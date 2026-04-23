@@ -61,4 +61,15 @@ internal static class SilkConstants
 
     /// <summary>Upper bound on <c>silk_log2lin</c> input (clamped in <c>silk_gains_dequant</c>; 3967 = 31 in Q7).</summary>
     internal const int GAIN_LOG_CLAMP_HIGH_Q7 = 3967;
+
+    // ----- NLSF -----
+
+    /// <summary>Maximum LPC filter order (SILK uses 10 for NB/MB and 16 for WB).</summary>
+    internal const int MAX_LPC_ORDER = 16;
+
+    /// <summary>Maximum absolute amplitude of an NLSF quantization residual.</summary>
+    internal const int NLSF_QUANT_MAX_AMPLITUDE = 4;
+
+    /// <summary>Cosine lookup table size for NLSF-to-LPC conversion.</summary>
+    internal const int LSF_COS_TAB_SZ_FIX = 128;
 }
