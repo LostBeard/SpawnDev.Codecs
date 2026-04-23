@@ -236,4 +236,76 @@ internal static class SilkIcdfTables
             _ => throw new ArgumentOutOfRangeException(nameof(perIndex), $"perIndex must be 0, 1, or 2 (got {perIndex}).")
         };
     }
+
+    // ----- Pulses decode iCDFs (silk/tables_pulses_per_block.c + silk/tables_other.c) -----
+
+    /// <summary>
+    /// <c>silk_rate_levels_iCDF</c>: 2 x 9-symbol iCDF selecting the pulse rate level
+    /// for the current frame. First row is used for signal types inactive + unvoiced
+    /// (<c>signalType &gt;&gt; 1 == 0</c>), second row for voiced.
+    /// </summary>
+    internal static readonly byte[] RateLevels =
+    {
+        241, 190, 178, 132,  87,  74,  41,  14,   0,   // non-voiced
+        223, 193, 157, 140, 106,  57,  39,  18,   0,   // voiced
+    };
+
+    /// <summary>Entries per rate-level row in <see cref="RateLevels"/>.</summary>
+    internal const int RateLevelsEntriesPerType = 9;
+
+    /// <summary>Byte offset into <see cref="RateLevels"/> for signal type <paramref name="signalType"/>.</summary>
+    internal static int RateLevelsOffset(int signalType) => (signalType >> 1) * RateLevelsEntriesPerType;
+
+    /// <summary>
+    /// <c>silk_pulses_per_block_iCDF</c>: 10 x 18 iCDF for pulses-per-block counts,
+    /// keyed on rate level. The last row (index 9) is also used when the pulse count
+    /// escape-signals extra LSB bits during decode.
+    /// </summary>
+    internal static readonly byte[] PulsesPerBlock =
+    {
+        125,  51,  26,  18,  15,  12,  11,  10,   9,   8,   7,   6,   5,   4,   3,   2,   1,   0,
+        198, 105,  45,  22,  15,  12,  11,  10,   9,   8,   7,   6,   5,   4,   3,   2,   1,   0,
+        213, 162, 116,  83,  59,  43,  32,  24,  18,  15,  12,   9,   7,   6,   5,   3,   2,   0,
+        239, 187, 116,  59,  28,  16,  11,  10,   9,   8,   7,   6,   5,   4,   3,   2,   1,   0,
+        250, 229, 188, 135,  86,  51,  30,  19,  13,  10,   8,   6,   5,   4,   3,   2,   1,   0,
+        249, 235, 213, 185, 156, 128, 103,  83,  66,  53,  42,  33,  26,  21,  17,  13,  10,   0,
+        254, 249, 235, 206, 164, 118,  77,  46,  27,  16,  10,   7,   5,   4,   3,   2,   1,   0,
+        255, 253, 249, 239, 220, 191, 156, 119,  85,  57,  37,  23,  15,  10,   6,   4,   2,   0,
+        255, 253, 251, 246, 237, 223, 203, 179, 152, 124,  98,  75,  55,  40,  29,  21,  15,   0,
+        255, 254, 253, 247, 220, 162, 106,  67,  42,  28,  18,  12,   9,   6,   4,   3,   2,   0,
+    };
+
+    /// <summary>Entries per rate-level row in <see cref="PulsesPerBlock"/>.</summary>
+    internal const int PulsesPerBlockEntriesPerRow = 18;
+
+    /// <summary>Byte offset into <see cref="PulsesPerBlock"/> for rate level <paramref name="rateLevel"/>.</summary>
+    internal static int PulsesPerBlockOffset(int rateLevel) => rateLevel * PulsesPerBlockEntriesPerRow;
+
+    /// <summary>
+    /// <c>silk_sign_iCDF</c>: 42-byte flat table (6 rows x 7 entries) for pulse-sign
+    /// decoding. Row index is <c>7 * (quantOffsetType + 2 * signalType)</c>; column
+    /// index is <c>min(sumPulses &amp; 0x1F, 6)</c>.
+    /// </summary>
+    internal static readonly byte[] Sign =
+    {
+        254,  49,  67,  77,  82,  93,  99,
+        198,  11,  18,  24,  31,  36,  45,
+        255,  46,  66,  78,  87,  94, 104,
+        208,  14,  21,  32,  42,  51,  66,
+        255,  94, 104, 109, 112, 115, 118,
+        248,  53,  69,  80,  88,  95, 102,
+    };
+
+    /// <summary>Entries per row in <see cref="Sign"/>.</summary>
+    internal const int SignEntriesPerRow = 7;
+
+    /// <summary>Byte offset into <see cref="Sign"/> for a given (signalType, quantOffsetType) pair.</summary>
+    internal static int SignOffset(int signalType, int quantOffsetType) =>
+        SignEntriesPerRow * (quantOffsetType + 2 * signalType);
+
+    /// <summary>
+    /// <c>silk_lsb_iCDF</c>: 2-entry iCDF used to extract extra LSB bits when the
+    /// pulse count escapes the <see cref="PulsesPerBlock"/> tables.
+    /// </summary>
+    internal static readonly byte[] Lsb = { 120, 0 };
 }

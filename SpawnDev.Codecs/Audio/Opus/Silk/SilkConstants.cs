@@ -99,4 +99,21 @@ internal static class SilkConstants
     /// produced LPC filter is unstable. Matches libopus <c>MAX_LPC_STABILIZE_ITERATIONS = 16</c>.
     /// </summary>
     internal const int MAX_LPC_STABILIZE_ITERATIONS = 16;
+
+    // ----- Pulses / shell coder -----
+
+    /// <summary>Log2 of <see cref="SHELL_CODEC_FRAME_LENGTH"/>. Libopus: 4.</summary>
+    internal const int LOG2_SHELL_CODEC_FRAME_LENGTH = 4;
+
+    /// <summary>Shell coder block size in samples. Libopus: <c>1 &lt;&lt; LOG2_SHELL_CODEC_FRAME_LENGTH = 16</c>.</summary>
+    internal const int SHELL_CODEC_FRAME_LENGTH = 16;
+
+    /// <summary>Maximum number of shell-coder blocks in a frame (for the longest supported SILK frame). Libopus: 20.</summary>
+    internal const int MAX_NB_SHELL_BLOCKS = 20;
+
+    /// <summary>Maximum pulse magnitude encodable via a single rate-level iCDF before the LSB-extension escape fires. Libopus: 16.</summary>
+    internal const int SILK_MAX_PULSES = 16;
+
+    /// <summary>Number of rate levels in the pulses-per-block iCDF. Libopus: 10.</summary>
+    internal const int N_RATE_LEVELS = 10;
 }
