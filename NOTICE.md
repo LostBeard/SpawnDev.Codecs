@@ -6,9 +6,9 @@ This project incorporates, consults, or is structurally inspired by the followin
 
 ---
 
-## Opus reference implementation — libopus (planned for Phase 1)
+## Opus reference implementation - libopus (planned for Phase 1)
 
-**Copyright:** © 2001–2011 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin, Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo
+**Copyright:** © 2001-2011 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin, Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo
 **License:** BSD 3-Clause (Xiph.Org license)
 **Source:** https://github.com/xiph/opus
 
@@ -46,7 +46,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---
 
-## Concentus — pure-C# libopus port (planned for Phase 1 structural reference)
+## Concentus - pure-C# libopus port (planned for Phase 1 structural reference)
 
 **Copyright:** © 2016 Logan Stromberg (and libopus original copyright holders)
 **License:** BSD 3-Clause (inherited from libopus)
@@ -66,7 +66,7 @@ SpawnDev.Codecs.Opus is an independent implementation of the Opus codec as defin
 
 ---
 
-## RFC 6386 (VP8 codec specification) — planned for Phase 2
+## RFC 6386 (VP8 codec specification) - planned for Phase 2
 
 **Authors:** Jim Bankoski, Paul Wilkins, Yaowu Xu
 **Publisher:** IETF
@@ -74,36 +74,36 @@ SpawnDev.Codecs.Opus is an independent implementation of the Opus codec as defin
 
 ---
 
-## libvpx — reference VP8/VP9 implementation (planned for Phase 2+)
+## libvpx - reference VP8/VP9 implementation (planned for Phase 2+)
 
-**Copyright:** © 2010–present, The WebM Project Authors, Google LLC
+**Copyright:** © 2010-present, The WebM Project Authors, Google LLC
 **License:** BSD 3-Clause (VP8/VP9 license grant)
 **Source:** https://github.com/webmproject/libvpx
 
-VP8 and VP9 are released under the Google WebM patent pledge — patent-clean for royalty-free implementation.
+VP8 and VP9 are released under the Google WebM patent pledge - patent-clean for royalty-free implementation.
 
 ---
 
-## libaom — reference AV1 implementation (planned for later phase)
+## libaom - reference AV1 implementation (planned for later phase)
 
-**Copyright:** © 2018–present, Alliance for Open Media
+**Copyright:** © 2018-present, Alliance for Open Media
 **License:** BSD 2-Clause + patent grant
 **Source:** https://aomedia.googlesource.com/aom/
 
-AV1 is released under the AOMedia patent license — patent-clean for royalty-free implementation.
+AV1 is released under the AOMedia patent license - patent-clean for royalty-free implementation.
 
 ---
 
-## libFLAC / libvorbis — reference FLAC and Vorbis implementations (planned for later phase)
+## libFLAC / libvorbis - reference FLAC and Vorbis implementations (planned for later phase)
 
 **Copyright:** © Xiph.Org Foundation
 **License:** BSD 3-Clause
-**Source:** https://gitlab.xiph.org/xiph/flac — https://gitlab.xiph.org/xiph/vorbis
+**Source:** https://gitlab.xiph.org/xiph/flac - https://gitlab.xiph.org/xiph/vorbis
 
 ---
 
 ## Final notes
 
-All codecs SpawnDev.Codecs implements are **patent-clean** — Opus, VP8, VP9, AV1, FLAC, Vorbis. Patent-encumbered codecs (H.264, H.265, AAC) are out of scope for this library and are delegated to platform encoders via SpawnDev.MultiMedia.
+All codecs SpawnDev.Codecs implements are **patent-clean** - Opus, VP8, VP9, AV1, FLAC, Vorbis. Patent-encumbered codecs (H.264, H.265, AAC) are out of scope for this library and are delegated to platform encoders via SpawnDev.MultiMedia.
 
 For license questions or corrections, open an issue at https://github.com/LostBeard/SpawnDev.Codecs/issues.

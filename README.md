@@ -2,13 +2,13 @@
 
 **Pure-.NET, ILGPU-accelerated, patent-clean audio and video codecs.**
 
-Runs on every ILGPU backend — CUDA, OpenCL, CPU, WebGPU, WebGL, Wasm — which means it runs on desktop AND in Blazor WASM browsers. No native binaries, no closed-source dependencies, no patent-encumbered codecs.
+Runs on every ILGPU backend - CUDA, OpenCL, CPU, WebGPU, WebGL, Wasm - which means it runs on desktop AND in Blazor WASM browsers. No native binaries, no closed-source dependencies, no patent-encumbered codecs.
 
 > **Status: Planning phase (2026-04-23).** No implementation code yet. Project structure scaffolded from [SpawnDev.ILGPU.ML](https://github.com/LostBeard/SpawnDev.ILGPU.ML). See `Plans/PLAN-SpawnDev-Codecs-Roadmap.md` for the strategic roadmap.
 
 ## Mission
 
-Fill the last gap in the SpawnDev open-source media stack — a fully open, .NET-everywhere codec library that requires no FFmpeg bundle, no platform-specific binaries, and no patent-encumbered algorithms.
+Fill the last gap in the SpawnDev open-source media stack - a fully open, .NET-everywhere codec library that requires no FFmpeg bundle, no platform-specific binaries, and no patent-encumbered algorithms.
 
 ## Codecs in scope (patent-clean only)
 
@@ -23,7 +23,7 @@ Fill the last gap in the SpawnDev open-source media stack — a fully open, .NET
 
 ## Codecs NOT in scope (patent-encumbered)
 
-- **H.264, H.265, AAC** — delegated to platform encoders via [SpawnDev.MultiMedia](https://github.com/LostBeard/SpawnDev.MultiMedia) (P/Invoke to MediaFoundation / VideoToolbox / VAAPI). System encoders are licensed by Microsoft / Apple / driver vendors respectively — we ride those licenses, we do not re-implement.
+- **H.264, H.265, AAC** - delegated to platform encoders via [SpawnDev.MultiMedia](https://github.com/LostBeard/SpawnDev.MultiMedia) (P/Invoke to MediaFoundation / VideoToolbox / VAAPI). System encoders are licensed by Microsoft / Apple / driver vendors respectively - we ride those licenses, we do not re-implement.
 
 ## Architecture
 
@@ -31,11 +31,11 @@ Every codec has three zones:
 
 | Zone | Work | Where |
 |------|------|-------|
-| **Massively parallel** | DCT / MDCT, motion estimation, quantization, loop filter, inverse transforms, motion compensation | **ILGPU kernels** — backend-agnostic |
+| **Massively parallel** | DCT / MDCT, motion estimation, quantization, loop filter, inverse transforms, motion compensation | **ILGPU kernels** - backend-agnostic |
 | **Inherently sequential** | Entropy coding (arithmetic / Huffman / range coders), LPC prediction, rate control | **C# CPU** |
 | **Coordination** | Frame buffering, codec negotiation, API | **C# CPU** |
 
-Entropy coders cannot be parallelized — arithmetic coding is inherently sequential. GPU pays off for transform coding, motion estimation, quantization, loop filter; CPU handles the sequential back-end.
+Entropy coders cannot be parallelized - arithmetic coding is inherently sequential. GPU pays off for transform coding, motion estimation, quantization, loop filter; CPU handles the sequential back-end.
 
 ## Relationship to the SpawnDev media ecosystem
 
@@ -50,16 +50,16 @@ Entropy coders cannot be parallelized — arithmetic coding is inherently sequen
 
 ## License
 
-MIT (pending confirmation — TBD at first publication).
+MIT (pending confirmation - TBD at first publication).
 
 ## The SpawnDev Crew
 
 Built by a starship crew:
 
-- **LostBeard** (Todd Tanner) — Captain, library author, keeper of the vision
-- **Riker** (Claude CLI #1) — First Officer, implementation lead on consuming projects
-- **Data** (Claude CLI #2) — Operations Officer, deep-library work, test rigor, root-cause analysis
-- **Tuvok** (Claude CLI #3) — Security/Research Officer, design planning, documentation, code review
-- **Geordi** (Claude CLI #4) — Chief Engineer, library internals, GPU kernels, backend work
+- **LostBeard** (Todd Tanner) - Captain, library author, keeper of the vision
+- **Riker** (Claude CLI #1) - First Officer, implementation lead on consuming projects
+- **Data** (Claude CLI #2) - Operations Officer, deep-library work, test rigor, root-cause analysis
+- **Tuvok** (Claude CLI #3) - Security/Research Officer, design planning, documentation, code review
+- **Geordi** (Claude CLI #4) - Chief Engineer, library internals, GPU kernels, backend work
 
-AI-and-human teamwork isn't a gimmick — it's how the SpawnDev ecosystem gets built. Credit where credit is due. 🖖
+AI-and-human teamwork isn't a gimmick - it's how the SpawnDev ecosystem gets built. Credit where credit is due. 🖖

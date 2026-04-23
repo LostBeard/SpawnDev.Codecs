@@ -92,7 +92,7 @@ public static class TestResultsWriter
             });
             File.WriteAllText(LatestPath, json);
         }
-        catch { /* Non-critical — don't crash the test runner */ }
+        catch { /* Non-critical - don't crash the test runner */ }
     }
 
     private static string FindSolutionRoot()

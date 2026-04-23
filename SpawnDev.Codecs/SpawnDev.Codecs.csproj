@@ -11,7 +11,7 @@
 		<DebugType>Embedded</DebugType>
 		<Title>SpawnDev.Codecs</Title>
 		<Authors>LostBeard</Authors>
-		<Description>Pure-.NET, ILGPU-accelerated, patent-clean audio and video codecs (Opus, VP8, VP9, AV1, FLAC, Vorbis). Runs on every ILGPU backend — CUDA, OpenCL, CPU, WebGPU, WebGL, Wasm. Desktop AND Blazor WebAssembly.</Description>
+		<Description>Pure-.NET, ILGPU-accelerated, patent-clean audio and video codecs (Opus, VP8, VP9, AV1, FLAC, Vorbis). Runs on every ILGPU backend - CUDA, OpenCL, CPU, WebGPU, WebGL, Wasm. Desktop AND Blazor WebAssembly.</Description>
 		<PackageProjectUrl>https://github.com/LostBeard/SpawnDev.Codecs</PackageProjectUrl>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>

@@ -135,7 +135,7 @@ public static class ProjectDiscovery
 
         var exited = await exitTcs.Task;
         if (exited)
-            process.WaitForExit(5000); // timed wait — no-arg WaitForExit can hang on child processes
+            process.WaitForExit(5000); // timed wait - no-arg WaitForExit can hang on child processes
         else
             try { process.Kill(entireProcessTree: true); } catch { }
 
