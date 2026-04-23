@@ -159,29 +159,41 @@ public abstract partial class CodecsTestBase
     // -------- silk_DIV32_varQ --------
 
     [TestMethod]
-    public void Div32VarQ_ReturnsNonZeroForNonZeroInputs()
+    public void Div32VarQ_Q16GainAdjustment_MatchesExpectedRatio()
     {
-        // Without asserting exact values (the Newton refinement approximation has
-        // input-dependent error characteristics), at minimum verify the function
-        // returns non-zero for non-zero inputs and scales sensibly with Qres.
-        int a = 6553600, b = 3276800;
-        int res0 = silk_DIV32_varQ(a, b, 0);
-        int res16 = silk_DIV32_varQ(a, b, 16);
-        True(res0 != 0, "non-zero inputs should produce non-zero result at Q0");
-        True(res16 != 0, "non-zero inputs should produce non-zero result at Q16");
-        True(res16 > res0, $"higher Qres should give larger magnitude: Q0={res0}, Q16={res16}");
+        // prev = 100.0 in Q16 = 6553600. cur = 50.0 in Q16 = 3276800. Ratio = 2.0 in Q16 = 131072.
+        int res = silk_DIV32_varQ(6553600, 3276800, 16);
+        double relErr = Math.Abs(res - 131072.0) / 131072.0;
+        True(relErr < 0.001, $"expected ~131072 (2.0 in Q16), got {res} (rel err {relErr:P})");
+    }
+
+    [TestMethod]
+    public void Div32VarQ_IdenticalInputs_EqualsOne()
+    {
+        // N / N at Q16 should be 1.0 in Q16 = 65536.
+        int gainQ16 = 1234567;
+        int res = silk_DIV32_varQ(gainQ16, gainQ16, 16);
+        double relErr = Math.Abs(res - 65536.0) / 65536.0;
+        True(relErr < 0.001, $"expected ~65536 (1.0 in Q16), got {res} (rel err {relErr:P})");
+    }
+
+    [TestMethod]
+    public void Div32VarQ_NegativeNumerator_ProducesNegativeResult()
+    {
+        int prev = -6553600;
+        int cur = 3276800;
+        int res = silk_DIV32_varQ(prev, cur, 16);
+        True(res < 0, $"-2.0 / 1.0 should be negative, got {res}");
+        double relErr = Math.Abs(res - (-131072.0)) / 131072.0;
+        True(relErr < 0.001, $"expected ~-131072 (-2.0 in Q16), got {res} (rel err {relErr:P})");
     }
 
     [TestMethod]
     public void Div32VarQ_SignMatchesInputSign()
     {
-        // Positive / positive -> positive.
         True(silk_DIV32_varQ(100_000, 50, 4) > 0, "+ / + should be >=0");
-        // Negative / positive -> negative.
         True(silk_DIV32_varQ(-100_000, 50, 4) < 0, "- / + should be <0");
-        // Positive / negative -> negative.
         True(silk_DIV32_varQ(100_000, -50, 4) < 0, "+ / - should be <0");
-        // Negative / negative -> positive.
         True(silk_DIV32_varQ(-100_000, -50, 4) > 0, "- / - should be >=0");
     }
 }

@@ -353,7 +353,11 @@ internal static class SilkMacros
 
         int result = silk_SMULWB(a32_nrm, b32_inv);
 
-        a32_nrm = silk_SUB_LSHIFT32(a32_nrm, silk_LSHIFT_ovflw(silk_SMMUL(b32_nrm, result), 3), 3);
+        // Residual: a_nrm - (b_nrm * result) scaled back to Q(a_headrm). Overflow is fine -
+        // libopus guarantees the final value stays small. NOTE: earlier libopus versions
+        // used silk_SUB_LSHIFT32 here with an extra <<3 shift; the current (xiph/opus main)
+        // uses silk_SUB32_ovflw with no second shift - we follow current.
+        a32_nrm = silk_SUB32_ovflw(a32_nrm, silk_LSHIFT_ovflw(silk_SMMUL(b32_nrm, result), 3));
 
         result = silk_SMLAWB(result, a32_nrm, b32_inv);
 
