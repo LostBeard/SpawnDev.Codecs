@@ -78,4 +78,19 @@ internal static class SilkConstants
     /// <c>SILK_FIX_CONST(0.1, 10)</c>. Computed as <c>(int)(0.1 * 1024 + 0.5) = 102</c>.
     /// </summary>
     internal const int NLSF_QUANT_LEVEL_ADJ_Q10 = 102;
+
+    // ----- LPC stability / inverse prediction gain -----
+
+    /// <summary>
+    /// Maximum inverse prediction power gain accepted for a stable LPC filter.
+    /// Matches libopus <c>MAX_PREDICTION_POWER_GAIN = 1e4f</c> in silk/define.h.
+    /// </summary>
+    internal const float MAX_PREDICTION_POWER_GAIN = 1e4f;
+
+    /// <summary>
+    /// Q30 threshold below which an LPC filter's inverse prediction gain is considered unstable:
+    /// <c>SILK_FIX_CONST(1.0f / MAX_PREDICTION_POWER_GAIN, 30)</c>.
+    /// Computed as <c>(int)(1e-4 * 2^30 + 0.5) = 107374</c>.
+    /// </summary>
+    internal const int INV_GAIN_Q30_MIN = 107374;
 }
