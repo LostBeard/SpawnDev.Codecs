@@ -180,10 +180,10 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
-    public void OpusDecoder_StereoAtNon_InternalRate_ThrowsUntilWired()
+    public void OpusDecoder_StereoNbAt48kHz_ResamplesBothChannels()
     {
-        // Until the stereo-path resampler wiring ships, stereo output must be at
-        // the internal rate. Requesting 48 kHz output for NB stereo should throw.
+        // NB stereo packet decoded to 48 kHz output. Exercises the per-channel
+        // resampler pair (6x upsample from 8 kHz mid/side signals).
         var mid = new SilkDecodedIndices
         {
             SignalType = SilkSideInfoDecoder.TypeInactive,
@@ -192,7 +192,14 @@ public abstract partial class CodecsTestBase
         };
         for (int i = 0; i < 4; i++) mid.GainsIndices[i] = 10;
         mid.NlsfIndices[0] = 3;
-        var side = mid;
+        var side = new SilkDecodedIndices
+        {
+            SignalType = SilkSideInfoDecoder.TypeInactive,
+            QuantOffsetType = 0,
+            NlsfInterpCoefQ2 = 4,
+        };
+        for (int i = 0; i < 4; i++) side.GainsIndices[i] = 8;
+        side.NlsfIndices[0] = 5;
 
         byte[] packet = BuildStereoSilkOpusPacket(
             tocConfig: 1, cb: SilkNlsfCodebookTables.NbMb,
@@ -202,13 +209,52 @@ public abstract partial class CodecsTestBase
 
         var config = new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 2 };
         var dec = new OpusDecoder(config);
+        float[] pcm = new float[960 * 2]; // 20 ms at 48 kHz = 960 per channel, 1920 interleaved
+        int samples = dec.DecodePacketAsync(packet.AsMemory(), pcm.AsMemory()).Result;
+
+        Equal(960, samples);
+        for (int i = 0; i < pcm.Length; i++)
+        {
+            True(pcm[i] >= -1.0f && pcm[i] <= 1.0f, $"pcm[{i}] = {pcm[i]} out of range");
+        }
+    }
+
+    [TestMethod]
+    public void OpusDecoder_StereoWbAt48kHz_ResamplesBothChannels()
+    {
+        // WB stereo at 48 kHz output - 3x upsample via IIR_FIR.
+        var mid = new SilkDecodedIndices
+        {
+            SignalType = SilkSideInfoDecoder.TypeUnvoiced,
+            QuantOffsetType = 0,
+            NlsfInterpCoefQ2 = 4,
+        };
+        for (int i = 0; i < 4; i++) mid.GainsIndices[i] = 15;
+        mid.NlsfIndices[0] = 7;
+        var side = new SilkDecodedIndices
+        {
+            SignalType = SilkSideInfoDecoder.TypeUnvoiced,
+            QuantOffsetType = 0,
+            NlsfInterpCoefQ2 = 4,
+        };
+        for (int i = 0; i < 4; i++) side.GainsIndices[i] = 10;
+        side.NlsfIndices[0] = 5;
+
+        byte[] packet = BuildStereoSilkOpusPacket(
+            tocConfig: 9, cb: SilkNlsfCodebookTables.Wb,
+            midIdx: mid, sideIdx: side,
+            fsKHz: 16, nbSubfr: 4, vadMid: true, vadSide: true,
+            p0a: 1, p0b: 3, p0c: 1, p1a: 1, p1b: 2, p1c: 1);
+
+        var config = new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 2 };
+        var dec = new OpusDecoder(config);
         float[] pcm = new float[960 * 2];
+        int samples = dec.DecodePacketAsync(packet.AsMemory(), pcm.AsMemory()).Result;
 
-        bool threw = false;
-        try { _ = dec.DecodePacketAsync(packet.AsMemory(), pcm.AsMemory()).Result; }
-        catch (NotImplementedException) { threw = true; }
-        catch (AggregateException ae) when (ae.InnerException is NotImplementedException) { threw = true; }
-
-        True(threw, "Expected stereo + non-internal output rate to throw NotImplementedException");
+        Equal(960, samples);
+        for (int i = 0; i < pcm.Length; i++)
+        {
+            True(pcm[i] >= -1.0f && pcm[i] <= 1.0f);
+        }
     }
 }

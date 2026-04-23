@@ -32,6 +32,11 @@ public sealed class OpusDecoder : IAudioDecoder
     // Stereo needs MID and SIDE internal-rate PCM plus 2-sample prefix for MS->LR.
     private short[]? _silkMidScratch;
     private short[]? _silkSideScratch;
+    // Stereo-only: resamplers for L and R channels when output rate differs from internal.
+    private SilkResamplerState? _silkResamplerL;
+    private SilkResamplerState? _silkResamplerR;
+    private short[]? _silkResampleLOut;
+    private short[]? _silkResampleROut;
 
     /// <summary>Creates a new Opus decoder with the given configuration.</summary>
     public OpusDecoder(OpusDecoderConfig config)
@@ -264,18 +269,19 @@ public sealed class OpusDecoder : IAudioDecoder
 
         Span<int> predQ13 = stackalloc int[2];
 
-        // We decode at the internal rate (into _silkMid/SideScratch) and then resample
-        // L/R separately if output rate differs. For this first stereo slice we require
-        // output rate == internal rate (no resampling) to keep the glue simple; a future
-        // slice will add the resampler-pair invocation.
-        if (_config.SampleRateHz != internalKHz * 1000)
+        int outputRateKHz = _config.SampleRateHz / 1000;
+        int outputFrameLen = outputRateKHz * silkFrameLengthMs;
+        bool needResample = _config.SampleRateHz != internalKHz * 1000;
+
+        if (needResample)
         {
-            throw new NotImplementedException(
-                $"Stereo SILK output resampling from {internalKHz} kHz to {_config.SampleRateHz} Hz is not yet wired (next slice).");
+            if (_silkResampleLOut is null || _silkResampleLOut.Length < outputFrameLen)
+            {
+                _silkResampleLOut = new short[outputFrameLen];
+                _silkResampleROut = new short[outputFrameLen];
+            }
         }
 
-        // State-carry: the stereo state struct was created / reset in EnsureSilkDecoders
-        // (for a fresh stream) or persisted across prior frames.
         for (int f = 0; f < silkFrameCount; f++)
         {
             SilkStereoDecodePred.DecodePred(rangeDec, predQ13);
@@ -285,8 +291,6 @@ public sealed class OpusDecoder : IAudioDecoder
                 : 0;
 
             // Decode mid into internal-rate scratch at position [2..internalFrameLen+1].
-            // (MS->LR convention: first 2 samples are history prefix.)
-            // Since SilkDecoder output goes to [0..n-1], we decode to a temp then shift.
             short[] midTemp = new short[internalFrameLen];
             _silkDecoderMono.DecodeFromRange(
                 rangeDec,
@@ -307,20 +311,40 @@ public sealed class OpusDecoder : IAudioDecoder
             }
             else
             {
-                // Mid-only: zero the side samples.
                 _silkSideScratch.AsSpan(2, internalFrameLen).Clear();
             }
 
-            // MS -> LR in place (writes L to midScratch[1..internalFrameLen], R to sideScratch[1..internalFrameLen]).
+            // MS -> LR at internal rate.
             SilkStereoMsToLr.Apply(_silkStereoState!, _silkMidScratch, _silkSideScratch,
                 predQ13, internalKHz, internalFrameLen);
 
-            // Interleave L/R into pcmOut at [f * internalFrameLen * 2 .. (f+1) * internalFrameLen * 2).
-            int baseOffset = f * internalFrameLen * 2;
-            for (int i = 0; i < internalFrameLen; i++)
+            if (needResample)
             {
-                pcmOut[baseOffset + 2 * i] = _silkMidScratch[i + 1] / 32768.0f;      // L
-                pcmOut[baseOffset + 2 * i + 1] = _silkSideScratch[i + 1] / 32768.0f; // R
+                // Resample L and R independently from internal to output rate.
+                SilkResampler.Apply(_silkResamplerL!,
+                    _silkResampleLOut!.AsSpan(0, outputFrameLen),
+                    _silkMidScratch.AsSpan(1, internalFrameLen),
+                    internalFrameLen);
+                SilkResampler.Apply(_silkResamplerR!,
+                    _silkResampleROut!.AsSpan(0, outputFrameLen),
+                    _silkSideScratch.AsSpan(1, internalFrameLen),
+                    internalFrameLen);
+
+                int baseOffset = f * outputFrameLen * 2;
+                for (int i = 0; i < outputFrameLen; i++)
+                {
+                    pcmOut[baseOffset + 2 * i] = _silkResampleLOut![i] / 32768.0f;
+                    pcmOut[baseOffset + 2 * i + 1] = _silkResampleROut![i] / 32768.0f;
+                }
+            }
+            else
+            {
+                int baseOffset = f * internalFrameLen * 2;
+                for (int i = 0; i < internalFrameLen; i++)
+                {
+                    pcmOut[baseOffset + 2 * i] = _silkMidScratch[i + 1] / 32768.0f;
+                    pcmOut[baseOffset + 2 * i + 1] = _silkSideScratch[i + 1] / 32768.0f;
+                }
             }
         }
     }
@@ -360,6 +384,25 @@ public sealed class OpusDecoder : IAudioDecoder
                     outputSampleRateHz: internalKHz * 1000);
             }
             _silkStereoState ??= new SilkStereoState();
+
+            // If output rate differs from internal, allocate a per-channel resampler pair.
+            if (_config.SampleRateHz != internalKHz * 1000)
+            {
+                if (_silkResamplerL is null || configChanged)
+                {
+                    _silkResamplerL = new SilkResamplerState();
+                    SilkResampler.Init(_silkResamplerL, internalKHz * 1000, _config.SampleRateHz, forEncode: false);
+                    _silkResamplerR = new SilkResamplerState();
+                    SilkResampler.Init(_silkResamplerR, internalKHz * 1000, _config.SampleRateHz, forEncode: false);
+                    _silkResampleLOut = null;
+                    _silkResampleROut = null;
+                }
+            }
+            else
+            {
+                _silkResamplerL = null;
+                _silkResamplerR = null;
+            }
         }
     }
 
