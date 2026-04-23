@@ -72,4 +72,10 @@ internal static class SilkConstants
 
     /// <summary>Cosine lookup table size for NLSF-to-LPC conversion.</summary>
     internal const int LSF_COS_TAB_SZ_FIX = 128;
+
+    /// <summary>
+    /// NLSF quantization level adjustment in Q10 format, matching libopus
+    /// <c>SILK_FIX_CONST(0.1, 10)</c>. Computed as <c>(int)(0.1 * 1024 + 0.5) = 102</c>.
+    /// </summary>
+    internal const int NLSF_QUANT_LEVEL_ADJ_Q10 = 102;
 }
