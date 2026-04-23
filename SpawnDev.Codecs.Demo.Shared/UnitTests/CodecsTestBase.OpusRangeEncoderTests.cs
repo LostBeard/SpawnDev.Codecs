@@ -1,88 +1,87 @@
 using SpawnDev.Codecs.EntropyCoders;
+using SpawnDev.UnitTesting;
+using static SpawnDev.Codecs.Demo.Shared.UnitTests.TestHelpers;
 
-namespace SpawnDev.Codecs.Tests.EntropyCoders;
+namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 /// <summary>
-/// Tests for the Opus range encoder. Includes round-trip tests (encode then decode)
-/// that serve as the primary correctness gate for both encoder and decoder in
-/// Phase 1a slice 2. If a round-trip fails, at least one of the two has a bug.
+/// Tests for <see cref="OpusRangeEncoder"/>, including round-trip tests that serve as
+/// the primary correctness gate for both encoder and decoder. If a round-trip fails,
+/// at least one of the two has a bug.
 /// </summary>
-public class OpusRangeEncoderTests
+public abstract partial class CodecsTestBase
 {
-    // -------- Construction / argument validation --------
+    // -------- Argument / state guards --------
 
-    [Fact]
-    public void Ctor_Capacity_AllocatesBuffer()
+    [TestMethod]
+    public void Encoder_Ctor_Capacity_AllocatesBuffer()
     {
         var enc = new OpusRangeEncoder(64);
-        Assert.Equal(0u, enc.RangeBytes);
-        Assert.Equal(0, enc.Error);
+        Equal(0u, enc.RangeBytes);
+        Equal(0, enc.Error);
     }
 
-    [Fact]
-    public void Ctor_NegativeCapacity_Throws()
+    [TestMethod]
+    public void Encoder_Ctor_NegativeCapacity_Throws()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => new OpusRangeEncoder(-1));
+        Throws<ArgumentOutOfRangeException>(() => new OpusRangeEncoder(-1));
     }
 
-    [Fact]
-    public void Ctor_NullBuffer_Throws()
+    [TestMethod]
+    public void Encoder_Ctor_NullBuffer_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => new OpusRangeEncoder(null!, 0, 0));
+        Throws<ArgumentNullException>(() => new OpusRangeEncoder(null!, 0, 0));
     }
 
-    [Fact]
-    public void Ctor_OffsetOutOfRange_Throws()
+    [TestMethod]
+    public void Encoder_Ctor_OffsetOutOfRange_Throws()
     {
         var buf = new byte[4];
-        Assert.Throws<ArgumentOutOfRangeException>(() => new OpusRangeEncoder(buf, 5, 0));
+        Throws<ArgumentOutOfRangeException>(() => new OpusRangeEncoder(buf, 5, 0));
     }
 
-    // -------- Done() guards --------
-
-    [Fact]
-    public void Encode_AfterDone_Throws()
+    [TestMethod]
+    public void Encoder_Encode_AfterDone_Throws()
     {
         var enc = new OpusRangeEncoder(64);
         enc.EncodeBitLogP(1, 2);
         enc.Done();
-        Assert.Throws<InvalidOperationException>(() => enc.EncodeBitLogP(1, 2));
+        Throws<InvalidOperationException>(() => enc.EncodeBitLogP(1, 2));
     }
 
-    [Fact]
-    public void ToArray_BeforeDone_Throws()
+    [TestMethod]
+    public void Encoder_ToArray_BeforeDone_Throws()
     {
         var enc = new OpusRangeEncoder(64);
         enc.EncodeBitLogP(1, 2);
-        Assert.Throws<InvalidOperationException>(() => enc.ToArray());
+        Throws<InvalidOperationException>(() => enc.ToArray());
     }
 
-    [Fact]
-    public void Done_TwiceIsNoOp()
+    [TestMethod]
+    public void Encoder_Done_Twice_IsNoOp()
     {
         var enc = new OpusRangeEncoder(64);
         enc.EncodeBitLogP(1, 2);
         enc.Done();
-        enc.Done(); // should not throw
-        Assert.True(enc.IsDone);
+        enc.Done();
+        True(enc.IsDone);
     }
 
     // -------- Round-trip: the real correctness gate --------
 
-    [Fact]
-    public void RoundTrip_SingleBitLogP()
+    [TestMethod]
+    public void Encoder_RoundTrip_SingleBitLogP()
     {
         var enc = new OpusRangeEncoder(64);
         enc.EncodeBitLogP(1, 3);
         enc.Done();
 
         var dec = new OpusRangeDecoder(enc.ToArray());
-        int decoded = dec.DecodeBitLogP(3);
-        Assert.Equal(1, decoded);
+        Equal(1, dec.DecodeBitLogP(3));
     }
 
-    [Fact]
-    public void RoundTrip_MultipleBitLogP()
+    [TestMethod]
+    public void Encoder_RoundTrip_MultipleBitLogP()
     {
         var enc = new OpusRangeEncoder(128);
         int[] bits = { 1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0 };
@@ -93,32 +92,27 @@ public class OpusRangeEncoderTests
         var dec = new OpusRangeDecoder(enc.ToArray());
         for (int i = 0; i < bits.Length; i++)
         {
-            int decoded = dec.DecodeBitLogP(logps[i]);
-            Assert.Equal(expected: bits[i], actual: decoded);
+            Equal(bits[i], dec.DecodeBitLogP(logps[i]), $"bit {i}");
         }
-        Assert.Equal(0, dec.Error);
+        Equal(0, dec.Error);
     }
 
-    [Fact]
-    public void RoundTrip_IcdfSmallTable()
+    [TestMethod]
+    public void Encoder_RoundTrip_IcdfSmallTable()
     {
         var enc = new OpusRangeEncoder(128);
-        var icdf = new byte[] { 200, 100, 50, 0 }; // 4-symbol table at ftb=8
+        var icdf = new byte[] { 200, 100, 50, 0 };
         int[] symbols = { 0, 1, 2, 3, 1, 2, 0, 3, 2, 1 };
         foreach (int s in symbols) enc.EncodeIcdf(s, icdf, 8);
         enc.Done();
 
         var dec = new OpusRangeDecoder(enc.ToArray());
-        foreach (int s in symbols)
-        {
-            int decoded = dec.DecodeIcdf(icdf, 8);
-            Assert.Equal(s, decoded);
-        }
-        Assert.Equal(0, dec.Error);
+        foreach (int s in symbols) Equal(s, dec.DecodeIcdf(icdf, 8));
+        Equal(0, dec.Error);
     }
 
-    [Fact]
-    public void RoundTrip_Icdf16_Wide()
+    [TestMethod]
+    public void Encoder_RoundTrip_Icdf16Wide()
     {
         var enc = new OpusRangeEncoder(256);
         var icdf = new ushort[] { 60000, 50000, 40000, 30000, 20000, 10000, 0 };
@@ -127,15 +121,11 @@ public class OpusRangeEncoderTests
         enc.Done();
 
         var dec = new OpusRangeDecoder(enc.ToArray());
-        foreach (int s in symbols)
-        {
-            int decoded = dec.DecodeIcdf16(icdf, 16);
-            Assert.Equal(s, decoded);
-        }
+        foreach (int s in symbols) Equal(s, dec.DecodeIcdf16(icdf, 16));
     }
 
-    [Fact]
-    public void RoundTrip_EncodeDecodePair_PowerOfTwoFt()
+    [TestMethod]
+    public void Encoder_RoundTrip_EncodeUpdatePair()
     {
         var enc = new OpusRangeEncoder(128);
         uint ft = 16;
@@ -146,18 +136,17 @@ public class OpusRangeEncoderTests
         var dec = new OpusRangeDecoder(enc.ToArray());
         foreach (uint s in symbols)
         {
-            uint cum = dec.Decode(ft);
-            Assert.InRange(cum, s, s);
+            Equal(s, dec.Decode(ft));
             dec.Update(s, s + 1u, ft);
         }
-        Assert.Equal(0, dec.Error);
+        Equal(0, dec.Error);
     }
 
-    [Fact]
-    public void RoundTrip_EncodeBin_DecodeBin()
+    [TestMethod]
+    public void Encoder_RoundTrip_EncodeBinDecodeBin()
     {
         var enc = new OpusRangeEncoder(128);
-        int bits = 5; // ft = 32
+        int bits = 5;
         uint[] symbols = { 0, 31, 15, 1, 30, 7, 22, 13 };
         foreach (uint s in symbols) enc.EncodeBin(s, s + 1u, bits);
         enc.Done();
@@ -165,14 +154,13 @@ public class OpusRangeEncoderTests
         var dec = new OpusRangeDecoder(enc.ToArray());
         foreach (uint s in symbols)
         {
-            uint cum = dec.DecodeBin(bits);
-            Assert.Equal(s, cum);
+            Equal(s, dec.DecodeBin(bits));
             dec.Update(s, s + 1u, 1u << bits);
         }
     }
 
-    [Fact]
-    public void RoundTrip_RawBits_Small()
+    [TestMethod]
+    public void Encoder_RoundTrip_RawBitsSmall()
     {
         var enc = new OpusRangeEncoder(128);
         uint[] values = { 5, 0, 15, 7, 1, 8, 14, 3 };
@@ -180,15 +168,11 @@ public class OpusRangeEncoderTests
         enc.Done();
 
         var dec = new OpusRangeDecoder(enc.ToArray());
-        foreach (uint v in values)
-        {
-            uint decoded = dec.DecodeBits(4);
-            Assert.Equal(v, decoded);
-        }
+        foreach (uint v in values) Equal(v, dec.DecodeBits(4));
     }
 
-    [Fact]
-    public void RoundTrip_RawBits_Large()
+    [TestMethod]
+    public void Encoder_RoundTrip_RawBitsLarge()
     {
         var enc = new OpusRangeEncoder(256);
         uint[] values = { 0x12345, 0xABCDE, 0x1FFFFFF, 0x0, 0x55555 };
@@ -196,15 +180,11 @@ public class OpusRangeEncoderTests
         enc.Done();
 
         var dec = new OpusRangeDecoder(enc.ToArray());
-        foreach (uint v in values)
-        {
-            uint decoded = dec.DecodeBits(25);
-            Assert.Equal(v, decoded);
-        }
+        foreach (uint v in values) Equal(v, dec.DecodeBits(25));
     }
 
-    [Fact]
-    public void RoundTrip_Uint_Small()
+    [TestMethod]
+    public void Encoder_RoundTrip_UintSmall()
     {
         var enc = new OpusRangeEncoder(64);
         uint ft = 100;
@@ -213,15 +193,11 @@ public class OpusRangeEncoderTests
         enc.Done();
 
         var dec = new OpusRangeDecoder(enc.ToArray());
-        foreach (uint v in values)
-        {
-            uint decoded = dec.DecodeUint(ft);
-            Assert.Equal(v, decoded);
-        }
+        foreach (uint v in values) Equal(v, dec.DecodeUint(ft));
     }
 
-    [Fact]
-    public void RoundTrip_Uint_Large()
+    [TestMethod]
+    public void Encoder_RoundTrip_UintLarge()
     {
         var enc = new OpusRangeEncoder(256);
         uint ft = 1u << 20;
@@ -230,57 +206,45 @@ public class OpusRangeEncoderTests
         enc.Done();
 
         var dec = new OpusRangeDecoder(enc.ToArray());
-        foreach (uint v in values)
-        {
-            uint decoded = dec.DecodeUint(ft);
-            Assert.Equal(v, decoded);
-        }
+        foreach (uint v in values) Equal(v, dec.DecodeUint(ft));
     }
 
-    [Fact]
-    public void RoundTrip_MixedOperations()
+    [TestMethod]
+    public void Encoder_RoundTrip_MixedOperations()
     {
         var enc = new OpusRangeEncoder(512);
         var icdf = new byte[] { 180, 100, 30, 0 };
 
-        // Arbitrary mixed sequence.
         enc.EncodeBitLogP(1, 2);
         enc.EncodeIcdf(2, icdf, 8);
         enc.EncodeBitLogP(0, 4);
         enc.Encode(7, 8, 16);
         enc.EncodeUint(42, 100);
         enc.EncodeIcdf(0, icdf, 8);
-        enc.EncodeBin(5, 6, 3); // ft = 8, symbol 5
+        enc.EncodeBin(5, 6, 3);
         enc.EncodeBits(0xABC, 12);
         enc.EncodeBitLogP(1, 1);
         enc.EncodeIcdf(3, icdf, 8);
         enc.Done();
 
         var dec = new OpusRangeDecoder(enc.ToArray());
-        Assert.Equal(1, dec.DecodeBitLogP(2));
-        Assert.Equal(2, dec.DecodeIcdf(icdf, 8));
-        Assert.Equal(0, dec.DecodeBitLogP(4));
-
-        uint cum = dec.Decode(16);
-        Assert.Equal(7u, cum);
+        Equal(1, dec.DecodeBitLogP(2));
+        Equal(2, dec.DecodeIcdf(icdf, 8));
+        Equal(0, dec.DecodeBitLogP(4));
+        Equal(7u, dec.Decode(16));
         dec.Update(7, 8, 16);
-
-        Assert.Equal(42u, dec.DecodeUint(100));
-        Assert.Equal(0, dec.DecodeIcdf(icdf, 8));
-
-        uint cumBin = dec.DecodeBin(3);
-        Assert.Equal(5u, cumBin);
+        Equal(42u, dec.DecodeUint(100));
+        Equal(0, dec.DecodeIcdf(icdf, 8));
+        Equal(5u, dec.DecodeBin(3));
         dec.Update(5, 6, 8);
-
-        Assert.Equal(0xABCu, dec.DecodeBits(12));
-        Assert.Equal(1, dec.DecodeBitLogP(1));
-        Assert.Equal(3, dec.DecodeIcdf(icdf, 8));
-
-        Assert.Equal(0, dec.Error);
+        Equal(0xABCu, dec.DecodeBits(12));
+        Equal(1, dec.DecodeBitLogP(1));
+        Equal(3, dec.DecodeIcdf(icdf, 8));
+        Equal(0, dec.Error);
     }
 
-    [Fact]
-    public void RoundTrip_LongSymbolStream_DeterministicBitExact()
+    [TestMethod]
+    public void Encoder_RoundTrip_LongRandomSymbolStream()
     {
         var enc = new OpusRangeEncoder(1024);
         var icdf = new byte[] { 240, 200, 150, 100, 60, 30, 10, 0 };
@@ -293,23 +257,19 @@ public class OpusRangeEncoderTests
 
         byte[] encoded = enc.ToArray();
 
-        // First decode pass.
         var dec1 = new OpusRangeDecoder(encoded);
         int[] decoded1 = new int[symbols.Length];
         for (int i = 0; i < symbols.Length; i++) decoded1[i] = dec1.DecodeIcdf(icdf, 8);
-        Assert.Equal(symbols, decoded1);
+        EqualInts(symbols, decoded1, "first pass decode");
 
-        // Second decode pass on the same bytes must match the first.
         var dec2 = new OpusRangeDecoder(encoded);
         int[] decoded2 = new int[symbols.Length];
         for (int i = 0; i < symbols.Length; i++) decoded2[i] = dec2.DecodeIcdf(icdf, 8);
-        Assert.Equal(decoded1, decoded2);
+        EqualInts(decoded1, decoded2, "second pass matches first");
     }
 
-    // -------- Shrink + PatchInitialBits --------
-
-    [Fact]
-    public void Shrink_ValidSize_Succeeds()
+    [TestMethod]
+    public void Encoder_Shrink_ValidSize_Succeeds()
     {
         var enc = new OpusRangeEncoder(256);
         enc.EncodeBits(0x5A, 8);
@@ -317,33 +277,31 @@ public class OpusRangeEncoderTests
         enc.Done();
 
         var dec = new OpusRangeDecoder(enc.ToArray());
-        Assert.Equal(0x5Au, dec.DecodeBits(8));
+        Equal(0x5Au, dec.DecodeBits(8));
     }
 
-    [Fact]
-    public void Shrink_TooSmall_Throws()
+    [TestMethod]
+    public void Encoder_Shrink_TooSmall_Throws()
     {
         var enc = new OpusRangeEncoder(128);
-        // 3 calls of 24 bits each flush enough bytes to push _endOffs to 6.
         enc.EncodeBits(0xABCDEF, 24);
         enc.EncodeBits(0x123456, 24);
         enc.EncodeBits(0x789ABC, 24);
-        Assert.Throws<ArgumentOutOfRangeException>(() => enc.Shrink(5));
+        Throws<ArgumentOutOfRangeException>(() => enc.Shrink(5));
     }
 
-    [Fact]
-    public void PatchInitialBits_BeforeAnyOutput_UpdatesFirstByte()
+    [TestMethod]
+    public void Encoder_PatchInitialBits_UpdatesFirstByte()
     {
         var enc = new OpusRangeEncoder(64);
         enc.EncodeBitLogP(0, 2);
         enc.EncodeBitLogP(1, 2);
-        enc.PatchInitialBits(0b101, 3); // overwrite the top 3 bits of the first output byte
+        enc.PatchInitialBits(0b101, 3);
         enc.Done();
 
-        // Patched bits are decoded first in the bitstream.
         var dec = new OpusRangeDecoder(enc.ToArray());
-        Assert.Equal(1, dec.DecodeBitLogP(1));
-        Assert.Equal(0, dec.DecodeBitLogP(1));
-        Assert.Equal(1, dec.DecodeBitLogP(1));
+        Equal(1, dec.DecodeBitLogP(1));
+        Equal(0, dec.DecodeBitLogP(1));
+        Equal(1, dec.DecodeBitLogP(1));
     }
 }
