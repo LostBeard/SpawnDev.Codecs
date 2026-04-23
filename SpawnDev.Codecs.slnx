@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="SpawnDev.Codecs/SpawnDev.Codecs.csproj" />
+  <Project Path="SpawnDev.Codecs.Demo/SpawnDev.Codecs.Demo.csproj" />
+  <Project Path="SpawnDev.Codecs.Demo.Shared/SpawnDev.Codecs.Demo.Shared.csproj" />
+  <Project Path="SpawnDev.Codecs.DemoConsole/SpawnDev.Codecs.DemoConsole.csproj" />
+  <Project Path="SpawnDev.Codecs.Tests/SpawnDev.Codecs.Tests.csproj" />
+  <Project Path="PlaywrightMultiTest/PlaywrightMultiTest.csproj" />
+</Solution>
