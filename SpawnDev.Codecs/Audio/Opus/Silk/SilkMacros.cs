@@ -295,4 +295,66 @@ internal static class SilkMacros
     /// </summary>
     internal static int silk_MUL32_FRAC_Q(int a32, int b32, int Q) =>
         (int)silk_RSHIFT_ROUND64(silk_SMULL(a32, b32), Q);
+
+    // ----- Decode-core support helpers -----
+
+    /// <summary>
+    /// Overflow-wrapping multiply-accumulate: <c>a + b * c</c> with unsigned multiplication
+    /// so overflow wraps bit-exactly. Matches libopus <c>silk_MLA_ovflw</c>.
+    /// </summary>
+    internal static int silk_MLA_ovflw(int a, int b, int c) =>
+        silk_ADD32_ovflw(a, (int)((uint)b * (uint)c));
+
+    /// <summary>
+    /// SILK pseudo-random generator step. Matches libopus
+    /// <c>silk_RAND(seed) = silk_MLA_ovflw(RAND_INCREMENT, seed, RAND_MULTIPLIER)</c>.
+    /// </summary>
+    internal static int silk_RAND(int seed) =>
+        silk_MLA_ovflw(SilkConstants.RAND_INCREMENT, seed, SilkConstants.RAND_MULTIPLIER);
+
+    /// <summary>
+    /// Saturating 32-bit add: clamps <c>a + b</c> to <c>[int.MinValue, int.MaxValue]</c>.
+    /// Matches libopus <c>silk_ADD_SAT32</c>.
+    /// </summary>
+    internal static int silk_ADD_SAT32(int a, int b)
+    {
+        long sum = (long)a + b;
+        if (sum > int.MaxValue) return int.MaxValue;
+        if (sum < int.MinValue) return int.MinValue;
+        return (int)sum;
+    }
+
+    /// <summary>Subtract-then-left-shift: <c>a - (b &lt;&lt; shift)</c>. Matches libopus <c>silk_SUB_LSHIFT32</c>.</summary>
+    internal static int silk_SUB_LSHIFT32(int a, int b, int shift) => a - (b << shift);
+
+    /// <summary>Overflow-wrapping left shift (uses unsigned arithmetic). Matches libopus <c>silk_LSHIFT_ovflw</c>.</summary>
+    internal static int silk_LSHIFT_ovflw(int a, int shift) => (int)((uint)a << shift);
+
+    /// <summary>
+    /// Variable-Q 32-bit division: returns a Q<paramref name="Qres"/> approximation to
+    /// <paramref name="a32"/> / <paramref name="b32"/>. Matches libopus
+    /// <c>silk_DIV32_varQ</c> (Inlines.h). Requires <paramref name="b32"/> != 0 and
+    /// <paramref name="Qres"/> &gt;= 0.
+    /// </summary>
+    internal static int silk_DIV32_varQ(int a32, int b32, int Qres)
+    {
+        int a_headrm = silk_CLZ32(silk_abs(a32)) - 1;
+        int a32_nrm = silk_LSHIFT(a32, a_headrm);
+
+        int b_headrm = silk_CLZ32(silk_abs(b32)) - 1;
+        int b32_nrm = silk_LSHIFT(b32, b_headrm);
+
+        int b32_inv = silk_DIV32_16(silk_int32_MAX >> 2, silk_RSHIFT(b32_nrm, 16));
+
+        int result = silk_SMULWB(a32_nrm, b32_inv);
+
+        a32_nrm = silk_SUB_LSHIFT32(a32_nrm, silk_LSHIFT_ovflw(silk_SMMUL(b32_nrm, result), 3), 3);
+
+        result = silk_SMLAWB(result, a32_nrm, b32_inv);
+
+        int lshift = 29 + a_headrm - b_headrm - Qres;
+        if (lshift < 0) return silk_LSHIFT_SAT32(result, -lshift);
+        if (lshift < 32) return silk_RSHIFT(result, lshift);
+        return 0;
+    }
 }

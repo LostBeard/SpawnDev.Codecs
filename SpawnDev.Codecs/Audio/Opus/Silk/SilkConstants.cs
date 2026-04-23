@@ -139,4 +139,26 @@ internal static class SilkConstants
 
     /// <summary>Pitch contour codebook size, stage-3 / 10 ms / non-NB. Libopus <c>PE_NB_CBKS_STAGE3_10MS = 12</c>.</summary>
     internal const int PE_NB_CBKS_STAGE3_10MS = 12;
+
+    // ----- Excitation decode + PRNG -----
+
+    /// <summary>Constant added to the dequantized pulse amplitude in silk_decode_core. Libopus <c>QUANT_LEVEL_ADJUST_Q10 = 80</c>.</summary>
+    internal const int QUANT_LEVEL_ADJUST_Q10 = 80;
+
+    /// <summary>PRNG increment (additive constant) used by <c>silk_RAND</c>. Libopus <c>RAND_INCREMENT = 907633515</c>.</summary>
+    internal const int RAND_INCREMENT = 907633515;
+
+    /// <summary>PRNG multiplier used by <c>silk_RAND</c>. Libopus <c>RAND_MULTIPLIER = 196314165</c>.</summary>
+    internal const int RAND_MULTIPLIER = 196314165;
+
+    /// <summary>
+    /// Quantization offsets in Q10 from libopus <c>silk_Quantization_Offsets_Q10[2][2]</c>.
+    /// Indexed by <c>[signalType &gt;&gt; 1][quantOffsetType]</c>: row 0 covers non-voiced
+    /// (UV), row 1 covers voiced (V). Columns are LOW / HIGH.
+    /// </summary>
+    internal static readonly short[,] QUANTIZATION_OFFSETS_Q10 =
+    {
+        { 100, 240 }, // UVL, UVH (non-voiced)
+        {  32, 100 }, // VL,  VH  (voiced)
+    };
 }
