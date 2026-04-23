@@ -114,6 +114,11 @@ internal static class SilkMacros
     internal static int silk_ADD32_ovflw(int a, int b) => (int)((uint)a + (uint)b);
 
     /// <summary>
+    /// Overflow-wrapping 32-bit subtract. Matches libopus <c>silk_SUB32_ovflw</c>.
+    /// </summary>
+    internal static int silk_SUB32_ovflw(int a, int b) => (int)((uint)a - (uint)b);
+
+    /// <summary>
     /// Overflow-wrapping signed multiply-accumulate byte-by-byte: <c>a + (short)b * (short)c</c>
     /// with overflow wrapping. Matches libopus <c>silk_SMLABB_ovflw</c>.
     /// </summary>
