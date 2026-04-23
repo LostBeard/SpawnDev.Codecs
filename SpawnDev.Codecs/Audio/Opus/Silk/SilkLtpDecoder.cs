@@ -61,4 +61,30 @@ internal static class SilkLtpDecoder
             ltpScaleIndex = 0;
         }
     }
+
+    /// <summary>
+    /// Retrieve the 5-tap Q7 LTP gain vector for a given <paramref name="perIndex"/> +
+    /// <paramref name="ltpIndex"/> pair, writing it into <paramref name="taps"/>.
+    /// Matches the per-subframe LTP filter lookup in libopus <c>silk_decode_parameters</c>.
+    /// </summary>
+    /// <param name="taps">Output: 5 signed Q7 taps.</param>
+    /// <param name="perIndex">Periodicity index selecting which codebook (0, 1, or 2).</param>
+    /// <param name="ltpIndex">Entry index within the selected codebook (0..cb_size-1).</param>
+    internal static void GetGainVector(Span<sbyte> taps, int perIndex, int ltpIndex)
+    {
+        if (taps.Length < SilkLtpGainTables.LtpVecSize)
+            throw new ArgumentException($"taps too small (need {SilkLtpGainTables.LtpVecSize}).", nameof(taps));
+
+        sbyte[] cb = SilkLtpGainTables.Select(perIndex);
+        int cbSize = cb.Length / SilkLtpGainTables.LtpVecSize;
+        if ((uint)ltpIndex >= (uint)cbSize)
+            throw new ArgumentOutOfRangeException(nameof(ltpIndex),
+                $"ltpIndex {ltpIndex} out of range [0, {cbSize}) for perIndex {perIndex}.");
+
+        int offset = ltpIndex * SilkLtpGainTables.LtpVecSize;
+        for (int i = 0; i < SilkLtpGainTables.LtpVecSize; i++)
+        {
+            taps[i] = cb[offset + i];
+        }
+    }
 }
