@@ -165,28 +165,33 @@ public sealed class OpusDecoder : IAudioDecoder
                 $"Unsupported SILK bandwidth {toc.Bandwidth}; SILK-only mode allows NB/MB/WB.", nameof(toc)),
         };
 
-        // Derive frame duration in ms from the TOC config's 48 kHz sample count.
-        // SILK-only packets support 10/20/40/60 ms total durations; only 10/20 ms are
-        // a single SILK internal frame (40/60 ms split into 2 or 3 x 20 ms SILK frames
-        // inside one Opus frame - deferred until a future slice splits them).
+        // Derive packet duration in ms from the TOC config. SILK-only packets are
+        // 10/20/40/60 ms total. 10/20 ms = 1 internal SILK frame; 40/60 ms splits
+        // into 2 or 3 internal 20 ms SILK frames read sequentially from the same
+        // range-coded payload.
         int samplesAt48k = toc.GetSamplesPerFrame(48000);
         int totalMs = samplesAt48k / 48;
-        int frameLengthMs = totalMs switch
+        (int silkFrameLengthMs, int silkFrameCount) = totalMs switch
         {
-            10 => 10,
-            20 => 20,
+            10 => (10, 1),
+            20 => (20, 1),
+            40 => (20, 2),
+            60 => (20, 3),
             _ => throw new NotImplementedException(
-                $"SILK packet duration {totalMs} ms not yet supported; only 10 and 20 ms Opus frames that map to a single SILK internal frame are wired (40/60 ms would split into 2/3 internal SILK frames)."),
+                $"SILK packet duration {totalMs} ms not a standard SILK duration."),
         };
 
-        EnsureSilkDecoder(internalKHz, frameLengthMs);
+        EnsureSilkDecoder(internalKHz, silkFrameLengthMs);
 
-        // Outer Opus frame header: read VAD flag (1 bit) + LBRR flag (1 bit) from the
-        // range decoder before handing off to SILK. Per RFC 6716 section 4.2.3, for
-        // mono SILK-only frames there is exactly one VAD flag and one LBRR flag per
-        // 20 ms frame (10 ms frames encode a single sub-frame within the packet).
+        // Outer Opus frame header: SILK-only packets encode one VAD flag per internal
+        // SILK frame first, then one LBRR flag, then the per-frame indices. Per RFC 6716
+        // section 4.2.3.
         var rangeDec = new OpusRangeDecoder(frame.ToArray());
-        int vadFlag = rangeDec.DecodeBitLogP(1);
+        Span<int> vadFlags = stackalloc int[3]; // max 3 for 60 ms
+        for (int f = 0; f < silkFrameCount; f++)
+        {
+            vadFlags[f] = rangeDec.DecodeBitLogP(1);
+        }
         int lbrrFlag = rangeDec.DecodeBitLogP(1);
         if (lbrrFlag != 0)
         {
@@ -194,24 +199,37 @@ public sealed class OpusDecoder : IAudioDecoder
                 "SILK LBRR (low-bitrate redundancy) frames are not yet implemented.");
         }
 
-        // Decode to int16 scratch at the requested output rate, then convert to float[-1, 1].
-        int outputLen = _silkDecoderMono!.FrameLength;
-        if (_silkPcmScratch is null || _silkPcmScratch.Length < outputLen)
-        {
-            _silkPcmScratch = new short[outputLen];
-        }
-        _silkDecoderMono.DecodeFromRange(rangeDec, _silkPcmScratch.AsSpan(0, outputLen),
-            vadFlag: vadFlag != 0, conditional: false);
+        int outputLenPerFrame = _silkDecoderMono!.FrameLength;
+        int totalOutputLen = outputLenPerFrame * silkFrameCount;
 
-        if (pcmOut.Length < outputLen)
+        if (_silkPcmScratch is null || _silkPcmScratch.Length < outputLenPerFrame)
+        {
+            _silkPcmScratch = new short[outputLenPerFrame];
+        }
+
+        if (pcmOut.Length < totalOutputLen)
         {
             throw new ArgumentException(
-                $"pcmOut too small: need {outputLen} samples for {frameLengthMs} ms at {_config.SampleRateHz} Hz.",
+                $"pcmOut too small: need {totalOutputLen} samples for {totalMs} ms at {_config.SampleRateHz} Hz.",
                 nameof(pcmOut));
         }
-        for (int i = 0; i < outputLen; i++)
+
+        // Decode each internal SILK frame sequentially. First frame is independent;
+        // subsequent frames use conditional (delta) gain + pitch coding keyed on the
+        // previous frame's state.
+        for (int f = 0; f < silkFrameCount; f++)
         {
-            pcmOut[i] = _silkPcmScratch[i] / 32768.0f;
+            _silkDecoderMono.DecodeFromRange(
+                rangeDec,
+                _silkPcmScratch.AsSpan(0, outputLenPerFrame),
+                vadFlag: vadFlags[f] != 0,
+                conditional: f > 0);
+
+            int outputOffset = f * outputLenPerFrame;
+            for (int i = 0; i < outputLenPerFrame; i++)
+            {
+                pcmOut[outputOffset + i] = _silkPcmScratch[i] / 32768.0f;
+            }
         }
     }
 
