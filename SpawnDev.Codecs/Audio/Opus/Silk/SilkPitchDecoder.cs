@@ -85,4 +85,74 @@ internal static class SilkPitchDecoder
 
         return new SilkPitchIndices(lagIndex, contour);
     }
+
+    /// <summary>
+    /// Expand the decoded <c>(lagIndex, contourIndex)</c> pair into <paramref name="nbSubfr"/>
+    /// per-subframe pitch lags, matching libopus <c>silk_decode_pitch</c>. The resulting
+    /// lags are clamped to <c>[PE_MIN_LAG_MS * fsKHz, PE_MAX_LAG_MS * fsKHz]</c>.
+    /// </summary>
+    /// <param name="pitchLags">Output: <paramref name="nbSubfr"/> pitch lag values in samples.</param>
+    /// <param name="lagIndex">Decoded coarse lag index (from <see cref="SilkPitchIndices.LagIndex"/>).</param>
+    /// <param name="contourIndex">Decoded contour index (from <see cref="SilkPitchIndices.ContourIndex"/>).</param>
+    /// <param name="fsKHz">Internal SILK sample rate (8, 12, or 16).</param>
+    /// <param name="nbSubfr">Subframe count (2 or 4).</param>
+    internal static void ComputeLags(
+        Span<int> pitchLags,
+        short lagIndex,
+        sbyte contourIndex,
+        int fsKHz,
+        int nbSubfr)
+    {
+        if (fsKHz != 8 && fsKHz != 12 && fsKHz != 16)
+            throw new ArgumentException($"Unsupported fs_kHz: {fsKHz}.", nameof(fsKHz));
+        if (nbSubfr != 2 && nbSubfr != 4)
+            throw new ArgumentException($"nbSubfr must be 2 or 4, got {nbSubfr}.", nameof(nbSubfr));
+        if (pitchLags.Length < nbSubfr)
+            throw new ArgumentException($"pitchLags too small (need {nbSubfr}).", nameof(pitchLags));
+
+        sbyte[] cb;
+        int cbSize;
+        if (fsKHz == 8)
+        {
+            if (nbSubfr == SilkConstants.PE_MAX_NB_SUBFR)
+            {
+                cb = SilkPitchContourTables.Stage2;
+                cbSize = SilkConstants.PE_NB_CBKS_STAGE2_EXT;
+            }
+            else
+            {
+                cb = SilkPitchContourTables.Stage210Ms;
+                cbSize = SilkConstants.PE_NB_CBKS_STAGE2_10MS;
+            }
+        }
+        else
+        {
+            if (nbSubfr == SilkConstants.PE_MAX_NB_SUBFR)
+            {
+                cb = SilkPitchContourTables.Stage3;
+                cbSize = SilkConstants.PE_NB_CBKS_STAGE3_MAX;
+            }
+            else
+            {
+                cb = SilkPitchContourTables.Stage310Ms;
+                cbSize = SilkConstants.PE_NB_CBKS_STAGE3_10MS;
+            }
+        }
+
+        if ((uint)contourIndex >= (uint)cbSize)
+            throw new ArgumentOutOfRangeException(nameof(contourIndex),
+                $"contourIndex {contourIndex} out of range [0, {cbSize}) for fsKHz={fsKHz}, nbSubfr={nbSubfr}.");
+
+        int minLag = SilkConstants.PE_MIN_LAG_MS * fsKHz;
+        int maxLag = SilkConstants.PE_MAX_LAG_MS * fsKHz;
+        int baseLag = minLag + lagIndex;
+
+        for (int k = 0; k < nbSubfr; k++)
+        {
+            int lag = baseLag + cb[k * cbSize + contourIndex];
+            if (lag < minLag) lag = minLag;
+            else if (lag > maxLag) lag = maxLag;
+            pitchLags[k] = lag;
+        }
+    }
 }

@@ -116,4 +116,27 @@ internal static class SilkConstants
 
     /// <summary>Number of rate levels in the pulses-per-block iCDF. Libopus: 10.</summary>
     internal const int N_RATE_LEVELS = 10;
+
+    // ----- Pitch estimator constants (silk/pitch_est_defines.h) -----
+
+    /// <summary>Maximum number of subframes used by pitch estimation. Libopus <c>PE_MAX_NB_SUBFR = 4</c>.</summary>
+    internal const int PE_MAX_NB_SUBFR = 4;
+
+    /// <summary>Minimum pitch lag in milliseconds. Libopus <c>PE_MIN_LAG_MS = 2</c>.</summary>
+    internal const int PE_MIN_LAG_MS = 2;
+
+    /// <summary>Maximum pitch lag in milliseconds. Libopus <c>PE_MAX_LAG_MS = 18</c>.</summary>
+    internal const int PE_MAX_LAG_MS = 18;
+
+    /// <summary>Pitch contour codebook size, stage-2 / 20 ms / NB. Libopus <c>PE_NB_CBKS_STAGE2_EXT = 11</c>.</summary>
+    internal const int PE_NB_CBKS_STAGE2_EXT = 11;
+
+    /// <summary>Pitch contour codebook size, stage-2 / 10 ms / NB. Libopus <c>PE_NB_CBKS_STAGE2_10MS = 3</c>.</summary>
+    internal const int PE_NB_CBKS_STAGE2_10MS = 3;
+
+    /// <summary>Pitch contour codebook size, stage-3 / 20 ms / non-NB. Libopus <c>PE_NB_CBKS_STAGE3_MAX = 34</c>.</summary>
+    internal const int PE_NB_CBKS_STAGE3_MAX = 34;
+
+    /// <summary>Pitch contour codebook size, stage-3 / 10 ms / non-NB. Libopus <c>PE_NB_CBKS_STAGE3_10MS = 12</c>.</summary>
+    internal const int PE_NB_CBKS_STAGE3_10MS = 12;
 }
