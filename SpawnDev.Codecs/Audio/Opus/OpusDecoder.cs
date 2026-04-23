@@ -1,6 +1,9 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 // See NOTICE.md for upstream attributions.
 
+using SpawnDev.Codecs.Audio.Opus.Silk;
+using SpawnDev.Codecs.EntropyCoders;
+
 namespace SpawnDev.Codecs.Audio.Opus;
 
 /// <summary>
@@ -16,6 +19,13 @@ public sealed class OpusDecoder : IAudioDecoder
 {
     private readonly OpusDecoderConfig _config;
     private bool _disposed;
+
+    // Lazily-constructed SILK decoders, keyed by (internal-fs-kHz, frame-length-ms).
+    // Mono only for now; stereo adds a second instance plus mid/side mixing logic.
+    private SilkDecoder? _silkDecoderMono;
+    private int _silkInternalKHz;
+    private int _silkFrameLengthMs;
+    private short[]? _silkPcmScratch;
 
     /// <summary>Creates a new Opus decoder with the given configuration.</summary>
     public OpusDecoder(OpusDecoderConfig config)
@@ -133,11 +143,93 @@ public sealed class OpusDecoder : IAudioDecoder
         }
     }
 
-    private static void DecodeSilkFrame(OpusTocByte toc, ReadOnlySpan<byte> frame, Span<float> pcmOut)
+    /// <summary>
+    /// Dispatches a SILK-mode Opus frame to the SILK decoder. Handles the outer
+    /// VAD + LBRR flag-reading that precedes the SILK indices in every Opus SILK
+    /// frame. Stereo and LBRR are intentionally out of scope for this slice.
+    /// </summary>
+    private void DecodeSilkFrame(OpusTocByte toc, ReadOnlySpan<byte> frame, Span<float> pcmOut)
     {
-        _ = toc; _ = frame; _ = pcmOut;
-        throw new NotImplementedException(
-            "SILK decode not yet implemented. Phase 1a slice 5+ ports Concentus SILK LPC synthesis.");
+        if (toc.IsStereo)
+        {
+            throw new NotImplementedException(
+                "SILK stereo decode not yet implemented; mono SILK decode is supported.");
+        }
+
+        int internalKHz = toc.Bandwidth switch
+        {
+            OpusBandwidth.Narrowband => 8,
+            OpusBandwidth.Mediumband => 12,
+            OpusBandwidth.Wideband => 16,
+            _ => throw new ArgumentException(
+                $"Unsupported SILK bandwidth {toc.Bandwidth}; SILK-only mode allows NB/MB/WB.", nameof(toc)),
+        };
+
+        // Derive frame duration in ms from the TOC config's 48 kHz sample count.
+        // SILK-only packets support 10/20/40/60 ms total durations; only 10/20 ms are
+        // a single SILK internal frame (40/60 ms split into 2 or 3 x 20 ms SILK frames
+        // inside one Opus frame - deferred until a future slice splits them).
+        int samplesAt48k = toc.GetSamplesPerFrame(48000);
+        int totalMs = samplesAt48k / 48;
+        int frameLengthMs = totalMs switch
+        {
+            10 => 10,
+            20 => 20,
+            _ => throw new NotImplementedException(
+                $"SILK packet duration {totalMs} ms not yet supported; only 10 and 20 ms Opus frames that map to a single SILK internal frame are wired (40/60 ms would split into 2/3 internal SILK frames)."),
+        };
+
+        EnsureSilkDecoder(internalKHz, frameLengthMs);
+
+        // Outer Opus frame header: read VAD flag (1 bit) + LBRR flag (1 bit) from the
+        // range decoder before handing off to SILK. Per RFC 6716 section 4.2.3, for
+        // mono SILK-only frames there is exactly one VAD flag and one LBRR flag per
+        // 20 ms frame (10 ms frames encode a single sub-frame within the packet).
+        var rangeDec = new OpusRangeDecoder(frame.ToArray());
+        int vadFlag = rangeDec.DecodeBitLogP(1);
+        int lbrrFlag = rangeDec.DecodeBitLogP(1);
+        if (lbrrFlag != 0)
+        {
+            throw new NotImplementedException(
+                "SILK LBRR (low-bitrate redundancy) frames are not yet implemented.");
+        }
+
+        // Decode to int16 scratch at the requested output rate, then convert to float[-1, 1].
+        int outputLen = _silkDecoderMono!.FrameLength;
+        if (_silkPcmScratch is null || _silkPcmScratch.Length < outputLen)
+        {
+            _silkPcmScratch = new short[outputLen];
+        }
+        _silkDecoderMono.DecodeFromRange(rangeDec, _silkPcmScratch.AsSpan(0, outputLen),
+            vadFlag: vadFlag != 0, conditional: false);
+
+        if (pcmOut.Length < outputLen)
+        {
+            throw new ArgumentException(
+                $"pcmOut too small: need {outputLen} samples for {frameLengthMs} ms at {_config.SampleRateHz} Hz.",
+                nameof(pcmOut));
+        }
+        for (int i = 0; i < outputLen; i++)
+        {
+            pcmOut[i] = _silkPcmScratch[i] / 32768.0f;
+        }
+    }
+
+    private void EnsureSilkDecoder(int internalKHz, int frameLengthMs)
+    {
+        if (_silkDecoderMono is not null &&
+            _silkInternalKHz == internalKHz &&
+            _silkFrameLengthMs == frameLengthMs)
+        {
+            return;
+        }
+        _silkDecoderMono = new SilkDecoder(
+            internalSampleRateHz: internalKHz * 1000,
+            frameLengthMs: frameLengthMs,
+            outputSampleRateHz: _config.SampleRateHz);
+        _silkInternalKHz = internalKHz;
+        _silkFrameLengthMs = frameLengthMs;
+        _silkPcmScratch = null; // force reallocation on first use
     }
 
     private static void DecodeHybridFrame(OpusTocByte toc, ReadOnlySpan<byte> frame, Span<float> pcmOut)
