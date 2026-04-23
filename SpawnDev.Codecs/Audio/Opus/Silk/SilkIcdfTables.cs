@@ -90,4 +90,99 @@ internal static class SilkIcdfTables
           8,   7,   6,   5,   4,   3,   2,   1,
           0,
     };
+
+    // ----- Pitch decode iCDFs (silk/tables_pitch_lag.c) -----
+
+    /// <summary>
+    /// <c>silk_pitch_lag_iCDF</c>: 32-symbol iCDF for the coarse pitch lag index.
+    /// Dimension is <c>2 * (PITCH_EST_MAX_LAG_MS - PITCH_EST_MIN_LAG_MS)</c>.
+    /// </summary>
+    internal static readonly byte[] PitchLag =
+    {
+        253, 250, 244, 233, 212, 182, 150, 131,
+        120, 110,  98,  85,  72,  60,  49,  40,
+         32,  25,  19,  15,  13,  11,   9,   8,
+          7,   6,   5,   4,   3,   2,   1,   0,
+    };
+
+    /// <summary>
+    /// <c>silk_pitch_delta_iCDF</c>: 21-symbol iCDF for delta-coded pitch lags.
+    /// Raw symbol 0 signals "use absolute coding"; symbols 1..20 encode delta = raw - 9
+    /// applied to the previous frame's lag.
+    /// </summary>
+    internal static readonly byte[] PitchDelta =
+    {
+        210, 208, 206, 203, 199, 193, 183, 168,
+        142, 104,  74,  52,  37,  27,  20,  14,
+         10,   6,   4,   2,   0,
+    };
+
+    /// <summary>
+    /// <c>silk_pitch_contour_iCDF</c>: 34-symbol pitch-contour iCDF for 20 ms non-NB frames.
+    /// </summary>
+    internal static readonly byte[] PitchContour =
+    {
+        223, 201, 183, 167, 152, 138, 124, 111,
+         98,  88,  79,  70,  62,  56,  50,  44,
+         39,  35,  31,  27,  24,  21,  18,  16,
+         14,  12,  10,   8,   6,   4,   3,   2,
+          1,   0,
+    };
+
+    /// <summary>
+    /// <c>silk_pitch_contour_NB_iCDF</c>: 11-symbol pitch-contour iCDF for 20 ms NB frames.
+    /// </summary>
+    internal static readonly byte[] PitchContourNb =
+    {
+        188, 176, 155, 138, 119,  97,  67,  43,
+         26,  10,   0,
+    };
+
+    /// <summary>
+    /// <c>silk_pitch_contour_10_ms_iCDF</c>: 12-symbol pitch-contour iCDF for 10 ms non-NB frames.
+    /// </summary>
+    internal static readonly byte[] PitchContour10Ms =
+    {
+        165, 119,  80,  61,  47,  35,  27,  20,
+         14,   9,   4,   0,
+    };
+
+    /// <summary>
+    /// <c>silk_pitch_contour_10_ms_NB_iCDF</c>: 3-symbol pitch-contour iCDF for 10 ms NB frames.
+    /// </summary>
+    internal static readonly byte[] PitchContour10MsNb =
+    {
+        113,  63,   0,
+    };
+
+    /// <summary>
+    /// Select the pitch-contour iCDF for a given sample rate and subframe count.
+    /// NB uses smaller codebooks; 10 ms frames use shorter variants.
+    /// </summary>
+    /// <param name="fsKHz">Internal SILK sample rate in kHz (8, 12, or 16).</param>
+    /// <param name="nbSubfr">Subframe count - 2 for 10 ms frames, 4 for 20 ms frames.</param>
+    internal static byte[] SelectPitchContour(int fsKHz, int nbSubfr)
+    {
+        if (fsKHz == 8)
+        {
+            return nbSubfr == 4 ? PitchContourNb : PitchContour10MsNb;
+        }
+        return nbSubfr == 4 ? PitchContour : PitchContour10Ms;
+    }
+
+    /// <summary>
+    /// Select the pitch-lag LSB iCDF for a given sample rate. NB uses 2 bits (Uniform4),
+    /// MB uses ~2.58 bits (Uniform6), WB uses 3 bits (Uniform8).
+    /// </summary>
+    /// <param name="fsKHz">Internal SILK sample rate (8, 12, or 16).</param>
+    internal static byte[] SelectPitchLagLowBits(int fsKHz)
+    {
+        return fsKHz switch
+        {
+            16 => Uniform8,
+            12 => Uniform6,
+            8 => Uniform4,
+            _ => throw new ArgumentException($"Unsupported SILK fs_kHz: {fsKHz}.", nameof(fsKHz)),
+        };
+    }
 }
