@@ -1,9 +1,11 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
-// Structural port of libopus silk/gain_quant.c::silk_gains_dequant to clean C#.
+// Structural port of libopus silk/gain_quant.c::silk_gains_dequant and the
+// gain-index decoding portion of silk/decode_indices.c to clean C#.
 //
 // Upstream Copyright (c) 2006-2011 Skype Limited. BSD 3-Clause. See NOTICE.md.
 
+using SpawnDev.Codecs.EntropyCoders;
 using static SpawnDev.Codecs.Audio.Opus.Silk.SilkMacros;
 
 namespace SpawnDev.Codecs.Audio.Opus.Silk;
@@ -72,6 +74,57 @@ internal static class SilkGainDecoder
                 silk_SMULWB(SilkConstants.GAIN_INV_SCALE_Q16, prevInd) + SilkConstants.GAIN_OFFSET_Q7,
                 SilkConstants.GAIN_LOG_CLAMP_HIGH_Q7);
             gainQ16[k] = SilkLog2.silk_log2lin(inLogQ7);
+        }
+    }
+
+    /// <summary>
+    /// Read <paramref name="nbSubfr"/> gain indices from <paramref name="rangeDec"/>, matching
+    /// the gain-index block in libopus <c>silk_decode_indices</c>. The first index is either
+    /// independent (8-symbol MSB <c>silk_gain_iCDF[signalType]</c> shifted left by 3, plus an
+    /// 8-symbol uniform LSB) when <paramref name="conditional"/> == 0, or delta-coded when it
+    /// is non-zero. Subsequent indices are always delta-coded from the 41-symbol
+    /// <c>silk_delta_gain_iCDF</c>.
+    /// </summary>
+    /// <param name="indices">Output buffer for gain indices; length must be &gt;= <paramref name="nbSubfr"/>.</param>
+    /// <param name="rangeDec">Range decoder positioned at the start of the gain-index block.</param>
+    /// <param name="signalType">SILK signal type (0 inactive, 1 unvoiced, 2 voiced). Only used when
+    /// <paramref name="conditional"/> is 0.</param>
+    /// <param name="conditional">0 for independent coding (first frame of a packet, or after a VAD
+    /// boundary), non-zero for conditional (delta) coding.</param>
+    /// <param name="nbSubfr">Subframe count - 2 for 10 ms frames, 4 for 20 ms frames.</param>
+    internal static void DecodeIndices(
+        Span<sbyte> indices,
+        OpusRangeDecoder rangeDec,
+        int signalType,
+        int conditional,
+        int nbSubfr)
+    {
+        if (rangeDec is null) throw new ArgumentNullException(nameof(rangeDec));
+        if (nbSubfr <= 0 || nbSubfr > SilkConstants.MAX_NB_SUBFR)
+            throw new ArgumentOutOfRangeException(nameof(nbSubfr));
+        if (indices.Length < nbSubfr) throw new ArgumentException("indices too small.", nameof(indices));
+        if ((uint)signalType >= SilkIcdfTables.GainIcdfNumTypes)
+            throw new ArgumentOutOfRangeException(nameof(signalType), $"signalType must be in [0, {SilkIcdfTables.GainIcdfNumTypes - 1}].");
+
+        int first;
+        if (conditional != 0)
+        {
+            first = rangeDec.DecodeIcdf(SilkIcdfTables.DeltaGain, 8);
+        }
+        else
+        {
+            int gainIcdfStart = SilkIcdfTables.GainIcdfOffset(signalType);
+            int msb = rangeDec.DecodeIcdf(
+                SilkIcdfTables.Gain.AsSpan(gainIcdfStart, SilkIcdfTables.GainIcdfEntriesPerType),
+                8);
+            int lsb = rangeDec.DecodeIcdf(SilkIcdfTables.Uniform8, 8);
+            first = (msb << 3) + lsb;
+        }
+        indices[0] = (sbyte)first;
+
+        for (int i = 1; i < nbSubfr; i++)
+        {
+            indices[i] = (sbyte)rangeDec.DecodeIcdf(SilkIcdfTables.DeltaGain, 8);
         }
     }
 }
