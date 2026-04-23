@@ -105,4 +105,96 @@ public abstract partial class CodecsTestBase
         True(ratio > 0.25 && ratio < 4.0,
             $"Our RMS ({ourRms:F4}) should be within factor-of-4 of Concentus RMS ({concentusRms:F4}); ratio={ratio:F2}");
     }
+
+    [TestMethod]
+    public void OpusDecoder_ConcentusEncodedSilk_WbMono_20Ms_DecodesWithoutCrash()
+    {
+        // WB (16 kHz internal) 20 ms. Concentus VOIP should emit SILK-WB for 16 kHz audio.
+        var pcm = ReferenceOracle.GenerateSineWave(440, 16000, 1, 320);
+        byte[] packet = ReferenceOracle.EncodeFrame(pcm, 16000, 1, 320, OpusApplication.OPUS_APPLICATION_VOIP);
+
+        var toc = new OpusTocByte(packet[0]);
+        if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Silk)
+        {
+            throw new UnsupportedTestException(
+                $"Concentus chose {toc.Mode} for WB VOIP; test needs SILK.");
+        }
+
+        var config = new OpusDecoderConfig { SampleRateHz = 16000, ChannelCount = 1 };
+        var dec = new OpusDecoder(config);
+        float[] ourPcm = new float[320];
+        try
+        {
+            _ = dec.DecodePacketAsync(packet.AsMemory(), ourPcm.AsMemory()).Result;
+        }
+        catch (AggregateException ae) when (ae.InnerException is NotImplementedException)
+        {
+            throw new UnsupportedTestException($"NotImpl: {ae.InnerException.Message}");
+        }
+
+        for (int i = 0; i < 320; i++)
+        {
+            True(ourPcm[i] >= -1.0f && ourPcm[i] <= 1.0f, $"pcm[{i}] = {ourPcm[i]}");
+        }
+    }
+
+    [TestMethod]
+    public void OpusDecoder_ConcentusEncodedSilk_Nb10Ms_DecodesWithoutCrash()
+    {
+        // 10 ms NB frame.
+        var pcm = ReferenceOracle.GenerateSineWave(440, 8000, 1, 80);
+        byte[] packet = ReferenceOracle.EncodeFrame(pcm, 8000, 1, 80, OpusApplication.OPUS_APPLICATION_VOIP);
+
+        var toc = new OpusTocByte(packet[0]);
+        if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Silk)
+        {
+            throw new UnsupportedTestException($"Concentus chose {toc.Mode}, need SILK.");
+        }
+
+        var config = new OpusDecoderConfig { SampleRateHz = 8000, ChannelCount = 1 };
+        var dec = new OpusDecoder(config);
+        float[] ourPcm = new float[80];
+        try
+        {
+            _ = dec.DecodePacketAsync(packet.AsMemory(), ourPcm.AsMemory()).Result;
+        }
+        catch (AggregateException ae) when (ae.InnerException is NotImplementedException)
+        {
+            throw new UnsupportedTestException($"NotImpl: {ae.InnerException.Message}");
+        }
+
+        for (int i = 0; i < 80; i++)
+        {
+            True(ourPcm[i] >= -1.0f && ourPcm[i] <= 1.0f);
+        }
+    }
+
+    [TestMethod]
+    public void OpusDecoder_ConcentusEncodedSilk_NbSilence_DecodesSilent()
+    {
+        // Silent input -> SILK produces near-silent output. Our decoder should match.
+        var pcm = new float[160]; // all zero
+        byte[] packet = ReferenceOracle.EncodeFrame(pcm, 8000, 1, 160, OpusApplication.OPUS_APPLICATION_VOIP);
+
+        var toc = new OpusTocByte(packet[0]);
+        if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Silk)
+        {
+            throw new UnsupportedTestException($"Concentus chose {toc.Mode}, need SILK.");
+        }
+
+        var config = new OpusDecoderConfig { SampleRateHz = 8000, ChannelCount = 1 };
+        var dec = new OpusDecoder(config);
+        float[] ourPcm = new float[160];
+        try
+        {
+            _ = dec.DecodePacketAsync(packet.AsMemory(), ourPcm.AsMemory()).Result;
+        }
+        catch (AggregateException ae) when (ae.InnerException is NotImplementedException)
+        {
+            throw new UnsupportedTestException($"NotImpl: {ae.InnerException.Message}");
+        }
+
+        double rms = ComputeRmsFloat(ourPcm);
+        True(rms < 0.1, $"Silent input should decode near-silent; got RMS {rms:F4}");
+    }
 }
