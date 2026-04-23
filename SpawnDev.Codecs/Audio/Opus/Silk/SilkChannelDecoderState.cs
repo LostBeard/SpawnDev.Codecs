@@ -89,7 +89,7 @@ internal sealed class SilkChannelDecoderState
     public readonly int[] ExcQ14 = new int[SilkConstants.MAX_FRAME_LENGTH];
 
     /// <summary>Previous frame's last-subframe gain in Q16. Used to scale LTP state across gain changes.</summary>
-    public int PrevGainQ16 = 1; // non-zero sentinel, will be overwritten on first frame
+    public int PrevGainQ16 = 65536; // 1.0 Q16 = libopus init value per silk_init_decoder
 
     /// <summary>
     /// Packet-loss counter. Incremented on each lost packet (not yet wired up by this code);
@@ -148,7 +148,7 @@ internal sealed class SilkChannelDecoderState
         Array.Clear(SLpcQ14Buf, 0, SLpcQ14Buf.Length);
         Array.Clear(ExcQ14, 0, ExcQ14.Length);
 
-        PrevGainQ16 = 1;
+        PrevGainQ16 = 65536; // 1.0 Q16, libopus silk_init_decoder default
         LossCnt = 0;
         PrevSignalType = SilkConstants.TYPE_NO_VOICE_ACTIVITY;
         FirstFrameAfterReset = true;

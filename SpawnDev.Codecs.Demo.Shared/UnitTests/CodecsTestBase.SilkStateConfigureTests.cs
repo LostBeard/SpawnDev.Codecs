@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < state.SLtpQ15.Length; i++) Equal(0, state.SLtpQ15[i], $"sLtp[{i}]");
         for (int i = 0; i < state.SLpcQ14Buf.Length; i++) Equal(0, state.SLpcQ14Buf[i], $"sLpc[{i}]");
         for (int i = 0; i < state.ExcQ14.Length; i++) Equal(0, state.ExcQ14[i], $"exc[{i}]");
-        Equal(1, state.PrevGainQ16);
+        Equal(65536, state.PrevGainQ16);
         Equal(0, state.LossCnt);
         Equal(SilkConstants.TYPE_NO_VOICE_ACTIVITY, state.PrevSignalType);
         True(state.FirstFrameAfterReset, "FirstFrameAfterReset should be true after Reset");
