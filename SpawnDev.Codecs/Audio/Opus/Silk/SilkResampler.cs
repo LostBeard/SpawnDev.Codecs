@@ -118,31 +118,37 @@ internal static class SilkResampler
             {
                 state.FirFracs = 3;
                 state.FirOrder = SilkResamplerConstants.DOWN_ORDER_FIR0;
+                state.Coefs = SilkResamplerTables.Coefs3To4;
             }
             else if (fsHzOut * 3 == fsHzIn * 2)
             {
                 state.FirFracs = 2;
                 state.FirOrder = SilkResamplerConstants.DOWN_ORDER_FIR0;
+                state.Coefs = SilkResamplerTables.Coefs2To3;
             }
             else if (fsHzOut * 2 == fsHzIn)
             {
                 state.FirFracs = 1;
                 state.FirOrder = SilkResamplerConstants.DOWN_ORDER_FIR1;
+                state.Coefs = SilkResamplerTables.Coefs1To2;
             }
             else if (fsHzOut * 3 == fsHzIn)
             {
                 state.FirFracs = 1;
                 state.FirOrder = SilkResamplerConstants.DOWN_ORDER_FIR2;
+                state.Coefs = SilkResamplerTables.Coefs1To3;
             }
             else if (fsHzOut * 4 == fsHzIn)
             {
                 state.FirFracs = 1;
                 state.FirOrder = SilkResamplerConstants.DOWN_ORDER_FIR2;
+                state.Coefs = SilkResamplerTables.Coefs1To4;
             }
             else if (fsHzOut * 6 == fsHzIn)
             {
                 state.FirFracs = 1;
                 state.FirOrder = SilkResamplerConstants.DOWN_ORDER_FIR2;
+                state.Coefs = SilkResamplerTables.Coefs1To6;
             }
             else
             {
@@ -213,8 +219,10 @@ internal static class SilkResampler
                     "silk_resampler_private_IIR_FIR not yet ported (slice 44+).");
 
             case SilkResamplerConstants.USE_DOWN_FIR:
-                throw new NotImplementedException(
-                    "silk_resampler_private_down_FIR not yet ported (slice 45+).");
+                DownFir(state, output, state.DelayBuf.AsSpan(0, state.FsInKHz), state.FsInKHz);
+                DownFir(state, output.Slice(state.FsOutKHz),
+                    input.Slice(nSamples, inLen - state.FsInKHz), inLen - state.FsInKHz);
+                break;
 
             default:
                 throw new InvalidOperationException(
@@ -240,6 +248,158 @@ internal static class SilkResampler
     private static void Up2HqWrapper(SilkResamplerState state, Span<short> output, ReadOnlySpan<short> input, int len)
     {
         Up2Hq(state.SIir, output, input, len);
+    }
+
+    // ---- Downsample FIR ----
+
+    /// <summary>
+    /// Downsample via AR2 pre-filter + polyphase interpolated FIR. Matches
+    /// libopus <c>silk_resampler_private_down_FIR</c>. The FIR order + number
+    /// of polyphase fractions + coefficient table are all pre-selected in
+    /// <see cref="Init"/> based on the specific input/output rate ratio.
+    /// </summary>
+    private static void DownFir(SilkResamplerState state, Span<short> output,
+        ReadOnlySpan<short> input, int inLen)
+    {
+        if (state.Coefs is null)
+            throw new InvalidOperationException("DownFir: state.Coefs not initialized.");
+
+        int firOrder = state.FirOrder;
+        // buf length is batchSize + FIR_Order int32 values.
+        Span<int> buf = stackalloc int[state.BatchSize + firOrder];
+
+        // Prime buf with the persisted FIR history (first FIR_Order entries).
+        state.SFirI32.AsSpan(0, firOrder).CopyTo(buf);
+
+        ReadOnlySpan<short> firCoefs = state.Coefs.AsSpan(2);
+
+        int outOffset = 0;
+        int indexIncrementQ16 = state.InvRatioQ16;
+        int remaining = inLen;
+        int inOffset = 0;
+        int nSamplesInBatch;
+
+        while (true)
+        {
+            nSamplesInBatch = Math.Min(remaining, state.BatchSize);
+
+            // AR2 pre-filter writes to buf[FIR_Order..FIR_Order+nSamplesInBatch].
+            Ar2(state.SIir, buf.Slice(firOrder, nSamplesInBatch),
+                input.Slice(inOffset, nSamplesInBatch), state.Coefs.AsSpan(0, 2));
+
+            long maxIndexQ16 = (long)nSamplesInBatch << 16;
+            outOffset = DownFirInterpol(output, outOffset, buf, firCoefs,
+                firOrder, state.FirFracs, maxIndexQ16, indexIncrementQ16);
+
+            inOffset += nSamplesInBatch;
+            remaining -= nSamplesInBatch;
+
+            if (remaining > 1)
+            {
+                // Slide the trailing FIR_Order samples of buf back to the head for the next batch.
+                buf.Slice(nSamplesInBatch, firOrder).CopyTo(buf);
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        // Persist the FIR history for the next Apply() call.
+        buf.Slice(nSamplesInBatch, firOrder).CopyTo(state.SFirI32);
+    }
+
+    /// <summary>
+    /// AR2 IIR pre-filter (2 coefficients in Q14). Matches libopus
+    /// <c>silk_resampler_private_AR2</c>.
+    /// </summary>
+    private static void Ar2(Span<int> S, Span<int> outQ8, ReadOnlySpan<short> input, ReadOnlySpan<short> aQ14)
+    {
+        for (int k = 0; k < outQ8.Length; k++)
+        {
+            int out32 = silk_ADD_LSHIFT32(S[0], input[k], 8);
+            outQ8[k] = out32;
+            out32 = silk_LSHIFT(out32, 2);
+            S[0] = silk_SMLAWB(S[1], out32, aQ14[0]);
+            S[1] = silk_SMULWB(out32, aQ14[1]);
+        }
+    }
+
+    /// <summary>
+    /// Polyphase interpolated FIR downsampler. Selects one of three implementations
+    /// based on FIR_Order (18 / 24 / 36). Matches libopus <c>silk_resampler_private_down_FIR_INTERPOL</c>.
+    /// </summary>
+    private static int DownFirInterpol(Span<short> output, int outOffset, ReadOnlySpan<int> buf,
+        ReadOnlySpan<short> firCoefs, int firOrder, int firFracs, long maxIndexQ16, int indexIncrementQ16)
+    {
+        switch (firOrder)
+        {
+            case SilkResamplerConstants.DOWN_ORDER_FIR0:
+                for (long indexQ16 = 0; indexQ16 < maxIndexQ16; indexQ16 += indexIncrementQ16)
+                {
+                    int bufStart = (int)(indexQ16 >> 16);
+                    int interpolInd = silk_SMULWB((int)indexQ16 & 0xFFFF, firFracs);
+                    int interpolStart = (SilkResamplerConstants.DOWN_ORDER_FIR0 / 2) * interpolInd;
+
+                    int resQ6 = silk_SMULWB(buf[bufStart + 0], firCoefs[interpolStart + 0]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 1], firCoefs[interpolStart + 1]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 2], firCoefs[interpolStart + 2]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 3], firCoefs[interpolStart + 3]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 4], firCoefs[interpolStart + 4]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 5], firCoefs[interpolStart + 5]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 6], firCoefs[interpolStart + 6]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 7], firCoefs[interpolStart + 7]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 8], firCoefs[interpolStart + 8]);
+
+                    int interpolStart2 = (SilkResamplerConstants.DOWN_ORDER_FIR0 / 2) * (firFracs - 1 - interpolInd);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 17], firCoefs[interpolStart2 + 0]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 16], firCoefs[interpolStart2 + 1]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 15], firCoefs[interpolStart2 + 2]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 14], firCoefs[interpolStart2 + 3]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 13], firCoefs[interpolStart2 + 4]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 12], firCoefs[interpolStart2 + 5]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 11], firCoefs[interpolStart2 + 6]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 10], firCoefs[interpolStart2 + 7]);
+                    resQ6 = silk_SMLAWB(resQ6, buf[bufStart + 9], firCoefs[interpolStart2 + 8]);
+
+                    output[outOffset++] = silk_SAT16(silk_RSHIFT_ROUND(resQ6, 6));
+                }
+                break;
+
+            case SilkResamplerConstants.DOWN_ORDER_FIR1:
+                for (long indexQ16 = 0; indexQ16 < maxIndexQ16; indexQ16 += indexIncrementQ16)
+                {
+                    int bufStart = (int)(indexQ16 >> 16);
+                    int resQ6 = silk_SMULWB(silk_ADD32(buf[bufStart + 0], buf[bufStart + 23]), firCoefs[0]);
+                    for (int k = 1; k < 12; k++)
+                    {
+                        resQ6 = silk_SMLAWB(resQ6,
+                            silk_ADD32(buf[bufStart + k], buf[bufStart + 23 - k]),
+                            firCoefs[k]);
+                    }
+                    output[outOffset++] = silk_SAT16(silk_RSHIFT_ROUND(resQ6, 6));
+                }
+                break;
+
+            case SilkResamplerConstants.DOWN_ORDER_FIR2:
+                for (long indexQ16 = 0; indexQ16 < maxIndexQ16; indexQ16 += indexIncrementQ16)
+                {
+                    int bufStart = (int)(indexQ16 >> 16);
+                    int resQ6 = silk_SMULWB(silk_ADD32(buf[bufStart + 0], buf[bufStart + 35]), firCoefs[0]);
+                    for (int k = 1; k < 18; k++)
+                    {
+                        resQ6 = silk_SMLAWB(resQ6,
+                            silk_ADD32(buf[bufStart + k], buf[bufStart + 35 - k]),
+                            firCoefs[k]);
+                    }
+                    output[outOffset++] = silk_SAT16(silk_RSHIFT_ROUND(resQ6, 6));
+                }
+                break;
+
+            default:
+                throw new InvalidOperationException($"Unsupported FIR order {firOrder}.");
+        }
+        return outOffset;
     }
 
     /// <summary>

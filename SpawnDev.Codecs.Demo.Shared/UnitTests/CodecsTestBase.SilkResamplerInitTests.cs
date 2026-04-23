@@ -197,8 +197,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerApply_NotImplementedPaths_Throw()
     {
-        // iir_fir and down_fir paths remain stubs until their slices land.
-        // (up2 is implemented as of slice 43.)
+        // Only iir_fir remains a stub (up2 and down_fir landed in slices 43 + 44).
         var state = new SilkResamplerState();
 
         SilkResampler.Init(state, 16000, 48000, forEncode: false); // iir_fir path
@@ -206,11 +205,5 @@ public abstract partial class CodecsTestBase
         short[] output2 = new short[480];
         Throws<NotImplementedException>(() =>
             SilkResampler.Apply(state, output2, input2, input2.Length));
-
-        SilkResampler.Init(state, 16000, 8000, forEncode: false); // down_fir path
-        short[] input3 = new short[160];
-        short[] output3 = new short[80];
-        Throws<NotImplementedException>(() =>
-            SilkResampler.Apply(state, output3, input3, input3.Length));
     }
 }
