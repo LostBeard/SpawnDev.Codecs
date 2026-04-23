@@ -35,6 +35,12 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<!-- Test project sees internal types so SILK/CELT subsystems can be tested
+		     in isolation without polluting the public API. -->
+		<InternalsVisibleTo Include="SpawnDev.Codecs.Demo.Shared" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<SupportedPlatform Include="browser" />
 		<SupportedPlatform Include="windows" />
 		<SupportedPlatform Include="linux" />
