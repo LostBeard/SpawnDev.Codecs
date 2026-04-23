@@ -12,10 +12,15 @@ var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.Services.AddBlazorJSRuntime();
 builder.Services.AddSingleton(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
 
-// SpawnDev.UnitTesting: register concrete test class so PlaywrightMultiTest discovers it.
+// SpawnDev.UnitTesting: register one concrete test class per browser backend so
+// PlaywrightMultiTest + UnitTestsView discover them. Each class currently inherits
+// all tests from CodecsTestBase; when CELT ILGPU kernels land each will override
+// accelerator creation to exercise its specific ILGPU backend.
 // (IServiceCollection is already singleton-registered by BackgroundServiceManager via
 //  AddBlazorJSRuntime -> GetBlazorJSRuntime -> GetBackgroundServiceManager, so the
 //  /tests page's [Inject] IServiceCollection resolves without any extra wiring.)
+builder.Services.AddSingleton<WebGPUCodecsTests>();
+builder.Services.AddSingleton<WebGLCodecsTests>();
 builder.Services.AddSingleton<WasmCodecsTests>();
 
 builder.RootComponents.Add<App>("#app");

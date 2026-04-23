@@ -6,7 +6,11 @@ using SpawnDev.UnitTesting;
 try
 {
     var services = new ServiceCollection();
-    services.AddSingleton<DesktopCodecsTests>();
+    // One concrete test class per desktop ILGPU backend. Each currently inherits all
+    // tests from CodecsTestBase; CELT kernel work will override per-backend accelerator.
+    services.AddSingleton<CpuCodecsTests>();
+    services.AddSingleton<CudaCodecsTests>();
+    services.AddSingleton<OpenCLCodecsTests>();
     var sp = services.BuildServiceProvider();
     var runner = new UnitTestRunner(sp, true);
     await ConsoleRunner.Run(args, runner);
