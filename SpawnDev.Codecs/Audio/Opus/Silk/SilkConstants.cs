@@ -93,4 +93,10 @@ internal static class SilkConstants
     /// Computed as <c>(int)(1e-4 * 2^30 + 0.5) = 107374</c>.
     /// </summary>
     internal const int INV_GAIN_Q30_MIN = 107374;
+
+    /// <summary>
+    /// Maximum number of bandwidth-expansion iterations applied in NLSF2A when the
+    /// produced LPC filter is unstable. Matches libopus <c>MAX_LPC_STABILIZE_ITERATIONS = 16</c>.
+    /// </summary>
+    internal const int MAX_LPC_STABILIZE_ITERATIONS = 16;
 }
