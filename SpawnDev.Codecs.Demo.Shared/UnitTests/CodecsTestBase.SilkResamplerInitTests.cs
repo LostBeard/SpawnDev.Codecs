@@ -197,13 +197,9 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerApply_NotImplementedPaths_Throw()
     {
-        // Verify the stub paths throw NotImplementedException with a clear message.
+        // iir_fir and down_fir paths remain stubs until their slices land.
+        // (up2 is implemented as of slice 43.)
         var state = new SilkResamplerState();
-        SilkResampler.Init(state, 8000, 16000, forEncode: false); // up2 path
-        short[] input = new short[80];
-        short[] output = new short[160];
-        Throws<NotImplementedException>(() =>
-            SilkResampler.Apply(state, output, input, input.Length));
 
         SilkResampler.Init(state, 16000, 48000, forEncode: false); // iir_fir path
         short[] input2 = new short[160];

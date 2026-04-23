@@ -202,8 +202,11 @@ internal static class SilkResampler
                 break;
 
             case SilkResamplerConstants.USE_UP2_HQ_WRAPPER:
-                throw new NotImplementedException(
-                    "silk_resampler_private_up2_HQ_wrapper not yet ported (slice 43+).");
+                // Two halves: first from delayBuf's FsInKHz samples, then from the remaining input.
+                Up2HqWrapper(state, output, state.DelayBuf.AsSpan(0, state.FsInKHz), state.FsInKHz);
+                Up2HqWrapper(state, output.Slice(state.FsOutKHz),
+                    input.Slice(nSamples, inLen - state.FsInKHz), inLen - state.FsInKHz);
+                break;
 
             case SilkResamplerConstants.USE_IIR_FIR:
                 throw new NotImplementedException(
@@ -220,5 +223,76 @@ internal static class SilkResampler
 
         // Slide the trailing InputDelay samples of the input into the delay buffer for the next call.
         input.Slice(inLen - state.InputDelay, state.InputDelay).CopyTo(state.DelayBuf);
+    }
+
+    // ---- 2x HQ upsample ----
+
+    /// <summary>Coefficients for the 2x high-quality upsample filter's even-sample all-pass cascade.</summary>
+    private static readonly short[] Up2Hq0 = { 1746, 14986, (short)(39083 - 65536) };
+
+    /// <summary>Coefficients for the 2x high-quality upsample filter's odd-sample all-pass cascade.</summary>
+    private static readonly short[] Up2Hq1 = { 6854, 25769, (short)(55542 - 65536) };
+
+    /// <summary>
+    /// Thin wrapper matching libopus <c>silk_resampler_private_up2_HQ_wrapper</c>: forwards
+    /// to <see cref="Up2Hq"/> using the first 6 entries of the state's IIR buffer.
+    /// </summary>
+    private static void Up2HqWrapper(SilkResamplerState state, Span<short> output, ReadOnlySpan<short> input, int len)
+    {
+        Up2Hq(state.SIir, output, input, len);
+    }
+
+    /// <summary>
+    /// 2x high-quality upsampler. Produces 2*<paramref name="len"/> output samples from
+    /// <paramref name="len"/> input samples via 3 cascaded all-pass filters per output phase.
+    /// Matches libopus <c>silk_resampler_private_up2_HQ</c> bit-exactly.
+    /// </summary>
+    /// <param name="S">State buffer, at least 6 entries ([0..2] = even branch, [3..5] = odd branch).</param>
+    /// <param name="output">Output samples (length &gt;= 2 * len).</param>
+    /// <param name="input">Input samples (length &gt;= len).</param>
+    /// <param name="len">Number of input samples.</param>
+    private static void Up2Hq(Span<int> S, Span<short> output, ReadOnlySpan<short> input, int len)
+    {
+        // All state + internal variables are in Q10.
+        for (int k = 0; k < len; k++)
+        {
+            int in32 = silk_LSHIFT((int)input[k], 10);
+
+            // Even-sample branch: three all-pass sections using Up2Hq0.
+            int Y = silk_SUB32(in32, S[0]);
+            int X = silk_SMULWB(Y, Up2Hq0[0]);
+            int out32_1 = silk_ADD32(S[0], X);
+            S[0] = silk_ADD32(in32, X);
+
+            Y = silk_SUB32(out32_1, S[1]);
+            X = silk_SMULWB(Y, Up2Hq0[1]);
+            int out32_2 = silk_ADD32(S[1], X);
+            S[1] = silk_ADD32(out32_1, X);
+
+            Y = silk_SUB32(out32_2, S[2]);
+            X = silk_SMLAWB(Y, Y, Up2Hq0[2]);
+            out32_1 = silk_ADD32(S[2], X);
+            S[2] = silk_ADD32(out32_2, X);
+
+            output[2 * k] = silk_SAT16(silk_RSHIFT_ROUND(out32_1, 10));
+
+            // Odd-sample branch: three all-pass sections using Up2Hq1.
+            Y = silk_SUB32(in32, S[3]);
+            X = silk_SMULWB(Y, Up2Hq1[0]);
+            out32_1 = silk_ADD32(S[3], X);
+            S[3] = silk_ADD32(in32, X);
+
+            Y = silk_SUB32(out32_1, S[4]);
+            X = silk_SMULWB(Y, Up2Hq1[1]);
+            out32_2 = silk_ADD32(S[4], X);
+            S[4] = silk_ADD32(out32_1, X);
+
+            Y = silk_SUB32(out32_2, S[5]);
+            X = silk_SMLAWB(Y, Y, Up2Hq1[2]);
+            out32_1 = silk_ADD32(S[5], X);
+            S[5] = silk_ADD32(out32_2, X);
+
+            output[2 * k + 1] = silk_SAT16(silk_RSHIFT_ROUND(out32_1, 10));
+        }
     }
 }
