@@ -82,6 +82,25 @@ internal static class SilkMacros
     /// <summary>Count leading zeros of a 32-bit value. Returns 32 for input 0 (matches libopus <c>silk_CLZ32</c>).</summary>
     internal static int silk_CLZ32(int x) => BitOperations.LeadingZeroCount((uint)x);
 
+    /// <summary>Maximum int16 value, matching libopus <c>silk_int16_MAX</c>.</summary>
+    internal const short silk_int16_MAX = short.MaxValue;
+
+    /// <summary>Absolute value of a 32-bit integer.</summary>
+    internal static int silk_abs(int x) => x < 0 ? -x : x;
+
+    /// <summary>Minimum of two int32 (libopus <c>silk_min</c> variant; shorthand for <see cref="silk_min_int"/>).</summary>
+    internal static int silk_min(int a, int b) => a < b ? a : b;
+
+    /// <summary>Signed 32-bit division.</summary>
+    internal static int silk_DIV32(int a, int b) => a / b;
+
+    /// <summary>32-bit right shift alias (libopus <c>silk_RSHIFT32</c>).</summary>
+    internal static int silk_RSHIFT32(int a, int shift) => a >> shift;
+
+    /// <summary>Saturate a 32-bit signed value to int16 range.</summary>
+    internal static short silk_SAT16(int x) =>
+        x > short.MaxValue ? short.MaxValue : (x < short.MinValue ? short.MinValue : (short)x);
+
     /// <summary>Count leading zeros of a 32-bit value (same as <see cref="silk_CLZ32"/>; some libopus code uses 32-bit spelling).</summary>
     internal static int silk_max_32(int a, int b) => a > b ? a : b;
 
