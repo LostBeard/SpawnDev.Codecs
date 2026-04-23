@@ -79,6 +79,30 @@ internal static class SilkMacros
     /// <summary>Clamp 32-bit value to inclusive <c>[lo, hi]</c>.</summary>
     internal static int silk_LIMIT_32(int x, int lo, int hi) => x < lo ? lo : (x > hi ? hi : x);
 
+    /// <summary>Count leading zeros of a 32-bit value. Returns 32 for input 0 (matches libopus <c>silk_CLZ32</c>).</summary>
+    internal static int silk_CLZ32(int x) => BitOperations.LeadingZeroCount((uint)x);
+
+    /// <summary>Count leading zeros of a 32-bit value (same as <see cref="silk_CLZ32"/>; some libopus code uses 32-bit spelling).</summary>
+    internal static int silk_max_32(int a, int b) => a > b ? a : b;
+
+    /// <summary>
+    /// Overflow-wrapping 32-bit add: performs <c>a + b</c> in unsigned arithmetic and
+    /// reinterprets the bit pattern as signed. Matches libopus <c>silk_ADD32_ovflw</c>.
+    /// </summary>
+    internal static int silk_ADD32_ovflw(int a, int b) => (int)((uint)a + (uint)b);
+
+    /// <summary>
+    /// Overflow-wrapping signed multiply-accumulate byte-by-byte: <c>a + (short)b * (short)c</c>
+    /// with overflow wrapping. Matches libopus <c>silk_SMLABB_ovflw</c>.
+    /// </summary>
+    internal static int silk_SMLABB_ovflw(int a, int b, int c) => silk_ADD32_ovflw(a, silk_SMULBB(b, c));
+
+    /// <summary>
+    /// Unsigned add-then-right-shift: <c>a + (b &gt;&gt; shift)</c> treating both operands as <see cref="uint"/>.
+    /// Matches libopus <c>silk_ADD_RSHIFT_uint</c>.
+    /// </summary>
+    internal static uint silk_ADD_RSHIFT_uint(uint a, uint b, int shift) => a + (b >> shift);
+
     /// <summary>
     /// Signed multiply word-by-word high. Libopus macro form:
     /// <c>silk_MLA(silk_SMULWB(a, b), a, silk_RSHIFT_ROUND(b, 16))</c>.
