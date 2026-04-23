@@ -61,4 +61,26 @@ internal static class SilkResamplerTables
          27540, -15257,
             17,     12,      8,      1,    -10,    -22,    -30,    -32,    -22,      3,     44,    100,    168,    243,    317,    381,    429,    455,
     };
+
+    /// <summary>
+    /// Fractional FIR coefficient table for the IIR+FIR upsample path. Layout:
+    /// 12 rows of 4 taps each (<c>RESAMPLER_ORDER_FIR_12 / 2 = 4</c>), flattened row-major.
+    /// Indexed as <c>FracFir12[tableIdx * 4 + tap]</c> where <c>tableIdx in [0, 11]</c>
+    /// and <c>tap in [0, 3]</c>.
+    /// </summary>
+    internal static readonly short[] FracFir12 =
+    {
+         189,  -600,   617, 30567,
+         117,  -159, -1070, 29704,
+          52,   221, -2392, 28276,
+          -4,   529, -3350, 26341,
+         -48,   758, -3956, 23973,
+         -80,   905, -4235, 21254,
+         -99,   972, -4222, 18278,
+        -107,   967, -3957, 15143,
+        -103,   896, -3487, 11950,
+         -91,   773, -2865,  8798,
+         -71,   611, -2143,  5784,
+         -46,   425, -1375,  2996,
+    };
 }

@@ -194,16 +194,6 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
-    public void ResamplerApply_NotImplementedPaths_Throw()
-    {
-        // Only iir_fir remains a stub (up2 and down_fir landed in slices 43 + 44).
-        var state = new SilkResamplerState();
-
-        SilkResampler.Init(state, 16000, 48000, forEncode: false); // iir_fir path
-        short[] input2 = new short[160];
-        short[] output2 = new short[480];
-        Throws<NotImplementedException>(() =>
-            SilkResampler.Apply(state, output2, input2, input2.Length));
-    }
+    // Note: there is no longer a NotImplementedPaths test - every decoder rate pair
+    // has a working Apply() path as of slice 45.
 }

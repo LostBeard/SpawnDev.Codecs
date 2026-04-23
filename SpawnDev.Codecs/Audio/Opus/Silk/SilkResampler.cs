@@ -215,8 +215,10 @@ internal static class SilkResampler
                 break;
 
             case SilkResamplerConstants.USE_IIR_FIR:
-                throw new NotImplementedException(
-                    "silk_resampler_private_IIR_FIR not yet ported (slice 44+).");
+                IirFir(state, output, state.DelayBuf.AsSpan(0, state.FsInKHz), state.FsInKHz);
+                IirFir(state, output.Slice(state.FsOutKHz),
+                    input.Slice(nSamples, inLen - state.FsInKHz), inLen - state.FsInKHz);
+                break;
 
             case SilkResamplerConstants.USE_DOWN_FIR:
                 DownFir(state, output, state.DelayBuf.AsSpan(0, state.FsInKHz), state.FsInKHz);
@@ -231,6 +233,88 @@ internal static class SilkResampler
 
         // Slide the trailing InputDelay samples of the input into the delay buffer for the next call.
         input.Slice(inLen - state.InputDelay, state.InputDelay).CopyTo(state.DelayBuf);
+    }
+
+    // ---- IIR + FIR arbitrary upsample ----
+
+    /// <summary>
+    /// Arbitrary-ratio upsampler for cases where <c>fsOut / fsIn</c> is not exactly 2.
+    /// Runs the input through the 2x HQ upsampler (doubles the sample count), then
+    /// applies a 12-phase fractional FIR to produce the final output. Matches libopus
+    /// <c>silk_resampler_private_IIR_FIR</c>.
+    /// </summary>
+    private static void IirFir(SilkResamplerState state, Span<short> output,
+        ReadOnlySpan<short> input, int inLen)
+    {
+        int firOrder = SilkResamplerConstants.ORDER_FIR_12;
+        // buf holds the up2 output (2 * batchSize samples) plus the FIR history prefix (firOrder samples).
+        Span<short> buf = stackalloc short[2 * state.BatchSize + SilkResamplerConstants.ORDER_FIR_12];
+
+        // Prime buf with the persisted FIR history (first 8 entries).
+        state.SFirI16.AsSpan(0, firOrder).CopyTo(buf);
+
+        int indexIncrementQ16 = state.InvRatioQ16;
+        int outOffset = 0;
+        int remaining = inLen;
+        int inOffset = 0;
+        int nSamplesInBatch;
+
+        while (true)
+        {
+            nSamplesInBatch = Math.Min(remaining, state.BatchSize);
+
+            // Upsample this batch by 2 into buf[firOrder..firOrder + 2*nSamplesInBatch].
+            Up2Hq(state.SIir, buf.Slice(firOrder), input.Slice(inOffset, nSamplesInBatch), nSamplesInBatch);
+
+            long maxIndexQ16 = (long)nSamplesInBatch << (16 + 1);
+            outOffset = IirFirInterpol(output, outOffset, buf, maxIndexQ16, indexIncrementQ16);
+
+            inOffset += nSamplesInBatch;
+            remaining -= nSamplesInBatch;
+
+            if (remaining > 0)
+            {
+                // Slide the trailing firOrder samples of the up2-output back to the head.
+                buf.Slice(nSamplesInBatch << 1, firOrder).CopyTo(buf);
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        // Persist the FIR history for the next call.
+        buf.Slice(nSamplesInBatch << 1, firOrder).CopyTo(state.SFirI16);
+    }
+
+    /// <summary>
+    /// 12-phase fractional FIR interpolator. Each output sample reads 4 coefficients
+    /// from the low half of the table (rows <c>tableIdx</c>) and 4 from the mirrored
+    /// high half (rows <c>11 - tableIdx</c>), applied to 8 consecutive buffer samples.
+    /// Matches libopus <c>silk_resampler_private_IIR_FIR_INTERPOL</c>.
+    /// </summary>
+    private static int IirFirInterpol(Span<short> output, int outOffset, ReadOnlySpan<short> buf,
+        long maxIndexQ16, int indexIncrementQ16)
+    {
+        for (long indexQ16 = 0; indexQ16 < maxIndexQ16; indexQ16 += indexIncrementQ16)
+        {
+            int tableIndex = silk_SMULWB((int)indexQ16 & 0xFFFF, 12);
+            int bufStart = (int)(indexQ16 >> 16);
+            int rowLow = tableIndex * 4;
+            int rowHigh = (11 - tableIndex) * 4;
+
+            int resQ15 = silk_SMULBB(buf[bufStart + 0], SilkResamplerTables.FracFir12[rowLow + 0]);
+            resQ15 = silk_SMLABB(resQ15, buf[bufStart + 1], SilkResamplerTables.FracFir12[rowLow + 1]);
+            resQ15 = silk_SMLABB(resQ15, buf[bufStart + 2], SilkResamplerTables.FracFir12[rowLow + 2]);
+            resQ15 = silk_SMLABB(resQ15, buf[bufStart + 3], SilkResamplerTables.FracFir12[rowLow + 3]);
+            resQ15 = silk_SMLABB(resQ15, buf[bufStart + 4], SilkResamplerTables.FracFir12[rowHigh + 3]);
+            resQ15 = silk_SMLABB(resQ15, buf[bufStart + 5], SilkResamplerTables.FracFir12[rowHigh + 2]);
+            resQ15 = silk_SMLABB(resQ15, buf[bufStart + 6], SilkResamplerTables.FracFir12[rowHigh + 1]);
+            resQ15 = silk_SMLABB(resQ15, buf[bufStart + 7], SilkResamplerTables.FracFir12[rowHigh + 0]);
+
+            output[outOffset++] = silk_SAT16(silk_RSHIFT_ROUND(resQ15, 15));
+        }
+        return outOffset;
     }
 
     // ---- 2x HQ upsample ----

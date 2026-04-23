@@ -38,6 +38,12 @@ internal static class SilkMacros
     /// <returns><c>(short)a32 * (short)b32</c></returns>
     internal static int silk_SMULBB(int a32, int b32) => (short)a32 * (short)b32;
 
+    /// <summary>
+    /// Signed multiply-accumulate byte-by-byte (non-overflow-wrapping variant):
+    /// <c>a32 + (short)b32 * (short)c32</c>. Matches libopus <c>silk_SMLABB</c>.
+    /// </summary>
+    internal static int silk_SMLABB(int a32, int b32, int c32) => a32 + silk_SMULBB(b32, c32);
+
     /// <summary>Multiply-add: <c>a32 + b32 * c32</c>.</summary>
     internal static int silk_MLA(int a32, int b32, int c32) => a32 + b32 * c32;
 
