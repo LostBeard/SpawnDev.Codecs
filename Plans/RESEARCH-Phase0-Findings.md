@@ -101,6 +101,23 @@ Given Concentus is BSD-3, pure-C#, battle-tested, and already consumed by SipSor
 
 **Trade-off:** we're not "pure from scratch" - but the point was never purity-of-authorship. The point is pure-.NET, ILGPU-accelerated, patent-clean, open-source. All four properties preserved.
 
+### Value-add over Concentus (addressing Riker's scope flag 2026-04-23)
+
+Riker flagged in `riker-to-tuvok-phase4-effort-estimates-2026-04-23.md`: *"If Phase 1 is 'reimplement Opus,' the value-add over Concentus is probably ILGPU acceleration and architectural control (SpawnDev-idiomatic DI, BlazorJS-aware, etc.) rather than patent cleanup (Concentus is already clean). Worth clarifying scope so Phase 1 doesn't end up being 'port Concentus tests' for three weeks of zero user-visible progress."*
+
+Valid flag. Being explicit about the value-prop:
+
+SpawnDev.Codecs.Opus is NOT competing with Concentus on patent status or basic correctness. Concentus is BSD-3, pure C#, passes RFC 6716 - it is already "good Opus for managed .NET." We build SpawnDev.Codecs.Opus anyway because:
+
+1. **GPU-accelerated CELT (Phase 1a payoff)** - IMDCT + dequant + windowing + post-filter as ILGPU kernels. On a single stream this is marginal (Concentus is fast enough for 1 voice call on any modern CPU). On GPU backends it scales linearly with hardware.
+2. **Multi-stream batch dispatch (Phase 1c payoff)** - this is where the real value lives. Server-side conference mixer with 100 concurrent Opus streams on one GPU dispatch. Concentus cannot do this architecturally - it runs one stream per call on CPU. Our GPU kernel dispatch is sized for the batch; `N=1` is the same codepath as `N=100`, priced proportionally by GPU.
+3. **Foundation template for VP8/VP9/AV1 (Phase 2+ payoff)** - Opus Phase 1 proves the shared `EntropyCoders/` base class, the `Accelerator`-parameterized codec lifecycle, the RFC-conformance-vector test harness, and the `IAudioEncoder`/`IAudioDecoder` surface patterns. VP8/VP9/AV1 inherit all of this infrastructure. For video codecs, GPU acceleration is not marginal - it is necessary. Phase 1 builds the scaffolding; video codecs cash in on it.
+4. **SpawnDev ecosystem integration** - SpawnDev DI shape, BlazorJS-aware browser paths, matches SpawnDev.RTC / SpawnDev.MultiMedia / SpawnDev.WebTorrent idioms so downstream consumers have one consistent mental model.
+
+**The real "Phase 1 ships value" moment is Phase 1c** (multi-stream batch dispatch). Phase 1a (single-stream decoder) and 1b (single-stream encoder) are the foundation that makes 1c possible. We should NOT sell Phase 1a as "better Opus than Concentus for single-stream VoIP" because it mostly isn't. We sell it as "foundation for GPU-native multi-stream audio + the template the video codecs inherit."
+
+This framing affects how Phase 1a gets announced when it ships - the release notes should lead with "first open-source GPU-accelerated Opus implementation in any language" and "foundation for SpawnDev.Codecs video codecs" rather than "replaces Concentus." We don't replace Concentus on our target use cases (single VoIP stream); we enable use cases Concentus structurally can't reach (batched multi-stream GPU dispatch + the video codec pipeline).
+
 ### First-mover positioning
 
 - **GPU-accelerated Opus:** first in any language (open-source)
