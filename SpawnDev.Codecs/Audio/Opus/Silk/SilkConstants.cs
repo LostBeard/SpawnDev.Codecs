@@ -161,4 +161,43 @@ internal static class SilkConstants
         { 100, 240 }, // UVL, UVH (non-voiced)
         {  32, 100 }, // VL,  VH  (voiced)
     };
+
+    // ----- Frame geometry + post-loss / init constants -----
+
+    /// <summary>Maximum SILK internal sample rate in kHz. Libopus <c>MAX_FS_KHZ = 16</c>.</summary>
+    internal const int MAX_FS_KHZ = 16;
+
+    /// <summary>Maximum SILK frame length in milliseconds. Libopus <c>MAX_FRAME_LENGTH_MS = 20</c>.</summary>
+    internal const int MAX_FRAME_LENGTH_MS = 20;
+
+    /// <summary>SILK subframe length in milliseconds. Libopus <c>SUB_FRAME_LENGTH_MS = 5</c>.</summary>
+    internal const int SUB_FRAME_LENGTH_MS = 5;
+
+    /// <summary>LTP buffer length in milliseconds. Libopus <c>LTP_MEM_LENGTH_MS = 20</c>.</summary>
+    internal const int LTP_MEM_LENGTH_MS = 20;
+
+    /// <summary>Maximum SILK frame length in samples: <c>MAX_FRAME_LENGTH_MS * MAX_FS_KHZ = 320</c>.</summary>
+    internal const int MAX_FRAME_LENGTH = MAX_FRAME_LENGTH_MS * MAX_FS_KHZ;
+
+    /// <summary>Maximum SILK subframe length in samples: <c>SUB_FRAME_LENGTH_MS * MAX_FS_KHZ = 80</c>.</summary>
+    internal const int MAX_SUB_FRAME_LENGTH = SUB_FRAME_LENGTH_MS * MAX_FS_KHZ;
+
+    /// <summary>Maximum LTP buffer length in samples: <c>LTP_MEM_LENGTH_MS * MAX_FS_KHZ = 320</c>.</summary>
+    internal const int MAX_LTP_MEM_LENGTH = LTP_MEM_LENGTH_MS * MAX_FS_KHZ;
+
+    /// <summary>
+    /// Q16 chirp factor applied to LPC coefficients after a lost-packet reset to widen the
+    /// filter and improve packet-loss robustness. Matches libopus <c>BWE_AFTER_LOSS_Q16 = 63570</c>
+    /// (~= 0.970 in Q16).
+    /// </summary>
+    internal const int BWE_AFTER_LOSS_Q16 = 63570;
+
+    /// <summary>Signal type: no voice activity. Libopus <c>TYPE_NO_VOICE_ACTIVITY = 0</c>.</summary>
+    internal const int TYPE_NO_VOICE_ACTIVITY = 0;
+
+    /// <summary>Signal type: unvoiced. Libopus <c>TYPE_UNVOICED = 1</c>.</summary>
+    internal const int TYPE_UNVOICED = 1;
+
+    /// <summary>Signal type: voiced. Libopus <c>TYPE_VOICED = 2</c>.</summary>
+    internal const int TYPE_VOICED = 2;
 }
