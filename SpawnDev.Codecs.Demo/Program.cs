@@ -13,6 +13,9 @@ builder.Services.AddBlazorJSRuntime();
 builder.Services.AddSingleton(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
 
 // SpawnDev.UnitTesting: register concrete test class so PlaywrightMultiTest discovers it.
+// (IServiceCollection is already singleton-registered by BackgroundServiceManager via
+//  AddBlazorJSRuntime -> GetBlazorJSRuntime -> GetBackgroundServiceManager, so the
+//  /tests page's [Inject] IServiceCollection resolves without any extra wiring.)
 builder.Services.AddSingleton<WasmCodecsTests>();
 
 builder.RootComponents.Add<App>("#app");
