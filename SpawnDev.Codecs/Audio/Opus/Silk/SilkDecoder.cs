@@ -112,6 +112,8 @@ public sealed class SilkDecoder
 
     /// <summary>
     /// Decode one SILK frame from a range-coded byte payload into 16-bit PCM at the output rate.
+    /// Convenience wrapper around <see cref="DecodeFromRange"/> that constructs the range decoder
+    /// from the payload bytes.
     /// </summary>
     /// <param name="payload">Range-coded SILK frame bytes.</param>
     /// <param name="pcmOut">Output PCM buffer. Length &gt;= <see cref="FrameLength"/>.</param>
@@ -121,20 +123,34 @@ public sealed class SilkDecoder
     public int DecodeFrame(ReadOnlySpan<byte> payload, Span<short> pcmOut, bool vadFlag, bool conditional)
     {
         if (payload.Length == 0) throw new ArgumentException("Empty payload.", nameof(payload));
+        var rangeDec = new OpusRangeDecoder(payload.ToArray());
+        return DecodeFromRange(rangeDec, pcmOut, vadFlag, conditional);
+    }
+
+    /// <summary>
+    /// Decode one SILK frame from a pre-positioned range decoder. This is the primitive
+    /// used by the Opus-level decoder, which reads VAD + LBRR flags from the range decoder
+    /// before calling this method. End users who have raw SILK frame bytes should prefer
+    /// <see cref="DecodeFrame"/> for convenience.
+    /// </summary>
+    /// <param name="rangeDec">Range decoder already positioned at the start of the SILK indices.</param>
+    /// <param name="pcmOut">Output PCM buffer. Length &gt;= <see cref="FrameLength"/>.</param>
+    /// <param name="vadFlag">VAD flag (as read from the outer Opus frame header).</param>
+    /// <param name="conditional">True for conditional / delta coding, false for independent.</param>
+    /// <returns>Number of PCM samples written.</returns>
+    public int DecodeFromRange(OpusRangeDecoder rangeDec, Span<short> pcmOut, bool vadFlag, bool conditional)
+    {
+        if (rangeDec is null) throw new ArgumentNullException(nameof(rangeDec));
         if (pcmOut.Length < _outputFrameLength)
             throw new ArgumentException(
                 $"pcmOut too small (need {_outputFrameLength}).", nameof(pcmOut));
 
-        var rangeDec = new OpusRangeDecoder(payload.ToArray());
-
         if (_resamplerState is null)
         {
-            // No resampling: decode directly into the caller's buffer.
             SilkDecodeFrame.Decode(_state, rangeDec, pcmOut, vadFlag, conditional ? 1 : 0);
             return _internalFrameLength;
         }
 
-        // Resampling path: decode to internal buffer, then resample to caller's buffer.
         SilkDecodeFrame.Decode(_state, rangeDec, _internalPcmBuf!.AsSpan(0, _internalFrameLength),
             vadFlag, conditional ? 1 : 0);
         SilkResampler.Apply(_resamplerState, pcmOut, _internalPcmBuf.AsSpan(0, _internalFrameLength),

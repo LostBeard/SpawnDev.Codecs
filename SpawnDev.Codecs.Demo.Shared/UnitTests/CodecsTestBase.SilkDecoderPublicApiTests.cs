@@ -134,4 +134,49 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() =>
             dec.DecodeFrame(payload, tooSmall, false, false));
     }
+
+    [TestMethod]
+    public void SilkDecoder_DecodeFromRange_MatchesDecodeFrame()
+    {
+        // DecodeFromRange with a freshly-constructed range decoder must produce
+        // identical output to DecodeFrame with the same payload (the former is
+        // the Opus-layer primitive; the latter is a convenience wrapper around it).
+        var indices = new SilkDecodedIndices
+        {
+            SignalType = SilkSideInfoDecoder.TypeInactive,
+            QuantOffsetType = 0,
+            NlsfInterpCoefQ2 = 4,
+            Seed = 0,
+        };
+        for (int i = 0; i < 4; i++) indices.GainsIndices[i] = 15;
+        indices.NlsfIndices[0] = 5;
+
+        short[] pulses = new short[160 + 16];
+        byte[] bitstream = EncodeFullSilkFrame(
+            SilkNlsfCodebookTables.NbMb, indices, pulses,
+            fsKHz: 8, nbSubfr: 4, conditional: 0, vadFlag: false);
+
+        var dec1 = new SilkDecoder(8000);
+        short[] pcm1 = new short[dec1.FrameLength];
+        dec1.DecodeFrame(bitstream, pcm1, vadFlag: false, conditional: false);
+
+        var dec2 = new SilkDecoder(8000);
+        var rangeDec = new OpusRangeDecoder(bitstream);
+        short[] pcm2 = new short[dec2.FrameLength];
+        dec2.DecodeFromRange(rangeDec, pcm2, vadFlag: false, conditional: false);
+
+        for (int i = 0; i < dec1.FrameLength; i++)
+        {
+            Equal(pcm1[i], pcm2[i], $"pos {i}");
+        }
+    }
+
+    [TestMethod]
+    public void SilkDecoder_DecodeFromRange_NullDecoder_Throws()
+    {
+        var dec = new SilkDecoder(8000);
+        short[] pcm = new short[dec.FrameLength];
+        Throws<ArgumentNullException>(() =>
+            dec.DecodeFromRange(null!, pcm, false, false));
+    }
 }
