@@ -39,10 +39,17 @@ internal static class SilkPulsesDecoder
         if ((uint)signalType > 2) throw new ArgumentOutOfRangeException(nameof(signalType));
         if ((uint)quantOffsetType > 1) throw new ArgumentOutOfRangeException(nameof(quantOffsetType));
         if (frameLength <= 0) throw new ArgumentOutOfRangeException(nameof(frameLength));
-        if (pulses.Length < frameLength)
-            throw new ArgumentException($"pulses too small (need {frameLength}).", nameof(pulses));
 
         int shellLen = SilkConstants.SHELL_CODEC_FRAME_LENGTH;
+
+        // pulses must be sized to the NEXT multiple of SHELL_CODEC_FRAME_LENGTH >= frameLength.
+        // For frame lengths that aren't exact multiples (e.g. 120 samples for MB 10 ms), the
+        // final shell block writes samples past frameLength; callers must allocate accordingly.
+        int alignedLen = (frameLength + shellLen - 1) & ~(shellLen - 1);
+        if (pulses.Length < alignedLen)
+            throw new ArgumentException(
+                $"pulses too small (need {alignedLen} aligned to shell boundary for frameLength {frameLength}).",
+                nameof(pulses));
 
         // Rate-level selection (9-symbol iCDF per signal-type-rough-class).
         int rateLevelIndex = rangeDec.DecodeIcdf(
@@ -194,10 +201,13 @@ internal static class SilkPulsesDecoder
         if (rangeEnc is null) throw new ArgumentNullException(nameof(rangeEnc));
         if ((uint)signalType > 2) throw new ArgumentOutOfRangeException(nameof(signalType));
         if ((uint)quantOffsetType > 1) throw new ArgumentOutOfRangeException(nameof(quantOffsetType));
-        if (pulses.Length < frameLength)
-            throw new ArgumentException($"pulses too small (need {frameLength}).", nameof(pulses));
 
         int shellLen = SilkConstants.SHELL_CODEC_FRAME_LENGTH;
+        int alignedLen = (frameLength + shellLen - 1) & ~(shellLen - 1);
+        if (pulses.Length < alignedLen)
+            throw new ArgumentException(
+                $"pulses too small (need {alignedLen} aligned to shell boundary).", nameof(pulses));
+
         int iter = frameLength >> SilkConstants.LOG2_SHELL_CODEC_FRAME_LENGTH;
         if (iter * shellLen < frameLength) iter++;
 
