@@ -185,4 +185,55 @@ internal static class SilkIcdfTables
             _ => throw new ArgumentException($"Unsupported SILK fs_kHz: {fsKHz}.", nameof(fsKHz)),
         };
     }
+
+    // ----- LTP decode iCDFs (silk/tables_LTP.c) -----
+
+    /// <summary>
+    /// <c>silk_LTP_per_index_iCDF</c>: 3-symbol iCDF for the LTP periodicity index
+    /// (selects which LTP gain codebook the current frame uses).
+    /// </summary>
+    internal static readonly byte[] LtpPerIndex = { 179, 99, 0 };
+
+    /// <summary>
+    /// <c>silk_LTP_gain_iCDF_0</c>: 8-symbol iCDF for LTP gain index, codebook 0.
+    /// </summary>
+    internal static readonly byte[] LtpGain0 =
+    {
+        71, 56, 43, 30, 21, 12,  6,  0,
+    };
+
+    /// <summary>
+    /// <c>silk_LTP_gain_iCDF_1</c>: 16-symbol iCDF for LTP gain index, codebook 1.
+    /// </summary>
+    internal static readonly byte[] LtpGain1 =
+    {
+        199, 165, 144, 124, 109,  96,  84,  71,
+         61,  51,  42,  32,  23,  15,   8,   0,
+    };
+
+    /// <summary>
+    /// <c>silk_LTP_gain_iCDF_2</c>: 32-symbol iCDF for LTP gain index, codebook 2.
+    /// </summary>
+    internal static readonly byte[] LtpGain2 =
+    {
+        241, 225, 211, 199, 187, 175, 164, 153,
+        142, 132, 123, 114, 105,  96,  88,  80,
+         72,  64,  57,  50,  44,  38,  33,  29,
+         24,  20,  16,  12,   9,   5,   2,   0,
+    };
+
+    /// <summary>
+    /// Select the LTP gain iCDF for the given PERIndex (0, 1, or 2).
+    /// Matches libopus <c>silk_LTP_gain_iCDF_ptrs</c>.
+    /// </summary>
+    internal static byte[] SelectLtpGain(int perIndex)
+    {
+        return perIndex switch
+        {
+            0 => LtpGain0,
+            1 => LtpGain1,
+            2 => LtpGain2,
+            _ => throw new ArgumentOutOfRangeException(nameof(perIndex), $"perIndex must be 0, 1, or 2 (got {perIndex}).")
+        };
+    }
 }
