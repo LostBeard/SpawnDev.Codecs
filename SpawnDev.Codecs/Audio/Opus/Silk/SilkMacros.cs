@@ -79,6 +79,14 @@ internal static class SilkMacros
     /// <summary>Clamp 32-bit value to inclusive <c>[lo, hi]</c>.</summary>
     internal static int silk_LIMIT_32(int x, int lo, int hi) => x < lo ? lo : (x > hi ? hi : x);
 
+    /// <summary>
+    /// Signed multiply word-by-word high. Libopus macro form:
+    /// <c>silk_MLA(silk_SMULWB(a, b), a, silk_RSHIFT_ROUND(b, 16))</c>.
+    /// Used by bwexpander_32 and a few other SILK utilities.
+    /// </summary>
+    internal static int silk_SMULWW(int a32, int b32) =>
+        silk_MLA(silk_SMULWB(a32, b32), a32, silk_RSHIFT_ROUND(b32, 16));
+
     /// <summary>Saturating 16-bit add: clamps result to <c>[short.MinValue, short.MaxValue]</c>.</summary>
     internal static short silk_ADD_SAT16(short a, short b)
     {
