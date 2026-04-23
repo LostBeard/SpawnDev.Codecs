@@ -66,6 +66,49 @@ internal static class SilkMacros
     internal static int silk_min_32(int a, int b) => a < b ? a : b;
 
     /// <summary>
+    /// Rounded right-shift. Libopus defines this as:
+    ///   shift == 1: <c>(a &gt;&gt; 1) + (a &amp; 1)</c>
+    ///   shift &gt; 1: <c>((a &gt;&gt; (shift - 1)) + 1) &gt;&gt; 1</c>
+    /// Rounds half away from zero for positive input.
+    /// </summary>
+    internal static int silk_RSHIFT_ROUND(int a, int shift) =>
+        shift == 1
+            ? (a >> 1) + (a & 1)
+            : ((a >> (shift - 1)) + 1) >> 1;
+
+    /// <summary>Clamp 32-bit value to inclusive <c>[lo, hi]</c>.</summary>
+    internal static int silk_LIMIT_32(int x, int lo, int hi) => x < lo ? lo : (x > hi ? hi : x);
+
+    /// <summary>Saturating 16-bit add: clamps result to <c>[short.MinValue, short.MaxValue]</c>.</summary>
+    internal static short silk_ADD_SAT16(short a, short b)
+    {
+        int sum = a + b;
+        if (sum > short.MaxValue) return short.MaxValue;
+        if (sum < short.MinValue) return short.MinValue;
+        return (short)sum;
+    }
+
+    /// <summary>
+    /// Insertion sort (ascending) for a span of <see cref="short"/> values.
+    /// Libopus <c>silk_insertion_sort_increasing_all_values_int16</c>. Best case O(n),
+    /// worst case O(n^2), but the SILK caller typically hands in already-almost-sorted data.
+    /// </summary>
+    internal static void silk_insertion_sort_increasing_all_values_int16(Span<short> a)
+    {
+        for (int i = 1; i < a.Length; i++)
+        {
+            short value = a[i];
+            int j = i - 1;
+            while (j >= 0 && value < a[j])
+            {
+                a[j + 1] = a[j];
+                j--;
+            }
+            a[j + 1] = value;
+        }
+    }
+
+    /// <summary>
     /// Decomposes a positive 32-bit integer into (leading zeros, fractional bits in Q7).
     /// <para>
     /// For input 0 the result is (32, 0) per libopus <c>silk_CLZ_FRAC</c> behavior

@@ -3,8 +3,8 @@
 namespace SpawnDev.Codecs.Audio;
 
 /// <summary>
-/// Identifies which audio codec an <see cref="IAudioDecoder"/> or
-/// <see cref="IAudioEncoder"/> implements. New codecs extend this enum as they ship.
+/// Identifies which audio codec an <see cref="IAudioDecoder"/> (or future
+/// <c>IAudioEncoder</c>, once Phase 1b lands) implements. New codecs extend this enum as they ship.
 /// </summary>
 public enum AudioCodec
 {
