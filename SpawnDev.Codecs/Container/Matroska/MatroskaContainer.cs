@@ -55,6 +55,29 @@ public sealed class MatroskaContainer
     public bool IsMatroska => string.Equals(DocType, "matroska", StringComparison.Ordinal);
 
     /// <summary>
+    /// Snapshot of /Segment/Info. Returns default values if the element is
+    /// absent; <see cref="MatroskaSegmentInfo.TimestampScaleNs"/> falls back
+    /// to the Matroska spec default of 1,000,000 ns/tick (= 1 ms/tick).
+    /// </summary>
+    public MatroskaSegmentInfo SegmentInfo
+    {
+        get
+        {
+            var info = _doc.First<MasterElement>("/Segment/Info");
+            var scale = info?.First<UintElement>("TimestampScale")?.Data ?? 1_000_000UL;
+            var duration = info?.First<FloatElement>("Duration")?.Data;
+            return new MatroskaSegmentInfo
+            {
+                TimestampScaleNs = scale,
+                DurationTicks = duration,
+                Title = info?.First<StringElement>("Title")?.Data,
+                MuxingApp = info?.First<StringElement>("MuxingApp")?.Data,
+                WritingApp = info?.First<StringElement>("WritingApp")?.Data,
+            };
+        }
+    }
+
+    /// <summary>
     /// Enumerate every TrackEntry under /Segment/Tracks with its
     /// TrackNumber + TrackType + CodecID. Consumers route frames to the
     /// matching codec by <see cref="MatroskaTrack.CodecId"/>.

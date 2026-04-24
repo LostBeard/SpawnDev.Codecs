@@ -113,6 +113,51 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void MatroskaContainer_SegmentInfo_ExposesTimestampScale_ForBigBuckBunny()
+    {
+        using var stream = LoadBigBuckBunnyWebM();
+        var container = new MatroskaContainer(stream);
+        var info = container.SegmentInfo;
+        // Default per Matroska spec is 1,000,000 (ticks = ms). Most WebM
+        // encoders keep this; zero would be invalid (range="not 0").
+        True(info.TimestampScaleNs > 0, "TimestampScale must be > 0");
+    }
+
+    [TestMethod]
+    public void MatroskaContainer_SegmentInfo_DurationConvertsToRealTimeSpan()
+    {
+        using var stream = LoadBigBuckBunnyWebM();
+        var container = new MatroskaContainer(stream);
+        var info = container.SegmentInfo;
+        // The fixture is ~10 seconds. We accept any Duration > 5s to keep
+        // the test robust against re-encode variation.
+        True(info.DurationTimeSpan.HasValue, "Duration must be populated for this WebM");
+        True(info.DurationTimeSpan!.Value.TotalSeconds > 5,
+            $"Duration must be > 5s, got {info.DurationTimeSpan.Value.TotalSeconds}s");
+        True(info.DurationTimeSpan.Value.TotalSeconds < 60,
+            $"Duration must be < 60s, got {info.DurationTimeSpan.Value.TotalSeconds}s");
+    }
+
+    [TestMethod]
+    public void MatroskaContainer_SegmentInfo_DefaultsTimestampScale_WhenElementAbsent()
+    {
+        // Hand-build a minimal WebM with no /Segment/Info. The container
+        // should still return a populated SegmentInfo object with the
+        // spec-default TimestampScale of 1,000,000.
+        var headerBytes = new byte[] { 0x1A, 0x45, 0xDF, 0xA3, 0x80 };
+        // Segment element with size-unknown payload = 0 (just header).
+        var segmentBytes = new byte[] { 0x18, 0x53, 0x80, 0x67, 0x80 };
+        var buf = new byte[headerBytes.Length + segmentBytes.Length];
+        Array.Copy(headerBytes, 0, buf, 0, headerBytes.Length);
+        Array.Copy(segmentBytes, 0, buf, headerBytes.Length, segmentBytes.Length);
+        using var stream = new MemoryStream(buf);
+        var container = new MatroskaContainer(stream);
+        var info = container.SegmentInfo;
+        Equal(1_000_000UL, info.TimestampScaleNs);
+        True(info.DurationTicks is null, "Duration must be null when absent");
+    }
+
+    [TestMethod]
     public void MatroskaContainer_Frames_FirstVideoFrame_IsKeyframe()
     {
         // The very first video frame in any well-formed stream must be a
