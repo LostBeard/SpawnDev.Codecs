@@ -13,19 +13,24 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 public abstract partial class CodecsTestBase
 {
     /// <summary>
-    /// WebGPU and WebGL currently can't execute the 8x8 kernel bit-exactly.
-    /// - WebGL: no atomics, so sub-word byte writes silently corrupt output
-    ///   (already guarded at runner level; this helper is a second layer).
-    /// - WebGPU: the 64-element LocalMemory<int> row-pass buffer is rejected
-    ///   with "Invalid BindGroupLayout" during shader compile. Filed to
-    ///   Geordi in tuvok-to-geordi-idct8x8-webgpu-bindgroup-2026-04-24.md.
-    /// Until both backends gain full support, kernel tests skip on them.
+    /// WebGL can't execute the 8x8 kernel bit-exactly - not for the usual
+    /// "no atomics" reason the 4x4 kernel hits, but because each thread
+    /// emits 64 `flat out` varyings which exceeds GL_MAX_VARYING_VECTORS
+    /// on most WebGL implementations. Per Geordi's 2026-04-24 analysis
+    /// (geordi-to-tuvok-vp9-idct8x8-fixed), getting this kernel green on
+    /// WebGL requires the kernel topology to change from one-thread-per-
+    /// block to one-thread-per-output-element. That's a future slice if
+    /// WebGL coverage becomes a requirement.
+    ///
+    /// WebGPU was previously blocked by a LocalMemory<int>(N>=32) codegen
+    /// bug; that was fixed in SpawnDev.ILGPU 4.9.2-rc.10 (commit 9bc8ec2)
+    /// and WebGPU now runs the kernel bit-exact. The guard below no longer
+    /// filters it.
     /// </summary>
     private static bool Is8x8KernelSupported(Accelerator acc)
     {
         var name = acc.AcceleratorType.ToString();
-        return !name.Equals("WebGL", StringComparison.OrdinalIgnoreCase)
-            && !name.Equals("WebGPU", StringComparison.OrdinalIgnoreCase);
+        return !name.Equals("WebGL", StringComparison.OrdinalIgnoreCase);
     }
 
     [TestMethod]
