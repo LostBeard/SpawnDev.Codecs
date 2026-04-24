@@ -42,11 +42,15 @@ public static class FlacEncoder
         // Metadata block header: isLast=1, type=0 (STREAMINFO), length=34.
         outputBytes.AddRange(new byte[] { 0x80, 0x00, 0x00, 0x22 });
 
+        // Compute MD5 of the decoded PCM for STREAMINFO integrity field.
+        byte[] md5 = FlacMd5.Compute(interleavedSamples, bitsPerSample);
+
         // STREAMINFO payload (34 bytes).
         outputBytes.AddRange(BuildStreamInfoPayload(
             minBlock: blockSize, maxBlock: blockSize,
             sampleRateHz: sampleRateHz, channels: channels, bitsPerSample: bitsPerSample,
-            totalSamples: (ulong)totalPerChannel));
+            totalSamples: (ulong)totalPerChannel,
+            md5Signature: md5));
 
         // Audio frames. Sample rate / bps codes are stream-wide constants; block-size code
         // and (for stereo) channel-assignment code are resolved PER-FRAME.
@@ -88,7 +92,8 @@ public static class FlacEncoder
     }
 
     private static byte[] BuildStreamInfoPayload(
-        int minBlock, int maxBlock, int sampleRateHz, int channels, int bitsPerSample, ulong totalSamples)
+        int minBlock, int maxBlock, int sampleRateHz, int channels, int bitsPerSample, ulong totalSamples,
+        byte[] md5Signature)
     {
         var w = new FlacBitWriter();
         w.Write((uint)minBlock, 16);
@@ -100,7 +105,7 @@ public static class FlacEncoder
         w.Write((uint)(bitsPerSample - 1), 5);
         w.Write((uint)(totalSamples >> 32), 4);
         w.Write((uint)(totalSamples & 0xFFFFFFFF), 32);
-        for (int i = 0; i < 16; i++) w.Write(0, 8); // MD5 zero (not computed)
+        for (int i = 0; i < 16; i++) w.Write(md5Signature[i], 8);
         return w.ToArray();
     }
 

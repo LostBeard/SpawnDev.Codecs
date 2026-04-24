@@ -20,4 +20,26 @@ public sealed record FlacStreamDecodeResult
 
     /// <summary>Total decoded samples per channel summed across all frames.</summary>
     public int TotalSamplesPerChannel { get; init; }
+
+    /// <summary>
+    /// Verify the STREAMINFO MD5 signature against the decoded samples. Returns
+    /// <c>true</c> if the signatures match (integrity preserved) or the stored
+    /// signature is all-zero (the encoder chose not to compute it). Returns
+    /// <c>false</c> when the stored signature is non-zero AND does not match.
+    /// </summary>
+    public bool VerifyMd5()
+    {
+        bool allZero = true;
+        for (int i = 0; i < 16; i++)
+        {
+            if (StreamInfo.Md5Signature[i] != 0) { allZero = false; break; }
+        }
+        if (allZero) return true; // not computed
+        byte[] recomputed = FlacMd5.Compute(InterleavedSamples, StreamInfo.BitsPerSample);
+        for (int i = 0; i < 16; i++)
+        {
+            if (recomputed[i] != StreamInfo.Md5Signature[i]) return false;
+        }
+        return true;
+    }
 }
