@@ -16,8 +16,8 @@ internal static class FlacSubframeWriter
     /// </summary>
     internal static long EstimateBits(ReadOnlySpan<int> samples, int bps)
     {
-        if (samples.Length == 0) return 8; // header only
-        // CONSTANT: 8-bit header + bps sample.
+        if (samples.Length == 0) return 8;
+        // CONSTANT fast path.
         bool allEqual = true;
         int first = samples[0];
         for (int i = 1; i < samples.Length; i++)
@@ -26,12 +26,18 @@ internal static class FlacSubframeWriter
         }
         if (allEqual) return 8 + bps;
 
-        // FIXED: try order selection. Null means no FIXED beats VERBATIM baseline.
-        var fixedChoice = FlacFixedSubframeEncoder.PickBest(samples, bps);
         long verbatimBits = 8L + (long)samples.Length * bps;
-        if (fixedChoice is not null && fixedChoice.TotalSubframeBits < verbatimBits)
-            return fixedChoice.TotalSubframeBits;
-        return verbatimBits;
+        long best = verbatimBits;
+
+        var fixedChoice = FlacFixedSubframeEncoder.PickBest(samples, bps);
+        if (fixedChoice is not null && fixedChoice.TotalSubframeBits < best)
+            best = fixedChoice.TotalSubframeBits;
+
+        var lpcChoice = FlacLpcSubframeEncoder.PickBest(samples, bps, best);
+        if (lpcChoice is not null && lpcChoice.TotalSubframeBits < best)
+            best = lpcChoice.TotalSubframeBits;
+
+        return best;
     }
 
     /// <summary>
@@ -49,7 +55,6 @@ internal static class FlacSubframeWriter
         }
         if (allEqual)
         {
-            // CONSTANT: reserved 0, type 0b000000, wasted flag 0.
             w.Write(0, 1);
             w.Write(0b000000, 6);
             w.Write(0, 1);
@@ -57,9 +62,20 @@ internal static class FlacSubframeWriter
             return;
         }
 
-        var fixedChoice = FlacFixedSubframeEncoder.PickBest(samples, bps);
         long verbatimBits = 8L + (long)samples.Length * bps;
-        if (fixedChoice is not null && fixedChoice.TotalSubframeBits < verbatimBits)
+        var fixedChoice = FlacFixedSubframeEncoder.PickBest(samples, bps);
+        long fixedBits = fixedChoice?.TotalSubframeBits ?? long.MaxValue;
+
+        // Cheapest baseline between VERBATIM and FIXED becomes the bar LPC has to beat.
+        long bestSoFar = Math.Min(verbatimBits, fixedBits);
+        var lpcChoice = FlacLpcSubframeEncoder.PickBest(samples, bps, bestSoFar);
+
+        if (lpcChoice is not null)
+        {
+            FlacLpcSubframeEncoder.Emit(w, samples, bps, lpcChoice);
+            return;
+        }
+        if (fixedChoice is not null && fixedBits < verbatimBits)
         {
             FlacFixedSubframeEncoder.Emit(w, samples, bps, fixedChoice);
             return;

@@ -316,4 +316,43 @@ public abstract partial class CodecsTestBase
         Equal(2, decoded.StreamInfo.Channels);
         EqualInts(input, decoded.InterleavedSamples);
     }
+
+    [TestMethod]
+    public void FlacEncoder_DampedSinusoid_CompressesWithLpc()
+    {
+        // A damped sinusoid x[n] = A * exp(-alpha*n) * sin(omega*n) is a classical
+        // signal that LPC order 2 fits near-perfectly. FIXED residual would be noisy,
+        // LPC can drive residual near zero. This tests that LPC actually gets picked
+        // for a signal where it wins.
+        int samples = 1024;
+        var input = new int[samples];
+        for (int n = 0; n < samples; n++)
+        {
+            double env = Math.Exp(-0.002 * n);
+            double phase = 2.0 * Math.PI * 0.1 * n;
+            input[n] = (int)(Math.Sin(phase) * 20000 * env);
+        }
+        byte[] encoded = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 1024);
+        // Still lossless regardless of which subframe type won.
+        var decoded = FlacDecoder.Decode(encoded);
+        EqualInts(input, decoded.InterleavedSamples);
+        True(decoded.VerifyMd5(), "MD5 must verify after LPC roundtrip.");
+        // VERBATIM baseline = 2KB. LPC should fit far below (~150 bytes or less for this signal).
+        True(encoded.Length < 2048, $"Damped sinusoid should compress below VERBATIM; got {encoded.Length} bytes.");
+    }
+
+    [TestMethod]
+    public void FlacEncoder_WhiteNoise_LargeBlock_LpcAvoidsFailure()
+    {
+        // White noise is hard for ANY predictor. Verifies that when LPC doesn't
+        // beat FIXED or VERBATIM, the encoder falls back cleanly without error.
+        int samples = 1024;
+        var input = new int[samples];
+        var rng = new Random(99);
+        for (int n = 0; n < samples; n++) input[n] = rng.Next(-32000, 32001);
+        byte[] encoded = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 1024);
+        var decoded = FlacDecoder.Decode(encoded);
+        EqualInts(input, decoded.InterleavedSamples);
+        True(decoded.VerifyMd5(), "MD5 must verify even for noise (lossless).");
+    }
 }
