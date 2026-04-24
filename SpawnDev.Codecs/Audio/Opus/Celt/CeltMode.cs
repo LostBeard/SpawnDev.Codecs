@@ -14,7 +14,7 @@ namespace SpawnDev.Codecs.Audio.Opus.Celt;
 /// TOC's frame size + bandwidth. Matches the libopus <c>OpusCustomMode</c>
 /// for the standard 48 kHz Opus configurations.
 /// </summary>
-internal sealed class CeltMode
+public sealed class CeltMode
 {
     /// <summary>Sample rate in Hz (48000 for all Opus CELT modes).</summary>
     public int SampleRateHz { get; init; }

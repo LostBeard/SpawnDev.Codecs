@@ -1,6 +1,7 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 // See NOTICE.md for upstream attributions.
 
+using SpawnDev.Codecs.Audio.Opus.Celt;
 using SpawnDev.Codecs.Audio.Opus.Silk;
 using SpawnDev.Codecs.EntropyCoders;
 
@@ -415,8 +416,18 @@ public sealed class OpusDecoder : IAudioDecoder
 
     private static void DecodeCeltFrame(OpusTocByte toc, ReadOnlySpan<byte> frame, Span<float> pcmOut)
     {
-        _ = toc; _ = frame; _ = pcmOut;
-        throw new NotImplementedException(
-            "CELT decode not yet implemented. Phase 1a slice 6+ wires up ILGPU kernels for IMDCT / dequant / windowing / post-filter.");
+        // Construct a CeltMode so the thrown exception carries helpful geometry info.
+        int samplesAt48k = toc.GetSamplesPerFrame(48000);
+        int frameSize = samplesAt48k switch
+        {
+            <= 120 => CeltConstants.FRAME_SIZE_2_5MS,
+            <= 240 => CeltConstants.FRAME_SIZE_5MS,
+            <= 480 => CeltConstants.FRAME_SIZE_10MS,
+            _ => CeltConstants.FRAME_SIZE_20MS,
+        };
+        int endBand = CeltMode.EndBandForBandwidth(toc.Bandwidth);
+        var mode = CeltMode.Create(frameSize, endBand);
+        var dec = new CeltDecoder(mode);
+        dec.DecodeFrame(frame, pcmOut, 1); // throws NotImplementedException with context
     }
 }
