@@ -28,6 +28,120 @@ internal sealed record VorbisHuffmanTable
     public int MaxLength { get; init; }
 }
 
+/// <summary>
+/// Decision tree built from a <see cref="VorbisHuffmanTable"/>. Each internal
+/// node carries two child indices, a leaf node carries the codebook entry.
+/// </summary>
+internal sealed class VorbisHuffmanDecoder
+{
+    // Packed representation: node i has two children _nodes[2i] (for bit 0)
+    // and _nodes[2i+1] (for bit 1). Values < 0 mean "no child / error";
+    // values in 0..entries-1 encoded with the high bit clear are entry indices
+    // (leaves) - we distinguish leaves from internal nodes by checking
+    // _isLeaf[i].
+    private readonly int[] _children;
+    private readonly bool[] _isLeaf;
+    private readonly int _maxDepth;
+
+    public VorbisHuffmanDecoder(VorbisHuffmanTable table)
+    {
+        // Worst-case node count: binary tree with 2^(maxDepth+1) - 1 nodes.
+        // maxDepth capped at 32 during Build so worst-case is bounded by entries * 33
+        // once we only allocate actually-used nodes.
+        int capacity = Math.Max(2, (int)Math.Min((long)table.Codewords.Length * (table.MaxLength + 1) * 2 + 2, 1 << 20));
+        var children = new List<int>(capacity);
+        var isLeaf = new List<bool>(capacity);
+        // Root node.
+        children.Add(-1); children.Add(-1); isLeaf.Add(false);
+
+        for (int entry = 0; entry < table.Codewords.Length; entry++)
+        {
+            int length = table.EntryLengths[entry];
+            if (length == 0) continue;
+            uint code = table.Codewords[entry];
+            int node = 0;
+            for (int bitIdx = length - 1; bitIdx >= 0; bitIdx--)
+            {
+                if (isLeaf[node])
+                    throw new InvalidDataException(
+                        $"Vorbis Huffman build: entry {entry} (code 0x{code:X}, length {length}) collides with a shorter prefix.");
+                int bit = (int)((code >> bitIdx) & 1);
+                int nodeChild = children[node * 2 + bit];
+                if (bitIdx == 0)
+                {
+                    if (nodeChild != -1)
+                        throw new InvalidDataException(
+                            $"Vorbis Huffman build: entry {entry} (code 0x{code:X}, length {length}) would overwrite an existing leaf.");
+                    int leafIndex = isLeaf.Count;
+                    children.Add(-1); children.Add(-1);
+                    isLeaf.Add(true);
+                    children[node * 2 + bit] = leafIndex | EntryBit;
+                }
+                else
+                {
+                    if (nodeChild == -1)
+                    {
+                        int newIndex = isLeaf.Count;
+                        children.Add(-1); children.Add(-1);
+                        isLeaf.Add(false);
+                        children[node * 2 + bit] = newIndex;
+                        nodeChild = newIndex;
+                    }
+                    node = nodeChild;
+                }
+            }
+        }
+        _children = children.ToArray();
+        _isLeaf = isLeaf.ToArray();
+        _maxDepth = table.MaxLength;
+
+        // Post-build: store entry index on each leaf so Decode can look it up.
+        _leafToEntry = new Dictionary<int, int>();
+        for (int entry = 0; entry < table.Codewords.Length; entry++)
+        {
+            int length = table.EntryLengths[entry];
+            if (length == 0) continue;
+            uint code = table.Codewords[entry];
+            int node = 0;
+            for (int bitIdx = length - 1; bitIdx > 0; bitIdx--)
+            {
+                int bit = (int)((code >> bitIdx) & 1);
+                int next = _children[node * 2 + bit];
+                node = next & ~EntryBit;
+            }
+            int lastBit = (int)(code & 1);
+            int leaf = _children[node * 2 + lastBit] & ~EntryBit;
+            _leafToEntry[leaf] = entry;
+        }
+    }
+
+    private const int EntryBit = 1 << 30;
+    private readonly Dictionary<int, int> _leafToEntry;
+
+    /// <summary>
+    /// Decode the next codebook entry from <paramref name="reader"/>. Walks the
+    /// decision tree bit-by-bit; each bit read goes left (0) or right (1)
+    /// until a leaf is hit.
+    /// </summary>
+    internal int Decode(ref VorbisBitReader reader)
+    {
+        int node = 0;
+        for (int depth = 0; depth <= _maxDepth; depth++)
+        {
+            int bit = (int)reader.ReadBit();
+            int nextRaw = _children[node * 2 + bit];
+            if (nextRaw == -1)
+                throw new InvalidDataException(
+                    $"Vorbis Huffman decode: no path for bit pattern at depth {depth}.");
+            int nextIdx = nextRaw & ~EntryBit;
+            if (_isLeaf[nextIdx])
+                return _leafToEntry[nextIdx];
+            node = nextIdx;
+        }
+        throw new InvalidDataException("Vorbis Huffman decode: exceeded max depth without hitting a leaf.");
+    }
+}
+
 internal static class VorbisHuffman
 {
     /// <summary>
