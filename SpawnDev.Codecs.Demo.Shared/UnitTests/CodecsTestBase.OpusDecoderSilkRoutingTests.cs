@@ -173,43 +173,4 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
-    public void OpusDecoder_StereoSilk_NotYetImplemented_Throws()
-    {
-        // Stereo SILK is not yet wired; verify we throw the documented exception.
-        var indices = new SilkDecodedIndices
-        {
-            SignalType = SilkSideInfoDecoder.TypeInactive,
-            QuantOffsetType = 0,
-            NlsfInterpCoefQ2 = 4,
-        };
-        for (int i = 0; i < 4; i++) indices.GainsIndices[i] = 10;
-        indices.NlsfIndices[0] = 3;
-
-        byte[] packet = BuildSilkOnlyOpusPacket(
-            tocConfig: 1, stereo: true,
-            cb: SilkNlsfCodebookTables.NbMb,
-            indices: indices,
-            fsKHz: 8, nbSubfr: 4, vadFlag: false);
-
-        var config = new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 2 };
-        var dec = new OpusDecoder(config);
-        float[] pcm = new float[960 * 2];
-
-        // Stereo SILK is not yet wired; verify the decode throws NotImplementedException.
-        bool threw = false;
-        try
-        {
-            _ = dec.DecodePacketAsync(packet.AsMemory(), pcm.AsMemory()).Result;
-        }
-        catch (NotImplementedException)
-        {
-            threw = true;
-        }
-        catch (AggregateException ae) when (ae.InnerException is NotImplementedException)
-        {
-            threw = true;
-        }
-        True(threw, "Expected stereo SILK decode to throw NotImplementedException");
-    }
 }

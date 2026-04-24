@@ -97,23 +97,6 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
-    public async Task OpusDecoder_DecodePacket_SilkPath_StubsWithNotImplementedException()
-    {
-        // TOC config 0: SILK NB 10ms mono = 480 samples @ 48kHz
-        var dec = new OpusDecoder(new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 1 });
-        byte[] packet = { 0x00, 0x00, 0x00, 0x00 };
-        try
-        {
-            await dec.DecodePacketAsync(packet, new float[960]);
-            throw new Exception("Expected NotImplementedException from SILK stub");
-        }
-        catch (NotImplementedException ex)
-        {
-            Contains("SILK", ex.Message);
-        }
-    }
-
-    [TestMethod]
     public async Task OpusDecoder_DecodePacket_HybridPath_StubsWithNotImplementedException()
     {
         // TOC config 12: Hybrid SWB 10ms mono = 480 samples @ 48kHz
