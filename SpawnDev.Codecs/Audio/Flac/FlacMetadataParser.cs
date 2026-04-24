@@ -100,6 +100,99 @@ public static class FlacMetadataParser
     }
 
     /// <summary>
+    /// Aggregated metadata surface returned by <see cref="ReadAllBlocks"/>. All
+    /// block fields are optional except STREAMINFO which the format requires.
+    /// </summary>
+    public sealed record FlacMetadataBlocks
+    {
+        /// <summary>STREAMINFO block (always present in a valid stream).</summary>
+        public required FlacStreamInfo StreamInfo { get; init; }
+
+        /// <summary>Vorbis-format comment block if present.</summary>
+        public SpawnDev.Codecs.Audio.Vorbis.VorbisCommentHeader? VorbisComment { get; init; }
+
+        /// <summary>Seek table block if present.</summary>
+        public FlacSeekTable? SeekTable { get; init; }
+
+        /// <summary>Byte offset of the first audio frame.</summary>
+        public int AudioStartOffset { get; init; }
+    }
+
+    /// <summary>
+    /// Walk the full metadata chain and parse STREAMINFO, VORBIS_COMMENT, and
+    /// SEEKTABLE if present. Other block types are skipped.
+    /// </summary>
+    public static FlacMetadataBlocks ReadAllBlocks(ReadOnlySpan<byte> data)
+    {
+        int pos = 0;
+        ReadStreamMarker(data[pos..], out int markerSize);
+        pos += markerSize;
+
+        var firstHeader = ReadBlockHeader(data[pos..], out int hdrSize);
+        pos += hdrSize;
+        if (firstHeader.BlockType != FlacConstants.MetadataStreamInfo)
+            throw new InvalidDataException(
+                $"FLAC first metadata block must be STREAMINFO, got type {firstHeader.BlockType}.");
+        if (data.Length < pos + firstHeader.LengthBytes)
+            throw new InvalidDataException("FLAC STREAMINFO block truncated.");
+        var streamInfo = ReadStreamInfo(data.Slice(pos, firstHeader.LengthBytes));
+        pos += firstHeader.LengthBytes;
+
+        SpawnDev.Codecs.Audio.Vorbis.VorbisCommentHeader? comment = null;
+        FlacSeekTable? seekTable = null;
+
+        bool isLast = firstHeader.IsLast;
+        while (!isLast)
+        {
+            if (data.Length < pos + 4)
+                throw new InvalidDataException("FLAC metadata chain truncated mid-header.");
+            var hdr = ReadBlockHeader(data[pos..], out int hs);
+            pos += hs;
+            if (data.Length < pos + hdr.LengthBytes)
+                throw new InvalidDataException($"FLAC metadata block (type={hdr.BlockType}) truncated.");
+            var payload = data.Slice(pos, hdr.LengthBytes);
+            switch (hdr.BlockType)
+            {
+                case FlacConstants.MetadataVorbisComment:
+                    comment = SpawnDev.Codecs.Audio.Vorbis.VorbisCommentHeaderParser.Parse(BuildVorbisCommentSyntheticPacket(payload));
+                    break;
+                case FlacConstants.MetadataSeekTable:
+                    seekTable = FlacSeekTableParser.Parse(payload);
+                    break;
+                default:
+                    // STREAMINFO (handled above), PADDING, APPLICATION, CUESHEET, PICTURE: skipped.
+                    break;
+            }
+            pos += hdr.LengthBytes;
+            isLast = hdr.IsLast;
+        }
+
+        return new FlacMetadataBlocks
+        {
+            StreamInfo = streamInfo,
+            VorbisComment = comment,
+            SeekTable = seekTable,
+            AudioStartOffset = pos,
+        };
+    }
+
+    /// <summary>
+    /// FLAC's VORBIS_COMMENT block reuses the Vorbis comment body (vendor + user
+    /// comments) but without the Vorbis packet header. Our
+    /// <see cref="SpawnDev.Codecs.Audio.Vorbis.VorbisCommentHeaderParser"/> expects
+    /// the full packet shape (0x03 + "vorbis"), so we prepend those 7 bytes
+    /// and let the parser skip the framing-flag byte (it's optional).
+    /// </summary>
+    private static byte[] BuildVorbisCommentSyntheticPacket(ReadOnlySpan<byte> commentBody)
+    {
+        byte[] prefix = { 0x03, (byte)'v', (byte)'o', (byte)'r', (byte)'b', (byte)'i', (byte)'s' };
+        var buf = new byte[prefix.Length + commentBody.Length];
+        Array.Copy(prefix, buf, prefix.Length);
+        commentBody.CopyTo(buf.AsSpan(prefix.Length));
+        return buf;
+    }
+
+    /// <summary>
     /// Walk the full metadata chain starting at offset 0 (including the "fLaC" marker),
     /// parse STREAMINFO (which must be the first block), and return the byte offset of
     /// the first audio frame. Non-STREAMINFO blocks are skipped.
