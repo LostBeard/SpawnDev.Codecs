@@ -72,6 +72,61 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void MatroskaContainer_OnBigBuckBunnyWebM_YieldsVideoFrames()
+    {
+        using var stream = LoadBigBuckBunnyWebM();
+        var container = new MatroskaContainer(stream);
+        var videoTrack = container.Tracks.FirstOrDefault(t => t.IsVideo);
+        True(videoTrack != null, "expected a video track");
+
+        var videoFrames = container.Frames
+            .Where(f => f.TrackNumber == videoTrack!.TrackNumber)
+            .ToList();
+        True(videoFrames.Count > 0, $"expected video frames on track {videoTrack!.TrackNumber}");
+        // Every frame must have non-empty payload and be tagged with the
+        // correct track number.
+        foreach (var f in videoFrames)
+        {
+            True(f.Data.Length > 0, "video frame data must be non-empty");
+            Equal(videoTrack.TrackNumber, f.TrackNumber);
+        }
+    }
+
+    [TestMethod]
+    public void MatroskaContainer_Frames_AreTimestampOrdered_WithinTrack()
+    {
+        using var stream = LoadBigBuckBunnyWebM();
+        var container = new MatroskaContainer(stream);
+        var videoTrack = container.Tracks.First(t => t.IsVideo);
+        var frames = container.Frames
+            .Where(f => f.TrackNumber == videoTrack.TrackNumber)
+            .ToList();
+        True(frames.Count > 1, "need at least 2 frames to test ordering");
+        // Within a single track, timestamps should be strictly non-decreasing
+        // (Matroska doesn't require strict monotonicity due to B-frames,
+        // but the typical VP9 WebM we bundle has no B-frames).
+        for (int i = 1; i < frames.Count; i++)
+        {
+            True(frames[i].Timestamp >= frames[i - 1].Timestamp,
+                $"frame {i} ts {frames[i].Timestamp} < frame {i - 1} ts {frames[i - 1].Timestamp}");
+        }
+    }
+
+    [TestMethod]
+    public void MatroskaContainer_Frames_FirstVideoFrame_IsKeyframe()
+    {
+        // The very first video frame in any well-formed stream must be a
+        // keyframe - otherwise there's nothing for a decoder to reference.
+        using var stream = LoadBigBuckBunnyWebM();
+        var container = new MatroskaContainer(stream);
+        var videoTrack = container.Tracks.First(t => t.IsVideo);
+        var firstVideoFrame = container.Frames
+            .First(f => f.TrackNumber == videoTrack.TrackNumber);
+        True(firstVideoFrame.IsKeyframe,
+            "first video frame must be a keyframe (SimpleBlock with bit 7 set)");
+    }
+
+    [TestMethod]
     public void MatroskaContainer_ThrowsOnNullStream()
     {
         bool threw = false;
