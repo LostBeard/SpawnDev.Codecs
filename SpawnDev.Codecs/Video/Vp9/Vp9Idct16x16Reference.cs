@@ -98,8 +98,9 @@ public static class Vp9Idct16x16Reference
     /// One-dimensional 16-point iDCT butterfly, bit-exact against
     /// libvpx <c>idct16_c</c>. 7 stages, int32 intermediates for the
     /// cospi multiplies, int16 narrowing between stages (WRAPLOW).
+    /// Internal so the iHT 16x16 tx_type dispatcher can share it.
     /// </summary>
-    private static void Idct16_1d(ReadOnlySpan<short> input, Span<short> output)
+    internal static void Idct16_1d(ReadOnlySpan<short> input, Span<short> output)
     {
         Span<short> step1 = stackalloc short[16];
         Span<short> step2 = stackalloc short[16];
