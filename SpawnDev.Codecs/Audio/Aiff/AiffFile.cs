@@ -38,6 +38,21 @@ public sealed record AiffFile
 /// <summary>Reader/writer for AIFF PCM files.</summary>
 public static class AiffFileCodec
 {
+    /// <summary>Read an AIFF file from disk.</summary>
+    public static AiffFile ReadFile(string path)
+    {
+        if (path is null) throw new ArgumentNullException(nameof(path));
+        return Read(File.ReadAllBytes(path));
+    }
+
+    /// <summary>Write PCM samples directly to an AIFF file on disk.</summary>
+    public static void WriteFile(string path, ReadOnlySpan<int> interleavedSamples,
+        int sampleRateHz, int channels, int bitsPerSample)
+    {
+        if (path is null) throw new ArgumentNullException(nameof(path));
+        File.WriteAllBytes(path, Write(interleavedSamples, sampleRateHz, channels, bitsPerSample));
+    }
+
     /// <summary>Read an AIFF file from a byte buffer.</summary>
     public static AiffFile Read(ReadOnlySpan<byte> data)
     {

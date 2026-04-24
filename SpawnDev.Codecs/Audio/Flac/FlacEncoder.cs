@@ -17,6 +17,22 @@ namespace SpawnDev.Codecs.Audio.Flac;
 public static class FlacEncoder
 {
     /// <summary>
+    /// Encode PCM samples and write directly to a <c>.flac</c> file on disk.
+    /// </summary>
+    public static void EncodeToFile(
+        string path,
+        ReadOnlySpan<int> interleavedSamples,
+        int sampleRateHz,
+        int channels,
+        int bitsPerSample,
+        int blockSize = 4096)
+    {
+        if (path is null) throw new ArgumentNullException(nameof(path));
+        byte[] bytes = EncodeStream(interleavedSamples, sampleRateHz, channels, bitsPerSample, blockSize);
+        File.WriteAllBytes(path, bytes);
+    }
+
+    /// <summary>
     /// Encode interleaved PCM samples to a full FLAC byte stream.
     /// </summary>
     /// <param name="interleavedSamples">PCM samples as <c>[ch0[0], ch1[0], ch0[1], ...]</c>. Length must be a multiple of <paramref name="channels"/>.</param>

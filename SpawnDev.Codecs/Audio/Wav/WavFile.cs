@@ -43,6 +43,21 @@ public sealed record WavFile
 /// <summary>Reader and writer for WAV (RIFF/WAVE) uncompressed PCM files.</summary>
 public static class WavFileCodec
 {
+    /// <summary>Read a WAV file from disk.</summary>
+    public static WavFile ReadFile(string path)
+    {
+        if (path is null) throw new ArgumentNullException(nameof(path));
+        return Read(File.ReadAllBytes(path));
+    }
+
+    /// <summary>Write PCM samples directly to a WAV file on disk.</summary>
+    public static void WriteFile(string path, ReadOnlySpan<int> interleavedSamples,
+        int sampleRateHz, int channels, int bitsPerSample)
+    {
+        if (path is null) throw new ArgumentNullException(nameof(path));
+        File.WriteAllBytes(path, Write(interleavedSamples, sampleRateHz, channels, bitsPerSample));
+    }
+
     /// <summary>Read a WAV file from a byte buffer.</summary>
     public static WavFile Read(ReadOnlySpan<byte> data)
     {

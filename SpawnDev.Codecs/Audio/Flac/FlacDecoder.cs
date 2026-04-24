@@ -86,4 +86,11 @@ public sealed class FlacDecoder
 
     /// <summary>Shorthand for <c>Open(data).DecodeAll()</c>.</summary>
     public static FlacStreamDecodeResult Decode(ReadOnlyMemory<byte> data) => Open(data).DecodeAll();
+
+    /// <summary>Read an entire <c>.flac</c> file from disk and decode it.</summary>
+    public static FlacStreamDecodeResult DecodeFile(string path)
+    {
+        if (path is null) throw new ArgumentNullException(nameof(path));
+        return Decode(File.ReadAllBytes(path));
+    }
 }
