@@ -78,11 +78,10 @@ public static class Vp9Iadst4x4Reference
 
     /// <summary>
     /// One-dimensional 4-point iADST butterfly per libvpx <c>iadst4_c</c>.
-    /// Fast-exits with zero output when all 4 inputs are zero (matches the
-    /// libvpx short-circuit; not strictly required for correctness but
-    /// skips pointless arithmetic).
+    /// Fast-exits with zero output when all 4 inputs are zero.
+    /// Internal so the tx_type dispatcher (Vp9Iht4x4Reference) can share it.
     /// </summary>
-    private static void Iadst4_1d(ReadOnlySpan<short> input, Span<short> output)
+    internal static void Iadst4_1d(ReadOnlySpan<short> input, Span<short> output)
     {
         int x0 = input[0];
         int x1 = input[1];

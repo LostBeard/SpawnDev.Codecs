@@ -95,8 +95,9 @@ public static class Vp9Idct4x4Reference
     /// One-dimensional 4-point iDCT butterfly, per libvpx <c>idct4_c</c>.
     /// <paramref name="input"/> and <paramref name="output"/> are 4-length
     /// int16 slices. Distinct buffers are allowed (and expected).
+    /// Internal so the tx_type dispatcher (Vp9Iht4x4Reference) can share it.
     /// </summary>
-    private static void Idct4_1d(ReadOnlySpan<short> input, Span<short> output)
+    internal static void Idct4_1d(ReadOnlySpan<short> input, Span<short> output)
     {
         // Butterfly stage 1 (int32 intermediates to avoid overflow).
         int t1 = (input[0] + input[2]) * CosPi16_64;
