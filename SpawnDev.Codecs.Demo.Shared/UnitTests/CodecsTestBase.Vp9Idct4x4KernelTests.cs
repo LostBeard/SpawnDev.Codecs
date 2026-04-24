@@ -4,15 +4,14 @@
 // any divergence between the reference and the GPU kernel would make
 // the decoder produce visibly wrong pixels on that backend.
 //
-// This slice runs the kernel on the ILGPU CPU backend, which works
-// identically in desktop AND Blazor WASM runners (the CPU "backend"
-// is really an ILGPU IR interpreter, not hardware). A later slice
-// extends the matrix to CUDA / OpenCL / WebGPU / WebGL / Wasm by
-// having each concrete test runner provide its own Accelerator.
+// Each runner (CpuCodecsTests, CudaCodecsTests, OpenCLCodecsTests,
+// WebGPUCodecsTests, WebGLCodecsTests, WasmCodecsTests) overrides
+// CreateKernelAcceleratorAsync() to return its native accelerator.
+// The same kernel code therefore runs on all 6 backends through
+// PlaywrightMultiTest, and bit-exact agreement is enforced on each.
 
 using ILGPU;
 using ILGPU.Runtime;
-using ILGPU.Runtime.CPU;
 using SpawnDev.Codecs.Video.Vp9;
 using SpawnDev.UnitTesting;
 using static SpawnDev.Codecs.Demo.Shared.UnitTests.TestHelpers;
@@ -21,38 +20,26 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    /// <summary>
-    /// Create an ILGPU Context + CPU Accelerator for kernel testing. The
-    /// CPU backend is an IR interpreter; available in every runtime
-    /// environment including Blazor WASM.
-    /// </summary>
-    private static (Context ctx, Accelerator acc) CreateCpuAccelerator()
-    {
-        var ctx = Context.Create(b => b.CPU());
-        var acc = ctx.CreateCPUAccelerator(0);
-        return (ctx, acc);
-    }
-
     [TestMethod]
-    public void Vp9Idct4x4Kernel_ZeroCoefficients_LeavesPredictorUnchanged()
+    public async Task Vp9Idct4x4Kernel_ZeroCoefficients_LeavesPredictorUnchanged()
     {
-        var (ctx, acc) = CreateCpuAccelerator();
+        var (ctx, acc) = await CreateKernelAcceleratorAsync();
         try
         {
             using var kernel = new Vp9Idct4x4Kernel(acc);
             var coeffs = new short[16];
             var dest = new byte[16];
             for (int i = 0; i < 16; i++) dest[i] = 128;
-            kernel.Run(coeffs.AsSpan(), dest.AsSpan(), blockCount: 1);
+            await kernel.RunAsync(coeffs, dest, blockCount: 1);
             for (int i = 0; i < 16; i++) Equal((byte)128, dest[i]);
         }
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
     [TestMethod]
-    public void Vp9Idct4x4Kernel_DcOnly_MatchesReference()
+    public async Task Vp9Idct4x4Kernel_DcOnly_MatchesReference()
     {
-        var (ctx, acc) = CreateCpuAccelerator();
+        var (ctx, acc) = await CreateKernelAcceleratorAsync();
         try
         {
             using var kernel = new Vp9Idct4x4Kernel(acc);
@@ -63,20 +50,18 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < 16; i++) { cpuDest[i] = 100; gpuDest[i] = 100; }
 
             Vp9Idct4x4Reference.Idct4x4_16_Add(coeffs, cpuDest, 4);
-            kernel.Run(coeffs.AsSpan(), gpuDest.AsSpan(), blockCount: 1);
+            await kernel.RunAsync(coeffs.AsMemory(), gpuDest.AsMemory(), blockCount: 1);
 
             True(cpuDest.AsSpan().SequenceEqual(gpuDest),
-                "kernel DC-only output must match CPU reference");
+                $"kernel DC-only output must match CPU reference on {acc.AcceleratorType}");
         }
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
     [TestMethod]
-    public void Vp9Idct4x4Kernel_RandomInputs_BitExactMatchReference()
+    public async Task Vp9Idct4x4Kernel_RandomInputs_BitExactMatchReference()
     {
-        // Drive a variety of coefficient patterns and predictor values
-        // through both paths; require byte-for-byte parity.
-        var (ctx, acc) = CreateCpuAccelerator();
+        var (ctx, acc) = await CreateKernelAcceleratorAsync();
         try
         {
             using var kernel = new Vp9Idct4x4Kernel(acc);
@@ -96,7 +81,7 @@ public abstract partial class CodecsTestBase
                 }
 
                 Vp9Idct4x4Reference.Idct4x4_16_Add(coeffs, cpuDest, 4);
-                kernel.Run(coeffs.AsSpan(), gpuDest.AsSpan(), blockCount: 1);
+                await kernel.RunAsync(coeffs.AsMemory(), gpuDest.AsMemory(), blockCount: 1);
 
                 for (int i = 0; i < 16; i++)
                 {
@@ -108,13 +93,12 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
-    public void Vp9Idct4x4Kernel_BatchedDispatch_AllBlocksMatchReference()
+    public async Task Vp9Idct4x4Kernel_BatchedDispatch_AllBlocksMatchReference()
     {
-        // THE flex: drive N=64 independent blocks through one kernel
-        // dispatch and verify every single block matches the single-block
-        // CPU reference. This is the shape a 1080p VP9 decode will use
-        // thousands of times per frame.
-        var (ctx, acc) = CreateCpuAccelerator();
+        // THE flex: N=64 independent blocks through one kernel dispatch
+        // on this runner's native accelerator. Every output byte must
+        // match the single-block CPU reference.
+        var (ctx, acc) = await CreateKernelAcceleratorAsync();
         try
         {
             using var kernel = new Vp9Idct4x4Kernel(acc);
@@ -142,7 +126,7 @@ public abstract partial class CodecsTestBase
 
             // GPU batched: one dispatch.
             var gpuResults = (byte[])predFlat.Clone();
-            kernel.Run(coeffsFlat.AsSpan(), gpuResults.AsSpan(), blockCount: n);
+            await kernel.RunAsync(coeffsFlat.AsMemory(), gpuResults.AsMemory(), blockCount: n);
 
             // Compare byte-for-byte.
             for (int i = 0; i < n * 16; i++)

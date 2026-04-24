@@ -14,6 +14,7 @@
 
 using ILGPU;
 using ILGPU.Runtime;
+using SpawnDev.ILGPU;
 
 namespace SpawnDev.Codecs.Video.Vp9;
 
@@ -70,25 +71,28 @@ public sealed class Vp9Idct4x4Kernel : IDisposable
     }
 
     /// <summary>
-    /// Convenience: allocate temporary GPU buffers, run the kernel,
-    /// read the result back. For tests and one-shot work where you don't
-    /// have long-lived GPU buffers handy.
+    /// Convenience: allocate temporary GPU buffers, run the kernel, read
+    /// the result back. For tests and one-shot work where the caller
+    /// doesn't maintain long-lived GPU buffers.
+    /// <para>
+    /// Must be async because the WebGPU backend forbids synchronous
+    /// GPU-to-CPU copies; <see cref="SpawnDevContextExtensions.CopyToHostAsync{T}(MemoryBuffer)"/>
+    /// works on all 6 backends (browser or desktop).
+    /// </para>
     /// </summary>
-    public void Run(
-        ReadOnlySpan<short> coeffs, Span<byte> predAndDest, int blockCount,
+    public async Task RunAsync(
+        ReadOnlyMemory<short> coeffs, Memory<byte> predAndDest, int blockCount,
         int blockStrideBytes = 16)
     {
         if (blockCount <= 0) return;
         using var dCoeffs = _accelerator.Allocate1D<short>(blockCount * 16);
         using var dDest = _accelerator.Allocate1D<byte>(blockCount * (long)blockStrideBytes);
-        dCoeffs.View.CopyFromCPU(ref System.Runtime.InteropServices.MemoryMarshal.GetReference(coeffs),
-            blockCount * 16);
-        dDest.View.CopyFromCPU(ref System.Runtime.InteropServices.MemoryMarshal.GetReference(predAndDest),
-            blockCount * (long)blockStrideBytes);
+        dCoeffs.View.CopyFromCPU(coeffs.Span.ToArray());
+        dDest.View.CopyFromCPU(predAndDest.Span.ToArray());
         _kernel(blockCount, dCoeffs.View, dDest.View, blockCount, blockStrideBytes);
-        _accelerator.Synchronize();
-        dDest.View.CopyToCPU(ref System.Runtime.InteropServices.MemoryMarshal.GetReference(predAndDest),
-            blockCount * (long)blockStrideBytes);
+        await _accelerator.SynchronizeAsync();
+        var readBack = await dDest.CopyToHostAsync();
+        readBack.AsSpan(0, predAndDest.Length).CopyTo(predAndDest.Span);
     }
 
     /// <summary>Kernel body. One thread per block.</summary>
