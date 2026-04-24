@@ -4,26 +4,56 @@
 
 Runs on every ILGPU backend - CUDA, OpenCL, CPU, WebGPU, WebGL, Wasm - which means it runs on desktop AND in Blazor WASM browsers. No native binaries, no closed-source dependencies, no patent-encumbered codecs.
 
-> **Status: Planning phase (2026-04-23).** No implementation code yet. Project structure scaffolded from [SpawnDev.ILGPU.ML](https://github.com/LostBeard/SpawnDev.ILGPU.ML). See `Plans/PLAN-SpawnDev-Codecs-Roadmap.md` for the strategic roadmap.
+> **Status: Phase 1a shipping.** Audio codec work is live. FLAC (encode + decode), Opus SILK decode + Opus-in-Ogg, native and Ogg-wrapped container formats, and a Vorbis decoder scaffold are all merged to `master`. See the feature matrix below for precise state.
 
-## Mission
+## Current feature matrix
 
-Fill the last gap in the SpawnDev open-source media stack - a fully open, .NET-everywhere codec library that requires no FFmpeg bundle, no platform-specific binaries, and no patent-encumbered algorithms.
+### Audio codecs
 
-## Codecs in scope (patent-clean only)
+| Codec | Decoder | Encoder |
+|-------|---------|---------|
+| **FLAC (native)** | Complete: CONSTANT/VERBATIM/FIXED/LPC, stereo decorrelation, CRC-8 + CRC-16, MD5 verify, SEEKTABLE + VORBIS_COMMENT metadata | Complete: CONSTANT detection + FIXED order search + LPC via Levinson-Durbin + stereo mode selection, MD5, optional VORBIS_COMMENT tag injection |
+| **FLAC-in-Ogg** | Complete | Manual via `OggPageWriter` |
+| **Opus (SILK)** | Complete: mono + stereo across NB/MB/WB, 10/20/40/60 ms frames | Not yet |
+| **Opus (CELT)** | Stub (`NotImplementedException` with context) | Not yet |
+| **Opus-in-Ogg** | Done for SILK - parses `OpusHead` + `OpusTags` + audio packets end-to-end | Done as packager - wraps pre-encoded Opus packets into `.opus` bytes |
+| **Vorbis** | Structural decoder: setup parse + floor-1 posterior + curve synthesis + residue framing + inverse coupling + IMDCT + window overlap-add composed; awaits bit-accuracy validation against libvorbis test vectors | Not yet |
 
-| Codec | Type | Why | Reference |
-|-------|------|-----|-----------|
-| **Opus** (RFC 6716) | Audio enc+dec | WebRTC mandatory-to-implement, royalty-free | libopus (BSD) |
-| **VP8** (RFC 6386) | Video enc+dec | WebRTC MTI, patent-clean via Google WebM pledge | libvpx (BSD) |
-| **VP9** | Video enc+dec | Better compression than VP8, same patent status | libvpx (BSD) |
-| **AV1** | Video enc+dec | AOMedia patent-free, future-proof | libaom / SVT-AV1 (BSD/MIT) |
-| **FLAC** | Audio enc+dec | Lossless, small spec | libFLAC (BSD) |
-| **Vorbis** | Audio enc+dec | Open alternative to AAC | libvorbis (BSD) |
+### Audio containers
 
-## Codecs NOT in scope (patent-encumbered)
+| Container | Read | Write |
+|-----------|------|-------|
+| RIFF / WAVE | Yes - 8/12/16/20/24/32-bit PCM, 32-bit float, multi-channel, LIST-chunk skipping, WAVE_FORMAT_EXTENSIBLE | Yes |
+| AIFF | Yes - 8/16/24/32-bit PCM, IEEE 80-bit extended sample rate | Yes |
+| Ogg | Yes - page + packet, CRC-32 per RFC 3533, multi-bitstream demux | Yes |
 
-- **H.264, H.265, AAC** - delegated to platform encoders via [SpawnDev.MultiMedia](https://github.com/LostBeard/SpawnDev.MultiMedia) (P/Invoke to MediaFoundation / VideoToolbox / VAAPI). System encoders are licensed by Microsoft / Apple / driver vendors respectively - we ride those licenses, we do not re-implement.
+### Transforms (shared)
+
+- MDCT + IMDCT reference implementations (CPU, O(N²))
+- Round-trip identity `MDCT(IMDCT(X)) = N·X` validated to float precision
+- FFT-accelerated CPU and ILGPU-kernel variants planned
+
+### Video codecs
+
+Not started. VP8, VP9, AV1 are planned (patent-clean via AOMedia pledge).
+
+### Out of scope (patent-encumbered)
+
+H.264, H.265, AAC, MP3 - delegated to platform encoders via [SpawnDev.MultiMedia](https://github.com/LostBeard/SpawnDev.MultiMedia).
+
+## Example
+
+```csharp
+using SpawnDev.Codecs.Audio.Flac;
+using SpawnDev.Codecs.Audio.Wav;
+
+// WAV -> FLAC -> WAV lossless round-trip.
+var wav = WavFileCodec.ReadFile("in.wav");
+FlacEncoder.EncodeToFile("out.flac", wav.InterleavedSamples, wav.SampleRateHz, wav.Channels, wav.BitsPerSample);
+var flac = FlacDecoder.DecodeFile("out.flac");
+WavFileCodec.WriteFile("roundtrip.wav", flac.InterleavedSamples, flac.StreamInfo.SampleRateHz,
+    flac.StreamInfo.Channels, flac.StreamInfo.BitsPerSample);
+```
 
 ## Architecture
 
@@ -36,6 +66,16 @@ Every codec has three zones:
 | **Coordination** | Frame buffering, codec negotiation, API | **C# CPU** |
 
 Entropy coders cannot be parallelized - arithmetic coding is inherently sequential. GPU pays off for transform coding, motion estimation, quantization, loop filter; CPU handles the sequential back-end.
+
+## Testing
+
+Every slice is validated through the `PlaywrightMultiTest` harness, which runs the same test suite across every ILGPU backend (WebGPU, WebGL, Wasm, CUDA, OpenCL, CPU) and aggregates the results. Thousands of cross-backend test executions gate each merge.
+
+```
+dotnet test PlaywrightMultiTest/PlaywrightMultiTest.csproj --filter "FullyQualifiedName~Flac"
+```
+
+The in-browser demo at `SpawnDev.Codecs.Demo/` also ships a `/benchmarks` page that runs throughput + compression measurements against the live library.
 
 ## Relationship to the SpawnDev media ecosystem
 
@@ -50,7 +90,7 @@ Entropy coders cannot be parallelized - arithmetic coding is inherently sequenti
 
 ## License
 
-MIT (pending confirmation - TBD at first publication).
+MIT - see `LICENSE.txt`. Upstream attribution for reference-ported code is in `NOTICE.md`.
 
 ## The SpawnDev Crew
 
