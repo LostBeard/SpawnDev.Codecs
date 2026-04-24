@@ -202,19 +202,41 @@ public static class FlacEncoder
         frame.AddRange(headerBytes);
         frame.Add(crc8);
 
-        // Subframes (VERBATIM for every channel).
+        // Subframes. CONSTANT when every sample of this channel is equal
+        // (typical for DC, silence, or very low-rate pad frames); VERBATIM otherwise.
         var subframeWriter = new FlacBitWriter();
         for (int ch = 0; ch < channels; ch++)
         {
-            // Subframe header: reserved 0, type 0b000001 (VERBATIM), wasted flag 0.
-            subframeWriter.Write(0, 1);
-            subframeWriter.Write(0b000001, 6);
-            subframeWriter.Write(0, 1);
-            // Raw samples (signed) at bps.
-            for (int n = 0; n < blockSize; n++)
+            int firstSample = interleaved[frameStart * channels + ch];
+            bool allEqual = true;
+            for (int n = 1; n < blockSize; n++)
             {
-                int sample = interleaved[(frameStart + n) * channels + ch];
-                subframeWriter.WriteSigned(sample, bps);
+                if (interleaved[(frameStart + n) * channels + ch] != firstSample)
+                {
+                    allEqual = false;
+                    break;
+                }
+            }
+
+            if (allEqual)
+            {
+                // Subframe header: reserved 0, type 0b000000 (CONSTANT), wasted flag 0.
+                subframeWriter.Write(0, 1);
+                subframeWriter.Write(0b000000, 6);
+                subframeWriter.Write(0, 1);
+                subframeWriter.WriteSigned(firstSample, bps);
+            }
+            else
+            {
+                // Subframe header: reserved 0, type 0b000001 (VERBATIM), wasted flag 0.
+                subframeWriter.Write(0, 1);
+                subframeWriter.Write(0b000001, 6);
+                subframeWriter.Write(0, 1);
+                for (int n = 0; n < blockSize; n++)
+                {
+                    int sample = interleaved[(frameStart + n) * channels + ch];
+                    subframeWriter.WriteSigned(sample, bps);
+                }
             }
         }
         subframeWriter.AlignToByte();

@@ -175,4 +175,55 @@ public abstract partial class CodecsTestBase
         var decoded = FlacDecoder.Decode(encoded);
         Equal(777UL, decoded.StreamInfo.TotalSamples);
     }
+
+    [TestMethod]
+    public void FlacEncoder_Silence_UsesConstantSubframes_CompactEncoding()
+    {
+        // 1024 samples of silence. VERBATIM would need 16*1024 = 16384 bits per channel.
+        // CONSTANT needs just 16 bits per channel. The encoded stream should be much
+        // smaller than the VERBATIM baseline.
+        var silent = new int[1024];
+        var silentEncoded = FlacEncoder.EncodeStream(silent, 44100, 1, 16, blockSize: 1024);
+        // Compare to a DC-varying signal at the same block size (which cannot use CONSTANT).
+        var varying = new int[1024];
+        for (int i = 0; i < varying.Length; i++) varying[i] = i % 7;
+        var varyingEncoded = FlacEncoder.EncodeStream(varying, 44100, 1, 16, blockSize: 1024);
+        True(silentEncoded.Length < varyingEncoded.Length / 4,
+            $"Silence should compress far smaller than varying signal. silent={silentEncoded.Length}, varying={varyingEncoded.Length}.");
+
+        // And it must still round-trip exactly.
+        var decoded = FlacDecoder.Decode(silentEncoded);
+        EqualInts(silent, decoded.InterleavedSamples);
+    }
+
+    [TestMethod]
+    public void FlacEncoder_DcOffset_UsesConstantSubframes()
+    {
+        // Non-zero DC offset: every sample == 4242.
+        var dc = new int[512];
+        Array.Fill(dc, 4242);
+        byte[] encoded = FlacEncoder.EncodeStream(dc, 44100, 1, 16, blockSize: 512);
+        var decoded = FlacDecoder.Decode(encoded);
+        EqualInts(dc, decoded.InterleavedSamples);
+        // Even without VERBATIM comparison, encoded length for 512 DC samples with CONSTANT
+        // subframes is bounded: 42 metadata + ~10 frame-header + 3 subframe + 2 CRC-16 = under 70 bytes total.
+        True(encoded.Length < 100, $"DC-encoded 512 samples should be under 100 bytes; got {encoded.Length}.");
+    }
+
+    [TestMethod]
+    public void FlacEncoder_PerChannelMix_OneConstantOneVerbatim()
+    {
+        // Stereo where channel 0 is silent but channel 1 is varying. Our encoder should pick
+        // CONSTANT for ch0 and VERBATIM for ch1 on a per-subframe basis.
+        int samplesPerChannel = 256;
+        var input = new int[samplesPerChannel * 2];
+        for (int n = 0; n < samplesPerChannel; n++)
+        {
+            input[n * 2 + 0] = 0;       // ch0 silent
+            input[n * 2 + 1] = (n * 37) % 31 - 15; // ch1 noise
+        }
+        byte[] encoded = FlacEncoder.EncodeStream(input, 44100, 2, 16, blockSize: 256);
+        var decoded = FlacDecoder.Decode(encoded);
+        EqualInts(input, decoded.InterleavedSamples);
+    }
 }
