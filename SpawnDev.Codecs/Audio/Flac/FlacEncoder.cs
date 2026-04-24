@@ -40,12 +40,37 @@ public static class FlacEncoder
     /// <param name="channels">Channel count. 1..8.</param>
     /// <param name="bitsPerSample">Bits per sample. 4..32, but only the standard FLAC set (8/12/16/20/24/32) is supported by this encoder.</param>
     /// <param name="blockSize">Samples per channel per frame. Defaults to 4096.</param>
+    /// <summary>Encode with <see cref="FlacEncoderOptions"/> support (VORBIS_COMMENT injection).</summary>
+    public static byte[] EncodeStream(
+        ReadOnlySpan<int> interleavedSamples,
+        int sampleRateHz,
+        int channels,
+        int bitsPerSample,
+        FlacEncoderOptions options)
+    {
+        if (options is null) throw new ArgumentNullException(nameof(options));
+        return EncodeStreamCore(interleavedSamples, sampleRateHz, channels, bitsPerSample,
+            options.BlockSize, options);
+    }
+
+    /// <summary>
+    /// Encode interleaved PCM samples to a full FLAC byte stream (no extra metadata blocks).
+    /// </summary>
     public static byte[] EncodeStream(
         ReadOnlySpan<int> interleavedSamples,
         int sampleRateHz,
         int channels,
         int bitsPerSample,
         int blockSize = 4096)
+        => EncodeStreamCore(interleavedSamples, sampleRateHz, channels, bitsPerSample, blockSize, options: null);
+
+    private static byte[] EncodeStreamCore(
+        ReadOnlySpan<int> interleavedSamples,
+        int sampleRateHz,
+        int channels,
+        int bitsPerSample,
+        int blockSize,
+        FlacEncoderOptions? options)
     {
         ValidateInputs(interleavedSamples.Length, sampleRateHz, channels, bitsPerSample, blockSize);
 
@@ -55,18 +80,31 @@ public static class FlacEncoder
         // "fLaC"
         outputBytes.AddRange(new byte[] { (byte)'f', (byte)'L', (byte)'a', (byte)'C' });
 
-        // Metadata block header: isLast=1, type=0 (STREAMINFO), length=34.
-        outputBytes.AddRange(new byte[] { 0x80, 0x00, 0x00, 0x22 });
+        bool hasVorbisComment = options?.VorbisComments is { Count: > 0 };
+        byte[]? vorbisCommentBody = hasVorbisComment ? BuildVorbisCommentBody(options!) : null;
 
-        // Compute MD5 of the decoded PCM for STREAMINFO integrity field.
+        // STREAMINFO header: isLast = 1 UNLESS we're about to append a VORBIS_COMMENT block.
+        byte streamInfoLastFlag = (byte)(hasVorbisComment ? 0x00 : 0x80);
+        outputBytes.AddRange(new byte[] { streamInfoLastFlag, 0x00, 0x00, 0x22 });
+
         byte[] md5 = FlacMd5.Compute(interleavedSamples, bitsPerSample);
 
-        // STREAMINFO payload (34 bytes).
         outputBytes.AddRange(BuildStreamInfoPayload(
             minBlock: blockSize, maxBlock: blockSize,
             sampleRateHz: sampleRateHz, channels: channels, bitsPerSample: bitsPerSample,
             totalSamples: (ulong)totalPerChannel,
             md5Signature: md5));
+
+        if (hasVorbisComment)
+        {
+            // VORBIS_COMMENT header: isLast = 1 (terminator), type = 4, 24-bit length.
+            int bodyLen = vorbisCommentBody!.Length;
+            outputBytes.Add((byte)(0x80 | FlacConstants.MetadataVorbisComment));
+            outputBytes.Add((byte)(bodyLen >> 16));
+            outputBytes.Add((byte)(bodyLen >> 8));
+            outputBytes.Add((byte)bodyLen);
+            outputBytes.AddRange(vorbisCommentBody);
+        }
 
         // Audio frames. Sample rate / bps codes are stream-wide constants; block-size code
         // and (for stereo) channel-assignment code are resolved PER-FRAME.
@@ -105,6 +143,36 @@ public static class FlacEncoder
                 $"Bit depth {bps} not supported by this encoder (use 8/12/16/20/24/32).", nameof(bps));
         if (blockSize < 16 || blockSize > FlacConstants.MaxBlockSize)
             throw new ArgumentException($"Block size {blockSize} out of range [16, {FlacConstants.MaxBlockSize}].", nameof(blockSize));
+    }
+
+    /// <summary>
+    /// Build a FLAC VORBIS_COMMENT block body (vendor length + vendor bytes +
+    /// comment count + per-comment length/bytes). No framing flag - FLAC uses
+    /// the Vorbis-comment layout without the trailing framing byte.
+    /// </summary>
+    private static byte[] BuildVorbisCommentBody(FlacEncoderOptions options)
+    {
+        byte[] vendorBytes = System.Text.Encoding.UTF8.GetBytes(options.Vendor);
+        var comments = options.VorbisComments ?? Array.Empty<string>();
+        byte[][] cmtBytes = comments.Select(c => System.Text.Encoding.UTF8.GetBytes(c)).ToArray();
+        int size = 4 + vendorBytes.Length + 4;
+        foreach (var cb in cmtBytes) size += 4 + cb.Length;
+        var bytes = new byte[size];
+        int pos = 0;
+        WriteUInt32LeInternal(bytes, pos, (uint)vendorBytes.Length); pos += 4;
+        Array.Copy(vendorBytes, 0, bytes, pos, vendorBytes.Length); pos += vendorBytes.Length;
+        WriteUInt32LeInternal(bytes, pos, (uint)cmtBytes.Length); pos += 4;
+        foreach (var cb in cmtBytes)
+        {
+            WriteUInt32LeInternal(bytes, pos, (uint)cb.Length); pos += 4;
+            Array.Copy(cb, 0, bytes, pos, cb.Length); pos += cb.Length;
+        }
+        return bytes;
+    }
+
+    private static void WriteUInt32LeInternal(byte[] dest, int offset, uint value)
+    {
+        for (int i = 0; i < 4; i++) dest[offset + i] = (byte)(value >> (8 * i));
     }
 
     private static byte[] BuildStreamInfoPayload(
