@@ -87,8 +87,9 @@ public static class Vp9Iadst8x8Reference
 
     /// <summary>
     /// One-dimensional 8-point iADST butterfly per libvpx iadst8_c.
+    /// Internal so the iHT 8x8 tx_type dispatcher can share it.
     /// </summary>
-    private static void Iadst8_1d(ReadOnlySpan<short> input, Span<short> output)
+    internal static void Iadst8_1d(ReadOnlySpan<short> input, Span<short> output)
     {
         // libvpx input reordering (NOT the natural order).
         int x0 = input[7];

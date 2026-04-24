@@ -90,9 +90,9 @@ public static class Vp9Idct8x8Reference
     /// <summary>
     /// One-dimensional 8-point iDCT butterfly per libvpx <c>vp9_idct8_c</c>.
     /// Four stages; even half reuses the 4-point pattern, odd half is
-    /// additional.
+    /// additional. Internal so the iHT 8x8 tx_type dispatcher can share it.
     /// </summary>
-    private static void Idct8_1d(ReadOnlySpan<short> input, Span<short> output)
+    internal static void Idct8_1d(ReadOnlySpan<short> input, Span<short> output)
     {
         // Intermediate arrays mirror libvpx's step1[0..7] / step2[0..7].
         // Using individual locals keeps register-allocation friendly.
