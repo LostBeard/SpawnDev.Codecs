@@ -1,0 +1,182 @@
+@page "/benchmarks"
+@using System.Diagnostics
+@using SpawnDev.Codecs.Audio.Flac
+@using SpawnDev.Codecs.Audio.Transforms
+@using SpawnDev.Codecs.Audio.Wav
+@using SpawnDev.Codecs.Audio.Aiff
+
+<PageTitle>SpawnDev.Codecs Benchmarks</PageTitle>
+
+<h1>Benchmarks</h1>
+
+<p>Runs in the browser against the same code paths the unit tests exercise. Sample signals are synthesised on the fly, encoded/decoded, and the resulting throughput is measured against <code>Stopwatch.GetTimestamp</code> wall time.</p>
+
+<div style="margin-bottom: 1rem;">
+    <button class="btn btn-primary" @onclick="RunAllAsync" disabled="@_running">
+        @(_running ? "Running..." : "Run all benchmarks")
+    </button>
+</div>
+
+@if (_log.Count > 0)
+{
+    <h2>Results</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Benchmark</th>
+                <th>Input</th>
+                <th>Time (ms)</th>
+                <th>Throughput</th>
+                <th>Compression / Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var entry in _log)
+            {
+                <tr>
+                    <td>@entry.Name</td>
+                    <td>@entry.Input</td>
+                    <td>@entry.TimeMs.ToString("F2")</td>
+                    <td>@entry.Throughput</td>
+                    <td>@entry.Extra</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    sealed record BenchEntry(string Name, string Input, double TimeMs, string Throughput, string Extra);
+
+    List<BenchEntry> _log = new();
+    bool _running;
+
+    async Task RunAllAsync()
+    {
+        _running = true;
+        _log = new List<BenchEntry>();
+        StateHasChanged();
+        await Task.Yield();
+
+        try
+        {
+            BenchFlacEncode(samplesPerChannel: 48_000, channels: 2, bps: 16, rate: 48_000, label: "FLAC encode (2ch 16bit 48k 1sec sine)");
+            BenchFlacEncode(samplesPerChannel: 44_100 * 5, channels: 2, bps: 16, rate: 44_100, label: "FLAC encode (2ch 16bit 44.1k 5sec sine)");
+            BenchFlacEncode(samplesPerChannel: 44_100, channels: 1, bps: 24, rate: 44_100, label: "FLAC encode (1ch 24bit 44.1k 1sec sine)");
+
+            BenchFlacDecode(samplesPerChannel: 48_000, channels: 2, bps: 16, rate: 48_000, label: "FLAC decode (2ch 16bit 48k 1sec)");
+            BenchFlacDecode(samplesPerChannel: 44_100 * 5, channels: 2, bps: 16, rate: 44_100, label: "FLAC decode (2ch 16bit 44.1k 5sec)");
+
+            BenchWavRoundtrip(samplesPerChannel: 48_000, channels: 2, bps: 16, rate: 48_000, label: "WAV write+read (2ch 16bit 1sec)");
+            BenchAiffRoundtrip(samplesPerChannel: 48_000, channels: 2, bps: 24, rate: 48_000, label: "AIFF write+read (2ch 24bit 1sec)");
+
+            BenchImdct(n: 128, iterations: 100, label: "IMDCT N=128 x100");
+            BenchImdct(n: 256, iterations: 50, label: "IMDCT N=256 x50");
+            BenchImdct(n: 960, iterations: 10, label: "IMDCT N=960 x10 (Opus/CELT 20ms-48k frame)");
+            BenchMdct(n: 256, iterations: 50, label: "MDCT N=256 x50");
+        }
+        finally
+        {
+            _running = false;
+            StateHasChanged();
+        }
+    }
+
+    void BenchFlacEncode(int samplesPerChannel, int channels, int bps, int rate, string label)
+    {
+        var input = GenerateSine(samplesPerChannel, channels, rate, bps);
+        var sw = Stopwatch.StartNew();
+        byte[] bytes = FlacEncoder.EncodeStream(input, rate, channels, bps, blockSize: 4096);
+        sw.Stop();
+        int rawBytes = input.Length * ((bps + 7) / 8);
+        double ratio = (double)bytes.Length / rawBytes;
+        double samplesPerSec = (input.Length * 1000.0) / sw.Elapsed.TotalMilliseconds;
+        _log.Add(new BenchEntry(
+            label,
+            $"{input.Length:N0} samples ({rawBytes:N0} B raw)",
+            sw.Elapsed.TotalMilliseconds,
+            $"{samplesPerSec / 1e6:F2} Msamples/s",
+            $"{bytes.Length:N0} B FLAC ({ratio:P1})"));
+    }
+
+    void BenchFlacDecode(int samplesPerChannel, int channels, int bps, int rate, string label)
+    {
+        var input = GenerateSine(samplesPerChannel, channels, rate, bps);
+        byte[] encoded = FlacEncoder.EncodeStream(input, rate, channels, bps, blockSize: 4096);
+        var sw = Stopwatch.StartNew();
+        var decoded = FlacDecoder.Decode(encoded);
+        sw.Stop();
+        double samplesPerSec = (decoded.InterleavedSamples.Length * 1000.0) / sw.Elapsed.TotalMilliseconds;
+        _log.Add(new BenchEntry(
+            label,
+            $"{encoded.Length:N0} B FLAC",
+            sw.Elapsed.TotalMilliseconds,
+            $"{samplesPerSec / 1e6:F2} Msamples/s",
+            $"{decoded.InterleavedSamples.Length:N0} samples"));
+    }
+
+    void BenchWavRoundtrip(int samplesPerChannel, int channels, int bps, int rate, string label)
+    {
+        var input = GenerateSine(samplesPerChannel, channels, rate, bps);
+        var sw = Stopwatch.StartNew();
+        byte[] bytes = WavFileCodec.Write(input, rate, channels, bps);
+        _ = WavFileCodec.Read(bytes);
+        sw.Stop();
+        _log.Add(new BenchEntry(label, $"{input.Length:N0} samples", sw.Elapsed.TotalMilliseconds,
+            $"{(input.Length * 1000.0 / sw.Elapsed.TotalMilliseconds) / 1e6:F2} Msamples/s",
+            $"{bytes.Length:N0} B"));
+    }
+
+    void BenchAiffRoundtrip(int samplesPerChannel, int channels, int bps, int rate, string label)
+    {
+        var input = GenerateSine(samplesPerChannel, channels, rate, bps);
+        var sw = Stopwatch.StartNew();
+        byte[] bytes = AiffFileCodec.Write(input, rate, channels, bps);
+        _ = AiffFileCodec.Read(bytes);
+        sw.Stop();
+        _log.Add(new BenchEntry(label, $"{input.Length:N0} samples", sw.Elapsed.TotalMilliseconds,
+            $"{(input.Length * 1000.0 / sw.Elapsed.TotalMilliseconds) / 1e6:F2} Msamples/s",
+            $"{bytes.Length:N0} B"));
+    }
+
+    void BenchImdct(int n, int iterations, string label)
+    {
+        var input = new float[n];
+        for (int i = 0; i < n; i++) input[i] = (float)Math.Cos(i * 0.17);
+        var output = new float[2 * n];
+        var sw = Stopwatch.StartNew();
+        for (int k = 0; k < iterations; k++) ImdctReference.Transform(input, output);
+        sw.Stop();
+        _log.Add(new BenchEntry(label, $"N={n}, iter={iterations}", sw.Elapsed.TotalMilliseconds,
+            $"{(iterations * n * 1000.0 / sw.Elapsed.TotalMilliseconds) / 1e6:F2} Mpoints/s",
+            "CPU O(N²) reference"));
+    }
+
+    void BenchMdct(int n, int iterations, string label)
+    {
+        var input = new float[2 * n];
+        for (int i = 0; i < 2 * n; i++) input[i] = (float)Math.Sin(i * 0.13);
+        var output = new float[n];
+        var sw = Stopwatch.StartNew();
+        for (int k = 0; k < iterations; k++) MdctReference.Transform(input, output);
+        sw.Stop();
+        _log.Add(new BenchEntry(label, $"N={n}, iter={iterations}", sw.Elapsed.TotalMilliseconds,
+            $"{(iterations * n * 1000.0 / sw.Elapsed.TotalMilliseconds) / 1e6:F2} Mpoints/s",
+            "CPU O(N²) reference"));
+    }
+
+    int[] GenerateSine(int samplesPerChannel, int channels, int rate, int bps)
+    {
+        int maxValue = (1 << (bps - 1)) - 1;
+        int amplitude = (int)(maxValue * 0.5);
+        var samples = new int[samplesPerChannel * channels];
+        for (int n = 0; n < samplesPerChannel; n++)
+        {
+            double phase = 2.0 * Math.PI * 440.0 * n / rate;
+            int v = (int)(Math.Sin(phase) * amplitude);
+            for (int ch = 0; ch < channels; ch++)
+                samples[n * channels + ch] = v;
+        }
+        return samples;
+    }
+}

@@ -4,8 +4,50 @@
 
 <h1>SpawnDev.Codecs</h1>
 
-<p>Pure-.NET, ILGPU-accelerated, patent-clean audio and video codecs.</p>
+<p>Pure-.NET, ILGPU-accelerated, patent-clean audio and video codecs. Runs on every SpawnDev.ILGPU backend (WebGPU, WebGL, Wasm, CUDA, OpenCL, CPU) so the same library works in Blazor WASM and on desktop.</p>
 
-<p><strong>Status:</strong> Planning phase (Phase 0, 2026-04-23). No implementation yet.</p>
+<h2>Current status</h2>
 
-<p>See <code>Plans/PLAN-SpawnDev-Codecs-Roadmap.md</code> for the roadmap.</p>
+<h3>Audio codecs</h3>
+<table>
+    <thead>
+        <tr><th>Codec</th><th>Decoder</th><th>Encoder</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>FLAC (native)</td><td>Complete</td><td>Complete (CONSTANT + FIXED + LPC, stereo decor, MD5)</td></tr>
+        <tr><td>FLAC-in-Ogg</td><td>Complete</td><td>Manual via OggPageWriter</td></tr>
+        <tr><td>Opus (SILK)</td><td>Complete - NB/MB/WB x 10/20/40/60 ms, mono + stereo</td><td>-</td></tr>
+        <tr><td>Opus (CELT)</td><td>Stub</td><td>-</td></tr>
+        <tr><td>Opus-in-Ogg</td><td>SILK decode end-to-end</td><td>Packages pre-encoded Opus packets</td></tr>
+        <tr><td>Vorbis</td><td>Structural decoder: setup parse + floor-1 + residue + coupling + IMDCT + overlap-add composed; awaits bit-accuracy validation against libvorbis test vectors</td><td>-</td></tr>
+    </tbody>
+</table>
+
+<h3>Audio containers</h3>
+<table>
+    <thead><tr><th>Container</th><th>Read</th><th>Write</th></tr></thead>
+    <tbody>
+        <tr><td>RIFF / WAVE</td><td>Complete</td><td>Complete</td></tr>
+        <tr><td>AIFF</td><td>Complete</td><td>Complete</td></tr>
+        <tr><td>Ogg</td><td>Complete</td><td>Complete</td></tr>
+    </tbody>
+</table>
+
+<h3>Transforms</h3>
+<ul>
+    <li>Forward MDCT + Inverse MDCT reference implementations (CPU, O(N²)).</li>
+    <li>Round-trip identity <code>MDCT(IMDCT(X)) = N·X</code> validated to float precision.</li>
+    <li>FFT-accelerated CPU and ILGPU-kernel variants planned.</li>
+</ul>
+
+<h3>Video codecs</h3>
+<p>Not started. VP8 / VP9 / AV1 are planned (patent-clean via AOMedia pledge).</p>
+
+<h3>Out of scope (patent-encumbered)</h3>
+<p>H.264, H.265, AAC, MP3 — delegated to platform encoders via <code>SpawnDev.MultiMedia</code>.</p>
+
+<h2>Pages</h2>
+<ul>
+    <li><a href="/benchmarks">Benchmarks</a> — throughput + compression measurements for FLAC + transforms</li>
+    <li><a href="/tests">Tests</a> — SpawnDev.UnitTesting cross-backend test harness</li>
+</ul>

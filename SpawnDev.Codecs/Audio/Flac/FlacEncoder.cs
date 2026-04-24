@@ -35,12 +35,12 @@ public static class FlacEncoder
     /// <summary>
     /// Encode interleaved PCM samples to a full FLAC byte stream.
     /// </summary>
+    /// <summary>Encode with <see cref="FlacEncoderOptions"/> support (VORBIS_COMMENT injection).</summary>
     /// <param name="interleavedSamples">PCM samples as <c>[ch0[0], ch1[0], ch0[1], ...]</c>. Length must be a multiple of <paramref name="channels"/>.</param>
     /// <param name="sampleRateHz">Output sample rate. Must be 1..655350 Hz.</param>
     /// <param name="channels">Channel count. 1..8.</param>
     /// <param name="bitsPerSample">Bits per sample. 4..32, but only the standard FLAC set (8/12/16/20/24/32) is supported by this encoder.</param>
-    /// <param name="blockSize">Samples per channel per frame. Defaults to 4096.</param>
-    /// <summary>Encode with <see cref="FlacEncoderOptions"/> support (VORBIS_COMMENT injection).</summary>
+    /// <param name="options">Encoder options (block size, vendor, VORBIS_COMMENT tags).</param>
     public static byte[] EncodeStream(
         ReadOnlySpan<int> interleavedSamples,
         int sampleRateHz,

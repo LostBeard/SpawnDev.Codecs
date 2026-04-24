@@ -102,9 +102,9 @@ public static class VorbisWindow
 
     /// <summary>
     /// Overlap-add the previous block's right half into the current block's
-    /// left half and emit <paramref name="halfBlockSize"/> finalised samples.
-    /// The inputs are windowed time-domain samples; this helper just sums
-    /// them pointwise.
+    /// left half and emit the matching count of finalised samples. The
+    /// inputs are windowed time-domain samples; this helper just sums them
+    /// pointwise.
     /// </summary>
     /// <param name="previousRightHalf">Previous block's windowed right-half samples (length halfBlockSize).</param>
     /// <param name="currentLeftHalf">Current block's windowed left-half samples (length halfBlockSize).</param>
