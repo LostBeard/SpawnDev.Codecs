@@ -274,4 +274,46 @@ public abstract partial class CodecsTestBase
         var decoded = FlacDecoder.Decode(encoded);
         EqualInts(input, decoded.InterleavedSamples);
     }
+
+    [TestMethod]
+    public void FlacEncoder_StereoHighlyCorrelated_PicksMidSide()
+    {
+        // L and R nearly identical -> side ~= 0 -> MidSide is MUCH cheaper than Independent.
+        int samplesPerChannel = 1024;
+        var input = new int[samplesPerChannel * 2];
+        for (int n = 0; n < samplesPerChannel; n++)
+        {
+            double phase = 2.0 * Math.PI * 440.0 * n / 48000.0;
+            int v = (int)(Math.Sin(phase) * 10000);
+            input[n * 2 + 0] = v;            // L
+            input[n * 2 + 1] = v + (n & 1);  // R almost equal to L (+/- 1 sample)
+        }
+        byte[] encoded = FlacEncoder.EncodeStream(input, 48000, 2, 16, blockSize: 1024);
+        // Independent would need to encode two full channels at ~2KB worst case.
+        // MidSide keeps mid similar to L and side near zero (with order-1 FIXED trivial to encode).
+        // Expect well under 2KB total.
+        True(encoded.Length < 2048,
+            $"Correlated stereo should compress below 2KB via MidSide; got {encoded.Length}.");
+        var decoded = FlacDecoder.Decode(encoded);
+        EqualInts(input, decoded.InterleavedSamples);
+    }
+
+    [TestMethod]
+    public void FlacEncoder_StereoUncorrelated_PicksIndependent_StillRoundtrips()
+    {
+        // L and R independent noise: decor modes don't help. Encoder should pick
+        // Independent. Test only verifies lossless roundtrip (not compression).
+        int samplesPerChannel = 512;
+        var input = new int[samplesPerChannel * 2];
+        var rng = new Random(42);
+        for (int n = 0; n < samplesPerChannel; n++)
+        {
+            input[n * 2 + 0] = rng.Next(-32000, 32001);
+            input[n * 2 + 1] = rng.Next(-32000, 32001);
+        }
+        byte[] encoded = FlacEncoder.EncodeStream(input, 44100, 2, 16, blockSize: 512);
+        var decoded = FlacDecoder.Decode(encoded);
+        Equal(2, decoded.StreamInfo.Channels);
+        EqualInts(input, decoded.InterleavedSamples);
+    }
 }

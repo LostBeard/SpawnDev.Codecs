@@ -46,14 +46,12 @@ internal static class FlacFixedSubframeEncoder
                 }
             }
 
-            // Total subframe bits (excluding 1-bit reserved + 6-bit type + 1-bit wasted flag =
-            // constant 8 across all choices):
-            //   warmup * bps + 2 (coding method) + 4 (partition order) + 4 (Rice param) + rice bits
+            // Total subframe bits (8-bit subframe header + warmup + 10 residual-section bits + Rice bits).
             long subframeBits = 8 + (long)order * bps + 2 + 4 + 4 + bestPartitionBits;
             if (subframeBits < bestBits)
             {
                 bestBits = (int)subframeBits;
-                best = new FlacFixedChoice(order, bestK, residual, bestPartitionBits);
+                best = new FlacFixedChoice(order, bestK, residual, subframeBits);
             }
         }
         return best;
@@ -136,6 +134,7 @@ internal static class FlacFixedSubframeEncoder
 
 /// <summary>
 /// Result of FIXED order + Rice parameter selection: the chosen order, parameter,
-/// and the residual values (pre-computed for reuse at emit time).
+/// the residual values (pre-computed for reuse at emit time), and the estimated
+/// total subframe bits including header, warm-up samples, and Rice residual section.
 /// </summary>
-internal sealed record FlacFixedChoice(int Order, int RiceParam, int[] Residual, long EstimatedRiceBits);
+internal sealed record FlacFixedChoice(int Order, int RiceParam, int[] Residual, long TotalSubframeBits);

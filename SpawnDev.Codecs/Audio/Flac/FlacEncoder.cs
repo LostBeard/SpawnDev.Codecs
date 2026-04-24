@@ -48,10 +48,9 @@ public static class FlacEncoder
             sampleRateHz: sampleRateHz, channels: channels, bitsPerSample: bitsPerSample,
             totalSamples: (ulong)totalPerChannel));
 
-        // Audio frames. Sample rate / channel / bps codes are stream-wide constants; block-size code
-        // is resolved PER-FRAME because the final frame may be partial.
+        // Audio frames. Sample rate / bps codes are stream-wide constants; block-size code
+        // and (for stereo) channel-assignment code are resolved PER-FRAME.
         int srateCode = ResolveSampleRateCode(sampleRateHz, out int srateSideBytes, out int srateSideValue);
-        int chanCode = channels - 1; // Independent channels for now (codes 0..7 == channels 1..8).
         int bpsCode = ResolveBpsCode(bitsPerSample);
 
         int frameIndex = 0;
@@ -64,7 +63,7 @@ public static class FlacEncoder
                 (uint)frameIndex,
                 bsizeCode, bsizeSideBytes, bsizeSideValue,
                 srateCode, srateSideBytes, srateSideValue,
-                chanCode, bpsCode);
+                bpsCode);
             outputBytes.AddRange(frameBytes);
             frameIndex++;
         }
@@ -175,8 +174,32 @@ public static class FlacEncoder
         uint frameNumber,
         int bsizeCode, int bsizeSideBytes, int bsizeSideValue,
         int srateCode, int srateSideBytes, int srateSideValue,
-        int chanCode, int bpsCode)
+        int bpsCode)
     {
+        // For stereo, select the cheapest channel decorrelation mode. Resolve
+        // per-channel samples under that mode, then emit subframes.
+        int[][] channelBuffers;
+        int[] perChannelBps;
+        int chanCode;
+        if (channels == 2)
+        {
+            (channelBuffers, perChannelBps, chanCode) =
+                SelectStereoMode(interleaved, frameStart, blockSize, bps);
+        }
+        else
+        {
+            channelBuffers = new int[channels][];
+            perChannelBps = new int[channels];
+            for (int ch = 0; ch < channels; ch++)
+            {
+                channelBuffers[ch] = new int[blockSize];
+                perChannelBps[ch] = bps;
+                for (int n = 0; n < blockSize; n++)
+                    channelBuffers[ch][n] = interleaved[(frameStart + n) * channels + ch];
+            }
+            chanCode = channels - 1; // Independent 1-8 channels.
+        }
+
         // Build frame header into one writer (through CRC-8 byte).
         var header = new FlacBitWriter();
         header.Write((uint)FlacConstants.FrameSyncCode, 14);
@@ -187,13 +210,11 @@ public static class FlacEncoder
         header.Write((uint)chanCode, 4);
         header.Write((uint)bpsCode, 3);
         header.Write(0, 1);                  // reserved
-        // UTF-8-coded frame number (fixed block strategy: frame number).
         WriteUtf8Number(header, frameNumber);
         if (bsizeSideBytes == 1) header.Write((uint)bsizeSideValue, 8);
         else if (bsizeSideBytes == 2) header.Write((uint)bsizeSideValue, 16);
         if (srateSideBytes == 1) header.Write((uint)srateSideValue, 8);
         else if (srateSideBytes == 2) header.Write((uint)srateSideValue, 16);
-        // Byte-align & append CRC-8.
         header.AlignToByte();
         byte[] headerBytes = header.ToArray();
         byte crc8 = FlacCrc.Compute8(headerBytes);
@@ -202,54 +223,61 @@ public static class FlacEncoder
         frame.AddRange(headerBytes);
         frame.Add(crc8);
 
-        // Subframes. Per-channel choice among CONSTANT (when block is constant),
-        // FIXED (when order selection beats VERBATIM), and VERBATIM (fallback).
+        // Emit each subframe using the unified writer.
         var subframeWriter = new FlacBitWriter();
-        var channelSamples = new int[blockSize];
-        for (int ch = 0; ch < channels; ch++)
-        {
-            for (int n = 0; n < blockSize; n++)
-                channelSamples[n] = interleaved[(frameStart + n) * channels + ch];
-
-            int firstSample = channelSamples[0];
-            bool allEqual = true;
-            for (int n = 1; n < blockSize; n++)
-            {
-                if (channelSamples[n] != firstSample) { allEqual = false; break; }
-            }
-
-            if (allEqual)
-            {
-                // CONSTANT: reserved 0, type 0b000000, wasted flag 0.
-                subframeWriter.Write(0, 1);
-                subframeWriter.Write(0b000000, 6);
-                subframeWriter.Write(0, 1);
-                subframeWriter.WriteSigned(firstSample, bps);
-                continue;
-            }
-
-            var fixedChoice = FlacFixedSubframeEncoder.PickBest(channelSamples, bps);
-            if (fixedChoice is not null)
-            {
-                FlacFixedSubframeEncoder.Emit(subframeWriter, channelSamples, bps, fixedChoice);
-                continue;
-            }
-
-            // VERBATIM fallback: reserved 0, type 0b000001, wasted flag 0.
-            subframeWriter.Write(0, 1);
-            subframeWriter.Write(0b000001, 6);
-            subframeWriter.Write(0, 1);
-            for (int n = 0; n < blockSize; n++)
-                subframeWriter.WriteSigned(channelSamples[n], bps);
-        }
+        for (int ch = 0; ch < channelBuffers.Length; ch++)
+            FlacSubframeWriter.Emit(subframeWriter, channelBuffers[ch], perChannelBps[ch]);
         subframeWriter.AlignToByte();
         frame.AddRange(subframeWriter.ToArray());
 
-        // CRC-16 over full frame so far.
         ushort crc16 = FlacCrc.Compute16(frame.ToArray());
         frame.Add((byte)(crc16 >> 8));
         frame.Add((byte)crc16);
         return frame.ToArray();
+    }
+
+    /// <summary>
+    /// Select the best stereo channel-decorrelation mode for this frame. Tries
+    /// Independent, LeftSide, RightSide, MidSide; picks the one whose combined
+    /// subframe bit estimate is smallest. Returns the two channel buffers, their
+    /// per-channel bit depths (side channels are <paramref name="bps"/>+1), and
+    /// the FLAC frame-header channel-assignment code.
+    /// </summary>
+    private static (int[][] buffers, int[] bpsPerChannel, int chanCode) SelectStereoMode(
+        ReadOnlySpan<int> interleaved, int frameStart, int blockSize, int bps)
+    {
+        int[] L = new int[blockSize];
+        int[] R = new int[blockSize];
+        int[] side = new int[blockSize];
+        int[] mid = new int[blockSize];
+        for (int n = 0; n < blockSize; n++)
+        {
+            int l = interleaved[(frameStart + n) * 2 + 0];
+            int r = interleaved[(frameStart + n) * 2 + 1];
+            L[n] = l;
+            R[n] = r;
+            side[n] = l - r;
+            mid[n] = (l + r) >> 1; // arithmetic shift (floor toward negative infinity)
+        }
+
+        long costL = FlacSubframeWriter.EstimateBits(L, bps);
+        long costR = FlacSubframeWriter.EstimateBits(R, bps);
+        long costSide = FlacSubframeWriter.EstimateBits(side, bps + 1);
+        long costMid = FlacSubframeWriter.EstimateBits(mid, bps);
+
+        long independent = costL + costR;
+        long leftSide = costL + costSide;
+        long rightSide = costSide + costR;
+        long midSide = costMid + costSide;
+
+        long min = Math.Min(Math.Min(independent, leftSide), Math.Min(rightSide, midSide));
+        if (min == independent)
+            return (new[] { L, R }, new[] { bps, bps }, 0b0001);
+        if (min == leftSide)
+            return (new[] { L, side }, new[] { bps, bps + 1 }, 0b1000);
+        if (min == rightSide)
+            return (new[] { side, R }, new[] { bps + 1, bps }, 0b1001);
+        return (new[] { mid, side }, new[] { bps, bps + 1 }, 0b1010);
     }
 
     /// <summary>Encode a value as UTF-8-style variable-length integer (FLAC convention).</summary>
