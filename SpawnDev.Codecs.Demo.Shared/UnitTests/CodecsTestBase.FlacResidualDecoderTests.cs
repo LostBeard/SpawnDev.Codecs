@@ -14,49 +14,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    /// <summary>Minimal MSB-first bit writer used only for hand-building Rice test vectors.</summary>
-    private sealed class FlacBitWriter
-    {
-        private readonly List<byte> _bytes = new();
-        private int _currentByte;
-        private int _bitPos; // bits already written into _currentByte, 0..7
-
-        public void Write(uint value, int bits)
-        {
-            while (bits > 0)
-            {
-                int free = 8 - _bitPos;
-                int take = Math.Min(free, bits);
-                int shift = bits - take;
-                uint chunk = (value >> shift) & ((1u << take) - 1);
-                _currentByte = (_currentByte << take) | (int)chunk;
-                _bitPos += take;
-                bits -= take;
-                if (_bitPos == 8)
-                {
-                    _bytes.Add((byte)_currentByte);
-                    _currentByte = 0;
-                    _bitPos = 0;
-                }
-            }
-        }
-
-        public void WriteUnary(int zeroCount)
-        {
-            for (int i = 0; i < zeroCount; i++) Write(0, 1);
-            Write(1, 1);
-        }
-
-        public byte[] ToArray()
-        {
-            if (_bitPos > 0)
-            {
-                // Left-align the remainder to MSB of its byte.
-                _bytes.Add((byte)(_currentByte << (8 - _bitPos)));
-            }
-            return _bytes.ToArray();
-        }
-    }
+    // FlacBitWriter lives in the library (internal); tests access it via InternalsVisibleTo.
 
     private static void WriteRiceCoded(FlacBitWriter w, int value, int param)
     {
