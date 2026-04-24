@@ -202,42 +202,45 @@ public static class FlacEncoder
         frame.AddRange(headerBytes);
         frame.Add(crc8);
 
-        // Subframes. CONSTANT when every sample of this channel is equal
-        // (typical for DC, silence, or very low-rate pad frames); VERBATIM otherwise.
+        // Subframes. Per-channel choice among CONSTANT (when block is constant),
+        // FIXED (when order selection beats VERBATIM), and VERBATIM (fallback).
         var subframeWriter = new FlacBitWriter();
+        var channelSamples = new int[blockSize];
         for (int ch = 0; ch < channels; ch++)
         {
-            int firstSample = interleaved[frameStart * channels + ch];
+            for (int n = 0; n < blockSize; n++)
+                channelSamples[n] = interleaved[(frameStart + n) * channels + ch];
+
+            int firstSample = channelSamples[0];
             bool allEqual = true;
             for (int n = 1; n < blockSize; n++)
             {
-                if (interleaved[(frameStart + n) * channels + ch] != firstSample)
-                {
-                    allEqual = false;
-                    break;
-                }
+                if (channelSamples[n] != firstSample) { allEqual = false; break; }
             }
 
             if (allEqual)
             {
-                // Subframe header: reserved 0, type 0b000000 (CONSTANT), wasted flag 0.
+                // CONSTANT: reserved 0, type 0b000000, wasted flag 0.
                 subframeWriter.Write(0, 1);
                 subframeWriter.Write(0b000000, 6);
                 subframeWriter.Write(0, 1);
                 subframeWriter.WriteSigned(firstSample, bps);
+                continue;
             }
-            else
+
+            var fixedChoice = FlacFixedSubframeEncoder.PickBest(channelSamples, bps);
+            if (fixedChoice is not null)
             {
-                // Subframe header: reserved 0, type 0b000001 (VERBATIM), wasted flag 0.
-                subframeWriter.Write(0, 1);
-                subframeWriter.Write(0b000001, 6);
-                subframeWriter.Write(0, 1);
-                for (int n = 0; n < blockSize; n++)
-                {
-                    int sample = interleaved[(frameStart + n) * channels + ch];
-                    subframeWriter.WriteSigned(sample, bps);
-                }
+                FlacFixedSubframeEncoder.Emit(subframeWriter, channelSamples, bps, fixedChoice);
+                continue;
             }
+
+            // VERBATIM fallback: reserved 0, type 0b000001, wasted flag 0.
+            subframeWriter.Write(0, 1);
+            subframeWriter.Write(0b000001, 6);
+            subframeWriter.Write(0, 1);
+            for (int n = 0; n < blockSize; n++)
+                subframeWriter.WriteSigned(channelSamples[n], bps);
         }
         subframeWriter.AlignToByte();
         frame.AddRange(subframeWriter.ToArray());

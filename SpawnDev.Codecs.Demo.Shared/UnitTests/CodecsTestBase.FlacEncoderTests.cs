@@ -226,4 +226,52 @@ public abstract partial class CodecsTestBase
         var decoded = FlacDecoder.Decode(encoded);
         EqualInts(input, decoded.InterleavedSamples);
     }
+
+    [TestMethod]
+    public void FlacEncoder_Sine_CompressesBelowVerbatim()
+    {
+        // A 1024-sample 16-bit sine wave should compress well via FIXED order
+        // selection. VERBATIM baseline = 1024 * 16 / 8 = 2048 bytes just for the
+        // subframe payload; full file adds ~50 bytes of metadata/framing.
+        // With FIXED encoding, file should be noticeably smaller.
+        var input = GenerateSineInt(samplesPerChannel: 1024, channels: 1, sampleRateHz: 44100, bps: 16);
+        byte[] encoded = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 1024);
+        True(encoded.Length < 2048,
+            $"1024-sample 16-bit sine should compress below VERBATIM 2048-byte baseline; got {encoded.Length} bytes.");
+        // Still lossless.
+        var decoded = FlacDecoder.Decode(encoded);
+        EqualInts(input, decoded.InterleavedSamples);
+    }
+
+    [TestMethod]
+    public void FlacEncoder_Ramp_CompressesDramatically()
+    {
+        // A monotonically-increasing ramp is a perfect fit for FIXED order 1
+        // (first difference is constant). Encoder should pick FIXED order 1
+        // with Rice param near 0, producing a near-trivial bit stream.
+        var input = new int[512];
+        for (int i = 0; i < 512; i++) input[i] = i - 256;
+        byte[] encoded = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 512);
+        // VERBATIM would need 512 * 2 = 1024 bytes for the samples alone.
+        // Ramp should encode dramatically smaller - under 150 bytes total.
+        True(encoded.Length < 150,
+            $"Linear ramp should compress far below VERBATIM; got {encoded.Length} bytes.");
+        var decoded = FlacDecoder.Decode(encoded);
+        EqualInts(input, decoded.InterleavedSamples);
+    }
+
+    [TestMethod]
+    public void FlacEncoder_Quadratic_CompressesWithFixedOrder2()
+    {
+        // f(n) = n*n is perfectly fit by FIXED order 2 (2nd difference = constant 2).
+        var input = new int[512];
+        for (int i = 0; i < 512; i++) input[i] = i * i - 65536;
+        byte[] encoded = FlacEncoder.EncodeStream(input, 44100, 1, 32, blockSize: 512);
+        // VERBATIM baseline for 32-bit samples = 2048 bytes. FIXED order 2 residuals
+        // are all 2 -> tiny Rice output.
+        True(encoded.Length < 200,
+            $"Quadratic should compress far below VERBATIM; got {encoded.Length} bytes.");
+        var decoded = FlacDecoder.Decode(encoded);
+        EqualInts(input, decoded.InterleavedSamples);
+    }
 }
