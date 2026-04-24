@@ -27,6 +27,13 @@ Runs on every ILGPU backend - CUDA, OpenCL, CPU, WebGPU, WebGL, Wasm - which mea
 | AIFF | Yes - 8/16/24/32-bit PCM, IEEE 80-bit extended sample rate | Yes |
 | Ogg | Yes - page + packet, CRC-32 per RFC 3533, multi-bitstream demux | Yes |
 
+### Multimedia containers
+
+| Container | Read | Write |
+|-----------|------|-------|
+| WebM / Matroska (EBML) | Via [`SpawnDev.EBML 3.0.0`](https://www.nuget.org/packages/SpawnDev.EBML) - schema-driven path navigation, non-destructive edits | Via `SpawnDev.EBML` |
+| MP4 / ISOBMFF | Structural box reader (ftyp, container recursion, size=0 "rest of file" convention) | Not yet |
+
 ### Transforms (shared)
 
 - MDCT + IMDCT reference implementations (CPU, O(N²))
