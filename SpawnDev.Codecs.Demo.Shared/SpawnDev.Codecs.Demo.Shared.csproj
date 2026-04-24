@@ -21,4 +21,11 @@
 		<ProjectReference Include="..\SpawnDev.Codecs\SpawnDev.Codecs.csproj" />
 	</ItemGroup>
 
+	<!-- Bundled real-world container test fixtures. Embedded as resources
+	     so the same asset is reachable from desktop DemoConsole runs AND
+	     Blazor WASM in-browser runs without static-web-asset plumbing. -->
+	<ItemGroup>
+		<EmbeddedResource Include="TestData\Big_Buck_Bunny_180_10s.webm" />
+	</ItemGroup>
+
 </Project>
