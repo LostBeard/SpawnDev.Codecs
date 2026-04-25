@@ -75,4 +75,54 @@ public static class Vp9SubPelConvolve
         return ConvolveSample(src, srcStart,
             Vp9SubPelFilters.GetRow(filter, subPel));
     }
+
+    /// <summary>
+    /// Horizontal 1D convolve over a w x h block. For each output
+    /// position (x, y), advances <paramref name="x0Q4"/> by
+    /// <paramref name="xStepQ4"/> and convolves 8 source samples
+    /// centered on the current sub-pel position.
+    ///
+    /// Mirror of libvpx <c>convolve_horiz</c> inner walker. Caller
+    /// is responsible for source-buffer padding: the convolution
+    /// reads <c>src[(x0_q4 &gt;&gt; 4) - 3 ..  (x0_q4 &gt;&gt; 4) + 4]</c>
+    /// at each position, so the source buffer must include 3 pixels
+    /// of left padding and at least 4 pixels of right padding past
+    /// the last accessed integer column.
+    /// </summary>
+    /// <param name="src">Source buffer (typically a reference frame).</param>
+    /// <param name="srcStart">Top-left index of the source region.</param>
+    /// <param name="srcStride">Stride between source rows.</param>
+    /// <param name="dst">Destination buffer.</param>
+    /// <param name="dstStart">Top-left index of the destination region.</param>
+    /// <param name="dstStride">Stride between destination rows.</param>
+    /// <param name="filter">Interpolation filter selection.</param>
+    /// <param name="x0Q4">Initial x position in q4 fraction (per-pixel sub-pel offset).</param>
+    /// <param name="xStepQ4">x increment in q4 fraction (16 = 1.0 = no scaling).</param>
+    /// <param name="width">Output width in pixels.</param>
+    /// <param name="height">Output height in pixels.</param>
+    public static void ConvolveHoriz(
+        ReadOnlySpan<byte> src, int srcStart, int srcStride,
+        Span<byte> dst, int dstStart, int dstStride,
+        Vp9InterpFilter filter, int x0Q4, int xStepQ4,
+        int width, int height)
+    {
+        var filterTable = Vp9SubPelFilters.GetFilter(filter);
+        const int leftPadding = Vp9SubPelFilters.SubPelTaps / 2 - 1; // 3
+        for (int y = 0; y < height; y++)
+        {
+            int xOffsetQ4 = x0Q4;
+            int srcRowStart = srcStart + y * srcStride;
+            int dstRowStart = dstStart + y * dstStride;
+            for (int x = 0; x < width; x++)
+            {
+                int srcCol = xOffsetQ4 >> Vp9SubPelFilters.SubPelBits;
+                int subPel = xOffsetQ4 & (Vp9SubPelFilters.SubPelShifts - 1);
+                int srcIdx = srcRowStart + srcCol - leftPadding;
+                var row = filterTable.AsSpan(
+                    subPel * Vp9SubPelFilters.SubPelTaps, Vp9SubPelFilters.SubPelTaps);
+                dst[dstRowStart + x] = ConvolveSample(src, srcIdx, row);
+                xOffsetQ4 += xStepQ4;
+            }
+        }
+    }
 }

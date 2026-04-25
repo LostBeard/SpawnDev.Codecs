@@ -122,4 +122,88 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9SubPelConvolve.ConvolveSample(src, 1, rowArr));
     }
+
+    [TestMethod]
+    public void Vp9SubPelConvolve_Horiz_NoScale_IdentityCopiesPixels()
+    {
+        // x0_q4 = 0 (sub-pel 0 = identity), x_step_q4 = 16 (1.0 step).
+        // Source row of 16 padded pixels (3 left + 8 actual + 5 right).
+        var src = new byte[16];
+        for (int i = 0; i < 16; i++) src[i] = (byte)((i + 1) * 10);
+        var dst = new byte[8];
+
+        // srcStart = 3 means "first output reads src[3..10]" with sub-pel 0 -> src[3+3] = 30+30 = ... wait.
+        // sub-pel 0 row is { 0, 0, 0, 128, 0, 0, 0, 0 } -> picks src[idx + 3].
+        // With srcStart = 3 + leftPadding=3 = 0... no.
+        // Actually horizontal walker reads src[srcStart + 0*stride + 0 - 3 .. + 4]
+        // for the first output pixel at x0_q4 = 0 -> srcCol = 0, srcIdx = srcStart - 3.
+        // To read src[3..10] for the first output (which is src[6] under identity),
+        // srcStart must be 3 - meaning the "source position" is index 3.
+        Vp9SubPelConvolve.ConvolveHoriz(
+            src, srcStart: 3, srcStride: 16,
+            dst, dstStart: 0, dstStride: 8,
+            Vp9InterpFilter.EightTap, x0Q4: 0, xStepQ4: 16,
+            width: 8, height: 1);
+
+        // Identity at sub-pel 0 with srcStart=3 -> output[x] = src[3 + x + (0>>4) - 3 + 3]
+        //                                                 = src[3 + x + 0]
+        // Wait, that's not right. Let me trace:
+        //   srcCol = (x0_q4 + x*step) >> 4 = (0 + 0*16) >> 4 = 0 for x=0
+        //   srcIdx = srcStart + 0*stride + 0 - leftPadding(3) = 3 - 3 = 0
+        //   row = subpel-0 = { 0, 0, 0, 128, 0, 0, 0, 0 }
+        //   dot picks src[0 + 3] = src[3]
+        // For x=1: srcCol = (0 + 16) >> 4 = 1, srcIdx = 3 + 1 - 3 = 1, picks src[1 + 3] = src[4].
+        // So output[x] = src[x + 3].
+        for (int x = 0; x < 8; x++)
+        {
+            Equal((byte)((x + 3 + 1) * 10), dst[x]);
+        }
+    }
+
+    [TestMethod]
+    public void Vp9SubPelConvolve_Horiz_ConstantInput_ConstantOutput()
+    {
+        // Constant input of 100 across all positions; any sub-pel
+        // produces 100 (filter rows sum to 128).
+        var src = new byte[64];
+        for (int i = 0; i < 64; i++) src[i] = 100;
+        var dst = new byte[16];
+
+        Vp9SubPelConvolve.ConvolveHoriz(
+            src, srcStart: 8, srcStride: 64,
+            dst, dstStart: 0, dstStride: 16,
+            Vp9InterpFilter.EightTapSharp, x0Q4: 5, xStepQ4: 16,
+            width: 16, height: 1);
+
+        for (int x = 0; x < 16; x++)
+        {
+            Equal((byte)100, dst[x]);
+        }
+    }
+
+    [TestMethod]
+    public void Vp9SubPelConvolve_Horiz_MultiRow_CopiesEachIndependently()
+    {
+        // 2-row source, identity sub-pel: output rows match source rows
+        // (offset by 3 from srcStart per identity tap pattern).
+        var src = new byte[2 * 16];
+        for (int y = 0; y < 2; y++)
+            for (int x = 0; x < 16; x++)
+                src[y * 16 + x] = (byte)(y * 100 + x);
+        var dst = new byte[2 * 8];
+
+        Vp9SubPelConvolve.ConvolveHoriz(
+            src, srcStart: 3, srcStride: 16,
+            dst, dstStart: 0, dstStride: 8,
+            Vp9InterpFilter.EightTap, x0Q4: 0, xStepQ4: 16,
+            width: 8, height: 2);
+
+        for (int y = 0; y < 2; y++)
+        {
+            for (int x = 0; x < 8; x++)
+            {
+                Equal((byte)(y * 100 + x + 3), dst[y * 8 + x]);
+            }
+        }
+    }
 }
