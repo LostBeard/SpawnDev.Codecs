@@ -144,6 +144,68 @@ public static class Vp9DirectionalPredictor
         }
     }
 
+    /// <summary>
+    /// D135 predictor (135 deg, down-right diagonal from the top-left
+    /// corner). Builds a 2*N-1 "border" array of AVG3-filtered edge
+    /// samples reaching from the bottom-left of the left column up
+    /// through the corner and across the top row, then copies a
+    /// shifted slice of that border into each output row.
+    /// </summary>
+    /// <param name="topLeft">
+    /// Corner pixel diagonally above-left of the block (libvpx
+    /// <c>above[-1]</c>). Passed explicitly to keep the Span API safe.
+    /// </param>
+    /// <param name="above">At least n samples (n+2 read for the AVG3 filter at the right edge).</param>
+    /// <param name="left">N samples from the column left of the block.</param>
+    /// <param name="dst">Destination block (n*stride bytes).</param>
+    /// <param name="n">Block size (4, 8, 16, or 32).</param>
+    /// <param name="stride">Stride in bytes for <paramref name="dst"/>.</param>
+    public static void D135Predict(
+        byte topLeft,
+        ReadOnlySpan<byte> above,
+        ReadOnlySpan<byte> left,
+        Span<byte> dst, int n, int stride)
+    {
+        ValidateSize(n);
+        if (above.Length < n)
+            throw new ArgumentException($"above must hold {n} samples", nameof(above));
+        if (left.Length < n)
+            throw new ArgumentException($"left must hold {n} samples", nameof(left));
+        if (stride < n)
+            throw new ArgumentException("stride must be >= n", nameof(stride));
+        if (dst.Length < (n - 1) * stride + n)
+            throw new ArgumentException("dst too small", nameof(dst));
+
+        // Border layout (libvpx d135_predictor):
+        //   border[0..n-3]       AVG3 of bottom-left left-column samples (descending order)
+        //   border[n-2]          AVG3(topLeft, left[0], left[1])
+        //   border[n-1]          AVG3(left[0], topLeft, above[0])
+        //   border[n]            AVG3(topLeft, above[0], above[1])
+        //   border[n+1..2n-1]    AVG3 of remaining above samples (ascending)
+        // Total length: 2n-1. We allocate 2n for stack alignment and
+        // leave the last byte unused.
+        Span<byte> border = stackalloc byte[2 * n];
+
+        for (int i = 0; i < n - 2; i++)
+            border[i] = Avg3(left[n - 3 - i], left[n - 2 - i], left[n - 1 - i]);
+        border[n - 2] = Avg3(topLeft, left[0], left[1]);
+        border[n - 1] = Avg3(left[0], topLeft, above[0]);
+        border[n + 0] = Avg3(topLeft, above[0], above[1]);
+        for (int i = 0; i < n - 2; i++)
+            border[n + 1 + i] = Avg3(above[i], above[i + 1], above[i + 2]);
+
+        // Each output row is an n-byte slice of border starting at offset
+        // (n - 1 - row). Row 0 starts at offset n-1 (top of the diagonal);
+        // row n-1 starts at offset 0 (bottom-left of the diagonal).
+        for (int row = 0; row < n; row++)
+        {
+            int srcStart = n - 1 - row;
+            int dstStart = row * stride;
+            for (int col = 0; col < n; col++)
+                dst[dstStart + col] = border[srcStart + col];
+        }
+    }
+
     private static void ValidateSize(int n)
     {
         if (n != 4 && n != 8 && n != 16 && n != 32)
