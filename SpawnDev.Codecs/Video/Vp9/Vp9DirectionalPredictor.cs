@@ -206,6 +206,59 @@ public static class Vp9DirectionalPredictor
         }
     }
 
+    /// <summary>
+    /// D117 predictor (117 deg, between vertical and 135 deg). First
+    /// two rows seed AVG2 / AVG3 patterns; the first column past row 1
+    /// gets its own AVG3 path; the rest of the block fills via a
+    /// 2-row-up + 1-col-left shift propagation. Mirror of libvpx
+    /// <c>d117_predictor_c</c>.
+    /// </summary>
+    public static void D117Predict(
+        byte topLeft,
+        ReadOnlySpan<byte> above,
+        ReadOnlySpan<byte> left,
+        Span<byte> dst, int n, int stride)
+    {
+        ValidateSize(n);
+        if (above.Length < n)
+            throw new ArgumentException($"above must hold {n} samples", nameof(above));
+        if (left.Length < n)
+            throw new ArgumentException($"left must hold {n} samples", nameof(left));
+        if (stride < n)
+            throw new ArgumentException("stride must be >= n", nameof(stride));
+        if (dst.Length < (n - 1) * stride + n)
+            throw new ArgumentException("dst too small", nameof(dst));
+
+        // First row: AVG2(above[c-1], above[c]). At c=0, above[-1] = topLeft.
+        dst[0] = Avg2(topLeft, above[0]);
+        for (int c = 1; c < n; c++)
+            dst[c] = Avg2(above[c - 1], above[c]);
+
+        // Second row (offset stride): AVG3 with above[c-2], above[c-1], above[c].
+        // At c=0: AVG3(left[0], topLeft, above[0]). At c=1: AVG3(topLeft, above[0], above[1]).
+        dst[stride + 0] = Avg3(left[0], topLeft, above[0]);
+        dst[stride + 1] = Avg3(topLeft, above[0], above[1]);
+        for (int c = 2; c < n; c++)
+            dst[stride + c] = Avg3(above[c - 2], above[c - 1], above[c]);
+
+        // First column for r=2..n-1.
+        // r=2: AVG3(topLeft, left[0], left[1])
+        // r>=3: AVG3(left[r-3], left[r-2], left[r-1])
+        if (n >= 3)
+            dst[2 * stride] = Avg3(topLeft, left[0], left[1]);
+        for (int r = 3; r < n; r++)
+            dst[r * stride] = Avg3(left[r - 3], left[r - 2], left[r - 1]);
+
+        // Rest of block: dst[r][c] = dst[r-2][c-1] for r=2..n-1, c=1..n-1.
+        for (int r = 2; r < n; r++)
+        {
+            int rowStart = r * stride;
+            int srcRowStart = (r - 2) * stride;
+            for (int c = 1; c < n; c++)
+                dst[rowStart + c] = dst[srcRowStart + c - 1];
+        }
+    }
+
     private static void ValidateSize(int n)
     {
         if (n != 4 && n != 8 && n != 16 && n != 32)

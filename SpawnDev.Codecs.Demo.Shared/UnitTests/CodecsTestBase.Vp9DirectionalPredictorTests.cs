@@ -191,4 +191,47 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() =>
             Vp9DirectionalPredictor.D135Predict(0, new byte[4], new byte[3], new byte[16], n: 4, stride: 4));
     }
+
+    [TestMethod]
+    public void Vp9DirectionalPredictor_D117_4x4_KnownPattern()
+    {
+        // above = [10, 20, 30, 40]; left = [50, 60, 70, 80]; topLeft = 5.
+        // Row 0 (AVG2): AVG2(5,10)=8, AVG2(10,20)=15, AVG2(20,30)=25, AVG2(30,40)=35.
+        // Row 1 (AVG3): AVG3(50,5,10)=18, AVG3(5,10,20)=11, AVG3(10,20,30)=20, AVG3(20,30,40)=30.
+        // Row 2 col 0: AVG3(5, 50, 60) = (5+100+60+2)>>2 = 41
+        //         cols 1..3 = row 0 cols 0..2 = 8, 15, 25.
+        // Row 3 col 0: AVG3(50, 60, 70) = 60
+        //         cols 1..3 = row 1 cols 0..2 = 18, 11, 20.
+        var above = new byte[] { 10, 20, 30, 40 };
+        var left = new byte[] { 50, 60, 70, 80 };
+        var dst = new byte[16];
+        Vp9DirectionalPredictor.D117Predict(topLeft: 5, above, left, dst, n: 4, stride: 4);
+
+        Equal((byte)8,  dst[0]);  Equal((byte)15, dst[1]);  Equal((byte)25, dst[2]);  Equal((byte)35, dst[3]);
+        Equal((byte)18, dst[4]);  Equal((byte)11, dst[5]);  Equal((byte)20, dst[6]);  Equal((byte)30, dst[7]);
+        Equal((byte)41, dst[8]);  Equal((byte)8,  dst[9]);  Equal((byte)15, dst[10]); Equal((byte)25, dst[11]);
+        Equal((byte)60, dst[12]); Equal((byte)18, dst[13]); Equal((byte)11, dst[14]); Equal((byte)20, dst[15]);
+    }
+
+    [TestMethod]
+    public void Vp9DirectionalPredictor_D117_FlatInputProducesFlatOutput()
+    {
+        var above = new byte[8];
+        var left = new byte[8];
+        for (int i = 0; i < 8; i++) { above[i] = 100; left[i] = 100; }
+        var dst = new byte[64];
+        Vp9DirectionalPredictor.D117Predict(topLeft: 100, above, left, dst, n: 8, stride: 8);
+        for (int i = 0; i < 64; i++) Equal((byte)100, dst[i]);
+    }
+
+    [TestMethod]
+    public void Vp9DirectionalPredictor_D117_RejectsInvalidArgs()
+    {
+        Throws<ArgumentOutOfRangeException>(() =>
+            Vp9DirectionalPredictor.D117Predict(0, new byte[5], new byte[5], new byte[25], n: 5, stride: 5));
+        Throws<ArgumentException>(() =>
+            Vp9DirectionalPredictor.D117Predict(0, new byte[3], new byte[4], new byte[16], n: 4, stride: 4));
+        Throws<ArgumentException>(() =>
+            Vp9DirectionalPredictor.D117Predict(0, new byte[4], new byte[3], new byte[16], n: 4, stride: 4));
+    }
 }
