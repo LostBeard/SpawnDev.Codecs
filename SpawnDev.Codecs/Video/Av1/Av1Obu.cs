@@ -51,6 +51,7 @@ public readonly record struct Av1Obu(
     Av1ObuType Type,
     int TemporalId,
     int SpatialId,
+    bool HasExtension,
     bool HasSizeField,
     int PayloadOffset,
     int PayloadLength)
@@ -121,7 +122,7 @@ public static class Av1ObuParser
                 payloadLength = data.Length - payloadOffset;
             }
 
-            yield return new Av1Obu(type, temporalId, spatialId, hasSizeField,
+            yield return new Av1Obu(type, temporalId, spatialId, extFlag, hasSizeField,
                 payloadOffset, payloadLength);
 
             pos = payloadOffset + payloadLength;
