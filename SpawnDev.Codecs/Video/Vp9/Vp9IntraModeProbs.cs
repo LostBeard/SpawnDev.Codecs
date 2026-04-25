@@ -22,7 +22,7 @@
 namespace SpawnDev.Codecs.Video.Vp9;
 
 /// <summary>VP9 default intra mode probability tables.</summary>
-public static class Vp9IntraModeProbs
+public static partial class Vp9IntraModeProbs
 {
     /// <summary>Number of intra mode tree probabilities (libvpx INTRA_MODES - 1).</summary>
     public const int ProbsPerMode = 9;
