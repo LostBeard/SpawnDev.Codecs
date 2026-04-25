@@ -36,6 +36,24 @@ public sealed class Av1Decoder : IVideoDecoder
     public IReadOnlyDictionary<Av1ObuType, int> LastFrameObuCounts { get; private set; }
         = new Dictionary<Av1ObuType, int>();
 
+    /// <summary>
+    /// Cumulative count of every OBU type observed across all
+    /// <see cref="DecodeFrameAsync"/> calls on this decoder instance.
+    /// </summary>
+    public IReadOnlyDictionary<Av1ObuType, int> CumulativeObuCounts => _cumulativeObuCounts;
+    private readonly Dictionary<Av1ObuType, int> _cumulativeObuCounts = new();
+
+    /// <summary>
+    /// Cumulative count of every Av1FrameType observed across all
+    /// <see cref="DecodeFrameAsync"/> calls on this decoder instance.
+    /// Populated for every frame whose header was parsed.
+    /// </summary>
+    public IReadOnlyDictionary<Av1FrameType, int> CumulativeFrameTypeCounts => _cumulativeFrameTypeCounts;
+    private readonly Dictionary<Av1FrameType, int> _cumulativeFrameTypeCounts = new();
+
+    /// <summary>Total number of Temporal Units (IVF frames) decoded.</summary>
+    public int TotalTemporalUnits { get; private set; }
+
     /// <inheritdoc/>
     public async ValueTask<int> DecodeFrameAsync(
         ReadOnlyMemory<byte> compressedPacket,
@@ -43,6 +61,8 @@ public sealed class Av1Decoder : IVideoDecoder
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(frameSink);
+
+        TotalTemporalUnits++;
 
         // Parse all OBUs in this Temporal Unit.
         var counts = new Dictionary<Av1ObuType, int>();
@@ -52,6 +72,8 @@ public sealed class Av1Decoder : IVideoDecoder
         {
             counts.TryGetValue(obu.Type, out int c);
             counts[obu.Type] = c + 1;
+            _cumulativeObuCounts.TryGetValue(obu.Type, out int cc);
+            _cumulativeObuCounts[obu.Type] = cc + 1;
 
             if (obu.Type == Av1ObuType.SequenceHeader)
             {
@@ -66,9 +88,12 @@ public sealed class Av1Decoder : IVideoDecoder
                 hasFrameData = true;
                 if (LastSequenceHeader is not null)
                 {
-                    LastFrameHeader = Av1FrameHeaderParser.Parse(
+                    var fh = Av1FrameHeaderParser.Parse(
                         compressedPacket.Span.Slice(obu.PayloadOffset, obu.PayloadLength),
                         LastSequenceHeader);
+                    LastFrameHeader = fh;
+                    _cumulativeFrameTypeCounts.TryGetValue(fh.FrameType, out int fc);
+                    _cumulativeFrameTypeCounts[fh.FrameType] = fc + 1;
                 }
                 // Per-frame block decode goes here once the inverse-transform
                 // + prediction + entropy-decode pipeline is wired up.

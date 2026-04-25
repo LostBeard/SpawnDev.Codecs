@@ -94,6 +94,46 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task Av1Decoder_BbbStream_CumulativeStats_MatchObservedTotals()
+    {
+        // After driving every BBB AV1 frame through the decoder, cumulative
+        // counts should reflect the OBU type distribution + frame type
+        // breakdown observed by the per-frame metadata tests.
+        var bytes = LoadAv1Fixture();
+        await using var decoder = new Av1Decoder();
+        var sink = new Av1RecordingSink();
+
+        foreach (var ivfFrame in IvfReader.EnumerateFrames(bytes))
+        {
+            await decoder.DecodeFrameAsync(ivfFrame.Data, sink);
+        }
+
+        // 60 IVF frames = 60 Temporal Units.
+        Equal(60, decoder.TotalTemporalUnits);
+
+        // OBU type distribution observed in fixture:
+        //   Frame: 62, TemporalDelimiter: 60, FrameHeader: 25, SequenceHeader: 1
+        var obuCounts = decoder.CumulativeObuCounts;
+        True(obuCounts.ContainsKey(Av1ObuType.SequenceHeader),
+            $"expected SH OBUs; saw {string.Join(',', obuCounts.Keys)}");
+        Equal(60, obuCounts[Av1ObuType.TemporalDelimiter]);
+        Equal(1, obuCounts[Av1ObuType.SequenceHeader]);
+        Equal(62, obuCounts[Av1ObuType.Frame]);
+        Equal(25, obuCounts[Av1ObuType.FrameHeader]);
+
+        // Frame type breakdown across ALL coded frame data OBUs (62 Frame
+        // + 25 FrameHeader = 87 frame headers parsed). BBB has hidden
+        // alt-ref frames and showable-but-not-shown frames; the cumulative
+        // count tracks every frame header we parsed.
+        var ftCounts = decoder.CumulativeFrameTypeCounts;
+        int kfCount = ftCounts.GetValueOrDefault(Av1FrameType.KeyFrame, 0);
+        int interCount = ftCounts.GetValueOrDefault(Av1FrameType.InterFrame, 0);
+        Equal(87, kfCount + interCount);
+        Equal(26, kfCount);
+        // No IntraOnlyFrame or SwitchFrame in BBB.
+    }
+
+    [TestMethod]
     public async Task Av1Decoder_BbbFirstFrame_PopulatesLastFrameHeader_AsKeyframe()
     {
         var bytes = LoadAv1Fixture();
