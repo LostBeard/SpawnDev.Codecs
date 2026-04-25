@@ -154,4 +154,87 @@ public abstract partial class CodecsTestBase
             null,
             (Vp9TxSize.Tx16x16, false)));
     }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_PartitionPlane_Block8x8_BothZero()
+    {
+        // bsl = 0 (8x8). Both ctx bytes 0 -> bit 0 = 0. Context = 0.
+        Equal(0, Vp9NeighborContexts.GetPartitionPlaneContext(
+            0, 0, Vp9BlockSize.Block8x8));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_PartitionPlane_Block8x8_AboveSplit()
+    {
+        // bsl = 0. above_ctx bit 0 = 1, left = 0. -> 0*2 + 1 = 1, +0*4 = 1.
+        Equal(1, Vp9NeighborContexts.GetPartitionPlaneContext(
+            0b00000001, 0, Vp9BlockSize.Block8x8));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_PartitionPlane_Block8x8_LeftSplit()
+    {
+        // bsl = 0. above = 0, left bit 0 = 1. -> 1*2 + 0 = 2.
+        Equal(2, Vp9NeighborContexts.GetPartitionPlaneContext(
+            0, 0b00000001, Vp9BlockSize.Block8x8));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_PartitionPlane_Block8x8_BothSplit()
+    {
+        // bsl = 0. both = 1 -> 1*2 + 1 = 3.
+        Equal(3, Vp9NeighborContexts.GetPartitionPlaneContext(
+            0b00000001, 0b00000001, Vp9BlockSize.Block8x8));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_PartitionPlane_Block16x16_GroupOffset()
+    {
+        // bsl = 1 (16x16). above bit 1 of 0b10 = 1, left = 0.
+        // (0*2 + 1) + 1*4 = 5 (bsl=1 group, "above split, left not split").
+        Equal(5, Vp9NeighborContexts.GetPartitionPlaneContext(
+            0b00000010, 0, Vp9BlockSize.Block16x16));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_PartitionPlane_Block32x32_BaseAt8()
+    {
+        // bsl = 2 (32x32). Both ctx bytes 0 -> 0 + 2*4 = 8.
+        Equal(8, Vp9NeighborContexts.GetPartitionPlaneContext(
+            0, 0, Vp9BlockSize.Block32x32));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_PartitionPlane_Block64x64_BaseAt12()
+    {
+        // bsl = 3 (64x64). Both ctx bytes 0 -> 0 + 3*4 = 12.
+        Equal(12, Vp9NeighborContexts.GetPartitionPlaneContext(
+            0, 0, Vp9BlockSize.Block64x64));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_PartitionPlane_Block64x64_BothSplitMaxContext()
+    {
+        // bsl = 3. above bit 3 = 1 (0b1000), left bit 3 = 1.
+        // (1*2 + 1) + 3*4 = 3 + 12 = 15 (the highest valid partition context).
+        Equal(15, Vp9NeighborContexts.GetPartitionPlaneContext(
+            0b00001000, 0b00001000, Vp9BlockSize.Block64x64));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_PartitionPlane_Block16x16_OnlyBit1Counts()
+    {
+        // bsl = 1. above_ctx 0b11111101 -> bit 1 = 0, same for left.
+        // Other bits don't contribute. Split state = 0, base for bsl=1
+        // group is 1*4 = 4.
+        Equal(4, Vp9NeighborContexts.GetPartitionPlaneContext(
+            0b11111101, 0b11111101, Vp9BlockSize.Block16x16));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_PartitionPlane_RejectsOutOfRangeBlock()
+    {
+        Throws<ArgumentOutOfRangeException>(() =>
+            Vp9NeighborContexts.GetPartitionPlaneContext(0, 0, (Vp9BlockSize)99));
+    }
 }

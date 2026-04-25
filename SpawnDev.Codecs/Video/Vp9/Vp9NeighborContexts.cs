@@ -18,9 +18,8 @@
 //   true       = neighbor is intra-coded
 //   false      = neighbor is inter-coded
 //
-// More involved helpers (partition_plane_context, reference-frame
-// context predictors) need richer neighbor state - kept for
-// downstream slices.
+// More involved helpers (reference-frame context predictors) need
+// richer neighbor state - kept for downstream slices.
 
 namespace SpawnDev.Codecs.Video.Vp9;
 
@@ -130,5 +129,53 @@ public static class Vp9NeighborContexts
         if (!hasAbove) aboveCtx = leftCtx;
         if (!hasLeft) leftCtx = aboveCtx;
         return (aboveCtx + leftCtx) > maxIdx ? 1 : 0;
+    }
+
+    /// <summary>
+    /// libvpx <c>PARTITION_PLOFFSET</c> = 4: stride between bsl groups
+    /// in the 16-context partition probability tables.
+    /// </summary>
+    public const int PartitionPlaneOffset = 4;
+
+    /// <summary>
+    /// libvpx <c>partition_plane_context</c>. Returns 0..15 indexing
+    /// either <see cref="Vp9PartitionProbs.KfPartitionProbs"/> or
+    /// <see cref="Vp9PartitionProbs.DefaultPartitionProbs"/>.
+    ///
+    /// Layout: <c>(left_split * 2 + above_split) + bsl * 4</c>, where
+    /// <c>bsl = mi_width_log2_lookup[blockSize]</c> picks the bsl
+    /// group (0 = 8x8 -> 4x4, 1 = 16x16 -> 8x8, 2 = 32x32 -> 16x16,
+    /// 3 = 64x64 -> 32x32) and the (left_split, above_split) bits
+    /// pick the 4 contexts within that group.
+    /// </summary>
+    /// <param name="aboveSegCtx">
+    /// Above-row segment-context byte at column <c>mi_col</c>.
+    /// libvpx stores 1 bit per bsl level; only the bit at
+    /// <c>bsl = mi_width_log2_lookup[blockSize]</c> matters here.
+    /// </param>
+    /// <param name="leftSegCtx">
+    /// Left-column segment-context byte at <c>mi_row &amp; MI_MASK</c>.
+    /// </param>
+    /// <param name="blockSize">
+    /// Block size whose partition decision is being decoded. Must be
+    /// >= Block8x8 (libvpx never decodes a partition for sub-8x8).
+    /// </param>
+    public static int GetPartitionPlaneContext(
+        byte aboveSegCtx,
+        byte leftSegCtx,
+        Vp9BlockSize blockSize)
+    {
+        int idx = (int)blockSize;
+        if ((uint)idx >= (uint)Vp9BlockSizes.Count)
+            throw new ArgumentOutOfRangeException(nameof(blockSize), blockSize,
+                "VP9 block size index out of range.");
+        int bsl = Vp9BlockSizes.MiWidthLog2[idx];
+        if (bsl < 0 || bsl > 3)
+            throw new ArgumentOutOfRangeException(nameof(blockSize), blockSize,
+                "Partition decoding only applies to Block8x8..Block64x64.");
+
+        int above = (aboveSegCtx >> bsl) & 1;
+        int left = (leftSegCtx >> bsl) & 1;
+        return (left * 2 + above) + bsl * PartitionPlaneOffset;
     }
 }
