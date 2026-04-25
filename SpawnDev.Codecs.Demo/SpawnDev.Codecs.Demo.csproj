@@ -38,7 +38,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="SpawnDev.ILGPU" Version="4.9.2-rc.18" />
+    <PackageReference Include="SpawnDev.ILGPU" Version="4.9.2-rc.19" />
     <ProjectReference Include="..\SpawnDev.Codecs\SpawnDev.Codecs.csproj" />
     <ProjectReference Include="..\SpawnDev.Codecs.Demo.Shared\SpawnDev.Codecs.Demo.Shared.csproj" />
   </ItemGroup>
