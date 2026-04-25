@@ -18,9 +18,9 @@
 //   true       = neighbor is intra-coded
 //   false      = neighbor is inter-coded
 //
-// More involved helpers (partition_plane_context, get_tx_size_context,
-// reference-frame context predictors) need richer neighbor state -
-// kept for downstream slices.
+// More involved helpers (partition_plane_context, reference-frame
+// context predictors) need richer neighbor state - kept for
+// downstream slices.
 
 namespace SpawnDev.Codecs.Video.Vp9;
 
@@ -91,5 +91,44 @@ public static class Vp9NeighborContexts
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// libvpx <c>get_tx_size_context</c>. Returns 0 or 1 indexing the
+    /// <see cref="Vp9TxModeProbs.TxSizeContexts"/> dimension of the
+    /// per-context tx_size probability tables.
+    /// </summary>
+    /// <param name="blockSize">Current block's <see cref="Vp9BlockSize"/>.</param>
+    /// <param name="above">
+    /// Above neighbor's (tx_size, skip) tuple, or null if no above
+    /// neighbor. Skipped neighbors do not contribute their tx_size.
+    /// </param>
+    /// <param name="left">
+    /// Left neighbor's (tx_size, skip) tuple, or null if no left
+    /// neighbor. Skipped neighbors do not contribute their tx_size.
+    /// </param>
+    /// <remarks>
+    /// libvpx logic: when a neighbor is missing entirely (image edge),
+    /// inherit from the other neighbor. When a neighbor is present
+    /// but skip-coded, treat its tx_size as max_tx_size for the
+    /// CURRENT block. Context = 1 if the (above + left) tx_size sum
+    /// exceeds max_tx_size, else 0.
+    /// </remarks>
+    public static int GetTxSizeContext(
+        Vp9BlockSize blockSize,
+        (Vp9TxSize TxSize, bool Skip)? above,
+        (Vp9TxSize TxSize, bool Skip)? left)
+    {
+        var maxTxSize = Vp9MaxTxSize.ForBlockSize(blockSize);
+        int maxIdx = (int)maxTxSize;
+
+        bool hasAbove = above.HasValue;
+        bool hasLeft = left.HasValue;
+
+        int aboveCtx = hasAbove && !above!.Value.Skip ? (int)above.Value.TxSize : maxIdx;
+        int leftCtx = hasLeft && !left!.Value.Skip ? (int)left.Value.TxSize : maxIdx;
+        if (!hasAbove) aboveCtx = leftCtx;
+        if (!hasLeft) leftCtx = aboveCtx;
+        return (aboveCtx + leftCtx) > maxIdx ? 1 : 0;
     }
 }
