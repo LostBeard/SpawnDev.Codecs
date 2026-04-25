@@ -15,6 +15,7 @@
 // architectural reason as slices 120 and 131 - 256 `flat out`
 // varyings per thread blow past GL_MAX_VARYING_VECTORS.
 
+using System.Runtime.CompilerServices;
 using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.ILGPU;
@@ -183,6 +184,22 @@ public sealed class Vp9Idct16x16Kernel : IDisposable
     /// 16-point 1D iDCT butterfly, bit-exact against
     /// Vp9Idct16x16Reference.Idct16_1d. 7 stages.
     /// </summary>
+    /// <remarks>
+    /// <see cref="MethodImplOptions.NoInlining"/> tells the ILGPU IR
+    /// Inliner to skip this method, which routes the WGSL codegen
+    /// through the function-definition path Geordi added in
+    /// SpawnDev.ILGPU rc.14 commit <c>1cb4f6c</c>. Without this
+    /// attribute the WebGPU shader inlines the 7-stage 16-point
+    /// butterfly at all 32 call sites in <see cref="IdctKernel"/>,
+    /// producing ~3800 lines of straight-line WGSL that hits Chrome's
+    /// validator compile cliff (~30s+ per kernel instance, every
+    /// test method timing out). With the attribute, WGSL emits one
+    /// <c>fn Idct16Row_NN(...)</c> definition + 32 function calls -
+    /// the validator chews through it in milliseconds. Other backends
+    /// (CPU / CUDA / OpenCL / Wasm) handle non-inlined methods
+    /// natively and are unaffected by the attribute.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void Idct16Row(
         short i0,  short i1,  short i2,  short i3,
         short i4,  short i5,  short i6,  short i7,
