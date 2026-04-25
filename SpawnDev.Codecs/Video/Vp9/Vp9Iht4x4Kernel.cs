@@ -1,16 +1,25 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
 // ILGPU kernel for the VP9 inverse 2D 4x4 hybrid transform. This is the
-// kernel side of slice 122's Vp9Iht4x4Reference: a per-block tx_type
-// selects one of four row+column transform pairs - iDCT or iADST in
-// either direction. VP9 intra blocks carry tx_type as per-block
-// metadata (spec sec 8.7.1.6), so the kernel reads it from a parallel
-// ArrayView keyed by block index.
+// kernel side of slice 122's Vp9Iht4x4Reference: tx_type is a SCALAR
+// kernel parameter (one tx_type per dispatch). The CPU reference has
+// the same shape - one tx_type per call - so the decoder simply groups
+// blocks by tx_type before dispatch, the canonical libvpx pattern.
 //
 // Inline locals only - 16 shorts per block fit comfortably in thread
-// registers on every backend, same shape as slices 117 (iDCT 4x4) and
-// 130 (iADST 4x4). Expected backend coverage: 5/6 green. WebGL drops
-// out on the same atomics constraint the other 4x4 kernels hit.
+// registers on every backend. Same shape as slice 117 (iDCT 4x4) and
+// slice 130 (iADST 4x4); WebGL drops out at the runner level on the
+// shared atomics constraint.
+//
+// Why scalar tx_type and not per-block via ArrayView<byte>: the iHT
+// 8x8 sibling kernel (slice 133) hit a WebGPU+Wasm bit-exact
+// divergence when divergent control flow within a workgroup
+// interacted with LocalMemory<int>(64). Although the 4x4 size uses
+// inline locals (no LocalMemory) and survived the divergent-CF case
+// in isolation, harmonizing both 4x4 and 8x8 kernels on a uniform
+// per-dispatch tx_type keeps the decoder API symmetric: the consumer
+// groups by tx_type once and uses the same call shape at both block
+// sizes.
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -19,8 +28,9 @@ using SpawnDev.ILGPU;
 namespace SpawnDev.Codecs.Video.Vp9;
 
 /// <summary>
-/// Batched ILGPU kernel for VP9 iHT 4x4. Each block carries its own
-/// tx_type byte (0..3) which selects the row + column 1D transforms.
+/// Batched ILGPU kernel for VP9 iHT 4x4. Every block in a single
+/// dispatch shares one tx_type; group blocks by tx_type at the call
+/// site for mixed-tx_type frames.
 /// </summary>
 public sealed class Vp9Iht4x4Kernel : IDisposable
 {
@@ -36,7 +46,7 @@ public sealed class Vp9Iht4x4Kernel : IDisposable
     private const int SinPi4_9 = 15212;
 
     private readonly Accelerator _accelerator;
-    private readonly Action<Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<byte>, int, int> _kernel;
+    private readonly Action<Index1D, ArrayView<short>, ArrayView<byte>, int, int, int> _kernel;
 
     /// <summary>Compile the kernel onto <paramref name="accelerator"/>.</summary>
     public Vp9Iht4x4Kernel(Accelerator accelerator)
@@ -44,18 +54,18 @@ public sealed class Vp9Iht4x4Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<byte>, int, int>(IhtKernel);
+            Index1D, ArrayView<short>, ArrayView<byte>, int, int, int>(IhtKernel);
     }
 
     /// <summary>
-    /// Run the iHT across <paramref name="blockCount"/> 4x4 blocks.
-    /// <paramref name="txTypes"/> holds one byte per block (0..3);
-    /// the low bit selects row transform (0=iDCT, 1=iADST) and the
-    /// high bit selects column transform.
+    /// Run the iHT across <paramref name="blockCount"/> 4x4 blocks
+    /// using <paramref name="txType"/> uniformly. Low bit of tx_type
+    /// selects row transform (0=iDCT, 1=iADST), high bit selects
+    /// column.
     /// </summary>
     public async Task RunAsync(
+        Vp9TxType4x4 txType,
         ReadOnlyMemory<short> coeffs,
-        ReadOnlyMemory<byte> txTypes,
         Memory<byte> predAndDest,
         int blockCount,
         int blockStrideBytes = 16)
@@ -64,18 +74,14 @@ public sealed class Vp9Iht4x4Kernel : IDisposable
         if (blockCount == 0) return;
         if (coeffs.Length < blockCount * 16L)
             throw new ArgumentException("coeffs too small", nameof(coeffs));
-        if (txTypes.Length < blockCount)
-            throw new ArgumentException("txTypes too small", nameof(txTypes));
         if (predAndDest.Length < blockCount * (long)blockStrideBytes)
             throw new ArgumentException("predAndDest too small", nameof(predAndDest));
 
         using var dCoeffs = _accelerator.Allocate1D<short>(blockCount * 16);
-        using var dTxTypes = _accelerator.Allocate1D<byte>(blockCount);
         using var dDest = _accelerator.Allocate1D<byte>(blockCount * (long)blockStrideBytes);
         dCoeffs.View.CopyFromCPU(coeffs.Span.ToArray());
-        dTxTypes.View.CopyFromCPU(txTypes.Span.ToArray());
         dDest.View.CopyFromCPU(predAndDest.Span.ToArray());
-        _kernel(blockCount, dCoeffs.View, dTxTypes.View, dDest.View, blockCount, blockStrideBytes);
+        _kernel(blockCount, dCoeffs.View, dDest.View, (int)txType, blockCount, blockStrideBytes);
         await _accelerator.SynchronizeAsync();
         var readBack = await dDest.CopyToHostAsync();
         readBack.AsSpan(0, predAndDest.Length).CopyTo(predAndDest.Span);
@@ -84,8 +90,8 @@ public sealed class Vp9Iht4x4Kernel : IDisposable
     private static void IhtKernel(
         Index1D blockIdx,
         ArrayView<short> coeffs,
-        ArrayView<byte> txTypes,
         ArrayView<byte> dest,
+        int txType,
         int blockCount,
         int blockStrideBytes)
     {
@@ -95,9 +101,8 @@ public sealed class Vp9Iht4x4Kernel : IDisposable
         long cBase = (long)idx * 16;
         long dBase = (long)idx * blockStrideBytes;
 
-        int tx = txTypes[idx];
-        bool rowIsAdst = (tx & 1) != 0;
-        bool colIsAdst = (tx & 2) != 0;
+        bool rowIsAdst = (txType & 1) != 0;
+        bool colIsAdst = (txType & 2) != 0;
 
         // Read 16 coefficients into registers.
         short c00 = coeffs[cBase + 0],  c01 = coeffs[cBase + 1],
@@ -114,7 +119,7 @@ public sealed class Vp9Iht4x4Kernel : IDisposable
         short t20, t21, t22, t23;
         short t30, t31, t32, t33;
 
-        // Row pass - single branch for all 4 rows since they share tx_type.
+        // Row pass.
         if (rowIsAdst)
         {
             Iadst4Row(c00, c01, c02, c03, out t00, out t01, out t02, out t03);
@@ -130,9 +135,8 @@ public sealed class Vp9Iht4x4Kernel : IDisposable
             Idct4Row(c30, c31, c32, c33, out t30, out t31, out t32, out t33);
         }
 
-        // Column pass - 4 columns, each branching on colIsAdst. Inline
-        // the residual-add + clip per column so the 4 per-column outputs
-        // can live purely in registers.
+        // Column pass - 4 columns, branch on colIsAdst per column. The
+        // 4 outputs stay in registers for immediate residual-add + clip.
         short co00, co10, co20, co30;
         if (colIsAdst)
             Iadst4Row(t00, t10, t20, t30, out co00, out co10, out co20, out co30);
