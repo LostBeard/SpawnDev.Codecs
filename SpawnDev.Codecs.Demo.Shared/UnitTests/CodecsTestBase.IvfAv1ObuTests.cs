@@ -100,16 +100,15 @@ public abstract partial class CodecsTestBase
         }
         True(sh is not null, "no SequenceHeader OBU found in first frame");
 
-        // BBB SH parses without exception. Headline fields:
-        //   Profile = 0, StillPicture = false (not a still image).
+        // BBB at 320x180, 8-bit, 4:2:0.
         Equal(0, sh!.SeqProfile);
         Equal(false, sh.StillPicture);
-        // MaxFrameWidth / MaxFrameHeight / BitDepth come from later
-        // bits in the SH that depend on the optional timing/OP loop -
-        // pin once the SH parser handles those correctly. For now,
-        // verify the simpler fields and that we got SOMETHING parseable.
-        True(sh.MaxFrameWidth > 0, $"MaxFrameWidth must be positive; got {sh.MaxFrameWidth}");
-        True(sh.MaxFrameHeight > 0, $"MaxFrameHeight must be positive; got {sh.MaxFrameHeight}");
+        Equal(320, sh.MaxFrameWidth);
+        Equal(180, sh.MaxFrameHeight);
+        Equal(8, sh.BitDepth);
+        Equal(false, sh.Monochrome);
+        Equal(1, sh.SubsamplingX);
+        Equal(1, sh.SubsamplingY);
     }
 
     [TestMethod]

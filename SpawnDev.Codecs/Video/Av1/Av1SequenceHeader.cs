@@ -82,7 +82,11 @@ public static class Av1SequenceHeaderParser
 
         int seqProfile = (int)br.ReadBits(3);
         bool stillPicture = br.ReadFlag();
-        bool reducedStill = stillPicture && br.ReadFlag();
+        // Per AV1 spec 5.5.1: reduced_still_picture_header is read
+        // UNCONDITIONALLY (not gated on still_picture). Spec
+        // constraint: reduced=1 implies still=1, but the bit is
+        // always present in the bitstream.
+        bool reducedStill = br.ReadFlag();
 
         bool timingInfoPresent = false;
         bool decoderModelInfoPresent = false;
@@ -90,7 +94,9 @@ public static class Av1SequenceHeaderParser
 
         if (reducedStill)
         {
-            // Most flags forced to 0; OP count = 1; operating_point_idc = 0.
+            // OP count = 1; operating_point_idc = 0; per spec, just one
+            // f(5) read for seq_level_idx[0].
+            br.ReadBits(5); // seq_level_idx[0]
         }
         else
         {
