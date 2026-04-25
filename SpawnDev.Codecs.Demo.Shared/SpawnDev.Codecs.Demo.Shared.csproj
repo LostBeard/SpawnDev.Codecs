@@ -37,6 +37,10 @@
 		     Used by Vp9Decoder integration tests to compare our decoder's
 		     output against ffmpeg's reference. -->
 		<EmbeddedResource Include="TestData\bbb_first_frame.yuv" />
+		<!-- AV1 IVF test fixture: 320x180 60-frame 2-second AV1 stream
+		     generated from BBB.webm with libaom-av1 cpu-used 8 b:v 200k.
+		     Used by AV1 OBU parser + future Av1Decoder tests. -->
+		<EmbeddedResource Include="TestData\bbb_180_2s.ivf" />
 	</ItemGroup>
 
 </Project>
