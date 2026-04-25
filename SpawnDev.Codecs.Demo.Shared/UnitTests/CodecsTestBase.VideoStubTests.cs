@@ -63,20 +63,4 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
-    public async Task Av1Decoder_DecodeFrame_ThrowsDescriptive()
-    {
-        await using var dec = new Av1Decoder();
-        bool threw = false;
-        try
-        {
-            await dec.DecodeFrameAsync(new byte[] { 0 }, new NoopFrameSink());
-        }
-        catch (NotImplementedException ex)
-        {
-            threw = true;
-            Contains("AV1", ex.Message);
-        }
-        True(threw);
-    }
 }
