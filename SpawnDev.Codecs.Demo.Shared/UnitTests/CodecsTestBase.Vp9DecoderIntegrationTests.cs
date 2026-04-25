@@ -152,6 +152,53 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task Vp9Decoder_FirstFrame_PlaneSizesMatchFfmpegGroundTruth()
+    {
+        // Cross-check our decoder's output plane geometry against the
+        // ffmpeg-decoded ground truth for the same first frame.
+        //
+        // The ground truth was extracted with:
+        //   ffmpeg -i Big_Buck_Bunny_180_10s.webm -vframes 1 \
+        //          -f rawvideo -pix_fmt yuv420p bbb_first_frame.yuv
+        //
+        // and embedded as 86400 bytes (320x180 + 160x90 + 160x90).
+        //
+        // Pixel values are NOT compared yet - the decoder currently
+        // emits placeholder gray. This test pins the geometry match
+        // so future pixel-fidelity progress is visible.
+        var assembly = typeof(CodecsTestBase).Assembly;
+        const string resourceName =
+            "SpawnDev.Codecs.Demo.Shared.TestData.bbb_first_frame.yuv";
+        using var groundTruth = assembly.GetManifestResourceStream(resourceName)
+            ?? throw new FileNotFoundException(
+                $"Missing embedded resource '{resourceName}'.");
+        var gtBytes = new byte[(int)groundTruth.Length];
+        groundTruth.ReadExactly(gtBytes);
+        Equal(86_400, gtBytes.Length);
+
+        using var stream = LoadBigBuckBunnyWebM();
+        var container = new MatroskaContainer(stream);
+        var video = container.Tracks.First(t => t.IsVideo);
+        var first = container.Frames.First(f => f.TrackNumber == video.TrackNumber);
+
+        await using var decoder = new Vp9Decoder();
+        var sink = new RecordingVp9FrameSink();
+        await decoder.DecodeFrameAsync(first.Data, sink);
+
+        True(sink.Frames.Count >= 1, "expected at least one emitted frame");
+        var snap = sink.Frames[0];
+
+        // Geometry: must match ffmpeg's interpretation exactly.
+        Equal(320, snap.Width);
+        Equal(180, snap.Height);
+        Equal(57_600, snap.Y.Length);    // = 320 * 180
+        Equal(14_400, snap.U.Length);    // = 160 * 90
+        Equal(14_400, snap.V.Length);    // = 160 * 90
+        // Total bytes = 86_400, matching the embedded ground truth.
+        Equal(gtBytes.Length, snap.Y.Length + snap.U.Length + snap.V.Length);
+    }
+
+    [TestMethod]
     public async Task Vp9Decoder_DecodesEntireStream_NoExceptions()
     {
         // Smoke test: feed every video packet, verify nothing throws.
