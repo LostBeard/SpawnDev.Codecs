@@ -19,7 +19,7 @@ namespace SpawnDev.Codecs.Video.Vp9;
 
 public static partial class Vp9CoefProbs
 {
-    /// <summary>VP9 category MIN_VAL constants (libvpx CAT<N>_MIN_VAL).</summary>
+    /// <summary>VP9 category MIN_VAL constants (libvpx CAT&lt;N&gt;_MIN_VAL).</summary>
     public static class CatMinVal
     {
         /// <summary>Cat1 magnitude in [5, 6].</summary>
