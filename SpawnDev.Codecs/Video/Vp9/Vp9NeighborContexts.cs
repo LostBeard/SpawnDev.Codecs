@@ -178,4 +178,54 @@ public static class Vp9NeighborContexts
         int left = (leftSegCtx >> bsl) & 1;
         return (left * 2 + above) + bsl * PartitionPlaneOffset;
     }
+
+    /// <summary>
+    /// libvpx <c>SWITCHABLE_FILTERS</c> = 3. Used both as the count of
+    /// per-block selectable filters (EightTap / EightTapSmooth /
+    /// EightTapSharp) and as the sentinel "missing or non-inter
+    /// neighbor" value when computing switchable-interp context.
+    /// </summary>
+    public const int SwitchableFiltersCount = 3;
+
+    /// <summary>
+    /// libvpx <c>vp9_get_pred_context_switchable_interp</c>. Returns
+    /// 0..3 indexing the <see cref="Vp9SwitchableInterpProbs"/> 4-context
+    /// dimension. Logic: a neighbor contributes its actual filter only
+    /// if it is present AND inter-coded; otherwise it contributes the
+    /// sentinel <see cref="SwitchableFiltersCount"/>.
+    /// </summary>
+    /// <remarks>
+    /// Result rules (after substituting non-inter / missing neighbors
+    /// with the sentinel):
+    /// <list type="bullet">
+    /// <item><description>If both sides agree, return that filter (or
+    /// sentinel if both sides agree on sentinel).</description></item>
+    /// <item><description>If exactly one side is the sentinel, return
+    /// the other side's filter.</description></item>
+    /// <item><description>If both sides are valid but differ, return
+    /// sentinel.</description></item>
+    /// </list>
+    /// libvpx clamps incoming filter values against
+    /// <see cref="Vp9InterpFilter.Bilinear"/> by treating it as a fixed
+    /// filter; switchable contexts only ever see values in [0,
+    /// SwitchableFiltersCount]. Callers from
+    /// non-switchable-frame paths must pass the sentinel directly via
+    /// <c>isInter = false</c>.
+    /// </remarks>
+    public static int GetSwitchableInterpContext(
+        (bool IsInter, Vp9InterpFilter Filter)? above,
+        (bool IsInter, Vp9InterpFilter Filter)? left)
+    {
+        int aboveType = above.HasValue && above.Value.IsInter
+            ? (int)above.Value.Filter
+            : SwitchableFiltersCount;
+        int leftType = left.HasValue && left.Value.IsInter
+            ? (int)left.Value.Filter
+            : SwitchableFiltersCount;
+
+        if (leftType == aboveType) return leftType;
+        if (leftType == SwitchableFiltersCount) return aboveType;
+        if (aboveType == SwitchableFiltersCount) return leftType;
+        return SwitchableFiltersCount;
+    }
 }

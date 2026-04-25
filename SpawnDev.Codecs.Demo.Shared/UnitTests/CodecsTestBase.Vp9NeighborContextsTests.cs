@@ -237,4 +237,69 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9NeighborContexts.GetPartitionPlaneContext(0, 0, (Vp9BlockSize)99));
     }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_SwitchableInterp_BothMissing_ReturnsSentinel()
+    {
+        // Both sides absent -> both sentinel -> return sentinel (3).
+        Equal(3, Vp9NeighborContexts.GetSwitchableInterpContext(null, null));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_SwitchableInterp_BothIntra_ReturnsSentinel()
+    {
+        // Both present but intra -> both sentinel -> return sentinel.
+        Equal(3, Vp9NeighborContexts.GetSwitchableInterpContext(
+            (false, Vp9InterpFilter.EightTap),
+            (false, Vp9InterpFilter.EightTap)));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_SwitchableInterp_BothMatchEightTap()
+    {
+        Equal((int)Vp9InterpFilter.EightTap,
+            Vp9NeighborContexts.GetSwitchableInterpContext(
+                (true, Vp9InterpFilter.EightTap),
+                (true, Vp9InterpFilter.EightTap)));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_SwitchableInterp_BothMatchSmooth()
+    {
+        Equal((int)Vp9InterpFilter.EightTapSmooth,
+            Vp9NeighborContexts.GetSwitchableInterpContext(
+                (true, Vp9InterpFilter.EightTapSmooth),
+                (true, Vp9InterpFilter.EightTapSmooth)));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_SwitchableInterp_OnlyAboveInter_ReturnsAboveFilter()
+    {
+        // Left intra/missing, above inter EightTapSharp.
+        Equal((int)Vp9InterpFilter.EightTapSharp,
+            Vp9NeighborContexts.GetSwitchableInterpContext(
+                (true, Vp9InterpFilter.EightTapSharp),
+                null));
+        Equal((int)Vp9InterpFilter.EightTapSharp,
+            Vp9NeighborContexts.GetSwitchableInterpContext(
+                (true, Vp9InterpFilter.EightTapSharp),
+                (false, Vp9InterpFilter.EightTap)));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_SwitchableInterp_OnlyLeftInter_ReturnsLeftFilter()
+    {
+        Equal((int)Vp9InterpFilter.EightTapSmooth,
+            Vp9NeighborContexts.GetSwitchableInterpContext(
+                null,
+                (true, Vp9InterpFilter.EightTapSmooth)));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_SwitchableInterp_BothInterDifferent_ReturnsSentinel()
+    {
+        Equal(3, Vp9NeighborContexts.GetSwitchableInterpContext(
+            (true, Vp9InterpFilter.EightTap),
+            (true, Vp9InterpFilter.EightTapSharp)));
+    }
 }
