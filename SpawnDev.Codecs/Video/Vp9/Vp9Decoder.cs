@@ -46,10 +46,24 @@ public sealed class Vp9Decoder : IVideoDecoder
     public Vp9BitDepth BitDepth { get; private set; } = Vp9BitDepth.Bits8;
 
     /// <summary>
-    /// Most recently parsed uncompressed frame header; null before the first
-    /// successful frame parse.
+    /// Most recently parsed uncompressed frame header prefix; null
+    /// before the first successful frame parse.
     /// </summary>
     public Vp9FrameHeader? LastFrameHeader { get; private set; }
+
+    /// <summary>
+    /// Most recently parsed COMPLETE uncompressed header (prefix +
+    /// loop_filter + quant + segmentation + tile_info + header_size).
+    /// Null before the first successful frame parse.
+    /// </summary>
+    public Vp9UncompressedHeader? LastCompleteHeader { get; private set; }
+
+    /// <summary>
+    /// Reference frame dimensions tracked from past keyframes / intra-only
+    /// frames. 3 entries (LAST, GOLDEN, ALTREF), zeroed until the first
+    /// keyframe lands.
+    /// </summary>
+    private readonly (int Width, int Height)[] _refFrameSizes = new (int, int)[3];
 
     /// <inheritdoc/>
     public async ValueTask<int> DecodeFrameAsync(
@@ -66,8 +80,11 @@ public sealed class Vp9Decoder : IVideoDecoder
         {
             ct.ThrowIfCancellationRequested();
             var frameBytes = compressedPacket.Slice(slice.Offset, slice.Length);
-            var header = Vp9FrameHeaderParser.Parse(frameBytes.Span);
+            var complete = Vp9CompleteUncompressedHeaderParser.Parse(
+                frameBytes.Span, _refFrameSizes);
+            var header = complete.FrameHeader;
             LastFrameHeader = header;
+            LastCompleteHeader = complete;
 
             // Keyframes / intra-only frames carry color_config + frame_size,
             // so only those update our visible dimensions and chroma format.
@@ -86,6 +103,10 @@ public sealed class Vp9Decoder : IVideoDecoder
                     12 => Vp9BitDepth.Bits12,
                     _ => Vp9BitDepth.Bits8,
                 };
+                // Update ref frame size pool from this keyframe.
+                _refFrameSizes[0] = (Width, Height);
+                _refFrameSizes[1] = (Width, Height);
+                _refFrameSizes[2] = (Width, Height);
             }
 
             // Hidden alt-ref frames are decoded but not displayed. Until the

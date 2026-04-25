@@ -119,7 +119,20 @@ public static class Vp9FrameHeaderParser
     {
         if (frame.Length < 1) throw new InvalidDataException("VP9 frame is empty.");
         var r = new Vp9BitReader(frame);
+        return ParsePrefix(ref r);
+    }
 
+    /// <summary>
+    /// Continue parsing an in-flight <see cref="Vp9BitReader"/> from
+    /// the frame_marker bits forward. The reader is advanced past the
+    /// last bit consumed by this header prefix (i.e. the reader is
+    /// positioned at the start of refresh_frame_flags / loop_filter /
+    /// etc. when this returns). Used by
+    /// <see cref="Vp9CompleteUncompressedHeaderParser"/> to chain
+    /// downstream sub-section parsers without re-creating the reader.
+    /// </summary>
+    internal static Vp9FrameHeader ParsePrefix(ref Vp9BitReader r)
+    {
         // frame_marker: f(2) must be 0b10.
         uint marker = r.ReadBits(2);
         if (marker != FrameMarkerExpected)
