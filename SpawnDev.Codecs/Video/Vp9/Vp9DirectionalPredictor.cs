@@ -314,6 +314,60 @@ public static class Vp9DirectionalPredictor
         }
     }
 
+    /// <summary>
+    /// D207 predictor (207 deg, down-left). Left-edge only - the libvpx
+    /// reference takes <c>above</c> as a parameter but ignores it
+    /// (<c>(void)above;</c>). Mirror of libvpx <c>d207_predictor_c</c>.
+    /// First two columns seed AVG2 / AVG3 patterns from the left column
+    /// (with the last left sample replicated past the bottom edge); the
+    /// last row past col 1 is filled with <c>left[n-1]</c>; the rest of
+    /// the block fills bottom-up via <c>dst[r][c] = dst[r+1][c-2]</c>.
+    /// </summary>
+    /// <param name="left">N samples from the column left of the block.</param>
+    /// <param name="dst">Destination block (n*stride bytes).</param>
+    /// <param name="n">Block size (4, 8, 16, or 32).</param>
+    /// <param name="stride">Stride in bytes for <paramref name="dst"/>.</param>
+    public static void D207Predict(
+        ReadOnlySpan<byte> left,
+        Span<byte> dst, int n, int stride)
+    {
+        ValidateSize(n);
+        if (left.Length < n)
+            throw new ArgumentException($"left must hold {n} samples", nameof(left));
+        if (stride < n)
+            throw new ArgumentException("stride must be >= n", nameof(stride));
+        if (dst.Length < (n - 1) * stride + n)
+            throw new ArgumentException("dst too small", nameof(dst));
+
+        // First column: AVG2(left[r], left[r+1]) for r=0..n-2; bottom = left[n-1].
+        for (int r = 0; r < n - 1; r++)
+            dst[r * stride] = Avg2(left[r], left[r + 1]);
+        dst[(n - 1) * stride] = left[n - 1];
+
+        // Second column: AVG3 of three consecutive left samples for r=0..n-3.
+        // At r=n-2: AVG3(left[n-2], left[n-1], left[n-1]) (last sample replicated).
+        // At r=n-1: left[n-1].
+        for (int r = 0; r < n - 2; r++)
+            dst[r * stride + 1] = Avg3(left[r], left[r + 1], left[r + 2]);
+        dst[(n - 2) * stride + 1] = Avg3(left[n - 2], left[n - 1], left[n - 1]);
+        dst[(n - 1) * stride + 1] = left[n - 1];
+
+        // Last row, cols 2..n-1: filled with left[n-1].
+        byte fillVal = left[n - 1];
+        for (int c = 2; c < n; c++)
+            dst[(n - 1) * stride + c] = fillVal;
+
+        // Remaining rows (n-2 down to 0), cols 2..n-1: dst[r][c] = dst[r+1][c-2].
+        // Walk bottom-up so the source row is already populated.
+        for (int r = n - 2; r >= 0; r--)
+        {
+            int rowStart = r * stride;
+            int srcRowStart = (r + 1) * stride;
+            for (int c = 2; c < n; c++)
+                dst[rowStart + c] = dst[srcRowStart + c - 2];
+        }
+    }
+
     private static void ValidateSize(int n)
     {
         if (n != 4 && n != 8 && n != 16 && n != 32)

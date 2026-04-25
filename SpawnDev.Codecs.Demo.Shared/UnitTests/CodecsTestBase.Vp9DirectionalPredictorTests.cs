@@ -279,4 +279,62 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() =>
             Vp9DirectionalPredictor.D153Predict(0, new byte[4], new byte[3], new byte[16], n: 4, stride: 4));
     }
+
+    [TestMethod]
+    public void Vp9DirectionalPredictor_D207_4x4_KnownPattern()
+    {
+        // left = [50, 60, 70, 80].
+        // Col 0: AVG2(50,60)=55, AVG2(60,70)=65, AVG2(70,80)=75, dst[3][0]=left[3]=80.
+        // Col 1: AVG3(50,60,70)=60, AVG3(60,70,80)=70,
+        //        AVG3(70,80,80)=(70+160+80+2)>>2=78, dst[3][1]=left[3]=80.
+        // Last row cols 2..3 = left[3] = 80.
+        // r=2: dst[2][2]=dst[3][0]=80; dst[2][3]=dst[3][1]=80.
+        // r=1: dst[1][2]=dst[2][0]=75; dst[1][3]=dst[2][1]=78.
+        // r=0: dst[0][2]=dst[1][0]=65; dst[0][3]=dst[1][1]=70.
+        var left = new byte[] { 50, 60, 70, 80 };
+        var dst = new byte[16];
+        Vp9DirectionalPredictor.D207Predict(left, dst, n: 4, stride: 4);
+
+        Equal((byte)55, dst[0]);  Equal((byte)60, dst[1]);  Equal((byte)65, dst[2]);  Equal((byte)70, dst[3]);
+        Equal((byte)65, dst[4]);  Equal((byte)70, dst[5]);  Equal((byte)75, dst[6]);  Equal((byte)78, dst[7]);
+        Equal((byte)75, dst[8]);  Equal((byte)78, dst[9]);  Equal((byte)80, dst[10]); Equal((byte)80, dst[11]);
+        Equal((byte)80, dst[12]); Equal((byte)80, dst[13]); Equal((byte)80, dst[14]); Equal((byte)80, dst[15]);
+    }
+
+    [TestMethod]
+    public void Vp9DirectionalPredictor_D207_FlatInputProducesFlatOutput()
+    {
+        var left = new byte[8];
+        for (int i = 0; i < 8; i++) left[i] = 100;
+        var dst = new byte[64];
+        Vp9DirectionalPredictor.D207Predict(left, dst, n: 8, stride: 8);
+        for (int i = 0; i < 64; i++) Equal((byte)100, dst[i]);
+    }
+
+    [TestMethod]
+    public void Vp9DirectionalPredictor_D207_StridedDest_OnlyTouchesBlock()
+    {
+        var left = new byte[16];
+        for (int i = 0; i < 16; i++) left[i] = 80;
+        const int stride = 32;
+        var canvas = new byte[stride * 16];
+        for (int i = 0; i < canvas.Length; i++) canvas[i] = 222;
+        Vp9DirectionalPredictor.D207Predict(left, canvas, n: 16, stride);
+        for (int row = 0; row < 16; row++)
+        {
+            for (int col = 0; col < 16; col++)
+                Equal((byte)80, canvas[row * stride + col]);
+            for (int col = 16; col < stride; col++)
+                Equal((byte)222, canvas[row * stride + col]);
+        }
+    }
+
+    [TestMethod]
+    public void Vp9DirectionalPredictor_D207_RejectsInvalidArgs()
+    {
+        Throws<ArgumentOutOfRangeException>(() =>
+            Vp9DirectionalPredictor.D207Predict(new byte[5], new byte[25], n: 5, stride: 5));
+        Throws<ArgumentException>(() =>
+            Vp9DirectionalPredictor.D207Predict(new byte[3], new byte[16], n: 4, stride: 4));
+    }
 }
