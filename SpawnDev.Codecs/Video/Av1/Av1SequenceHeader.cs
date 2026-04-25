@@ -132,7 +132,7 @@ public sealed record Av1SequenceHeader
     /// <summary>matrix_coefficients (8-bit value, default 2 = UNSPECIFIED).</summary>
     public int MatrixCoefficients { get; init; } = 2;
 
-    /// <summary>chroma_sample_position (only signaled when subX=1 && subY=1).</summary>
+    /// <summary>chroma_sample_position (only signaled when subX=1 and subY=1).</summary>
     public int ChromaSamplePosition { get; init; }
 
     /// <summary>separate_uv_deltas flag.</summary>

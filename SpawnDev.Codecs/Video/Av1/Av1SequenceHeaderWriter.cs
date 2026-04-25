@@ -146,7 +146,7 @@ public sealed record Av1SequenceHeaderConfig
     /// <summary>matrix_coefficients, f(8). Only emitted when ColorDescriptionPresent=true.</summary>
     public int MatrixCoefficients { get; init; } = 2;
 
-    /// <summary>chroma_sample_position, f(2). Only emitted when subX=1 && subY=1.</summary>
+    /// <summary>chroma_sample_position, f(2). Only emitted when subX=1 and subY=1.</summary>
     public int ChromaSamplePosition { get; init; } = 0;
 
     /// <summary>separate_uv_deltas flag.</summary>
