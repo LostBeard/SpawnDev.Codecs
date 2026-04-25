@@ -116,6 +116,7 @@ public sealed class Vp9Decoder : IVideoDecoder
             if (!header.ShowExistingFrame && complete.FirstPartitionSize > 0)
             {
                 ParseCompressedHeader(complete, frameBytes);
+                LastTileGroup = Vp9TileGroupExtractor.Extract(frameBytes.Span, complete);
             }
 
             // Hidden alt-ref frames are decoded but not displayed. Until the
@@ -139,6 +140,9 @@ public sealed class Vp9Decoder : IVideoDecoder
 
     /// <summary>Last parsed compressed-header tx_mode + reference_mode.</summary>
     public Vp9CompressedHeaderResult? LastCompressedResult { get; private set; }
+
+    /// <summary>Per-tile byte ranges of the most recent visible frame.</summary>
+    public Vp9TileGroup? LastTileGroup { get; private set; }
 
     /// <summary>
     /// Parse the compressed header from the frame at the byte offset
