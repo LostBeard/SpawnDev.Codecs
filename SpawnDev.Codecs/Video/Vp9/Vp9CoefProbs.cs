@@ -30,7 +30,7 @@ namespace SpawnDev.Codecs.Video.Vp9;
 /// <summary>
 /// VP9 entropy probability tables from libvpx vp9_entropy.c.
 /// </summary>
-public static class Vp9CoefProbs
+public static partial class Vp9CoefProbs
 {
     /// <summary>cat1 binary-refinement probabilities (1 bit).</summary>
     public static readonly byte[] Cat1Prob = new byte[] { 159 };
