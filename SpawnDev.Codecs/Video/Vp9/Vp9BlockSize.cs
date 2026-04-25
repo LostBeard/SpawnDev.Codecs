@@ -124,6 +124,24 @@ public static class Vp9BlockSizes
         4, 5, 5, 6, 7, 7, 8, 9, 9, 10, 11, 11, 12,
     };
 
+    /// <summary>
+    /// libvpx <c>b_width_log2_lookup</c>: log2 of block width in 4x4
+    /// transform-block (b) units.
+    /// </summary>
+    public static readonly int[] B4x4WidthLog2 = new int[Count]
+    {
+        0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4,
+    };
+
+    /// <summary>
+    /// libvpx <c>b_height_log2_lookup</c>: log2 of block height in 4x4
+    /// transform-block (b) units.
+    /// </summary>
+    public static readonly int[] B4x4HeightLog2 = new int[Count]
+    {
+        0, 1, 0, 1, 2, 1, 2, 3, 2, 3, 4, 3, 4,
+    };
+
     /// <summary>Block width in pixels.</summary>
     public static int Width(Vp9BlockSize size) => WidthPx[(int)size];
 
