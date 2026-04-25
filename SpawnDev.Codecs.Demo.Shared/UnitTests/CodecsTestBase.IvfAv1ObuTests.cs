@@ -192,6 +192,43 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void Av1FrameHeader_BbbFirstFrame_ParsesPostPrefixFields()
+    {
+        // After my SH-driven prefix extension, the parser surfaces
+        // disable_cdf_update + allow_screen_content_tools + force_integer_mv
+        // for BBB's first keyframe. Verify these get plausible values.
+        var bytes = LoadAv1Fixture();
+        var firstFrame = IvfReader.EnumerateFrames(bytes).First();
+
+        Av1SequenceHeader? sh = null;
+        Av1FrameHeader? fh = null;
+        foreach (var obu in Av1ObuParser.EnumerateObus(firstFrame.Data))
+        {
+            if (obu.Type == Av1ObuType.SequenceHeader)
+                sh = Av1SequenceHeaderParser.Parse(
+                    firstFrame.Data.Span.Slice(obu.PayloadOffset, obu.PayloadLength));
+            else if (obu.IsCodedFrameData && sh is not null)
+            {
+                fh = Av1FrameHeaderParser.Parse(
+                    firstFrame.Data.Span.Slice(obu.PayloadOffset, obu.PayloadLength), sh);
+                break;
+            }
+        }
+        True(sh is not null && fh is not null, "expected SH + FH");
+
+        // BBB's first keyframe: disable_cdf_update is a 1-bit flag, value
+        // is what libaom chose. Just assert it's parseable (no throw).
+        // allow_screen_content_tools: BBB SH says SELECT (2), so parser
+        // reads a 1-bit f(1) value -> resolves to 0 or 1.
+        True(fh!.AllowScreenContentTools == 0 || fh.AllowScreenContentTools == 1,
+            $"allow_screen_content_tools must be 0 or 1, got {fh.AllowScreenContentTools}");
+
+        // force_integer_mv for an intra frame is forced to 1.
+        Equal(true, fh.FrameIsIntra);
+        Equal(1, fh.ForceIntegerMv);
+    }
+
+    [TestMethod]
     public void Av1FrameHeader_BbbAllFrames_FrameTypesPlausible()
     {
         // Walk every frame, count frame types. BBB should produce 1

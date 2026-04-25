@@ -37,6 +37,23 @@ public sealed record Av1FrameHeaderConfig
 
     /// <summary>error_resilient_mode flag.</summary>
     public bool ErrorResilientMode { get; init; }
+
+    /// <summary>disable_cdf_update flag.</summary>
+    public bool DisableCdfUpdate { get; init; }
+
+    /// <summary>
+    /// allow_screen_content_tools value (0 or 1). Only emitted explicitly
+    /// when SH.SeqForceScreenContentTools is SELECT (2); otherwise inherited
+    /// from SH and the writer skips emission to match what the parser reads.
+    /// </summary>
+    public int AllowScreenContentTools { get; init; }
+
+    /// <summary>
+    /// force_integer_mv value (0 or 1). Only emitted when
+    /// AllowScreenContentTools != 0 and SH.SeqForceIntegerMv is SELECT (2).
+    /// For intra frames the parser forces this to 1 regardless.
+    /// </summary>
+    public int ForceIntegerMv { get; init; }
 }
 
 /// <summary>AV1 frame header prefix writer.</summary>
@@ -97,6 +114,29 @@ public static class Av1FrameHeaderWriter
         {
             bw.WriteFlag(cfg.ErrorResilientMode);
         }
+
+        bw.WriteFlag(cfg.DisableCdfUpdate);
+
+        if (sh.SeqForceScreenContentTools == 2 /* SELECT */)
+        {
+            if ((uint)cfg.AllowScreenContentTools > 1)
+                throw new ArgumentOutOfRangeException(nameof(cfg.AllowScreenContentTools),
+                    "allow_screen_content_tools is f(1): 0 or 1 when SH chose SELECT.");
+            bw.WriteBits(cfg.AllowScreenContentTools, 1);
+        }
+        // else: inherited from SH, no emission.
+
+        bool isIntra = cfg.FrameType == Av1FrameType.KeyFrame
+            || cfg.FrameType == Av1FrameType.IntraOnlyFrame;
+        if (cfg.AllowScreenContentTools != 0 && !isIntra
+            && sh.SeqForceIntegerMv == 2 /* SELECT */)
+        {
+            if ((uint)cfg.ForceIntegerMv > 1)
+                throw new ArgumentOutOfRangeException(nameof(cfg.ForceIntegerMv),
+                    "force_integer_mv is f(1): 0 or 1 when SH chose SELECT and frame is non-intra.");
+            bw.WriteBits(cfg.ForceIntegerMv, 1);
+        }
+        // else: implicit per AV1 spec - no emission.
 
         bw.WriteTrailingBits();
         return bw.ToArray();

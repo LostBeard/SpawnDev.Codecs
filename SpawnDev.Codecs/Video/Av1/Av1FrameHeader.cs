@@ -56,6 +56,26 @@ public sealed record Av1FrameHeader
 
     /// <summary>libvpx <c>error_resilient_mode</c>.</summary>
     public required bool ErrorResilientMode { get; init; }
+
+    /// <summary>
+    /// disable_cdf_update flag. When true, CDF tables aren't updated from
+    /// this frame's symbols. Defaults to false for unparsed prefix fields.
+    /// </summary>
+    public bool DisableCdfUpdate { get; init; }
+
+    /// <summary>
+    /// allow_screen_content_tools resolved value (0 or 1). Either parsed
+    /// from the bitstream when SH says SELECT, or inherited from
+    /// <see cref="Av1SequenceHeader.SeqForceScreenContentTools"/>.
+    /// </summary>
+    public int AllowScreenContentTools { get; init; }
+
+    /// <summary>
+    /// force_integer_mv resolved value (0 or 1). For intra frames this is
+    /// forced to 1; otherwise parsed from the bitstream when allowed by SH
+    /// + AllowScreenContentTools.
+    /// </summary>
+    public int ForceIntegerMv { get; init; }
 }
 
 /// <summary>AV1 frame header parser (headline fields only).</summary>
@@ -122,6 +142,33 @@ public static class Av1FrameHeaderParser
             errorResilient = br.ReadFlag();
         }
 
+        bool disableCdfUpdate = br.ReadFlag();
+
+        // allow_screen_content_tools: spec sec 5.9.1
+        // libaom uses SELECT = 2 to mean "frame chooses".
+        int allowSccTools;
+        if (sh.SeqForceScreenContentTools == 2 /* SELECT */)
+            allowSccTools = (int)br.ReadBits(1);
+        else
+            allowSccTools = sh.SeqForceScreenContentTools;
+
+        // force_integer_mv: also resolves SELECT=2 from the SH side.
+        int forceIntegerMv;
+        if (allowSccTools != 0)
+        {
+            if (sh.SeqForceIntegerMv == 2 /* SELECT */)
+                forceIntegerMv = (int)br.ReadBits(1);
+            else
+                forceIntegerMv = sh.SeqForceIntegerMv;
+        }
+        else
+        {
+            forceIntegerMv = 0;
+        }
+        bool isIntra = frameType == Av1FrameType.KeyFrame
+            || frameType == Av1FrameType.IntraOnlyFrame;
+        if (isIntra) forceIntegerMv = 1;
+
         return new Av1FrameHeader
         {
             ShowExistingFrame = false,
@@ -129,6 +176,9 @@ public static class Av1FrameHeaderParser
             ShowFrame = showFrame,
             ShowableFrame = showableFrame,
             ErrorResilientMode = errorResilient,
+            DisableCdfUpdate = disableCdfUpdate,
+            AllowScreenContentTools = allowSccTools,
+            ForceIntegerMv = forceIntegerMv,
         };
     }
 }
