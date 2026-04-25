@@ -204,6 +204,63 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void Vp9SubPelConvolve_2D_NoScale_IdentityCopiesPixels()
+    {
+        // Create a 16x16 source with values src[y, x] = y * 16 + x.
+        // Then 2D-convolve a 4x4 region with both sub-pels = 0
+        // (identity in both dimensions). Output should match source
+        // at the corresponding locations.
+        const int sw = 32, sh = 32, stride = sw;
+        var src = new byte[sh * stride];
+        for (int y = 0; y < sh; y++)
+            for (int x = 0; x < sw; x++)
+                src[y * stride + x] = (byte)((y * 7 + x * 11) & 0xff);
+        var dst = new byte[4 * 4];
+
+        // srcStart = 8*stride + 8 -> source pixel (8, 8) is the "top-left"
+        // of the requested output. With identity sub-pel both axes, the
+        // output should be src[(8 + y) * stride + (8 + x)] for output (x, y).
+        Vp9SubPelConvolve.Convolve2D(
+            src, srcStart: 8 * stride + 8, srcStride: stride,
+            dst, dstStart: 0, dstStride: 4,
+            Vp9InterpFilter.EightTap,
+            x0Q4: 0, xStepQ4: 16, y0Q4: 0, yStepQ4: 16,
+            width: 4, height: 4);
+
+        for (int y = 0; y < 4; y++)
+        {
+            for (int x = 0; x < 4; x++)
+            {
+                Equal((byte)(((8 + y) * 7 + (8 + x) * 11) & 0xff),
+                    dst[y * 4 + x]);
+            }
+        }
+    }
+
+    [TestMethod]
+    public void Vp9SubPelConvolve_2D_ConstantInput_ConstantOutput()
+    {
+        // A constant source produces a constant output for any sub-pel
+        // pair (both filter passes preserve constants).
+        const int stride = 32;
+        var src = new byte[32 * stride];
+        for (int i = 0; i < src.Length; i++) src[i] = 99;
+        var dst = new byte[8 * 8];
+
+        Vp9SubPelConvolve.Convolve2D(
+            src, srcStart: 8 * stride + 8, srcStride: stride,
+            dst, dstStart: 0, dstStride: 8,
+            Vp9InterpFilter.EightTapSharp,
+            x0Q4: 5, xStepQ4: 16, y0Q4: 11, yStepQ4: 16,
+            width: 8, height: 8);
+
+        for (int i = 0; i < dst.Length; i++)
+        {
+            Equal((byte)99, dst[i]);
+        }
+    }
+
+    [TestMethod]
     public void Vp9SubPelConvolve_Vert_ConstantInput_ConstantOutput()
     {
         const int rows = 64, cols = 8, stride = 8;

@@ -174,4 +174,46 @@ public static class Vp9SubPelConvolve
             }
         }
     }
+
+    /// <summary>
+    /// Full 2D sub-pel convolve. Composes <see cref="ConvolveHoriz"/>
+    /// and <see cref="ConvolveVert"/> through an intermediate buffer.
+    /// Mirror of libvpx <c>vpx_convolve8_c</c>.
+    ///
+    /// Source-buffer padding: must include 3 rows of top padding past
+    /// srcStart's row, 3 pixels of left padding per row, and enough
+    /// right/bottom padding to cover the largest accessed integer
+    /// row/column.
+    /// </summary>
+    public static void Convolve2D(
+        ReadOnlySpan<byte> src, int srcStart, int srcStride,
+        Span<byte> dst, int dstStart, int dstStride,
+        Vp9InterpFilter filter,
+        int x0Q4, int xStepQ4, int y0Q4, int yStepQ4,
+        int width, int height)
+    {
+        const int topPadding = Vp9SubPelFilters.SubPelTaps / 2 - 1; // 3
+        int intermediateHeight =
+            (((height - 1) * yStepQ4) >> Vp9SubPelFilters.SubPelBits)
+                + Vp9SubPelFilters.SubPelTaps;
+        int intermediateStride = width;
+        var temp = new byte[width * intermediateHeight];
+
+        // Horizontal pass: start 3 rows above srcStart so the
+        // resulting temp has 3 rows of padding above the row that
+        // maps to dst row 0.
+        ConvolveHoriz(
+            src, srcStart - topPadding * srcStride, srcStride,
+            temp, 0, intermediateStride,
+            filter, x0Q4, xStepQ4,
+            width, intermediateHeight);
+
+        // Vertical pass: read temp offset by topPadding rows down so
+        // that the vertical pass's "row 0" lines up with dst row 0.
+        ConvolveVert(
+            temp, topPadding * intermediateStride, intermediateStride,
+            dst, dstStart, dstStride,
+            filter, y0Q4, yStepQ4,
+            width, height);
+    }
 }
