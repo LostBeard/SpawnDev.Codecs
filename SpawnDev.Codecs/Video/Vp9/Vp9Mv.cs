@@ -51,4 +51,25 @@ public readonly record struct Vp9Mv(int Row, int Col)
     public Vp9Mv Clamp() => new Vp9Mv(
         Math.Clamp(Row, Low, Upp - 1),
         Math.Clamp(Col, Low, Upp - 1));
+
+    /// <summary>
+    /// Clamp this MV's components to a caller-supplied bounding box
+    /// in the same units as the MV (1/8-pel for VP9 stored MVs).
+    /// Used by libvpx <c>clamp_mv</c> when the reference window for
+    /// an MV must stay within the frame plus border.
+    /// </summary>
+    /// <param name="minRow">Lower bound for the row component.</param>
+    /// <param name="maxRow">Upper bound for the row component.</param>
+    /// <param name="minCol">Lower bound for the col component.</param>
+    /// <param name="maxCol">Upper bound for the col component.</param>
+    public Vp9Mv Clamp(int minRow, int maxRow, int minCol, int maxCol)
+    {
+        if (minRow > maxRow)
+            throw new ArgumentException("minRow must be <= maxRow.", nameof(minRow));
+        if (minCol > maxCol)
+            throw new ArgumentException("minCol must be <= maxCol.", nameof(minCol));
+        return new Vp9Mv(
+            Math.Clamp(Row, minRow, maxRow),
+            Math.Clamp(Col, minCol, maxCol));
+    }
 }

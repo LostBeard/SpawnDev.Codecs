@@ -83,4 +83,38 @@ public abstract partial class CodecsTestBase
         Equal(16383, clamped.Row);
         Equal(-16384, clamped.Col);
     }
+
+    [TestMethod]
+    public void Vp9Mv_ClampCustom_InRange_NoChange()
+    {
+        var mv = new Vp9Mv(5, -10);
+        var clamped = mv.Clamp(-100, 100, -100, 100);
+        Equal(mv, clamped);
+    }
+
+    [TestMethod]
+    public void Vp9Mv_ClampCustom_OutOfRange_BoundsApplied()
+    {
+        var mv = new Vp9Mv(200, -300);
+        var clamped = mv.Clamp(-50, 50, -50, 50);
+        Equal(50, clamped.Row);
+        Equal(-50, clamped.Col);
+    }
+
+    [TestMethod]
+    public void Vp9Mv_ClampCustom_AsymmetricBounds()
+    {
+        var mv = new Vp9Mv(100, 100);
+        var clamped = mv.Clamp(-10, 50, -200, 80);
+        Equal(50, clamped.Row);
+        Equal(80, clamped.Col);
+    }
+
+    [TestMethod]
+    public void Vp9Mv_ClampCustom_RejectsInvertedRange()
+    {
+        var mv = new Vp9Mv(0, 0);
+        Throws<ArgumentException>(() => mv.Clamp(10, 5, -10, 10));
+        Throws<ArgumentException>(() => mv.Clamp(-10, 10, 10, 5));
+    }
 }
