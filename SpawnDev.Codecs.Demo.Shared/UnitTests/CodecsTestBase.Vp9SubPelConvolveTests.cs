@@ -182,6 +182,48 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void Vp9SubPelConvolve_Vert_NoScale_IdentityCopiesPixels()
+    {
+        // 1-column source of 16 padded rows, identity sub-pel.
+        // Each output row maps to src[srcStart + (3 + y) * stride].
+        const int rows = 16, cols = 1, stride = 1;
+        var src = new byte[rows * stride];
+        for (int y = 0; y < rows; y++) src[y] = (byte)((y + 1) * 10);
+        var dst = new byte[8];
+
+        Vp9SubPelConvolve.ConvolveVert(
+            src, srcStart: 3, srcStride: stride,
+            dst, dstStart: 0, dstStride: cols,
+            Vp9InterpFilter.EightTap, y0Q4: 0, yStepQ4: 16,
+            width: 1, height: 8);
+
+        for (int y = 0; y < 8; y++)
+        {
+            Equal((byte)((y + 3 + 1) * 10), dst[y]);
+        }
+    }
+
+    [TestMethod]
+    public void Vp9SubPelConvolve_Vert_ConstantInput_ConstantOutput()
+    {
+        const int rows = 64, cols = 8, stride = 8;
+        var src = new byte[rows * stride];
+        for (int i = 0; i < src.Length; i++) src[i] = 137;
+        var dst = new byte[8 * 8];
+
+        Vp9SubPelConvolve.ConvolveVert(
+            src, srcStart: 8 * stride, srcStride: stride,
+            dst, dstStart: 0, dstStride: 8,
+            Vp9InterpFilter.EightTapSmooth, y0Q4: 7, yStepQ4: 16,
+            width: 8, height: 8);
+
+        for (int i = 0; i < dst.Length; i++)
+        {
+            Equal((byte)137, dst[i]);
+        }
+    }
+
+    [TestMethod]
     public void Vp9SubPelConvolve_Horiz_MultiRow_CopiesEachIndependently()
     {
         // 2-row source, identity sub-pel: output rows match source rows

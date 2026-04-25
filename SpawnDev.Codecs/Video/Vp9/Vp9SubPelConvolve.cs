@@ -125,4 +125,53 @@ public static class Vp9SubPelConvolve
             }
         }
     }
+
+    /// <summary>
+    /// Vertical 1D convolve over a w x h block. For each output
+    /// position (x, y), advances <paramref name="y0Q4"/> by
+    /// <paramref name="yStepQ4"/> and convolves 8 source samples
+    /// vertically centered on the current sub-pel position.
+    ///
+    /// Symmetric to <see cref="ConvolveHoriz"/> but stride-aware:
+    /// the 8 source samples come from 8 consecutive ROWS at the
+    /// same column. Mirror of libvpx <c>convolve_vert</c>.
+    ///
+    /// Caller is responsible for source-buffer padding: reads
+    /// <c>src[(y0_q4 &gt;&gt; 4) - 3 .. (y0_q4 &gt;&gt; 4) + 4]</c> rows
+    /// at each position; source buffer must include 3 rows of top
+    /// padding and at least 4 rows of bottom padding past the last
+    /// accessed integer row.
+    /// </summary>
+    public static void ConvolveVert(
+        ReadOnlySpan<byte> src, int srcStart, int srcStride,
+        Span<byte> dst, int dstStart, int dstStride,
+        Vp9InterpFilter filter, int y0Q4, int yStepQ4,
+        int width, int height)
+    {
+        var filterTable = Vp9SubPelFilters.GetFilter(filter);
+        const int topPadding = Vp9SubPelFilters.SubPelTaps / 2 - 1; // 3
+        for (int x = 0; x < width; x++)
+        {
+            int yOffsetQ4 = y0Q4;
+            for (int y = 0; y < height; y++)
+            {
+                int srcRow = yOffsetQ4 >> Vp9SubPelFilters.SubPelBits;
+                int subPel = yOffsetQ4 & (Vp9SubPelFilters.SubPelShifts - 1);
+                int srcColStart = srcStart + (srcRow - topPadding) * srcStride + x;
+                var filterRow = filterTable.AsSpan(
+                    subPel * Vp9SubPelFilters.SubPelTaps, Vp9SubPelFilters.SubPelTaps);
+
+                int sum = 0;
+                for (int t = 0; t < Vp9SubPelFilters.SubPelTaps; t++)
+                    sum += src[srcColStart + t * srcStride] * filterRow[t];
+                sum += 1 << (FilterBits - 1);
+                sum >>= FilterBits;
+                if (sum < 0) sum = 0;
+                else if (sum > 255) sum = 255;
+                dst[dstStart + y * dstStride + x] = (byte)sum;
+
+                yOffsetQ4 += yStepQ4;
+            }
+        }
+    }
 }
