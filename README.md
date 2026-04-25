@@ -4,7 +4,7 @@
 
 Runs on every ILGPU backend - CUDA, OpenCL, CPU, WebGPU, WebGL, Wasm - which means it runs on desktop AND in Blazor WASM browsers. No native binaries, no closed-source dependencies, no patent-encumbered codecs.
 
-> **Status: Phase 1a shipping.** Audio codec work is live. FLAC (encode + decode), Opus SILK decode + Opus-in-Ogg, native and Ogg-wrapped container formats, and a Vorbis decoder scaffold are all merged to `master`. See the feature matrix below for precise state.
+> **Status: Phase 1a shipping. Video codec foundations now live.** Audio codec work is mature - FLAC encode + decode (ffmpeg cross-validated bit-exact), Opus SILK decode + Opus-in-Ogg, Vorbis structural decoder. Video codec foundations now ship - VP9 decoder pipeline (300 BBB packets parsed end-to-end, placeholder pixels), AV1 decoder pipeline (60 BBB frames + SH + FrameHeader), and an **AV1 encoder framing foundation** whose SequenceHeader bytes are bit-exact identical to libaom-av1 and whose end-to-end remux of real AV1 frames decodes pixel-identical to source through ffmpeg + dav1d. See the feature matrix below for precise state.
 
 ## Current feature matrix
 
@@ -42,7 +42,15 @@ Runs on every ILGPU backend - CUDA, OpenCL, CPU, WebGPU, WebGL, Wasm - which mea
 
 ### Video codecs
 
-Not started. VP8, VP9, AV1 are planned (patent-clean via AOMedia pledge).
+Patent-clean via the AOMedia patent pledge.
+
+| Codec | Decoder | Encoder |
+|-------|---------|---------|
+| **VP8** | Scaffold (NotImplementedException) | Not yet |
+| **VP9** | Pipeline through tile group extraction. Driven 300 packets / 300 visible frames on Big Buck Bunny (320x180 4:2:0 8-bit) end-to-end; uncompressed header + compressed header (probability updates, tx_mode, ref_mode) + tile group byte ranges all parsed; ~58 slices of block-decode foundation (intra prediction kernels, iDCT family, MV decode chain, segmentation/quantization/loop-filter resolvers). Block walker + per-block mode/coeff decode are the next slice. Placeholder mid-gray pixels until then. | Not yet |
+| **AV1** | OBU + SequenceHeader + FrameHeader prefix parsers running on real `bbb_180_2s.ivf` (libaom-encoded, 60 frames, 26 key + 34 inter). SH extracts profile / dims / bit depth / subsampling / color range correctly; placeholder pixels until block decode lands. | **Encoder framing FOUNDATION live**: `Av1ObuWriter`, `Av1SequenceHeaderWriter` (28 fields), `Av1FrameHeaderWriter`, `Av1BitWriter`. Cross-validation: writer-emitted SH bytes are **BIT-EXACT IDENTICAL to libaom-av1's source SH** for the BBB encode (14/14 bytes); end-to-end remux of all 60 BBB frames through `Av1ObuWriter` + `IvfWriter` produces a stream that ffmpeg/dav1d decodes pixel-identical to the source (5,184,000 / 5,184,000 byte-equal YUV). 120 / 120 writer tests pass on every backend (CPU, CUDA, OpenCL, WebGPU, WebGL, Wasm). Daala range coder + block-level emission are downstream gates for an end-to-end pure-.NET AV1 encoder. |
+
+Containers wired for video pipelines: IVF reader + writer, Matroska / WebM via SpawnDev.EBML, Ogg.
 
 ### Out of scope (patent-encumbered)
 
