@@ -41,6 +41,8 @@ public sealed class Vp9TmPredict4x4Kernel : IDisposable
     /// <param name="aboveFlat">Block-major flat above samples (N bytes per block).</param>
     /// <param name="leftFlat">Block-major flat left samples (N bytes per block).</param>
     /// <param name="dstFlat">Block-major destination (blockStrideBytes per block).</param>
+    /// <param name="blockCount">Number of 4x4 blocks to predict.</param>
+    /// <param name="blockStrideBytes">Bytes per destination block (default N*N=16).</param>
     public void Run(
         ArrayView<byte> topLeftFlat,
         ArrayView<byte> aboveFlat,

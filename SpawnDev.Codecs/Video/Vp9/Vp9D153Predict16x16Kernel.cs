@@ -92,11 +92,13 @@ public sealed class Vp9D153Predict16x16Kernel : IDisposable
 
     /// <summary>
     /// Kernel body. 46 register cells; 256 unrolled writes.
-    /// For row r, col c:
-    ///   c=0: c0r[r];  c=1: c1r[r]
-    ///   c even, c/2 <= r: c0r[r - c/2]
-    ///   c odd, (c-1)/2 <= r: c1r[r - (c-1)/2]
-    ///   else: r0c[c - 2*r]
+    /// <para>For row r, col c:</para>
+    /// <list type="bullet">
+    /// <item>c=0: c0r[r]; c=1: c1r[r]</item>
+    /// <item>c even, c/2 &lt;= r: c0r[r - c/2]</item>
+    /// <item>c odd, (c-1)/2 &lt;= r: c1r[r - (c-1)/2]</item>
+    /// <item>else: r0c[c - 2*r]</item>
+    /// </list>
     /// </summary>
     private static void D153Kernel(
         Index1D blockIdx,

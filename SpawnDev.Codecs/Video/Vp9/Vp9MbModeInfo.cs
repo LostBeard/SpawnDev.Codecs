@@ -21,7 +21,7 @@ namespace SpawnDev.Codecs.Video.Vp9;
 /// <c>MB_MODE_INFO</c>.
 /// </summary>
 /// <remarks>
-/// IsIntra-discriminated: when <see cref="RefFrames"/>[0] is
+/// IsIntra-discriminated: when <see cref="PrimaryRefFrame"/> is
 /// <see cref="Vp9MvReferenceFrame.Intra"/>, the block is intra-coded
 /// and YMode / UvMode are meaningful (InterMode / Mvs / InterpFilter
 /// have no meaning). Otherwise the block is inter-coded and the

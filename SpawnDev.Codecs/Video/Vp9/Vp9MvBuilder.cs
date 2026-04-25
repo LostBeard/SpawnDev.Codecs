@@ -45,10 +45,10 @@ public static class Vp9MvBuilder
     }
 
     /// <summary>
-    /// Add an MV diff (<paramref name="vert"/>, <paramref name="horiz"/>)
-    /// to a reference MV, then apply
+    /// Add an MV diff (<paramref name="vertDiff"/>, <paramref name="horizDiff"/>)
+    /// to <paramref name="referenceMv"/>, then apply
     /// <see cref="LowerMvPrecision"/> and a final
-    /// <see cref="Vp9Mv.Clamp"/> to land on the legal range.
+    /// <see cref="Vp9Mv.Clamp(int, int, int, int)"/> to land on the legal range.
     /// </summary>
     public static Vp9Mv ApplyDiff(
         Vp9Mv referenceMv,
