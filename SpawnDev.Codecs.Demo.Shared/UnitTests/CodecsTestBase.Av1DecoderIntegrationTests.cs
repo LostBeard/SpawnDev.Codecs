@@ -92,4 +92,21 @@ public abstract partial class CodecsTestBase
         True(counts.ContainsKey(Av1ObuType.SequenceHeader),
             $"first frame must contain SequenceHeader; saw {string.Join(',', counts.Keys)}");
     }
+
+    [TestMethod]
+    public async Task Av1Decoder_BbbFirstFrame_PopulatesLastFrameHeader_AsKeyframe()
+    {
+        var bytes = LoadAv1Fixture();
+        await using var decoder = new Av1Decoder();
+        var sink = new Av1RecordingSink();
+
+        var first = IvfReader.EnumerateFrames(bytes).First();
+        await decoder.DecodeFrameAsync(first.Data, sink);
+
+        True(decoder.LastFrameHeader is not null, "LastFrameHeader must be populated for the first frame");
+        Equal(Av1FrameType.KeyFrame, decoder.LastFrameHeader!.FrameType);
+        Equal(true, decoder.LastFrameHeader.ShowFrame);
+        Equal(true, decoder.LastFrameHeader.FrameIsIntra);
+        Equal(false, decoder.LastFrameHeader.ShowExistingFrame);
+    }
 }

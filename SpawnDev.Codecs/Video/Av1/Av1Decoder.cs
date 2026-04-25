@@ -24,6 +24,12 @@ public sealed class Av1Decoder : IVideoDecoder
     public Av1SequenceHeader? LastSequenceHeader { get; private set; }
 
     /// <summary>
+    /// Most recently parsed FrameHeader (prefix-fields only). Updated for
+    /// every Frame / FrameHeader / RedundantFrameHeader OBU.
+    /// </summary>
+    public Av1FrameHeader? LastFrameHeader { get; private set; }
+
+    /// <summary>
     /// Number of OBUs the most recent <see cref="DecodeFrameAsync"/>
     /// invocation parsed, broken down by type.
     /// </summary>
@@ -58,6 +64,12 @@ public sealed class Av1Decoder : IVideoDecoder
             else if (obu.IsCodedFrameData)
             {
                 hasFrameData = true;
+                if (LastSequenceHeader is not null)
+                {
+                    LastFrameHeader = Av1FrameHeaderParser.Parse(
+                        compressedPacket.Span.Slice(obu.PayloadOffset, obu.PayloadLength),
+                        LastSequenceHeader);
+                }
                 // Per-frame block decode goes here once the inverse-transform
                 // + prediction + entropy-decode pipeline is wired up.
             }
