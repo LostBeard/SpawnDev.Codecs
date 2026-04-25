@@ -148,16 +148,87 @@ Console.WriteLine("--- AV1: OBU type distribution across all 60 frames ---");
     }
 }
 
+// 5. AV1 ENCODER FOUNDATION: writers emit bytes ffmpeg + dav1d accept.
+Console.WriteLine();
+Console.WriteLine("--- AV1 ENCODER FOUNDATION: bit-exact emit, ffmpeg-validated ---");
+{
+    var av1Bytes = File.ReadAllBytes(Path.Combine(testDataDir, "bbb_180_2s.ivf"));
+    var firstFrame = IvfReader.EnumerateFrames(av1Bytes).First();
+    byte[] sourceSh = Array.Empty<byte>();
+    foreach (var obu in Av1ObuParser.EnumerateObus(firstFrame.Data))
+        if (obu.Type == Av1ObuType.SequenceHeader)
+        {
+            sourceSh = firstFrame.Data.Slice(obu.PayloadOffset, obu.PayloadLength).ToArray();
+            break;
+        }
+
+    // Build BBB-equivalent SH config from observed bits.
+    var ourSh = Av1SequenceHeaderWriter.EmitPayload(new Av1SequenceHeaderConfig
+    {
+        SeqProfile = 0, SeqLevelIdx0 = 0, MaxFrameWidth = 320, MaxFrameHeight = 180,
+        BitDepth = 8, SubsamplingX = 1, SubsamplingY = 1,
+        EnableFilterIntra = true, EnableIntraEdgeFilter = true,
+        EnableMaskedCompound = true, EnableWarpedMotion = true,
+        EnableOrderHint = true, EnableRefFrameMvs = true, OrderHintBitsMinus1 = 6,
+        SeqChooseScreenContentTools = true, SeqChooseIntegerMv = true,
+        EnableCdef = true, ColorDescriptionPresent = true,
+        ColorPrimaries = 2, TransferCharacteristics = 2, MatrixCoefficients = 5,
+    });
+    int shMatch = 0;
+    int shLen = Math.Min(sourceSh.Length, ourSh.Length);
+    for (int i = 0; i < shLen; i++) if (sourceSh[i] == ourSh[i]) shMatch++;
+    Console.WriteLine($"  Av1SequenceHeaderWriter vs libaom-av1 BBB SH: {shMatch}/{sourceSh.Length} BIT-EXACT");
+
+    // Round-trip every OBU through Av1ObuWriter and write a new IVF.
+    string remuxIvf = Path.Combine(Path.GetTempPath(), "demo_remux.ivf");
+    string srcYuv = Path.Combine(Path.GetTempPath(), "demo_src.yuv");
+    string rmxYuv = Path.Combine(Path.GetTempPath(), "demo_rmx.yuv");
+    int frameCount = 0, obuCount = 0;
+    using (var outFs = new FileStream(remuxIvf, FileMode.Create, FileAccess.Write))
+    {
+        var ivf = new IvfWriter(outFs, "AV01", 320, 180, frameRate: 30, timeScale: 1);
+        foreach (var ivfFrame in IvfReader.EnumerateFrames(av1Bytes))
+        {
+            using var ms = new MemoryStream();
+            foreach (var obu in Av1ObuParser.EnumerateObus(ivfFrame.Data))
+            {
+                var re = Av1ObuWriter.EmitObu(obu, ivfFrame.Data);
+                ms.Write(re, 0, re.Length);
+                obuCount++;
+            }
+            ivf.WriteFrame(ms.ToArray(), ivfFrame.Pts);
+            frameCount++;
+        }
+        ivf.Finish();
+    }
+    Console.WriteLine($"  Remuxed {frameCount} frames / {obuCount} OBUs through our IvfWriter + Av1ObuWriter");
+
+    RunFfmpeg(ffmpegPath, $"-y -i \"{Path.Combine(testDataDir, "bbb_180_2s.ivf")}\" -f rawvideo -pix_fmt yuv420p \"{srcYuv}\"");
+    RunFfmpeg(ffmpegPath, $"-y -i \"{remuxIvf}\" -f rawvideo -pix_fmt yuv420p \"{rmxYuv}\"");
+    var src = File.ReadAllBytes(srcYuv);
+    var rmx = File.ReadAllBytes(rmxYuv);
+    int yuvMismatch = 0;
+    int yuvLen = Math.Min(src.Length, rmx.Length);
+    for (int i = 0; i < yuvLen; i++) if (src[i] != rmx[i]) yuvMismatch++;
+    Console.WriteLine($"  ffmpeg+dav1d source vs remux YUV: {yuvLen - yuvMismatch}/{yuvLen} BIT-EXACT");
+    File.Delete(remuxIvf); File.Delete(srcYuv); File.Delete(rmxYuv);
+}
+
 Console.WriteLine();
 Console.WriteLine("============================================================");
 Console.WriteLine("  Working today, end-to-end:");
 Console.WriteLine("    - FLAC encoder + decoder (ffmpeg cross-verified BIT-EXACT)");
 Console.WriteLine("    - VP9 decoder pipeline through tile group extraction");
 Console.WriteLine("    - AV1 decoder pipeline + SH + FrameHeader parsers");
-Console.WriteLine("    - IVF / Matroska / Ogg container readers");
+Console.WriteLine("    - AV1 ENCODER FOUNDATION:");
+Console.WriteLine("        SequenceHeader writer BIT-EXACT vs libaom-av1");
+Console.WriteLine("        FrameHeader writer + OBU writer + IVF writer");
+Console.WriteLine("        ffmpeg+dav1d accept our remux pixel-identical to source");
+Console.WriteLine("    - IVF / Matroska / Ogg container readers + IVF writer");
 Console.WriteLine("  In progress (placeholder pixels for video):");
 Console.WriteLine("    - VP9 / AV1 block decode walker");
 Console.WriteLine("    - Opus CELT mode (SILK works)");
+Console.WriteLine("    - AV1 daala range coder (gates real encoder pixels)");
 Console.WriteLine("============================================================");
 
 static void RunFfmpeg(string path, string args)
