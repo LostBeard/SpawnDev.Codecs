@@ -24,7 +24,7 @@ namespace SpawnDev.Codecs.Video.Vp9;
 /// Each entry is a raster position; pairs are read at indices
 /// (2*i, 2*i + 1) for scan position i.
 /// </summary>
-public static class Vp9NeighborTables
+public static partial class Vp9NeighborTables
 {
     /// <summary>4x4 default-scan neighbors. (16 + 1) * 2 = 34 entries.</summary>
     public static readonly ushort[] DefaultScan4x4Neighbors = new ushort[]

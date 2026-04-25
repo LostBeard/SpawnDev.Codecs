@@ -89,4 +89,69 @@ public abstract partial class CodecsTestBase
         True(ReferenceEquals(Vp9NeighborTables.RowScan8x8Neighbors,     Vp9NeighborTables.GetNeighbors8x8(Vp9ScanType.Row)));
         True(ReferenceEquals(Vp9NeighborTables.ColScan8x8Neighbors,     Vp9NeighborTables.GetNeighbors8x8(Vp9ScanType.Col)));
     }
+
+    [TestMethod]
+    public void Vp9NeighborTables_16x16_AllThreeShapesValid()
+    {
+        AssertNeighborTableShape(Vp9NeighborTables.DefaultScan16x16Neighbors, 256, "DefaultScan16x16Neighbors");
+        AssertNeighborTableShape(Vp9NeighborTables.RowScan16x16Neighbors,     256, "RowScan16x16Neighbors");
+        AssertNeighborTableShape(Vp9NeighborTables.ColScan16x16Neighbors,     256, "ColScan16x16Neighbors");
+    }
+
+    [TestMethod]
+    public void Vp9NeighborTables_32x32_DefaultScanShapeValid()
+    {
+        AssertNeighborTableShape(Vp9NeighborTables.DefaultScan32x32Neighbors, 1024, "DefaultScan32x32Neighbors");
+    }
+
+    [TestMethod]
+    public void Vp9NeighborTables_16x16DefaultScan_PinnedFirstFewPairs()
+    {
+        // Pinned vs libvpx default_scan_16x16_neighbors:
+        //   (0,0)(0,0)(0,0)(16,16)(1,16)(1,1)(32,32)(17,32)...
+        var t = Vp9NeighborTables.DefaultScan16x16Neighbors;
+        Equal((ushort)0, t[0]);   Equal((ushort)0, t[1]);
+        Equal((ushort)0, t[2]);   Equal((ushort)0, t[3]);
+        Equal((ushort)0, t[4]);   Equal((ushort)0, t[5]);
+        Equal((ushort)16, t[6]);  Equal((ushort)16, t[7]);
+        Equal((ushort)1, t[8]);   Equal((ushort)16, t[9]);
+        Equal((ushort)1, t[10]);  Equal((ushort)1, t[11]);
+        Equal((ushort)32, t[12]); Equal((ushort)32, t[13]);
+        Equal((ushort)17, t[14]); Equal((ushort)32, t[15]);
+    }
+
+    [TestMethod]
+    public void Vp9NeighborTables_32x32DefaultScan_PinnedFirstAndLastPairs()
+    {
+        // Pinned vs libvpx default_scan_32x32_neighbors first 8 pairs:
+        //   (0,0)(0,0)(0,0)(32,32)(1,32)(1,1)(64,64)(33,64)
+        var t = Vp9NeighborTables.DefaultScan32x32Neighbors;
+        Equal((ushort)0, t[0]);   Equal((ushort)0, t[1]);
+        Equal((ushort)0, t[2]);   Equal((ushort)0, t[3]);
+        Equal((ushort)0, t[4]);   Equal((ushort)0, t[5]);
+        Equal((ushort)32, t[6]);  Equal((ushort)32, t[7]);
+        Equal((ushort)1, t[8]);   Equal((ushort)32, t[9]);
+        // Last meaningful pair before the trailing (0,0) - libvpx values:
+        // ...991, 1022, 0, 0
+        Equal((ushort)991,  t[2046]);
+        Equal((ushort)1022, t[2047]);
+        Equal((ushort)0,    t[2048]);
+        Equal((ushort)0,    t[2049]);
+    }
+
+    [TestMethod]
+    public void Vp9NeighborTables_GetNeighbors16x16_DispatchesByScanType()
+    {
+        True(ReferenceEquals(Vp9NeighborTables.DefaultScan16x16Neighbors, Vp9NeighborTables.GetNeighbors16x16(Vp9ScanType.Default)));
+        True(ReferenceEquals(Vp9NeighborTables.RowScan16x16Neighbors,     Vp9NeighborTables.GetNeighbors16x16(Vp9ScanType.Row)));
+        True(ReferenceEquals(Vp9NeighborTables.ColScan16x16Neighbors,     Vp9NeighborTables.GetNeighbors16x16(Vp9ScanType.Col)));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborTables_GetNeighbors32x32_AlwaysReturnsDefault()
+    {
+        True(ReferenceEquals(Vp9NeighborTables.DefaultScan32x32Neighbors, Vp9NeighborTables.GetNeighbors32x32(Vp9ScanType.Default)));
+        True(ReferenceEquals(Vp9NeighborTables.DefaultScan32x32Neighbors, Vp9NeighborTables.GetNeighbors32x32(Vp9ScanType.Row)));
+        True(ReferenceEquals(Vp9NeighborTables.DefaultScan32x32Neighbors, Vp9NeighborTables.GetNeighbors32x32(Vp9ScanType.Col)));
+    }
 }
