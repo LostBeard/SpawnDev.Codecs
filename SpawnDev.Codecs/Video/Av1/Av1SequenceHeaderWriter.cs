@@ -154,6 +154,54 @@ public sealed record Av1SequenceHeaderConfig
 
     /// <summary>film_grain_params_present flag.</summary>
     public bool FilmGrainParamsPresent { get; init; }
+
+    /// <summary>
+    /// Build a writer config from a parsed <see cref="Av1SequenceHeader"/>.
+    /// Round-trip helper: parse(SH) -> ToConfig -> EmitPayload should
+    /// produce byte-identical output to the source SH for any AV1 stream
+    /// our parser handles.
+    /// </summary>
+    public static Av1SequenceHeaderConfig FromHeader(Av1SequenceHeader sh)
+    {
+        ArgumentNullException.ThrowIfNull(sh);
+        return new Av1SequenceHeaderConfig
+        {
+            SeqProfile = sh.SeqProfile,
+            SeqLevelIdx0 = sh.SeqLevelIdx0,
+            MaxFrameWidth = sh.MaxFrameWidth,
+            MaxFrameHeight = sh.MaxFrameHeight,
+            BitDepth = sh.BitDepth,
+            Monochrome = sh.Monochrome,
+            SubsamplingX = sh.SubsamplingX,
+            SubsamplingY = sh.SubsamplingY,
+            ColorRangeFull = sh.ColorRangeFull,
+            Use128x128Superblock = sh.Use128x128Superblock,
+            EnableFilterIntra = sh.EnableFilterIntra,
+            EnableIntraEdgeFilter = sh.EnableIntraEdgeFilter,
+            EnableInterintraCompound = sh.EnableInterintraCompound,
+            EnableMaskedCompound = sh.EnableMaskedCompound,
+            EnableWarpedMotion = sh.EnableWarpedMotion,
+            EnableDualFilter = sh.EnableDualFilter,
+            EnableOrderHint = sh.EnableOrderHint,
+            EnableJntComp = sh.EnableJntComp,
+            EnableRefFrameMvs = sh.EnableRefFrameMvs,
+            OrderHintBitsMinus1 = sh.OrderHintBitsMinus1,
+            SeqChooseScreenContentTools = sh.SeqChooseScreenContentTools,
+            SeqForceScreenContentTools = sh.SeqForceScreenContentTools,
+            SeqChooseIntegerMv = sh.SeqChooseIntegerMv,
+            SeqForceIntegerMv = sh.SeqForceIntegerMv,
+            EnableSuperres = sh.EnableSuperres,
+            EnableCdef = sh.EnableCdef,
+            EnableRestoration = sh.EnableRestoration,
+            ColorDescriptionPresent = sh.ColorDescriptionPresent,
+            ColorPrimaries = sh.ColorPrimaries,
+            TransferCharacteristics = sh.TransferCharacteristics,
+            MatrixCoefficients = sh.MatrixCoefficients,
+            ChromaSamplePosition = sh.ChromaSamplePosition,
+            SeparateUvDeltas = sh.SeparateUvDeltas,
+            FilmGrainParamsPresent = sh.FilmGrainParamsPresent,
+        };
+    }
 }
 
 /// <summary>AV1 SequenceHeader OBU payload writer.</summary>

@@ -67,6 +67,79 @@ public sealed record Av1SequenceHeader
 
     /// <summary>Intra edge filter enable.</summary>
     public required bool EnableIntraEdgeFilter { get; init; }
+
+    // The fields below default to false / 0 / 2 so existing record
+    // construction sites stay compatible. The Av1SequenceHeaderParser
+    // populates them from the bitstream when present.
+
+    /// <summary>seq_level_idx[0] (operating point 0 level index).</summary>
+    public int SeqLevelIdx0 { get; init; }
+
+    /// <summary>enable_interintra_compound flag.</summary>
+    public bool EnableInterintraCompound { get; init; }
+
+    /// <summary>enable_masked_compound flag.</summary>
+    public bool EnableMaskedCompound { get; init; }
+
+    /// <summary>enable_warped_motion flag.</summary>
+    public bool EnableWarpedMotion { get; init; }
+
+    /// <summary>enable_dual_filter flag.</summary>
+    public bool EnableDualFilter { get; init; }
+
+    /// <summary>enable_order_hint flag.</summary>
+    public bool EnableOrderHint { get; init; }
+
+    /// <summary>enable_jnt_comp flag (only signaled when EnableOrderHint=true).</summary>
+    public bool EnableJntComp { get; init; }
+
+    /// <summary>enable_ref_frame_mvs flag (only signaled when EnableOrderHint=true).</summary>
+    public bool EnableRefFrameMvs { get; init; }
+
+    /// <summary>order_hint_bits_minus_1 (only signaled when EnableOrderHint=true).</summary>
+    public int OrderHintBitsMinus1 { get; init; }
+
+    /// <summary>seq_choose_screen_content_tools flag.</summary>
+    public bool SeqChooseScreenContentTools { get; init; }
+
+    /// <summary>seq_force_screen_content_tools value (2 = SELECT, 0/1 = explicit).</summary>
+    public int SeqForceScreenContentTools { get; init; }
+
+    /// <summary>seq_choose_integer_mv flag.</summary>
+    public bool SeqChooseIntegerMv { get; init; }
+
+    /// <summary>seq_force_integer_mv value (2 = SELECT, 0/1 = explicit).</summary>
+    public int SeqForceIntegerMv { get; init; }
+
+    /// <summary>enable_superres flag.</summary>
+    public bool EnableSuperres { get; init; }
+
+    /// <summary>enable_cdef flag.</summary>
+    public bool EnableCdef { get; init; }
+
+    /// <summary>enable_restoration flag.</summary>
+    public bool EnableRestoration { get; init; }
+
+    /// <summary>color_description_present flag.</summary>
+    public bool ColorDescriptionPresent { get; init; }
+
+    /// <summary>color_primaries (8-bit value, default 2 = UNSPECIFIED).</summary>
+    public int ColorPrimaries { get; init; } = 2;
+
+    /// <summary>transfer_characteristics (8-bit value, default 2 = UNSPECIFIED).</summary>
+    public int TransferCharacteristics { get; init; } = 2;
+
+    /// <summary>matrix_coefficients (8-bit value, default 2 = UNSPECIFIED).</summary>
+    public int MatrixCoefficients { get; init; } = 2;
+
+    /// <summary>chroma_sample_position (only signaled when subX=1 && subY=1).</summary>
+    public int ChromaSamplePosition { get; init; }
+
+    /// <summary>separate_uv_deltas flag.</summary>
+    public bool SeparateUvDeltas { get; init; }
+
+    /// <summary>film_grain_params_present flag.</summary>
+    public bool FilmGrainParamsPresent { get; init; }
 }
 
 /// <summary>AV1 sequence header parser.</summary>
@@ -92,11 +165,12 @@ public static class Av1SequenceHeaderParser
         bool decoderModelInfoPresent = false;
         bool initialDisplayDelayPresent = false;
 
+        int seqLevelIdx0 = 0;
         if (reducedStill)
         {
             // OP count = 1; operating_point_idc = 0; per spec, just one
             // f(5) read for seq_level_idx[0].
-            br.ReadBits(5); // seq_level_idx[0]
+            seqLevelIdx0 = (int)br.ReadBits(5);
         }
         else
         {
@@ -117,6 +191,7 @@ public static class Av1SequenceHeaderParser
             {
                 br.ReadBits(12); // operating_point_idc[i]
                 int level = (int)br.ReadBits(5);
+                if (i == 0) seqLevelIdx0 = level;
                 if (level > 7) br.ReadBits(1); // seq_tier[i]
                 if (decoderModelInfoPresent)
                 {
@@ -153,39 +228,45 @@ public static class Av1SequenceHeaderParser
         bool enableFilterIntra = br.ReadFlag();
         bool enableIntraEdgeFilter = br.ReadFlag();
 
-        // The rest of the SH parses additional flags (interintra, masked
-        // compound, warped motion, dual filter, order hint, jnt_comp,
-        // ref frame mvs, screen content tools, force integer mv, OH bits,
-        // superres, cdef, restoration, color config, film grain). For now
-        // we fast-forward to color_config since the body up to here is
-        // enough to populate the headline fields.
+        bool enableInterintraCompound = false;
+        bool enableMaskedCompound = false;
+        bool enableWarpedMotion = false;
+        bool enableDualFilter = false;
+        bool enableOrderHint = false;
+        bool enableJntComp = false;
+        bool enableRefFrameMvs = false;
+        bool seqChooseScreenContentTools = false;
+        int seqForceScreenContentTools = 0;
+        bool seqChooseIntegerMv = false;
+        int seqForceIntegerMv = 0;
+        int orderHintBitsMinus1 = 0;
         if (!reducedStill)
         {
-            br.ReadBits(1); // enable_interintra_compound
-            br.ReadBits(1); // enable_masked_compound
-            br.ReadBits(1); // enable_warped_motion
-            br.ReadBits(1); // enable_dual_filter
-            bool enableOrderHint = br.ReadFlag();
+            enableInterintraCompound = br.ReadFlag();
+            enableMaskedCompound = br.ReadFlag();
+            enableWarpedMotion = br.ReadFlag();
+            enableDualFilter = br.ReadFlag();
+            enableOrderHint = br.ReadFlag();
             if (enableOrderHint)
             {
-                br.ReadBits(1); // enable_jnt_comp
-                br.ReadBits(1); // enable_ref_frame_mvs
+                enableJntComp = br.ReadFlag();
+                enableRefFrameMvs = br.ReadFlag();
             }
-            bool seqChooseScreenContentTools = br.ReadFlag();
-            int seqForceScreenContentTools;
+            seqChooseScreenContentTools = br.ReadFlag();
             if (seqChooseScreenContentTools) seqForceScreenContentTools = 2; // SELECT_SCREEN_CONTENT_TOOLS
             else seqForceScreenContentTools = (int)br.ReadBits(1);
             if (seqForceScreenContentTools > 0)
             {
-                bool seqChooseIntegerMv = br.ReadFlag();
-                if (!seqChooseIntegerMv) br.ReadBits(1); // seq_force_integer_mv
+                seqChooseIntegerMv = br.ReadFlag();
+                if (!seqChooseIntegerMv) seqForceIntegerMv = (int)br.ReadBits(1);
+                else seqForceIntegerMv = 2;
             }
             if (enableOrderHint)
-                br.ReadBits(3); // order_hint_bits_minus_1
+                orderHintBitsMinus1 = (int)br.ReadBits(3);
         }
-        br.ReadBits(1); // enable_superres
-        br.ReadBits(1); // enable_cdef
-        br.ReadBits(1); // enable_restoration
+        bool enableSuperres = br.ReadFlag();
+        bool enableCdef = br.ReadFlag();
+        bool enableRestoration = br.ReadFlag();
 
         // color_config:
         bool highBitDepth = br.ReadFlag();
@@ -202,14 +283,19 @@ public static class Av1SequenceHeaderParser
         bool monochrome = false;
         if (seqProfile != 1) monochrome = br.ReadFlag();
         bool colorDescPresent = br.ReadFlag();
+        int colorPrimaries = 2;
+        int transferChars = 2;
+        int matrixCoefs = 2;
         if (colorDescPresent)
         {
-            br.ReadBits(8); // color_primaries
-            br.ReadBits(8); // transfer_characteristics
-            br.ReadBits(8); // matrix_coefficients
+            colorPrimaries = (int)br.ReadBits(8);
+            transferChars = (int)br.ReadBits(8);
+            matrixCoefs = (int)br.ReadBits(8);
         }
         bool colorRangeFull;
         int subX = 1, subY = 1;
+        int chromaSamplePosition = 0;
+        bool separateUvDeltas = false;
         if (monochrome)
         {
             colorRangeFull = br.ReadFlag();
@@ -218,8 +304,6 @@ public static class Av1SequenceHeaderParser
         }
         else
         {
-            // sRGB-style: profile=1 OR (profile=2 & bit=12) gates sub flags
-            bool srgb = colorDescPresent && br.BitsRemaining > 0 && false; // placeholder
             colorRangeFull = br.ReadFlag();
             if (seqProfile == 0) { subX = 1; subY = 1; }
             else if (seqProfile == 1) { subX = 0; subY = 0; }
@@ -237,10 +321,10 @@ public static class Av1SequenceHeaderParser
                     subY = 0;
                 }
             }
-            if (subX != 0 && subY != 0) br.ReadBits(2); // chroma_sample_position
-            br.ReadBits(1); // separate_uv_deltas
+            if (subX != 0 && subY != 0) chromaSamplePosition = (int)br.ReadBits(2);
+            separateUvDeltas = br.ReadFlag();
         }
-        // film_grain_params_present, then trailing bits - not parsed.
+        bool filmGrainParamsPresent = br.BitsRemaining > 0 && br.ReadFlag();
 
         return new Av1SequenceHeader
         {
@@ -259,6 +343,29 @@ public static class Av1SequenceHeaderParser
             Use128x128Superblock = use128x128Superblock,
             EnableFilterIntra = enableFilterIntra,
             EnableIntraEdgeFilter = enableIntraEdgeFilter,
+            SeqLevelIdx0 = seqLevelIdx0,
+            EnableInterintraCompound = enableInterintraCompound,
+            EnableMaskedCompound = enableMaskedCompound,
+            EnableWarpedMotion = enableWarpedMotion,
+            EnableDualFilter = enableDualFilter,
+            EnableOrderHint = enableOrderHint,
+            EnableJntComp = enableJntComp,
+            EnableRefFrameMvs = enableRefFrameMvs,
+            OrderHintBitsMinus1 = orderHintBitsMinus1,
+            SeqChooseScreenContentTools = seqChooseScreenContentTools,
+            SeqForceScreenContentTools = seqForceScreenContentTools,
+            SeqChooseIntegerMv = seqChooseIntegerMv,
+            SeqForceIntegerMv = seqForceIntegerMv,
+            EnableSuperres = enableSuperres,
+            EnableCdef = enableCdef,
+            EnableRestoration = enableRestoration,
+            ColorDescriptionPresent = colorDescPresent,
+            ColorPrimaries = colorPrimaries,
+            TransferCharacteristics = transferChars,
+            MatrixCoefficients = matrixCoefs,
+            ChromaSamplePosition = chromaSamplePosition,
+            SeparateUvDeltas = separateUvDeltas,
+            FilmGrainParamsPresent = filmGrainParamsPresent,
         };
     }
 

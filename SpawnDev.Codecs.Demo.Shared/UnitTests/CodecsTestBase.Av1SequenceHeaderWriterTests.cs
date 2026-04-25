@@ -195,6 +195,40 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void Av1SequenceHeaderWriter_BbbSh_ParseToConfigEchoesBitExact()
+    {
+        // The full closed loop: parse a real libaom-encoded SH OBU, build
+        // the writer config straight from the parsed Av1SequenceHeader via
+        // Av1SequenceHeaderConfig.FromHeader, and verify the writer emits
+        // back the IDENTICAL source bytes. This proves the parser surfaces
+        // every conditional bit it reads, and the writer round-trips it.
+        var bytes = LoadAv1Fixture();
+        var firstFrame = SpawnDev.Codecs.Container.Ivf.IvfReader.EnumerateFrames(bytes).First();
+        byte[] sourceSh = Array.Empty<byte>();
+        foreach (var obu in Av1ObuParser.EnumerateObus(firstFrame.Data))
+        {
+            if (obu.Type == Av1ObuType.SequenceHeader)
+            {
+                sourceSh = firstFrame.Data.Slice(obu.PayloadOffset, obu.PayloadLength).ToArray();
+                break;
+            }
+        }
+        True(sourceSh.Length > 0, "no SH OBU found in BBB first frame");
+
+        var sh = Av1SequenceHeaderParser.Parse(sourceSh);
+        var cfg = Av1SequenceHeaderConfig.FromHeader(sh);
+        var emitted = Av1SequenceHeaderWriter.EmitPayload(cfg);
+
+        Equal(sourceSh.Length, emitted.Length);
+        for (int i = 0; i < sourceSh.Length; i++)
+        {
+            if (sourceSh[i] != emitted[i])
+                throw new Exception(
+                    $"BBB SH echo byte {i}: source 0x{sourceSh[i]:X2} vs emitted 0x{emitted[i]:X2}");
+        }
+    }
+
+    [TestMethod]
     public void Av1SequenceHeaderWriter_RejectsInvalidConfigs()
     {
         // 12-bit on profile 0 is invalid.
