@@ -59,4 +59,15 @@ internal ref struct Vp9BitReader
 
     /// <summary>Read a single bit as a bool (1 -> true).</summary>
     internal bool ReadFlag() => ReadBits(1) == 1;
+
+    /// <summary>
+    /// Read a signed-magnitude literal: <paramref name="nBits"/> bits of
+    /// magnitude followed by 1 sign bit (1 = negative). Mirror of
+    /// libvpx <c>vpx_rb_read_signed_literal</c>.
+    /// </summary>
+    internal int ReadSignedLiteral(int nBits)
+    {
+        int value = (int)ReadBits(nBits);
+        return ReadFlag() ? -value : value;
+    }
 }
