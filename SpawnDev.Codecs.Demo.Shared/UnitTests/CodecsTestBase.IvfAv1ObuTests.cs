@@ -112,6 +112,56 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void Av1SequenceHeader_BbbFirstFrame_ParsesAdvancedFlags()
+    {
+        // Verify the parser surfaces every conditional bit observed in
+        // the libaom-encoded BBB SH (decoded from the bitstream by hand:
+        // see inspect_bbb_sh.cs).
+        var bytes = LoadAv1Fixture();
+        var firstFrame = IvfReader.EnumerateFrames(bytes).First();
+
+        Av1SequenceHeader? sh = null;
+        foreach (var obu in Av1ObuParser.EnumerateObus(firstFrame.Data))
+        {
+            if (obu.Type == Av1ObuType.SequenceHeader)
+            {
+                sh = Av1SequenceHeaderParser.Parse(
+                    firstFrame.Data.Span.Slice(obu.PayloadOffset, obu.PayloadLength));
+                break;
+            }
+        }
+        True(sh is not null, "no SequenceHeader OBU found");
+
+        // Tools that affect frame parsing - libaom-av1 set these:
+        Equal(true, sh!.EnableFilterIntra);
+        Equal(true, sh.EnableIntraEdgeFilter);
+        Equal(false, sh.EnableInterintraCompound);
+        Equal(true, sh.EnableMaskedCompound);
+        Equal(true, sh.EnableWarpedMotion);
+        Equal(false, sh.EnableDualFilter);
+        Equal(true, sh.EnableOrderHint);
+        Equal(false, sh.EnableJntComp);
+        Equal(true, sh.EnableRefFrameMvs);
+        Equal(6, sh.OrderHintBitsMinus1);
+        Equal(true, sh.SeqChooseScreenContentTools);
+        Equal(2, sh.SeqForceScreenContentTools); // SELECT
+        Equal(true, sh.SeqChooseIntegerMv);
+        Equal(2, sh.SeqForceIntegerMv); // SELECT
+        Equal(false, sh.EnableSuperres);
+        Equal(true, sh.EnableCdef);
+        Equal(false, sh.EnableRestoration);
+        Equal(true, sh.ColorDescriptionPresent);
+        Equal(2, sh.ColorPrimaries);          // UNSPECIFIED
+        Equal(2, sh.TransferCharacteristics); // UNSPECIFIED
+        Equal(5, sh.MatrixCoefficients);      // BT.709
+        Equal(0, sh.ChromaSamplePosition);
+        Equal(false, sh.SeparateUvDeltas);
+        Equal(false, sh.FilmGrainParamsPresent);
+        Equal(false, sh.Use128x128Superblock);
+        Equal(0, sh.SeqLevelIdx0);
+    }
+
+    [TestMethod]
     public void Av1FrameHeader_BbbFirstFrame_FirstFrameIsKey()
     {
         // The first IVF frame must be a keyframe.
