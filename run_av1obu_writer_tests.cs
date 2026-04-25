@@ -15,6 +15,8 @@ string[] tests = new[]
     "Av1SequenceHeaderWriter_Monochrome_RoundTrips",
     "Av1SequenceHeaderWriter_WrappedAsObu_StreamHasValidShape",
     "Av1SequenceHeaderWriter_RejectsInvalidConfigs",
+    "Av1SequenceHeaderWriter_BbbConfig_BitExactMatchesLibaomBytes",
+    "Av1SequenceHeaderWriter_BbbSh_ParseToConfigEchoesBitExact",
     "Av1FrameHeaderWriter_VisibleKeyFrame_RoundTripsThroughParser",
     "Av1FrameHeaderWriter_VisibleInterFrame_ErrorResilientFalse_RoundTrips",
     "Av1FrameHeaderWriter_HiddenFrame_ShowableTrue_RoundTrips",
