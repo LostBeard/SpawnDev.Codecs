@@ -109,6 +109,15 @@ public sealed class Vp9Decoder : IVideoDecoder
                 _refFrameSizes[2] = (Width, Height);
             }
 
+            // Compressed header (probability updates). Sits between the
+            // byte-aligned uncompressed header and the tile data, with
+            // length first_partition_size. For show_existing_frame
+            // there's no compressed header.
+            if (!header.ShowExistingFrame && complete.FirstPartitionSize > 0)
+            {
+                ParseCompressedHeader(complete, frameBytes);
+            }
+
             // Hidden alt-ref frames are decoded but not displayed. Until the
             // reference pool exists, skip emission for those.
             if (!header.ShowFrame && !header.ShowExistingFrame) continue;
@@ -123,6 +132,53 @@ public sealed class Vp9Decoder : IVideoDecoder
         }
 
         return emitted;
+    }
+
+    /// <summary>Per-frame compressed-header state. Recreated for keyframes.</summary>
+    private Vp9CompressedHeaderState _compressedState = new();
+
+    /// <summary>Last parsed compressed-header tx_mode + reference_mode.</summary>
+    public Vp9CompressedHeaderResult? LastCompressedResult { get; private set; }
+
+    /// <summary>
+    /// Parse the compressed header from the frame at the byte offset
+    /// derived from the complete uncompressed header. Updates the
+    /// per-frame probability state and exposes tx_mode +
+    /// reference_mode via <see cref="LastCompressedResult"/>.
+    /// </summary>
+    private void ParseCompressedHeader(Vp9UncompressedHeader complete, ReadOnlyMemory<byte> frameBytes)
+    {
+        // libvpx VP9 frames re-seed prob state on keyframes / intra_only;
+        // inter frames carry over previous state. For now we always
+        // start with fresh defaults to avoid carrying stale state into
+        // mismatching frames.
+        if (complete.FrameHeader.FrameType == Vp9FrameType.Key
+            || complete.FrameHeader.IntraOnly)
+        {
+            _compressedState = new Vp9CompressedHeaderState();
+        }
+
+        var inputs = new Vp9CompressedHeaderInputs(
+            IsLossless: complete.Quantization.BaseQIndex == 0
+                && complete.Quantization.YDcDeltaQ == 0
+                && complete.Quantization.UvDcDeltaQ == 0
+                && complete.Quantization.UvAcDeltaQ == 0,
+            IsIntraOnly: complete.FrameHeader.FrameType == Vp9FrameType.Key
+                || complete.FrameHeader.IntraOnly,
+            InterpFilter: complete.InterpFilter,
+            AllowHighPrecisionMv: complete.AllowHighPrecisionMv,
+            SignBiasLast: complete.RefFrameSignBias is { } sb && sb.Length > 0 && sb[0],
+            SignBiasGolden: complete.RefFrameSignBias is { } sb2 && sb2.Length > 1 && sb2[1],
+            SignBiasAltRef: complete.RefFrameSignBias is { } sb3 && sb3.Length > 2 && sb3[2]);
+
+        // Materialize a contiguous buffer covering the compressed header
+        // bytes for the bool decoder (Vp9BoolDecoder takes byte[], not Span).
+        var headerBytes = frameBytes.Span.Slice(
+            complete.UncompressedHeaderSizeBytes,
+            complete.FirstPartitionSize).ToArray();
+        var reader = new Vp9BoolDecoder(headerBytes, 0, headerBytes.Length);
+
+        LastCompressedResult = Vp9CompressedHeaderParser.Read(_compressedState, inputs, reader);
     }
 
     /// <summary>
