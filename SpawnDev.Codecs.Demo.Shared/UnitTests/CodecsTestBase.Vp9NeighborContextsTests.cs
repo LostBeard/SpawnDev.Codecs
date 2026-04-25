@@ -302,4 +302,31 @@ public abstract partial class CodecsTestBase
             (true, Vp9InterpFilter.EightTap),
             (true, Vp9InterpFilter.EightTapSharp)));
     }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_SegId_BothMissing()
+    {
+        Equal(0, Vp9NeighborContexts.GetSegIdContext(null, null));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_SegId_OneSidePredicted()
+    {
+        Equal(1, Vp9NeighborContexts.GetSegIdContext(true, null));
+        Equal(1, Vp9NeighborContexts.GetSegIdContext(null, true));
+        Equal(1, Vp9NeighborContexts.GetSegIdContext(true, false));
+        Equal(1, Vp9NeighborContexts.GetSegIdContext(false, true));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_SegId_BothPredicted()
+    {
+        Equal(2, Vp9NeighborContexts.GetSegIdContext(true, true));
+    }
+
+    [TestMethod]
+    public void Vp9NeighborContexts_SegId_BothPresentNeitherPredicted()
+    {
+        Equal(0, Vp9NeighborContexts.GetSegIdContext(false, false));
+    }
 }

@@ -228,4 +228,26 @@ public static class Vp9NeighborContexts
         if (aboveType == SwitchableFiltersCount) return leftType;
         return SwitchableFiltersCount;
     }
+
+    /// <summary>
+    /// libvpx <c>vp9_get_pred_context_seg_id</c>. Returns 0..2 =
+    /// (above_seg_id_predicted + left_seg_id_predicted), where
+    /// missing neighbors contribute 0. Used to index the segmentation
+    /// temporal-update probability array
+    /// (<see cref="Vp9SegmentationParams.PredProbs"/>).
+    /// </summary>
+    /// <param name="aboveSegIdPredicted">
+    /// seg_id_predicted flag of the above neighbor, or null if no
+    /// above neighbor (top-of-frame edge).
+    /// </param>
+    /// <param name="leftSegIdPredicted">
+    /// seg_id_predicted flag of the left neighbor, or null if no
+    /// left neighbor (start-of-tile-row edge).
+    /// </param>
+    public static int GetSegIdContext(bool? aboveSegIdPredicted, bool? leftSegIdPredicted)
+    {
+        int above = aboveSegIdPredicted == true ? 1 : 0;
+        int left = leftSegIdPredicted == true ? 1 : 0;
+        return above + left;
+    }
 }
