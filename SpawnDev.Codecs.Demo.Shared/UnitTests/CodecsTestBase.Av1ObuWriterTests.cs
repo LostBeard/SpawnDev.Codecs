@@ -123,6 +123,42 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void Av1ObuWriter_BbbAllFrames_ConcatenatedRoundTripMatchesSource()
+    {
+        // Stream-level closed loop: for every IVF frame's OBU payload,
+        // re-emit each OBU through Av1ObuWriter, concatenate them, and
+        // verify the result is byte-identical to the source IVF frame
+        // payload. Across 60 frames + 148 OBUs, every byte of every
+        // frame's OBU stream must match.
+        var bytes = LoadAv1Fixture();
+        int frameIdx = 0;
+        int totalBytes = 0;
+        foreach (var ivfFrame in IvfReader.EnumerateFrames(bytes))
+        {
+            frameIdx++;
+            using var ms = new MemoryStream();
+            foreach (var obu in Av1ObuParser.EnumerateObus(ivfFrame.Data))
+            {
+                byte[] re = Av1ObuWriter.EmitObu(obu, ivfFrame.Data);
+                ms.Write(re, 0, re.Length);
+            }
+            byte[] emitted = ms.ToArray();
+            byte[] source = ivfFrame.Data.ToArray();
+
+            Equal(source.Length, emitted.Length);
+            for (int i = 0; i < source.Length; i++)
+            {
+                if (source[i] != emitted[i])
+                    throw new Exception(
+                        $"frame {frameIdx} byte {i}: src 0x{source[i]:X2} vs emit 0x{emitted[i]:X2}");
+            }
+            totalBytes += source.Length;
+        }
+        Equal(60, frameIdx);
+        True(totalBytes > 50_000, $"expected substantial frame bytes; got {totalBytes}");
+    }
+
+    [TestMethod]
     public void Av1ObuWriter_BbbFirstFrame_ConcatenatedRoundTripMatchesSource()
     {
         // Stronger end-to-end check: concatenate every re-emitted OBU and
