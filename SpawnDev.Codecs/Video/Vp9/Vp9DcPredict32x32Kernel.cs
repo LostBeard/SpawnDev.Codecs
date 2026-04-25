@@ -5,25 +5,21 @@
 // per-edge sum extent (32 samples) and shift counts (Log2N = 5,
 // Log2N + 1 = 6) change. Bit-exact against Vp9DcPredictor at N=32.
 //
-// rc.13 backend status:
+// rc.13 backend status: 4/6 green.
 //   CPU + CUDA + OpenCL + Wasm: bit-exact, all six tests green.
-//   WebGPU: 30+ second WGSL compile cliff (same root cause as the
-//           pre-rc.14 Vp9Idct16x16Kernel issue - large inlined kernel
-//           body). Pending SpawnDev.ILGPU rc.14 codegen fix +
-//           bumping Codecs PackageReference. Once rc.14 is in, the
-//           WGSL function-definition path lets the kernel compile
-//           in milliseconds.
-//   WebGL: gated at the runner level (atomic-RMW unavailable for
-//          ArrayView<byte> writes; same as every other VP9 byte-write
-//          kernel in this assembly).
+//   WebGPU: 30+ second WGSL compile cliff on the inlined kernel
+//           (same pattern as the pre-rc.14 Vp9Idct16x16Kernel issue).
+//   WebGL: gated at the runner level (atomic-RMW for ArrayView<byte>
+//          writes).
 //
-// I tried wrapping the sum loop and 32x32 fill in
-// [MethodImpl(NoInlining)] helpers to encourage the codegen path
-// early - it broke Wasm under rc.13 (writes silent-no-op'd, the
-// kernel produced 0 bytes everywhere). The Wasm regression and the
-// WebGPU compile cliff are both fixed at the codegen layer in rc.14;
-// until then, leave the loops inlined here so the 4 working backends
-// stay bit-exact.
+// rc.14 was supposed to fix WebGPU + Wasm via the function-definition
+// codegen path + a wide-to-narrow narrowing patch. Verification on
+// 2026-04-25 found new regressions: WebGPU emits invalid WGSL
+// (`-> void` parse error from the function-definition path) and Wasm
+// still silent-zero-writes when [MethodImpl(NoInlining)] is applied
+// to the byte-write FillBlock helper. Filed back to Geordi for rc.15.
+// Until rc.15 lands, keep this kernel inlined - 4/6 green is better
+// than 3/6.
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -100,7 +96,7 @@ public sealed class Vp9DcPredict32x32Kernel : IDisposable
         readBack.AsSpan(0, dstFlat.Length).CopyTo(dstFlat.Span);
     }
 
-    /// <summary>Kernel body. One thread per block.</summary>
+    /// <summary>Kernel body. One thread per block, fully inlined.</summary>
     private static void DcKernel(
         Index1D blockIdx,
         ArrayView<byte> aboveFlat,
