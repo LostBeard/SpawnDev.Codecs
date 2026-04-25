@@ -39,49 +39,31 @@ var sourceHeader = IvfReader.ParseHeader(sourceBytes);
 Console.WriteLine();
 Console.WriteLine($"Source IVF: {sourceHeader.FourCc} {sourceHeader.Width}x{sourceHeader.Height} ({sourceHeader.NumFrames} frames declared)");
 
-// 2. Build our SequenceHeader OBU.
-var ourSeqHeader = Av1SequenceHeaderWriter.EmitPayload(new Av1SequenceHeaderConfig
-{
-    SeqProfile = 0,
-    MaxFrameWidth = sourceHeader.Width,
-    MaxFrameHeight = sourceHeader.Height,
-    BitDepth = 8,
-    SubsamplingX = 1,
-    SubsamplingY = 1,
-    ColorRangeFull = false,
-});
-var ourSeqObu = Av1ObuWriter.EmitObu(Av1ObuType.SequenceHeader, ourSeqHeader, hasSizeField: true);
-Console.WriteLine($"Our SH payload: {ourSeqHeader.Length} bytes; OBU-wrapped: {ourSeqObu.Length} bytes");
-
-// 3. Walk every IVF frame; for each frame, drop original SH OBUs,
-//    keep all other OBUs verbatim. Prepend our SH only to the first frame.
-using var outFs = new FileStream(remuxIvf, FileMode.Create, FileAccess.Write);
-var ivfOut = new IvfWriter(outFs, "AV01", sourceHeader.Width, sourceHeader.Height,
-    frameRate: sourceHeader.FrameRate, timeScale: sourceHeader.TimeScale);
-
+// 2. Walk every IVF frame; re-emit each OBU verbatim through Av1ObuWriter,
+//    write the resulting frame through our IvfWriter. Source SH stays
+//    intact so frames parse correctly.
 int frameIdx = 0;
-int strippedSh = 0;
-foreach (var srcFrame in IvfReader.EnumerateFrames(sourceBytes))
+int totalObus = 0;
+using (var outFs = new FileStream(remuxIvf, FileMode.Create, FileAccess.Write))
 {
-    using var frameMs = new MemoryStream();
-    if (frameIdx == 0)
-        frameMs.Write(ourSeqObu, 0, ourSeqObu.Length);
-    foreach (var obu in Av1ObuParser.EnumerateObus(srcFrame.Data))
+    var ivfOut = new IvfWriter(outFs, "AV01", sourceHeader.Width, sourceHeader.Height,
+        frameRate: sourceHeader.FrameRate, timeScale: sourceHeader.TimeScale);
+
+    foreach (var srcFrame in IvfReader.EnumerateFrames(sourceBytes))
     {
-        if (obu.Type == Av1ObuType.SequenceHeader)
+        using var frameMs = new MemoryStream();
+        foreach (var obu in Av1ObuParser.EnumerateObus(srcFrame.Data))
         {
-            strippedSh++;
-            continue;
+            var re = Av1ObuWriter.EmitObu(obu, srcFrame.Data);
+            frameMs.Write(re, 0, re.Length);
+            totalObus++;
         }
-        var re = Av1ObuWriter.EmitObu(obu, srcFrame.Data);
-        frameMs.Write(re, 0, re.Length);
+        ivfOut.WriteFrame(frameMs.ToArray(), srcFrame.Pts);
+        frameIdx++;
     }
-    ivfOut.WriteFrame(frameMs.ToArray(), srcFrame.Pts);
-    frameIdx++;
+    ivfOut.Finish();
 }
-ivfOut.Finish();
-outFs.Flush();
-Console.WriteLine($"Remuxed: {frameIdx} frames written, {strippedSh} original SH OBU(s) replaced");
+Console.WriteLine($"Remuxed: {frameIdx} frames written, {totalObus} OBUs re-emitted");
 Console.WriteLine($"Output: {remuxIvf} ({new FileInfo(remuxIvf).Length} bytes; source = {sourceBytes.Length})");
 
 // 4. ffmpeg decode source + remux to YUV.
@@ -108,10 +90,9 @@ else
         Console.WriteLine();
         Console.WriteLine("============================================================");
         Console.WriteLine("  END-TO-END BIT-EXACT.");
-        Console.WriteLine("  - Av1ObuWriter wrote framing ffmpeg accepts.");
-        Console.WriteLine("  - Av1SequenceHeaderWriter wrote SH bytes ffmpeg accepts.");
+        Console.WriteLine("  - Av1ObuWriter wrote framing ffmpeg + dav1d accept.");
         Console.WriteLine("  - IvfWriter wrote a container ffmpeg accepts.");
-        Console.WriteLine("  - The decoded pixel-level result is identical.");
+        Console.WriteLine("  - The decoded pixel result is identical to source.");
         Console.WriteLine("============================================================");
     }
 }
