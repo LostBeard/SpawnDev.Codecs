@@ -209,8 +209,9 @@ public static class Av1SequenceHeaderWriter
 {
     /// <summary>
     /// Emit the SequenceHeader OBU PAYLOAD (i.e. the bytes that go AFTER
-    /// the OBU header / size prefix). Wrap with <see cref="Av1ObuWriter.EmitObu"/>
-    /// to produce a full OBU.
+    /// the OBU header / size prefix). Wrap with the
+    /// <see cref="Av1ObuWriter.EmitObu(Av1ObuType, System.ReadOnlySpan{byte}, bool, int, int, bool?)"/>
+    /// overload to produce a full OBU.
     /// </summary>
     public static byte[] EmitPayload(Av1SequenceHeaderConfig cfg)
     {

@@ -130,8 +130,9 @@ public static class Av1ObuParser
     }
 
     /// <summary>
-    /// Read an unsigned LEB128 integer. AV1 caps the value at 8 bytes
-    /// total. Returns the byte count consumed via <paramref name="bytesRead"/>.
+    /// Read an unsigned LEB128 integer from <paramref name="data"/>. AV1
+    /// caps the value at 8 bytes total. Returns the number of bytes
+    /// consumed; the decoded value goes through <paramref name="value"/>.
     /// </summary>
     private static int ReadLeb128(ReadOnlySpan<byte> data, out long value)
     {
