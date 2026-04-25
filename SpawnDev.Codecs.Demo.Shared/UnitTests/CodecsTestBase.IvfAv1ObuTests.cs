@@ -112,6 +112,72 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void Av1FrameHeader_BbbFirstFrame_FirstFrameIsKey()
+    {
+        // The first IVF frame must be a keyframe.
+        var bytes = LoadAv1Fixture();
+        var firstFrame = IvfReader.EnumerateFrames(bytes).First();
+
+        Av1SequenceHeader? sh = null;
+        Av1FrameHeader? fh = null;
+        foreach (var obu in Av1ObuParser.EnumerateObus(firstFrame.Data))
+        {
+            if (obu.Type == Av1ObuType.SequenceHeader)
+            {
+                sh = Av1SequenceHeaderParser.Parse(
+                    firstFrame.Data.Span.Slice(obu.PayloadOffset, obu.PayloadLength));
+            }
+            else if (obu.IsCodedFrameData && sh is not null)
+            {
+                fh = Av1FrameHeaderParser.Parse(
+                    firstFrame.Data.Span.Slice(obu.PayloadOffset, obu.PayloadLength), sh);
+                break;
+            }
+        }
+        True(sh is not null, "expected SH OBU before frame OBU");
+        True(fh is not null, "expected Frame / FrameHeader OBU");
+        Equal(Av1FrameType.KeyFrame, fh!.FrameType);
+        Equal(true, fh.ShowFrame);
+        Equal(true, fh.FrameIsIntra);
+    }
+
+    [TestMethod]
+    public void Av1FrameHeader_BbbAllFrames_FrameTypesPlausible()
+    {
+        // Walk every frame, count frame types. BBB should produce 1
+        // keyframe + many inter.
+        var bytes = LoadAv1Fixture();
+        Av1SequenceHeader? sh = null;
+        var typeCounts = new Dictionary<Av1FrameType, int>();
+        int parsed = 0;
+        foreach (var ivfFrame in IvfReader.EnumerateFrames(bytes))
+        {
+            foreach (var obu in Av1ObuParser.EnumerateObus(ivfFrame.Data))
+            {
+                if (obu.Type == Av1ObuType.SequenceHeader)
+                {
+                    sh = Av1SequenceHeaderParser.Parse(
+                        ivfFrame.Data.Span.Slice(obu.PayloadOffset, obu.PayloadLength));
+                }
+                else if (obu.IsCodedFrameData && sh is not null)
+                {
+                    var fh = Av1FrameHeaderParser.Parse(
+                        ivfFrame.Data.Span.Slice(obu.PayloadOffset, obu.PayloadLength), sh);
+                    typeCounts.TryGetValue(fh.FrameType, out int c);
+                    typeCounts[fh.FrameType] = c + 1;
+                    parsed++;
+                    break;
+                }
+            }
+        }
+        True(parsed >= 60, $"expected at least 60 frame headers parsed; got {parsed}");
+        True(typeCounts.ContainsKey(Av1FrameType.KeyFrame),
+            $"expected at least one keyframe; saw types {string.Join(',', typeCounts.Keys)}");
+        True(typeCounts.ContainsKey(Av1FrameType.InterFrame),
+            $"expected inter frames; saw types {string.Join(',', typeCounts.Keys)}");
+    }
+
+    [TestMethod]
     public void Av1ObuParser_BbbAllFrames_ParseWithoutErrors()
     {
         // Drive every frame through the OBU parser and verify all OBUs
