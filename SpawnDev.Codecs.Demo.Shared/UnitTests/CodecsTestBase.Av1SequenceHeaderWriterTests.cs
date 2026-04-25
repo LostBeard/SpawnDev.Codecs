@@ -128,6 +128,73 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void Av1SequenceHeaderWriter_BbbConfig_BitExactMatchesLibaomBytes()
+    {
+        // Strongest spec validation: build the config that mirrors what
+        // libaom-av1 chose for the BBB encode (observed by parsing the
+        // source SH bit-by-bit) and verify our writer emits IDENTICAL
+        // bytes. Same config in -> same bitstream out as the reference
+        // encoder.
+        var bytes = LoadAv1Fixture();
+        var firstFrame = SpawnDev.Codecs.Container.Ivf.IvfReader.EnumerateFrames(bytes).First();
+        byte[] sourceSh = Array.Empty<byte>();
+        foreach (var obu in Av1ObuParser.EnumerateObus(firstFrame.Data))
+        {
+            if (obu.Type == Av1ObuType.SequenceHeader)
+            {
+                sourceSh = firstFrame.Data.Slice(obu.PayloadOffset, obu.PayloadLength).ToArray();
+                break;
+            }
+        }
+        True(sourceSh.Length > 0, "Could not extract source SH from BBB fixture.");
+
+        var cfg = new Av1SequenceHeaderConfig
+        {
+            SeqProfile = 0,
+            SeqLevelIdx0 = 0,
+            MaxFrameWidth = 320,
+            MaxFrameHeight = 180,
+            BitDepth = 8,
+            Monochrome = false,
+            SubsamplingX = 1,
+            SubsamplingY = 1,
+            ColorRangeFull = false,
+            Use128x128Superblock = false,
+            EnableFilterIntra = true,
+            EnableIntraEdgeFilter = true,
+            EnableInterintraCompound = false,
+            EnableMaskedCompound = true,
+            EnableWarpedMotion = true,
+            EnableDualFilter = false,
+            EnableOrderHint = true,
+            EnableJntComp = false,
+            EnableRefFrameMvs = true,
+            OrderHintBitsMinus1 = 6,
+            SeqChooseScreenContentTools = true,
+            SeqChooseIntegerMv = true,
+            EnableSuperres = false,
+            EnableCdef = true,
+            EnableRestoration = false,
+            ColorDescriptionPresent = true,
+            ColorPrimaries = 2,
+            TransferCharacteristics = 2,
+            MatrixCoefficients = 5,
+            ChromaSamplePosition = 0,
+            SeparateUvDeltas = false,
+            FilmGrainParamsPresent = false,
+        };
+
+        var emitted = Av1SequenceHeaderWriter.EmitPayload(cfg);
+        Equal(sourceSh.Length, emitted.Length);
+        for (int i = 0; i < sourceSh.Length; i++)
+        {
+            if (sourceSh[i] != emitted[i])
+                throw new Exception(
+                    $"BBB SH byte {i}: source 0x{sourceSh[i]:X2} vs emitted 0x{emitted[i]:X2}");
+        }
+    }
+
+    [TestMethod]
     public void Av1SequenceHeaderWriter_RejectsInvalidConfigs()
     {
         // 12-bit on profile 0 is invalid.

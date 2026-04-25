@@ -79,6 +79,81 @@ public sealed record Av1SequenceHeaderConfig
 
     /// <summary>True for full-range pixel values, false for studio range.</summary>
     public bool ColorRangeFull { get; init; }
+
+    /// <summary>use_128x128_superblock flag.</summary>
+    public bool Use128x128Superblock { get; init; }
+
+    /// <summary>enable_filter_intra flag.</summary>
+    public bool EnableFilterIntra { get; init; }
+
+    /// <summary>enable_intra_edge_filter flag.</summary>
+    public bool EnableIntraEdgeFilter { get; init; }
+
+    /// <summary>enable_interintra_compound flag.</summary>
+    public bool EnableInterintraCompound { get; init; }
+
+    /// <summary>enable_masked_compound flag.</summary>
+    public bool EnableMaskedCompound { get; init; }
+
+    /// <summary>enable_warped_motion flag.</summary>
+    public bool EnableWarpedMotion { get; init; }
+
+    /// <summary>enable_dual_filter flag.</summary>
+    public bool EnableDualFilter { get; init; }
+
+    /// <summary>enable_order_hint flag (gates jnt_comp / ref_frame_mvs / order_hint_bits).</summary>
+    public bool EnableOrderHint { get; init; }
+
+    /// <summary>enable_jnt_comp flag. Only emitted when EnableOrderHint=true.</summary>
+    public bool EnableJntComp { get; init; }
+
+    /// <summary>enable_ref_frame_mvs flag. Only emitted when EnableOrderHint=true.</summary>
+    public bool EnableRefFrameMvs { get; init; }
+
+    /// <summary>order_hint_bits_minus_1, f(3). Only emitted when EnableOrderHint=true.</summary>
+    public int OrderHintBitsMinus1 { get; init; }
+
+    /// <summary>seq_choose_screen_content_tools flag (true picks SELECT, false uses ForceScreenContentTools).</summary>
+    public bool SeqChooseScreenContentTools { get; init; } = true;
+
+    /// <summary>seq_force_screen_content_tools, f(1). Only emitted when SeqChooseScreenContentTools=false.</summary>
+    public int SeqForceScreenContentTools { get; init; }
+
+    /// <summary>seq_choose_integer_mv flag. Only emitted when seq_force_screen_content_tools > 0.</summary>
+    public bool SeqChooseIntegerMv { get; init; } = true;
+
+    /// <summary>seq_force_integer_mv, f(1). Only emitted when SeqChooseIntegerMv=false.</summary>
+    public int SeqForceIntegerMv { get; init; }
+
+    /// <summary>enable_superres flag.</summary>
+    public bool EnableSuperres { get; init; }
+
+    /// <summary>enable_cdef flag.</summary>
+    public bool EnableCdef { get; init; }
+
+    /// <summary>enable_restoration flag.</summary>
+    public bool EnableRestoration { get; init; }
+
+    /// <summary>color_description_present flag (gates color_primaries / transfer / matrix bytes).</summary>
+    public bool ColorDescriptionPresent { get; init; }
+
+    /// <summary>color_primaries, f(8). Only emitted when ColorDescriptionPresent=true.</summary>
+    public int ColorPrimaries { get; init; } = 2;
+
+    /// <summary>transfer_characteristics, f(8). Only emitted when ColorDescriptionPresent=true.</summary>
+    public int TransferCharacteristics { get; init; } = 2;
+
+    /// <summary>matrix_coefficients, f(8). Only emitted when ColorDescriptionPresent=true.</summary>
+    public int MatrixCoefficients { get; init; } = 2;
+
+    /// <summary>chroma_sample_position, f(2). Only emitted when subX=1 && subY=1.</summary>
+    public int ChromaSamplePosition { get; init; } = 0;
+
+    /// <summary>separate_uv_deltas flag.</summary>
+    public bool SeparateUvDeltas { get; init; }
+
+    /// <summary>film_grain_params_present flag.</summary>
+    public bool FilmGrainParamsPresent { get; init; }
 }
 
 /// <summary>AV1 SequenceHeader OBU payload writer.</summary>
@@ -114,25 +189,50 @@ public static class Av1SequenceHeaderWriter
         bw.WriteBits(cfg.MaxFrameHeight - 1, hBits);
 
         bw.WriteFlag(false); // frame_id_numbers_present_flag
-        bw.WriteFlag(false); // use_128x128_superblock
-        bw.WriteFlag(false); // enable_filter_intra
-        bw.WriteFlag(false); // enable_intra_edge_filter
+        bw.WriteFlag(cfg.Use128x128Superblock);
+        bw.WriteFlag(cfg.EnableFilterIntra);
+        bw.WriteFlag(cfg.EnableIntraEdgeFilter);
 
-        bw.WriteFlag(false); // enable_interintra_compound
-        bw.WriteFlag(false); // enable_masked_compound
-        bw.WriteFlag(false); // enable_warped_motion
-        bw.WriteFlag(false); // enable_dual_filter
-        bw.WriteFlag(false); // enable_order_hint
-        bw.WriteFlag(true);  // seq_choose_screen_content_tools = 1 (SELECT)
-        // SELECT puts seq_force_screen_content_tools at 2 (>0), so the
-        // bitstream still carries seq_choose_integer_mv. Emit SELECT for
-        // that too so frame-level integer-mv flags pick it up.
-        bw.WriteFlag(true);  // seq_choose_integer_mv = 1
-        // No order_hint_bits_minus_1 since enable_order_hint=0.
+        bw.WriteFlag(cfg.EnableInterintraCompound);
+        bw.WriteFlag(cfg.EnableMaskedCompound);
+        bw.WriteFlag(cfg.EnableWarpedMotion);
+        bw.WriteFlag(cfg.EnableDualFilter);
+        bw.WriteFlag(cfg.EnableOrderHint);
+        if (cfg.EnableOrderHint)
+        {
+            bw.WriteFlag(cfg.EnableJntComp);
+            bw.WriteFlag(cfg.EnableRefFrameMvs);
+        }
+        bw.WriteFlag(cfg.SeqChooseScreenContentTools);
+        int sccForce;
+        if (cfg.SeqChooseScreenContentTools)
+        {
+            sccForce = 2; // SELECT
+        }
+        else
+        {
+            sccForce = cfg.SeqForceScreenContentTools;
+            if ((uint)sccForce > 1) throw new ArgumentOutOfRangeException(nameof(cfg.SeqForceScreenContentTools));
+            bw.WriteBits(sccForce, 1);
+        }
+        if (sccForce > 0)
+        {
+            bw.WriteFlag(cfg.SeqChooseIntegerMv);
+            if (!cfg.SeqChooseIntegerMv)
+            {
+                if ((uint)cfg.SeqForceIntegerMv > 1) throw new ArgumentOutOfRangeException(nameof(cfg.SeqForceIntegerMv));
+                bw.WriteBits(cfg.SeqForceIntegerMv, 1);
+            }
+        }
+        if (cfg.EnableOrderHint)
+        {
+            if ((uint)cfg.OrderHintBitsMinus1 > 7) throw new ArgumentOutOfRangeException(nameof(cfg.OrderHintBitsMinus1));
+            bw.WriteBits(cfg.OrderHintBitsMinus1, 3);
+        }
 
-        bw.WriteFlag(false); // enable_superres
-        bw.WriteFlag(false); // enable_cdef
-        bw.WriteFlag(false); // enable_restoration
+        bw.WriteFlag(cfg.EnableSuperres);
+        bw.WriteFlag(cfg.EnableCdef);
+        bw.WriteFlag(cfg.EnableRestoration);
 
         // color_config
         bool highBitDepth = cfg.BitDepth >= 10;
@@ -141,7 +241,16 @@ public static class Av1SequenceHeaderWriter
             bw.WriteFlag(cfg.BitDepth == 12);
         if (cfg.SeqProfile != 1)
             bw.WriteFlag(cfg.Monochrome);
-        bw.WriteFlag(false); // color_description_present_flag
+        bw.WriteFlag(cfg.ColorDescriptionPresent);
+        if (cfg.ColorDescriptionPresent)
+        {
+            if ((uint)cfg.ColorPrimaries > 255) throw new ArgumentOutOfRangeException(nameof(cfg.ColorPrimaries));
+            if ((uint)cfg.TransferCharacteristics > 255) throw new ArgumentOutOfRangeException(nameof(cfg.TransferCharacteristics));
+            if ((uint)cfg.MatrixCoefficients > 255) throw new ArgumentOutOfRangeException(nameof(cfg.MatrixCoefficients));
+            bw.WriteBits(cfg.ColorPrimaries, 8);
+            bw.WriteBits(cfg.TransferCharacteristics, 8);
+            bw.WriteBits(cfg.MatrixCoefficients, 8);
+        }
         if (cfg.Monochrome)
         {
             bw.WriteFlag(cfg.ColorRangeFull);
@@ -164,11 +273,14 @@ public static class Av1SequenceHeaderWriter
             int effSubX = cfg.SeqProfile == 0 ? 1 : (cfg.SeqProfile == 1 ? 0 : cfg.SubsamplingX);
             int effSubY = cfg.SeqProfile == 0 ? 1 : (cfg.SeqProfile == 1 ? 0 : cfg.SubsamplingY);
             if (effSubX != 0 && effSubY != 0)
-                bw.WriteBits(0, 2); // chroma_sample_position = CSP_UNKNOWN
-            bw.WriteFlag(false); // separate_uv_deltas
+            {
+                if ((uint)cfg.ChromaSamplePosition > 3) throw new ArgumentOutOfRangeException(nameof(cfg.ChromaSamplePosition));
+                bw.WriteBits(cfg.ChromaSamplePosition, 2);
+            }
+            bw.WriteFlag(cfg.SeparateUvDeltas);
         }
 
-        bw.WriteFlag(false); // film_grain_params_present
+        bw.WriteFlag(cfg.FilmGrainParamsPresent);
 
         bw.WriteTrailingBits();
         return bw.ToArray();
