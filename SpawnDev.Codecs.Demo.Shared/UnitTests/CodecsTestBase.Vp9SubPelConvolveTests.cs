@@ -238,6 +238,51 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void Vp9SubPelConvolve_Copy_RowMatchesSourceExactly()
+    {
+        const int sw = 16, stride = sw;
+        var src = new byte[2 * stride];
+        for (int i = 0; i < src.Length; i++) src[i] = (byte)(i + 1);
+        var dst = new byte[2 * 8];
+
+        Vp9SubPelConvolve.ConvolveCopy(
+            src, srcStart: 4, srcStride: stride,
+            dst, dstStart: 0, dstStride: 8,
+            width: 8, height: 2);
+
+        // Row 0 -> src[4..11]; Row 1 -> src[stride+4..stride+11].
+        for (int x = 0; x < 8; x++)
+        {
+            Equal((byte)(4 + x + 1), dst[x]);
+            Equal((byte)(stride + 4 + x + 1), dst[8 + x]);
+        }
+    }
+
+    [TestMethod]
+    public void Vp9SubPelConvolve_Avg_AveragesSourceWithExistingDst()
+    {
+        // dst[i] = (existing + src[i] + 1) >> 1.
+        var src = new byte[8];
+        var dst = new byte[8];
+        for (int i = 0; i < 8; i++)
+        {
+            src[i] = (byte)(i * 20);   // 0, 20, 40, 60, 80, 100, 120, 140
+            dst[i] = (byte)(100);       // existing dst all 100
+        }
+
+        Vp9SubPelConvolve.ConvolveAvg(
+            src, srcStart: 0, srcStride: 8,
+            dst, dstStart: 0, dstStride: 8,
+            width: 8, height: 1);
+
+        // Expected: (100 + i*20 + 1) >> 1
+        for (int i = 0; i < 8; i++)
+        {
+            Equal((byte)((100 + i * 20 + 1) >> 1), dst[i]);
+        }
+    }
+
+    [TestMethod]
     public void Vp9SubPelConvolve_2D_ConstantInput_ConstantOutput()
     {
         // A constant source produces a constant output for any sub-pel

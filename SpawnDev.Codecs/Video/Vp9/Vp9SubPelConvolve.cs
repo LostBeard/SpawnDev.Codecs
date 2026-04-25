@@ -216,4 +216,50 @@ public static class Vp9SubPelConvolve
             filter, y0Q4, yStepQ4,
             width, height);
     }
+
+    /// <summary>
+    /// Fast-path pixel copy for integer-pel MV (x0Q4 = y0Q4 = 0,
+    /// xStepQ4 = yStepQ4 = 16). No filtering - direct memcpy. Mirror
+    /// of libvpx <c>vpx_convolve_copy_c</c>.
+    ///
+    /// Caller must already have advanced srcStart to the integer-pel
+    /// reference position (no top/left padding required since no taps
+    /// are applied).
+    /// </summary>
+    public static void ConvolveCopy(
+        ReadOnlySpan<byte> src, int srcStart, int srcStride,
+        Span<byte> dst, int dstStart, int dstStride,
+        int width, int height)
+    {
+        if (width <= 0 || height <= 0) return;
+        for (int y = 0; y < height; y++)
+        {
+            var srcRow = src.Slice(srcStart + y * srcStride, width);
+            var dstRow = dst.Slice(dstStart + y * dstStride, width);
+            srcRow.CopyTo(dstRow);
+        }
+    }
+
+    /// <summary>
+    /// Fast-path pixel-average for integer-pel MV in compound
+    /// prediction: dst = (dst + src + 1) &gt;&gt; 1. Mirror of libvpx
+    /// <c>vpx_convolve_avg_c</c>.
+    /// </summary>
+    public static void ConvolveAvg(
+        ReadOnlySpan<byte> src, int srcStart, int srcStride,
+        Span<byte> dst, int dstStart, int dstStride,
+        int width, int height)
+    {
+        if (width <= 0 || height <= 0) return;
+        for (int y = 0; y < height; y++)
+        {
+            int srcRowStart = srcStart + y * srcStride;
+            int dstRowStart = dstStart + y * dstStride;
+            for (int x = 0; x < width; x++)
+            {
+                int avg = (dst[dstRowStart + x] + src[srcRowStart + x] + 1) >> 1;
+                dst[dstRowStart + x] = (byte)avg;
+            }
+        }
+    }
 }
