@@ -262,6 +262,39 @@ public static class Vp9ScanTables
     };
 
     /// <summary>
+    /// Canonical-enum scan flavor picker. Same shape as the legacy
+    /// <see cref="ScanTypeForTxType4x4"/> / <see cref="ScanTypeForTxType8x8"/>
+    /// helpers but takes the canonical <see cref="Vp9TxType"/>. Applies
+    /// at 4x4 / 8x8 / 16x16; 32x32 is always
+    /// <see cref="Vp9ScanType.Default"/> regardless of tx_type.
+    /// </summary>
+    public static Vp9ScanType ScanTypeForTxType(Vp9TxType txType) => txType switch
+    {
+        Vp9TxType.DctDct   => Vp9ScanType.Default,
+        Vp9TxType.AdstDct  => Vp9ScanType.Row,
+        Vp9TxType.DctAdst  => Vp9ScanType.Col,
+        Vp9TxType.AdstAdst => Vp9ScanType.Default,
+        _ => Vp9ScanType.Default,
+    };
+
+    /// <summary>
+    /// One-call scan picker for an intra block: derives the tx_type
+    /// from <paramref name="mode"/> (via <see cref="Vp9IntraTxType.ForMode"/>),
+    /// the scan flavor from the tx_type (via
+    /// <see cref="ScanTypeForTxType"/>), and returns the scan table
+    /// for <paramref name="txSize"/>. 32x32 always returns the default
+    /// scan; the intra mode is ignored at that size to mirror libvpx.
+    /// </summary>
+    public static ushort[] GetIntraScan(Vp9TxSize txSize, Vp9IntraMode mode)
+    {
+        if (txSize == Vp9TxSize.Tx32x32)
+            return DefaultScan32x32;
+        var txType = Vp9IntraTxType.ForMode(mode);
+        var scanType = ScanTypeForTxType(txType);
+        return GetScan(txSize, scanType);
+    }
+
+    /// <summary>
     /// Look up the scan-position to raster-position table for a given
     /// transform size and scan flavor. 32x32 only has the default
     /// flavor; passing <c>Row</c> or <c>Col</c> at 32x32 still returns
