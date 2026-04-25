@@ -77,4 +77,33 @@ public static class Vp9TileLayout
         int colEnd = GetTileOffset(tileCol + 1, miCols, log2TileCols);
         return new Vp9TileBounds(rowStart, rowEnd, colStart, colEnd);
     }
+
+    /// <summary>libvpx <c>MIN_TILE_WIDTH_B64</c>: minimum tile width in SBs.</summary>
+    public const int MinTileWidthSb = 4;
+
+    /// <summary>libvpx <c>MAX_TILE_WIDTH_B64</c>: maximum tile width in SBs.</summary>
+    public const int MaxTileWidthSb = 64;
+
+    /// <summary>
+    /// Compute (min, max) bounds for the <c>log2_tile_cols</c> field
+    /// given the frame's mi-column width. The decoder validates that
+    /// the bitstream's value lies in this range. Mirror of libvpx
+    /// <c>vp9_get_tile_n_bits</c>.
+    /// </summary>
+    public static (int Min, int Max) GetLog2TileColsBounds(int miCols)
+    {
+        if (miCols < 0)
+            throw new ArgumentOutOfRangeException(nameof(miCols), miCols, "miCols must be >= 0.");
+        int sbCols = MiAlignedToSb(miCols) >> MiBlockSizeLog2;
+
+        int maxLog2 = 1;
+        while ((sbCols >> maxLog2) >= MinTileWidthSb) maxLog2++;
+        maxLog2--;
+        if (maxLog2 < 0) maxLog2 = 0;
+
+        int minLog2 = 0;
+        while ((MaxTileWidthSb << minLog2) < sbCols) minLog2++;
+
+        return (minLog2, maxLog2);
+    }
 }

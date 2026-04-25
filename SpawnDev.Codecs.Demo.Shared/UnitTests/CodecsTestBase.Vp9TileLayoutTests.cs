@@ -93,4 +93,50 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9TileLayout.GetTileOffset(0, 64, -1));
     }
+
+    [TestMethod]
+    public void Vp9TileLayout_TileWidthConstants()
+    {
+        Equal(4, Vp9TileLayout.MinTileWidthSb);
+        Equal(64, Vp9TileLayout.MaxTileWidthSb);
+    }
+
+    [TestMethod]
+    public void Vp9TileLayout_Log2TileColsBounds_SmallFrame_BothZero()
+    {
+        // 32 mi cols = 4 SBs. min: 64 << 0 < 4 is false -> min = 0.
+        // max: (4 >> 1) >= 4? no, so max = 0.
+        var (min, max) = Vp9TileLayout.GetLog2TileColsBounds(32);
+        Equal(0, min);
+        Equal(0, max);
+    }
+
+    [TestMethod]
+    public void Vp9TileLayout_Log2TileColsBounds_HD()
+    {
+        // 1280 px frame -> 1280/8 = 160 mi cols, aligned -> 160, sb_cols = 20.
+        // max: how many bits before sb_cols >> bits drops below 4? 20 >> 2 = 5 (>=4 ok), 20 >> 3 = 2 (<4 stop). max=3-1=2.
+        // min: 64 << 0 = 64; 64 < 20? no. min = 0.
+        var (min, max) = Vp9TileLayout.GetLog2TileColsBounds(160);
+        Equal(0, min);
+        Equal(2, max);
+    }
+
+    [TestMethod]
+    public void Vp9TileLayout_Log2TileColsBounds_VeryWide()
+    {
+        // 8192 mi cols -> sb_cols = 1024.
+        // min: 64 << 0 = 64 < 1024 -> ++; 128 -> ++; ... 64 << 4 = 1024, not < 1024 -> stop. min = 4.
+        // max: 1024 >> 1 = 512 (>=4); 1024 >> 9 = 2 (<4); ++ went 1..9, stops with maxLog2=9 -> --=8.
+        var (min, max) = Vp9TileLayout.GetLog2TileColsBounds(8192);
+        Equal(4, min);
+        Equal(8, max);
+    }
+
+    [TestMethod]
+    public void Vp9TileLayout_Log2TileColsBounds_RejectsNegativeMis()
+    {
+        Throws<ArgumentOutOfRangeException>(() =>
+            Vp9TileLayout.GetLog2TileColsBounds(-1));
+    }
 }
