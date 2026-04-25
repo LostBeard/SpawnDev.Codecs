@@ -15,6 +15,14 @@ string[] tests = new[]
     "Av1SequenceHeaderWriter_Monochrome_RoundTrips",
     "Av1SequenceHeaderWriter_WrappedAsObu_StreamHasValidShape",
     "Av1SequenceHeaderWriter_RejectsInvalidConfigs",
+    "Av1FrameHeaderWriter_VisibleKeyFrame_RoundTripsThroughParser",
+    "Av1FrameHeaderWriter_VisibleInterFrame_ErrorResilientFalse_RoundTrips",
+    "Av1FrameHeaderWriter_HiddenFrame_ShowableTrue_RoundTrips",
+    "Av1FrameHeaderWriter_ShowExistingFrame_RoundTrips",
+    "Av1FrameHeaderWriter_IntraOnlyFrame_RoundTrips",
+    "Av1FrameHeaderWriter_SwitchFrame_RoundTrips",
+    "Av1FrameHeaderWriter_RejectsImplicitErrorResilientMisconfig",
+    "Av1FrameHeaderWriter_ReducedStillPictureHeader_EmptyHeader",
 };
 
 int total = 0, passed = 0;
