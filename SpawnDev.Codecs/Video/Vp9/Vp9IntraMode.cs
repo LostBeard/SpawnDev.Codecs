@@ -73,8 +73,8 @@ public static class Vp9IntraModeTree
     /// are byte indices of the next node within this same array.
     ///
     /// DcPred = 0 case: the tree value at slot 0 is `-DcPred` = 0.
-    /// The walker treats the value as "<= 0 means leaf" so 0 is a
-    /// valid leaf for mode value 0.
+    /// The walker treats the value as &quot;&lt;= 0 means leaf&quot; so 0
+    /// is a valid leaf for mode value 0.
     /// </summary>
     public static readonly sbyte[] Tree = new sbyte[]
     {
