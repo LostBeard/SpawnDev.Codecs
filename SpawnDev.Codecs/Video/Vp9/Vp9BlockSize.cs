@@ -49,6 +49,13 @@ public enum Vp9BlockSize : byte
     Block64x32 = 11,
     /// <summary>64x64 pixels (super-block).</summary>
     Block64x64 = 12,
+
+    /// <summary>
+    /// libvpx <c>BLOCK_INVALID</c>. Returned by lookup tables for
+    /// (block size, partition) combinations the bitstream is forbidden
+    /// from emitting.
+    /// </summary>
+    Invalid = 13,
 }
 
 /// <summary>VP9 block-size dimension lookups.</summary>
