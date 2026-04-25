@@ -83,6 +83,109 @@ public abstract partial class CodecsTestBase
             Vp9LoopFilterLookup.ResolveSegmentLevel(null!, 0, 30));
     }
 
+    [TestMethod]
+    public void Vp9LoopFilterLookup_BlockLevel_NoModeRefDelta_PassesSegmentLevel()
+    {
+        var seg = MakeLfSeg(enabled: false);
+        Equal(30, Vp9LoopFilterLookup.ResolveBlockLevel(
+            frameFilterLevel: 30, seg, segmentId: 0,
+            modeRefDeltaEnabled: false,
+            refDeltas: ReadOnlySpan<int>.Empty,
+            modeDeltas: ReadOnlySpan<int>.Empty,
+            Vp9MvReferenceFrame.Last,
+            interMode: Vp9InterMode.ZeroMv));
+    }
+
+    [TestMethod]
+    public void Vp9LoopFilterLookup_BlockLevel_IntraOnlyAddsRefDelta()
+    {
+        // Frame level 32, intra block. Ref deltas {1, 2, 3, 4}.
+        // ref_deltas[Intra=0] = 1; scale = 1 << (32 >> 5) = 1 << 1 = 2.
+        // level = 32 + 1*2 = 34.
+        var seg = MakeLfSeg(enabled: false);
+        Equal(34, Vp9LoopFilterLookup.ResolveBlockLevel(
+            frameFilterLevel: 32, seg, segmentId: 0,
+            modeRefDeltaEnabled: true,
+            refDeltas: new int[] { 1, 2, 3, 4 },
+            modeDeltas: new int[] { -1, 1 },
+            Vp9MvReferenceFrame.Intra,
+            interMode: null));
+    }
+
+    [TestMethod]
+    public void Vp9LoopFilterLookup_BlockLevel_InterAddsBothRefAndModeDelta()
+    {
+        // Frame level 32, ref Last (idx 1), interMode = ZeroMv.
+        // ref_deltas[Last] = 2; mode_deltas[0] = -3 (Zero index).
+        // scale = 1 << (32 >> 5) = 2.
+        // level = 32 + 2*2 + (-3)*2 = 32 + 4 - 6 = 30.
+        var seg = MakeLfSeg(enabled: false);
+        Equal(30, Vp9LoopFilterLookup.ResolveBlockLevel(
+            frameFilterLevel: 32, seg, segmentId: 0,
+            modeRefDeltaEnabled: true,
+            refDeltas: new int[] { 1, 2, 3, 4 },
+            modeDeltas: new int[] { -3, 1 },
+            Vp9MvReferenceFrame.Last,
+            interMode: Vp9InterMode.ZeroMv));
+    }
+
+    [TestMethod]
+    public void Vp9LoopFilterLookup_BlockLevel_NewMvUsesIndex1OfModeDeltas()
+    {
+        // Frame level 0, scale = 1 << 0 = 1. ref_deltas[Last] = 0, mode_deltas[1] = 7.
+        // level = 0 + 0*1 + 7*1 = 7.
+        var seg = MakeLfSeg(enabled: false);
+        Equal(7, Vp9LoopFilterLookup.ResolveBlockLevel(
+            frameFilterLevel: 0, seg, segmentId: 0,
+            modeRefDeltaEnabled: true,
+            refDeltas: new int[] { 0, 0, 0, 0 },
+            modeDeltas: new int[] { 0, 7 },
+            Vp9MvReferenceFrame.Last,
+            interMode: Vp9InterMode.NewMv));
+    }
+
+    [TestMethod]
+    public void Vp9LoopFilterLookup_BlockLevel_ScaleAtLevel32_Is2()
+    {
+        // level >> 5 = 1 -> scale = 2 once we cross 32.
+        var seg = MakeLfSeg(enabled: false);
+        Equal(36, Vp9LoopFilterLookup.ResolveBlockLevel(
+            frameFilterLevel: 32, seg, segmentId: 0,
+            modeRefDeltaEnabled: true,
+            refDeltas: new int[] { 0, 2, 0, 0 },
+            modeDeltas: new int[] { 0, 0 },
+            Vp9MvReferenceFrame.Last,
+            interMode: Vp9InterMode.NewMv));
+    }
+
+    [TestMethod]
+    public void Vp9LoopFilterLookup_BlockLevel_RejectsNullInterModeForInterRef()
+    {
+        var seg = MakeLfSeg(enabled: false);
+        Throws<ArgumentNullException>(() =>
+            Vp9LoopFilterLookup.ResolveBlockLevel(
+                frameFilterLevel: 30, seg, segmentId: 0,
+                modeRefDeltaEnabled: true,
+                refDeltas: new int[] { 0, 0, 0, 0 },
+                modeDeltas: new int[] { 0, 0 },
+                Vp9MvReferenceFrame.Last,
+                interMode: null));
+    }
+
+    [TestMethod]
+    public void Vp9LoopFilterLookup_BlockLevel_RejectsShortRefDeltas()
+    {
+        var seg = MakeLfSeg(enabled: false);
+        Throws<ArgumentException>(() =>
+            Vp9LoopFilterLookup.ResolveBlockLevel(
+                frameFilterLevel: 30, seg, segmentId: 0,
+                modeRefDeltaEnabled: true,
+                refDeltas: new int[] { 0, 0, 0 }, // only 3, need 4
+                modeDeltas: new int[] { 0, 0 },
+                Vp9MvReferenceFrame.Last,
+                interMode: Vp9InterMode.ZeroMv));
+    }
+
     private static Vp9SegmentationParams MakeLfSeg(bool enabled = true, bool absDelta = false)
     {
         return new Vp9SegmentationParams
