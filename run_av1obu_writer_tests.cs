@@ -25,6 +25,14 @@ string[] tests = new[]
     "Av1FrameHeaderWriter_SwitchFrame_RoundTrips",
     "Av1FrameHeaderWriter_RejectsImplicitErrorResilientMisconfig",
     "Av1FrameHeaderWriter_ReducedStillPictureHeader_EmptyHeader",
+    "Av1BitWriter_EmptyAfterTrailingBits_IsOneByte",
+    "Av1BitWriter_SingleByteThroughTrailing_PreservesBits",
+    "Av1BitWriter_MixedFlags_ReadBackInOrder",
+    "Av1BitWriter_LargeMultiByteField_ReadBack",
+    "Av1BitWriter_RejectsValueOutOfRange",
+    "Av1BitWriter_ZeroBitsIsNoop",
+    "Av1BitWriter_PositionTracksBitsWritten",
+    "Av1BitWriter_ToArrayWithoutTrailing_Throws",
 };
 
 int total = 0, passed = 0;
