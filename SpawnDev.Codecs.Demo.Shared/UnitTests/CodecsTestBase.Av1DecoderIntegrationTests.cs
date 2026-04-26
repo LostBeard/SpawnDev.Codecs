@@ -166,6 +166,44 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task Av1Decoder_WriterBuiltMinimalStream_DecodesSequenceHeader()
+    {
+        // The writers + parser/decoder loop: build a TD + SH stream
+        // entirely with our writers, feed it back through Av1Decoder,
+        // verify the decoder learns the dimensions.
+        var sh = SpawnDev.Codecs.Video.Av1.Av1SequenceHeaderWriter.EmitPayload(
+            new SpawnDev.Codecs.Video.Av1.Av1SequenceHeaderConfig
+            {
+                SeqProfile = 0,
+                MaxFrameWidth = 1920,
+                MaxFrameHeight = 1080,
+                BitDepth = 8,
+                SubsamplingX = 1,
+                SubsamplingY = 1,
+            });
+        var shObu = SpawnDev.Codecs.Video.Av1.Av1ObuWriter.EmitObu(
+            SpawnDev.Codecs.Video.Av1.Av1ObuType.SequenceHeader, sh);
+        var tdObu = SpawnDev.Codecs.Video.Av1.Av1ObuWriter.EmitObu(
+            SpawnDev.Codecs.Video.Av1.Av1ObuType.TemporalDelimiter, ReadOnlySpan<byte>.Empty);
+        var combined = new byte[tdObu.Length + shObu.Length];
+        tdObu.CopyTo(combined, 0);
+        shObu.CopyTo(combined, tdObu.Length);
+
+        await using var decoder = new Av1Decoder();
+        var sink = new Av1RecordingSink();
+        await decoder.DecodeFrameAsync(combined, sink);
+
+        True(decoder.LastSequenceHeader is not null,
+            "decoder should populate LastSequenceHeader from writer-built bytes");
+        Equal(0, decoder.LastSequenceHeader!.SeqProfile);
+        Equal(1920, decoder.LastSequenceHeader.MaxFrameWidth);
+        Equal(1080, decoder.LastSequenceHeader.MaxFrameHeight);
+        Equal(8, decoder.LastSequenceHeader.BitDepth);
+        Equal(1920, decoder.Width);
+        Equal(1080, decoder.Height);
+    }
+
+    [TestMethod]
     public async Task Av1Decoder_BbbFirstFrame_PopulatesLastFrameHeader_AsKeyframe()
     {
         var bytes = LoadAv1Fixture();
