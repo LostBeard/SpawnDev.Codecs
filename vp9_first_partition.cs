@@ -33,6 +33,10 @@ Console.WriteLine();
 Console.WriteLine($"Compressed header parsed:");
 Console.WriteLine($"  tx_mode  = {decoder.LastCompressedResult?.TxMode}");
 Console.WriteLine($"  ref_mode = {decoder.LastCompressedResult?.ReferenceMode}");
+var seg = decoder.LastCompleteHeader?.Segmentation;
+Console.WriteLine($"  segmentation_enabled = {seg?.Enabled}");
+Console.WriteLine($"  segmentation_update_map = {seg?.UpdateMap}");
+Console.WriteLine($"  segmentation_temporal_update = {seg?.TemporalUpdate}");
 Console.WriteLine();
 
 // Initialize bool decoder over tile 0 bytes.
@@ -46,7 +50,7 @@ Console.WriteLine($"Tile 0: offset={tile0.Offset}, length={tile0.Length}");
 // First superblock at top-left: 64x64 (sizeIdx=3), both above + left
 // out of frame so splitState=0.
 var br = new Vp9BoolDecoder(tileBytes, 0, tileBytes.Length);
-var probs = Vp9PartitionProbs.DefaultProbs(sizeIdx: 3, splitState: 0);
+var probs = Vp9PartitionProbs.KeyframeProbs(sizeIdx: 3, splitState: 0);
 Console.WriteLine($"Partition probs (64x64, both unsplit context): "
     + $"None_vs_else={probs[0]}, Horz_vs_else={probs[1]}, Vert_vs_Split={probs[2]}");
 
@@ -80,7 +84,7 @@ if (partition == Vp9PartitionType.Split)
     Console.WriteLine();
     Console.WriteLine("Recursing into top-left 32x32 sub-block...");
     // 32x32 SB at top-left corner of the 64x64: above + left still out of frame.
-    var probs32 = Vp9PartitionProbs.DefaultProbs(sizeIdx: 2, splitState: 0);
+    var probs32 = Vp9PartitionProbs.KeyframeProbs(sizeIdx: 2, splitState: 0);
     Console.WriteLine($"Partition probs (32x32, both unsplit context): "
         + $"None={probs32[0]}, Horz={probs32[1]}, Vert/Split={probs32[2]}");
     var partition32 = Vp9PartitionTree.Decode(p => br.Read(p), probs32);
@@ -157,13 +161,13 @@ if (partition == Vp9PartitionType.Split)
     }
     else if (partition32 == Vp9PartitionType.Split)
     {
-        var probs16 = Vp9PartitionProbs.DefaultProbs(sizeIdx: 1, splitState: 0);
+        var probs16 = Vp9PartitionProbs.KeyframeProbs(sizeIdx: 1, splitState: 0);
         var partition16 = Vp9PartitionTree.Decode(p => br.Read(p), probs16);
         Console.WriteLine($"  Top-left 16x16 partition: {partition16}");
 
         if (partition16 == Vp9PartitionType.Split)
         {
-            var probs8 = Vp9PartitionProbs.DefaultProbs(sizeIdx: 0, splitState: 0);
+            var probs8 = Vp9PartitionProbs.KeyframeProbs(sizeIdx: 0, splitState: 0);
             var partition8 = Vp9PartitionTree.Decode(p => br.Read(p), probs8);
             Console.WriteLine($"  Top-left 8x8 partition:  {partition8}");
         }
