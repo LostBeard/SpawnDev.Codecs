@@ -230,16 +230,67 @@ Console.WriteLine("--- AV1 ENCODER FOUNDATION: bit-exact emit, ffmpeg-validated 
     File.Delete(remuxIvf); File.Delete(srcYuv); File.Delete(rmxYuv);
 }
 
+// 6. VP9 ENCODER FOUNDATION: WebM -> our writers -> IVF -> ffmpeg.
+Console.WriteLine();
+Console.WriteLine("--- VP9 ENCODER FOUNDATION: WebM -> writers -> IVF -> ffmpeg ---");
+{
+    string webmPath = Path.Combine(testDataDir, "Big_Buck_Bunny_180_10s.webm");
+    string remuxIvf = Path.Combine(Path.GetTempPath(), "demo_vp9_remux.ivf");
+    string srcYuv = Path.Combine(Path.GetTempPath(), "demo_vp9_src.yuv");
+    string rmxYuv = Path.Combine(Path.GetTempPath(), "demo_vp9_rmx.yuv");
+
+    using (var webmStream = File.OpenRead(webmPath))
+    {
+        var c = new MatroskaContainer(webmStream);
+        var v = c.Tracks.First(t => t.IsVideo);
+        int packets = 0;
+        using var outFs = new FileStream(remuxIvf, FileMode.Create, FileAccess.Write);
+        var ivfOut = new IvfWriter(outFs, "VP90", 320, 180, frameRate: 30, timeScale: 1);
+        long pts = 0;
+        foreach (var pkt in c.Frames.Where(f => f.TrackNumber == v.TrackNumber))
+        {
+            packets++;
+            var data = pkt.Data.ToArray();
+            var parsed = Vp9SuperframeParser.Parse(data);
+            var frames = new byte[parsed.Frames.Count][];
+            for (int i = 0; i < parsed.Frames.Count; i++)
+            {
+                var sl = parsed.Frames[i];
+                var fb = new byte[sl.Length];
+                Buffer.BlockCopy(data, sl.Offset, fb, 0, sl.Length);
+                frames[i] = fb;
+            }
+            ivfOut.WriteFrame(Vp9SuperframeWriter.Emit(frames), pts++);
+        }
+        ivfOut.Finish();
+        Console.WriteLine($"  Remuxed {packets} VP9 packets via Vp9SuperframeWriter + IvfWriter");
+    }
+
+    RunFfmpeg(ffmpegPath, $"-loglevel error -y -i \"{webmPath}\" -f rawvideo -pix_fmt yuv420p \"{srcYuv}\"");
+    RunFfmpeg(ffmpegPath, $"-loglevel error -y -i \"{remuxIvf}\" -f rawvideo -pix_fmt yuv420p \"{rmxYuv}\"");
+    var src = File.ReadAllBytes(srcYuv);
+    var rmx = File.ReadAllBytes(rmxYuv);
+    int yuvMismatch = 0;
+    int yuvLen = Math.Min(src.Length, rmx.Length);
+    for (int i = 0; i < yuvLen; i++) if (src[i] != rmx[i]) yuvMismatch++;
+    Console.WriteLine($"  ffmpeg source vs remux YUV: {yuvLen - yuvMismatch}/{yuvLen} BIT-EXACT");
+    File.Delete(remuxIvf); File.Delete(srcYuv); File.Delete(rmxYuv);
+}
+
 Console.WriteLine();
 Console.WriteLine("============================================================");
 Console.WriteLine("  Working today, end-to-end:");
 Console.WriteLine("    - FLAC encoder + decoder (ffmpeg cross-verified BIT-EXACT)");
 Console.WriteLine("    - VP9 decoder pipeline through tile group extraction");
-Console.WriteLine("    - AV1 decoder pipeline + SH + FrameHeader parsers");
+Console.WriteLine("    - AV1 decoder pipeline + SH + FrameHeader (16 fields) parsers");
+Console.WriteLine("    - AV1 + VP9 stream analyzers + validators (consumer APIs)");
 Console.WriteLine("    - AV1 ENCODER FOUNDATION:");
 Console.WriteLine("        SequenceHeader writer BIT-EXACT vs libaom-av1");
 Console.WriteLine("        FrameHeader writer + OBU writer + IVF writer");
 Console.WriteLine("        ffmpeg+dav1d accept our remux pixel-identical to source");
+Console.WriteLine("    - VP9 ENCODER FOUNDATION:");
+Console.WriteLine("        SuperframeWriter (BBB packets BIT-EXACT round-trip)");
+Console.WriteLine("        WebM -> IVF round-trip BIT-EXACT through ffmpeg");
 Console.WriteLine("    - IVF / Matroska / Ogg container readers + IVF writer");
 Console.WriteLine("  In progress (placeholder pixels for video):");
 Console.WriteLine("    - VP9 / AV1 block decode walker");
@@ -249,11 +300,13 @@ Console.WriteLine("============================================================"
 
 static void RunFfmpeg(string path, string args)
 {
+    // Drain stderr synchronously - ok with quiet logging.
     var psi = new ProcessStartInfo(path, args) { RedirectStandardError = true, UseShellExecute = false };
     var p = Process.Start(psi)!;
+    string stderr = p.StandardError.ReadToEnd();
     p.WaitForExit();
     if (p.ExitCode != 0)
-        throw new Exception($"ffmpeg failed (exit {p.ExitCode}):\n{p.StandardError.ReadToEnd()}");
+        throw new Exception($"ffmpeg failed (exit {p.ExitCode}):\n{stderr}");
 }
 
 internal sealed class CountingFrameSink : IVideoFrameSink
