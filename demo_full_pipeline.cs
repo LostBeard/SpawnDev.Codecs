@@ -195,29 +195,16 @@ Console.WriteLine("--- AV1 ENCODER FOUNDATION: bit-exact emit, ffmpeg-validated 
     for (int i = 0; i < shLen; i++) if (sourceSh[i] == ourSh[i]) shMatch++;
     Console.WriteLine($"  Av1SequenceHeaderWriter vs libaom-av1 BBB SH: {shMatch}/{sourceSh.Length} BIT-EXACT");
 
-    // Round-trip every OBU through Av1ObuWriter and write a new IVF.
+    // Use the high-level Av1IvfRemuxer for the round-trip remux.
     string remuxIvf = Path.Combine(Path.GetTempPath(), "demo_remux.ivf");
     string srcYuv = Path.Combine(Path.GetTempPath(), "demo_src.yuv");
     string rmxYuv = Path.Combine(Path.GetTempPath(), "demo_rmx.yuv");
-    int frameCount = 0, obuCount = 0;
-    using (var outFs = new FileStream(remuxIvf, FileMode.Create, FileAccess.Write))
-    {
-        var ivf = new IvfWriter(outFs, "AV01", 320, 180, frameRate: 30, timeScale: 1);
-        foreach (var ivfFrame in IvfReader.EnumerateFrames(av1Bytes))
-        {
-            using var ms = new MemoryStream();
-            foreach (var obu in Av1ObuParser.EnumerateObus(ivfFrame.Data))
-            {
-                var re = Av1ObuWriter.EmitObu(obu, ivfFrame.Data);
-                ms.Write(re, 0, re.Length);
-                obuCount++;
-            }
-            ivf.WriteFrame(ms.ToArray(), ivfFrame.Pts);
-            frameCount++;
-        }
-        ivf.Finish();
-    }
-    Console.WriteLine($"  Remuxed {frameCount} frames / {obuCount} OBUs through our IvfWriter + Av1ObuWriter");
+    var remuxedBytes = Av1IvfRemuxer.RemuxToBytes(av1Bytes);
+    File.WriteAllBytes(remuxIvf, remuxedBytes);
+    int matched = 0;
+    int compareLen = Math.Min(av1Bytes.Length, remuxedBytes.Length);
+    for (int i = 0; i < compareLen; i++) if (av1Bytes[i] == remuxedBytes[i]) matched++;
+    Console.WriteLine($"  Av1IvfRemuxer round-trip: {matched}/{av1Bytes.Length} bytes BIT-EXACT");
 
     // Closed-loop SH-substitution remux test using the high-level API.
     var bbbCfg = new Av1SequenceHeaderConfig
