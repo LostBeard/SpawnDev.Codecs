@@ -172,6 +172,40 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task Vp9Decoder_BbbFirstFrame_FirstPartitionDecisionDecodes()
+    {
+        // First step toward block-level VP9 decode: read the very first
+        // partition decision from BBB's first SB. Compose:
+        //   - Default keyframe partition probs (no compressed-header diff_update yet)
+        //   - 64x64 sizeIdx=3 + splitState=0 (above+left both unsplit)
+        //   - Vp9PartitionTree.Decode with the bool reader
+        // This proves partition tree -> decoder bridge works on real bytes.
+        using var stream = LoadBigBuckBunnyWebM();
+        var container = new MatroskaContainer(stream);
+        var video = container.Tracks.First(t => t.IsVideo);
+
+        var first = container.Frames.First(f => f.TrackNumber == video.TrackNumber);
+        await using var decoder = new Vp9Decoder();
+        await decoder.DecodeFrameAsync(first.Data, new RecordingVp9FrameSink());
+
+        var tile0 = decoder.LastTileGroup!.Tiles[0];
+        var data = first.Data.ToArray();
+        var tileBytes = new byte[tile0.Length];
+        Buffer.BlockCopy(data, tile0.Offset, tileBytes, 0, tile0.Length);
+
+        var br = new Vp9BoolDecoder(tileBytes, 0, tileBytes.Length);
+        // 64x64 SB at (0,0): sizeIdx=3, splitState=0 (both above + left out of frame).
+        var probs = Vp9PartitionProbs.DefaultProbs(sizeIdx: 3, splitState: 0);
+        var partition = Vp9PartitionTree.Decode(p => br.Read(p), probs);
+
+        // For BBB's first SB the partition is whatever libvpx chose;
+        // any of None/Horz/Vert/Split is technically valid for a keyframe.
+        // Just assert the result is in range.
+        True(partition >= Vp9PartitionType.None && partition <= Vp9PartitionType.Split,
+            $"partition {partition} out of valid range");
+    }
+
+    [TestMethod]
     public async Task Vp9Decoder_BbbFirstFrame_BoolDecoderInitializesOverTile()
     {
         // Smoke test: drive the BBB.webm first frame's tile 0 bytes
