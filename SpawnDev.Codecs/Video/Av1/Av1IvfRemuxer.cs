@@ -44,4 +44,45 @@ public static class Av1IvfRemuxer
         writer.Finish();
         return ms.ToArray();
     }
+
+    /// <summary>
+    /// Like <see cref="RemuxToBytes(ReadOnlyMemory{byte})"/> but substitutes
+    /// the source's SequenceHeader OBUs with one emitted from
+    /// <paramref name="newShConfig"/>. Useful for testing the closed-loop
+    /// SH writer path - if the new config produces byte-equivalent SH bytes
+    /// to the source, the remux output is byte-equivalent as well.
+    /// </summary>
+    public static byte[] RemuxToBytesWithShSubstitution(
+        ReadOnlyMemory<byte> sourceIvf,
+        Av1SequenceHeaderConfig newShConfig)
+    {
+        ArgumentNullException.ThrowIfNull(newShConfig);
+        var header = IvfReader.ParseHeader(sourceIvf.Span);
+        var ourShPayload = Av1SequenceHeaderWriter.EmitPayload(newShConfig);
+        var ourShObu = Av1ObuWriter.EmitObu(Av1ObuType.SequenceHeader, ourShPayload, hasSizeField: true);
+
+        using var ms = new MemoryStream();
+        var writer = new IvfWriter(ms, header.FourCc, header.Width, header.Height,
+            frameRate: header.FrameRate, timeScale: header.TimeScale);
+
+        foreach (var ivfFrame in IvfReader.EnumerateFrames(sourceIvf))
+        {
+            using var frameMs = new MemoryStream();
+            foreach (var obu in Av1ObuParser.EnumerateObus(ivfFrame.Data))
+            {
+                if (obu.Type == Av1ObuType.SequenceHeader)
+                {
+                    frameMs.Write(ourShObu, 0, ourShObu.Length);
+                }
+                else
+                {
+                    byte[] re = Av1ObuWriter.EmitObu(obu, ivfFrame.Data);
+                    frameMs.Write(re, 0, re.Length);
+                }
+            }
+            writer.WriteFrame(frameMs.ToArray(), ivfFrame.Pts);
+        }
+        writer.Finish();
+        return ms.ToArray();
+    }
 }
