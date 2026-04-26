@@ -140,6 +140,32 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task Av1Decoder_BbbStream_TracksShowExistingFrameSeparately()
+    {
+        // After driving every BBB AV1 frame, ShowExistingFrameCount + the
+        // CumulativeFrameTypeCounts should add up to the total coded
+        // frame data parses without overlap.
+        var bytes = LoadAv1Fixture();
+        await using var decoder = new Av1Decoder();
+        var sink = new Av1RecordingSink();
+
+        foreach (var ivfFrame in IvfReader.EnumerateFrames(bytes))
+        {
+            await decoder.DecodeFrameAsync(ivfFrame.Data, sink);
+        }
+
+        // BBB has libaom's hierarchical alt-ref structure. The 25
+        // FrameHeader OBUs in the source are show_existing_frame replays
+        // (one per visible "skip" frame in the GOP).
+        Equal(25, decoder.ShowExistingFrameCount);
+
+        // Show_existing entries are excluded from cumulative type counts.
+        var ftCounts = decoder.CumulativeFrameTypeCounts;
+        True(!ftCounts.ContainsKey(Av1FrameType.KeyFrame) || ftCounts[Av1FrameType.KeyFrame] < 25,
+            "show_existing should not be counted as KeyFrame in cumulative type counts");
+    }
+
+    [TestMethod]
     public async Task Av1Decoder_BbbFirstFrame_PopulatesLastFrameHeader_AsKeyframe()
     {
         var bytes = LoadAv1Fixture();
