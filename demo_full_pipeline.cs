@@ -77,7 +77,10 @@ Console.WriteLine("--- VP9: decoder pipeline on Big Buck Bunny WebM ---");
     Console.WriteLine($"  Codec: {video.CodecId}");
     Console.WriteLine($"  Vp9Decoder learned: {vp9.Width}x{vp9.Height}, {vp9.Subsampling}, {vp9.BitDepth}");
     Console.WriteLine($"  Packets decoded: {packets}");
-    Console.WriteLine($"  Visible frames emitted: {sink.FrameCount}");
+    Console.WriteLine($"  Coded frames: {vp9.TotalCodedFrames}, Visible frames emitted: {vp9.TotalVisibleFrames}");
+    Console.WriteLine($"  Cumulative frame types: "
+        + string.Join(", ", vp9.CumulativeFrameTypeCounts.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key}={kv.Value}"))
+        + (vp9.ShowExistingFrameCount > 0 ? $", ShowExist={vp9.ShowExistingFrameCount}" : ""));
     Console.WriteLine($"  Last frame header: {vp9.LastFrameHeader?.FrameType}, {vp9.LastFrameHeader?.FrameWidth}x{vp9.LastFrameHeader?.FrameHeight}");
     Console.WriteLine($"  Last compressed header: tx_mode={vp9.LastCompressedResult?.TxMode}, ref_mode={vp9.LastCompressedResult?.ReferenceMode}");
     Console.WriteLine($"  Last tile group: {vp9.LastTileGroup?.Tiles.Count} tile(s)");
