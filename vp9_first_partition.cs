@@ -140,6 +140,19 @@ if (partition == Vp9PartitionType.Split)
                     Console.Write($"{dst[row * N + col],4}");
                 Console.WriteLine();
             }
+
+            // ffmpeg ground truth shows the actual top-left 32x32 Y plane
+            // is NOT all-127 (range 57-112). So our chain is missing a
+            // bit somewhere - possibly segmentation seg_id read BEFORE
+            // partition, or the partition decode didn't actually start
+            // at byte 0 of tile 0. Honest report: chain runs end-to-end,
+            // doesn't yet match ffmpeg.
+            Console.WriteLine();
+            Console.WriteLine("  Note: chain runs without throwing, but values don't match ffmpeg's");
+            Console.WriteLine("  ground truth (top-left 32x32 actual: range 57-112, not 127). Likely");
+            Console.WriteLine("  missing segmentation seg_id read before partition decode. The");
+            Console.WriteLine("  primitives compose correctly - the byte-position alignment is the");
+            Console.WriteLine("  remaining bug to chase.");
         }
     }
     else if (partition32 == Vp9PartitionType.Split)
