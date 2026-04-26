@@ -97,6 +97,13 @@ if (partition == Vp9PartitionType.Split)
         int skipFlag = br.Read(skipProb);
         Console.WriteLine($"  Skip flag for top-left 32x32: {skipFlag}");
         Console.WriteLine($"    -> {(skipFlag != 0 ? "all-zero residual (skip)" : "has coefficients")}");
+
+        // Intra Y mode: for top-left block, above + left are out of frame
+        // so libvpx treats them as DcPred. Mode is read regardless of
+        // skip flag (mode determines prediction even with no residual).
+        var yModeProbs = Vp9IntraModeProbs.KeyframeYProbs(Vp9IntraMode.DcPred, Vp9IntraMode.DcPred);
+        var yMode = Vp9IntraModeTree.Decode(p => br.Read(p), yModeProbs);
+        Console.WriteLine($"  Intra Y mode (above=Dc, left=Dc): {yMode}");
     }
     else if (partition32 == Vp9PartitionType.Split)
     {
