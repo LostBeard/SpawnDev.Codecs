@@ -172,6 +172,37 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task Vp9Decoder_BbbFirstFrame_BoolDecoderInitializesOverTile()
+    {
+        // Smoke test: drive the BBB.webm first frame's tile 0 bytes
+        // through Vp9BoolDecoder. Reading the first 100 single-bit
+        // decisions should not throw - this proves the entropy reader
+        // ingests real libvpx-encoded tile bytes without corruption.
+        using var stream = LoadBigBuckBunnyWebM();
+        var container = new MatroskaContainer(stream);
+        var video = container.Tracks.First(t => t.IsVideo);
+
+        var first = container.Frames.First(f => f.TrackNumber == video.TrackNumber);
+        await using var decoder = new Vp9Decoder();
+        await decoder.DecodeFrameAsync(first.Data, new RecordingVp9FrameSink());
+
+        True(decoder.LastTileGroup is not null, "expected tile group from first BBB frame");
+        Equal(1, decoder.LastTileGroup!.Tiles.Count);
+
+        var tile0 = decoder.LastTileGroup.Tiles[0];
+        var data = first.Data.ToArray();
+        var tileBytes = new byte[tile0.Length];
+        Buffer.BlockCopy(data, tile0.Offset, tileBytes, 0, tile0.Length);
+
+        var br = new Vp9BoolDecoder(tileBytes, 0, tileBytes.Length);
+        // Read 100 equiprobable bits + 100 with default partition prob.
+        // No specific value to verify - just that decoder doesn't throw.
+        for (int i = 0; i < 100; i++) br.ReadBit();
+        byte defaultPartProb = Vp9PartitionProbs.KfPartitionProbs[0]; // root prob for 8x8 context 0
+        for (int i = 0; i < 100; i++) br.Read(defaultPartProb);
+    }
+
+    [TestMethod]
     public async Task Vp9Decoder_RejectsNullSink()
     {
         await using var decoder = new Vp9Decoder();
