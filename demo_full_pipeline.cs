@@ -219,6 +219,24 @@ Console.WriteLine("--- AV1 ENCODER FOUNDATION: bit-exact emit, ffmpeg-validated 
     }
     Console.WriteLine($"  Remuxed {frameCount} frames / {obuCount} OBUs through our IvfWriter + Av1ObuWriter");
 
+    // Closed-loop SH-substitution remux test using the high-level API.
+    var bbbCfg = new Av1SequenceHeaderConfig
+    {
+        SeqProfile = 0, MaxFrameWidth = 320, MaxFrameHeight = 180,
+        BitDepth = 8, SubsamplingX = 1, SubsamplingY = 1,
+        EnableFilterIntra = true, EnableIntraEdgeFilter = true,
+        EnableMaskedCompound = true, EnableWarpedMotion = true,
+        EnableOrderHint = true, EnableRefFrameMvs = true, OrderHintBitsMinus1 = 6,
+        SeqChooseScreenContentTools = true, SeqChooseIntegerMv = true,
+        EnableCdef = true, ColorDescriptionPresent = true,
+        ColorPrimaries = 2, TransferCharacteristics = 2, MatrixCoefficients = 5,
+    };
+    byte[] subRemuxed = Av1IvfRemuxer.RemuxToBytesWithShSubstitution(av1Bytes, bbbCfg);
+    int subMatch = 0;
+    int subLen = Math.Min(av1Bytes.Length, subRemuxed.Length);
+    for (int i = 0; i < subLen; i++) if (av1Bytes[i] == subRemuxed[i]) subMatch++;
+    Console.WriteLine($"  Av1IvfRemuxer SH-substitution: {subMatch}/{av1Bytes.Length} bytes BIT-EXACT vs libaom source");
+
     RunFfmpeg(ffmpegPath, $"-y -i \"{Path.Combine(testDataDir, "bbb_180_2s.ivf")}\" -f rawvideo -pix_fmt yuv420p \"{srcYuv}\"");
     RunFfmpeg(ffmpegPath, $"-y -i \"{remuxIvf}\" -f rawvideo -pix_fmt yuv420p \"{rmxYuv}\"");
     var src = File.ReadAllBytes(srcYuv);
