@@ -30,6 +30,15 @@ Console.WriteLine($"Container: {container.DocType} (WebM)");
 Console.WriteLine($"Video codec: {video.CodecId}");
 Console.WriteLine();
 
+// Use the high-level analyzer for the summary header.
+var packetEnumerable = container.Frames
+    .Where(f => f.TrackNumber == video.TrackNumber)
+    .Select(f => (ReadOnlyMemory<byte>)f.Data);
+var summary = Vp9StreamAnalyzer.Analyze(packetEnumerable);
+Console.WriteLine(summary.ToReport());
+Console.WriteLine();
+
+// Re-enumerate for the per-packet timeline (analyzer consumed once).
 var decoder = new Vp9Decoder();
 var sink = new CountingSink();
 int packetIdx = 0;

@@ -20,17 +20,8 @@ Console.WriteLine("  AV1 frame timeline (per-frame metadata)");
 Console.WriteLine("============================================================");
 Console.WriteLine();
 Console.WriteLine($"Source: {ivfPath}");
-Console.WriteLine($"IVF: {summary.IvfHeader.FourCc} {summary.IvfHeader.Width}x{summary.IvfHeader.Height} ({summary.IvfHeader.NumFrames} frames declared)");
-Console.WriteLine($"SH: profile={summary.SequenceHeader?.SeqProfile}, "
-    + $"bit_depth={summary.SequenceHeader?.BitDepth}, "
-    + $"order_hint={summary.SequenceHeader?.EnableOrderHint}, "
-    + $"cdef={summary.SequenceHeader?.EnableCdef}");
 Console.WriteLine();
-Console.WriteLine($"OBU counts: " + string.Join(", ",
-    summary.ObuCounts.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key}={kv.Value}")));
-Console.WriteLine($"Frame types: " + string.Join(", ",
-    summary.FrameTypeCounts.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key}={kv.Value}"))
-    + $", ShowExist={summary.ShowExistingFrames.Count}");
+Console.WriteLine(summary.ToReport());
 Console.WriteLine();
 
 Console.WriteLine($"{"TU",-3} {"#",-3} {"Type",-15} {"Show",-5} {"AllowSCC",-9} {"FIntMV",-7} {"OrderHint",-9} {"Refresh",-9} {"Size",-9}");
