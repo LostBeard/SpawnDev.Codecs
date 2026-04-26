@@ -52,6 +52,26 @@ public sealed record Av1StreamSummary
 
     /// <summary>Total Temporal Units (IVF frames) walked.</summary>
     public required int TotalTemporalUnits { get; init; }
+
+    /// <summary>Format the summary as a human-readable multi-line report.</summary>
+    public string ToReport()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"AV1 stream: {IvfHeader.FourCc} {IvfHeader.Width}x{IvfHeader.Height}");
+        if (SequenceHeader is not null)
+        {
+            sb.AppendLine($"  SH: profile={SequenceHeader.SeqProfile}, bit_depth={SequenceHeader.BitDepth}, "
+                + $"subsampling=({SequenceHeader.SubsamplingX},{SequenceHeader.SubsamplingY}), "
+                + $"order_hint={SequenceHeader.EnableOrderHint}, cdef={SequenceHeader.EnableCdef}");
+        }
+        sb.AppendLine($"  Total TUs: {TotalTemporalUnits}");
+        sb.AppendLine($"  Coded frames: {CodedFrames.Count}, ShowExisting: {ShowExistingFrames.Count}");
+        sb.AppendLine($"  OBU types: " + string.Join(", ",
+            ObuCounts.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key}={kv.Value}")));
+        sb.Append($"  Frame types: " + string.Join(", ",
+            FrameTypeCounts.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key}={kv.Value}")));
+        return sb.ToString();
+    }
 }
 
 /// <summary>Walks an AV1 IVF stream and produces a structured summary.</summary>

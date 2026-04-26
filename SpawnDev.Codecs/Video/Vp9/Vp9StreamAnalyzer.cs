@@ -43,6 +43,20 @@ public sealed record Vp9StreamSummary
 
     /// <summary>Total superframe slices walked (>= TotalPackets when superframes carry multiple).</summary>
     public required int TotalSlices { get; init; }
+
+    /// <summary>Format the summary as a human-readable multi-line report.</summary>
+    public string ToReport()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"VP9 stream:");
+        sb.AppendLine($"  Total packets: {TotalPackets}, total slices: {TotalSlices}");
+        sb.AppendLine($"  Coded frames: {CodedFrames.Count}, ShowExisting: {ShowExistingFrames.Count}");
+        sb.AppendLine($"  Frame types: " + string.Join(", ",
+            FrameTypeCounts.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key}={kv.Value}")));
+        sb.Append($"  Size changes: " + string.Join(", ",
+            SizeChanges.Select(s => $"{s.Width}x{s.Height}")));
+        return sb.ToString();
+    }
 }
 
 /// <summary>Walks a sequence of VP9 frame packets and produces a structured summary.</summary>
