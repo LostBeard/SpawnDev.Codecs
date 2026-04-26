@@ -65,6 +65,24 @@ public sealed class Vp9Decoder : IVideoDecoder
     /// </summary>
     private readonly (int Width, int Height)[] _refFrameSizes = new (int, int)[3];
 
+    /// <summary>
+    /// Cumulative count of every Vp9FrameType observed across coded frames
+    /// (excludes show_existing_frame replays).
+    /// </summary>
+    public IReadOnlyDictionary<Vp9FrameType, int> CumulativeFrameTypeCounts => _cumulativeFrameTypeCounts;
+    private readonly Dictionary<Vp9FrameType, int> _cumulativeFrameTypeCounts = new();
+
+    /// <summary>
+    /// Cumulative count of show_existing_frame replays.
+    /// </summary>
+    public int ShowExistingFrameCount { get; private set; }
+
+    /// <summary>Total number of coded frames (superframe slices) seen.</summary>
+    public int TotalCodedFrames { get; private set; }
+
+    /// <summary>Total number of visible frames emitted to the sink.</summary>
+    public int TotalVisibleFrames { get; private set; }
+
     /// <inheritdoc/>
     public async ValueTask<int> DecodeFrameAsync(
         ReadOnlyMemory<byte> compressedPacket,
@@ -85,6 +103,16 @@ public sealed class Vp9Decoder : IVideoDecoder
             var header = complete.FrameHeader;
             LastFrameHeader = header;
             LastCompleteHeader = complete;
+            TotalCodedFrames++;
+            if (header.ShowExistingFrame)
+            {
+                ShowExistingFrameCount++;
+            }
+            else
+            {
+                _cumulativeFrameTypeCounts.TryGetValue(header.FrameType, out int fc);
+                _cumulativeFrameTypeCounts[header.FrameType] = fc + 1;
+            }
 
             // Keyframes / intra-only frames carry color_config + frame_size,
             // so only those update our visible dimensions and chroma format.
@@ -130,6 +158,7 @@ public sealed class Vp9Decoder : IVideoDecoder
 
             await EmitPlaceholderFrameAsync(frameSink, ct).ConfigureAwait(false);
             emitted++;
+            TotalVisibleFrames++;
         }
 
         return emitted;

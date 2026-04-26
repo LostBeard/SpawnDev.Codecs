@@ -141,6 +141,37 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task Vp9Decoder_BbbStream_CumulativeStatsMatchObservedTotals()
+    {
+        // Drive every packet from BBB.webm and verify the cumulative
+        // counters match: 300 visible frames + non-zero KeyFrame count.
+        using var stream = LoadBigBuckBunnyWebM();
+        var container = new MatroskaContainer(stream);
+        var video = container.Tracks.First(t => t.IsVideo);
+
+        await using var decoder = new Vp9Decoder();
+        var sink = new RecordingVp9FrameSink();
+
+        foreach (var frame in container.Frames.Where(f => f.TrackNumber == video.TrackNumber))
+        {
+            await decoder.DecodeFrameAsync(frame.Data, sink);
+        }
+
+        // BBB has 300 visible frames over 10s @ 30fps.
+        Equal(300, decoder.TotalVisibleFrames);
+        True(decoder.TotalCodedFrames >= 300,
+            $"expected at least 300 coded frames, got {decoder.TotalCodedFrames}");
+
+        // BBB starts with a keyframe; expect at least 1.
+        var ftCounts = decoder.CumulativeFrameTypeCounts;
+        True(ftCounts.GetValueOrDefault(Vp9FrameType.Key, 0) >= 1,
+            $"expected at least 1 keyframe; saw {string.Join(',', ftCounts.Keys)}");
+        // Most frames are inter (NonKey); should dominate.
+        True(ftCounts.GetValueOrDefault(Vp9FrameType.NonKey, 0) > 100,
+            $"expected many inter frames; saw NonKey={ftCounts.GetValueOrDefault(Vp9FrameType.NonKey, 0)}");
+    }
+
+    [TestMethod]
     public async Task Vp9Decoder_RejectsNullSink()
     {
         await using var decoder = new Vp9Decoder();
