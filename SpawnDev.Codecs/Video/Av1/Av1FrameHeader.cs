@@ -94,6 +94,23 @@ public sealed record Av1FrameHeader
     /// the AV1 reference frame system + temporal MV scaling.
     /// </summary>
     public int OrderHint { get; init; }
+
+    /// <summary>
+    /// refresh_frame_flags: which of the 8 reference frame slots to
+    /// update with this frame's reconstructed output. KeyFrame visible
+    /// implicit 0xFF; SwitchFrame implicit 0xFF; otherwise f(8).
+    /// </summary>
+    public int RefreshFrameFlags { get; init; }
+
+    /// <summary>
+    /// Decoded frame width in pixels. Either from SH.MaxFrameWidth (no
+    /// override) or read from the bitstream when frame_size_override
+    /// applies. Always non-zero for parsed frame headers.
+    /// </summary>
+    public int FrameWidth { get; init; }
+
+    /// <summary>Decoded frame height in pixels. See <see cref="FrameWidth"/>.</summary>
+    public int FrameHeight { get; init; }
 }
 
 /// <summary>AV1 frame header parser (headline fields only).</summary>
@@ -213,6 +230,39 @@ public static class Av1FrameHeaderParser
             orderHint = (int)br.ReadBits(orderHintBits);
         }
 
+        // refresh_frame_flags: which 8 ref slots get updated with this
+        // frame's output. KeyFrame visible / SwitchFrame are implicit 0xFF.
+        int refreshFrameFlags;
+        if ((frameType == Av1FrameType.KeyFrame && showFrame)
+            || frameType == Av1FrameType.SwitchFrame)
+        {
+            refreshFrameFlags = 0xFF;
+        }
+        else
+        {
+            refreshFrameFlags = (int)br.ReadBits(8);
+        }
+
+        // frame_size + render_size (simplified: for keyframe + intra_only,
+        // always read explicit dims when frame_size_override; otherwise
+        // SH defaults). For inter frames with refs, full frame_size_with_refs
+        // walks frame_refs - we simplify by falling through to SH dims when
+        // frame_size_override is false.
+        int frameWidth = sh.MaxFrameWidth;
+        int frameHeight = sh.MaxFrameHeight;
+        if (frameSizeOverride)
+        {
+            // f(SH.frame_width_bits + 1) for width, same for height.
+            // Our SH parser doesn't surface those values today, so we
+            // assume 16 bits each (max). For BBB the override flag is 0
+            // on every frame, so this branch isn't exercised.
+            int widthMinus1 = (int)br.ReadBits(16);
+            int heightMinus1 = (int)br.ReadBits(16);
+            frameWidth = widthMinus1 + 1;
+            frameHeight = heightMinus1 + 1;
+            // render_size fields skipped - downstream work.
+        }
+
         return new Av1FrameHeader
         {
             ShowExistingFrame = false,
@@ -226,6 +276,9 @@ public static class Av1FrameHeaderParser
             CurrentFrameId = currentFrameId,
             FrameSizeOverride = frameSizeOverride,
             OrderHint = orderHint,
+            RefreshFrameFlags = refreshFrameFlags,
+            FrameWidth = frameWidth,
+            FrameHeight = frameHeight,
         };
     }
 }

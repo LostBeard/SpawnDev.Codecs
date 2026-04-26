@@ -65,10 +65,26 @@ public sealed record Av1FrameHeaderConfig
     public bool FrameSizeOverride { get; init; }
 
     /// <summary>
+    /// frame_width when FrameSizeOverride=true. Falls back to SH.MaxFrameWidth
+    /// when override is false (writer doesn't emit override-size bits).
+    /// Per current parser scope, written/read as 16-bit (max - 1).
+    /// </summary>
+    public int FrameWidth { get; init; }
+
+    /// <summary>frame_height when FrameSizeOverride=true. See <see cref="FrameWidth"/>.</summary>
+    public int FrameHeight { get; init; }
+
+    /// <summary>
     /// order_hint value. Only emitted when SH.EnableOrderHint=true AND
     /// the frame is non-intra AND not error_resilient_mode.
     /// </summary>
     public int OrderHint { get; init; }
+
+    /// <summary>
+    /// refresh_frame_flags (8-bit mask). Implicit 0xFF for visible
+    /// KeyFrame and SwitchFrame; otherwise emitted as f(8).
+    /// </summary>
+    public int RefreshFrameFlags { get; init; }
 }
 
 /// <summary>AV1 frame header prefix writer.</summary>
@@ -181,6 +197,18 @@ public static class Av1FrameHeaderWriter
             bw.WriteFlag(cfg.FrameSizeOverride);
         }
 
+        // When override is set, emit frame_width + frame_height. Parser
+        // reads 16 bits each (simplified scope); we mirror that here.
+        if (cfg.FrameSizeOverride)
+        {
+            int w = cfg.FrameWidth > 0 ? cfg.FrameWidth : sh.MaxFrameWidth;
+            int h = cfg.FrameHeight > 0 ? cfg.FrameHeight : sh.MaxFrameHeight;
+            if ((uint)(w - 1) > 0xFFFF) throw new ArgumentOutOfRangeException(nameof(cfg.FrameWidth));
+            if ((uint)(h - 1) > 0xFFFF) throw new ArgumentOutOfRangeException(nameof(cfg.FrameHeight));
+            bw.WriteBits(w - 1, 16);
+            bw.WriteBits(h - 1, 16);
+        }
+
         if (sh.EnableOrderHint && !cfg.ErrorResilientMode && !isIntra)
         {
             int orderHintBits = sh.OrderHintBitsMinus1 + 1;
@@ -188,6 +216,24 @@ public static class Av1FrameHeaderWriter
                 throw new ArgumentOutOfRangeException(nameof(cfg.OrderHint),
                     $"order_hint must fit in {orderHintBits} bits.");
             bw.WriteBits(cfg.OrderHint, orderHintBits);
+        }
+
+        // refresh_frame_flags
+        bool refreshImplicit = (cfg.FrameType == Av1FrameType.KeyFrame && cfg.ShowFrame)
+            || cfg.FrameType == Av1FrameType.SwitchFrame;
+        if (refreshImplicit)
+        {
+            if (cfg.RefreshFrameFlags != 0xFF && cfg.RefreshFrameFlags != 0)
+                throw new ArgumentException(
+                    "refresh_frame_flags is implicit 0xFF for visible KeyFrame and SwitchFrame.",
+                    nameof(cfg));
+        }
+        else
+        {
+            if ((uint)cfg.RefreshFrameFlags > 0xFF)
+                throw new ArgumentOutOfRangeException(nameof(cfg.RefreshFrameFlags),
+                    "refresh_frame_flags is f(8): 0..255.");
+            bw.WriteBits(cfg.RefreshFrameFlags, 8);
         }
 
         bw.WriteTrailingBits();
