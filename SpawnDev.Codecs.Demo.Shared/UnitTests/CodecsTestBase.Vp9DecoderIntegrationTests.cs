@@ -195,7 +195,9 @@ public abstract partial class CodecsTestBase
 
         var br = new Vp9BoolDecoder(tileBytes, 0, tileBytes.Length);
         // 64x64 SB at (0,0): sizeIdx=3, splitState=0 (both above + left out of frame).
-        var probs = Vp9PartitionProbs.DefaultProbs(sizeIdx: 3, splitState: 0);
+        // BBB is a keyframe so KeyframeProbs is the correct table (inter
+        // frames use DefaultProbs).
+        var probs = Vp9PartitionProbs.KeyframeProbs(sizeIdx: 3, splitState: 0);
         var partition = Vp9PartitionTree.Decode(p => br.Read(p), probs);
 
         // For BBB's first SB the partition is whatever libvpx chose;
