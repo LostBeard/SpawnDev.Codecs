@@ -121,15 +121,21 @@ public abstract partial class CodecsTestBase
         Equal(62, obuCounts[Av1ObuType.Frame]);
         Equal(25, obuCounts[Av1ObuType.FrameHeader]);
 
-        // Frame type breakdown across ALL coded frame data OBUs (62 Frame
-        // + 25 FrameHeader = 87 frame headers parsed). BBB has hidden
-        // alt-ref frames and showable-but-not-shown frames; the cumulative
-        // count tracks every frame header we parsed.
+        // Frame type breakdown across all coded frame data OBUs.
+        // 62 Frame + 25 FrameHeader = 87 frame-header parses total.
+        // Some are show_existing_frame replays (no coded body) - those
+        // are counted in ShowExistingFrameCount, not CumulativeFrameTypeCounts.
         var ftCounts = decoder.CumulativeFrameTypeCounts;
         int kfCount = ftCounts.GetValueOrDefault(Av1FrameType.KeyFrame, 0);
         int interCount = ftCounts.GetValueOrDefault(Av1FrameType.InterFrame, 0);
-        Equal(87, kfCount + interCount);
-        Equal(26, kfCount);
+        int showExistCount = decoder.ShowExistingFrameCount;
+        Equal(87, kfCount + interCount + showExistCount);
+        // BBB has only 1 actual KeyFrame plus many show_existing replays.
+        Equal(1, kfCount);
+        // 25 show_existing replays (matches FrameHeader OBU count - those
+        // are typically used for show_existing in BBB's hierarchical structure).
+        Equal(25, showExistCount);
+        Equal(61, interCount);
         // No IntraOnlyFrame or SwitchFrame in BBB.
     }
 

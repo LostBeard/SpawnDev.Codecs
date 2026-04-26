@@ -44,12 +44,17 @@ public sealed class Av1Decoder : IVideoDecoder
     private readonly Dictionary<Av1ObuType, int> _cumulativeObuCounts = new();
 
     /// <summary>
-    /// Cumulative count of every Av1FrameType observed across all
-    /// <see cref="DecodeFrameAsync"/> calls on this decoder instance.
-    /// Populated for every frame whose header was parsed.
+    /// Cumulative count of every Av1FrameType observed across coded
+    /// frames (excludes show_existing_frame replays).
     /// </summary>
     public IReadOnlyDictionary<Av1FrameType, int> CumulativeFrameTypeCounts => _cumulativeFrameTypeCounts;
     private readonly Dictionary<Av1FrameType, int> _cumulativeFrameTypeCounts = new();
+
+    /// <summary>
+    /// Cumulative count of show_existing_frame OBUs (frames that just
+    /// replay a buffered reference slot, no coded body).
+    /// </summary>
+    public int ShowExistingFrameCount { get; private set; }
 
     /// <summary>Total number of Temporal Units (IVF frames) decoded.</summary>
     public int TotalTemporalUnits { get; private set; }
@@ -92,8 +97,15 @@ public sealed class Av1Decoder : IVideoDecoder
                         compressedPacket.Span.Slice(obu.PayloadOffset, obu.PayloadLength),
                         LastSequenceHeader);
                     LastFrameHeader = fh;
-                    _cumulativeFrameTypeCounts.TryGetValue(fh.FrameType, out int fc);
-                    _cumulativeFrameTypeCounts[fh.FrameType] = fc + 1;
+                    if (fh.ShowExistingFrame)
+                    {
+                        ShowExistingFrameCount++;
+                    }
+                    else
+                    {
+                        _cumulativeFrameTypeCounts.TryGetValue(fh.FrameType, out int fc);
+                        _cumulativeFrameTypeCounts[fh.FrameType] = fc + 1;
+                    }
                 }
                 // Per-frame block decode goes here once the inverse-transform
                 // + prediction + entropy-decode pipeline is wired up.
