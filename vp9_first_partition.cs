@@ -74,6 +74,34 @@ switch (partition)
         break;
 }
 
+// If split, decode the first 32x32 sub-block's partition decision.
+if (partition == Vp9PartitionType.Split)
+{
+    Console.WriteLine();
+    Console.WriteLine("Recursing into top-left 32x32 sub-block...");
+    // 32x32 SB at top-left corner of the 64x64: above + left still out of frame.
+    var probs32 = Vp9PartitionProbs.DefaultProbs(sizeIdx: 2, splitState: 0);
+    Console.WriteLine($"Partition probs (32x32, both unsplit context): "
+        + $"None={probs32[0]}, Horz={probs32[1]}, Vert/Split={probs32[2]}");
+    var partition32 = Vp9PartitionTree.Decode(p => br.Read(p), probs32);
+    Console.WriteLine($"  Top-left 32x32 partition: {partition32}");
+
+    // If split again, decode the next level too.
+    if (partition32 == Vp9PartitionType.Split)
+    {
+        var probs16 = Vp9PartitionProbs.DefaultProbs(sizeIdx: 1, splitState: 0);
+        var partition16 = Vp9PartitionTree.Decode(p => br.Read(p), probs16);
+        Console.WriteLine($"  Top-left 16x16 partition: {partition16}");
+
+        if (partition16 == Vp9PartitionType.Split)
+        {
+            var probs8 = Vp9PartitionProbs.DefaultProbs(sizeIdx: 0, splitState: 0);
+            var partition8 = Vp9PartitionTree.Decode(p => br.Read(p), probs8);
+            Console.WriteLine($"  Top-left 8x8 partition:  {partition8}");
+        }
+    }
+}
+
 internal sealed class IgnoreSink : IVideoFrameSink
 {
     public ValueTask OnFrameAsync(
