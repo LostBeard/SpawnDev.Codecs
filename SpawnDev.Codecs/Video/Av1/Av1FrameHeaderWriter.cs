@@ -75,6 +75,12 @@ public sealed record Av1FrameHeaderConfig
     public int FrameHeight { get; init; }
 
     /// <summary>
+    /// allow_intrabc flag (only for intra_only/key frames with screen
+    /// content tools enabled). See Av1FrameHeader.AllowIntraBc.
+    /// </summary>
+    public bool AllowIntraBc { get; init; }
+
+    /// <summary>
     /// Build a writer config from a parsed <see cref="Av1FrameHeader"/>.
     /// Round-trip helper: parse(FH) -&gt; FromHeader -&gt; EmitPayload should
     /// produce byte-equivalent output for any frame header whose fields
@@ -100,6 +106,7 @@ public sealed record Av1FrameHeaderConfig
             RefreshFrameFlags = fh.RefreshFrameFlags,
             FrameWidth = fh.FrameWidth,
             FrameHeight = fh.FrameHeight,
+            AllowIntraBc = fh.AllowIntraBc,
         };
     }
 
@@ -263,6 +270,12 @@ public static class Av1FrameHeaderWriter
                 throw new ArgumentOutOfRangeException(nameof(cfg.RefreshFrameFlags),
                     "refresh_frame_flags is f(8): 0..255.");
             bw.WriteBits(cfg.RefreshFrameFlags, 8);
+        }
+
+        // allow_intrabc only for intra frames with SCC tools active.
+        if (isIntra && cfg.AllowScreenContentTools != 0)
+        {
+            bw.WriteFlag(cfg.AllowIntraBc);
         }
 
         bw.WriteTrailingBits();
