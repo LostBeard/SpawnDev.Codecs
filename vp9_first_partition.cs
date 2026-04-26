@@ -104,6 +104,43 @@ if (partition == Vp9PartitionType.Split)
         var yModeProbs = Vp9IntraModeProbs.KeyframeYProbs(Vp9IntraMode.DcPred, Vp9IntraMode.DcPred);
         var yMode = Vp9IntraModeTree.Decode(p => br.Read(p), yModeProbs);
         Console.WriteLine($"  Intra Y mode (above=Dc, left=Dc): {yMode}");
+
+        // ACTUAL PIXEL DECODE for top-left 32x32 Y block.
+        // Since skip=1, residual is zero - the prediction IS the output.
+        // Above row + left col are out of frame, libvpx fills with 127/129.
+        if (skipFlag == 1)
+        {
+            const int N = 32;
+            var aboveBuf = new byte[N * 2]; // 2N for D45/D63 paths
+            var leftBuf = new byte[N];
+            // Out-of-frame fills per libvpx convention.
+            Array.Fill(aboveBuf, (byte)127);
+            Array.Fill(leftBuf, (byte)129);
+            byte topLeft = 127;
+            var dst = new byte[N * N];
+            Vp9IntraPredictor.Predict(yMode, topLeft, aboveBuf, leftBuf, dst, N, stride: N);
+
+            // Compute simple statistics of the decoded block.
+            int min = 255, max = 0, sum = 0;
+            for (int i = 0; i < dst.Length; i++)
+            {
+                if (dst[i] < min) min = dst[i];
+                if (dst[i] > max) max = dst[i];
+                sum += dst[i];
+            }
+            int mean = sum / dst.Length;
+            Console.WriteLine();
+            Console.WriteLine($"  ACTUAL DECODED 32x32 Y BLOCK PIXELS:");
+            Console.WriteLine($"    min={min}, max={max}, mean={mean}");
+            Console.WriteLine($"    Top-left 4x4 sample:");
+            for (int row = 0; row < 4; row++)
+            {
+                Console.Write("      ");
+                for (int col = 0; col < 4; col++)
+                    Console.Write($"{dst[row * N + col],4}");
+                Console.WriteLine();
+            }
+        }
     }
     else if (partition32 == Vp9PartitionType.Split)
     {
