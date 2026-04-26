@@ -128,13 +128,16 @@ public abstract partial class CodecsTestBase
         {
             FrameType = Av1FrameType.SwitchFrame,
             ShowFrame = true,
-            // SwitchFrame has implicit ErrorResilientMode = true
+            // SwitchFrame has implicit ErrorResilientMode = true and
+            // implicit FrameSizeOverride = true.
             ErrorResilientMode = true,
+            FrameSizeOverride = true,
         };
         var payload = Av1FrameHeaderWriter.EmitPayload(cfg, sh);
         var fh = Av1FrameHeaderParser.Parse(payload, sh);
         Equal(Av1FrameType.SwitchFrame, fh.FrameType);
         Equal(true, fh.ErrorResilientMode);
+        Equal(true, fh.FrameSizeOverride);
     }
 
     [TestMethod]

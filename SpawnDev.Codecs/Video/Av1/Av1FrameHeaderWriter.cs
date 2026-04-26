@@ -54,6 +54,21 @@ public sealed record Av1FrameHeaderConfig
     /// For intra frames the parser forces this to 1 regardless.
     /// </summary>
     public int ForceIntegerMv { get; init; }
+
+    /// <summary>current_frame_id (only emitted when SH.FrameIdNumbersPresent).</summary>
+    public int CurrentFrameId { get; init; }
+
+    /// <summary>
+    /// frame_size_override_flag. Implicit for SwitchFrame (true) and when
+    /// ReducedStillPictureHeader (false); otherwise emitted.
+    /// </summary>
+    public bool FrameSizeOverride { get; init; }
+
+    /// <summary>
+    /// order_hint value. Only emitted when SH.EnableOrderHint=true AND
+    /// the frame is non-intra AND not error_resilient_mode.
+    /// </summary>
+    public int OrderHint { get; init; }
 }
 
 /// <summary>AV1 frame header prefix writer.</summary>
@@ -137,6 +152,43 @@ public static class Av1FrameHeaderWriter
             bw.WriteBits(cfg.ForceIntegerMv, 1);
         }
         // else: implicit per AV1 spec - no emission.
+
+        if (sh.FrameIdNumbersPresent)
+        {
+            int idLen = sh.FrameIdLengthMinus7 + 7;
+            if ((uint)cfg.CurrentFrameId >= (1u << idLen))
+                throw new ArgumentOutOfRangeException(nameof(cfg.CurrentFrameId),
+                    $"current_frame_id must fit in {idLen} bits.");
+            bw.WriteBits(cfg.CurrentFrameId, idLen);
+        }
+
+        if (cfg.FrameType == Av1FrameType.SwitchFrame)
+        {
+            if (!cfg.FrameSizeOverride)
+                throw new ArgumentException(
+                    "frame_size_override_flag is implicitly true for SwitchFrame.",
+                    nameof(cfg));
+        }
+        else if (sh.ReducedStillPictureHeader)
+        {
+            if (cfg.FrameSizeOverride)
+                throw new ArgumentException(
+                    "frame_size_override_flag is implicitly false for reduced_still_picture_header.",
+                    nameof(cfg));
+        }
+        else
+        {
+            bw.WriteFlag(cfg.FrameSizeOverride);
+        }
+
+        if (sh.EnableOrderHint && !cfg.ErrorResilientMode && !isIntra)
+        {
+            int orderHintBits = sh.OrderHintBitsMinus1 + 1;
+            if ((uint)cfg.OrderHint >= (1u << orderHintBits))
+                throw new ArgumentOutOfRangeException(nameof(cfg.OrderHint),
+                    $"order_hint must fit in {orderHintBits} bits.");
+            bw.WriteBits(cfg.OrderHint, orderHintBits);
+        }
 
         bw.WriteTrailingBits();
         return bw.ToArray();

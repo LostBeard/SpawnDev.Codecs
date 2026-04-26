@@ -76,6 +76,24 @@ public sealed record Av1FrameHeader
     /// + AllowScreenContentTools.
     /// </summary>
     public int ForceIntegerMv { get; init; }
+
+    /// <summary>
+    /// current_frame_id, only present when SH.FrameIdNumbersPresent.
+    /// </summary>
+    public int CurrentFrameId { get; init; }
+
+    /// <summary>
+    /// frame_size_override_flag. When true, the bitstream carries explicit
+    /// frame_size + render_size. When false, dimensions come from SH defaults
+    /// (or frame_refs for inter frames).
+    /// </summary>
+    public bool FrameSizeOverride { get; init; }
+
+    /// <summary>
+    /// order_hint. Only meaningful when SH.EnableOrderHint=true. Used by
+    /// the AV1 reference frame system + temporal MV scaling.
+    /// </summary>
+    public int OrderHint { get; init; }
 }
 
 /// <summary>AV1 frame header parser (headline fields only).</summary>
@@ -169,6 +187,32 @@ public static class Av1FrameHeaderParser
             || frameType == Av1FrameType.IntraOnlyFrame;
         if (isIntra) forceIntegerMv = 1;
 
+        int currentFrameId = 0;
+        if (sh.FrameIdNumbersPresent)
+        {
+            int idLen = sh.FrameIdLengthMinus7 + 7;
+            currentFrameId = (int)br.ReadBits(idLen);
+        }
+
+        bool frameSizeOverride;
+        if (frameType == Av1FrameType.SwitchFrame)
+            frameSizeOverride = true;
+        else if (sh.ReducedStillPictureHeader)
+            frameSizeOverride = false;
+        else
+            frameSizeOverride = br.ReadFlag();
+
+        int orderHint = 0;
+        if (sh.EnableOrderHint && !errorResilient && !isIntra)
+        {
+            // AV1 spec: order_hint is f(OrderHintBits) only for non-intra
+            // non-error-resilient frames. Intra frames have order_hint=0
+            // implicitly. Note: for KeyFrame + IntraOnly + show_existing,
+            // we don't read it here either.
+            int orderHintBits = sh.OrderHintBitsMinus1 + 1;
+            orderHint = (int)br.ReadBits(orderHintBits);
+        }
+
         return new Av1FrameHeader
         {
             ShowExistingFrame = false,
@@ -179,6 +223,9 @@ public static class Av1FrameHeaderParser
             DisableCdfUpdate = disableCdfUpdate,
             AllowScreenContentTools = allowSccTools,
             ForceIntegerMv = forceIntegerMv,
+            CurrentFrameId = currentFrameId,
+            FrameSizeOverride = frameSizeOverride,
+            OrderHint = orderHint,
         };
     }
 }
