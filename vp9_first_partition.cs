@@ -165,7 +165,35 @@ if (partition == Vp9PartitionType.Split)
         var partition16 = Vp9PartitionTree.Decode(p => br.Read(p), probs16);
         Console.WriteLine($"  Top-left 16x16 partition: {partition16}");
 
-        if (partition16 == Vp9PartitionType.Split)
+        if (partition16 == Vp9PartitionType.None)
+        {
+            // 16x16 leaf - read skip + Y mode + (if skip) emit predicted pixels.
+            byte sp = decoder.LastCompressedState!.SkipProbs.Probs[0];
+            int sk = br.Read(sp);
+            Console.WriteLine($"  Skip flag for 16x16: {sk}");
+            var ym = Vp9IntraModeTree.Decode(p => br.Read(p),
+                Vp9IntraModeProbs.KeyframeYProbs(Vp9IntraMode.DcPred, Vp9IntraMode.DcPred));
+            Console.WriteLine($"  Intra Y mode for 16x16: {ym}");
+            if (sk == 1)
+            {
+                const int N = 16;
+                var ab = new byte[N * 2];
+                var lf = new byte[N];
+                Array.Fill(ab, (byte)127);
+                Array.Fill(lf, (byte)129);
+                var dst16 = new byte[N * N];
+                Vp9IntraPredictor.Predict(ym, 127, ab, lf, dst16, N, stride: N);
+                int mn = 255, mx = 0, sm = 0;
+                for (int i = 0; i < dst16.Length; i++)
+                {
+                    if (dst16[i] < mn) mn = dst16[i];
+                    if (dst16[i] > mx) mx = dst16[i];
+                    sm += dst16[i];
+                }
+                Console.WriteLine($"  Predicted 16x16 Y: min={mn}, max={mx}, mean={sm/dst16.Length}");
+            }
+        }
+        else if (partition16 == Vp9PartitionType.Split)
         {
             var probs8 = Vp9PartitionProbs.KeyframeProbs(sizeIdx: 0, splitState: 0);
             var partition8 = Vp9PartitionTree.Decode(p => br.Read(p), probs8);
