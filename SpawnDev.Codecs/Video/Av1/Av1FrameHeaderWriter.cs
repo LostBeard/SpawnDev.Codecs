@@ -75,6 +75,35 @@ public sealed record Av1FrameHeaderConfig
     public int FrameHeight { get; init; }
 
     /// <summary>
+    /// Build a writer config from a parsed <see cref="Av1FrameHeader"/>.
+    /// Round-trip helper: parse(FH) -&gt; FromHeader -&gt; EmitPayload should
+    /// produce byte-equivalent output for any frame header whose fields
+    /// our parser surfaces.
+    /// </summary>
+    public static Av1FrameHeaderConfig FromHeader(Av1FrameHeader fh)
+    {
+        ArgumentNullException.ThrowIfNull(fh);
+        return new Av1FrameHeaderConfig
+        {
+            ShowExistingFrame = fh.ShowExistingFrame,
+            FrameToShowMapIdx = fh.FrameToShowMapIdx,
+            FrameType = fh.FrameType,
+            ShowFrame = fh.ShowFrame,
+            ShowableFrame = fh.ShowableFrame,
+            ErrorResilientMode = fh.ErrorResilientMode,
+            DisableCdfUpdate = fh.DisableCdfUpdate,
+            AllowScreenContentTools = fh.AllowScreenContentTools,
+            ForceIntegerMv = fh.ForceIntegerMv,
+            CurrentFrameId = fh.CurrentFrameId,
+            FrameSizeOverride = fh.FrameSizeOverride,
+            OrderHint = fh.OrderHint,
+            RefreshFrameFlags = fh.RefreshFrameFlags,
+            FrameWidth = fh.FrameWidth,
+            FrameHeight = fh.FrameHeight,
+        };
+    }
+
+    /// <summary>
     /// order_hint value. Only emitted when SH.EnableOrderHint=true AND
     /// the frame is non-intra AND not error_resilient_mode.
     /// </summary>

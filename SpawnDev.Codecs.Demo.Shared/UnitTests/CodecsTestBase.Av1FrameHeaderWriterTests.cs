@@ -141,6 +141,36 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void Av1FrameHeaderWriter_FromHeader_RoundTripsViaWriter()
+    {
+        // Closed loop: build a FrameHeader by emitting a known config,
+        // parse it back, convert to config via FromHeader, re-emit,
+        // verify byte-equivalent output.
+        var sh = BuildBbbLikeSequenceHeader();
+        var originalCfg = new Av1FrameHeaderConfig
+        {
+            FrameType = Av1FrameType.InterFrame,
+            ShowFrame = true,
+            ErrorResilientMode = false,
+            DisableCdfUpdate = true,
+            RefreshFrameFlags = 0xAB,
+        };
+
+        var firstEmit = Av1FrameHeaderWriter.EmitPayload(originalCfg, sh);
+        var fh = Av1FrameHeaderParser.Parse(firstEmit, sh);
+        var roundTripCfg = Av1FrameHeaderConfig.FromHeader(fh);
+        var secondEmit = Av1FrameHeaderWriter.EmitPayload(roundTripCfg, sh);
+
+        Equal(firstEmit.Length, secondEmit.Length);
+        for (int i = 0; i < firstEmit.Length; i++)
+        {
+            if (firstEmit[i] != secondEmit[i])
+                throw new Exception(
+                    $"FH round-trip byte {i}: first 0x{firstEmit[i]:X2} vs second 0x{secondEmit[i]:X2}");
+        }
+    }
+
+    [TestMethod]
     public void Av1FrameHeaderWriter_RejectsImplicitErrorResilientMisconfig()
     {
         var sh = BuildBbbLikeSequenceHeader();
