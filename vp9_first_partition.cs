@@ -86,8 +86,19 @@ if (partition == Vp9PartitionType.Split)
     var partition32 = Vp9PartitionTree.Decode(p => br.Read(p), probs32);
     Console.WriteLine($"  Top-left 32x32 partition: {partition32}");
 
-    // If split again, decode the next level too.
-    if (partition32 == Vp9PartitionType.Split)
+    if (partition32 == Vp9PartitionType.None)
+    {
+        // Leaf at 32x32: read skip flag for this block. For an intra
+        // keyframe block, intra_inter is implicit (always 1=intra), so
+        // the next bit is the skip flag.
+        // skip_probs[ctx]: ctx=0 here (above + left both unavailable).
+        byte skipProb = decoder.LastCompressedState!.SkipProbs.Probs[0];
+        Console.WriteLine($"  Skip prob (context 0): {skipProb}");
+        int skipFlag = br.Read(skipProb);
+        Console.WriteLine($"  Skip flag for top-left 32x32: {skipFlag}");
+        Console.WriteLine($"    -> {(skipFlag != 0 ? "all-zero residual (skip)" : "has coefficients")}");
+    }
+    else if (partition32 == Vp9PartitionType.Split)
     {
         var probs16 = Vp9PartitionProbs.DefaultProbs(sizeIdx: 1, splitState: 0);
         var partition16 = Vp9PartitionTree.Decode(p => br.Read(p), probs16);

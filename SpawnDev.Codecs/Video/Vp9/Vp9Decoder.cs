@@ -170,6 +170,13 @@ public sealed class Vp9Decoder : IVideoDecoder
     /// <summary>Last parsed compressed-header tx_mode + reference_mode.</summary>
     public Vp9CompressedHeaderResult? LastCompressedResult { get; private set; }
 
+    /// <summary>
+    /// Compressed-header probability state after the last frame's
+    /// compressed header was parsed. Exposes skip / coef / mv / mode
+    /// probability tables consumers need for downstream block decode.
+    /// </summary>
+    public Vp9CompressedHeaderState LastCompressedState => _compressedState;
+
     /// <summary>Per-tile byte ranges of the most recent visible frame.</summary>
     public Vp9TileGroup? LastTileGroup { get; private set; }
 
