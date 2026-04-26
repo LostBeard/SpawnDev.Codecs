@@ -101,10 +101,25 @@ Console.WriteLine("--- AV1: decoder pipeline on bbb_180_2s.ivf ---");
     }
     Console.WriteLine($"  IVF frames fed: {frameCount}");
     Console.WriteLine($"  Av1Decoder learned: {av1.Width}x{av1.Height}");
-    Console.WriteLine($"  SequenceHeader: profile={av1.LastSequenceHeader?.SeqProfile}, " +
-                      $"bit_depth={av1.LastSequenceHeader?.BitDepth}, " +
-                      $"subsampling=({av1.LastSequenceHeader?.SubsamplingX},{av1.LastSequenceHeader?.SubsamplingY})");
+    var shInfo = av1.LastSequenceHeader;
+    Console.WriteLine($"  SequenceHeader: profile={shInfo?.SeqProfile}, " +
+                      $"bit_depth={shInfo?.BitDepth}, " +
+                      $"subsampling=({shInfo?.SubsamplingX},{shInfo?.SubsamplingY}), " +
+                      $"order_hint={shInfo?.EnableOrderHint}, " +
+                      $"cdef={shInfo?.EnableCdef}, " +
+                      $"matrix={shInfo?.MatrixCoefficients}");
     Console.WriteLine($"  Visible frames emitted: {sink.FrameCount}");
+    Console.WriteLine($"  Cumulative OBU counts: "
+        + string.Join(", ", av1.CumulativeObuCounts.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key}={kv.Value}")));
+    Console.WriteLine($"  Cumulative frame headers: "
+        + string.Join(", ", av1.CumulativeFrameTypeCounts.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key}={kv.Value}")));
+    var lastFh = av1.LastFrameHeader;
+    if (lastFh is not null)
+    {
+        Console.WriteLine($"  Last frame header: type={lastFh.FrameType}, "
+            + $"show={lastFh.ShowFrame}, allow_scc={lastFh.AllowScreenContentTools}, "
+            + $"force_int_mv={lastFh.ForceIntegerMv}, order_hint={lastFh.OrderHint}");
+    }
 
     // Per-frame metadata across all 60 frames.
     Av1SequenceHeader? sh = null;
