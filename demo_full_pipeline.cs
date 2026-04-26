@@ -148,21 +148,17 @@ Console.WriteLine("--- AV1: decoder pipeline on bbb_180_2s.ivf ---");
     Console.WriteLine($"  Frame type breakdown: {kfCount} key + {interCount} inter + {intraOnlyCount} intra-only");
 }
 
-// 4. AV1 OBU type distribution across BBB.
+// 4. AV1 stream summary via Av1StreamAnalyzer (high-level API).
 Console.WriteLine();
-Console.WriteLine("--- AV1: OBU type distribution across all 60 frames ---");
+Console.WriteLine("--- AV1: stream summary via Av1StreamAnalyzer ---");
 {
     var av1Bytes = File.ReadAllBytes(Path.Combine(testDataDir, "bbb_180_2s.ivf"));
-    var typeCounts = new System.Collections.Generic.Dictionary<Av1ObuType, int>();
-    foreach (var ivfFrame in IvfReader.EnumerateFrames(av1Bytes))
-    {
-        foreach (var obu in Av1ObuParser.EnumerateObus(ivfFrame.Data))
-        {
-            typeCounts.TryGetValue(obu.Type, out int c);
-            typeCounts[obu.Type] = c + 1;
-        }
-    }
-    foreach (var kv in typeCounts.OrderByDescending(kv => kv.Value))
+    var summary = Av1StreamAnalyzer.Analyze(av1Bytes);
+    Console.WriteLine($"  Stream:       {summary.IvfHeader.FourCc} {summary.IvfHeader.Width}x{summary.IvfHeader.Height}");
+    Console.WriteLine($"  Total TUs:    {summary.TotalTemporalUnits}");
+    Console.WriteLine($"  Coded frames: {summary.CodedFrames.Count} (KeyFrame={summary.FrameTypeCounts.GetValueOrDefault(Av1FrameType.KeyFrame, 0)}, InterFrame={summary.FrameTypeCounts.GetValueOrDefault(Av1FrameType.InterFrame, 0)})");
+    Console.WriteLine($"  ShowExist:    {summary.ShowExistingFrames.Count}");
+    foreach (var kv in summary.ObuCounts.OrderByDescending(kv => kv.Value))
     {
         Console.WriteLine($"  {kv.Key,-22} {kv.Value} OBUs");
     }
