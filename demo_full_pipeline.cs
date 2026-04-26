@@ -118,7 +118,9 @@ Console.WriteLine("--- AV1: decoder pipeline on bbb_180_2s.ivf ---");
     {
         Console.WriteLine($"  Last frame header: type={lastFh.FrameType}, "
             + $"show={lastFh.ShowFrame}, allow_scc={lastFh.AllowScreenContentTools}, "
-            + $"force_int_mv={lastFh.ForceIntegerMv}, order_hint={lastFh.OrderHint}");
+            + $"force_int_mv={lastFh.ForceIntegerMv}, order_hint={lastFh.OrderHint}, "
+            + $"refresh=0x{lastFh.RefreshFrameFlags:X2}, "
+            + $"size={lastFh.FrameWidth}x{lastFh.FrameHeight}");
     }
 
     // Per-frame metadata across all 60 frames.
