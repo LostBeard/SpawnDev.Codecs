@@ -224,9 +224,57 @@ if (partition == Vp9PartitionType.Split)
                     isHighBitDepth: false,
                     coefProbs: decoder.LastCompressedState!.CoefProbs[(int)Vp9TxSize.Tx16x16]);
                 Console.Write($"  Coefficients decoded, EOB at scan position {eob}; ");
-                Console.Write("first 8 in raster: ");
-                for (int i = 0; i < 8; i++) Console.Write($"{coefBlock[i]} ");
+                Console.Write("first 4 (scan order): ");
+                for (int i = 0; i < 4; i++) Console.Write($"{coefBlock[i]} ");
                 Console.WriteLine();
+
+                // Dequantize using Y plane quantizer at frame qindex.
+                int qindex = decoder.LastCompleteHeader!.Quantization.BaseQIndex;
+                var planeQuant = Vp9Dequantizer.PlaneQuantizer(qindex, dcDelta: 0, acDelta: 0);
+                Console.WriteLine($"  qindex={qindex}, Y plane Dc={planeQuant.Dc}, Ac={planeQuant.Ac}");
+                Vp9Dequantizer.DequantizeInPlace(coefBlock, planeQuant);
+                Console.Write($"  After dequant: first 4 (scan order): ");
+                for (int i = 0; i < 4; i++) Console.Write($"{coefBlock[i]} ");
+                Console.WriteLine();
+
+                // Reorder from scan-order to raster-order. The coef
+                // decoder writes to raster positions via scan[c]; verify
+                // by reading scan position 0 = raster position 0 (the DC
+                // is always at the top-left corner regardless of scan).
+                // Actually the decoder already writes to raster positions
+                // (block[scan[c]] = value), so coefBlock IS raster order.
+
+                // Predict (DcPred no neighbors -> 128 everywhere).
+                const int N = 16;
+                var ab = new byte[N * 2];
+                var lf = new byte[N];
+                Array.Fill(ab, (byte)127);
+                Array.Fill(lf, (byte)129);
+                var dst16 = new byte[N * N];
+                Vp9IntraPredictor.Predict(ym, 127, ab, lf, dst16, N, stride: N);
+
+                // iDCT (DCT_DCT for Tx16x16 + DcPred) + add to prediction.
+                Vp9InverseTransform.Apply(
+                    Vp9TxType.DctDct, Vp9TxSize.Tx16x16,
+                    coefBlock, dst16, stride: N);
+
+                int mn = 255, mx = 0, sm = 0;
+                for (int i = 0; i < dst16.Length; i++)
+                {
+                    if (dst16[i] < mn) mn = dst16[i];
+                    if (dst16[i] > mx) mx = dst16[i];
+                    sm += dst16[i];
+                }
+                Console.WriteLine($"  Reconstructed 16x16 Y: min={mn}, max={mx}, mean={sm/dst16.Length}");
+                Console.WriteLine($"  Top-left 4x4 sample:");
+                for (int row = 0; row < 4; row++)
+                {
+                    Console.Write("    ");
+                    for (int col = 0; col < 4; col++)
+                        Console.Write($"{dst16[row * N + col],4}");
+                    Console.WriteLine();
+                }
+                Console.WriteLine($"  ffmpeg ground truth for top-left 16x16 Y: range 67-75.");
             }
             if (sk == 1)
             {
