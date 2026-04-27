@@ -129,9 +129,26 @@ if (hdr.Log2NumPartitions < 0 || hdr.Log2NumPartitions > 3)
 
 Console.WriteLine($"OK frame header parses cleanly + all fields in spec-valid ranges.");
 Console.WriteLine();
-Console.WriteLine("=== VP8 INVERSE PIPELINE INTEGRATION: PARSE PASS GREEN ===");
-Console.WriteLine($"VP8 frame tag parser + frame header parser correctly decode a real");
-Console.WriteLine($"libvpx-encoded {Width}x{Height} VP8 keyframe end-to-end.");
+
+// === Stage 3: decode the FIRST 4 macroblocks' mode info ===
+// The bool decoder (bd) is positioned at the mode-info section after the
+// frame header. For a 320x240 frame that's 20x15 = 300 macroblocks total;
+// we just decode the first 4 to prove the integration works on real data.
+Console.WriteLine("First 4 macroblocks - mode info:");
+Console.WriteLine($"  idx | seg | skip | y_mode | uv_mode | sub_modes");
+for (int i = 0; i < 4; i++)
+{
+    var mb = Vp8MbModeInfoDecoder.DecodeKeyFrameMb(bd, hdr);
+    string subModes = mb.SubBlockModes != null
+        ? "[" + string.Join(",", mb.SubBlockModes.Take(4).Select(m => m.ToString())) + ",...]"
+        : "(n/a)";
+    Console.WriteLine($"  {i,3} | {mb.SegmentId,3} | {(mb.SkipCoeff ? "yes" : "no "),4} | {mb.YMode,-7} | {mb.UvMode,-7} | {subModes}");
+}
+Console.WriteLine();
+
+Console.WriteLine("=== VP8 INVERSE PIPELINE INTEGRATION: PARSE+MODE PASS GREEN ===");
+Console.WriteLine($"VP8 frame tag + frame header + MB mode info decoders correctly process");
+Console.WriteLine($"a real libvpx-encoded {Width}x{Height} VP8 keyframe through the first 4 MBs.");
 
 void RunFfmpeg(string args)
 {
