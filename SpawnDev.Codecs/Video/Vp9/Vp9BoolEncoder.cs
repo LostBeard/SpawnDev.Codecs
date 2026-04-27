@@ -28,13 +28,19 @@ public sealed class Vp9BoolEncoder
         Reset();
     }
 
-    /// <summary>Reset encoder state. Mirrors libvpx <c>vpx_start_encode</c>.</summary>
+    /// <summary>Reset encoder state. Mirrors libvpx <c>vpx_start_encode</c>,
+    /// including the leading 0 marker bit at flat probability 128 that
+    /// <see cref="Vp9BoolDecoder"/> consumes during init.</summary>
     public void Reset()
     {
         _buf.Clear();
         _lowvalue = 0;
         _range = 255;
         _count = -24;
+        // libvpx vpx_start_encode emits a leading marker bit (== 0)
+        // immediately after seeding the state. The Vp9 bool decoder
+        // consumes this bit during init and validates that it is zero.
+        Write(0, 128);
     }
 
     /// <summary>

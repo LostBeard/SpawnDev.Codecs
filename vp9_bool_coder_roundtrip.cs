@@ -1,9 +1,10 @@
 // Round-trip test for Vp9BoolEncoder + Vp9BoolDecoder.
+// Now uses the proper Vp9BoolDecoder pair after the encoder was fixed
+// to emit the leading marker bit per libvpx vpx_start_encode.
 
 #:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using SpawnDev.Codecs.Video.Vp9;
-using SpawnDev.Codecs.Video.Vp8; // Vp8BoolDecoder for round-trip (same algo, no marker enforcement)
 
 int totalChecks = 0;
 int totalFails = 0;
@@ -20,10 +21,10 @@ int totalFails = 0;
     var bytes = enc.Stop();
     Console.WriteLine($"Test 1: {symbols.Length} bools encoded into {bytes.Length} bytes");
 
-    var dec = new Vp8BoolDecoder(bytes); // Vp8BoolDecoder uses identical math + no marker bit enforcement
+    var dec = new Vp9BoolDecoder(bytes, 0, bytes.Length);
     for (int i = 0; i < symbols.Length; i++)
     {
-        int got = dec.DecodeBool(probs[i % probs.Length]);
+        int got = dec.Read(probs[i % probs.Length]);
         totalChecks++;
         if (got != symbols[i]) totalFails++;
     }
@@ -37,10 +38,10 @@ int totalFails = 0;
     var bytes = enc.Stop();
     Console.WriteLine($"Test 2: {values.Length} literals encoded into {bytes.Length} bytes");
 
-    var dec = new Vp8BoolDecoder(bytes); // Vp8BoolDecoder uses identical math + no marker bit enforcement
+    var dec = new Vp9BoolDecoder(bytes, 0, bytes.Length);
     for (int i = 0; i < values.Length; i++)
     {
-        int got = dec.DecodeValue(8);
+        int got = (int)dec.ReadLiteral(8);
         totalChecks++;
         if (got != values[i]) totalFails++;
     }
