@@ -140,13 +140,21 @@ public sealed class VorbisAudioDecoder
         VorbisInverseCoupling.Apply(spectra, mapping);
 
         // ----- IMDCT + window per channel -----
+        // Our ImdctReference is the literal unscaled inverse (matches the
+        // direct-formula MDCT in MdctReference). The MDCT->IMDCT round-trip
+        // for these reference impls produces N/4 times the original signal.
+        // Vorbis I expects unity round-trip, so we scale IMDCT output by 4/N.
+        // libvorbis bakes this normalisation into its FFT-based MDCT; our
+        // reference impls keep the bare formula and do the scaling at the
+        // decoder boundary so MdctReference and ImdctReference stay literal.
         var timeDomain = new float[channels][];
         var window = VorbisWindow.GenerateCanonical(blockSize);
+        float imdctScale = 4f / blockSize;
         for (int ch = 0; ch < channels; ch++)
         {
             var td = new float[blockSize];
             ImdctReference.Transform(spectra[ch], td);
-            for (int i = 0; i < blockSize; i++) td[i] *= window[i];
+            for (int i = 0; i < blockSize; i++) td[i] *= window[i] * imdctScale;
             timeDomain[ch] = td;
         }
 
