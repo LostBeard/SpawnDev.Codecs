@@ -171,4 +171,166 @@ public abstract partial class CodecsTestBase
         True(encodedBytes <= 6,
             $"all-zero coef block encoded to {encodedBytes} bytes, expected <= 6");
     }
+
+    /// <summary>
+    /// 8x8 variant of the 4x4 pipeline: forward DCT 8x8 -> quantize ->
+    /// coef encode -> bool stream -> coef decode -> dequantize ->
+    /// inverse DCT 8x8 + add into fresh predictor=128 buffer.
+    /// </summary>
+    private static (byte[] Reconstructed, int EncodedBytes) RoundTripVp9Block8x8(
+        ReadOnlySpan<byte> pixels, int qIndex)
+    {
+        const byte predictorValue = 128;
+
+        Span<short> residual = stackalloc short[64];
+        for (int i = 0; i < 64; i++) residual[i] = (short)(pixels[i] - predictorValue);
+
+        Span<int> coefs = stackalloc int[64];
+        Vp9ForwardDct8x8.Transform(residual, 8, coefs);
+
+        var planeQ = Vp9Dequantizer.PlaneQuantizer(qIndex, dcDelta: 0, acDelta: 0);
+        Vp9ForwardQuantizer.QuantizeBlock(coefs, planeQ.Dc, planeQ.Ac);
+
+        var coefsShort = new short[64];
+        for (int i = 0; i < 64; i++)
+        {
+            int v = coefs[i];
+            if (v > short.MaxValue || v < short.MinValue)
+                throw new InvalidOperationException($"quantized coef {v} doesn't fit in short");
+            coefsShort[i] = (short)v;
+        }
+
+        var enc = new Vp9BoolEncoder();
+        Vp9BlockCoefEncoder.EncodeBlockCoefficients(
+            (prob, bit) => enc.Write(bit, prob),
+            Vp9TxSize.Tx8x8, Vp9ScanType.Default,
+            Vp9BlockCoefDecoder.PlaneType.Y, Vp9BlockCoefDecoder.RefType.Intra,
+            coefsShort);
+        byte[] encoded = enc.Stop();
+
+        var dec = new Vp9BoolDecoder(encoded, 0, encoded.Length);
+        Span<short> decoded = stackalloc short[64];
+        Vp9BlockCoefDecoder.DecodeBlockCoefficients(
+            prob => dec.Read(prob),
+            Vp9TxSize.Tx8x8, Vp9ScanType.Default,
+            Vp9BlockCoefDecoder.PlaneType.Y, Vp9BlockCoefDecoder.RefType.Intra,
+            decoded);
+
+        for (int i = 0; i < 64; i++)
+            if (coefsShort[i] != decoded[i])
+                throw new Exception($"8x8 entropy round-trip mismatch at {i}: enc {coefsShort[i]} dec {decoded[i]}");
+
+        Vp9Dequantizer.DequantizeInPlace(decoded, planeQ);
+
+        var reconstructed = new byte[64];
+        for (int i = 0; i < 64; i++) reconstructed[i] = predictorValue;
+        Vp9Idct8x8Reference.Idct8x8_64_Add(decoded, reconstructed, stride: 8);
+
+        return (reconstructed, encoded.Length);
+    }
+
+    [TestMethod]
+    public void Vp9BlockEncodePipeline_8x8_FlatBlock_LowQ_ReconstructsExactly()
+    {
+        var pixels = new byte[64];
+        for (int i = 0; i < 64; i++) pixels[i] = 128;
+
+        var (recon, _) = RoundTripVp9Block8x8(pixels, qIndex: 8);
+        for (int i = 0; i < 64; i++) Equal((byte)128, recon[i]);
+    }
+
+    [TestMethod]
+    public void Vp9BlockEncodePipeline_8x8_Gradient_LowQ_LowError()
+    {
+        var pixels = new byte[64];
+        for (int r = 0; r < 8; r++)
+            for (int c = 0; c < 8; c++)
+                pixels[r * 8 + c] = (byte)(110 + r * 4 + c * 2);
+
+        var (recon, _) = RoundTripVp9Block8x8(pixels, qIndex: 16);
+
+        int maxErr = 0;
+        for (int i = 0; i < 64; i++)
+            maxErr = Math.Max(maxErr, Math.Abs(recon[i] - pixels[i]));
+        True(maxErr <= 4, $"8x8 gradient round-trip error = {maxErr}, expected <= 4");
+    }
+
+    /// <summary>16x16 pipeline variant.</summary>
+    private static (byte[] Reconstructed, int EncodedBytes) RoundTripVp9Block16x16(
+        ReadOnlySpan<byte> pixels, int qIndex)
+    {
+        const byte predictorValue = 128;
+
+        var residual = new short[256];
+        for (int i = 0; i < 256; i++) residual[i] = (short)(pixels[i] - predictorValue);
+
+        var coefs = new int[256];
+        Vp9ForwardDct16x16.Transform(residual, 16, coefs);
+
+        var planeQ = Vp9Dequantizer.PlaneQuantizer(qIndex, dcDelta: 0, acDelta: 0);
+        Vp9ForwardQuantizer.QuantizeBlock(coefs, planeQ.Dc, planeQ.Ac);
+
+        var coefsShort = new short[256];
+        for (int i = 0; i < 256; i++)
+        {
+            int v = coefs[i];
+            if (v > short.MaxValue || v < short.MinValue)
+                throw new InvalidOperationException($"quantized coef {v} doesn't fit in short");
+            coefsShort[i] = (short)v;
+        }
+
+        var enc = new Vp9BoolEncoder();
+        Vp9BlockCoefEncoder.EncodeBlockCoefficients(
+            (prob, bit) => enc.Write(bit, prob),
+            Vp9TxSize.Tx16x16, Vp9ScanType.Default,
+            Vp9BlockCoefDecoder.PlaneType.Y, Vp9BlockCoefDecoder.RefType.Intra,
+            coefsShort);
+        byte[] encoded = enc.Stop();
+
+        var dec = new Vp9BoolDecoder(encoded, 0, encoded.Length);
+        var decoded = new short[256];
+        Vp9BlockCoefDecoder.DecodeBlockCoefficients(
+            prob => dec.Read(prob),
+            Vp9TxSize.Tx16x16, Vp9ScanType.Default,
+            Vp9BlockCoefDecoder.PlaneType.Y, Vp9BlockCoefDecoder.RefType.Intra,
+            decoded);
+
+        for (int i = 0; i < 256; i++)
+            if (coefsShort[i] != decoded[i])
+                throw new Exception($"16x16 entropy round-trip mismatch at {i}: enc {coefsShort[i]} dec {decoded[i]}");
+
+        Vp9Dequantizer.DequantizeInPlace(decoded, planeQ);
+
+        var reconstructed = new byte[256];
+        for (int i = 0; i < 256; i++) reconstructed[i] = predictorValue;
+        Vp9Idct16x16Reference.Idct16x16_256_Add(decoded, reconstructed, stride: 16);
+
+        return (reconstructed, encoded.Length);
+    }
+
+    [TestMethod]
+    public void Vp9BlockEncodePipeline_16x16_FlatBlock_LowQ_ReconstructsExactly()
+    {
+        var pixels = new byte[256];
+        for (int i = 0; i < 256; i++) pixels[i] = 128;
+
+        var (recon, _) = RoundTripVp9Block16x16(pixels, qIndex: 8);
+        for (int i = 0; i < 256; i++) Equal((byte)128, recon[i]);
+    }
+
+    [TestMethod]
+    public void Vp9BlockEncodePipeline_16x16_Gradient_LowQ_LowError()
+    {
+        var pixels = new byte[256];
+        for (int r = 0; r < 16; r++)
+            for (int c = 0; c < 16; c++)
+                pixels[r * 16 + c] = (byte)(100 + r * 2 + c);
+
+        var (recon, _) = RoundTripVp9Block16x16(pixels, qIndex: 16);
+
+        int maxErr = 0;
+        for (int i = 0; i < 256; i++)
+            maxErr = Math.Max(maxErr, Math.Abs(recon[i] - pixels[i]));
+        True(maxErr <= 4, $"16x16 gradient round-trip error = {maxErr}, expected <= 4");
+    }
 }
