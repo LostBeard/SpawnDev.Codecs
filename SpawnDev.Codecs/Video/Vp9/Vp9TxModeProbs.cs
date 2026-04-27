@@ -25,13 +25,25 @@ public sealed class Vp9TxModeProbs
     public const int TxSizes = 4;
 
     /// <summary>p8x8: per-context 1-leaf tree choosing 4x4 vs 8x8.</summary>
-    public byte[,] P8x8 { get; } = new byte[TxSizeContexts, TxSizes - 3];
+    public byte[,] P8x8 { get; } = new byte[TxSizeContexts, TxSizes - 3]
+    {
+        { 100 },
+        { 66 },
+    };
 
     /// <summary>p16x16: per-context 2-leaf tree (4x4 / 8x8 / 16x16).</summary>
-    public byte[,] P16x16 { get; } = new byte[TxSizeContexts, TxSizes - 2];
+    public byte[,] P16x16 { get; } = new byte[TxSizeContexts, TxSizes - 2]
+    {
+        { 20, 152 },
+        { 15, 101 },
+    };
 
     /// <summary>p32x32: per-context 3-leaf tree (4x4 / 8x8 / 16x16 / 32x32).</summary>
-    public byte[,] P32x32 { get; } = new byte[TxSizeContexts, TxSizes - 1];
+    public byte[,] P32x32 { get; } = new byte[TxSizeContexts, TxSizes - 1]
+    {
+        { 3, 136, 37 },
+        { 5, 52, 13 },
+    };
 }
 
 /// <summary>Parser for the read_tx_mode_probs section of the compressed header.</summary>

@@ -46,6 +46,18 @@ var tileBytes = new byte[tile0.Length];
 Buffer.BlockCopy(data, tile0.Offset, tileBytes, 0, tile0.Length);
 
 Console.WriteLine($"Tile 0: offset={tile0.Offset}, length={tile0.Length}");
+Console.Write("Tile 0 first 16 bytes:");
+for (int i = 0; i < Math.Min(16, tileBytes.Length); i++)
+    Console.Write($" {tileBytes[i]:X2}");
+Console.WriteLine();
+var skipProbsDump = decoder.LastCompressedState!.SkipProbs.Probs;
+Console.WriteLine($"Skip probs (post-compressed-header): [{skipProbsDump[0]}, {skipProbsDump[1]}, {skipProbsDump[2]}]");
+var p32x32Dump = decoder.LastCompressedState.TxModeProbs.P32x32;
+Console.WriteLine($"P32x32[0,*]: [{p32x32Dump[0,0]}, {p32x32Dump[0,1]}, {p32x32Dump[0,2]}]");
+Console.WriteLine($"P32x32[1,*]: [{p32x32Dump[1,0]}, {p32x32Dump[1,1]}, {p32x32Dump[1,2]}]");
+var p16x16Dump = decoder.LastCompressedState.TxModeProbs.P16x16;
+Console.WriteLine($"P16x16[0,*]: [{p16x16Dump[0,0]}, {p16x16Dump[0,1]}]");
+Console.WriteLine($"P16x16[1,*]: [{p16x16Dump[1,0]}, {p16x16Dump[1,1]}]");
 
 // First superblock at top-left: 64x64 (sizeIdx=3), both above + left
 // out of frame so splitState=0.
@@ -102,12 +114,23 @@ if (partition == Vp9PartitionType.Split)
         Console.WriteLine($"  Skip flag for top-left 32x32: {skipFlag}");
         Console.WriteLine($"    -> {(skipFlag != 0 ? "all-zero residual (skip)" : "has coefficients")}");
 
-        // BUG (2026-04-26): libvpx reads tx_size BETWEEN skip and y_mode
-        // when tx_mode == TxModeSelect (the common case). This demo skips
-        // that read. See Plans/PLAN-vp9-block-decode-wiring.md for the
-        // fix recipe using Vp9TxSizeDecoder.ReadTxSize. Until applied,
-        // every read after skip drifts by 1-3 bits and the y_mode +
-        // pixel values are all wrong.
+        // tx_size: libvpx read_intra_frame_mode_info reads tx_size between
+        // skip and y_mode. Vp9TxSizeDecoder.ReadTxSize is a no-op when
+        // tx_mode != TxModeSelect; for TxModeSelect (common in libvpx
+        // output) it consumes 1-3 bits via the per-context tx_size_probs
+        // tree. Top-left no-neighbor tx_size_context = 1 per libvpx
+        // get_tx_size_context: (above_ctx + left_ctx) > max_tx_size with
+        // both defaulting to max_tx_size when neighbors are missing.
+        var txMode = decoder.LastCompressedResult!.TxMode;
+        var maxTxSize32 = Vp9MaxTxSize.ForBlockSize(Vp9BlockSize.Block32x32);
+        Span<byte> txProbs32 = stackalloc byte[3]
+        {
+            decoder.LastCompressedState!.TxModeProbs.P32x32[1, 0],
+            decoder.LastCompressedState!.TxModeProbs.P32x32[1, 1],
+            decoder.LastCompressedState!.TxModeProbs.P32x32[1, 2],
+        };
+        var txSize32 = Vp9TxSizeDecoder.ReadTxSize(txMode, maxTxSize32, br, txProbs32);
+        Console.WriteLine($"  tx_mode = {txMode}, tx_size for 32x32: {txSize32}");
 
         // Intra Y mode: for top-left block, above + left are out of frame
         // so libvpx treats them as DcPred. Mode is read regardless of
@@ -152,18 +175,10 @@ if (partition == Vp9PartitionType.Split)
                 Console.WriteLine();
             }
 
-            // ffmpeg ground truth shows the actual top-left 32x32 Y plane
-            // is NOT all-127 (range 57-112). So our chain is missing a
-            // bit somewhere - possibly segmentation seg_id read BEFORE
-            // partition, or the partition decode didn't actually start
-            // at byte 0 of tile 0. Honest report: chain runs end-to-end,
-            // doesn't yet match ffmpeg.
             Console.WriteLine();
-            Console.WriteLine("  Note: chain runs without throwing, but values don't match ffmpeg's");
-            Console.WriteLine("  ground truth (top-left 32x32 actual: range 57-112, not 127). Likely");
-            Console.WriteLine("  missing segmentation seg_id read before partition decode. The");
-            Console.WriteLine("  primitives compose correctly - the byte-position alignment is the");
-            Console.WriteLine("  remaining bug to chase.");
+            Console.WriteLine("  Note: skip=1 means the residual is zero, so prediction IS the output.");
+            Console.WriteLine("  For top-left DcPred with no neighbors, prediction is 128 by spec.");
+            Console.WriteLine("  Compare to ffmpeg ground truth for the actual block to confirm.");
         }
     }
     else if (partition32 == Vp9PartitionType.Split)
@@ -174,10 +189,23 @@ if (partition == Vp9PartitionType.Split)
 
         if (partition16 == Vp9PartitionType.None)
         {
-            // 16x16 leaf - read skip + Y mode + (if skip) emit predicted pixels.
+            // 16x16 leaf - read skip + tx_size + Y mode (libvpx order).
             byte sp = decoder.LastCompressedState!.SkipProbs.Probs[0];
             int sk = br.Read(sp);
             Console.WriteLine($"  Skip flag for 16x16: {sk}");
+
+            // tx_size between skip and y_mode (no-op unless TxModeSelect).
+            // Top-left no-neighbor tx_size_context = 1.
+            var txMode16 = decoder.LastCompressedResult!.TxMode;
+            var maxTxSize16 = Vp9MaxTxSize.ForBlockSize(Vp9BlockSize.Block16x16);
+            Span<byte> txProbs16 = stackalloc byte[2]
+            {
+                decoder.LastCompressedState!.TxModeProbs.P16x16[1, 0],
+                decoder.LastCompressedState!.TxModeProbs.P16x16[1, 1],
+            };
+            var txSize16 = Vp9TxSizeDecoder.ReadTxSize(txMode16, maxTxSize16, br, txProbs16);
+            Console.WriteLine($"  tx_mode = {txMode16}, tx_size for 16x16: {txSize16}");
+
             var ym = Vp9IntraModeTree.Decode(p => br.Read(p),
                 Vp9IntraModeProbs.KeyframeYProbs(Vp9IntraMode.DcPred, Vp9IntraMode.DcPred));
             Console.WriteLine($"  Intra Y mode for 16x16: {ym}");

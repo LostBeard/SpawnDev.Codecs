@@ -1,8 +1,16 @@
 # PLAN: VP9 block-level decode wiring
 
-**Status:** chain composes, pixel values don't match ffmpeg ground truth yet. **2026-04-26 update: missing `tx_size` read identified as primary suspect.**
+**Status:** Two real bugs found and fixed 2026-04-26. Skip flag now correctly decodes to 0 for the BBB top-left 16x16 block. Coefficient decode is the remaining gate to pixel-exact match.
 **Created:** 2026-04-25 (Tuvok)
-**Updated:** 2026-04-26 (Tuvok) - cleared 5 of 6 original suspects, narrowed to one root cause.
+**Updated:** 2026-04-26 (Tuvok) - cleared all 6 original suspects, found and fixed two real upstream bugs that the original suspect list missed.
+
+## 2026-04-26 commits in this branch of investigation
+
+1. **Library bug:** `Vp9SkipProbs.Probs` and `Vp9TxModeProbs.P8x8/P16x16/P32x32` defaulted to all-zero arrays. libvpx initializes these to specific default values (`default_skip_probs = {192, 128, 64}`, `default_tx_probs.p32x32[0] = {3, 136, 37}`, etc). The compressed header parser applies `diff_update_prob` deltas FROM the defaults; zero-init means deltas land in the wrong place. Fixed: defaults now seeded from libvpx tables. Tests added pinning the values.
+
+2. **Demo bug:** `vp9_first_partition.cs` was missing the `tx_size` read between `skip` and `y_mode`. libvpx's `read_intra_frame_mode_info` reads `tx_size` (consuming 1-3 bits when `tx_mode == TxModeSelect`). Without it, every downstream symbol drifted. Fixed: `Vp9TxSizeDecoder.ReadTxSize` is now called between skip and y_mode in both the 32x32-leaf and 16x16-leaf branches.
+
+3. **Result:** `skip_flag` for the BBB top-left 16x16 block now decodes to **0** (was 1 before). The actual block has a non-zero residual, which is consistent with ffmpeg's ground truth pixel values 67-75 (DcPred prediction = 128, residual takes it down to 67-75).
 
 ## What's already shipped
 

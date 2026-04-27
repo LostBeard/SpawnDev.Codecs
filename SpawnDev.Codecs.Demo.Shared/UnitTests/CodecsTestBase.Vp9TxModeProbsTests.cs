@@ -29,6 +29,34 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void Vp9TxModeProbs_DefaultsMatchLibvpx()
+    {
+        // libvpx vp9_entropymode.c default_tx_probs:
+        //   p32x32 = { { 3, 136, 37 }, { 5, 52, 13 } }
+        //   p16x16 = { { 20, 152 }, { 15, 101 } }
+        //   p8x8   = { { 100 }, { 66 } }
+        // The compressed header applies diff_update_prob deltas FROM these
+        // defaults; zero-init would corrupt every downstream tx_size read
+        // when tx_mode == TxModeSelect.
+        var probs = new Vp9TxModeProbs();
+
+        Equal((byte)100, probs.P8x8[0, 0]);
+        Equal((byte)66,  probs.P8x8[1, 0]);
+
+        Equal((byte)20,  probs.P16x16[0, 0]);
+        Equal((byte)152, probs.P16x16[0, 1]);
+        Equal((byte)15,  probs.P16x16[1, 0]);
+        Equal((byte)101, probs.P16x16[1, 1]);
+
+        Equal((byte)3,   probs.P32x32[0, 0]);
+        Equal((byte)136, probs.P32x32[0, 1]);
+        Equal((byte)37,  probs.P32x32[0, 2]);
+        Equal((byte)5,   probs.P32x32[1, 0]);
+        Equal((byte)52,  probs.P32x32[1, 1]);
+        Equal((byte)13,  probs.P32x32[1, 2]);
+    }
+
+    [TestMethod]
     public void Vp9TxModeProbs_Parse_NoUpdates_LeavesTableUntouched()
     {
         // 12 update flags, all zero. Buffer of zeros suffices.

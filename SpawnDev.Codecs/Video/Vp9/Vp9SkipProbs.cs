@@ -14,8 +14,19 @@ public sealed class Vp9SkipProbs
     /// <summary>libvpx <c>SKIP_CONTEXTS</c>.</summary>
     public const int SkipContexts = 3;
 
-    /// <summary>Per-context skip-flag probability.</summary>
-    public byte[] Probs { get; } = new byte[SkipContexts];
+    /// <summary>
+    /// libvpx <c>default_skip_probs</c> (vp9_entropymode.c). Used to seed
+    /// <see cref="Probs"/> at frame-context init; the compressed header
+    /// applies diff_update_prob deltas FROM these defaults, so starting
+    /// from zero would corrupt every downstream skip read.
+    /// </summary>
+    public static readonly byte[] DefaultProbs = new byte[SkipContexts]
+    {
+        192, 128, 64,
+    };
+
+    /// <summary>Per-context skip-flag probability, seeded from <see cref="DefaultProbs"/>.</summary>
+    public byte[] Probs { get; } = (byte[])DefaultProbs.Clone();
 }
 
 /// <summary>Parser for the read_skip_probs section of the compressed header.</summary>
