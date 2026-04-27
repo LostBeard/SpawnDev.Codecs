@@ -35,11 +35,19 @@ public static class Vp9CospiConstants
     public const int Cospi28_64 = 3196;
     public const int Cospi30_64 = 1606;
 
-    // Sin variants (used by IADST).
-    public const int SinpiAr1   = 5283;
-    public const int SinpiBr1   = 13377;
-    public const int SinpiCr1   = 15212;
-    public const int SinpiDr1   = 9929;
+    // Sin variants (used by IADST / FADST). Values match libvpx
+    // vpx_dsp/txfm_common.h sinpi_<i>_9 = round(sin(pi*i/9) * 2^14).
+    public const int Sinpi1_9 = 5283;
+    public const int Sinpi2_9 = 9929;
+    public const int Sinpi3_9 = 13377;
+    public const int Sinpi4_9 = 15212;
+
+    // Legacy aliases (initial commit used libvpx-suffix naming AR1/BR1/CR1/DR1
+    // which is non-standard - keep for compat then remove).
+    public const int SinpiAr1 = Sinpi1_9;
+    public const int SinpiBr1 = Sinpi3_9;
+    public const int SinpiCr1 = Sinpi4_9;
+    public const int SinpiDr1 = Sinpi2_9;
 
     /// <summary>fdct_round_shift: (input + DctConstRounding) &gt;&gt; DctConstBits.</summary>
     public static int RoundShift(long input) =>
