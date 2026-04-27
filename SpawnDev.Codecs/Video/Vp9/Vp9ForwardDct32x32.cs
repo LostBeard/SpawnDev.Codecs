@@ -23,7 +23,8 @@ public static class Vp9ForwardDct32x32
 
         Span<long> intermediate = stackalloc long[1024];
 
-        // Pass 1 (columns), input *4 then half_round_shift between passes.
+        // Pass 1 (columns): input *4, fdct32 round=0, then between-pass shift
+        // with POSITIVE bias: (x + 1 + (x > 0)) >> 2  (libvpx vpx_fdct32x32_c).
         Span<long> tempIn = stackalloc long[32];
         Span<long> tempOut = stackalloc long[32];
         for (int i = 0; i < 32; i++)
@@ -31,21 +32,27 @@ public static class Vp9ForwardDct32x32
             for (int j = 0; j < 32; j++) tempIn[j] = input[j * rowStrideShorts + i] * 4L;
             Fdct32(tempIn, tempOut, round: false);
             for (int j = 0; j < 32; j++)
-                intermediate[j * 32 + i] = HalfRoundShift(tempOut[j]);
+                intermediate[j * 32 + i] = PositiveBiasShift(tempOut[j]);
         }
 
-        // Pass 2 (rows), no extra round between final pass and output.
+        // Pass 2 (rows): fdct32 round=0, then NEGATIVE-bias half_round_shift
+        // on final output: (x + 1 + (x < 0)) >> 2  (libvpx vpx_fdct32x32_c).
         for (int i = 0; i < 32; i++)
         {
             for (int j = 0; j < 32; j++) tempIn[j] = intermediate[j + i * 32];
             Fdct32(tempIn, tempOut, round: false);
-            for (int j = 0; j < 32; j++) output[j + i * 32] = (int)tempOut[j];
+            for (int j = 0; j < 32; j++)
+                output[j + i * 32] = (int)HalfRoundShift(tempOut[j]);
         }
     }
 
     /// <summary>libvpx <c>half_round_shift</c>: <c>(input + 1 + (input&lt;0)) &gt;&gt; 2</c>.</summary>
     private static long HalfRoundShift(long input) =>
         (input + 1 + (input < 0 ? 1 : 0)) >> 2;
+
+    /// <summary>libvpx between-pass shift: <c>(input + 1 + (input&gt;0)) &gt;&gt; 2</c>.</summary>
+    private static long PositiveBiasShift(long input) =>
+        (input + 1 + (input > 0 ? 1 : 0)) >> 2;
 
     /// <summary>libvpx <c>dct_32_round</c>: same as <c>fdct_round_shift</c> (rounded right shift by 14).</summary>
     private static long DctRound(long input) =>
