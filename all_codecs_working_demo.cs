@@ -198,6 +198,34 @@ try
 catch (Exception ex) { Report("VP9 block encoder pipeline (4x4)", false, ex.Message); }
 
 // =================================================================
+// VIDEO: VP9 keyframe encoder -> IVF + sync-code validation
+//   16x16 flat-black frame -> EncodeKeyFrame -> verify the produced
+//   bitstream begins with the VP9 frame_marker byte (0x82) and the
+//   3-byte sync code (0x49 0x83 0x42).
+// =================================================================
+try
+{
+    int W = 16, H = 16;
+    var ySrc = new byte[W * H]; Array.Fill(ySrc, (byte)16);
+    var uSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc, (byte)128);
+    var vSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc, (byte)128);
+
+    var frame = Vp9KeyframeEncoder.EncodeKeyFrame(
+        ySrc, ySrcStride: W,
+        uSrc, uvSrcStride: W / 2,
+        vSrc, W, H, baseQIndex: 20);
+
+    // Validate the frame header bytes (per VP9 spec sec 6.2).
+    bool syncOk = frame.Length > 4
+                  && frame[0] == 0x82
+                  && frame[1] == 0x49
+                  && frame[2] == 0x83
+                  && frame[3] == 0x42;
+    Report("VP9 keyframe encoder->bitstream", syncOk, $"{frame.Length}B frame, header[0..3]={frame[0]:X2} {frame[1]:X2} {frame[2]:X2} {frame[3]:X2}");
+}
+catch (Exception ex) { Report("VP9 keyframe encoder->bitstream", false, ex.Message); }
+
+// =================================================================
 // VIDEO: AV1 forward DCT 4-point round-trip vs inverse oracle
 //   exercises libaom-bit-exact Av1ForwardDct4 + Av1InverseDct4
 // =================================================================
