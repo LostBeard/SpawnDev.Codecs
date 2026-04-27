@@ -198,6 +198,47 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void Av1ForwardDct32_AllZero_ProducesAllZero()
+    {
+        var input = new int[32];
+        var output = new int[32];
+        Av1ForwardDct32.Transform(input, output);
+        for (int i = 0; i < 32; i++) Equal(0, output[i]);
+    }
+
+    [TestMethod]
+    public void Av1ForwardDct32_Determinism()
+    {
+        var rng = new Random(0xD32);
+        var input = new int[32];
+        for (int i = 0; i < 32; i++) input[i] = rng.Next(-512, 512);
+        var a = new int[32];
+        var b = new int[32];
+        Av1ForwardDct32.Transform(input, a);
+        Av1ForwardDct32.Transform(input, b);
+        for (int i = 0; i < 32; i++) Equal(a[i], b[i]);
+    }
+
+    [TestMethod]
+    public void Av1ForwardDct32_ConstantInput_ConcentratesEnergyInDc()
+    {
+        // Constant input -> DCT energy concentrated in slot 0 (DC).
+        // AC slots should all be much smaller in absolute value than DC.
+        var input = new int[32];
+        for (int i = 0; i < 32; i++) input[i] = 100;
+        var output = new int[32];
+        Av1ForwardDct32.Transform(input, output);
+
+        int dcAbs = Math.Abs(output[0]);
+        True(dcAbs > 0, "DC must be non-zero for constant input");
+        for (int i = 1; i < 32; i++)
+        {
+            True(Math.Abs(output[i]) <= dcAbs / 8,
+                $"AC slot {i} = {output[i]} too large vs DC {output[0]}");
+        }
+    }
+
+    [TestMethod]
     public void Av1ForwardAdst4_FwdInv_RoundTripWithinTolerance()
     {
         var rng = new Random(0xAD);
