@@ -15,6 +15,7 @@
 //   - Tx8x8 + DCT_DCT (Vp9ForwardDct8x8)
 //   - Tx8x8 + ADST_ADST (Vp9ForwardAdst8 on rows + cols)
 //   - Tx16x16 + DCT_DCT (Vp9ForwardDct16x16)
+//   - Tx16x16 + ADST_ADST (Vp9ForwardAdst16 on rows + cols)
 //
 // Mixed DCT/ADST 1D combinations (DCT_ADST etc) require composing
 // fdct + fadst across rows/cols separately - layer in when needed.
@@ -49,7 +50,10 @@ public static class Vp9ForwardTransform
                 Apply16x16(txType, input, rowStrideShorts, output);
                 break;
             case Vp9TxSize.Tx32x32:
-                throw new NotImplementedException("Vp9 fdct32x32 not yet ported - use libvpx vpx_fdct32x32_c reference");
+                if (txType != Vp9TxType.DctDct)
+                    throw new NotImplementedException("VP9 32x32 only supports DCT_DCT (no ADST at 32x32 per spec)");
+                Vp9ForwardDct32x32.Transform(input, rowStrideShorts, output);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(txSize), txSize, "Unknown VP9 transform size");
         }
@@ -101,10 +105,12 @@ public static class Vp9ForwardTransform
                 Vp9ForwardDct16x16.Transform(input, rowStride, output);
                 break;
             case Vp9TxType.AdstAdst:
+                ApplyAdstAdst16x16(input, rowStride, output);
+                break;
             case Vp9TxType.DctAdst:
             case Vp9TxType.AdstDct:
                 throw new NotImplementedException(
-                    "VP9 16x16 ADST not yet ported - libvpx fadst16 has 4 stages, port from vp9_dct.c");
+                    "VP9 mixed DCT/ADST 16x16 not yet ported - compose fdct16 + fadst16 across rows/cols");
             default:
                 throw new ArgumentOutOfRangeException(nameof(txType));
         }
@@ -153,6 +159,39 @@ public static class Vp9ForwardTransform
             Span<int> outRow = stackalloc int[8];
             Vp9ForwardAdst8.Transform(row, outRow);
             for (int c = 0; c < 8; c++) output[r * 8 + c] = outRow[c];
+        }
+    }
+
+    private static void ApplyAdstAdst16x16(ReadOnlySpan<short> input, int rowStride, Span<int> output)
+    {
+        // libvpx fadst16 expects 1D input scaled by 4 (matches fdct16x16 pass-1
+        // input scaling) so the intermediate buffer keeps the same dynamic range
+        // as the all-DCT path. Pass 2 applies fadst16 to rows of the intermediate
+        // with the half_round_shift ((x + 1) >> 2) compensating for the pass-1 *4.
+        Span<int> intermediate = stackalloc int[256];
+        Span<int> col = stackalloc int[16];
+        Span<int> outCol = stackalloc int[16];
+
+        // Pass 1: column ADSTs (input *4 to match fdct16x16 dynamic range).
+        for (int c = 0; c < 16; c++)
+        {
+            for (int r = 0; r < 16; r++) col[r] = input[r * rowStride + c] * 4;
+            Vp9ForwardAdst16.Transform(col, outCol);
+            for (int r = 0; r < 16; r++) intermediate[r * 16 + c] = outCol[r];
+        }
+
+        // Pass 2: row ADSTs with half_round_shift ((x + 1) >> 2) before transform.
+        Span<int> row = stackalloc int[16];
+        Span<int> outRow = stackalloc int[16];
+        for (int r = 0; r < 16; r++)
+        {
+            for (int c = 0; c < 16; c++)
+            {
+                int v = intermediate[r * 16 + c];
+                row[c] = (v + 1 + (v < 0 ? 1 : 0)) >> 2;
+            }
+            Vp9ForwardAdst16.Transform(row, outRow);
+            for (int c = 0; c < 16; c++) output[r * 16 + c] = outRow[c];
         }
     }
 }
