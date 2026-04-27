@@ -139,20 +139,21 @@ public static class Vp9MvProbsParser
             UpdateMvProbs(reader, c.Bits);
         }
 
-        // Pass 2 over both components: class0_fp, fp.
+        // Pass 2 over both components: class0_fp, fp. Stackalloc hoisted out of
+        // the inner loop (CA2014); the same scratch span is reused per slot.
+        Span<byte> rowBuf = stackalloc byte[Vp9MvComponentProbs.MvFpSize - 1];
         for (int i = 0; i < 2; i++)
         {
             var c = probs.Components[i];
             for (int j = 0; j < Vp9MvComponentProbs.Class0Size; j++)
             {
-                Span<byte> row = stackalloc byte[Vp9MvComponentProbs.MvFpSize - 1];
-                row[0] = c.Class0Fp[j, 0];
-                row[1] = c.Class0Fp[j, 1];
-                row[2] = c.Class0Fp[j, 2];
-                UpdateMvProbs(reader, row);
-                c.Class0Fp[j, 0] = row[0];
-                c.Class0Fp[j, 1] = row[1];
-                c.Class0Fp[j, 2] = row[2];
+                rowBuf[0] = c.Class0Fp[j, 0];
+                rowBuf[1] = c.Class0Fp[j, 1];
+                rowBuf[2] = c.Class0Fp[j, 2];
+                UpdateMvProbs(reader, rowBuf);
+                c.Class0Fp[j, 0] = rowBuf[0];
+                c.Class0Fp[j, 1] = rowBuf[1];
+                c.Class0Fp[j, 2] = rowBuf[2];
             }
             UpdateMvProbs(reader, c.Fp);
         }

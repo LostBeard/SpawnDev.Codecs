@@ -187,13 +187,15 @@ public static class Vp8KeyframeEncoder
         // Hold all 16 transformed quantized blocks + the 16 Y4-DC values.
         Span<short> y4Coefs = stackalloc short[16 * 16]; // [Y4 block index * 16 + raster pos]
         Span<short> y2DcVals = stackalloc short[16];
+        // Hoist per-iteration scratch out of the loop (CA2014).
+        Span<short> residual = stackalloc short[16];
+        Span<short> coefs = stackalloc short[16];
 
         for (int by = 0; by < 4; by++)
         {
             for (int bx = 0; bx < 4; bx++)
             {
                 int blockIdx = by * 4 + bx;
-                Span<short> residual = stackalloc short[16];
                 for (int r = 0; r < 4; r++)
                 {
                     for (int c = 0; c < 4; c++)
@@ -203,7 +205,6 @@ public static class Vp8KeyframeEncoder
                         residual[r * 4 + c] = (short)(ySrc[srcOff] - yPredMb[predOff]);
                     }
                 }
-                Span<short> coefs = stackalloc short[16];
                 Vp8ForwardTransform.ShortFdct4x4(residual, 4, coefs);
                 // Save the DC value for Y2.
                 y2DcVals[blockIdx] = coefs[0];
