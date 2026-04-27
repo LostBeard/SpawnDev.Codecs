@@ -209,6 +209,15 @@ if (partition == Vp9PartitionType.Split)
             var ym = Vp9IntraModeTree.Decode(p => br.Read(p),
                 Vp9IntraModeProbs.KeyframeYProbs(Vp9IntraMode.DcPred, Vp9IntraMode.DcPred));
             Console.WriteLine($"  Intra Y mode for 16x16: {ym}");
+
+            // uv_mode: libvpx read_intra_frame_mode_info reads uv_mode
+            // AFTER y_mode and BEFORE the coefficient block. Without
+            // this read, the bool decoder is at the wrong bit position
+            // when coefs start.
+            var uvm = Vp9IntraModeTree.Decode(p => br.Read(p),
+                Vp9IntraModeProbs.KeyframeUvProbs(ym));
+            Console.WriteLine($"  Intra UV mode for 16x16: {uvm}");
+
             if (sk == 0)
             {
                 // Decode 16x16 Y coefficients. For DcPred + Tx16x16 the
