@@ -338,7 +338,8 @@ if (partition == Vp9PartitionType.Split)
                         Console.Write($"{dst16[row * N + col],4}");
                     Console.WriteLine();
                 }
-                Console.WriteLine($"  ffmpeg ground truth for top-left 16x16 Y: range 67-75.");
+                Console.WriteLine($"  ffmpeg ground truth for top-left 16x16 Y: mean=80, range=57-103.");
+                Console.WriteLine($"  (Run compare_groundtruth.cs to dump ffmpeg's actual pixels.)");
             }
             if (sk == 1)
             {
