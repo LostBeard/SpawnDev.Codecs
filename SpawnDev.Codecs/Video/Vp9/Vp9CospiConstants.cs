@@ -19,7 +19,23 @@ public static class Vp9CospiConstants
     public const int DctConstRounding = 1 << (DctConstBits - 1);
 
     // cos(pi*i/64) * 2^14, i in 1..32
+    public const int Cospi1_64  = 16364;
     public const int Cospi2_64  = 16305;
+    public const int Cospi3_64  = 16207;
+    public const int Cospi5_64  = 15893;
+    public const int Cospi7_64  = 15426;
+    public const int Cospi9_64  = 14811;
+    public const int Cospi11_64 = 14053;
+    public const int Cospi13_64 = 13160;
+    public const int Cospi15_64 = 12140;
+    public const int Cospi17_64 = 11003;
+    public const int Cospi19_64 = 9760;
+    public const int Cospi21_64 = 8423;
+    public const int Cospi23_64 = 7005;
+    public const int Cospi25_64 = 5520;
+    public const int Cospi27_64 = 3981;
+    public const int Cospi29_64 = 2404;
+    public const int Cospi31_64 = 804;
     public const int Cospi4_64  = 16069;
     public const int Cospi6_64  = 15679;
     public const int Cospi8_64  = 15137;
