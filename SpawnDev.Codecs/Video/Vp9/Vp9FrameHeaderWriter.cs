@@ -181,6 +181,53 @@ public sealed class Vp9BitWriter
     }
 
     /// <summary>
+    /// Write a signed literal in libvpx's "magnitude bits + sign bit"
+    /// encoding (matches <see cref="Vp9BitReader.ReadSignedLiteral"/>).
+    /// <paramref name="value"/> is in [-(2^numBits-1), 2^numBits-1];
+    /// <paramref name="numBits"/> is the magnitude width (the sign is a
+    /// separate trailing bit).
+    /// </summary>
+    public void WriteSignedLiteral(int value, int numBits)
+    {
+        int mag = value < 0 ? -value : value;
+        if (mag >= (1 << numBits))
+            throw new ArgumentOutOfRangeException(nameof(value),
+                $"|{value}| does not fit in {numBits} magnitude bits.");
+        WriteBits((uint)mag, numBits);
+        WriteBits(value < 0 ? 1u : 0u, 1);
+    }
+
+    /// <summary>Bits emitted so far including the partial current byte.</summary>
+    public int BitPosition => _bytes.Count * 8 + _bitsInCurrent;
+
+    /// <summary>
+    /// Pad the current byte with zero bits to align on the next byte
+    /// boundary. No-op when already aligned.
+    /// </summary>
+    public void PadToByte()
+    {
+        if (_bitsInCurrent == 0) return;
+        WriteBits(0u, 8 - _bitsInCurrent);
+    }
+
+    /// <summary>Append a complete byte (must be byte-aligned).</summary>
+    public void WriteByte(byte b)
+    {
+        if (_bitsInCurrent != 0)
+            throw new InvalidOperationException("WriteByte requires byte-aligned writer.");
+        _bytes.Add(b);
+    }
+
+    /// <summary>Append a span of bytes (must be byte-aligned).</summary>
+    public void WriteBytes(ReadOnlySpan<byte> bytes)
+    {
+        if (_bitsInCurrent != 0)
+            throw new InvalidOperationException("WriteBytes requires byte-aligned writer.");
+        for (int i = 0; i < bytes.Length; i++)
+            _bytes.Add(bytes[i]);
+    }
+
+    /// <summary>
     /// Finalize: pad the current partial byte with zeros and return
     /// the accumulated payload.
     /// </summary>
