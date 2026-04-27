@@ -73,45 +73,55 @@ public static class Vp8CoefBlockDecoder
 
         output.Clear();
 
+        // Mirror libvpx GetCoeffs: cache (band, ctx) lazily via 'p' (band index +
+        // ctx index). The probability vector for the CURRENT decode is selected
+        // by (pBand, pCtx) which is the band+ctx state from the PREVIOUS coef
+        // (or initial state for the first read).
+        //
+        // libvpx convention: prob[scan][ctx] is used initially with scan=firstCoef;
+        // since kBands[0]=0 and kBands[1]=1, this happens to match prob[kBands[scan]][ctx]
+        // for scan in {0, 1}. We use that band index directly.
         int n = firstCoef;
+        int pBand = CoefBands[n];
+        int pCtx = ctx;
         // EOB-style first token: if 0, the entire block is zero.
-        if (reader.DecodeBool(probs[CoefBands[n], ctx, 0]) == 0)
+        if (reader.DecodeBool(probs[pBand, pCtx, 0]) == 0)
             return 0;
 
         while (true)
         {
             n++;
-            int band = CoefBands[n];
-            // Probability vector for the current (band, ctx) state.
-            // probs is rank-3: [band, ctx, node]
-            if (reader.DecodeBool(probs[band, ctx, 1]) == 0)
+            // ZERO bit at the new scan position uses the OLD (pBand, pCtx) - matches libvpx p[1].
+            if (reader.DecodeBool(probs[pBand, pCtx, 1]) == 0)
             {
-                // Zero coefficient. Move ctx to 0 for next position.
-                ctx = 0;
+                // Zero coefficient. Update p for the next iteration's scan position.
+                pBand = CoefBands[n];
+                pCtx = 0;
             }
             else
             {
                 // Non-zero coefficient.
                 int v;
-                if (reader.DecodeBool(probs[band, ctx, 2]) == 0)
+                if (reader.DecodeBool(probs[pBand, pCtx, 2]) == 0)
                 {
                     v = 1;
-                    ctx = 1; // ctx after a One-token coefficient.
+                    pBand = CoefBands[n];
+                    pCtx = 1; // ctx after a One-token coefficient.
                 }
                 else
                 {
-                    if (reader.DecodeBool(probs[band, ctx, 3]) == 0)
+                    if (reader.DecodeBool(probs[pBand, pCtx, 3]) == 0)
                     {
-                        if (reader.DecodeBool(probs[band, ctx, 4]) == 0)
+                        if (reader.DecodeBool(probs[pBand, pCtx, 4]) == 0)
                             v = 2;
                         else
-                            v = 3 + reader.DecodeBool(probs[band, ctx, 5]);
+                            v = 3 + reader.DecodeBool(probs[pBand, pCtx, 5]);
                     }
                     else
                     {
-                        if (reader.DecodeBool(probs[band, ctx, 6]) == 0)
+                        if (reader.DecodeBool(probs[pBand, pCtx, 6]) == 0)
                         {
-                            if (reader.DecodeBool(probs[band, ctx, 7]) == 0)
+                            if (reader.DecodeBool(probs[pBand, pCtx, 7]) == 0)
                                 v = 5 + reader.DecodeBool(159);
                             else
                             {
@@ -121,8 +131,8 @@ public static class Vp8CoefBlockDecoder
                         }
                         else
                         {
-                            int bit1 = reader.DecodeBool(probs[band, ctx, 8]);
-                            int bit0 = reader.DecodeBool(probs[band, ctx, 9 + bit1]);
+                            int bit1 = reader.DecodeBool(probs[pBand, pCtx, 8]);
+                            int bit0 = reader.DecodeBool(probs[pBand, pCtx, 9 + bit1]);
                             int cat = 2 * bit1 + bit0;
                             byte[] tab = cat switch
                             {
@@ -138,13 +148,15 @@ public static class Vp8CoefBlockDecoder
                             v += 3 + (8 << cat);
                         }
                     }
-                    ctx = 2; // ctx after a Two-or-greater token.
+                    pBand = CoefBands[n];
+                    pCtx = 2; // ctx after a Two-or-greater token.
                 }
 
                 int j = ZigzagScan[n - 1];
                 output[j] = (short)DecodeSigned(reader, v);
 
-                if (n == 16 || reader.DecodeBool(probs[CoefBands[n], ctx, 0]) == 0)
+                // EOB check at NEW (pBand, pCtx) state.
+                if (n == 16 || reader.DecodeBool(probs[pBand, pCtx, 0]) == 0)
                     return n; // EOB
             }
             if (n == 16) return 16;

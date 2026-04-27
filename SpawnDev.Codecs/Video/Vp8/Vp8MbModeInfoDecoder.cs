@@ -53,21 +53,29 @@ public static class Vp8MbModeInfoDecoder
     /// </summary>
     /// <param name="reader">Bool decoder positioned at the MB.</param>
     /// <param name="frameHeader">Decoded frame header (carries seg / skip enables).</param>
-    /// <param name="bModeProbForSubBlock">
-    /// Callback supplying the 9-entry probability vector for each sub-block
-    /// based on the (above_4x4_mode, left_4x4_mode) context. Pass
-    /// <see cref="DefaultBModeProbCallback"/> for the simple default-probs
-    /// path (uses libvpx <c>vp8_bmode_prob</c> for every block - functionally
-    /// correct only for the trivial case where all neighbors share a mode).
+    /// <param name="bModeProbResolver">
+    /// Callback that supplies the 9-entry probability vector for each
+    /// 4x4 sub-block when y_mode == B_PRED. Receives:
+    ///   subIndex - 4x4 sub-block index in raster order (0..15)
+    ///   alreadyDecoded - the sub-block modes already decoded for THIS MB
+    ///                    (entries [0..subIndex-1] are valid; the rest are default values)
+    /// The callback should resolve the (above, left) sub-mode context per
+    /// libvpx <c>above_block_mode</c> / <c>left_block_mode</c> rules using
+    /// the MB-above and MB-left state the walker tracks externally PLUS
+    /// the in-progress entries for sub-blocks
+    /// already processed in this MB. It MUST then return the 9-entry
+    /// probability vector at <c>vp8_kf_bmode_prob[above][left]</c>.
+    /// Pass null to use the default (uses <see cref="Vp8ModeTrees.DefaultBModeProb"/>
+    /// for every block - functionally correct only when all neighbors are BDcPred).
     /// </param>
     public static Vp8KeyFrameMbModeInfo DecodeKeyFrameMb(
         Vp8BoolDecoder reader,
         Vp8FrameHeader frameHeader,
-        Func<Vp8IntraMode4x4, Vp8IntraMode4x4, byte[]>? bModeProbForSubBlock = null)
+        Func<int, Vp8IntraMode4x4[], byte[]>? bModeProbResolver = null)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(frameHeader);
-        bModeProbForSubBlock ??= DefaultBModeProbCallback;
+        bModeProbResolver ??= DefaultBModeProbResolver;
 
         // 1. Segment ID (if segmentation_enabled && update_map)
         int segmentId = 0;
@@ -87,22 +95,18 @@ public static class Vp8MbModeInfoDecoder
         var yMode = (Vp8YMode)Vp8ModeTrees.DecodeTree(
             reader, Vp8ModeTrees.KfYModeTree, Vp8ModeTrees.DefaultKfYModeProb);
 
-        // 4. Sub-block modes if Y mode == B_PRED
+        // 4. Sub-block modes if Y mode == B_PRED. We pass the
+        // partially-filled subBlockModes buffer to the resolver so it can
+        // compute (above, left) using already-decoded neighbors WITHIN the
+        // current MB plus the walker-tracked above/left MB state.
         Vp8IntraMode4x4[]? subBlockModes = null;
         if (yMode == Vp8YMode.BPred)
         {
             subBlockModes = new Vp8IntraMode4x4[16];
-            // Walk 4x4 raster blocks. Caller supplies the (above, left)
-            // context for each via bModeProbForSubBlock; we just decode.
-            // For simplicity, the default callback uses the static
-            // DefaultBModeProb regardless of context.
+            for (int i = 0; i < 16; i++) subBlockModes[i] = Vp8IntraMode4x4.BDcPred; // default for "not yet decoded"
             for (int i = 0; i < 16; i++)
             {
-                // Default to DcPred for "no neighbor"; the walker is
-                // expected to track real neighbors and pass them in.
-                Vp8IntraMode4x4 above = Vp8IntraMode4x4.BDcPred;
-                Vp8IntraMode4x4 left = Vp8IntraMode4x4.BDcPred;
-                var probs = bModeProbForSubBlock(above, left);
+                var probs = bModeProbResolver(i, subBlockModes);
                 subBlockModes[i] = (Vp8IntraMode4x4)Vp8ModeTrees.DecodeTree(
                     reader, Vp8ModeTrees.BModeTree, probs);
             }
@@ -139,11 +143,13 @@ public static class Vp8MbModeInfoDecoder
     }
 
     /// <summary>
-    /// Default bmode probability callback - returns the static
-    /// <see cref="Vp8ModeTrees.DefaultBModeProb"/> for every (above, left)
-    /// context. Only correct when the kf_bmode_prob context table is not
-    /// yet wired; the walker should override this with a real lookup.
+    /// Default bmode probability resolver - returns the static
+    /// <see cref="Vp8ModeTrees.DefaultBModeProb"/> regardless of position
+    /// or already-decoded neighbors. Only correct when neighbors happen to
+    /// be the trivial all-BDcPred case; the walker overrides this with a
+    /// real <see cref="Vp8KfBmodeProbs.GetProbs"/> lookup using the proper
+    /// (above, left) sub-mode context.
     /// </summary>
-    public static byte[] DefaultBModeProbCallback(Vp8IntraMode4x4 above, Vp8IntraMode4x4 left)
+    public static byte[] DefaultBModeProbResolver(int subIndex, Vp8IntraMode4x4[] alreadyDecoded)
         => Vp8ModeTrees.DefaultBModeProb;
 }
