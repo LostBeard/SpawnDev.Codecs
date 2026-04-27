@@ -226,6 +226,33 @@ try
 catch (Exception ex) { Report("VP9 keyframe encoder->bitstream", false, ex.Message); }
 
 // =================================================================
+// VIDEO: AV1 stream analysis on a real BBB IVF
+//   demonstrates that the AV1 OBU + sequence header + frame header
+//   parsers all run end-to-end on a real-world AV1 bitstream.
+// =================================================================
+try
+{
+    string ivfPath = "SpawnDev.Codecs.Demo.Shared/TestData/bbb_180_2s.ivf";
+    if (File.Exists(ivfPath))
+    {
+        var bytes = File.ReadAllBytes(ivfPath);
+        var summary = Av1StreamAnalyzer.Analyze(bytes);
+        bool ok = summary.SequenceHeader != null
+                  && summary.CodedFrames.Count > 0
+                  && summary.IvfHeader.Width == 320
+                  && summary.IvfHeader.Height == 180;
+        Report("AV1 stream analyze (BBB IVF)", ok,
+            $"{bytes.Length}B IVF, {summary.CodedFrames.Count} frames, " +
+            $"{summary.IvfHeader.Width}x{summary.IvfHeader.Height}, OBU types={summary.ObuCounts.Count}");
+    }
+    else
+    {
+        Report("AV1 stream analyze (BBB IVF)", false, "missing test data");
+    }
+}
+catch (Exception ex) { Report("AV1 stream analyze (BBB IVF)", false, ex.Message); }
+
+// =================================================================
 // VIDEO: AV1 forward DCT 4-point round-trip vs inverse oracle
 //   exercises libaom-bit-exact Av1ForwardDct4 + Av1InverseDct4
 // =================================================================
