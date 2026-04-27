@@ -118,23 +118,25 @@ public static class Vp9ForwardTransform
 
     private static void ApplyAdstAdst4x4(ReadOnlySpan<short> input, int rowStride, Span<int> output)
     {
-        // Pass 1: column ADST.
+        // Stackallocs hoisted out of loops (CA2014).
         Span<int> intermediate = stackalloc int[16];
         Span<int> col = stackalloc int[4];
+        Span<int> outCol = stackalloc int[4];
+        Span<int> row = stackalloc int[4];
+        Span<int> outRow = stackalloc int[4];
+
+        // Pass 1: column ADST.
         for (int c = 0; c < 4; c++)
         {
             for (int r = 0; r < 4; r++) col[r] = input[r * rowStride + c];
-            Span<int> outCol = stackalloc int[4];
             Vp9ForwardAdst4.Transform(col, outCol);
             for (int r = 0; r < 4; r++) intermediate[r * 4 + c] = outCol[r];
         }
 
         // Pass 2: row ADST.
-        Span<int> row = stackalloc int[4];
         for (int r = 0; r < 4; r++)
         {
             for (int c = 0; c < 4; c++) row[c] = intermediate[r * 4 + c];
-            Span<int> outRow = stackalloc int[4];
             Vp9ForwardAdst4.Transform(row, outRow);
             for (int c = 0; c < 4; c++) output[r * 4 + c] = outRow[c];
         }
@@ -144,19 +146,20 @@ public static class Vp9ForwardTransform
     {
         Span<int> intermediate = stackalloc int[64];
         Span<int> col = stackalloc int[8];
+        Span<int> outCol = stackalloc int[8];
+        Span<int> row = stackalloc int[8];
+        Span<int> outRow = stackalloc int[8];
+
         for (int c = 0; c < 8; c++)
         {
             for (int r = 0; r < 8; r++) col[r] = input[r * rowStride + c];
-            Span<int> outCol = stackalloc int[8];
             Vp9ForwardAdst8.Transform(col, outCol);
             for (int r = 0; r < 8; r++) intermediate[r * 8 + c] = outCol[r];
         }
 
-        Span<int> row = stackalloc int[8];
         for (int r = 0; r < 8; r++)
         {
             for (int c = 0; c < 8; c++) row[c] = intermediate[r * 8 + c];
-            Span<int> outRow = stackalloc int[8];
             Vp9ForwardAdst8.Transform(row, outRow);
             for (int c = 0; c < 8; c++) output[r * 8 + c] = outRow[c];
         }
