@@ -102,6 +102,13 @@ if (partition == Vp9PartitionType.Split)
         Console.WriteLine($"  Skip flag for top-left 32x32: {skipFlag}");
         Console.WriteLine($"    -> {(skipFlag != 0 ? "all-zero residual (skip)" : "has coefficients")}");
 
+        // BUG (2026-04-26): libvpx reads tx_size BETWEEN skip and y_mode
+        // when tx_mode == TxModeSelect (the common case). This demo skips
+        // that read. See Plans/PLAN-vp9-block-decode-wiring.md for the
+        // fix recipe using Vp9TxSizeDecoder.ReadTxSize. Until applied,
+        // every read after skip drifts by 1-3 bits and the y_mode +
+        // pixel values are all wrong.
+
         // Intra Y mode: for top-left block, above + left are out of frame
         // so libvpx treats them as DcPred. Mode is read regardless of
         // skip flag (mode determines prediction even with no residual).

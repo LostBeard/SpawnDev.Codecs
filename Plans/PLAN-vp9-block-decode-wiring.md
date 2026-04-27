@@ -1,7 +1,8 @@
 # PLAN: VP9 block-level decode wiring
 
-**Status:** chain composes, pixel values don't match ffmpeg ground truth yet.
+**Status:** chain composes, pixel values don't match ffmpeg ground truth yet. **2026-04-26 update: missing `tx_size` read identified as primary suspect.**
 **Created:** 2026-04-25 (Tuvok)
+**Updated:** 2026-04-26 (Tuvok) - cleared 5 of 6 original suspects, narrowed to one root cause.
 
 ## What's already shipped
 
@@ -16,56 +17,88 @@ The primitives are individually correct and unit-tested:
 - `Vp9IntraEdgeFill` - libvpx 127/129 out-of-frame conventions
 - `Vp9InverseTransform.Apply` - iDCT / iADST / iHT family
 - `Vp9IntraBlockDecode` - composes predict + iHT into a single block-level call
+- **`Vp9TxSizeDecoder.ReadTxSize`** - mirror of libvpx read_tx_size + read_selected_tx_size (THIS PRIMITIVE EXISTS BUT IS NOT BEING CALLED FROM THE DEMO CHAIN - SEE BELOW)
 
 Every primitive has unit tests + cross-backend coverage (CPU/CUDA/OpenCL/WebGPU/WebGL/Wasm).
 
-## What's NOT yet wired
+## Original symptom
 
-The composition step that drives a real frame's tile data through the partition + mode info + coefficient decode chain. Tonight's `vp9_first_partition.cs` demo wired the chain end-to-end on BBB.webm's first frame and got:
+`vp9_first_partition.cs` demo wires the chain end-to-end on BBB.webm's first frame and gets:
 
   64x64: Split, 32x32: Split, 16x16: None (leaf)
   Skip flag: 1 (all-zero residual)
   Y mode: DcPred
   Predicted 16x16: all 128
 
-But ffmpeg's actual decode shows top-left 16x16 has values 67-75, not 128. So the chain has a bit-position drift somewhere.
+But ffmpeg's actual decode shows top-left 16x16 has values 67-75, not 128.
 
-## Likely cause - bit-position drift
+## 2026-04-26 root cause: missing tx_size read between skip and y_mode
 
-The chain runs on real BBB tile bytes deterministically. Some upstream symbol read is consuming wrong bits. Candidates:
+**libvpx `read_intra_frame_mode_info` reads symbols in this exact order:**
 
-1. **Partition probability context** - my code uses `KeyframeProbs(sizeIdx=3, splitState=0)` for the top-left 64x64 SB. libvpx uses `partition_plane_context(...)` which gives ctx=12 for the (0,0) 64x64 case (= sizeIdx=3 * 4 + above_unsplit*2 + left_unsplit = 12). The two should match. But... need to verify.
+```c
+mi->segment_id = read_intra_segment_id(...);   // skipped for BBB (segmentation off)
+mi->skip       = read_skip(...);
+mi->tx_size    = read_tx_size(cm, xd, 1, r);   // ← THE MISSING STEP
+mi->mode       = read_intra_mode(r, get_y_mode_probs(...));
+```
 
-2. **Missing pre-partition read** - VP9 might read OTHER bits before the partition. Investigated: segmentation seg_id_predicted (only when `seg.UpdateMap && seg.TemporalUpdate`). BBB has segmentation_enabled=false so this branch shouldn't fire. Verified by dumping `decoder.LastCompleteHeader.Segmentation`. So not seg_id.
+Source: `vp9/decoder/vp9_decodemv.c` `read_intra_frame_mode_info`, verified via raw GitHub fetch 2026-04-26.
 
-3. **Bool decoder init** - Vp9BoolDecoder constructor reads a sentinel bit during init (per libvpx). Verified value is 0 (no throw). Looks right.
+The `1` argument to `read_tx_size` is `allow_select`. The function reads bits ONLY when `tx_mode == TX_MODE_SELECT`; otherwise it's a no-op returning a fixed size. **For TxModeSelect-encoded content (which is the common case for libvpx output, including BBB), this read consumes 1-3 bits between the skip flag and the Y mode read.**
 
-4. **Mode info ordering** - For a leaf intra block at keyframe: I read skip first, then Y mode. libvpx may read Y mode FIRST, then skip. Need to verify against vp9_decode_mb_mode_mv or equivalent.
+`vp9_first_partition.cs` lines 99-110 do not call this read. So the bool decoder position drifts by 1-3 bits at the y_mode read for any TxModeSelect-mode frame, which propagates to every downstream symbol.
 
-5. **Y mode neighbor context** - Top-left block has no neighbors. libvpx uses `default_intra_mode = DcPred` for missing neighbors. My code uses `DcPred` for both above + left. Should match.
+### Fix recipe (apply next session, verify via PMT)
 
-6. **kf_y_mode_prob layout** - libvpx's `vp9_kf_y_mode_probs[10][10][9]` is indexed by `[above][left][prob_index]`. My `Vp9IntraModeProbs.KeyframeYProbs(above, left)` should return the 9-element prob span. Need to verify the index math.
+For the 16x16 leaf path in `vp9_first_partition.cs` after the skip read (line 102), before the y_mode read (line 109), insert:
 
-## Path to fix
+```csharp
+// libvpx read_intra_frame_mode_info reads tx_size BEFORE y_mode when
+// tx_mode allows selection. Without this read, the bool decoder
+// position drifts and every downstream symbol is wrong.
+var txMode = decoder.LastCompressedResult!.TxMode;
+var maxTxSize = Vp9MaxTxSize.ForBlockSize(Vp9BlockSize.Block16x16);  // = Tx16x16
+// tx_size_probs row for ctx=0 (no above + left tx_size context).
+// P16x16 = compressed-header-parsed tx_size_probs for 16x16 max blocks.
+var txSizeProbs = decoder.LastCompressedState!.TxModeProbs.P16x16.AsSpan(0 /*ctx*/, 2);
+var txSize = Vp9TxSizeDecoder.ReadTxSize(txMode, maxTxSize, br, txSizeProbs);
+Console.WriteLine($"  tx_size for 16x16: {txSize}");
+```
 
-**Option A (cheap)** - add debug output to my demo: print every bit the bool decoder reads, with the prob used. Then run libvpx with similar debug instrumentation, compare per-bit output to find where drift starts.
+Mirror the same pattern for the 32x32 leaf path (line 117) using `maxTxSize = Tx32x32` and `P32x32` with a 3-entry slice.
 
-**Option B (expensive)** - read libvpx's vp9_decode_partition + vp9_decode_mode_info code very carefully and trace by hand against the demo. Match every read.
+The actual `tx_size_probs` field name on `LastCompressedState` may differ; verify by reading `Vp9CompressedHeaderState.cs` and `Vp9TxModeProbs.cs`. If `LastCompressedResult.TxMode` is NOT TxModeSelect, ReadTxSize will return without consuming bits, and the chain runs as before - but for BBB's keyframe, expect TxModeSelect.
 
-**Option C (pragmatic)** - implement a complete frame walker, drive all 60 IVF frames through, compare each YUV pixel to ffmpeg. Whatever doesn't match identifies the broken layer.
+### How to verify the fix worked
 
-Option A is fastest if libvpx debug log can be obtained. Option C is the eventual destination anyway.
+Run the demo. After the fix:
+- The bool decoder position at y_mode read should now be correct.
+- Y mode should likely change from DcPred to something else (since the prior value was decoded from the wrong bits).
+- The predicted block pixels should fall in ffmpeg's ground-truth range (top-left 16x16: 67-75, top-left 32x32: 57-112).
 
-## Estimated effort
+If pixels match ffmpeg: bug closed. If not: drift is still upstream OR the prior decisions (partition tree at 64x64, 32x32) are also being affected by some prior missing read. That would be an unlikely-but-possible second bug.
 
-Once the partition + mode info chain is bit-exact, the rest of the block decoder (coefficient decode + dequantization + iHT + reconstruction) reuses primitives we already have. Conservative estimate:
+## Suspects from 2026-04-25 - status update
 
-- 1-2 days to find + fix the partition / mode info drift (Option A)
-- 1-2 days to wire the coefficient decoder (Vp9BlockCoefDecoder is shipped, just needs to be called per block in raster order)
-- 1 day to wire dequantization (libvpx tables + per-frame qindex math)
-- 1 day to wire the full block walker that recurses through partition tree
+| # | Original Suspect | Status |
+|---|------------------|--------|
+| 1 | Partition probability context for top-left 64x64 | **CLEARED 2026-04-26.** libvpx `dec_partition_plane_context` formula = `(left*2 + above) + bsl * PARTITION_PLOFFSET` with both=0 for missing neighbors → ctx=12 → flat offset 36-38 → bytes `{174, 35, 49}`. Matches our `KeyframeProbs(3, 0)` exactly. |
+| 2 | Missing pre-partition seg_id read | Eliminated 2026-04-25. BBB has segmentation_enabled=false. |
+| 3 | Bool decoder init sentinel bit | Eliminated 2026-04-25. Verified value is 0 (no throw). |
+| 4 | Mode info read ordering (skip vs y_mode) | **REFINED 2026-04-26.** The order skip-then-y_mode IS correct. The actual missing piece is the `tx_size` read between them when `tx_mode == TxModeSelect`. See root cause above. |
+| 5 | Y mode neighbor context default = DcPred for missing | Plan-stated, not directly cited from libvpx in 2026-04-25 note. NOT verified from libvpx source this session, but `Vp9KfYModeProbsTests.Vp9KfYModeProbs_DriveProbsIntoIntraModeTree_DecodesDcPredOnFirstZeroBit` end-to-end-tests the (DcPred, DcPred) path, and the tables are correct. If the tx_size fix doesn't close the gap, this becomes the next target. |
+| 6 | kf_y_mode_prob layout `[above][left][prob]` row-major | **CLEARED 2026-04-26.** Already covered by 8 existing tests in `CodecsTestBase.Vp9KfYModeProbsTests.cs`: pinned values for (DcPred,DcPred), (TmPred,TmPred), (D45Pred,HPred), full-domain helper coverage, libvpx vp9_kf_y_mode_prob[0][0] = `{137, 30, 42, 148, 151, 207, 70, 52, 91}` matches our table exactly. Cross-validated against libvpx vp9_entropymode.c via raw GitHub fetch. |
 
-So: ~1 week of focused work to get first-frame BIT-EXACT YUV decode.
+## Verification approach for what's left
+
+After the tx_size fix lands and pixels match ffmpeg for the top-left block:
+
+1. Wire the coefficient decoder (`Vp9BlockCoefDecoder` is shipped, just needs to be called per block in raster order, gated on `skip == 0`). For BBB top-left where skip=1, the residual is zero, but for non-skip blocks coefficient decode is required.
+2. Wire dequantization (libvpx tables + per-frame qindex math).
+3. Wire the full block walker that recurses through partition tree.
+
+Estimated effort to first-frame BIT-EXACT YUV after this session's findings: ~3-5 days, down from the original ~1 week, because the bisection search just collapsed.
 
 After that, inter-frame decode (motion compensation, ref frame pool) is another ~2-3 weeks.
 
@@ -75,12 +108,15 @@ The encoder framing layer is COMPLETE today (BIT-EXACT validated through ffmpeg+
 
 - A library consumer can READ AV1+VP9 metadata + remux containers today
 - A library consumer who wants to write a custom AV1 encoder has the framing layer + writers ready - they just need an entropy coder + transforms + mode decision
-- A library consumer who wants to DECODE pixels still needs to wait for the block walker
+- A library consumer who wants to DECODE pixels still needs to wait for the block walker, but tx_size fix lights the path
 
 The decoder pixel work is genuinely valuable but it's the harder, longer-tail part. The framing work unblocks more consumers immediately.
 
 ## References
 
-- libvpx: vp9/decoder/vp9_decodeframe.c (decode_partition, decode_mb_mode_info)
-- VP9 spec: sec 6.4 (Tile data syntax)
+- libvpx: `vp9/decoder/vp9_decodemv.c` `read_intra_frame_mode_info` (skip then tx_size then y_mode order)
+- libvpx: `vp9/decoder/vp9_decodemv.c` `read_tx_size` + `read_selected_tx_size` (mirrored in `Vp9TxSizeDecoder`)
+- libvpx: `vp9/decoder/vp9_decodeframe.c` `dec_partition_plane_context` (ctx formula verified 2026-04-26)
+- libvpx: `vp9/common/vp9_entropymode.c` `vp9_kf_partition_probs` + `vp9_kf_y_mode_prob` (table values verified 2026-04-26)
+- VP9 spec: sec 6.4 (Tile data syntax), sec 6.4.13 (read_tx_size)
 - ffmpeg: libvpx-decoded YUV is the ground truth for cross-validation
