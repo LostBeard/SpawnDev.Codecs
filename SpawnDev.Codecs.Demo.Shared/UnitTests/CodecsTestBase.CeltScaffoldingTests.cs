@@ -102,4 +102,40 @@ public abstract partial class CodecsTestBase
         // CELT does not operate at MB (libopus uses SILK for MB).
         Throws<ArgumentException>(() => CeltMode.EndBandForBandwidth(OpusBandwidth.Mediumband));
     }
+
+    [TestMethod]
+    public void CeltMode_Create_PopulatesMdctGeometryFields()
+    {
+        // The new fields added for the future hand-port (overlap, maxLM,
+        // nbShortMdcts, shortMdctSize) must match the libopus standard
+        // 48 kHz CELT mode geometry.
+        var mode = CeltMode.Create(CeltConstants.FRAME_SIZE_20MS, CeltConstants.NB_BANDS_FULLBAND);
+        Equal(120, mode.Overlap);
+        Equal(3, mode.MaxLM);
+        Equal(8, mode.NbShortMdcts);
+        Equal(120, mode.ShortMdctSize);
+        Equal(21, mode.EffectiveEBands);
+    }
+
+    [TestMethod]
+    public void CeltConstants_FixedPoint_MatchesLibopus()
+    {
+        // Spot-check that the canonical libopus fixed-point constants are
+        // present and have their RFC-defined values.
+        Equal(32767, CeltConstants.Q15ONE);
+        Equal(12, CeltConstants.SIG_SHIFT);
+        Equal(10, CeltConstants.DB_SHIFT);
+        Equal(1024, CeltConstants.COMBFILTER_MAXPERIOD);
+        Equal(15, CeltConstants.COMBFILTER_MINPERIOD);
+        Equal(2048, CeltConstants.DECODE_BUFFER_SIZE);
+        Equal(24, CeltConstants.LPC_ORDER);
+        Equal(720, CeltConstants.PLC_PITCH_LAG_MAX);
+        Equal(100, CeltConstants.PLC_PITCH_LAG_MIN);
+        Equal(11, CeltConstants.BITALLOC_SIZE);
+        Equal(40, CeltConstants.MAX_PSEUDO);
+        Equal(128, CeltConstants.CELT_MAX_PULSES);
+        Equal(8, CeltConstants.MAX_FINE_BITS);
+        Equal(21, CeltConstants.FINE_OFFSET);
+        Equal(4, CeltConstants.QTHETA_OFFSET);
+    }
 }

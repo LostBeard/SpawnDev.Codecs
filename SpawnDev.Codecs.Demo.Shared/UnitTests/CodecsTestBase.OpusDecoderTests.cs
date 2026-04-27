@@ -97,36 +97,38 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
-    public async Task OpusDecoder_DecodePacket_HybridPath_StubsWithNotImplementedException()
+    public async Task OpusDecoder_DecodePacket_HybridPath_DecodesWithoutThrowing()
     {
-        // TOC config 12: Hybrid SWB 10ms mono = 480 samples @ 48kHz
+        // TOC config 12: Hybrid SWB 10ms mono = 480 samples @ 48kHz.
+        // Packet body is just zeros - this is not a valid encoded payload,
+        // but the CELT-backed Hybrid path must accept it and produce output
+        // (silence / decode-loss concealment) rather than throwing
+        // NotImplementedException as the prior stub did. We assert the call
+        // returns a non-negative sample count and the output stays in range.
         var dec = new OpusDecoder(new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 1 });
         byte[] packet = { 0x60, 0x00, 0x00, 0x00 }; // config 12 << 3 = 0x60
-        try
+        float[] pcm = new float[960];
+        int samples = await dec.DecodePacketAsync(packet, pcm.AsMemory());
+        True(samples > 0, $"Hybrid path should produce samples, got {samples}");
+        for (int i = 0; i < samples; i++)
         {
-            await dec.DecodePacketAsync(packet, new float[960]);
-            throw new Exception("Expected NotImplementedException from Hybrid stub");
-        }
-        catch (NotImplementedException ex)
-        {
-            Contains("Hybrid", ex.Message);
+            True(pcm[i] >= -1.0f && pcm[i] <= 1.0f, $"pcm[{i}] = {pcm[i]} out of range");
         }
     }
 
     [TestMethod]
-    public async Task OpusDecoder_DecodePacket_CeltPath_StubsWithNotImplementedException()
+    public async Task OpusDecoder_DecodePacket_CeltPath_DecodesWithoutThrowing()
     {
-        // TOC config 16: CELT NB 2.5ms mono = 120 samples @ 48kHz
+        // TOC config 16: CELT NB 2.5ms mono = 120 samples @ 48kHz.
+        // Same contract as the Hybrid test above: produces output, no throw.
         var dec = new OpusDecoder(new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 1 });
         byte[] packet = { 0x80, 0x00, 0x00, 0x00 }; // config 16 << 3 = 0x80
-        try
+        float[] pcm = new float[960];
+        int samples = await dec.DecodePacketAsync(packet, pcm.AsMemory());
+        True(samples > 0, $"CELT path should produce samples, got {samples}");
+        for (int i = 0; i < samples; i++)
         {
-            await dec.DecodePacketAsync(packet, new float[960]);
-            throw new Exception("Expected NotImplementedException from CELT stub");
-        }
-        catch (NotImplementedException ex)
-        {
-            Contains("CELT", ex.Message);
+            True(pcm[i] >= -1.0f && pcm[i] <= 1.0f, $"pcm[{i}] = {pcm[i]} out of range");
         }
     }
 

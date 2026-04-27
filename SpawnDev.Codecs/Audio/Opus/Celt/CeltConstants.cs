@@ -75,4 +75,79 @@ internal static class CeltConstants
     /// 2.5/5/10/20 ms at NB/WB/SWB/FB.
     /// </summary>
     internal const int NB_CONFIGS = 32;
+
+    // ----- Fixed-point shifts and Q-format constants (libopus celt/celt.h) -----
+
+    /// <summary>Q15 unity. <c>Q15ONE = 0x7FFF</c>.</summary>
+    internal const int Q15ONE = 32767;
+
+    /// <summary>Float scale used to convert PCM samples between [-1, +1] and the int16 range used internally.</summary>
+    internal const float CELT_SIG_SCALE = 32768.0f;
+
+    /// <summary>Right-shift applied when rounding sig samples back to int16.</summary>
+    internal const int SIG_SHIFT = 12;
+
+    /// <summary>Norm scaling used by PVQ codec.</summary>
+    internal const int NORM_SCALING = 16384;
+
+    /// <summary>Right-shift used by the dB-domain energy quantization.</summary>
+    internal const int DB_SHIFT = 10;
+
+    /// <summary>Smallest positive value treated as non-zero by the energy quantizer.</summary>
+    internal const int EPSILON = 1;
+
+    // ----- Comb filter / post-filter (libopus celt/celt.h) -----
+
+    /// <summary>Maximum pitch period in samples. Defines the comb-filter / post-filter window upper bound.</summary>
+    internal const int COMBFILTER_MAXPERIOD = 1024;
+
+    /// <summary>Minimum allowed pitch period in samples for the comb-filter / post-filter.</summary>
+    internal const int COMBFILTER_MINPERIOD = 15;
+
+    // ----- Decode buffer + PLC (libopus celt/celt.h, opus_decoder.c) -----
+
+    /// <summary>
+    /// Size of the running CELT synthesis history per channel, in samples at 48 kHz.
+    /// Defined large enough to hold the longest possible MDCT overlap-add window
+    /// plus pitch-based PLC lookahead. From libopus opus_decoder.c.
+    /// </summary>
+    internal const int DECODE_BUFFER_SIZE = 2048;
+
+    /// <summary>Maximum pitch lag in samples used by the pitch-based PLC; corresponds to ~67 Hz at 48 kHz.</summary>
+    internal const int PLC_PITCH_LAG_MAX = 720;
+
+    /// <summary>Minimum pitch lag in samples used by the pitch-based PLC; corresponds to ~480 Hz at 48 kHz.</summary>
+    internal const int PLC_PITCH_LAG_MIN = 100;
+
+    /// <summary>Order of the LPC filter used by the pitch-based PLC.</summary>
+    internal const int LPC_ORDER = 24;
+
+    /// <summary>Maximum pitch period in samples used by the pitch search.</summary>
+    internal const int MAX_PERIOD = 1024;
+
+    // ----- Bit allocation (libopus celt/rate.h) -----
+
+    /// <summary>Number of pre-computed allocation rows per CELT mode.</summary>
+    internal const int BITALLOC_SIZE = 11;
+
+    /// <summary>Maximum pseudo-band count used by the bit allocator.</summary>
+    internal const int MAX_PSEUDO = 40;
+
+    /// <summary>log2 of <see cref="MAX_PSEUDO"/>.</summary>
+    internal const int LOG_MAX_PSEUDO = 6;
+
+    /// <summary>Maximum pulse count used by PVQ.</summary>
+    internal const int CELT_MAX_PULSES = 128;
+
+    /// <summary>Maximum bits allocated to fine energy refinement per band.</summary>
+    internal const int MAX_FINE_BITS = 8;
+
+    /// <summary>Bias offset applied to fine-energy bit allocations per band.</summary>
+    internal const int FINE_OFFSET = 21;
+
+    /// <summary>Bias offset applied to PVQ shape-quant theta angle.</summary>
+    internal const int QTHETA_OFFSET = 4;
+
+    /// <summary>Two-phase variant of QTHETA_OFFSET.</summary>
+    internal const int QTHETA_OFFSET_TWOPHASE = 16;
 }

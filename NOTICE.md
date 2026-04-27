@@ -46,13 +46,54 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---
 
-## Concentus - pure-C# libopus port (planned for Phase 1 structural reference)
+## Concentus - pure-C# libopus port (runtime dependency for the CELT path)
 
 **Copyright:** © 2016 Logan Stromberg (and libopus original copyright holders)
 **License:** BSD 3-Clause (inherited from libopus)
 **Source:** https://github.com/lostromb/concentus
 
-Concentus is a BSD-3-Clause pure-C# port of libopus 1.1.2. SpawnDev.Codecs will port or consult portions of Concentus for the SILK layer (LPC synthesis) and range coder during Phase 1 implementation. BSD terms propagate to those ported portions.
+Concentus is a BSD-3-Clause pure-C# port of libopus 1.1.2.
+
+**Status as of CELT slice:** SpawnDev.Codecs depends on Concentus at runtime
+through `<PackageReference Include="Concentus" Version="2.2.2" />` in
+`SpawnDev.Codecs.csproj`. The CELT decode path in
+`Audio/Opus/Celt/CeltDecoder.cs` delegates the heavy lifting (range coding,
+bit allocation, energy decode, PVQ shape decode, IMDCT, comb-filter,
+de-emphasis) to the Concentus implementation. This delivers bit-exact CELT
+decode against the libopus reference today and gives a verifiable oracle for
+a future hand-port.
+
+The local files in `Audio/Opus/Celt/` (`CeltConstants`, `CeltMode`,
+`CeltDecoderState`) scaffold the eventual hand-port: when the per-module
+hand-port replaces the Concentus delegation inside `CeltDecoder`, the public
+API surface and the `OpusDecoder` integration do not change. BSD-3 terms
+propagate to all consuming distributions of SpawnDev.Codecs.
+
+```
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+- Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+- Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+- Neither the name of Internet Society, IETF or IETF Trust, nor the names of
+  specific contributors, may be used to endorse or promote products derived
+  from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+```
 
 ---
 

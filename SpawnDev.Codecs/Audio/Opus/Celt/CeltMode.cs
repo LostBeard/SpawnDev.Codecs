@@ -46,6 +46,39 @@ public sealed class CeltMode
     public required short[] EBands { get; init; }
 
     /// <summary>
+    /// MDCT overlap in samples at 48 kHz. CELT always uses a 120-sample overlap
+    /// (2.5 ms) regardless of frame size; this is the lapped-transform window
+    /// width on each side of each MDCT block.
+    /// </summary>
+    public int Overlap { get; init; } = 120;
+
+    /// <summary>
+    /// Number of effective bands. Equal to <see cref="NbEBands"/> for standard
+    /// Opus configurations; documented separately so a future custom-mode
+    /// extension can shrink it without changing the underlying table.
+    /// </summary>
+    public int EffectiveEBands { get; init; }
+
+    /// <summary>
+    /// Maximum log2 of the long-frame / short-frame ratio supported by this
+    /// mode. For the standard 48 kHz config: <c>maxLM = 3</c> means the longest
+    /// MDCT block is 8x the shortest (20 ms long blocks vs 2.5 ms short blocks).
+    /// </summary>
+    public int MaxLM { get; init; } = 3;
+
+    /// <summary>
+    /// Number of short MDCT blocks contained in a transient long frame for this
+    /// mode. <c>nbShortMdcts = 8</c> for the standard 48 kHz config.
+    /// </summary>
+    public int NbShortMdcts { get; init; } = 8;
+
+    /// <summary>
+    /// Length of one short MDCT block in samples at 48 kHz. <c>shortMdctSize = 120</c>
+    /// for the standard 48 kHz config (2.5 ms).
+    /// </summary>
+    public int ShortMdctSize { get; init; } = 120;
+
+    /// <summary>
     /// Construct a CELT mode for the given <paramref name="frameSizeSamples"/> at 48 kHz
     /// and the given effective band count (<see cref="EndBand"/>).
     /// </summary>
@@ -77,6 +110,11 @@ public sealed class CeltMode
             StartBand = 0,
             EndBand = endBand,
             EBands = CeltConstants.Eband5Ms,
+            Overlap = 120,
+            EffectiveEBands = CeltConstants.NB_BANDS_FULLBAND,
+            MaxLM = 3,
+            NbShortMdcts = 8,
+            ShortMdctSize = 120,
         };
     }
 

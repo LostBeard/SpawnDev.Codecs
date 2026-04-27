@@ -14,12 +14,17 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 ///   3. Decode those bytes with SpawnDev.Codecs' OpusDecoder (our output).
 ///   4. Assert the two outputs match within the documented float ULP tolerance.
 ///
-/// Phase 1a state: SILK, Hybrid, and CELT paths in OpusDecoder all throw
-/// <see cref="NotImplementedException"/>. Tests catch that and re-throw as
-/// <see cref="UnsupportedTestException"/> so SpawnDev.UnitTesting reports them
-/// as Skipped (not Failed). As each decode path is implemented in subsequent
-/// slices, the NotImplementedException stops firing and the bit-exact assertion
-/// runs automatically.
+/// Current state: SILK paths run end-to-end through the SpawnDev SILK
+/// decoder; CELT and Hybrid paths run through the Concentus-backed CELT
+/// decoder (see Audio/Opus/Celt/CeltDecoder.cs file header for the
+/// migration plan). The bit-exact-vs-Concentus assertions therefore hold
+/// trivially for the CELT/Hybrid paths today and become genuine regression
+/// gates when the per-module hand-port replaces the Concentus delegation.
+///
+/// Tests still catch <see cref="NotImplementedException"/> and re-throw as
+/// <see cref="UnsupportedTestException"/> as a defensive measure: any
+/// SpawnDev decode path that has not yet been implemented (e.g. SILK LBRR)
+/// reports as Skipped rather than Failed.
 /// </summary>
 public abstract partial class CodecsTestBase
 {

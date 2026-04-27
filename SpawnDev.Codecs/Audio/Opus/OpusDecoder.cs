@@ -21,6 +21,14 @@ public sealed class OpusDecoder : IAudioDecoder
     private readonly OpusDecoderConfig _config;
     private bool _disposed;
 
+    // Lazily-constructed CELT decoder. Used for CELT-only AND Hybrid-mode
+    // packets (Hybrid = SILK low band + CELT high band; we route the full
+    // packet to CELT which internally runs both halves correctly via its
+    // Concentus backbone). One instance per OpusDecoder lifetime so MDCT
+    // overlap / post-filter taps / oldEBands carry across packets per RFC
+    // 6716 sec 4.3 inter-frame state requirements.
+    private Celt.CeltDecoder? _celtDecoder;
+
     // Lazily-constructed SILK decoders, keyed by (internal-fs-kHz, frame-length-ms).
     // Mono packets use _silkDecoderMono; stereo packets additionally use _silkDecoderSide
     // and _silkStereoState for mid/side processing.
@@ -81,7 +89,25 @@ public sealed class OpusDecoder : IAudioDecoder
                 nameof(pcmOutput));
         }
 
-        // Route every frame through the mode-specific decode path. Each path is currently a stub.
+        // For CELT-only and Hybrid packets we need packet-level processing:
+        // CELT carries inter-frame state (MDCT overlap, post-filter taps,
+        // oldEBands) that is encoded once per PACKET, not per frame, and the
+        // Concentus-backed CeltDecoder handles the whole packet (parsing the
+        // per-frame range coder internally). For SILK-only packets we keep
+        // the existing per-frame loop because SILK's stereo predictors and
+        // mid-only flag are also packet-level but our SilkDecoder has its
+        // own per-frame fan-out logic.
+        if (packet.Toc.Mode is OpusMode.Celt or OpusMode.Hybrid)
+        {
+            EnsureCeltDecoder();
+            int produced = _celtDecoder!.DecodePacket(
+                compressedPacket.Span,
+                pcmOutput.Span,
+                samplesPerFrame * packet.FrameCount);
+            return new ValueTask<int>(produced);
+        }
+
+        // Route every SILK frame through the per-frame SILK decode path.
         int offset = 0;
         foreach (var frame in packet.Frames)
         {
@@ -91,6 +117,26 @@ public sealed class OpusDecoder : IAudioDecoder
         }
 
         return new ValueTask<int>(totalSamples);
+    }
+
+    /// <summary>
+    /// Lazily construct the per-stream CELT decoder. Reused across all CELT
+    /// and Hybrid packets so MDCT overlap and post-filter state carry across
+    /// packets correctly.
+    /// </summary>
+    private void EnsureCeltDecoder()
+    {
+        _celtDecoder ??= new Celt.CeltDecoder(
+            // Use the fullband 20 ms mode as the default; the underlying
+            // Concentus decoder reads the actual mode/bandwidth/frame-size
+            // from each packet's TOC byte regardless of what we pass here.
+            // The mode argument is retained to give callers and the future
+            // hand-port a stable entry point.
+            mode: Celt.CeltMode.Create(
+                Celt.CeltConstants.FRAME_SIZE_20MS,
+                Celt.CeltConstants.NB_BANDS_FULLBAND),
+            outputSampleRateHz: _config.SampleRateHz,
+            channelCount: _config.ChannelCount);
     }
 
     /// <inheritdoc/>
@@ -126,6 +172,8 @@ public sealed class OpusDecoder : IAudioDecoder
     public ValueTask DisposeAsync()
     {
         _disposed = true;
+        _celtDecoder?.Dispose();
+        _celtDecoder = null;
         return ValueTask.CompletedTask;
     }
 
@@ -407,27 +455,37 @@ public sealed class OpusDecoder : IAudioDecoder
         }
     }
 
-    private static void DecodeHybridFrame(OpusTocByte toc, ReadOnlySpan<byte> frame, Span<float> pcmOut)
+    /// <summary>
+    /// Per-frame Hybrid dispatch. Should not normally be reached: CELT/Hybrid
+    /// packets are handled at the packet level above (see DecodePacketAsync)
+    /// because Hybrid carries packet-level state (MDCT overlap, post-filter
+    /// taps) that the CeltDecoder owns. Kept here for defense-in-depth in
+    /// case a future code path bypasses the packet-level shortcut.
+    /// </summary>
+    private void DecodeHybridFrame(OpusTocByte toc, ReadOnlySpan<byte> frame, Span<float> pcmOut)
     {
-        _ = toc; _ = frame; _ = pcmOut;
-        throw new NotImplementedException(
-            "Hybrid decode not yet implemented. Requires both SILK and CELT paths to be wired.");
+        EnsureCeltDecoder();
+        // Reconstitute the single-frame Opus packet (TOC byte + frame body)
+        // and route through the CELT decoder which handles the SILK low band
+        // and CELT high band internally per RFC 6716 sec 4.5.
+        Span<byte> tocPlusFrame = stackalloc byte[1 + frame.Length];
+        tocPlusFrame[0] = toc.Value;
+        frame.CopyTo(tocPlusFrame.Slice(1));
+        int samples = toc.GetSamplesPerFrame(_config.SampleRateHz);
+        _ = _celtDecoder!.DecodePacket(tocPlusFrame, pcmOut, samples);
     }
 
-    private static void DecodeCeltFrame(OpusTocByte toc, ReadOnlySpan<byte> frame, Span<float> pcmOut)
+    /// <summary>
+    /// Per-frame CELT dispatch. As above: normally bypassed in favor of the
+    /// packet-level DecodePacket call. Kept defensive.
+    /// </summary>
+    private void DecodeCeltFrame(OpusTocByte toc, ReadOnlySpan<byte> frame, Span<float> pcmOut)
     {
-        // Construct a CeltMode so the thrown exception carries helpful geometry info.
-        int samplesAt48k = toc.GetSamplesPerFrame(48000);
-        int frameSize = samplesAt48k switch
-        {
-            <= 120 => CeltConstants.FRAME_SIZE_2_5MS,
-            <= 240 => CeltConstants.FRAME_SIZE_5MS,
-            <= 480 => CeltConstants.FRAME_SIZE_10MS,
-            _ => CeltConstants.FRAME_SIZE_20MS,
-        };
-        int endBand = CeltMode.EndBandForBandwidth(toc.Bandwidth);
-        var mode = CeltMode.Create(frameSize, endBand);
-        var dec = new CeltDecoder(mode);
-        dec.DecodeFrame(frame, pcmOut, 1); // throws NotImplementedException with context
+        EnsureCeltDecoder();
+        Span<byte> tocPlusFrame = stackalloc byte[1 + frame.Length];
+        tocPlusFrame[0] = toc.Value;
+        frame.CopyTo(tocPlusFrame.Slice(1));
+        int samples = toc.GetSamplesPerFrame(_config.SampleRateHz);
+        _ = _celtDecoder!.DecodePacket(tocPlusFrame, pcmOut, samples);
     }
 }

@@ -33,6 +33,14 @@
 	<ItemGroup>
 	  <PackageReference Include="SpawnDev.ILGPU" Version="4.9.2-rc.20" />
 	  <PackageReference Include="SpawnDev.EBML" Version="3.0.1" />
+	  <!-- BSD-3 pure-managed Opus port. Currently used as the runtime backbone
+	       of the CELT decode path inside Audio/Opus/Celt/CeltDecoder.cs while
+	       the per-module hand-port (CeltDecoderState/Bands/Rate/MDCT/etc.) is
+	       in progress. The wrap delivers bit-exact-vs-libopus CELT decode
+	       today; the local CELT files in Audio/Opus/Celt/ scaffold the future
+	       hand-port that will eventually replace this dependency. BSD-3
+	       attribution lives in NOTICE.md. -->
+	  <PackageReference Include="Concentus" Version="2.2.2" />
 	</ItemGroup>
 
 	<ItemGroup>
