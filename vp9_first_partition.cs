@@ -223,9 +223,18 @@ if (partition == Vp9PartitionType.Split)
                     block: coefBlock,
                     isHighBitDepth: false,
                     coefProbs: decoder.LastCompressedState!.CoefProbs[(int)Vp9TxSize.Tx16x16]);
-                Console.Write($"  Coefficients decoded, EOB at scan position {eob}; ");
-                Console.Write("first 4 (scan order): ");
-                for (int i = 0; i < 4; i++) Console.Write($"{coefBlock[i]} ");
+                Console.WriteLine($"  Coefficients decoded, EOB at scan position {eob}");
+                // Print all non-zero coefficients in raster order.
+                Console.Write("    Non-zero raster positions:");
+                int nonZeroCount = 0;
+                for (int i = 0; i < 256; i++)
+                {
+                    if (coefBlock[i] != 0)
+                    {
+                        Console.Write($" [{i}]={coefBlock[i]}");
+                        if (++nonZeroCount >= 10) break;
+                    }
+                }
                 Console.WriteLine();
 
                 // Dequantize using Y plane quantizer at frame qindex.
