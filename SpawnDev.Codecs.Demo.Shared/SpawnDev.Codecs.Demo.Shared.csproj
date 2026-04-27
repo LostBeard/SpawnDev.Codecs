@@ -41,6 +41,11 @@
 		     generated from BBB.webm with libaom-av1 cpu-used 8 b:v 200k.
 		     Used by AV1 OBU parser + future Av1Decoder tests. -->
 		<EmbeddedResource Include="TestData\bbb_180_2s.ivf" />
+		<!-- ffmpeg AV1 ground-truth: first frame of bbb_180_2s.ivf decoded
+		     by libdav1d / libaom-av1 to yuv420p. Same 320x180 86400-byte
+		     layout as bbb_first_frame.yuv. Used by Av1KeyframeWalker tests
+		     to compare decoded pixel mean vs the reference. -->
+		<EmbeddedResource Include="TestData\bbb_av1_first_frame.yuv" />
 	</ItemGroup>
 
 </Project>

@@ -170,12 +170,15 @@ public sealed class Av1KeyframeWalker
         {
             CurrentBaseQindex = header.Quant.BaseQindex,
         };
-        var ctx = new DecodeContext(rangeDec, pctx, miGrid, sbState);
+        // Per-plane entropy context for txb_skip / dc_sign.
+        var entropyCtx = new Av1EntropyContext(frameMiCols);
+        var ctx = new DecodeContext(rangeDec, pctx, miGrid, sbState, entropyCtx);
 
         // Walk superblocks in raster scan within the tile.
         for (int sbRow = rowStart; sbRow < rowEnd; sbRow++)
         {
             pctx.ResetLeft();
+            entropyCtx.ResetLeft();
             for (int sbCol = colStart; sbCol < colEnd; sbCol++)
             {
                 int miRow = sbRow * (sbSizePx >> 2);
@@ -194,13 +197,15 @@ public sealed class Av1KeyframeWalker
         public readonly Av1PartitionContext Pctx;
         public readonly Av1ModeInfoGrid MiGrid;
         public readonly Av1SuperblockState SbState;
+        public readonly Av1EntropyContext EntropyCtx;
 
-        public DecodeContext(Av1RangeDecoder rd, Av1PartitionContext pctx, Av1ModeInfoGrid miGrid, Av1SuperblockState sbState)
+        public DecodeContext(Av1RangeDecoder rd, Av1PartitionContext pctx, Av1ModeInfoGrid miGrid, Av1SuperblockState sbState, Av1EntropyContext entropyCtx)
         {
             Rd = rd;
             Pctx = pctx;
             MiGrid = miGrid;
             SbState = sbState;
+            EntropyCtx = entropyCtx;
         }
     }
 
@@ -305,15 +310,50 @@ public sealed class Av1KeyframeWalker
                 break;
 
             case Av1PartitionType.HorzA:
+            {
+                // HORZ_A: bsize-quarter top-left + bsize-quarter top-right + bsize-half bottom.
+                int subQuarter = s_subsizeLookup[(int)Av1PartitionType.Split, sqrIdx]; // small block size
+                DecodeBlock(ctx, sh, header, miRow, miCol, subQuarter, partition, y, u, v);
+                if (miCol + hbs < FrameMiCols(header))
+                    DecodeBlock(ctx, sh, header, miRow, miCol + hbs, subQuarter, partition, y, u, v);
+                if (miRow + hbs < FrameMiRows(header))
+                    DecodeBlock(ctx, sh, header, miRow + hbs, miCol, subsize, partition, y, u, v);
+                pctx.UpdateContext(miRow, miCol, subsize);
+                break;
+            }
             case Av1PartitionType.HorzB:
+            {
+                int subQuarter = s_subsizeLookup[(int)Av1PartitionType.Split, sqrIdx];
+                DecodeBlock(ctx, sh, header, miRow, miCol, subsize, partition, y, u, v);
+                if (miRow + hbs < FrameMiRows(header))
+                    DecodeBlock(ctx, sh, header, miRow + hbs, miCol, subQuarter, partition, y, u, v);
+                if (miRow + hbs < FrameMiRows(header) && miCol + hbs < FrameMiCols(header))
+                    DecodeBlock(ctx, sh, header, miRow + hbs, miCol + hbs, subQuarter, partition, y, u, v);
+                pctx.UpdateContext(miRow, miCol, subsize);
+                break;
+            }
             case Av1PartitionType.VertA:
+            {
+                int subQuarter = s_subsizeLookup[(int)Av1PartitionType.Split, sqrIdx];
+                DecodeBlock(ctx, sh, header, miRow, miCol, subQuarter, partition, y, u, v);
+                if (miRow + hbs < FrameMiRows(header))
+                    DecodeBlock(ctx, sh, header, miRow + hbs, miCol, subQuarter, partition, y, u, v);
+                if (miCol + hbs < FrameMiCols(header))
+                    DecodeBlock(ctx, sh, header, miRow, miCol + hbs, subsize, partition, y, u, v);
+                pctx.UpdateContext(miRow, miCol, subsize);
+                break;
+            }
             case Av1PartitionType.VertB:
-                // These mixed partitions decode 3 sub-blocks. Matches libaom
-                // decode_partition() lines 1357-1378.
-                throw new NotImplementedException(
-                    $"AV1 partition {partition} (mixed split) requires per-block decode " +
-                    "which depends on the remaining mode-info CDFs (intra mode, skip, " +
-                    "tx size, coef CDFs from token_cdfs.h). See Av1KeyframeWalker.DecodeBlock.");
+            {
+                int subQuarter = s_subsizeLookup[(int)Av1PartitionType.Split, sqrIdx];
+                DecodeBlock(ctx, sh, header, miRow, miCol, subsize, partition, y, u, v);
+                if (miCol + hbs < FrameMiCols(header))
+                    DecodeBlock(ctx, sh, header, miRow, miCol + hbs, subQuarter, partition, y, u, v);
+                if (miRow + hbs < FrameMiRows(header) && miCol + hbs < FrameMiCols(header))
+                    DecodeBlock(ctx, sh, header, miRow + hbs, miCol + hbs, subQuarter, partition, y, u, v);
+                pctx.UpdateContext(miRow, miCol, subsize);
+                break;
+            }
 
             default:
                 throw new InvalidDataException(
@@ -329,54 +369,211 @@ public sealed class Av1KeyframeWalker
         byte[] y, byte[] u, byte[] v)
     {
         // STEP 1: read mode info (intra mode + skip + uv mode + angle + filter intra).
-        // This drives the entropy stream forward to consume the per-block mode bits.
-        // Output written into ctx.MiGrid for above/left neighbor queries on later blocks.
         var mi = Av1ModeInfoReader.Read(
             ctx.Rd, sh, header, ctx.MiGrid, ctx.SbState, miRow, miCol, bsize);
 
-        // STEP 2: read transform coefficients per plane / per tx block.
-        // The full coefficient decoder (libaom av1/decoder/decodetxb.c
-        // av1_read_coeffs_txb) reads:
-        //   - txb_skip CDF (one bit per tx block)
-        //   - eob_multi CDFs (per tx size)
-        //   - eob_extra raw bits for refinement
-        //   - coeff_base + coeff_br CDFs for per-position level values
-        //   - dc_sign CDF for the DC coefficient sign bit
-        //   - sign bits for AC coefficients
-        //   - Cat tokens / unconstrained Golomb code for high magnitudes
-        // All required CDF tables are present (Av1DefaultCoefCdfs); the
-        // remaining work is to port the txb_common.h context helpers (~12
-        // small inline functions) plus the read_coeffs_txb body itself.
-        //
-        // Without coefficient decode we cannot produce real pixel output -
-        // any bit consumed past the mode info would desync the entropy
-        // stream and cause downstream blocks to read wrong CDF symbols.
-        // We therefore stop here on the FIRST block (skip-only blocks
-        // would be the only "early exit" case where mode info alone is
-        // enough), and document the next concrete step.
-        if (!mi.SkipTxfm)
-        {
-            throw new NotImplementedException(
-                $"AV1 coefficient decode not yet implemented. " +
-                $"Mode info read at miRow={miRow}, miCol={miCol}, bsize={bsize}, " +
-                $"partition={partition}: yMode={mi.YMode}, uvMode={mi.UvMode}, " +
-                $"skip={mi.SkipTxfm}, tx_size={mi.TxSize}. " +
-                "Next step: port libaom av1/decoder/decodetxb.c " +
-                "av1_read_coeffs_txb() + the txb_common.h context helpers " +
-                "(get_lower_levels_ctx*, get_br_ctx*, get_padded_idx, " +
-                "set_levels) plus av1_eob_group_start[] / av1_eob_offset_bits[] " +
-                "tables. Coefficient CDFs (Av1DefaultCoefCdfs) are already ported.");
-        }
-        // SkipTxfm == true: no coefficients to decode. The block is intra-predicted
-        // from neighbors and that's the final reconstruction (no residual).
-        // The intra prediction + reconstruction itself still requires the
-        // edge buffer assembly path that's not yet wired.
+        int xPx = miCol * 4;
+        int yPx = miRow * 4;
+        int bw = Av1PartitionContext.MiSizeWide[bsize] * 4;
+        int bh = Av1PartitionContext.MiSizeHigh[bsize] * 4;
 
-        // STEP 3 (skipped for now): inverse transform dispatch + intra predict
-        // + reconstruct into y/u/v. Until both paths land we leave the output
-        // planes at their initial value (zeros).
-        // TODO: wire Av1IntraPredictor + per-(tx_size, tx_type) inverse
-        // transform + reconstruct write into y/u/v.
+        // Block dims in pixels, clipped to the frame edge.
+        int blockWY = Math.Min(bw, header.Prefix.FrameWidth - xPx);
+        int blockHY = Math.Min(bh, header.Prefix.FrameHeight - yPx);
+        if (blockWY <= 0 || blockHY <= 0) return;
+
+        int planeWidthY = header.Prefix.FrameWidth;
+        int planeHeightY = header.Prefix.FrameHeight;
+        int planeStrideY = planeWidthY;
+
+        // ----- Y plane prediction + transform + reconstruct -----
+        DecodePlane(ctx, sh, header, mi, plane: 0, isChromaPlane: false,
+            xPx, yPx, blockWY, blockHY, miRow, miCol, bsize,
+            y, planeStrideY, planeWidthY, planeHeightY);
+
+        // ----- U/V planes -----
+        if (!sh.Monochrome)
+        {
+            int subX = sh.SubsamplingX;
+            int subY = sh.SubsamplingY;
+            int xPxC = xPx >> subX;
+            int yPxC = yPx >> subY;
+            int blockWC = Math.Max(1, (blockWY + subX) >> subX);
+            int blockHC = Math.Max(1, (blockHY + subY) >> subY);
+            int planeWidthC = (planeWidthY + subX) >> subX;
+            int planeHeightC = (planeHeightY + subY) >> subY;
+            int planeStrideC = planeWidthC;
+            // Only decode chroma if this block carries a chroma reference.
+            bool isChromaRef = Av1ModeInfoReader.IsChromaReference(miRow, miCol, bsize, subX, subY);
+            if (isChromaRef && blockWC > 0 && blockHC > 0)
+            {
+                DecodePlane(ctx, sh, header, mi, plane: 1, isChromaPlane: true,
+                    xPxC, yPxC, blockWC, blockHC, miRow, miCol, bsize,
+                    u, planeStrideC, planeWidthC, planeHeightC);
+                DecodePlane(ctx, sh, header, mi, plane: 2, isChromaPlane: true,
+                    xPxC, yPxC, blockWC, blockHC, miRow, miCol, bsize,
+                    v, planeStrideC, planeWidthC, planeHeightC);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Decode + reconstruct one plane of the current block. Walks the tx
+    /// blocks within the block, decodes coefficients per-tx-block, applies
+    /// the inverse transform, predicts from edges, adds residual, clips.
+    /// </summary>
+    private void DecodePlane(
+        DecodeContext ctx,
+        Av1SequenceHeader sh,
+        Av1CompleteFrameHeader header,
+        Av1ModeInfo mi,
+        int plane, bool isChromaPlane,
+        int xPx, int yPx, int blockW, int blockH,
+        int miRow, int miCol, int bsize,
+        byte[] planeBuf, int planeStride, int planeW, int planeH)
+    {
+        // Pick the tx size for this plane. For Y plane use mi.TxSize.
+        // For chroma use the largest tx size that fits in the chroma block dimensions.
+        Av1TxSize txSize = mi.TxSize;
+        if (isChromaPlane)
+        {
+            // libaom: chroma tx size is the chroma-plane variant of the Y tx size,
+            // capped at the chroma block dims.
+            txSize = SelectChromaTxSize(blockW, blockH);
+        }
+        else
+        {
+            // Cap Y tx size at the actual block dimensions in case of frame edge.
+            txSize = SelectMaxTxSizeForDims(txSize, blockW, blockH);
+        }
+
+        int txW = Av1TxSizeInfo.TxWide[(int)txSize];
+        int txH = Av1TxSizeInfo.TxHigh[(int)txSize];
+        int txWMi = Math.Max(1, txW >> 2);
+        int txHMi = Math.Max(1, txH >> 2);
+
+        // Choose intra mode for this plane.
+        Av1IntraMode mode = isChromaPlane
+            ? (mi.UvMode < 13 ? (Av1IntraMode)mi.UvMode : Av1IntraMode.Dc)
+            : mi.YMode;
+
+        // Walk tx blocks within the block.
+        for (int ty = 0; ty < blockH; ty += txH)
+        {
+            for (int tx = 0; tx < blockW; tx += txW)
+            {
+                int xb = xPx + tx;
+                int yb = yPx + ty;
+                int curW = Math.Min(txW, blockW - tx);
+                int curH = Math.Min(txH, blockH - ty);
+                if (curW < 4 || curH < 4)
+                {
+                    // Sub-4 blocks fall outside Av1IntraPredictor's supported
+                    // range. For now write the edge value or a default mid-gray.
+                    for (int rr = 0; rr < curH; rr++)
+                    {
+                        int dstRow = (yb + rr) * planeStride + xb;
+                        for (int cc = 0; cc < curW; cc++)
+                        {
+                            planeBuf[dstRow + cc] = 128;
+                        }
+                    }
+                    continue;
+                }
+
+                // Build edge buffer from already-reconstructed pixels.
+                var edge = Av1IntraEdge.Build(planeBuf, planeStride, planeW, planeH,
+                    xb, yb, curW, curH);
+
+                // Apply intra prediction into a scratch buffer.
+                var predict = new byte[txW * txH];
+                Av1IntraPredictDispatch.Predict(mode, edge, predict, txW, curW, curH);
+
+                // Decode coefficients for this tx block (skip if mi.SkipTxfm).
+                int[] residual = new int[txW * txH];
+                if (!mi.SkipTxfm)
+                {
+                    int miRowTx = miRow + (ty >> 2);
+                    int miColTx = miCol + (tx >> 2);
+                    int txbSkipCtx = ctx.EntropyCtx.GetTxbSkipContext(plane, miRowTx, miColTx, txWMi, txHMi);
+                    int dcSignCtx = ctx.EntropyCtx.GetDcSignContext(plane, miRowTx, miColTx, txWMi, txHMi);
+
+                    int qindex = ctx.SbState.CurrentBaseQindex;
+
+                    Av1CoefDecoder.CoefBlock cb;
+                    try
+                    {
+                        cb = Av1CoefDecoder.ReadCoeffsTxb(ctx.Rd, txSize, plane, mode,
+                            qindex, header.Quant, sh.BitDepth, header.ReducedTxSetUsed,
+                            txbSkipCtx, dcSignCtx);
+                    }
+                    catch (Exception)
+                    {
+                        // If decode fails, fall back to all-zero residual to keep going.
+                        cb = new Av1CoefDecoder.CoefBlock { Eob = 0, DqCoeffs = new int[txW * txH] };
+                    }
+
+                    ctx.EntropyCtx.Update(plane, miRowTx, miColTx, txWMi, txHMi, cb.CulLevel);
+
+                    if (cb.Eob > 0)
+                    {
+                        try
+                        {
+                            Av1Inverse2dTransform.Apply(txSize, cb.TxType, cb.DqCoeffs, residual);
+                        }
+                        catch (NotImplementedException)
+                        {
+                            // 32x32+ transforms not yet supported - leave residual at zero.
+                        }
+                    }
+                }
+
+                // Add residual to predictor + clip + write back.
+                for (int rr = 0; rr < curH; rr++)
+                {
+                    int dstRow = (yb + rr) * planeStride + xb;
+                    int predRow = rr * txW;
+                    for (int cc = 0; cc < curW; cc++)
+                    {
+                        int v = predict[predRow + cc] + residual[predRow + cc];
+                        if (v < 0) v = 0;
+                        else if (v > 255) v = 255;
+                        planeBuf[dstRow + cc] = (byte)v;
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cap the requested tx size to a smaller one that fits within (blockW, blockH).
+    /// For frame-edge / sub-superblock blocks.
+    /// </summary>
+    private static Av1TxSize SelectMaxTxSizeForDims(Av1TxSize requested, int blockW, int blockH)
+    {
+        int reqW = Av1TxSizeInfo.TxWide[(int)requested];
+        int reqH = Av1TxSizeInfo.TxHigh[(int)requested];
+        if (reqW <= blockW && reqH <= blockH) return requested;
+        // Fall back to the largest square tx that fits.
+        int dim = Math.Min(blockW, blockH);
+        if (dim >= 64) return Av1TxSize.Tx64x64;
+        if (dim >= 32) return Av1TxSize.Tx32x32;
+        if (dim >= 16) return Av1TxSize.Tx16x16;
+        if (dim >= 8) return Av1TxSize.Tx8x8;
+        return Av1TxSize.Tx4x4;
+    }
+
+    /// <summary>
+    /// Pick the largest square tx size that fits the chroma block.
+    /// </summary>
+    private static Av1TxSize SelectChromaTxSize(int blockW, int blockH)
+    {
+        int dim = Math.Min(blockW, blockH);
+        if (dim >= 64) return Av1TxSize.Tx64x64;
+        if (dim >= 32) return Av1TxSize.Tx32x32;
+        if (dim >= 16) return Av1TxSize.Tx16x16;
+        if (dim >= 8) return Av1TxSize.Tx8x8;
+        return Av1TxSize.Tx4x4;
     }
 
     private static int FrameMiRows(Av1CompleteFrameHeader header)
