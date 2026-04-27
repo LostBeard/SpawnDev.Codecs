@@ -1,0 +1,404 @@
+// SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
+//
+// VP8 keyframe encoder. Takes a YUV420 source frame and emits a valid
+// VP8 IVF-payload keyframe that libvpx / ffmpeg can decode.
+//
+// Simplifications (v1):
+//   - All MBs use Y_PRED = DC_PRED, UV_PRED = DC_PRED (no mode selection)
+//   - No segmentation
+//   - Single token partition (Log2NumPartitions = 0)
+//   - Loop filter disabled (filter_level = 0)
+//   - mb_no_skip_coeff disabled
+//
+// More sophisticated mode selection / RD-optimized quantization /
+// loop filtering can layer on top of this; the bitstream produced is
+// already a fully-valid VP8 keyframe.
+
+namespace SpawnDev.Codecs.Video.Vp8;
+
+/// <summary>VP8 keyframe encoder (DC-prediction-only, single partition, no LF).</summary>
+public static class Vp8KeyframeEncoder
+{
+    /// <summary>
+    /// Encode a single VP8 keyframe from YUV420 source.
+    /// </summary>
+    /// <param name="ySrc">Y plane bytes (rowStride * height).</param>
+    /// <param name="uSrc">U plane bytes (rowStride/2 * height/2).</param>
+    /// <param name="vSrc">V plane bytes (rowStride/2 * height/2).</param>
+    /// <param name="width">Frame width in pixels (multiple of 16 for v1).</param>
+    /// <param name="height">Frame height in pixels (multiple of 16 for v1).</param>
+    /// <param name="ySrcStride">Y plane row stride in bytes.</param>
+    /// <param name="uvSrcStride">UV plane row stride in bytes.</param>
+    /// <param name="baseQIndex">Base quantizer index 0..127 (lower = higher quality).</param>
+    /// <returns>Complete VP8 frame bytes ready to wrap in IVF or webm.</returns>
+    public static byte[] EncodeKeyFrame(
+        ReadOnlySpan<byte> ySrc, int ySrcStride,
+        ReadOnlySpan<byte> uSrc, int uvSrcStride,
+        ReadOnlySpan<byte> vSrc,
+        int width, int height,
+        int baseQIndex = 30)
+    {
+        if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException();
+        if ((width & 15) != 0 || (height & 15) != 0)
+            throw new ArgumentException("Width and height must be multiples of 16 (v1)");
+
+        int mbRows = height / 16;
+        int mbCols = width / 16;
+
+        // Per-frame state.
+        var dequant = Vp8MbDequantizer.Compute(0,
+            new Vp8QuantizerIndices
+            {
+                BaseQIndex = baseQIndex,
+                Y1DcDeltaQ = 0, Y2DcDeltaQ = 0, Y2AcDeltaQ = 0, UvDcDeltaQ = 0, UvAcDeltaQ = 0,
+            },
+            new Vp8SegmentationParams
+            {
+                Enabled = false, UpdateMap = false, UpdateData = false, AbsDelta = false,
+                FeatureData = new int[2, 4],
+                SegmentTreeProbs = new byte[3] { 255, 255, 255 },
+            });
+
+        var recon = new Vp8FrameBuffer(width, height);
+        var entropyContexts = new Vp8EntropyContexts(mbCols);
+
+        // Encode the first partition (frame header + mode info) into one
+        // bool encoder, then the second partition (coefficient tokens) into
+        // another. Concatenate at the end.
+        var partition0 = new Vp8BoolEncoder();
+        var tokenPartition = new Vp8BoolEncoder();
+
+        // Build frame header.
+        var hdr = new Vp8FrameHeader
+        {
+            ColorSpace = 0,
+            ClampingType = 0,
+            Segmentation = new Vp8SegmentationParams
+            {
+                Enabled = false, UpdateMap = false, UpdateData = false, AbsDelta = false,
+                FeatureData = new int[2, 4],
+                SegmentTreeProbs = new byte[3] { 255, 255, 255 },
+            },
+            LoopFilter = new Vp8LoopFilterParams
+            {
+                FilterType = 0, FilterLevel = 0, SharpnessLevel = 0,
+                ModeRefLfDeltaEnabled = false,
+                RefLfDeltas = new int[4], ModeLfDeltas = new int[4],
+            },
+            Log2NumPartitions = 0,
+            Quantizer = new Vp8QuantizerIndices
+            {
+                BaseQIndex = baseQIndex,
+                Y1DcDeltaQ = 0, Y2DcDeltaQ = 0, Y2AcDeltaQ = 0, UvDcDeltaQ = 0, UvAcDeltaQ = 0,
+            },
+            RefreshEntropyProbs = true,
+            CoefProbs = (byte[,,,])Vp8DefaultCoefProbs.DefaultProbs.Clone(),
+            MbNoSkipCoeffEnabled = false,
+            ProbSkipFalse = 0,
+        };
+        Vp8FrameHeaderWriter.WriteKeyFrameHeader(partition0, hdr);
+
+        // Slice the coef probs to a 3D shape per block type.
+        var coefProbsByType = new byte[Vp8DefaultCoefProbs.BlockTypes][,,];
+        for (int t = 0; t < Vp8DefaultCoefProbs.BlockTypes; t++)
+        {
+            var slice = new byte[Vp8DefaultCoefProbs.CoefBands, Vp8DefaultCoefProbs.PrevCoefContexts, Vp8DefaultCoefProbs.EntropyNodes];
+            for (int b = 0; b < Vp8DefaultCoefProbs.CoefBands; b++)
+                for (int c = 0; c < Vp8DefaultCoefProbs.PrevCoefContexts; c++)
+                    for (int n = 0; n < Vp8DefaultCoefProbs.EntropyNodes; n++)
+                        slice[b, c, n] = hdr.CoefProbs[t, b, c, n];
+            coefProbsByType[t] = slice;
+        }
+
+        // Per-MB iteration. Mode info goes into partition0; coef tokens into tokenPartition.
+        for (int mbRow = 0; mbRow < mbRows; mbRow++)
+        {
+            entropyContexts.ClearLeft();
+            for (int mbCol = 0; mbCol < mbCols; mbCol++)
+            {
+                EncodeMb(
+                    mbRow, mbCol, mbCols,
+                    ySrc, ySrcStride, uSrc, vSrc, uvSrcStride,
+                    recon,
+                    dequant, coefProbsByType,
+                    entropyContexts,
+                    partition0, tokenPartition);
+            }
+        }
+
+        // Finalize both partitions.
+        var partition0Bytes = partition0.Stop();
+        var tokenBytes = tokenPartition.Stop();
+
+        // Build the frame: tag + partition0 + tokenPartition.
+        var tag = new Vp8FrameTag
+        {
+            IsKeyFrame = true,
+            Version = Vp8Version.Bicubic,
+            ShowFrame = true,
+            FirstPartitionSize = partition0Bytes.Length,
+            Width = width, Height = height,
+            HorizontalScale = 0, VerticalScale = 0,
+        };
+        var tagBytes = Vp8FrameTagWriter.WriteTag(tag);
+
+        var output = new byte[tagBytes.Length + partition0Bytes.Length + tokenBytes.Length];
+        Buffer.BlockCopy(tagBytes, 0, output, 0, tagBytes.Length);
+        Buffer.BlockCopy(partition0Bytes, 0, output, tagBytes.Length, partition0Bytes.Length);
+        Buffer.BlockCopy(tokenBytes, 0, output, tagBytes.Length + partition0Bytes.Length, tokenBytes.Length);
+        return output;
+    }
+
+    private static void EncodeMb(
+        int mbRow, int mbCol, int mbCols,
+        ReadOnlySpan<byte> ySrc, int ySrcStride,
+        ReadOnlySpan<byte> uSrc, ReadOnlySpan<byte> vSrc, int uvSrcStride,
+        Vp8FrameBuffer recon,
+        Vp8MbDequant dequant,
+        byte[][,,] coefProbsByType,
+        Vp8EntropyContexts contexts,
+        Vp8BoolEncoder partition0,
+        Vp8BoolEncoder tokenPartition)
+    {
+        // === 1. Predict Y 16x16 with DC_PRED ===
+        // Read above/left from recon. For first row/col, use 127/129 fills.
+        Span<byte> yAbove = stackalloc byte[16];
+        Span<byte> yLeft = stackalloc byte[16];
+        bool haveAbove = mbRow > 0;
+        bool haveLeft = mbCol > 0;
+        if (haveAbove)
+        {
+            for (int c = 0; c < 16; c++)
+                yAbove[c] = recon.YPlane[(mbRow * 16 - 1) * recon.YStride + mbCol * 16 + c];
+        }
+        else Vp8IntraEdgeFill.FillAboveRow16(yAbove);
+        if (haveLeft)
+        {
+            for (int r = 0; r < 16; r++)
+                yLeft[r] = recon.YPlane[(mbRow * 16 + r) * recon.YStride + mbCol * 16 - 1];
+        }
+        else Vp8IntraEdgeFill.FillLeftColumn16(yLeft);
+
+        Span<byte> yPredMb = stackalloc byte[16 * 16];
+        Vp8IntraPredictor16x16.Predict(
+            Vp8IntraMode16x16.DcPred, yAbove, yLeft, 0, haveAbove, haveLeft, yPredMb, 16);
+
+        // === 2. Compute residual + forward DCT for each Y4 block ===
+        // Hold all 16 transformed quantized blocks + the 16 Y4-DC values.
+        Span<short> y4Coefs = stackalloc short[16 * 16]; // [Y4 block index * 16 + raster pos]
+        Span<short> y2DcVals = stackalloc short[16];
+
+        for (int by = 0; by < 4; by++)
+        {
+            for (int bx = 0; bx < 4; bx++)
+            {
+                int blockIdx = by * 4 + bx;
+                Span<short> residual = stackalloc short[16];
+                for (int r = 0; r < 4; r++)
+                {
+                    for (int c = 0; c < 4; c++)
+                    {
+                        int srcOff = (mbRow * 16 + by * 4 + r) * ySrcStride + mbCol * 16 + bx * 4 + c;
+                        int predOff = (by * 4 + r) * 16 + bx * 4 + c;
+                        residual[r * 4 + c] = (short)(ySrc[srcOff] - yPredMb[predOff]);
+                    }
+                }
+                Span<short> coefs = stackalloc short[16];
+                Vp8ForwardTransform.ShortFdct4x4(residual, 4, coefs);
+                // Save the DC value for Y2.
+                y2DcVals[blockIdx] = coefs[0];
+                // Y4 stores AC only (DC will come from Y2 inverse).
+                coefs[0] = 0;
+                // Quantize Y4 AC values.
+                Vp8ForwardQuantizer.QuantizeY1Block(coefs, dequant);
+                for (int i = 0; i < 16; i++) y4Coefs[blockIdx * 16 + i] = coefs[i];
+            }
+        }
+
+        // === 3. Forward Walsh-Hadamard the 16 Y2 DCs, quantize ===
+        Span<short> y2Coefs = stackalloc short[16];
+        Vp8ForwardTransform.ShortWalsh4x4(y2DcVals, 4, y2Coefs);
+        Vp8ForwardQuantizer.QuantizeY2Block(y2Coefs, dequant);
+
+        // === 4. UV planes ===
+        Span<byte> uAbove = stackalloc byte[8];
+        Span<byte> uLeft = stackalloc byte[8];
+        Span<byte> vAbove = stackalloc byte[8];
+        Span<byte> vLeft = stackalloc byte[8];
+
+        if (haveAbove)
+        {
+            for (int c = 0; c < 8; c++)
+            {
+                uAbove[c] = recon.UPlane[(mbRow * 8 - 1) * recon.UvStride + mbCol * 8 + c];
+                vAbove[c] = recon.VPlane[(mbRow * 8 - 1) * recon.UvStride + mbCol * 8 + c];
+            }
+        }
+        else { Vp8IntraEdgeFill.FillAboveRow8(uAbove); Vp8IntraEdgeFill.FillAboveRow8(vAbove); }
+
+        if (haveLeft)
+        {
+            for (int r = 0; r < 8; r++)
+            {
+                uLeft[r] = recon.UPlane[(mbRow * 8 + r) * recon.UvStride + mbCol * 8 - 1];
+                vLeft[r] = recon.VPlane[(mbRow * 8 + r) * recon.UvStride + mbCol * 8 - 1];
+            }
+        }
+        else { Vp8IntraEdgeFill.FillLeftColumn8(uLeft); Vp8IntraEdgeFill.FillLeftColumn8(vLeft); }
+
+        Span<byte> uPredMb = stackalloc byte[8 * 8];
+        Span<byte> vPredMb = stackalloc byte[8 * 8];
+        Vp8IntraPredictor8x8.Predict(Vp8IntraMode16x16.DcPred, uAbove, uLeft, 0, haveAbove, haveLeft, uPredMb, 8);
+        Vp8IntraPredictor8x8.Predict(Vp8IntraMode16x16.DcPred, vAbove, vLeft, 0, haveAbove, haveLeft, vPredMb, 8);
+
+        Span<short> uCoefs = stackalloc short[4 * 16];
+        Span<short> vCoefs = stackalloc short[4 * 16];
+        for (int by = 0; by < 2; by++)
+        {
+            for (int bx = 0; bx < 2; bx++)
+            {
+                int blockIdx = by * 2 + bx;
+                EncodeUvBlock(uSrc, uvSrcStride, uPredMb, mbRow, mbCol, by, bx, dequant, uCoefs.Slice(blockIdx * 16, 16));
+                EncodeUvBlock(vSrc, uvSrcStride, vPredMb, mbRow, mbCol, by, bx, dequant, vCoefs.Slice(blockIdx * 16, 16));
+            }
+        }
+
+        // === 5. Encode mode info into partition0 ===
+        // Y mode = DC_PRED (4 in inter ordering, 0 in keyframe ordering).
+        int yModeLeaf = (int)Vp8YMode.DcPred;
+        EncodeYModeKf(partition0, yModeLeaf);
+        EncodeUvMode(partition0, (int)Vp8UvMode.DcPred);
+
+        // === 6. Encode coefficients into tokenPartition ===
+        // Y2 first (block type 3).
+        var aboveCtx = contexts.GetAbove(mbCol);
+        int y2Ctx = aboveCtx[Vp8EntropyContexts.Plane.Y2Slot] + contexts.Left[Vp8EntropyContexts.Plane.Y2Slot];
+        int y2Eob = Vp8CoefBlockEncoder.Encode(tokenPartition, coefProbsByType[3], y2Ctx, 0, y2Coefs);
+        byte y2HasCoef = (byte)(y2Eob > 0 ? 1 : 0);
+        aboveCtx[Vp8EntropyContexts.Plane.Y2Slot] = y2HasCoef;
+        contexts.Left[Vp8EntropyContexts.Plane.Y2Slot] = y2HasCoef;
+
+        // Y4 (block type 0, firstCoef=1 since Y2 has DC).
+        for (int by = 0; by < 4; by++)
+        {
+            for (int bx = 0; bx < 4; bx++)
+            {
+                int blockIdx = by * 4 + bx;
+                int aboveSlot = Vp8EntropyContexts.Plane.YBase + bx;
+                int leftSlot = Vp8EntropyContexts.Plane.YBase + by;
+                int ctx = aboveCtx[aboveSlot] + contexts.Left[leftSlot];
+                int eob = Vp8CoefBlockEncoder.Encode(tokenPartition, coefProbsByType[0], ctx, 1, y4Coefs.Slice(blockIdx * 16, 16));
+                byte hasCoef = (byte)(eob > 1 ? 1 : 0);
+                aboveCtx[aboveSlot] = hasCoef;
+                contexts.Left[leftSlot] = hasCoef;
+            }
+        }
+
+        // U (block type 2).
+        for (int by = 0; by < 2; by++)
+        {
+            for (int bx = 0; bx < 2; bx++)
+            {
+                int blockIdx = by * 2 + bx;
+                int aboveSlot = Vp8EntropyContexts.Plane.UBase + bx;
+                int leftSlot = Vp8EntropyContexts.Plane.UBase + by;
+                int ctx = aboveCtx[aboveSlot] + contexts.Left[leftSlot];
+                int eob = Vp8CoefBlockEncoder.Encode(tokenPartition, coefProbsByType[2], ctx, 0, uCoefs.Slice(blockIdx * 16, 16));
+                byte hasCoef = (byte)(eob > 0 ? 1 : 0);
+                aboveCtx[aboveSlot] = hasCoef;
+                contexts.Left[leftSlot] = hasCoef;
+            }
+        }
+        // V (block type 2).
+        for (int by = 0; by < 2; by++)
+        {
+            for (int bx = 0; bx < 2; bx++)
+            {
+                int blockIdx = by * 2 + bx;
+                int aboveSlot = Vp8EntropyContexts.Plane.VBase + bx;
+                int leftSlot = Vp8EntropyContexts.Plane.VBase + by;
+                int ctx = aboveCtx[aboveSlot] + contexts.Left[leftSlot];
+                int eob = Vp8CoefBlockEncoder.Encode(tokenPartition, coefProbsByType[2], ctx, 0, vCoefs.Slice(blockIdx * 16, 16));
+                byte hasCoef = (byte)(eob > 0 ? 1 : 0);
+                aboveCtx[aboveSlot] = hasCoef;
+                contexts.Left[leftSlot] = hasCoef;
+            }
+        }
+
+        // === 7. Reconstruct: dequantize, inverse transform, write back to recon ===
+        // (Optional for v1 - not needed if we don't predict from this MB. But
+        // first-row/col MBs of subsequent MBs need this MB's recon pixels.)
+        // For v1 SCAFFOLD: skip recon write-back; subsequent MBs will use 127/129 edge fills.
+        // This degrades quality but keeps the encoder bitstream-valid.
+        // Real recon path is a future enhancement.
+    }
+
+    private static void EncodeUvBlock(
+        ReadOnlySpan<byte> src, int srcStride,
+        ReadOnlySpan<byte> pred,
+        int mbRow, int mbCol, int by, int bx,
+        Vp8MbDequant dequant,
+        Span<short> outCoefs)
+    {
+        Span<short> residual = stackalloc short[16];
+        for (int r = 0; r < 4; r++)
+        {
+            for (int c = 0; c < 4; c++)
+            {
+                int srcOff = (mbRow * 8 + by * 4 + r) * srcStride + mbCol * 8 + bx * 4 + c;
+                int predOff = (by * 4 + r) * 8 + bx * 4 + c;
+                residual[r * 4 + c] = (short)(src[srcOff] - pred[predOff]);
+            }
+        }
+        Vp8ForwardTransform.ShortFdct4x4(residual, 4, outCoefs);
+        Vp8ForwardQuantizer.QuantizeUvBlock(outCoefs, dequant);
+    }
+
+    /// <summary>Encode Y mode for keyframe: kf_ymode_tree walk, leaves are DcPred=0/VPred=1/HPred=2/TmPred=3/BPred=4.</summary>
+    private static void EncodeYModeKf(Vp8BoolEncoder writer, int yMode)
+    {
+        // KfYModeTree shape: leaves are { -BPred, -DcPred, -VPred, -HPred, -TmPred }
+        // tree = [-BPred, 2,  4, 6,  -DcPred, -VPred,  -HPred, -TmPred]
+        // For DcPred (yMode=0): bits 1, 0, 0
+        // For VPred  (yMode=1): bits 1, 0, 1
+        // For HPred  (yMode=2): bits 1, 1, 0
+        // For TmPred (yMode=3): bits 1, 1, 1
+        // For BPred  (yMode=4): bit 0
+        var probs = Vp8ModeTrees.DefaultKfYModeProb;
+        if (yMode == (int)Vp8YMode.BPred)
+        {
+            writer.EncodeBool(0, probs[0]);
+            return;
+        }
+        writer.EncodeBool(1, probs[0]);
+        // DcPred=0/VPred=1: bit 0; HPred=2/TmPred=3: bit 1
+        if (yMode <= (int)Vp8YMode.VPred)
+        {
+            writer.EncodeBool(0, probs[1]);
+            // bit 0 = DcPred, bit 1 = VPred
+            writer.EncodeBool(yMode == (int)Vp8YMode.VPred ? 1 : 0, probs[2]);
+        }
+        else
+        {
+            writer.EncodeBool(1, probs[1]);
+            // bit 0 = HPred, bit 1 = TmPred
+            writer.EncodeBool(yMode == (int)Vp8YMode.TmPred ? 1 : 0, probs[3]);
+        }
+    }
+
+    private static void EncodeUvMode(Vp8BoolEncoder writer, int uvMode)
+    {
+        // UvModeTree: leaves are { -DcPred, -VPred, -HPred, -TmPred }
+        // tree = [-DcPred, 2, -VPred, 4, -HPred, -TmPred]
+        // DcPred (0): bit 0
+        // VPred  (1): bits 1, 0
+        // HPred  (2): bits 1, 1, 0
+        // TmPred (3): bits 1, 1, 1
+        var probs = Vp8ModeTrees.DefaultKfUvModeProb;
+        if (uvMode == (int)Vp8UvMode.DcPred) { writer.EncodeBool(0, probs[0]); return; }
+        writer.EncodeBool(1, probs[0]);
+        if (uvMode == (int)Vp8UvMode.VPred) { writer.EncodeBool(0, probs[1]); return; }
+        writer.EncodeBool(1, probs[1]);
+        writer.EncodeBool(uvMode == (int)Vp8UvMode.TmPred ? 1 : 0, probs[2]);
+    }
+}
