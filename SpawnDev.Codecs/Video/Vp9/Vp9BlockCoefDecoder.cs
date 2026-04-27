@@ -73,7 +73,8 @@ public static class Vp9BlockCoefDecoder
         PlaneType planeType,
         RefType refType,
         Span<short> block,
-        bool isHighBitDepth = false)
+        bool isHighBitDepth = false,
+        byte[]? coefProbs = null)
     {
         ArgumentNullException.ThrowIfNull(readBit);
 
@@ -103,7 +104,11 @@ public static class Vp9BlockCoefDecoder
             Vp9TxSize.Tx32x32 => Vp9NeighborTables.GetNeighbors32x32(scanType),
             _ => throw new ArgumentOutOfRangeException(nameof(txSize)),
         };
-        byte[] coefProbs = Vp9CoefProbs.DefaultCoefProbsFor(txSize);
+        // If the caller doesn't supply per-frame probs, fall back to
+        // the static libvpx defaults. Real decode paths should pass
+        // the compressed-header-updated table from
+        // Vp9CompressedHeaderState.CoefProbs[(int)txSize].
+        coefProbs ??= Vp9CoefProbs.DefaultCoefProbsFor(txSize);
 
         // Per-position energy-class cache, raster-indexed. Drives the
         // GetCoefContext lookup. Allocate stack for small sizes;

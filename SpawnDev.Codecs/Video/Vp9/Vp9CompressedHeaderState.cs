@@ -31,14 +31,17 @@ public sealed class Vp9CompressedHeaderState
 
     /// <summary>
     /// Per-tx-size flat coef-prob tables (read_coef_probs). Index
-    /// 0..3 = 4x4 / 8x8 / 16x16 / 32x32; each is byte[432].
+    /// 0..3 = 4x4 / 8x8 / 16x16 / 32x32; each is byte[432]. Seeded
+    /// from libvpx default_coef_probs_* tables; the compressed header
+    /// applies diff_update_prob deltas FROM these defaults, so
+    /// zero-init would corrupt every downstream coefficient read.
     /// </summary>
     public byte[][] CoefProbs { get; } = new byte[4][]
     {
-        new byte[Vp9CoefProbsParser.FlatSize],
-        new byte[Vp9CoefProbsParser.FlatSize],
-        new byte[Vp9CoefProbsParser.FlatSize],
-        new byte[Vp9CoefProbsParser.FlatSize],
+        (byte[])Vp9CoefProbs.DefaultCoefProbs4x4.Clone(),
+        (byte[])Vp9CoefProbs.DefaultCoefProbs8x8.Clone(),
+        (byte[])Vp9CoefProbs.DefaultCoefProbs16x16.Clone(),
+        (byte[])Vp9CoefProbs.DefaultCoefProbs32x32.Clone(),
     };
 
     /// <summary>Skip-flag probabilities (read_skip_probs).</summary>

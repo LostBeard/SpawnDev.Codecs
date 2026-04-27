@@ -209,6 +209,25 @@ if (partition == Vp9PartitionType.Split)
             var ym = Vp9IntraModeTree.Decode(p => br.Read(p),
                 Vp9IntraModeProbs.KeyframeYProbs(Vp9IntraMode.DcPred, Vp9IntraMode.DcPred));
             Console.WriteLine($"  Intra Y mode for 16x16: {ym}");
+            if (sk == 0)
+            {
+                // Decode 16x16 Y coefficients. For DcPred + Tx16x16 the
+                // tx_type is DCT_DCT, which uses the Default scan order.
+                var coefBlock = new short[256];
+                int eob = Vp9BlockCoefDecoder.DecodeBlockCoefficients(
+                    readBit: p => br.Read(p),
+                    txSize: Vp9TxSize.Tx16x16,
+                    scanType: Vp9ScanType.Default,
+                    planeType: Vp9BlockCoefDecoder.PlaneType.Y,
+                    refType: Vp9BlockCoefDecoder.RefType.Intra,
+                    block: coefBlock,
+                    isHighBitDepth: false,
+                    coefProbs: decoder.LastCompressedState!.CoefProbs[(int)Vp9TxSize.Tx16x16]);
+                Console.Write($"  Coefficients decoded, EOB at scan position {eob}; ");
+                Console.Write("first 8 in raster: ");
+                for (int i = 0; i < 8; i++) Console.Write($"{coefBlock[i]} ");
+                Console.WriteLine();
+            }
             if (sk == 1)
             {
                 const int N = 16;
