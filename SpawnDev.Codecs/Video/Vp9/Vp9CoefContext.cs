@@ -82,11 +82,14 @@ public static class Vp9CoefContext
         int e0 = tokenCache[n0];
         int e1 = tokenCache[n1];
 
-        // (1 + e0 + e1) >> 1, capped at 2. libvpx already keeps the
-        // result in [0,2] because energy classes only contribute 0..5
-        // and the (1 + ...) >> 1 floor with cap-by-construction stays
-        // at 2 once both neighbors hit class 1+.
-        int ctx = (1 + e0 + e1) >> 1;
-        return ctx > 2 ? 2 : ctx;
+        // (1 + e0 + e1) >> 1. libvpx vp9_scan.h get_coef_context returns
+        // the raw value with no clamping; result range is [0, MAX_ENERGY_CLASS=5].
+        // The coefficient prob table is sized [REF][BAND][COEFF_CONTEXTS=6][3]
+        // with BAND_COEFF_CONTEXTS(band) = (band==0 ? 3 : 6); for band 0
+        // the only legal scan position is c=0 where tokenCache is all-zero
+        // so ctx = 0 naturally. Bands 1..5 must use the full ctx range
+        // 0..5; clamping here is what was hiding high-energy probabilities
+        // and producing the AC variance under-decode.
+        return (1 + e0 + e1) >> 1;
     }
 }

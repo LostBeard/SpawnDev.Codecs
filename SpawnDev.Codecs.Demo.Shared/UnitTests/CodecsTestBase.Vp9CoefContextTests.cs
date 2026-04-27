@@ -56,18 +56,21 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
-    public void Vp9CoefContext_GetCoefContext_BothNeighborsHighEnergy_CapsAt2()
+    public void Vp9CoefContext_GetCoefContext_BothNeighborsHighEnergy_ReturnsFive()
     {
         // Default 4x4 scan position 3 has neighbors (1, 4). With both
-        // neighbors at energy class 5 (Cat3+), the raw context value
-        // would be (1 + 5 + 5) >> 1 = 5 - but libvpx convention caps
-        // it at 2 because there are only 3 prob columns indexed 0/1/2.
+        // neighbors at energy class 5 (Cat3+), the raw context value is
+        // (1 + 5 + 5) >> 1 = 5. libvpx vp9_scan.h get_coef_context does
+        // NOT clamp; the prob table for bands 1..5 has 6 ctx columns
+        // (BAND_COEFF_CONTEXTS(band) = (band==0 ? 3 : 6)) so ctx 0..5
+        // are all valid. An earlier version of this test asserted a cap
+        // at 2 - that cap was the AC variance under-decode bug.
         var neighbors = Vp9NeighborTables.DefaultScan4x4Neighbors.AsSpan();
         Span<byte> cache = stackalloc byte[16];
         cache[1] = 5;
         cache[4] = 5;
         int ctx = Vp9CoefContext.GetCoefContext(neighbors, cache, scanPos: 3);
-        Equal(2, ctx);
+        Equal(5, ctx);
     }
 
     [TestMethod]
