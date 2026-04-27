@@ -10,6 +10,7 @@ using System.Diagnostics;
 using System.IO;
 using SpawnDev.Codecs.Audio.Flac;
 using SpawnDev.Codecs.Audio.Vorbis;
+using SpawnDev.Codecs.Audio.Wav;
 using SpawnDev.Codecs.Container.Ivf;
 using SpawnDev.Codecs.Video.Av1;
 using SpawnDev.Codecs.Video.Vp8;
@@ -278,6 +279,28 @@ try
     Report("AV1 forward+inverse DCT4", best <= 4, $"min round-trip err = {best} (scale1={err1} scale2={err2} scale4={err4})");
 }
 catch (Exception ex) { Report("AV1 forward+inverse DCT4", false, ex.Message); }
+
+// =================================================================
+// AUDIO: WAV reader + writer round-trip on a synthetic 1-sec sine
+// =================================================================
+try
+{
+    int sr = 44100;
+    var samples = new int[sr];
+    for (int n = 0; n < samples.Length; n++)
+        samples[n] = (int)(20000.0 * Math.Sin(2.0 * Math.PI * 440.0 * n / sr));
+
+    var bytes = WavFileCodec.Write(samples, sampleRateHz: sr, channels: 1, bitsPerSample: 16);
+    var wav = WavFileCodec.Read(bytes);
+
+    bool ok = wav.SampleRateHz == sr
+              && wav.Channels == 1
+              && wav.BitsPerSample == 16
+              && wav.InterleavedSamples.Length == sr;
+    Report("WAV writer+reader round-trip", ok,
+        $"{bytes.Length}B WAV, {wav.SampleRateHz}Hz, {wav.Channels}ch, {wav.BitsPerSample}-bit, {wav.InterleavedSamples.Length} samples");
+}
+catch (Exception ex) { Report("WAV writer+reader round-trip", false, ex.Message); }
 
 // =================================================================
 // AUDIO: FLAC encoder + decoder round-trip
