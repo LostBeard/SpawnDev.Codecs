@@ -12,6 +12,7 @@ using SpawnDev.Codecs.Audio.Flac;
 using SpawnDev.Codecs.Audio.Vorbis;
 using SpawnDev.Codecs.Container.Ivf;
 using SpawnDev.Codecs.Video.Vp8;
+using SpawnDev.Codecs.Video.Vp9;
 
 string ffmpeg = "C:\\Users\\TJ\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1-full_build\\bin\\ffmpeg.exe";
 
@@ -139,6 +140,61 @@ try
     else Report("VP9 BBB test data present", false, "missing test data");
 }
 catch (Exception ex) { Report("VP9 BBB test data present", false, ex.Message); }
+
+// =================================================================
+// VIDEO: VP9 block-level encoder pipeline (4x4)
+//   pixels -> forward DCT -> quantize -> coef encode -> bool stream
+//   -> coef decode -> dequantize -> inverse DCT -> reconstructed pixels
+// =================================================================
+try
+{
+    // 4x4 gradient block, predictor=128, low Q -> expect small reconstruction error.
+    var pixels = new byte[16];
+    for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 4; c++)
+            pixels[r * 4 + c] = (byte)(120 + r * 4 + c * 2);
+
+    const byte pred = 128;
+    const int qIndex = 16;
+
+    Span<short> residual = stackalloc short[16];
+    for (int i = 0; i < 16; i++) residual[i] = (short)(pixels[i] - pred);
+
+    Span<int> coefs = stackalloc int[16];
+    Vp9ForwardDct4x4.Transform(residual, 4, coefs);
+
+    var planeQ = Vp9Dequantizer.PlaneQuantizer(qIndex, 0, 0);
+    Vp9ForwardQuantizer.QuantizeBlock(coefs, planeQ.Dc, planeQ.Ac);
+
+    var coefsShort = new short[16];
+    for (int i = 0; i < 16; i++) coefsShort[i] = (short)coefs[i];
+
+    var enc = new Vp9BoolEncoder();
+    Vp9BlockCoefEncoder.EncodeBlockCoefficients(
+        (prob, bit) => enc.Write(bit, prob),
+        Vp9TxSize.Tx4x4, Vp9ScanType.Default,
+        Vp9BlockCoefDecoder.PlaneType.Y, Vp9BlockCoefDecoder.RefType.Intra,
+        coefsShort);
+    byte[] encoded = enc.Stop();
+
+    var dec = new Vp9BoolDecoder(encoded, 0, encoded.Length);
+    var decoded = new short[16];
+    Vp9BlockCoefDecoder.DecodeBlockCoefficients(
+        prob => dec.Read(prob),
+        Vp9TxSize.Tx4x4, Vp9ScanType.Default,
+        Vp9BlockCoefDecoder.PlaneType.Y, Vp9BlockCoefDecoder.RefType.Intra,
+        decoded);
+
+    Vp9Dequantizer.DequantizeInPlace(decoded, planeQ);
+    var recon = new byte[16];
+    for (int i = 0; i < 16; i++) recon[i] = pred;
+    Vp9Idct4x4Reference.Idct4x4_16_Add(decoded, recon, 4);
+
+    int maxErr = 0;
+    for (int i = 0; i < 16; i++) maxErr = Math.Max(maxErr, Math.Abs(recon[i] - pixels[i]));
+    Report("VP9 block encoder pipeline (4x4)", maxErr <= 4, $"{encoded.Length}B encoded, max recon err = {maxErr} (Q={qIndex})");
+}
+catch (Exception ex) { Report("VP9 block encoder pipeline (4x4)", false, ex.Message); }
 
 // =================================================================
 // AUDIO: FLAC encoder + decoder round-trip
