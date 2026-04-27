@@ -60,7 +60,7 @@ public static class Vp8IntraPredictor4x4
     private static int Clamp255(int v) => v < 0 ? 0 : v > 255 ? 255 : v;
 
     /// <summary>
-    /// Predict a 4x4 luma block. <paramref name="above"/> must have at least
+    /// Predict a 4x4 luma block. <paramref name="aboveBuffer"/> must have at least
     /// 9 entries indexable as <c>above[-1..7]</c> (caller-supplied with the
     /// VP8 edge convention applied).
     /// </summary>

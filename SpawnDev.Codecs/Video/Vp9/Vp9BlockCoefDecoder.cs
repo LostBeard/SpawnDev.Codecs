@@ -65,6 +65,11 @@ public static class Vp9BlockCoefDecoder
     /// All entries are zeroed before decode begins.
     /// </param>
     /// <param name="isHighBitDepth">12-bit profile flag - widens Cat6 residual.</param>
+    /// <param name="coefProbs">
+    /// Per-frame coefficient probability table indexed by
+    /// (planeType, refType, band, ctx, node). Defaults to libvpx static
+    /// defaults if null.
+    /// </param>
     /// <returns>EOB position (count of decoded scan slots, 0..maxCoefs).</returns>
     public static int DecodeBlockCoefficients(
         Func<byte, int> readBit,

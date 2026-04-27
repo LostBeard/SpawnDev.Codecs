@@ -18,7 +18,9 @@ public static class Vp9CospiConstants
     /// <summary>Rounding constant for fdct_round_shift.</summary>
     public const int DctConstRounding = 1 << (DctConstBits - 1);
 
-    // cos(pi*i/64) * 2^14, i in 1..32
+    // cos(pi*i/64) * 2^14, i in 1..32. Each constant is documented as
+    // its libvpx name; the value is the integer-rounded fixed-point cosine.
+#pragma warning disable CS1591  // bulk constants documented inline above
     public const int Cospi1_64  = 16364;
     public const int Cospi2_64  = 16305;
     public const int Cospi3_64  = 16207;
@@ -64,6 +66,7 @@ public static class Vp9CospiConstants
     public const int SinpiBr1 = Sinpi3_9;
     public const int SinpiCr1 = Sinpi4_9;
     public const int SinpiDr1 = Sinpi2_9;
+#pragma warning restore CS1591
 
     /// <summary>fdct_round_shift: (input + DctConstRounding) &gt;&gt; DctConstBits.</summary>
     public static int RoundShift(long input) =>
