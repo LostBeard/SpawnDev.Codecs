@@ -11,12 +11,12 @@
 //     reconstructs into the output
 //
 // As of this revision the partition CDF + partition_plane_context() are
-// wired up. Per-block decode (mode info / coefficients / reconstruction)
-// is still pending the remaining CDF tables (token_cdfs.h + the rest of
-// entropymode.c). The walker now walks the partition tree to leaf blocks
-// and throws NotImplementedException at the per-block boundary so callers
-// can still observe the entropy stream consuming partition bits before
-// hitting the next missing piece.
+// wired up, AND every default CDF table required for block decode is now
+// ported (Av1Default{Partition,Block,IntraMode,Txfm,Segment,Coef}Cdfs).
+// Per-block decode itself (mode_info read + decode_coefs() + inverse
+// transform + intra predict + reconstruct) is the next step and currently
+// throws NotImplementedException so callers can still observe the entropy
+// stream consuming partition bits before hitting the next missing piece.
 //
 // What IS wired up:
 //   - End-to-end skeleton from header parse to output framebuffer alloc
@@ -28,12 +28,18 @@
 //   - Output stride / plane sizes matched to ffmpeg layout
 //
 // What is NOT wired up (NotImplementedException):
-//   - Mode info decode (intra mode / tx size / segment / skip)
-//   - Coefficient decode + inverse quant
+//   - Mode info decode (intra mode / tx size / segment / skip / dc_sign etc)
+//   - decode_coefs() loop (libaom av1/decoder/decodetxb.c) - reads txb_skip,
+//     eob, base, br, dc_sign using the now-available Av1DefaultCoefCdfs
+//   - Inverse quant pipeline glue
 //   - Per-block intra prediction selection / edge buffer assembly
 //   - Per-block inverse transform dispatch
 //   - Per-block reconstruction
 //   - Adaptive CDF updates per AV1 spec sec 9.4
+//
+// All default CDF tables required to drive the above are present:
+//   Av1DefaultPartitionCdfs / Av1DefaultBlockCdfs / Av1DefaultIntraModeCdfs /
+//   Av1DefaultTxfmCdfs / Av1DefaultSegmentCdfs / Av1DefaultCoefCdfs.
 //
 // Spec references: AV1 Bitstream and Decoding Process Specification
 //   sec 5.11.4 Partition syntax
@@ -294,23 +300,37 @@ public sealed class Av1KeyframeWalker
         int miRow, int miCol, int bsize, Av1PartitionType partition,
         byte[] y, byte[] u, byte[] v)
     {
-        // Per-block decode requires:
-        //   - skip flag CDF (Av1DefaultBlockCdfs.DefaultSkipTxfmCdf)        - PORTED
-        //   - intra mode CDF (Av1DefaultIntraModeCdfs.DefaultKfYModeCdf)    - PORTED (KF) / DefaultYModeCdf (inter)
-        //   - uv mode CDF (Av1DefaultIntraModeCdfs.DefaultUvModeCdf)        - PORTED
-        //   - segmentation CDFs (not yet ported)
-        //   - tx size + tx type CDFs (not yet ported - txfm_partition partial)
-        //   - coefficient CDFs from libaom token_cdfs.h (~3500 lines, not yet ported)
-        //   - inverse quant + inverse transform + intra prediction + reconstruction
+        // Per-block decode dependencies. Status reflects PORTED tables; the
+        // execution wiring (read_modes_b -> read_inter_block_mode_info ->
+        // decode_tokens -> reconstruct) is the next step.
+        //   - partition CDF                  -> Av1DefaultPartitionCdfs        PORTED
+        //   - skip flag CDF                  -> Av1DefaultBlockCdfs.DefaultSkipTxfmCdf  PORTED
+        //   - intrabc + skip_mode + txfm_partition -> Av1DefaultBlockCdfs              PORTED
+        //   - intra mode CDFs (kf_y / y / uv) -> Av1DefaultIntraModeCdfs                PORTED
+        //   - segmentation CDFs              -> Av1DefaultSegmentCdfs           PORTED
+        //   - tx size + intra/inter ext_tx   -> Av1DefaultTxfmCdfs              PORTED
+        //   - coefficient CDFs (token_cdfs.h) -> Av1DefaultCoefCdfs              PORTED
+        //   - inverse quant tables           -> Av1DequantTables                PORTED
+        //   - inverse transforms             -> Av1Inverse{Dct,Adst,Identity}*  PORTED
+        //   - intra predictor                -> Av1IntraPredictor               PORTED
         //
-        // The partition tree IS now walked correctly using the partition CDF.
-        // Every other CDF / decode step is a follow-up port.
+        // Remaining wiring (this method's body):
+        //   - mode_info decode (intra mode + uv mode + skip + tx_size + segment)
+        //   - decode_coefs() loop per plane / per tx block (libaom
+        //     av1/decoder/decodetxb.c) - reads txb_skip, eob, base, br, dc_sign
+        //     using the Av1DefaultCoefCdfs tables; builds dequantized coeff array
+        //   - inverse transform dispatch
+        //   - intra predictor edge buffer assembly + invocation
+        //   - reconstruct sample array (predictor + residual) -> y/u/v planes
+        //   - adaptive CDF updates per AV1 spec sec 9.4 (defer until decode works)
         throw new NotImplementedException(
             $"AV1 per-block decode at miRow={miRow}, miCol={miCol}, bsize={bsize}, " +
-            $"partition={partition} requires the remaining CDF tables: " +
-            "intra mode (DefaultKfYModeCdf - ready), skip / tx_size / segmentation, " +
-            "and coefficient CDFs from libaom av1/common/token_cdfs.h. " +
-            "Partition CDF + tree walk are wired; per-block reconstruction is the next step.");
+            $"partition={partition}: all default CDF tables are ported (partition, " +
+            "block-level binary, intra mode, txfm size/type, segment, coefficient). " +
+            "Remaining: wire mode_info decode + decode_coefs() + inverse transform + " +
+            "intra predict + reconstruct. See libaom av1/decoder/decodeframe.c " +
+            "decode_partition() and av1/decoder/decodetxb.c decode_coefs() for the " +
+            "execution order. The data tables are now sufficient to drive the decoder.");
     }
 
     private static int FrameMiRows(Av1CompleteFrameHeader header)
