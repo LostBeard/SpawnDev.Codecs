@@ -4,35 +4,41 @@
 //   - Validates input is a keyframe with parsed complete header
 //   - Allocates output Y/U/V planes at the correct dimensions
 //   - Walks superblocks within each tile (skeleton)
-//   - Recursively decodes the partition tree (skeleton)
+//   - Recursively decodes the partition tree (now using libaom's default
+//     partition CDFs from Av1DefaultPartitionCdfs)
 //   - For each leaf block: decodes intra mode + coefficients +
 //     applies inverse transform + applies intra prediction +
 //     reconstructs into the output
 //
-// Block-level decode requires the full AV1 CDF tables for entropy
-// decode of mode info / partitioning / coefficients - the largest
-// missing piece (libaom token_cdfs.h alone is ~5000 lines of static
-// data). Until those land, the walker throws NotImplementedException
-// at the entropy decode boundary so callers fail loud rather than
-// emit wrong pixels.
+// As of this revision the partition CDF + partition_plane_context() are
+// wired up. Per-block decode (mode info / coefficients / reconstruction)
+// is still pending the remaining CDF tables (token_cdfs.h + the rest of
+// entropymode.c). The walker now walks the partition tree to leaf blocks
+// and throws NotImplementedException at the per-block boundary so callers
+// can still observe the entropy stream consuming partition bits before
+// hitting the next missing piece.
 //
 // What IS wired up:
 //   - End-to-end skeleton from header parse to output framebuffer alloc
 //   - Per-tile range decoder construction (uses Av1RangeDecoder)
 //   - Superblock grid iteration in spec order
+//   - Partition tree decode using default partition CDFs
+//   - partition_plane_context()-equivalent tracking via Av1PartitionContext
+//   - subsize_lookup[] for partition -> child block size mapping
 //   - Output stride / plane sizes matched to ffmpeg layout
 //
 // What is NOT wired up (NotImplementedException):
-//   - CDF tables (entropy normative data)
-//   - Mode info decode (partition / intra mode / tx size / segment / skip)
+//   - Mode info decode (intra mode / tx size / segment / skip)
 //   - Coefficient decode + inverse quant
 //   - Per-block intra prediction selection / edge buffer assembly
 //   - Per-block inverse transform dispatch
 //   - Per-block reconstruction
+//   - Adaptive CDF updates per AV1 spec sec 9.4
 //
-// This file ships the architecture skeleton + clear NotImplemented
-// boundaries so the next session has a complete frame to plug entropy
-// + reconstruction into without re-deriving the geometry.
+// Spec references: AV1 Bitstream and Decoding Process Specification
+//   sec 5.11.4 Partition syntax
+//   sec 6.4.4  Partition semantics
+//   sec 9.3    Conversion tables (Partition_Subsize, Mi_Width_Log2, etc)
 
 using SpawnDev.Codecs.EntropyCoders;
 
@@ -41,6 +47,40 @@ namespace SpawnDev.Codecs.Video.Av1;
 /// <summary>AV1 keyframe walker (top-level orchestrator).</summary>
 public sealed class Av1KeyframeWalker
 {
+    /// <summary>BLOCK_SIZE enum index for BLOCK_64X64 (libaom enums.h).</summary>
+    private const int Block64x64 = 12;
+    /// <summary>BLOCK_SIZE enum index for BLOCK_128X128 (libaom enums.h).</summary>
+    private const int Block128x128 = 15;
+
+    /// <summary>
+    /// Subsize lookup table from av1/common/common_data.h:subsize_lookup[EXT_PARTITION_TYPES][SQR_BLOCK_SIZES].
+    /// Indexed by [partition][sqr_bsize_idx] where sqr_bsize_idx = 0..5 for BLOCK_4X4..BLOCK_128X128.
+    /// Returns -1 (BLOCK_INVALID) for invalid combinations.
+    /// </summary>
+    private static readonly int[,] s_subsizeLookup = new int[10, 6]
+    {
+        // PARTITION_NONE
+        { 0, 3, 6, 9, 12, 15 }, // BLOCK_4X4, BLOCK_8X8, BLOCK_16X16, BLOCK_32X32, BLOCK_64X64, BLOCK_128X128
+        // PARTITION_HORZ
+        { -1, 2, 5, 8, 11, 14 }, // -, BLOCK_8X4, BLOCK_16X8, BLOCK_32X16, BLOCK_64X32, BLOCK_128X64
+        // PARTITION_VERT
+        { -1, 1, 4, 7, 10, 13 }, // -, BLOCK_4X8, BLOCK_8X16, BLOCK_16X32, BLOCK_32X64, BLOCK_64X128
+        // PARTITION_SPLIT
+        { -1, 0, 3, 6, 9, 12 },  // -, BLOCK_4X4, BLOCK_8X8, BLOCK_16X16, BLOCK_32X32, BLOCK_64X64
+        // PARTITION_HORZ_A
+        { -1, -1, 5, 8, 11, 14 }, // -, -, BLOCK_16X8, BLOCK_32X16, BLOCK_64X32, BLOCK_128X64
+        // PARTITION_HORZ_B
+        { -1, -1, 5, 8, 11, 14 },
+        // PARTITION_VERT_A
+        { -1, -1, 4, 7, 10, 13 }, // -, -, BLOCK_8X16, BLOCK_16X32, BLOCK_32X64, BLOCK_64X128
+        // PARTITION_VERT_B
+        { -1, -1, 4, 7, 10, 13 },
+        // PARTITION_HORZ_4
+        { -1, -1, 17, 19, 21, -1 }, // -, -, BLOCK_16X4, BLOCK_32X8, BLOCK_64X16, -
+        // PARTITION_VERT_4
+        { -1, -1, 16, 18, 20, -1 }, // -, -, BLOCK_4X16, BLOCK_8X32, BLOCK_16X64, -
+    };
+
     /// <summary>
     /// Walk a single AV1 keyframe and produce a planar 8-bit YUV
     /// frame buffer. Throws NotImplementedException for portions of
@@ -104,18 +144,28 @@ public sealed class Av1KeyframeWalker
         var rangeDec = new Av1RangeDecoder(tileBytes);
 
         // Compute the superblock geometry for this tile.
-        int sbSize = sh.Use128x128Superblock ? 128 : 64;
+        int sbSizePx = sh.Use128x128Superblock ? 128 : 64;
+        int sbBlockIdx = sh.Use128x128Superblock ? Block128x128 : Block64x64;
         int rowStart = header.TileInfo.RowStartSb[tile.TileRow];
         int rowEnd = header.TileInfo.RowStartSb[tile.TileRow + 1];
         int colStart = header.TileInfo.ColStartSb[tile.TileCol];
         int colEnd = header.TileInfo.ColStartSb[tile.TileCol + 1];
 
+        // Compute the tile's mi-grid width to size the partition context.
+        int tileMiCols = (colEnd - colStart) * (sbSizePx >> 2); // sbSizePx / 4
+        int frameMiRows = (header.Prefix.FrameHeight + 7) >> 3 << 1; // round up to 8 then to mi units
+        int frameMiCols = (header.Prefix.FrameWidth + 7) >> 3 << 1;
+        var pctx = new Av1PartitionContext(Math.Max(tileMiCols, frameMiCols));
+
         // Walk superblocks in raster scan within the tile.
         for (int sbRow = rowStart; sbRow < rowEnd; sbRow++)
         {
+            pctx.ResetLeft();
             for (int sbCol = colStart; sbCol < colEnd; sbCol++)
             {
-                DecodeSuperblock(rangeDec, sh, header, sbRow, sbCol, sbSize, y, u, v);
+                int miRow = sbRow * (sbSizePx >> 2);
+                int miCol = sbCol * (sbSizePx >> 2);
+                DecodeSuperblock(rangeDec, sh, header, pctx, miRow, miCol, sbBlockIdx, y, u, v);
             }
         }
     }
@@ -124,31 +174,173 @@ public sealed class Av1KeyframeWalker
         Av1RangeDecoder rd,
         Av1SequenceHeader sh,
         Av1CompleteFrameHeader header,
-        int sbRow, int sbCol, int sbSize,
+        Av1PartitionContext pctx,
+        int miRow, int miCol, int sbBlockIdx,
         byte[] y, byte[] u, byte[] v)
     {
-        // Recursive partition decode: starts at sbSize x sbSize, decodes
-        // a partition symbol, then recurses on the children based on
-        // PARTITION_NONE / HORZ / VERT / SPLIT / HORZ_A / HORZ_B /
-        // VERT_A / VERT_B / HORZ_4 / VERT_4.
-        DecodePartition(rd, sh, header, sbRow * sbSize, sbCol * sbSize, sbSize, y, u, v);
+        // Recursive partition decode: starts at the superblock size,
+        // decodes a partition symbol, then recurses on the children.
+        DecodePartition(rd, sh, header, pctx, miRow, miCol, sbBlockIdx, y, u, v);
     }
 
     private void DecodePartition(
         Av1RangeDecoder rd,
         Av1SequenceHeader sh,
         Av1CompleteFrameHeader header,
-        int rowPx, int colPx, int blockSize,
+        Av1PartitionContext pctx,
+        int miRow, int miCol, int bsize,
         byte[] y, byte[] u, byte[] v)
     {
-        // Decoding the partition symbol requires the partition CDF for
-        // the current ctx. The CDFs are not yet ported (token_cdfs.h +
-        // entropymode.c are the missing pieces). Without a partition
-        // symbol we cannot recurse correctly, so this is the boundary.
+        // Per AV1 spec sec 5.11.4: minimum partition size is BLOCK_8X8;
+        // smaller blocks have an implicit PARTITION_NONE.
+        if (bsize < Av1PartitionContext.Block8x8)
+        {
+            DecodeBlock(rd, sh, header, pctx, miRow, miCol, bsize, Av1PartitionType.None, y, u, v);
+            return;
+        }
+
+        // Compute the partition context (combination of above + left split bits).
+        int ctx = pctx.GetContext(miRow, miCol, bsize);
+        int nsyms = Av1PartitionContext.PartitionCdfLength(bsize);
+
+        // Decode the partition symbol from the appropriate CDF row.
+        var cdf = Av1DefaultPartitionCdfs.DefaultPartitionCdf[ctx];
+        Av1PartitionType partition = (Av1PartitionType)rd.DecodeCdfQ15(cdf, nsyms);
+
+        // Map (bsize, partition) -> sub-block size via subsize_lookup.
+        int sqrIdx = SqrBlockSizeIndex(bsize);
+        int subsize = s_subsizeLookup[(int)partition, sqrIdx];
+        if (subsize < 0)
+        {
+            throw new InvalidDataException(
+                $"AV1 invalid partition: bsize={bsize}, partition={partition}");
+        }
+
+        int hbs = Av1PartitionContext.MiSizeWide[bsize] >> 1; // half block size in mi units
+        int qbs = hbs >> 1; // quarter block size
+
+        // Recurse / leaf-decode per partition type. Mirrors libaom's
+        // decode_partition() switch (av1/decoder/decodeframe.c line 1296).
+        switch (partition)
+        {
+            case Av1PartitionType.None:
+                DecodeBlock(rd, sh, header, pctx, miRow, miCol, subsize, partition, y, u, v);
+                pctx.UpdateContext(miRow, miCol, subsize);
+                break;
+
+            case Av1PartitionType.Horz:
+                DecodeBlock(rd, sh, header, pctx, miRow, miCol, subsize, partition, y, u, v);
+                if (miRow + hbs < FrameMiRows(header))
+                    DecodeBlock(rd, sh, header, pctx, miRow + hbs, miCol, subsize, partition, y, u, v);
+                pctx.UpdateContext(miRow, miCol, subsize);
+                break;
+
+            case Av1PartitionType.Vert:
+                DecodeBlock(rd, sh, header, pctx, miRow, miCol, subsize, partition, y, u, v);
+                if (miCol + hbs < FrameMiCols(header))
+                    DecodeBlock(rd, sh, header, pctx, miRow, miCol + hbs, subsize, partition, y, u, v);
+                pctx.UpdateContext(miRow, miCol, subsize);
+                break;
+
+            case Av1PartitionType.Split:
+                DecodePartition(rd, sh, header, pctx, miRow, miCol, subsize, y, u, v);
+                DecodePartition(rd, sh, header, pctx, miRow, miCol + hbs, subsize, y, u, v);
+                DecodePartition(rd, sh, header, pctx, miRow + hbs, miCol, subsize, y, u, v);
+                DecodePartition(rd, sh, header, pctx, miRow + hbs, miCol + hbs, subsize, y, u, v);
+                break;
+
+            case Av1PartitionType.Horz4:
+                for (int i = 0; i < 4; i++)
+                {
+                    int r = miRow + i * qbs;
+                    if (i > 0 && r >= FrameMiRows(header)) break;
+                    DecodeBlock(rd, sh, header, pctx, r, miCol, subsize, partition, y, u, v);
+                }
+                pctx.UpdateContext(miRow, miCol, subsize);
+                break;
+
+            case Av1PartitionType.Vert4:
+                for (int i = 0; i < 4; i++)
+                {
+                    int c = miCol + i * qbs;
+                    if (i > 0 && c >= FrameMiCols(header)) break;
+                    DecodeBlock(rd, sh, header, pctx, miRow, c, subsize, partition, y, u, v);
+                }
+                pctx.UpdateContext(miRow, miCol, subsize);
+                break;
+
+            case Av1PartitionType.HorzA:
+            case Av1PartitionType.HorzB:
+            case Av1PartitionType.VertA:
+            case Av1PartitionType.VertB:
+                // These mixed partitions decode 3 sub-blocks. Matches libaom
+                // decode_partition() lines 1357-1378.
+                throw new NotImplementedException(
+                    $"AV1 partition {partition} (mixed split) requires per-block decode " +
+                    "which depends on the remaining mode-info CDFs (intra mode, skip, " +
+                    "tx size, coef CDFs from token_cdfs.h). See Av1KeyframeWalker.DecodeBlock.");
+
+            default:
+                throw new InvalidDataException(
+                    $"AV1 unknown partition type: {(int)partition}");
+        }
+    }
+
+    private void DecodeBlock(
+        Av1RangeDecoder rd,
+        Av1SequenceHeader sh,
+        Av1CompleteFrameHeader header,
+        Av1PartitionContext pctx,
+        int miRow, int miCol, int bsize, Av1PartitionType partition,
+        byte[] y, byte[] u, byte[] v)
+    {
+        // Per-block decode requires:
+        //   - skip flag CDF (Av1DefaultBlockCdfs.DefaultSkipTxfmCdf)        - PORTED
+        //   - intra mode CDF (Av1DefaultIntraModeCdfs.DefaultKfYModeCdf)    - PORTED (KF) / DefaultYModeCdf (inter)
+        //   - uv mode CDF (Av1DefaultIntraModeCdfs.DefaultUvModeCdf)        - PORTED
+        //   - segmentation CDFs (not yet ported)
+        //   - tx size + tx type CDFs (not yet ported - txfm_partition partial)
+        //   - coefficient CDFs from libaom token_cdfs.h (~3500 lines, not yet ported)
+        //   - inverse quant + inverse transform + intra prediction + reconstruction
+        //
+        // The partition tree IS now walked correctly using the partition CDF.
+        // Every other CDF / decode step is a follow-up port.
         throw new NotImplementedException(
-            "AV1 partition tree decode requires the partition CDF tables " +
-            "from libaom av1/common/entropymode.c default_partition_cdf[]. " +
-            "Porting that table set + the partition_ctx() function is the " +
-            "next step in the AV1 decoder pipeline.");
+            $"AV1 per-block decode at miRow={miRow}, miCol={miCol}, bsize={bsize}, " +
+            $"partition={partition} requires the remaining CDF tables: " +
+            "intra mode (DefaultKfYModeCdf - ready), skip / tx_size / segmentation, " +
+            "and coefficient CDFs from libaom av1/common/token_cdfs.h. " +
+            "Partition CDF + tree walk are wired; per-block reconstruction is the next step.");
+    }
+
+    private static int FrameMiRows(Av1CompleteFrameHeader header)
+    {
+        // mi_rows = (FrameHeight + 7) >> 3 << 1. AV1 mi units are 4 luma samples.
+        // Ceiling-div to 8-px alignment, then *2 to convert 8-px -> 4-px (mi).
+        return ((header.Prefix.FrameHeight + 7) >> 3) << 1;
+    }
+
+    private static int FrameMiCols(Av1CompleteFrameHeader header)
+    {
+        return ((header.Prefix.FrameWidth + 7) >> 3) << 1;
+    }
+
+    /// <summary>
+    /// Map a square BLOCK_SIZE enum value to its 0..5 sqr_bsize index used by
+    /// subsize_lookup. Mirrors libaom <c>get_sqr_bsize_idx()</c>.
+    /// </summary>
+    private static int SqrBlockSizeIndex(int bsize)
+    {
+        // BLOCK_4X4=0, BLOCK_8X8=3, BLOCK_16X16=6, BLOCK_32X32=9, BLOCK_64X64=12, BLOCK_128X128=15
+        return bsize switch
+        {
+            0 => 0,
+            3 => 1,
+            6 => 2,
+            9 => 3,
+            12 => 4,
+            15 => 5,
+            _ => throw new ArgumentException($"Not a square block size: {bsize}", nameof(bsize)),
+        };
     }
 }
