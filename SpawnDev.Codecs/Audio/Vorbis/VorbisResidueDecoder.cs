@@ -99,7 +99,11 @@ internal static class VorbisResidueDecoder
                     {
                         if (doNotDecode[ch]) continue;
                         int temp = decoders[config.Classbook].TryDecode(ref reader);
-                        if (temp < 0) { eop = true; break; }
+                        if (temp < 0)
+                        {
+                            eop = true;
+                            break;
+                        }
                         for (int i = classwordsPerCodeword - 1; i >= 0; i--)
                         {
                             int pi = partitionCount + i;
@@ -151,12 +155,14 @@ internal static class VorbisResidueDecoder
         Span<float> partitionOut)
     {
         int step = partitionOut.Length / book.Dimensions;
+        Span<float> entryVec = stackalloc float[book.Dimensions];
         for (int i = 0; i < step; i++)
         {
             int entry = bookDecoder.TryDecode(ref reader);
             if (entry < 0) return false;
+            VorbisCodebookVector.LookupVector(book, entry, entryVec);
             for (int d = 0; d < book.Dimensions; d++)
-                partitionOut[i + d * step] += VorbisCodebookVector.LookupValue(book, entry, d);
+                partitionOut[i + d * step] += entryVec[d];
         }
         return true;
     }
@@ -168,12 +174,14 @@ internal static class VorbisResidueDecoder
         Span<float> partitionOut)
     {
         int i = 0;
+        Span<float> entryVec = stackalloc float[book.Dimensions];
         while (i < partitionOut.Length)
         {
             int entry = bookDecoder.TryDecode(ref reader);
             if (entry < 0) return false;
+            VorbisCodebookVector.LookupVector(book, entry, entryVec);
             for (int d = 0; d < book.Dimensions; d++)
-                partitionOut[i + d] += VorbisCodebookVector.LookupValue(book, entry, d);
+                partitionOut[i + d] += entryVec[d];
             i += book.Dimensions;
         }
         return true;
@@ -218,49 +226,61 @@ internal static class VorbisResidueDecoder
     }
 }
 
-/// <summary>Look up the multiplicand value for (entry, dim) in a codebook lookup table.</summary>
+/// <summary>Look up the multiplicand vector for one entry in a codebook lookup table.</summary>
 internal static class VorbisCodebookVector
 {
     /// <summary>
-    /// Produce the multiplicand value per Vorbis I Section 3.2.2. Returns 0 when
-    /// the codebook has no lookup table (type 0).
+    /// Produce the per-dimension multiplicand vector for codebook entry
+    /// <paramref name="entry"/> per Vorbis I Section 3.2.2 / libvorbis
+    /// _book_unquantize. Output length must equal <c>book.Dimensions</c>.
+    /// Mirrors libvorbis lib/sharedbook.c maptype 1 / maptype 2 logic
+    /// including <c>fabs()</c> on the multiplicand and the cross-dimension
+    /// <c>q_sequencep</c> accumulator (the previous dimension's value is
+    /// added into the next dimension's value).
     /// </summary>
-    internal static float LookupValue(VorbisCodebook book, int entry, int dim)
+    internal static void LookupVector(VorbisCodebook book, int entry, Span<float> outVec)
     {
-        if (book.LookupType == 0) return 0;
-        if (entry < 0 || entry >= book.Entries) return 0;
+        int dims = book.Dimensions;
+        if (outVec.Length != dims)
+            throw new ArgumentException(
+                $"outVec length {outVec.Length} != book dimensions {dims}.", nameof(outVec));
+
+        if (book.LookupType == 0 || entry < 0 || entry >= book.Entries)
+        {
+            for (int d = 0; d < dims; d++) outVec[d] = 0f;
+            return;
+        }
+        double mindel = book.MinValue;
+        double delta = book.DeltaValue;
+        double last = 0;
         if (book.LookupType == 1)
         {
-            // Lookup type 1: each entry's dims share a row into a smaller table.
-            int lookup1Values = book.Multiplicands.Length;
+            // Lookup type 1: each dim picks its own row from the shorter
+            // multiplicand table; the per-dim index is (entry / quantvals^d) % quantvals.
+            int quantvals = book.Multiplicands.Length;
             int indexDivisor = 1;
-            for (int i = 0; i < dim; i++) indexDivisor *= Lookup1ValuesCount(lookup1Values, book.Dimensions);
-            int multiplicandIndex = (entry / indexDivisor) % Lookup1ValuesCount(lookup1Values, book.Dimensions);
-            double delta = book.DeltaValue;
-            double val = book.MinValue + book.Multiplicands[multiplicandIndex] * delta;
-            if (book.SequenceP && dim > 0)
+            for (int d = 0; d < dims; d++)
             {
-                // Sequential p: accumulate across dimensions - simplified here.
-                // Full spec handling deferred to when the audio decoder drives
-                // this path with real streams.
+                int multiplicandIndex = (entry / indexDivisor) % quantvals;
+                double m = book.Multiplicands[multiplicandIndex];
+                double val = Math.Abs(m) * delta + mindel + last;
+                if (book.SequenceP) last = val;
+                outVec[d] = (float)val;
+                indexDivisor *= quantvals;
             }
-            return (float)val;
+            return;
         }
         // Lookup type 2: flat table indexed by (entry * dimensions + dim).
-        int flatIndex = entry * book.Dimensions + dim;
-        if (flatIndex < 0 || flatIndex >= book.Multiplicands.Length) return 0;
-        return (float)(book.MinValue + book.Multiplicands[flatIndex] * book.DeltaValue);
-    }
-
-    /// <summary>
-    /// Compute the per-dimension "lookup1_values" count for lookup type 1.
-    /// </summary>
-    private static int Lookup1ValuesCount(int multiplicandCount, int dims)
-    {
-        // By construction, multiplicandCount = lookup1_values(entries, dims),
-        // which is the cached count we read at parse time. For a single-dim
-        // book this is simply multiplicandCount; for multi-dim use that same
-        // value (it's the base count per dimension).
-        return multiplicandCount;
+        int baseIndex = entry * dims;
+        for (int d = 0; d < dims; d++)
+        {
+            int flatIndex = baseIndex + d;
+            double m = (flatIndex < 0 || flatIndex >= book.Multiplicands.Length)
+                ? 0
+                : book.Multiplicands[flatIndex];
+            double val = Math.Abs(m) * delta + mindel + last;
+            if (book.SequenceP) last = val;
+            outVec[d] = (float)val;
+        }
     }
 }

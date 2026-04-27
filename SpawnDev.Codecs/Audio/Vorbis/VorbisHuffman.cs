@@ -170,9 +170,16 @@ internal sealed class VorbisHuffmanDecoder
 internal static class VorbisHuffman
 {
     /// <summary>
-    /// Assign canonical Huffman codewords to every entry. Throws
-    /// <see cref="InvalidDataException"/> if the set of lengths is not a valid
-    /// prefix code (over- or under-specified).
+    /// Assign canonical Huffman codewords to every entry per Vorbis I
+    /// section 3.2.1 / libvorbis lib/sharedbook.c <c>_make_words</c>. Vorbis's
+    /// canonical scheme processes entries in entry-index order (NOT sorted by
+    /// length) and uses per-length "marker" counters that get pruned and
+    /// rebased as longer codes branch from already-claimed shorter prefixes.
+    /// A textbook count-based canonical Huffman assignment only matches when
+    /// lengths happen to be sorted ascending - which Vorbis codebooks are
+    /// usually not, so we have to mirror the marker algorithm exactly.
+    /// Throws <see cref="InvalidDataException"/> if the set of lengths is not
+    /// a valid prefix code (over-specified tree).
     /// </summary>
     internal static VorbisHuffmanTable Build(int[] lengths)
     {
@@ -192,57 +199,72 @@ internal static class VorbisHuffman
         if (maxLength > 32)
             throw new InvalidDataException($"Codebook maxLength {maxLength} > 32 bits.");
 
-        // Count entries per length (skip length 0 = unused).
-        var count = new int[maxLength + 1];
-        for (int i = 0; i < entries; i++)
-        {
-            int L = lengths[i];
-            if (L > 0) count[L]++;
-        }
-
-        // Compute the first code assigned at each length via canonical form.
-        // nextCode[L] is the next available code at length L, pre-incremented per assignment.
-        var nextCode = new ulong[maxLength + 2];
-        nextCode[1] = 0;
-        for (int L = 2; L <= maxLength + 1; L++)
-            nextCode[L] = (nextCode[L - 1] + (ulong)count[L - 1]) << 1;
-
-        // Validate: the final nextCode at length maxLength + 1 should be exactly 2^(maxLength+1)
-        // if every length slot is fully consumed; or <= that if the single-used-entry degenerate
-        // case. Single-entry-used is special: one entry gets code 0 regardless of declared length.
+        // Single-entry-used short-circuit: that entry always gets code 0.
         int usedCount = 0;
         for (int i = 0; i < entries; i++) if (lengths[i] > 0) usedCount++;
         if (usedCount == 1)
         {
-            var codewords = new uint[entries];
             return new VorbisHuffmanTable
             {
-                Codewords = codewords,
+                Codewords = new uint[entries],
                 EntryLengths = lengths,
                 MaxLength = maxLength,
             };
         }
 
-        // Assign codewords in entry order.
+        // libvorbis _make_words marker algorithm. marker[L] tracks the next
+        // available codeword at length L. When we claim a leaf at length L,
+        // we must prune any longer branches that would have dangled from the
+        // claimed node, and rebase them so they branch from the new "current"
+        // node at length L.
+        var marker = new uint[maxLength + 1];
         var codes = new uint[entries];
-        var perLengthCounter = new ulong[maxLength + 1];
-        for (int L = 0; L <= maxLength; L++) perLengthCounter[L] = (L <= maxLength) ? nextCode[L] : 0;
+
         for (int i = 0; i < entries; i++)
         {
-            int L = lengths[i];
-            if (L == 0) { codes[i] = 0; continue; }
-            ulong code = perLengthCounter[L];
-            if (code >> L != 0)
+            int length = lengths[i];
+            if (length <= 0) { codes[i] = 0; continue; }
+
+            uint entryCode = marker[length];
+            if (length < 32 && (entryCode >> length) != 0)
                 throw new InvalidDataException(
-                    $"Codebook over-specified: code 0x{code:X} at length {L} exceeds {1 << L}.");
-            codes[i] = (uint)code;
-            perLengthCounter[L]++;
+                    $"Codebook over-specified: marker[{length}]=0x{entryCode:X} doesn't fit in {length} bits.");
+            codes[i] = entryCode;
+
+            // Walk the marker UP from this length to length 1, claiming the
+            // path. If a marker at level j is already odd (a 1-bit at the
+            // bottom), we have to "jump branches" - rebase from the parent's
+            // marker shifted up.
+            for (int j = length; j > 0; j--)
+            {
+                if ((marker[j] & 1) != 0)
+                {
+                    if (j == 1) marker[1]++;
+                    else marker[j] = marker[j - 1] << 1;
+                    break;
+                }
+                marker[j]++;
+            }
+
+            // Walk DOWN from length+1 to maxLength, pruning any longer
+            // markers that pointed to the node we just claimed. They have to
+            // dangle from the new node instead.
+            for (int j = length + 1; j <= maxLength; j++)
+            {
+                if ((marker[j] >> 1) == entryCode)
+                {
+                    entryCode = marker[j];
+                    marker[j] = marker[j - 1] << 1;
+                }
+                else break;
+            }
         }
 
-        // Optional rigour: check that the tree is exactly full. If under-specified, the spec
-        // allows it as long as all generated lengths fit, but a strict implementation rejects.
-        // For permissive behavior we only error on OVER-specification (the per-length overflow
-        // check above).
+        // NOTE: libvorbis bit-reverses codes here so its LSB-first oggpack
+        // writer emits the canonical-MSB bit first. We don't need to do that
+        // ourselves because our Huffman tree is built MSB-first from the
+        // canonical codes, and our LSB-first reader will pull the bits in the
+        // same canonical-MSB order the encoder emitted.
 
         return new VorbisHuffmanTable
         {
