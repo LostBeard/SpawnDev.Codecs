@@ -39,102 +39,85 @@ public static class Vp8CoefBlockEncoder
         ArgumentNullException.ThrowIfNull(probs);
         if (coefs.Length < 16) throw new ArgumentException("coefs must have 16 entries", nameof(coefs));
 
-        // Find the EOB position by scanning from the end to find the last
-        // non-zero coefficient in zigzag order.
+        // Mirror libvpx GetCoeffs encode side: maintain (pBand, pCtx) which
+        // selects the prob vector used for the CURRENT decode. After each
+        // decode, p is updated to reflect the new (band, ctx) state. The
+        // encoder must use the SAME OLD (pBand, pCtx) for each emit, then
+        // update AFTER, matching the decoder's pull-then-update pattern.
         var zigzag = Vp8CoefBlockDecoder.ZigzagScan;
         var bands = Vp8CoefBlockDecoder.CoefBands;
+
+        // Find EOB: last scan position with a non-zero coef + 1.
         int eob = 0;
-        for (int n = 16 - 1; n >= firstCoef; n--)
+        for (int scan = 15; scan >= firstCoef; scan--)
         {
-            int raster = zigzag[n - firstCoef];
-            if (coefs[raster] != 0) { eob = n + 1; break; }
+            int raster = zigzag[scan];
+            if (coefs[raster] != 0) { eob = scan + 1; break; }
         }
-        // Special case: all-zero block from firstCoef onward.
-        // The decoder reads ONE bit at probs[bands[firstCoef], ctx, 0]:
-        //   0 means "this whole block is empty (EOB)"
-        //   1 means "there is at least one coefficient"
-        // So for an all-zero block we emit the single 0 bit.
-        if (eob == 0)
+
+        int n = firstCoef;
+        int pBand = bands[n];
+        int pCtx = ctx;
+
+        // First emit: "block is empty?" = 0 if EOB <= firstCoef, else 1.
+        if (eob <= firstCoef)
         {
-            writer.EncodeBool(0, probs[bands[firstCoef], ctx, 0]);
+            writer.EncodeBool(0, probs[pBand, pCtx, 0]);
             return 0;
         }
+        writer.EncodeBool(1, probs[pBand, pCtx, 0]);
 
-        // First non-zero token at firstCoef: emit "block is non-empty" = 1.
-        writer.EncodeBool(1, probs[bands[firstCoef], ctx, 0]);
-
-        // Now walk scan positions [firstCoef..15], encoding the per-position
-        // token chain (Zero | One | Two..CAT6 | EOB-after-non-zero).
-        int n2 = firstCoef;
-        while (n2 < 16)
+        // Walk scan positions firstCoef+1 .. 16 emitting one decision per position.
+        while (true)
         {
-            n2++;
-            if (n2 > eob)
-            {
-                // We've passed the last non-zero coef. Nothing more to emit.
-                return eob;
-            }
+            n++;
+            // At this position, the OLD (pBand, pCtx) drives prob selection
+            // for the ZERO/ONE/category emits.
 
-            int band = bands[n2];
-            int raster = zigzag[n2 - 1 - firstCoef];
-            // Wait - the decoder pulls scan position n THEN advances it.
-            // Re-check: the decoder loop is "++n; band = kBands[n]; check ZERO at probs[band, ctx, 1]".
-            // The raster index for the just-incremented n is kZigzag[n - 1].
-            // So when n2 = firstCoef + 1, the raster index is kZigzag[firstCoef].
-            // Let me use n2 - 1 - firstCoef shifted appropriately... actually
-            // the decoder uses kZigzag[n - 1] where n is post-increment, so
-            // for our n2 (already incremented), raster is kZigzag[n2 - 1].
-            raster = zigzag[n2 - 1];
-            int v = coefs[raster];
+            int rasterPrev = zigzag[n - 1];
+            int v = coefs[rasterPrev];
 
             if (v == 0)
             {
-                // Emit ZERO at probs[band, ctx, 1] = 0.
-                writer.EncodeBool(0, probs[band, ctx, 1]);
-                ctx = 0;
-                continue;
-            }
-
-            // Non-zero: emit ZERO bit = 1.
-            writer.EncodeBool(1, probs[band, ctx, 1]);
-            int absV = v < 0 ? -v : v;
-
-            // Emit ONE bit: 0 = exactly 1, 1 = >= 2.
-            if (absV == 1)
-            {
-                writer.EncodeBool(0, probs[band, ctx, 2]);
-                ctx = 1;
+                writer.EncodeBool(0, probs[pBand, pCtx, 1]);
+                pBand = bands[n];
+                pCtx = 0;
             }
             else
             {
-                writer.EncodeBool(1, probs[band, ctx, 2]);
-                EncodeAtLeastTwo(writer, probs, band, ctx, absV);
-                ctx = 2;
-            }
-
-            // Emit sign bit (flat probability 128).
-            writer.EncodeBool(v < 0 ? 1 : 0, 128);
-
-            // Now decide whether this was the last non-zero coef (EOB next).
-            // Decoder reads "EOB" at probs[bands[n2], ctx_after, 0]: 0 = EOB.
-            // EOB only emitted at scan positions n2 < 16.
-            if (n2 < 16)
-            {
-                if (n2 == eob)
+                writer.EncodeBool(1, probs[pBand, pCtx, 1]);
+                int absV = v < 0 ? -v : v;
+                if (absV == 1)
                 {
-                    // No more non-zero coefs: emit EOB = 0.
-                    writer.EncodeBool(0, probs[bands[n2], ctx, 0]);
-                    return eob;
+                    writer.EncodeBool(0, probs[pBand, pCtx, 2]);
+                    int newPBand = bands[n];
+                    writer.EncodeBool(v < 0 ? 1 : 0, 128);
+                    pBand = newPBand;
+                    pCtx = 1;
                 }
                 else
                 {
-                    // More non-zero coefs to come: emit EOB = 1.
-                    writer.EncodeBool(1, probs[bands[n2], ctx, 0]);
+                    writer.EncodeBool(1, probs[pBand, pCtx, 2]);
+                    EncodeAtLeastTwo(writer, probs, pBand, pCtx, absV);
+                    int newPBand = bands[n];
+                    writer.EncodeBool(v < 0 ? 1 : 0, 128);
+                    pBand = newPBand;
+                    pCtx = 2;
+                }
+
+                // EOB bit at NEW (pBand, pCtx). 0 = EOB. Only if n < 16.
+                if (n < 16)
+                {
+                    if (n == eob)
+                    {
+                        writer.EncodeBool(0, probs[pBand, pCtx, 0]);
+                        return eob;
+                    }
+                    writer.EncodeBool(1, probs[pBand, pCtx, 0]);
                 }
             }
+            if (n == 16) return eob;
         }
-
-        return eob;
     }
 
     private static void EncodeAtLeastTwo(
