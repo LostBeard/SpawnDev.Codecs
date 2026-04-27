@@ -83,17 +83,23 @@ internal static class VorbisResidueDecoder
 
         // Phase 1: classify. Pass 0 also reads the classification codewords.
         // Phase 2: iterate all 8 passes applying the per-classification-per-pass books.
+        // EOP handling: Vorbis I sec 8.6.5 specifies that end-of-packet during
+        // residue decode terminates decoding gracefully (remaining samples stay
+        // at zero). Mirrors libvorbis res0.c `eopbreak` goto pattern: any -1 from
+        // the EOP-aware Huffman decode falls out of every loop.
         for (int pass = 0; pass < 8; pass++)
         {
             int partitionCount = 0;
-            while (partitionCount < partitionsToRead)
+            bool eop = false;
+            while (partitionCount < partitionsToRead && !eop)
             {
                 if (pass == 0)
                 {
                     for (int ch = 0; ch < channels; ch++)
                     {
                         if (doNotDecode[ch]) continue;
-                        int temp = decoders[config.Classbook].Decode(ref reader);
+                        int temp = decoders[config.Classbook].TryDecode(ref reader);
+                        if (temp < 0) { eop = true; break; }
                         for (int i = classwordsPerCodeword - 1; i >= 0; i--)
                         {
                             int pi = partitionCount + i;
@@ -102,9 +108,10 @@ internal static class VorbisResidueDecoder
                             temp /= classificationsCount;
                         }
                     }
+                    if (eop) break;
                 }
 
-                for (int i = 0; i < classwordsPerCodeword && partitionCount < partitionsToRead; i++)
+                for (int i = 0; i < classwordsPerCodeword && partitionCount < partitionsToRead && !eop; i++)
                 {
                     for (int ch = 0; ch < channels; ch++)
                     {
@@ -115,26 +122,29 @@ internal static class VorbisResidueDecoder
                         int offset = actualBegin + partitionCount * partitionSize;
                         var bookDecoder = decoders[bookIndex];
                         var book = codebooks[bookIndex];
+                        bool partitionOk;
                         if (config.Type == VorbisResidueType.Type0)
                         {
-                            DecodeType0Partition(
+                            partitionOk = TryDecodeType0Partition(
                                 ref reader, bookDecoder, book,
                                 residueOut[ch].AsSpan(offset, partitionSize));
                         }
                         else
                         {
-                            DecodeType1Partition(
+                            partitionOk = TryDecodeType1Partition(
                                 ref reader, bookDecoder, book,
                                 residueOut[ch].AsSpan(offset, partitionSize));
                         }
+                        if (!partitionOk) { eop = true; break; }
                     }
                     partitionCount++;
                 }
             }
+            if (eop) return;
         }
     }
 
-    private static void DecodeType0Partition(
+    private static bool TryDecodeType0Partition(
         ref VorbisBitReader reader,
         VorbisHuffmanDecoder bookDecoder,
         VorbisCodebook book,
@@ -143,13 +153,15 @@ internal static class VorbisResidueDecoder
         int step = partitionOut.Length / book.Dimensions;
         for (int i = 0; i < step; i++)
         {
-            int entry = bookDecoder.Decode(ref reader);
+            int entry = bookDecoder.TryDecode(ref reader);
+            if (entry < 0) return false;
             for (int d = 0; d < book.Dimensions; d++)
                 partitionOut[i + d * step] += VorbisCodebookVector.LookupValue(book, entry, d);
         }
+        return true;
     }
 
-    private static void DecodeType1Partition(
+    private static bool TryDecodeType1Partition(
         ref VorbisBitReader reader,
         VorbisHuffmanDecoder bookDecoder,
         VorbisCodebook book,
@@ -158,11 +170,13 @@ internal static class VorbisResidueDecoder
         int i = 0;
         while (i < partitionOut.Length)
         {
-            int entry = bookDecoder.Decode(ref reader);
+            int entry = bookDecoder.TryDecode(ref reader);
+            if (entry < 0) return false;
             for (int d = 0; d < book.Dimensions; d++)
                 partitionOut[i + d] += VorbisCodebookVector.LookupValue(book, entry, d);
             i += book.Dimensions;
         }
+        return true;
     }
 
     private static void DecodeType2(

@@ -140,6 +140,31 @@ internal sealed class VorbisHuffmanDecoder
         }
         throw new InvalidDataException("Vorbis Huffman decode: exceeded max depth without hitting a leaf.");
     }
+
+    /// <summary>
+    /// EOP-aware variant of <see cref="Decode"/>. Returns -1 when the packet
+    /// runs out of bits mid-codeword (Vorbis I sec 8.6.5: residue decode
+    /// terminates gracefully on end-of-packet). Mirrors libvorbis
+    /// <c>vorbis_book_decode</c> convention of returning -1 on EOP.
+    /// </summary>
+    internal int TryDecode(ref VorbisBitReader reader)
+    {
+        int node = 0;
+        for (int depth = 0; depth <= _maxDepth; depth++)
+        {
+            if (!reader.TryReadBit(out uint bitVal)) return -1;
+            int bit = (int)bitVal;
+            int nextRaw = _children[node * 2 + bit];
+            if (nextRaw == -1)
+                throw new InvalidDataException(
+                    $"Vorbis Huffman decode: no path for bit pattern at depth {depth}.");
+            int nextIdx = nextRaw & ~EntryBit;
+            if (_isLeaf[nextIdx])
+                return _leafToEntry[nextIdx];
+            node = nextIdx;
+        }
+        throw new InvalidDataException("Vorbis Huffman decode: exceeded max depth without hitting a leaf.");
+    }
 }
 
 internal static class VorbisHuffman

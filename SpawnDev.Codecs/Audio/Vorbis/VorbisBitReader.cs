@@ -75,6 +75,26 @@ internal ref struct VorbisBitReader
     internal uint ReadBit() => ReadBits(1);
 
     /// <summary>
+    /// Try to read <paramref name="nBits"/> bits. Returns false (without
+    /// advancing the read cursor) when the packet has fewer remaining bits.
+    /// Vorbis I sec 8.6.5 specifies that residue decode treats end-of-packet
+    /// as a graceful termination signal rather than an error, so the
+    /// EOP-aware decode paths use this overload to short-circuit cleanly.
+    /// </summary>
+    internal bool TryReadBits(int nBits, out uint value)
+    {
+        if (nBits < 0 || nBits > 32)
+            throw new ArgumentOutOfRangeException(nameof(nBits), "must be in [0, 32].");
+        if (nBits == 0) { value = 0; return true; }
+        if (BitsRemaining < nBits) { value = 0; return false; }
+        value = ReadBits(nBits);
+        return true;
+    }
+
+    /// <summary>EOP-aware single-bit read. Returns false on end-of-packet.</summary>
+    internal bool TryReadBit(out uint bit) => TryReadBits(1, out bit);
+
+    /// <summary>
     /// Read a signed integer of <paramref name="nBits"/> bits, where the top
     /// bit of the read value is interpreted as the sign per two's complement.
     /// </summary>
