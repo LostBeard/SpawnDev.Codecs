@@ -32,19 +32,32 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
-    public void Vp9BlockCoefDecoder_OneZeroThenEob_WritesZeroAtScan0RasterPos()
+    public void Vp9BlockCoefDecoder_ZeroAtPosZero_ThenOneAtPos1_ThenEobAtPos2()
     {
-        // c=0: EOB?=1 (not EOB), ZERO?=0 (Zero), advance
-        // c=1: EOB?=0 (EOB)
-        // Default 4x4 scan position 0 = raster 0, so block[0] stays 0
-        // (it was already 0 from the buffer init).
-        var read = BlockBitReader(new int[] { 1, 0, 0 });
+        // Per VP9 spec sec 6.4.21 + libvpx vp9/decoder/vp9_detokenize.c:
+        // after a ZERO token, the inner zero loop only re-reads the
+        // ZERO_CONTEXT_NODE bit (NOT EOB) at the next position. The
+        // inner loop only exits via a non-zero token, so a "ZERO then
+        // EOB" bitstream is impossible to emit - the encoder never
+        // writes that sequence. Replaced the prior "ZERO + EOB" test
+        // (which was asserting pre-libvpx-fix behavior) with this
+        // libvpx-valid scenario: ZERO at c=0, ONE at c=1, EOB at c=2.
+        //
+        // Bit stream: { 1, 0, 1, 0, 0, 0 }
+        //   c=0: EOB?=1 (not EOB), ZERO?=0 (Zero token, advance)
+        //   c=1: ZERO?=1 (not zero, exit inner loop), ONE?=0 (One token), sign=0 (+1)
+        //   c=2: EOB?=0 (EOB)
+        //
+        // Default 4x4 scan: scan[0]=0, scan[1]=4 (libvpx zigzag).
+        var read = BlockBitReader(new int[] { 1, 0, 1, 0, 0, 0 });
         var block = new short[16];
         int eob = Vp9BlockCoefDecoder.DecodeBlockCoefficients(
             read, Vp9TxSize.Tx4x4, Vp9ScanType.Default,
             Vp9BlockCoefDecoder.PlaneType.Y, Vp9BlockCoefDecoder.RefType.Intra, block);
-        Equal(1, eob);
-        for (int i = 0; i < 16; i++) Equal((short)0, block[i]);
+        Equal(2, eob);
+        Equal((short)0, block[0]);  // raster 0 (scan pos 0) is zero
+        Equal((short)1, block[4]);  // raster 4 (scan pos 1) is +1
+        for (int i = 0; i < 16; i++) if (i != 4) Equal((short)0, block[i]);
     }
 
     [TestMethod]

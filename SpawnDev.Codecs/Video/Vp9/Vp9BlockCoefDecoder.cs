@@ -124,26 +124,77 @@ public static class Vp9BlockCoefDecoder
         int c = 0;
         while (c < maxCoefs)
         {
-            int rasterPos = scan[c];
+            // Compute (band, ctx) and expand model for current c.
             int band = (int)Vp9CoefBands.GetBand(txSize, c);
             int ctx = Vp9CoefContext.GetCoefContext(neighbors, tokenCache, c);
-
-            // Expand the stored 3-entry model to the full 11-entry
-            // probability vector for this (band, ctx).
             int modelBase = Vp9CoefProbs.Index4x4(
                 (int)planeType, (int)refType, band, ctx, 0);
             ReadOnlySpan<byte> model = coefProbs.AsSpan(modelBase, 3);
             Vp9CoefProbs.ModelToFullProbs(model, fullProbs);
 
-            var decoded = Vp9CoefDecoder.DecodeOneCoefficient(
-                readBit, fullProbs, isHighBitDepth);
+            // EOB check at this scan position. !vpx_read(prob[EOB]) is the
+            // EOB branch (libvpx convention: read==0 means EOB).
+            if (readBit(fullProbs[0]) == 0) break;
 
-            if (decoded.Token == Vp9CoefToken.Eob)
-                break;
+            // Inner ZERO loop. libvpx reads ZERO repeatedly without
+            // re-reading EOB - this is bitstream-significant: re-reading
+            // EOB consumes bits the encoder never emits. Per VP9 spec
+            // 6.4.20 "Decode coefficients" the EOB token can only follow
+            // a NON-ZERO token, so once we're past EOB the only choice
+            // for the next position is ZERO vs non-ZERO until the next
+            // EOB-eligible (post-non-zero) position.
+            while (readBit(fullProbs[1]) == 0)
+            {
+                // ZERO token: block[scan[c]] is already 0 from Clear();
+                // tokenCache[scan[c]] is already 0 (PtEnergyClass[Zero]
+                // happens to be 0 too, so no update needed).
+                c++;
+                if (c >= maxCoefs) return c;
 
-            // Write the (signed) value at the raster position.
-            block[rasterPos] = (short)decoded.Value;
-            tokenCache[rasterPos] = Vp9CoefContext.PtEnergyClass[(int)decoded.Token];
+                // Recompute probs for the new position.
+                band = (int)Vp9CoefBands.GetBand(txSize, c);
+                ctx = Vp9CoefContext.GetCoefContext(neighbors, tokenCache, c);
+                modelBase = Vp9CoefProbs.Index4x4(
+                    (int)planeType, (int)refType, band, ctx, 0);
+                model = coefProbs.AsSpan(modelBase, 3);
+                Vp9CoefProbs.ModelToFullProbs(model, fullProbs);
+            }
+
+            // Got a non-zero token. Decode magnitude + sign WITHOUT
+            // re-reading EOB or ZERO (we already consumed those bits).
+            Vp9CoefToken token;
+            int magnitude;
+            if (readBit(fullProbs[2]) == 0)
+            {
+                token = Vp9CoefToken.One;
+                magnitude = 1;
+            }
+            else
+            {
+                token = Vp9CoefTrees.DecodeConToken(readBit, fullProbs.Slice(3, 8));
+                magnitude = token switch
+                {
+                    Vp9CoefToken.Two   => 2,
+                    Vp9CoefToken.Three => 3,
+                    Vp9CoefToken.Four  => 4,
+                    Vp9CoefToken.Category1
+                        or Vp9CoefToken.Category2
+                        or Vp9CoefToken.Category3
+                        or Vp9CoefToken.Category4
+                        or Vp9CoefToken.Category5
+                        or Vp9CoefToken.Category6
+                        => Vp9CoefProbs.DecodeCategoryMagnitude(readBit, token, isHighBitDepth),
+                    _ => throw new InvalidDataException(
+                        $"DecodeConToken returned unexpected token {token}"),
+                };
+            }
+
+            int sign = readBit(128);
+            int value = sign != 0 ? -magnitude : magnitude;
+
+            int rasterPos = scan[c];
+            block[rasterPos] = (short)value;
+            tokenCache[rasterPos] = Vp9CoefContext.PtEnergyClass[(int)token];
             c++;
         }
 

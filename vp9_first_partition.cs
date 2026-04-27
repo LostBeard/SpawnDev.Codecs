@@ -220,9 +220,8 @@ if (partition == Vp9PartitionType.Split)
 
             if (sk == 0)
             {
-                // Decode 16x16 Y coefficients with full per-token tracing.
-                // Custom loop that mirrors Vp9BlockCoefDecoder but logs
-                // every token + magnitude + sign for libvpx comparison.
+                // Decode 16x16 Y coefficients via inline trace loop (mirrors
+                // refactored Vp9BlockCoefDecoder with libvpx inner-zero-loop).
                 var coefBlock = new short[256];
                 var txSize = Vp9TxSize.Tx16x16;
                 var scanType = Vp9ScanType.Default;
@@ -233,34 +232,54 @@ if (partition == Vp9PartitionType.Split)
                 ushort[] neighbors = Vp9NeighborTables.GetNeighbors16x16(scanType);
                 var tokenCache = new byte[256];
                 var fullProbs = new byte[Vp9CoefProbs.EntropyNodes];
-
-                Console.WriteLine("  --- Coefficient decode trace ---");
-                int c = 0;
                 int eob = 0;
+                int c = 0;
+                Console.WriteLine("  --- Coef decode trace (libvpx inner-zero-loop) ---");
                 while (c < 256)
                 {
-                    int rasterPos = scan[c];
                     int band = (int)Vp9CoefBands.GetBand(txSize, c);
                     int ctx = Vp9CoefContext.GetCoefContext(neighbors, tokenCache, c);
                     int modelBase = Vp9CoefProbs.Index4x4((int)planeType, (int)refType, band, ctx, 0);
-                    ReadOnlySpan<byte> model = coefProbsTable.AsSpan(modelBase, 3);
+                    var model = coefProbsTable.AsSpan(modelBase, 3);
                     Vp9CoefProbs.ModelToFullProbs(model, fullProbs);
-
-                    var decoded = Vp9CoefDecoder.DecodeOneCoefficient(
-                        p => br.Read(p), fullProbs, isHighBitDepth: false);
-
-                    if (decoded.Token != Vp9CoefToken.Zero)
+                    int eobBit = br.Read(fullProbs[0]);
+                    if (eobBit == 0) { eob = c; Console.WriteLine($"    c={c,3} EOB"); break; }
+                    while (true)
                     {
-                        Console.WriteLine($"    c={c,3} raster={rasterPos,3} band={band} ctx={ctx} model=[{model[0]},{model[1]},{model[2]}] -> {decoded.Token} value={decoded.Value}");
+                        int zeroBit = br.Read(fullProbs[1]);
+                        if (zeroBit == 1) break;
+                        Console.WriteLine($"    c={c,3} raster={scan[c],3} band={band} ctx={ctx} -> Zero");
+                        c++;
+                        if (c >= 256) { eob = c; goto Done; }
+                        band = (int)Vp9CoefBands.GetBand(txSize, c);
+                        ctx = Vp9CoefContext.GetCoefContext(neighbors, tokenCache, c);
+                        modelBase = Vp9CoefProbs.Index4x4((int)planeType, (int)refType, band, ctx, 0);
+                        model = coefProbsTable.AsSpan(modelBase, 3);
+                        Vp9CoefProbs.ModelToFullProbs(model, fullProbs);
                     }
-
-                    if (decoded.Token == Vp9CoefToken.Eob) { eob = c; break; }
-                    coefBlock[rasterPos] = (short)decoded.Value;
-                    tokenCache[rasterPos] = Vp9CoefContext.PtEnergyClass[(int)decoded.Token];
+                    Vp9CoefToken token; int magnitude;
+                    if (br.Read(fullProbs[2]) == 0) { token = Vp9CoefToken.One; magnitude = 1; }
+                    else
+                    {
+                        token = Vp9CoefTrees.DecodeConToken(p => br.Read(p), fullProbs.AsSpan(3, 8));
+                        magnitude = token switch
+                        {
+                            Vp9CoefToken.Two => 2, Vp9CoefToken.Three => 3, Vp9CoefToken.Four => 4,
+                            Vp9CoefToken.Category1 or Vp9CoefToken.Category2 or Vp9CoefToken.Category3
+                            or Vp9CoefToken.Category4 or Vp9CoefToken.Category5 or Vp9CoefToken.Category6
+                                => Vp9CoefProbs.DecodeCategoryMagnitude(p => br.Read(p), token, false),
+                            _ => throw new InvalidDataException($"unexpected token {token}"),
+                        };
+                    }
+                    int sign = br.Read(128);
+                    int value = sign != 0 ? -magnitude : magnitude;
+                    Console.WriteLine($"    c={c,3} raster={scan[c],3} band={band} ctx={ctx} -> {token} value={value}");
+                    coefBlock[scan[c]] = (short)value;
+                    tokenCache[scan[c]] = Vp9CoefContext.PtEnergyClass[(int)token];
                     c++;
                 }
+                Done:
                 Console.WriteLine($"  --- End trace, EOB at scan position {eob} ---");
-                // Print all non-zero coefficients in raster order.
                 Console.Write("    Non-zero raster positions:");
                 int nonZeroCount = 0;
                 for (int i = 0; i < 256; i++)
@@ -268,7 +287,7 @@ if (partition == Vp9PartitionType.Split)
                     if (coefBlock[i] != 0)
                     {
                         Console.Write($" [{i}]={coefBlock[i]}");
-                        if (++nonZeroCount >= 10) break;
+                        if (++nonZeroCount >= 12) break;
                     }
                 }
                 Console.WriteLine();
