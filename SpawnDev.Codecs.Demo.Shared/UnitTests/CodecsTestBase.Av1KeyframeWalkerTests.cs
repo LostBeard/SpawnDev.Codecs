@@ -1,6 +1,7 @@
 // AV1 keyframe walker tests. Drives the architecture skeleton against
-// the BBB first keyframe and verifies it correctly throws at the
-// partition decode boundary (waiting for partition CDF tables).
+// the BBB first keyframe and verifies it correctly walks the bitstream
+// through partition decode + mode info read, then throws at the
+// coefficient decode boundary (next porting step: av1_read_coeffs_txb).
 
 using SpawnDev.Codecs.Container.Ivf;
 using SpawnDev.Codecs.Video.Av1;
@@ -12,8 +13,12 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 public abstract partial class CodecsTestBase
 {
     [TestMethod]
-    public void Av1KeyframeWalker_BbbFirstKeyframe_FailsAtPartitionDecodeBoundary()
+    public void Av1KeyframeWalker_BbbFirstKeyframe_FailsAtCoefficientDecodeBoundary()
     {
+        // The walker has been wired through partition decode + mode info
+        // read (intra mode, skip, delta_q, cdef, uv mode, angle delta,
+        // filter intra). The remaining gap is av1_read_coeffs_txb (libaom
+        // av1/decoder/decodetxb.c). This test pins the current boundary.
         var (sh, payload) = LoadBbbAv1FirstKeyframeForWalker();
         var complete = Av1CompleteFrameHeaderParser.Parse(payload, sh);
         var tg = Av1TileGroupExtractor.Extract(payload, complete);

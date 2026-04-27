@@ -163,6 +163,15 @@ public sealed class Av1KeyframeWalker
         int frameMiCols = (header.Prefix.FrameWidth + 7) >> 3 << 1;
         var pctx = new Av1PartitionContext(Math.Max(tileMiCols, frameMiCols));
 
+        // Per-tile mode info grid for above/left neighbor queries.
+        var miGrid = new Av1ModeInfoGrid(frameMiRows, frameMiCols);
+        // Per-superblock state (CDEF + delta_q running totals).
+        var sbState = new Av1SuperblockState
+        {
+            CurrentBaseQindex = header.Quant.BaseQindex,
+        };
+        var ctx = new DecodeContext(rangeDec, pctx, miGrid, sbState);
+
         // Walk superblocks in raster scan within the tile.
         for (int sbRow = rowStart; sbRow < rowEnd; sbRow++)
         {
@@ -171,46 +180,66 @@ public sealed class Av1KeyframeWalker
             {
                 int miRow = sbRow * (sbSizePx >> 2);
                 int miCol = sbCol * (sbSizePx >> 2);
-                DecodeSuperblock(rangeDec, sh, header, pctx, miRow, miCol, sbBlockIdx, y, u, v);
+                DecodeSuperblock(ctx, sh, header, miRow, miCol, sbBlockIdx, y, u, v);
             }
         }
     }
 
+    /// <summary>
+    /// Per-tile decode state passed down through the partition recursion.
+    /// </summary>
+    private sealed class DecodeContext
+    {
+        public readonly Av1RangeDecoder Rd;
+        public readonly Av1PartitionContext Pctx;
+        public readonly Av1ModeInfoGrid MiGrid;
+        public readonly Av1SuperblockState SbState;
+
+        public DecodeContext(Av1RangeDecoder rd, Av1PartitionContext pctx, Av1ModeInfoGrid miGrid, Av1SuperblockState sbState)
+        {
+            Rd = rd;
+            Pctx = pctx;
+            MiGrid = miGrid;
+            SbState = sbState;
+        }
+    }
+
     private void DecodeSuperblock(
-        Av1RangeDecoder rd,
+        DecodeContext ctx,
         Av1SequenceHeader sh,
         Av1CompleteFrameHeader header,
-        Av1PartitionContext pctx,
         int miRow, int miCol, int sbBlockIdx,
         byte[] y, byte[] u, byte[] v)
     {
         // Recursive partition decode: starts at the superblock size,
         // decodes a partition symbol, then recurses on the children.
-        DecodePartition(rd, sh, header, pctx, miRow, miCol, sbBlockIdx, y, u, v);
+        DecodePartition(ctx, sh, header, miRow, miCol, sbBlockIdx, y, u, v);
     }
 
     private void DecodePartition(
-        Av1RangeDecoder rd,
+        DecodeContext ctx,
         Av1SequenceHeader sh,
         Av1CompleteFrameHeader header,
-        Av1PartitionContext pctx,
         int miRow, int miCol, int bsize,
         byte[] y, byte[] u, byte[] v)
     {
+        var rd = ctx.Rd;
+        var pctx = ctx.Pctx;
+
         // Per AV1 spec sec 5.11.4: minimum partition size is BLOCK_8X8;
         // smaller blocks have an implicit PARTITION_NONE.
         if (bsize < Av1PartitionContext.Block8x8)
         {
-            DecodeBlock(rd, sh, header, pctx, miRow, miCol, bsize, Av1PartitionType.None, y, u, v);
+            DecodeBlock(ctx, sh, header, miRow, miCol, bsize, Av1PartitionType.None, y, u, v);
             return;
         }
 
         // Compute the partition context (combination of above + left split bits).
-        int ctx = pctx.GetContext(miRow, miCol, bsize);
+        int partitionCtx = pctx.GetContext(miRow, miCol, bsize);
         int nsyms = Av1PartitionContext.PartitionCdfLength(bsize);
 
         // Decode the partition symbol from the appropriate CDF row.
-        var cdf = Av1DefaultPartitionCdfs.DefaultPartitionCdf[ctx];
+        var cdf = Av1DefaultPartitionCdfs.DefaultPartitionCdf[partitionCtx];
         Av1PartitionType partition = (Av1PartitionType)rd.DecodeCdfQ15(cdf, nsyms);
 
         // Map (bsize, partition) -> sub-block size via subsize_lookup.
@@ -230,29 +259,29 @@ public sealed class Av1KeyframeWalker
         switch (partition)
         {
             case Av1PartitionType.None:
-                DecodeBlock(rd, sh, header, pctx, miRow, miCol, subsize, partition, y, u, v);
+                DecodeBlock(ctx, sh, header, miRow, miCol, subsize, partition, y, u, v);
                 pctx.UpdateContext(miRow, miCol, subsize);
                 break;
 
             case Av1PartitionType.Horz:
-                DecodeBlock(rd, sh, header, pctx, miRow, miCol, subsize, partition, y, u, v);
+                DecodeBlock(ctx, sh, header, miRow, miCol, subsize, partition, y, u, v);
                 if (miRow + hbs < FrameMiRows(header))
-                    DecodeBlock(rd, sh, header, pctx, miRow + hbs, miCol, subsize, partition, y, u, v);
+                    DecodeBlock(ctx, sh, header, miRow + hbs, miCol, subsize, partition, y, u, v);
                 pctx.UpdateContext(miRow, miCol, subsize);
                 break;
 
             case Av1PartitionType.Vert:
-                DecodeBlock(rd, sh, header, pctx, miRow, miCol, subsize, partition, y, u, v);
+                DecodeBlock(ctx, sh, header, miRow, miCol, subsize, partition, y, u, v);
                 if (miCol + hbs < FrameMiCols(header))
-                    DecodeBlock(rd, sh, header, pctx, miRow, miCol + hbs, subsize, partition, y, u, v);
+                    DecodeBlock(ctx, sh, header, miRow, miCol + hbs, subsize, partition, y, u, v);
                 pctx.UpdateContext(miRow, miCol, subsize);
                 break;
 
             case Av1PartitionType.Split:
-                DecodePartition(rd, sh, header, pctx, miRow, miCol, subsize, y, u, v);
-                DecodePartition(rd, sh, header, pctx, miRow, miCol + hbs, subsize, y, u, v);
-                DecodePartition(rd, sh, header, pctx, miRow + hbs, miCol, subsize, y, u, v);
-                DecodePartition(rd, sh, header, pctx, miRow + hbs, miCol + hbs, subsize, y, u, v);
+                DecodePartition(ctx, sh, header, miRow, miCol, subsize, y, u, v);
+                DecodePartition(ctx, sh, header, miRow, miCol + hbs, subsize, y, u, v);
+                DecodePartition(ctx, sh, header, miRow + hbs, miCol, subsize, y, u, v);
+                DecodePartition(ctx, sh, header, miRow + hbs, miCol + hbs, subsize, y, u, v);
                 break;
 
             case Av1PartitionType.Horz4:
@@ -260,7 +289,7 @@ public sealed class Av1KeyframeWalker
                 {
                     int r = miRow + i * qbs;
                     if (i > 0 && r >= FrameMiRows(header)) break;
-                    DecodeBlock(rd, sh, header, pctx, r, miCol, subsize, partition, y, u, v);
+                    DecodeBlock(ctx, sh, header, r, miCol, subsize, partition, y, u, v);
                 }
                 pctx.UpdateContext(miRow, miCol, subsize);
                 break;
@@ -270,7 +299,7 @@ public sealed class Av1KeyframeWalker
                 {
                     int c = miCol + i * qbs;
                     if (i > 0 && c >= FrameMiCols(header)) break;
-                    DecodeBlock(rd, sh, header, pctx, miRow, c, subsize, partition, y, u, v);
+                    DecodeBlock(ctx, sh, header, miRow, c, subsize, partition, y, u, v);
                 }
                 pctx.UpdateContext(miRow, miCol, subsize);
                 break;
@@ -293,44 +322,61 @@ public sealed class Av1KeyframeWalker
     }
 
     private void DecodeBlock(
-        Av1RangeDecoder rd,
+        DecodeContext ctx,
         Av1SequenceHeader sh,
         Av1CompleteFrameHeader header,
-        Av1PartitionContext pctx,
         int miRow, int miCol, int bsize, Av1PartitionType partition,
         byte[] y, byte[] u, byte[] v)
     {
-        // Per-block decode dependencies. Status reflects PORTED tables; the
-        // execution wiring (read_modes_b -> read_inter_block_mode_info ->
-        // decode_tokens -> reconstruct) is the next step.
-        //   - partition CDF                  -> Av1DefaultPartitionCdfs        PORTED
-        //   - skip flag CDF                  -> Av1DefaultBlockCdfs.DefaultSkipTxfmCdf  PORTED
-        //   - intrabc + skip_mode + txfm_partition -> Av1DefaultBlockCdfs              PORTED
-        //   - intra mode CDFs (kf_y / y / uv) -> Av1DefaultIntraModeCdfs                PORTED
-        //   - segmentation CDFs              -> Av1DefaultSegmentCdfs           PORTED
-        //   - tx size + intra/inter ext_tx   -> Av1DefaultTxfmCdfs              PORTED
-        //   - coefficient CDFs (token_cdfs.h) -> Av1DefaultCoefCdfs              PORTED
-        //   - inverse quant tables           -> Av1DequantTables                PORTED
-        //   - inverse transforms             -> Av1Inverse{Dct,Adst,Identity}*  PORTED
-        //   - intra predictor                -> Av1IntraPredictor               PORTED
+        // STEP 1: read mode info (intra mode + skip + uv mode + angle + filter intra).
+        // This drives the entropy stream forward to consume the per-block mode bits.
+        // Output written into ctx.MiGrid for above/left neighbor queries on later blocks.
+        var mi = Av1ModeInfoReader.Read(
+            ctx.Rd, sh, header, ctx.MiGrid, ctx.SbState, miRow, miCol, bsize);
+
+        // STEP 2: read transform coefficients per plane / per tx block.
+        // The full coefficient decoder (libaom av1/decoder/decodetxb.c
+        // av1_read_coeffs_txb) reads:
+        //   - txb_skip CDF (one bit per tx block)
+        //   - eob_multi CDFs (per tx size)
+        //   - eob_extra raw bits for refinement
+        //   - coeff_base + coeff_br CDFs for per-position level values
+        //   - dc_sign CDF for the DC coefficient sign bit
+        //   - sign bits for AC coefficients
+        //   - Cat tokens / unconstrained Golomb code for high magnitudes
+        // All required CDF tables are present (Av1DefaultCoefCdfs); the
+        // remaining work is to port the txb_common.h context helpers (~12
+        // small inline functions) plus the read_coeffs_txb body itself.
         //
-        // Remaining wiring (this method's body):
-        //   - mode_info decode (intra mode + uv mode + skip + tx_size + segment)
-        //   - decode_coefs() loop per plane / per tx block (libaom
-        //     av1/decoder/decodetxb.c) - reads txb_skip, eob, base, br, dc_sign
-        //     using the Av1DefaultCoefCdfs tables; builds dequantized coeff array
-        //   - inverse transform dispatch
-        //   - intra predictor edge buffer assembly + invocation
-        //   - reconstruct sample array (predictor + residual) -> y/u/v planes
-        //   - adaptive CDF updates per AV1 spec sec 9.4 (defer until decode works)
-        throw new NotImplementedException(
-            $"AV1 per-block decode at miRow={miRow}, miCol={miCol}, bsize={bsize}, " +
-            $"partition={partition}: all default CDF tables are ported (partition, " +
-            "block-level binary, intra mode, txfm size/type, segment, coefficient). " +
-            "Remaining: wire mode_info decode + decode_coefs() + inverse transform + " +
-            "intra predict + reconstruct. See libaom av1/decoder/decodeframe.c " +
-            "decode_partition() and av1/decoder/decodetxb.c decode_coefs() for the " +
-            "execution order. The data tables are now sufficient to drive the decoder.");
+        // Without coefficient decode we cannot produce real pixel output -
+        // any bit consumed past the mode info would desync the entropy
+        // stream and cause downstream blocks to read wrong CDF symbols.
+        // We therefore stop here on the FIRST block (skip-only blocks
+        // would be the only "early exit" case where mode info alone is
+        // enough), and document the next concrete step.
+        if (!mi.SkipTxfm)
+        {
+            throw new NotImplementedException(
+                $"AV1 coefficient decode not yet implemented. " +
+                $"Mode info read at miRow={miRow}, miCol={miCol}, bsize={bsize}, " +
+                $"partition={partition}: yMode={mi.YMode}, uvMode={mi.UvMode}, " +
+                $"skip={mi.SkipTxfm}, tx_size={mi.TxSize}. " +
+                "Next step: port libaom av1/decoder/decodetxb.c " +
+                "av1_read_coeffs_txb() + the txb_common.h context helpers " +
+                "(get_lower_levels_ctx*, get_br_ctx*, get_padded_idx, " +
+                "set_levels) plus av1_eob_group_start[] / av1_eob_offset_bits[] " +
+                "tables. Coefficient CDFs (Av1DefaultCoefCdfs) are already ported.");
+        }
+        // SkipTxfm == true: no coefficients to decode. The block is intra-predicted
+        // from neighbors and that's the final reconstruction (no residual).
+        // The intra prediction + reconstruction itself still requires the
+        // edge buffer assembly path that's not yet wired.
+
+        // STEP 3 (skipped for now): inverse transform dispatch + intra predict
+        // + reconstruct into y/u/v. Until both paths land we leave the output
+        // planes at their initial value (zeros).
+        // TODO: wire Av1IntraPredictor + per-(tx_size, tx_type) inverse
+        // transform + reconstruct write into y/u/v.
     }
 
     private static int FrameMiRows(Av1CompleteFrameHeader header)
