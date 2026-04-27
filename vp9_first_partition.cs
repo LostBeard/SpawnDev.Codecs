@@ -220,19 +220,46 @@ if (partition == Vp9PartitionType.Split)
 
             if (sk == 0)
             {
-                // Decode 16x16 Y coefficients. For DcPred + Tx16x16 the
-                // tx_type is DCT_DCT, which uses the Default scan order.
+                // Decode 16x16 Y coefficients with full per-token tracing.
+                // Custom loop that mirrors Vp9BlockCoefDecoder but logs
+                // every token + magnitude + sign for libvpx comparison.
                 var coefBlock = new short[256];
-                int eob = Vp9BlockCoefDecoder.DecodeBlockCoefficients(
-                    readBit: p => br.Read(p),
-                    txSize: Vp9TxSize.Tx16x16,
-                    scanType: Vp9ScanType.Default,
-                    planeType: Vp9BlockCoefDecoder.PlaneType.Y,
-                    refType: Vp9BlockCoefDecoder.RefType.Intra,
-                    block: coefBlock,
-                    isHighBitDepth: false,
-                    coefProbs: decoder.LastCompressedState!.CoefProbs[(int)Vp9TxSize.Tx16x16]);
-                Console.WriteLine($"  Coefficients decoded, EOB at scan position {eob}");
+                var txSize = Vp9TxSize.Tx16x16;
+                var scanType = Vp9ScanType.Default;
+                var planeType = Vp9BlockCoefDecoder.PlaneType.Y;
+                var refType = Vp9BlockCoefDecoder.RefType.Intra;
+                var coefProbsTable = decoder.LastCompressedState!.CoefProbs[(int)txSize];
+                ushort[] scan = Vp9ScanTables.GetScan(txSize, scanType);
+                ushort[] neighbors = Vp9NeighborTables.GetNeighbors16x16(scanType);
+                var tokenCache = new byte[256];
+                var fullProbs = new byte[Vp9CoefProbs.EntropyNodes];
+
+                Console.WriteLine("  --- Coefficient decode trace ---");
+                int c = 0;
+                int eob = 0;
+                while (c < 256)
+                {
+                    int rasterPos = scan[c];
+                    int band = (int)Vp9CoefBands.GetBand(txSize, c);
+                    int ctx = Vp9CoefContext.GetCoefContext(neighbors, tokenCache, c);
+                    int modelBase = Vp9CoefProbs.Index4x4((int)planeType, (int)refType, band, ctx, 0);
+                    ReadOnlySpan<byte> model = coefProbsTable.AsSpan(modelBase, 3);
+                    Vp9CoefProbs.ModelToFullProbs(model, fullProbs);
+
+                    var decoded = Vp9CoefDecoder.DecodeOneCoefficient(
+                        p => br.Read(p), fullProbs, isHighBitDepth: false);
+
+                    if (decoded.Token != Vp9CoefToken.Zero)
+                    {
+                        Console.WriteLine($"    c={c,3} raster={rasterPos,3} band={band} ctx={ctx} model=[{model[0]},{model[1]},{model[2]}] -> {decoded.Token} value={decoded.Value}");
+                    }
+
+                    if (decoded.Token == Vp9CoefToken.Eob) { eob = c; break; }
+                    coefBlock[rasterPos] = (short)decoded.Value;
+                    tokenCache[rasterPos] = Vp9CoefContext.PtEnergyClass[(int)decoded.Token];
+                    c++;
+                }
+                Console.WriteLine($"  --- End trace, EOB at scan position {eob} ---");
                 // Print all non-zero coefficients in raster order.
                 Console.Write("    Non-zero raster positions:");
                 int nonZeroCount = 0;
