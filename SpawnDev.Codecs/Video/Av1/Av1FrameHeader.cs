@@ -227,12 +227,14 @@ public static class Av1FrameHeaderParser
             frameSizeOverride = br.ReadFlag();
 
         int orderHint = 0;
-        if (sh.EnableOrderHint && !errorResilient && !isIntra)
+        if (sh.EnableOrderHint)
         {
-            // AV1 spec: order_hint is f(OrderHintBits) only for non-intra
-            // non-error-resilient frames. Intra frames have order_hint=0
-            // implicitly. Note: for KeyFrame + IntraOnly + show_existing,
-            // we don't read it here either.
+            // AV1 spec sec 5.9.1 / libaom decodeframe.c read_uncompressed_header:
+            // order_hint is read UNCONDITIONALLY for non-reduced-still frames
+            // when SH.EnableOrderHint is set. The earlier "!errorResilient
+            // && !isIntra" gating was incorrect and caused a bit-cursor
+            // misalignment that cascaded into wrong tile_info / quant /
+            // loop_filter decoding for any frame using order hints.
             int orderHintBits = sh.OrderHintBitsMinus1 + 1;
             orderHint = (int)br.ReadBits(orderHintBits);
         }
@@ -270,21 +272,12 @@ public static class Av1FrameHeaderParser
             // render_size fields skipped - downstream work.
         }
 
-        // allow_intrabc only signaled for intra_only/key frames with screen
-        // content tools. Most natural-content streams skip it. Implicit 0
-        // otherwise. We don't yet read the surrounding inter-frame fields
-        // (frame_refs / interpolation_filter / etc.) so this is the last
-        // bit our parser surfaces today.
+        // allow_intrabc is NOT read here - it lives AFTER setup_frame_size
+        // (superres + render_size) per the AV1 spec sec 5.9.5. The
+        // Av1CompleteFrameHeaderParser handles those bits properly. The
+        // prefix parser surfaces only fields that don't depend on those
+        // intervening bit reads.
         bool allowIntraBc = false;
-        if (isIntra && allowSccTools != 0 && br.BitsRemaining > 0)
-        {
-            // Strict spec: allow_intrabc emission is gated on coded_lossless
-            // and frame size match, but the simplest scope is: read 1 bit
-            // for intra frames with SCC enabled.
-            // Note: BBB has allowSccTools=0 on its keyframes so this branch
-            // is dormant for that fixture.
-            allowIntraBc = br.ReadFlag();
-        }
 
         return new Av1FrameHeader
         {
