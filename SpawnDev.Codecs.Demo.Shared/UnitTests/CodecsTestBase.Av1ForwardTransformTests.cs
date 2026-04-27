@@ -127,6 +127,41 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public void Av1ForwardAdst8_FwdInv_RoundTripWithinTolerance()
+    {
+        var rng = new Random(0xA8);
+        var input = new int[8];
+        for (int i = 0; i < 8; i++) input[i] = rng.Next(-512, 512);
+
+        var fwd = new int[8];
+        Av1ForwardAdst8.Transform(input, fwd);
+
+        var inv = new int[8];
+        Av1InverseAdst8.Transform(fwd, inv);
+
+        int err1 = 0, err2 = 0, err4 = 0, err8 = 0;
+        for (int i = 0; i < 8; i++)
+        {
+            err1 = Math.Max(err1, Math.Abs(inv[i] - input[i]));
+            err2 = Math.Max(err2, Math.Abs(inv[i] - input[i] * 2));
+            err4 = Math.Max(err4, Math.Abs(inv[i] - input[i] * 4));
+            err8 = Math.Max(err8, Math.Abs(inv[i] - input[i] * 8));
+        }
+        int best = Math.Min(Math.Min(err1, err2), Math.Min(err4, err8));
+        True(best <= 8,
+            $"Av1Adst8 round-trip: scale1 err={err1}, scale2 err={err2}, scale4 err={err4}, scale8 err={err8} - none within tolerance");
+    }
+
+    [TestMethod]
+    public void Av1ForwardAdst8_AllZero_ProducesAllZero()
+    {
+        var input = new int[8];
+        var output = new int[8];
+        Av1ForwardAdst8.Transform(input, output);
+        for (int i = 0; i < 8; i++) Equal(0, output[i]);
+    }
+
+    [TestMethod]
     public void Av1ForwardAdst4_FwdInv_RoundTripWithinTolerance()
     {
         var rng = new Random(0xAD);
