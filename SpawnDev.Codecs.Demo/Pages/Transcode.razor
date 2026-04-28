@@ -1,0 +1,191 @@
+@page "/transcode"
+@using System.Diagnostics
+@using SpawnDev.BlazorJS
+@using SpawnDev.BlazorJS.JSObjects
+@using SpawnDev.Codecs.Video
+@using SpawnDev.Codecs.Video.Av1
+@using SpawnDev.Codecs.Video.Vp8
+@using SpawnDev.Codecs.Video.Vp9
+@inject BlazorJSRuntime JS
+
+<PageTitle>SpawnDev.Codecs Transcode Demo</PageTitle>
+
+<h1>Browser Transcode Demo</h1>
+
+<p>Encode a synthetic YUV420 frame through every video codec in this library, decode it back via the matching <code>IVideoDecoder</code>, and display the result on an HTMLCanvas. All work runs in the browser via SpawnDev.Codecs Blazor WASM (no native binaries, no patent-encumbered codecs).</p>
+
+<div style="margin-bottom: 1rem;">
+    <label>Width: <input type="number" @bind="W" style="width:5em" min="16" max="640" step="16"/></label>
+    <label>Height: <input type="number" @bind="H" style="width:5em" min="16" max="480" step="16"/></label>
+    <label>Q: <input type="number" @bind="Q" style="width:5em" min="1" max="200"/></label>
+    <button class="btn btn-primary" @onclick="RunAsync" disabled="@_running">
+        @(_running ? "Running..." : "Encode + decode all 3 codecs")
+    </button>
+</div>
+
+@if (_results.Count > 0)
+{
+    <table>
+        <thead>
+            <tr><th>Codec</th><th>Encoded bytes</th><th>Encode ms</th><th>Decode ms</th><th>Y mean</th><th>Y range</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var r in _results)
+            {
+                <tr>
+                    <td>@r.Codec</td>
+                    <td>@r.EncBytes</td>
+                    <td>@r.EncMs.ToString("F1")</td>
+                    <td>@r.DecMs.ToString("F1")</td>
+                    <td>@r.YMean</td>
+                    <td>[@r.YMin, @r.YMax]</td>
+                    <td>@r.Status</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<h2>Source frame (gradient + flat chroma)</h2>
+<canvas id="src-canvas" width="@W" height="@H" style="border:1px solid #888;"></canvas>
+
+<h2>Decoded frames (per codec)</h2>
+<div style="display:flex; gap:2rem; flex-wrap:wrap;">
+    <div>
+        <h3>VP8</h3>
+        <canvas id="vp8-canvas" width="@W" height="@H" style="border:1px solid #888;"></canvas>
+    </div>
+    <div>
+        <h3>VP9</h3>
+        <canvas id="vp9-canvas" width="@W" height="@H" style="border:1px solid #888;"></canvas>
+    </div>
+    <div>
+        <h3>AV1</h3>
+        <canvas id="av1-canvas" width="@W" height="@H" style="border:1px solid #888;"></canvas>
+    </div>
+</div>
+
+@code {
+    int W = 64;
+    int H = 64;
+    int Q = 30;
+    bool _running;
+    sealed record Result(string Codec, int EncBytes, double EncMs, double DecMs, int YMean, int YMin, int YMax, string Status);
+    List<Result> _results = new();
+
+    sealed class CaptureSink : IVideoFrameSink
+    {
+        public byte[]? Y;
+        public byte[]? U;
+        public byte[]? V;
+        public int YStride;
+        public int UStride;
+        public int VStride;
+        public ValueTask OnFrameAsync(
+            ReadOnlyMemory<byte> y, int ys,
+            ReadOnlyMemory<byte> u, int us,
+            ReadOnlyMemory<byte> v, int vs,
+            long pts)
+        {
+            Y = y.ToArray(); YStride = ys;
+            U = u.ToArray(); UStride = us;
+            V = v.ToArray(); VStride = vs;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    async Task RunAsync()
+    {
+        _running = true;
+        _results = new List<Result>();
+        StateHasChanged();
+        await Task.Yield();
+
+        // Build a synthetic gradient frame.
+        var ySrc = new byte[W * H];
+        for (int r = 0; r < H; r++)
+            for (int c = 0; c < W; c++)
+                ySrc[r * W + c] = (byte)Math.Clamp(96 + 32 * Math.Sin(2.0 * Math.PI * c / 16.0) + r * 2, 0, 255);
+        var uSrc = new byte[(W / 2) * (H / 2)]; System.Array.Fill(uSrc, (byte)128);
+        var vSrc = new byte[(W / 2) * (H / 2)]; System.Array.Fill(vSrc, (byte)128);
+
+        DrawYuv("src-canvas", ySrc, uSrc, vSrc, W, H, W, W / 2, W / 2);
+
+        // VP8
+        await EncodeDecode("VP8", "vp8-canvas",
+            () => Vp8KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: Q),
+            frame => new Vp8Decoder().DecodeFrameAsync(frame, _capture).AsTask());
+
+        // VP9
+        await EncodeDecode("VP9", "vp9-canvas",
+            () => Vp9KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: Q),
+            frame => new Vp9Decoder().DecodeFrameAsync(frame, _capture).AsTask());
+
+        // AV1
+        int av1Q = Math.Clamp(Q, 1, 200);
+        await EncodeDecode("AV1", "av1-canvas",
+            () => Av1KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: av1Q),
+            frame => new Av1Decoder().DecodeFrameAsync(frame, _capture).AsTask());
+
+        _running = false;
+        StateHasChanged();
+    }
+
+    CaptureSink _capture = new();
+
+    async Task EncodeDecode(string codec, string canvasId, Func<byte[]> encode, Func<byte[], Task<int>> decode)
+    {
+        var swEnc = Stopwatch.StartNew();
+        byte[] encoded;
+        try { encoded = encode(); }
+        catch (Exception ex) { _results.Add(new Result(codec, 0, 0, 0, 0, 0, 0, $"ENCODE FAIL: {ex.Message}")); StateHasChanged(); return; }
+        swEnc.Stop();
+
+        _capture = new CaptureSink();
+        var swDec = Stopwatch.StartNew();
+        try { await decode(encoded); }
+        catch (Exception ex) { _results.Add(new Result(codec, encoded.Length, swEnc.Elapsed.TotalMilliseconds, 0, 0, 0, 0, $"DECODE FAIL: {ex.Message}")); StateHasChanged(); return; }
+        swDec.Stop();
+
+        if (_capture.Y is null) { _results.Add(new Result(codec, encoded.Length, swEnc.Elapsed.TotalMilliseconds, swDec.Elapsed.TotalMilliseconds, 0, 0, 0, "no frame")); StateHasChanged(); return; }
+
+        int min = 255, max = 0; long sum = 0;
+        foreach (var b in _capture.Y) { sum += b; if (b < min) min = b; if (b > max) max = b; }
+        int mean = (int)(sum / _capture.Y.Length);
+
+        DrawYuv(canvasId, _capture.Y, _capture.U!, _capture.V!, W, H, _capture.YStride, _capture.UStride, _capture.VStride);
+
+        _results.Add(new Result(codec, encoded.Length, swEnc.Elapsed.TotalMilliseconds, swDec.Elapsed.TotalMilliseconds, mean, min, max, "OK"));
+        StateHasChanged();
+        await Task.Yield();
+    }
+
+    void DrawYuv(string canvasId, byte[] y, byte[] u, byte[] v, int width, int height, int yStride, int uStride, int vStride)
+    {
+        // YUV420 -> RGBA via ITU-R BT.601 conversion, then copy to canvas.
+        var rgba = new byte[width * height * 4];
+        for (int row = 0; row < height; row++)
+            for (int col = 0; col < width; col++)
+            {
+                int yV = y[row * yStride + col];
+                int uV = u[(row / 2) * uStride + col / 2] - 128;
+                int vV = v[(row / 2) * vStride + col / 2] - 128;
+                int r = (int)(yV + 1.402 * vV);
+                int g = (int)(yV - 0.344 * uV - 0.714 * vV);
+                int b = (int)(yV + 1.772 * uV);
+                int dst = (row * width + col) * 4;
+                rgba[dst + 0] = (byte)Math.Clamp(r, 0, 255);
+                rgba[dst + 1] = (byte)Math.Clamp(g, 0, 255);
+                rgba[dst + 2] = (byte)Math.Clamp(b, 0, 255);
+                rgba[dst + 3] = 255;
+            }
+        using var doc = JS.Get<Document>("document");
+        using var canvas = doc.GetElementById<HTMLCanvasElement>(canvasId);
+        if (canvas is null) return;
+        using var ctx = canvas.Get2DContext();
+        using var imageData = ctx.CreateImageData(width, height);
+        using var data = imageData.Data;
+        data.Set(rgba);
+        ctx.PutImageData(imageData, 0, 0);
+    }
+}
