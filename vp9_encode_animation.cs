@@ -19,7 +19,7 @@ using System.IO;
 using SpawnDev.Codecs.Container.Ivf;
 using SpawnDev.Codecs.Video.Vp9;
 
-const int W = 16, H = 16;          // single-block size (ffmpeg-clean per Vp9KeyframeEncoder agent)
+const int W = 32, H = 32;          // multi-block (4x Block16x16) - exercises per-plane entropy ctx fix
 const int Frames = 60;
 const int Q = 30;
 

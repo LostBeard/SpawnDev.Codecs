@@ -41,7 +41,20 @@ public static class Vp9BlockCoefEncoder
     /// <param name="block">Signed coefficient block in raster layout (output of the forward transform + quantize).</param>
     /// <param name="isHighBitDepth">12-bit profile flag - widens Cat6 residual.</param>
     /// <param name="coefProbs">Per-frame prob table (defaults to libvpx static defaults if null).</param>
-    public static void EncodeBlockCoefficients(
+    /// <param name="initialCtx">
+    /// Per-plane entropy context for scan position 0. Mirrors
+    /// <see cref="Vp9BlockCoefDecoder.DecodeBlockCoefficients"/>'s
+    /// <c>initialCtx</c>: libvpx
+    /// <c>combine_entropy_contexts(a, b) = (a != 0) + (b != 0)</c>
+    /// applied to the per-plane above + left ENTROPY_CONTEXT byte arrays.
+    /// Range 0..2. The encoder must derive this from the per-plane
+    /// above/left coef context bytes that get set to <c>(eob &gt; 0)</c>
+    /// after each tx-block emit. Defaults to 0 for callers that do not
+    /// track entropy context (back-compat with isolated round-trip
+    /// tests where every block stands alone).
+    /// </param>
+    /// <returns>EOB position written to the bitstream (count of emitted scan slots, 0..maxCoefs).</returns>
+    public static int EncodeBlockCoefficients(
         WriteBit writeBit,
         Vp9TxSize txSize,
         Vp9ScanType scanType,
@@ -49,7 +62,8 @@ public static class Vp9BlockCoefEncoder
         Vp9BlockCoefDecoder.RefType refType,
         ReadOnlySpan<short> block,
         bool isHighBitDepth = false,
-        byte[]? coefProbs = null)
+        byte[]? coefProbs = null,
+        int initialCtx = 0)
     {
         ArgumentNullException.ThrowIfNull(writeBit);
 
@@ -92,14 +106,20 @@ public static class Vp9BlockCoefEncoder
         Span<byte> fullProbs = stackalloc byte[Vp9CoefProbs.EntropyNodes];
 
         int c = 0;
+        // First scan position uses initialCtx (per-plane entropy context);
+        // subsequent positions use GetCoefContext from tokenCache. Mirrors
+        // Vp9BlockCoefDecoder bit-for-bit.
+        bool firstIter = true;
         while (c < maxCoefs)
         {
-            ComputeProbs(coefProbs, planeType, refType, txSize, neighbors, tokenCache, c, fullProbs);
+            ComputeProbs(coefProbs, planeType, refType, txSize, neighbors, tokenCache, c,
+                fullProbs, firstIter ? initialCtx : -1);
+            firstIter = false;
 
             if (c == eob)
             {
                 writeBit(fullProbs[0], 0);  // EOB (decoder: read==0 -> EOB)
-                return;
+                return eob;
             }
             writeBit(fullProbs[0], 1);      // !EOB
 
@@ -109,8 +129,9 @@ public static class Vp9BlockCoefEncoder
             {
                 writeBit(fullProbs[1], 0);  // ZERO
                 c++;
-                if (c >= maxCoefs) return;  // matches decoder line 152
-                ComputeProbs(coefProbs, planeType, refType, txSize, neighbors, tokenCache, c, fullProbs);
+                if (c >= maxCoefs) return eob;  // matches decoder line 152
+                ComputeProbs(coefProbs, planeType, refType, txSize, neighbors, tokenCache, c,
+                    fullProbs, -1);
             }
 
             // Non-zero token: emit !ZERO, then magnitude tree, then sign.
@@ -141,6 +162,7 @@ public static class Vp9BlockCoefEncoder
             tokenCache[scan[c]] = Vp9CoefContext.PtEnergyClass[(int)token];
             c++;
         }
+        return eob;
     }
 
     private static void ComputeProbs(
@@ -151,10 +173,17 @@ public static class Vp9BlockCoefEncoder
         ushort[] neighbors,
         ReadOnlySpan<byte> tokenCache,
         int c,
-        Span<byte> fullProbs)
+        Span<byte> fullProbs,
+        int forcedCtx = -1)
     {
         int band = (int)Vp9CoefBands.GetBand(txSize, c);
-        int ctx = Vp9CoefContext.GetCoefContext(neighbors, tokenCache, c);
+        // forcedCtx >= 0 lets the caller override the per-coefficient
+        // context (used at scan position 0 to inject the per-plane
+        // entropy context per libvpx's vp9_decode_block_tokens). Pass
+        // -1 to compute the context from tokenCache as usual.
+        int ctx = forcedCtx >= 0
+            ? forcedCtx
+            : Vp9CoefContext.GetCoefContext(neighbors, tokenCache, c);
         int modelBase = Vp9CoefProbs.Index4x4((int)planeType, (int)refType, band, ctx, 0);
         ReadOnlySpan<byte> model = coefProbs.AsSpan(modelBase, 3);
         Vp9CoefProbs.ModelToFullProbs(model, fullProbs);

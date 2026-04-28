@@ -193,6 +193,74 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>
+    /// Multi-block regression: ensures the per-plane ENTROPY_CONTEXT
+    /// fix in <see cref="Vp9BlockCoefDecoder"/> +
+    /// <see cref="Vp9BlockCoefEncoder"/> stays in place. Without it
+    /// non-leftmost / non-top tx-blocks read at the wrong initial
+    /// coefficient context (libvpx vp9_decode_block_tokens
+    /// combine_entropy_contexts(a,b) = (a!=0)+(b!=0)) and their
+    /// reconstructed pixels diverge between our walker and ffmpeg's
+    /// native VP9 decoder. This test pins the per-block reconstruction
+    /// to within a tight tolerance against the source on a 32x32
+    /// vertical gradient where every Block16x16 leaf has at least one
+    /// real reconstructed neighbor.
+    /// </summary>
+    [TestMethod]
+    public async Task Vp9KeyframeEncoder_Gradient32x32_PerBlockBitstreamConsistent()
+    {
+        const int W = 32, H = 32;
+        var ySrc = new byte[W * H];
+        for (int r = 0; r < H; r++)
+            for (int c = 0; c < W; c++)
+                ySrc[r * W + c] = (byte)Math.Clamp(40 + r * 3, 0, 255);
+        var uSrc = new byte[(W / 2) * (H / 2)];
+        var vSrc = new byte[(W / 2) * (H / 2)];
+        Array.Fill(uSrc, (byte)128);
+        Array.Fill(vSrc, (byte)128);
+
+        byte[] frame = Vp9KeyframeEncoder.EncodeKeyFrame(
+            ySrc, ySrcStride: W,
+            uSrc, uvSrcStride: W / 2,
+            vSrc,
+            width: W, height: H,
+            baseQIndex: 8);  // low Q so quantization loss is small
+
+        var fb = await DecodeViaWalker(frame);
+        Equal(W, fb.LumaWidth);
+        Equal(H, fb.LumaHeight);
+
+        // Per-Block16x16 mean reconstruction must track the source mean
+        // tightly. Pre-fix, the bottom-right block diverged by tens of
+        // luma units because the decoder read coefs at ctx=0 while
+        // ffmpeg / libvpx read at ctx=2 - the wrong probability vector
+        // mis-decoded the EOB / ZERO bits. With the fix in place every
+        // 16x16 block's mean stays within a couple of units of the
+        // source mean.
+        for (int br = 0; br < H / 16; br++)
+        {
+            for (int bc = 0; bc < W / 16; bc++)
+            {
+                long blockSum = 0;
+                long srcSum = 0;
+                for (int r = 0; r < 16; r++)
+                {
+                    for (int c = 0; c < 16; c++)
+                    {
+                        int idx = (br * 16 + r) * W + (bc * 16 + c);
+                        blockSum += fb.Y[idx];
+                        srcSum += ySrc[idx];
+                    }
+                }
+                double blockMean = blockSum / 256.0;
+                double srcMean = srcSum / 256.0;
+                double delta = Math.Abs(blockMean - srcMean);
+                True(delta <= 2.0,
+                    $"block ({br},{bc}) Y mean delta = {delta:F2}, expected <= 2.0 (was tens of units pre-fix)");
+            }
+        }
+    }
+
+    /// <summary>
     /// Sanity: the encoded output is reasonably compact (under a few
     /// KB for a flat 16x16 black frame).
     /// </summary>

@@ -301,12 +301,34 @@ public static class Vp9KeyframeEncoder
         var leftPartCtx = new byte[8];
         var leftTxSize = new byte[8];
 
+        // Per-plane ENTROPY_CONTEXT byte arrays - mirror of the walker's
+        // arrays. Above is frame-wide (zeroed once per frame); left is
+        // per-tile-row (zeroed at every SB row). Drives the per-tx-block
+        // initial coefficient context that libvpx vp9_decode_block_tokens
+        // computes via combine_entropy_contexts(a, b) = (a != 0) + (b != 0).
+        // Without this, the encoder writes coef bits at ctx=0 while ffmpeg
+        // (and libvpx) read them at ctx=1 or 2 for any non-leftmost /
+        // non-top tx-block, producing pixel-level divergence after block 0.
+        int ssX = recon.Subsampling.SubsamplingX;
+        int ssY = recon.Subsampling.SubsamplingY;
+        int aboveYCells = miColsAligned * 2;
+        int aboveUvCells = aboveYCells >> ssX;
+        var aboveYEntropyCtx = new byte[aboveYCells];
+        var aboveUEntropyCtx = new byte[aboveUvCells];
+        var aboveVEntropyCtx = new byte[aboveUvCells];
+        var leftYEntropyCtx = new byte[16];
+        var leftUEntropyCtx = new byte[16 >> ssY];
+        var leftVEntropyCtx = new byte[16 >> ssY];
+
         for (int miRow = 0; miRow < miRows; miRow += 8)
         {
             Array.Fill(leftYMode, Vp9IntraMode.DcPred);
             Array.Clear(leftSkip);
             Array.Clear(leftPartCtx);
             Array.Clear(leftTxSize);
+            Array.Clear(leftYEntropyCtx);
+            Array.Clear(leftUEntropyCtx);
+            Array.Clear(leftVEntropyCtx);
 
             for (int miCol = 0; miCol < miCols; miCol += 8)
             {
@@ -317,6 +339,8 @@ public static class Vp9KeyframeEncoder
                     yQuant, uvQuant, recon,
                     aboveYMode, aboveSkip, abovePartCtx, aboveTxSize,
                     leftYMode, leftSkip, leftPartCtx, leftTxSize,
+                    aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
+                    leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
                     miRow, miCol, Vp9BlockSize.Block64x64);
             }
         }
@@ -337,6 +361,8 @@ public static class Vp9KeyframeEncoder
         Vp9FrameBuffer recon,
         Vp9IntraMode[] aboveYMode, byte[] aboveSkip, byte[] abovePartCtx, byte[] aboveTxSize,
         Vp9IntraMode[] leftYMode, byte[] leftSkip, byte[] leftPartCtx, byte[] leftTxSize,
+        byte[] aboveYEntropyCtx, byte[] aboveUEntropyCtx, byte[] aboveVEntropyCtx,
+        byte[] leftYEntropyCtx, byte[] leftUEntropyCtx, byte[] leftVEntropyCtx,
         int miRow, int miCol, Vp9BlockSize bsize)
     {
         if (miRow >= miRows || miCol >= miCols) return;
@@ -409,6 +435,8 @@ public static class Vp9KeyframeEncoder
                     yQuant, uvQuant, recon,
                     aboveYMode, aboveSkip, aboveTxSize,
                     leftYMode, leftSkip, leftTxSize,
+                    aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
+                    leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
                     miRow, miCol, subsize);
                 break;
             case Vp9PartitionType.Split:
@@ -422,21 +450,29 @@ public static class Vp9KeyframeEncoder
                     miCols, miRows, miColsAligned, yQuant, uvQuant, recon,
                     aboveYMode, aboveSkip, abovePartCtx, aboveTxSize,
                     leftYMode, leftSkip, leftPartCtx, leftTxSize,
+                    aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
+                    leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
                     miRow, miCol, subsize);
                 EncodePartition(enc, ySrc, ySrcStride, uSrc, vSrc, uvSrcStride,
                     miCols, miRows, miColsAligned, yQuant, uvQuant, recon,
                     aboveYMode, aboveSkip, abovePartCtx, aboveTxSize,
                     leftYMode, leftSkip, leftPartCtx, leftTxSize,
+                    aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
+                    leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
                     miRow, miCol + hbs, subsize);
                 EncodePartition(enc, ySrc, ySrcStride, uSrc, vSrc, uvSrcStride,
                     miCols, miRows, miColsAligned, yQuant, uvQuant, recon,
                     aboveYMode, aboveSkip, abovePartCtx, aboveTxSize,
                     leftYMode, leftSkip, leftPartCtx, leftTxSize,
+                    aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
+                    leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
                     miRow + hbs, miCol, subsize);
                 EncodePartition(enc, ySrc, ySrcStride, uSrc, vSrc, uvSrcStride,
                     miCols, miRows, miColsAligned, yQuant, uvQuant, recon,
                     aboveYMode, aboveSkip, abovePartCtx, aboveTxSize,
                     leftYMode, leftSkip, leftPartCtx, leftTxSize,
+                    aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
+                    leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
                     miRow + hbs, miCol + hbs, subsize);
                 break;
             case Vp9PartitionType.Horz:
@@ -539,6 +575,8 @@ public static class Vp9KeyframeEncoder
         Vp9FrameBuffer recon,
         Vp9IntraMode[] aboveYMode, byte[] aboveSkip, byte[] aboveTxSize,
         Vp9IntraMode[] leftYMode, byte[] leftSkip, byte[] leftTxSize,
+        byte[] aboveYEntropyCtx, byte[] aboveUEntropyCtx, byte[] aboveVEntropyCtx,
+        byte[] leftYEntropyCtx, byte[] leftUEntropyCtx, byte[] leftVEntropyCtx,
         int miRow, int miCol, Vp9BlockSize bsize)
     {
         if (miRow >= miRows || miCol >= miCols) return;
@@ -612,13 +650,16 @@ public static class Vp9KeyframeEncoder
         //      then reconstruct (predict + dequant + iDCT) into recon. ----
         EncodePlanePixels(enc, plane: 0,
             ySrc, ySrcStride, recon, yQuant, miRow, miCol, bsize, txSize,
-            yMode: Vp9IntraMode.DcPred);
+            yMode: Vp9IntraMode.DcPred,
+            aboveEntropyCtx: aboveYEntropyCtx, leftEntropyCtx: leftYEntropyCtx);
         EncodePlanePixels(enc, plane: 1,
             uSrc, uvSrcStride, recon, uvQuant, miRow, miCol, bsize, txSize,
-            yMode: Vp9IntraMode.DcPred);
+            yMode: Vp9IntraMode.DcPred,
+            aboveEntropyCtx: aboveUEntropyCtx, leftEntropyCtx: leftUEntropyCtx);
         EncodePlanePixels(enc, plane: 2,
             vSrc, uvSrcStride, recon, uvQuant, miRow, miCol, bsize, txSize,
-            yMode: Vp9IntraMode.DcPred);
+            yMode: Vp9IntraMode.DcPred,
+            aboveEntropyCtx: aboveVEntropyCtx, leftEntropyCtx: leftVEntropyCtx);
     }
 
     private static void EncodeIntraMode(
@@ -663,11 +704,13 @@ public static class Vp9KeyframeEncoder
         ReadOnlySpan<byte> src, int srcStride,
         Vp9FrameBuffer recon, Vp9PlaneQuantizer planeQuant,
         int miRow, int miCol, Vp9BlockSize bsize, Vp9TxSize lumaTxSize,
-        Vp9IntraMode yMode)
+        Vp9IntraMode yMode,
+        byte[] aboveEntropyCtx, byte[] leftEntropyCtx)
     {
         bool isUv = plane != 0;
         int ssX = isUv ? recon.Subsampling.SubsamplingX : 0;
         int ssY = isUv ? recon.Subsampling.SubsamplingY : 0;
+        int sbRowMaskPx = (64 >> ssY) - 1;
 
         Vp9BlockSize planeBsize = isUv
             ? Vp9ChromaBlockSize.ForLumaBlock(bsize)
@@ -800,15 +843,50 @@ public static class Vp9KeyframeEncoder
                     coefsShort[i] = (short)v;
                 }
 
+                // Per-plane entropy context cell offsets for this
+                // tx-block. Mirror of the walker's read of
+                // pd->above_context + x / left_context + y.
+                int aboveCellOff = xPx >> 2;
+                int leftCellOff = (yPx & sbRowMaskPx) >> 2;
+                int cellsPerTx = txN >> 2;
+                int aboveAgg = 0;
+                for (int i = 0; i < cellsPerTx; i++)
+                {
+                    int idx = aboveCellOff + i;
+                    if (idx < aboveEntropyCtx.Length) aboveAgg |= aboveEntropyCtx[idx];
+                }
+                int leftAgg = 0;
+                for (int i = 0; i < cellsPerTx; i++)
+                {
+                    int idx = leftCellOff + i;
+                    if (idx < leftEntropyCtx.Length) leftAgg |= leftEntropyCtx[idx];
+                }
+                int initialCoefCtx = (aboveAgg != 0 ? 1 : 0) + (leftAgg != 0 ? 1 : 0);
+
                 // Emit coefficient bool bits.
                 var coefBlockArray = coefsShort[..slots].ToArray();
-                Vp9BlockCoefEncoder.EncodeBlockCoefficients(
+                int emittedEob = Vp9BlockCoefEncoder.EncodeBlockCoefficients(
                     (prob, bit) => enc.Write(bit, prob),
                     txSize, scanType, planeType,
                     Vp9BlockCoefDecoder.RefType.Intra,
                     coefBlockArray,
                     isHighBitDepth: false,
-                    coefProbs: coefProbs);
+                    coefProbs: coefProbs,
+                    initialCtx: initialCoefCtx);
+
+                // libvpx writes (eob > 0) to the per-plane entropy
+                // context cells covered by this tx-block. The walker
+                // mirrors this on its side; both must agree so the
+                // initial coefficient context for the NEXT tx-block
+                // resolves identically on both ends of the pipeline.
+                byte ec = (byte)(emittedEob > 0 ? 1 : 0);
+                for (int i = 0; i < cellsPerTx; i++)
+                {
+                    int aIdx = aboveCellOff + i;
+                    int lIdx = leftCellOff + i;
+                    if (aIdx < aboveEntropyCtx.Length) aboveEntropyCtx[aIdx] = ec;
+                    if (lIdx < leftEntropyCtx.Length) leftEntropyCtx[lIdx] = ec;
+                }
 
                 // ---- Reconstruct so subsequent blocks see the same
                 //      context the decoder will compute. ----

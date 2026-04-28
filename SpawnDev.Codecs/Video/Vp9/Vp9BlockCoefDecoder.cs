@@ -70,6 +70,16 @@ public static class Vp9BlockCoefDecoder
     /// (planeType, refType, band, ctx, node). Defaults to libvpx static
     /// defaults if null.
     /// </param>
+    /// <param name="initialCtx">
+    /// Per-plane entropy context for scan position 0. libvpx
+    /// <c>combine_entropy_contexts(a, b) = (a != 0) + (b != 0)</c>
+    /// applied to the per-plane above + left ENTROPY_CONTEXT byte arrays.
+    /// Range 0..2. The walker derives this from the per-plane
+    /// above/left coef context bytes (set to <c>(eob &gt; 0)</c> after
+    /// each tx-block decode). Defaults to 0 for callers that do not
+    /// track entropy context (back-compat with isolated round-trip
+    /// tests where every block stands alone).
+    /// </param>
     /// <returns>EOB position (count of decoded scan slots, 0..maxCoefs).</returns>
     public static int DecodeBlockCoefficients(
         Func<byte, int> readBit,
@@ -79,7 +89,8 @@ public static class Vp9BlockCoefDecoder
         RefType refType,
         Span<short> block,
         bool isHighBitDepth = false,
-        byte[]? coefProbs = null)
+        byte[]? coefProbs = null,
+        int initialCtx = 0)
     {
         ArgumentNullException.ThrowIfNull(readBit);
 
@@ -127,15 +138,25 @@ public static class Vp9BlockCoefDecoder
         Span<byte> fullProbs = stackalloc byte[Vp9CoefProbs.EntropyNodes];
 
         int c = 0;
+        // libvpx decode_coefs: for scan position 0 the context comes from
+        // the per-plane above + left ENTROPY_CONTEXT bytes (combine_entropy_contexts
+        // in vp9_decode_block_tokens). For c >= 1 it comes from the
+        // per-coef tokenCache via get_coef_context. We honor the supplied
+        // initialCtx for the first iteration only and fall back to
+        // GetCoefContext from then on.
+        bool firstIter = true;
         while (c < maxCoefs)
         {
             // Compute (band, ctx) and expand model for current c.
             int band = (int)Vp9CoefBands.GetBand(txSize, c);
-            int ctx = Vp9CoefContext.GetCoefContext(neighbors, tokenCache, c);
+            int ctx = firstIter
+                ? initialCtx
+                : Vp9CoefContext.GetCoefContext(neighbors, tokenCache, c);
             int modelBase = Vp9CoefProbs.Index4x4(
                 (int)planeType, (int)refType, band, ctx, 0);
             ReadOnlySpan<byte> model = coefProbs.AsSpan(modelBase, 3);
             Vp9CoefProbs.ModelToFullProbs(model, fullProbs);
+            firstIter = false;
 
             // EOB check at this scan position. !vpx_read(prob[EOB]) is the
             // EOB branch (libvpx convention: read==0 means EOB).
