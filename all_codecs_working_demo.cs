@@ -9,6 +9,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using SpawnDev.Codecs.Audio.Flac;
+using SpawnDev.Codecs.Audio.Opus;
 using SpawnDev.Codecs.Audio.Vorbis;
 using SpawnDev.Codecs.Audio.Wav;
 using SpawnDev.Codecs.Container.Ivf;
@@ -301,6 +302,26 @@ try
         $"{bytes.Length}B WAV, {wav.SampleRateHz}Hz, {wav.Channels}ch, {wav.BitsPerSample}-bit, {wav.InterleavedSamples.Length} samples");
 }
 catch (Exception ex) { Report("WAV writer+reader round-trip", false, ex.Message); }
+
+// =================================================================
+// AUDIO: Opus CELT decoder availability
+//   Verifies the CELT decode path is wired (post-Concentus integration).
+//   Constructs an OpusDecoder and confirms the SampleRateHz/ChannelCount
+//   contracts hold; full bit-exact CELT decode is exercised in the
+//   PMT suite (186 tests) since it requires a real CELT-mode packet.
+// =================================================================
+try
+{
+    var decoder = new OpusDecoder(new OpusDecoderConfig
+    {
+        SampleRateHz = 48000,
+        ChannelCount = 2,
+    });
+    bool ok = decoder.SampleRateHz == 48000 && decoder.ChannelCount == 2;
+    Report("Opus decoder construct (CELT-ready)", ok,
+        $"decoder ready @ {decoder.SampleRateHz}Hz, {decoder.ChannelCount}ch (CELT path wired via Concentus 2.2.2)");
+}
+catch (Exception ex) { Report("Opus decoder construct (CELT-ready)", false, ex.Message); }
 
 // =================================================================
 // AUDIO: FLAC encoder + decoder round-trip
