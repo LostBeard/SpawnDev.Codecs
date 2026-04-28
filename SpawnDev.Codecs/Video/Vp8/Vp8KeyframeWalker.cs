@@ -71,14 +71,50 @@ public static class Vp8KeyframeWalker
 
         if (!frameTag.IsKeyFrame)
             throw new NotImplementedException("Vp8KeyframeWalker only handles key frames; inter frames are out of scope for this slice.");
-        if (frameHeader.Log2NumPartitions != 0)
-            throw new NotImplementedException(
-                $"Vp8KeyframeWalker only supports single-partition streams (Log2NumPartitions=0); got {frameHeader.Log2NumPartitions}.");
         if (entropyContexts.MbCols != frameBuffer.MbCols)
             throw new ArgumentException($"entropyContexts.MbCols ({entropyContexts.MbCols}) must equal frameBuffer.MbCols ({frameBuffer.MbCols})");
 
-        // Token partition has its OWN bool decoder (libvpx pbi->mbc[0]).
-        var tokenReader = new Vp8BoolDecoder(tokenPartitionBytes);
+        // Token partition layout (RFC 6386 sec 9.5):
+        //   For Log2NumPartitions = 0 (1 partition): tokenPartitionBytes IS the
+        //   single token partition.
+        //   For Log2NumPartitions > 0 (npart = 1 << Log2NumPartitions = 2/4/8):
+        //     bytes [0 .. 3*(npart-1)) are little-endian 24-bit sizes for
+        //     partitions 0..npart-2; partition (npart-1) takes the remainder.
+        //   MB row N is decoded by partition (N mod npart).
+        int npart = 1 << frameHeader.Log2NumPartitions;
+        var tokenReaders = new Vp8BoolDecoder[npart];
+        if (npart == 1)
+        {
+            tokenReaders[0] = new Vp8BoolDecoder(tokenPartitionBytes);
+        }
+        else
+        {
+            int sizesLen = 3 * (npart - 1);
+            if (tokenPartitionBytes.Length < sizesLen)
+                throw new InvalidDataException(
+                    $"VP8 frame declares Log2NumPartitions={frameHeader.Log2NumPartitions} ({npart} partitions) " +
+                    $"but token data is only {tokenPartitionBytes.Length}B - need at least {sizesLen}B for size headers.");
+            int offset = sizesLen;
+            for (int p = 0; p < npart - 1; p++)
+            {
+                int size = tokenPartitionBytes[3 * p]
+                         | (tokenPartitionBytes[3 * p + 1] << 8)
+                         | (tokenPartitionBytes[3 * p + 2] << 16);
+                if (offset + size > tokenPartitionBytes.Length)
+                    throw new InvalidDataException(
+                        $"VP8 token partition {p} declares size {size} at offset {offset} but only " +
+                        $"{tokenPartitionBytes.Length - offset}B remain.");
+                var slice = new byte[size];
+                Buffer.BlockCopy(tokenPartitionBytes, offset, slice, 0, size);
+                tokenReaders[p] = new Vp8BoolDecoder(slice);
+                offset += size;
+            }
+            // Last partition takes whatever's left.
+            int lastSize = tokenPartitionBytes.Length - offset;
+            var lastSlice = new byte[lastSize];
+            Buffer.BlockCopy(tokenPartitionBytes, offset, lastSlice, 0, lastSize);
+            tokenReaders[npart - 1] = new Vp8BoolDecoder(lastSlice);
+        }
 
         entropyContexts.ClearAll();
 
@@ -117,6 +153,10 @@ public static class Vp8KeyframeWalker
 
         for (int mbRow = 0; mbRow < mbRows; mbRow++)
         {
+            // Per RFC 6386 sec 9.5: token partition for row N is (N mod npart).
+            // libvpx mb->mbc[mb_row & (npart - 1)].
+            var tokenReader = tokenReaders[mbRow & (npart - 1)];
+
             entropyContexts.ClearLeft();
 
             // Persistent "left" sub-modes for the current MB row (4 entries, top-to-bottom).
