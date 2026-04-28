@@ -119,7 +119,7 @@ public sealed class Av1ForwardDct4Kernel : IDisposable
     /// </summary>
     private static void ResolveCospi(int cosBit, out int c16, out int c32, out int c48)
     {
-        if (cosBit == 13)      { c16 =  7568; c32 =  5793; c48 =  3035; }
+        if (cosBit == 13)      { c16 =  7568; c32 =  5793; c48 =  3135; }
         else if (cosBit == 12) { c16 =  3784; c32 =  2896; c48 =  1567; }
         else if (cosBit == 11) { c16 =  1892; c32 =  1448; c48 =   784; }
         else                   { c16 =   946; c32 =   724; c48 =   392; }
