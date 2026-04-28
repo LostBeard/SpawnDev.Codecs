@@ -14,6 +14,7 @@ using SpawnDev.Codecs.Audio.Flac;
 using SpawnDev.Codecs.Audio.Opus;
 using SpawnDev.Codecs.Audio.Vorbis;
 using SpawnDev.Codecs.Container.Ivf;
+using SpawnDev.Codecs.Video.Av1;
 using SpawnDev.Codecs.Video.Vp8;
 using SpawnDev.Codecs.Video.Vp9;
 
@@ -96,6 +97,28 @@ Console.WriteLine();
     Console.WriteLine($"VP9: {frameCount} frames in {sw.Elapsed.TotalSeconds:F1}s ({frameCount / sw.Elapsed.TotalSeconds:F1} fps), IVF {ivfSz / 1024}KB {mp4Status}");
 }
 
+// === VIDEO: AV1 (decoded via libdav1d for VLC) ===
+{
+    string ivf = Path.Combine(outDir, "av1.ivf");
+    string mp4 = Path.Combine(outDir, "av1.mp4");
+    var sw = Stopwatch.StartNew();
+    using (var fs = File.Create(ivf))
+    {
+        var w = new IvfWriter(fs, "AV01", W, H, frameRate: Fps, timeScale: 1, numFrames: 0, leaveOpen: true);
+        for (int f = 0; f < frameCount; f++)
+        {
+            var (y, u, v) = SliceFrame(allFrames, f);
+            w.WriteFrame(Av1KeyframeEncoder.EncodeKeyFrame(y, W, u, W / 2, v, W, H, baseQIndex: 32), f);
+        }
+        w.Finish();
+    }
+    sw.Stop();
+    long ivfSz = new FileInfo(ivf).Length;
+    bool remuxOk = TryRunFfmpeg($"-y -c:v libdav1d -i \"{ivf}\" -c:v libx264 -pix_fmt yuv420p \"{mp4}\"");
+    string mp4Status = remuxOk ? $"-> MP4 {new FileInfo(mp4).Length / 1024}KB" : "(libdav1d remux failed; .ivf still readable via ffmpeg)";
+    Console.WriteLine($"AV1: {frameCount} frames in {sw.Elapsed.TotalSeconds:F1}s ({frameCount / sw.Elapsed.TotalSeconds:F1} fps), IVF {ivfSz / 1024}KB {mp4Status}");
+}
+
 // === AUDIO: FLAC ===
 {
     string flacPath = Path.Combine(outDir, "audio.flac");
@@ -158,6 +181,7 @@ Console.WriteLine("=============================================================
 Console.WriteLine($"  Open the artifacts in VLC to verify visually + audibly:");
 Console.WriteLine($"  Video: {Path.Combine(outDir, "vp8.mp4")}");
 Console.WriteLine($"  Video: {Path.Combine(outDir, "vp9.mp4")}");
+Console.WriteLine($"  Video: {Path.Combine(outDir, "av1.mp4")}");
 Console.WriteLine($"  Audio: {Path.Combine(outDir, "audio.flac")}");
 Console.WriteLine($"  Audio: {Path.Combine(outDir, "audio.opus")}");
 Console.WriteLine($"  Audio: {Path.Combine(outDir, "audio.ogg")}");
