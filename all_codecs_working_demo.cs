@@ -97,6 +97,38 @@ try
 catch (Exception ex) { Report("VP8 encoder->ffmpeg", false, ex.Message); }
 
 // =================================================================
+// VIDEO: VP8 multi-token-partition (RFC 6386 sec 9.5) - encode at
+// log2parts=2 (4 partitions) and verify ffmpeg native VP8 accepts.
+// =================================================================
+try
+{
+    int W = 32, H = 32;
+    var ySrc = new byte[W * H]; Array.Fill(ySrc, (byte)128);
+    var uSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc, (byte)128);
+    var vSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc, (byte)128);
+
+    var frameBytes = Vp8KeyframeEncoder.EncodeKeyFrame(
+        ySrc, W, uSrc, W / 2, vSrc, W, H,
+        baseQIndex: 30, log2NumPartitions: 2);
+
+    string ivfPath = Path.Combine(Path.GetTempPath(), "spawndev_allcodecs_vp8_p4.ivf");
+    using (var fs = File.Create(ivfPath))
+    {
+        var w = new IvfWriter(fs, "VP80", W, H, frameRate: 1, timeScale: 30, numFrames: 1);
+        w.WriteFrame(frameBytes, 0);
+        w.Finish();
+    }
+
+    string outYuv = Path.Combine(Path.GetTempPath(), "spawndev_allcodecs_vp8_p4.yuv");
+    var p = Process.Start(new ProcessStartInfo(ffmpeg, $"-y -i \"{ivfPath}\" -f rawvideo -pix_fmt yuv420p \"{outYuv}\"") { RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true })!;
+    p.WaitForExit();
+    long sz = File.Exists(outYuv) ? new FileInfo(outYuv).Length : 0;
+    int expected = W * H + 2 * (W / 2) * (H / 2);
+    Report("VP8 4-partition->ffmpeg", p.ExitCode == 0 && sz == expected, $"{frameBytes.Length}B frame (4 partitions), ffmpeg decoded {sz}B (expected {expected}B)");
+}
+catch (Exception ex) { Report("VP8 4-partition->ffmpeg", false, ex.Message); }
+
+// =================================================================
 // VIDEO: VP8 walker decode of ffmpeg-encoded keyframe (built into
 // the existing vp8_real_keyframe_parse.cs flow, simplified inline).
 // =================================================================
