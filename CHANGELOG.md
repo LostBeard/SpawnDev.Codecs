@@ -32,11 +32,14 @@ working feature matrix.
 
 - `/transcode` page added: encode + decode all 3 video codecs in browser, render YUV->RGBA on HTMLCanvas (commit `d107dd2`).
 
+**More fixes (post-overnight):**
+
+- VP8 encoder: validate `baseQIndex` 0..127 at the API boundary - 7-bit field per RFC 6386 sec 9.6, larger values silently wrapped causing decoder/encoder quantizer mismatch (Q=150 PSNR collapsed to 8.76 dB) (commit `179d56a`).
+- Vorbis encoder: fit floor 1 curve to per-block spectrum envelope. Encoder was forcing floor to a constant ~0.94 and asking the residue book to carry the entire dynamic range alone; real audio bins peaked at ~0.005 and rounded to zero. Per-block adaptive floor + 1024-entry residue book. BBB SNR 0.35 dB -> 35.71 dB (now beating ffmpeg's libvorbis at 20.88 dB) (commit `c67d8ec`).
+
 **Known remaining gaps:**
 
-- Vorbis quality: structurally valid but spectral content collapses (SNR 0.35 dB on real audio vs ffmpeg's 20.88 dB) - codebook resolution improvement pending.
-- AV1 multi-block at FullHD: libdav1d rejects frames in many configurations - encoder neighbor context updates have follow-on bug per agent #19's note.
-- VP8 Q=150 PSNR collapse (extreme-Q corner case).
+- AV1 multi-block at FullHD: libdav1d rejects frames in many configurations - encoder neighbor context updates have follow-on bug per agent #19's note (sub-agent in flight).
 - VP8/VP9 inter frames + loop filter still NotImplementedException.
 
 
