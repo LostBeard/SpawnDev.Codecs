@@ -69,7 +69,7 @@ public sealed class Vp8Decoder : IVideoDecoder
         Width = width;
         Height = height;
 
-        // Single-token-partition only for now; the walker rejects others itself.
+        // The walker handles 1/2/4/8 token partitions per RFC 6386 sec 9.5.
         int tokenOffset = firstPartOffset + firstPartLen;
         int tokenLen = frameBytes.Length - tokenOffset;
         var tokenPart = new byte[tokenLen];
