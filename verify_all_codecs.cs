@@ -25,6 +25,7 @@ using SpawnDev.Codecs.Audio.Opus;
 using SpawnDev.Codecs.Audio.Vorbis;
 using SpawnDev.Codecs.Container.Ivf;
 using SpawnDev.Codecs.Video;
+using SpawnDev.Codecs.Video.Av1;
 using SpawnDev.Codecs.Video.Vp8;
 using SpawnDev.Codecs.Video.Vp9;
 
@@ -245,6 +246,45 @@ Section("FLAC encoder + bit-exact decoder", () =>
     long flacSize = new FileInfo(flacPath).Length;
     Console.WriteLine($"  PASS: {flacSize:N0}B FLAC, lossless round-trip -> {flacPath}");
     summary.AppendLine($"  PASS: {flacSize:N0}B FLAC, lossless round-trip -> {flacPath} - PLAYABLE IN VLC (audio)");
+});
+
+// === AV1 encoder -> dav1d decode round-trip ===
+// The AV1 encoder produces a TD+SH+Frame OBU bitstream that libdav1d
+// (via ffmpeg -c:v libdav1d) accepts. 16x16 flat Y=128 reconstructs
+// exactly to Y=128/U=128/V=128 through the third-party decoder.
+Section("AV1 encoder -> libdav1d (16x16 flat Y=128)", () =>
+{
+    int W = 16, H = 16;
+    var ySrc = new byte[W * H]; Array.Fill(ySrc, (byte)128);
+    var uSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc, (byte)128);
+    var vSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc, (byte)128);
+
+    var frame = Av1KeyframeEncoder.EncodeKeyFrame(
+        ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 32);
+
+    string ivf = Path.Combine(outDir, "av1_flat.ivf");
+    string yuv = Path.Combine(outDir, "av1_flat_dav1d.yuv");
+    using (var fs = File.Create(ivf))
+    {
+        var w = new IvfWriter(fs, "AV01", W, H, frameRate: 1, timeScale: 30, numFrames: 0, leaveOpen: true);
+        w.WriteFrame(frame, 0);
+        w.Finish();
+    }
+    if (!RunFfmpeg($"-y -c:v libdav1d -i \"{ivf}\" -f rawvideo -pix_fmt yuv420p \"{yuv}\""))
+        throw new Exception("libdav1d failed to decode our AV1 IVF");
+
+    var dec = File.ReadAllBytes(yuv);
+    int yPlaneSize = W * H, uvPlaneSize = (W / 2) * (H / 2);
+    int expected = yPlaneSize + 2 * uvPlaneSize;
+    if (dec.Length < expected) throw new Exception($"YUV too short: {dec.Length} < {expected}");
+
+    long ySum = 0; int yMin = 255, yMax = 0;
+    for (int i = 0; i < yPlaneSize; i++) { ySum += dec[i]; if (dec[i] < yMin) yMin = dec[i]; if (dec[i] > yMax) yMax = dec[i]; }
+    int yMean = (int)(ySum / yPlaneSize);
+    if (Math.Abs(yMean - 128) > 4) throw new Exception($"AV1 dav1d Y mean {yMean} too far from 128");
+
+    Console.WriteLine($"  PASS: {frame.Length}B AV1 frame -> libdav1d Y mean={yMean}, range=[{yMin}, {yMax}]");
+    summary.AppendLine($"  PASS: {frame.Length}B AV1 frame -> libdav1d Y mean={yMean}, range=[{yMin}, {yMax}] (third-party decode)");
 });
 
 // === Vp8Decoder API smoke (encode -> decode through public IVideoDecoder) ===
