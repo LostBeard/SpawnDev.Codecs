@@ -302,6 +302,35 @@ Section("VP9 encoder -> ffmpeg native decode (32x32 multi-block)", () =>
     summary.AppendLine($"  PASS: {frame.Length}B VP9 32x32 multi-block -> ffmpeg max diff Y={yMaxAbs} U={uMaxAbs} V={vMaxAbs} (was 132+ pre-fix)");
 });
 
+// === VP9 encoder -> ffmpeg native decode at width > 320 ===
+// Pre-be10e55 the tile_info min/max log2 formulas were transposed and
+// ffmpeg rejected every keyframe wider than 320px. Encode 640x480 and
+// confirm ffmpeg's native VP9 decoder accepts it.
+Section("VP9 encoder -> ffmpeg native decode (640x480 tile_info regression guard)", () =>
+{
+    int W = 640, H = 480;
+    var ySrc = new byte[W * H]; Array.Fill(ySrc, (byte)128);
+    var uSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc, (byte)128);
+    var vSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc, (byte)128);
+    var frame = Vp9KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 30);
+    string ivf = Path.Combine(outDir, "vp9_640x480.ivf");
+    string yuv = Path.Combine(outDir, "vp9_640x480.yuv");
+    using (var fs = File.Create(ivf))
+    {
+        var w = new IvfWriter(fs, "VP90", W, H, frameRate: 1, timeScale: 30, numFrames: 0, leaveOpen: true);
+        w.WriteFrame(frame, 0); w.Finish();
+    }
+    if (!RunFfmpeg($"-y -i \"{ivf}\" -f rawvideo -pix_fmt yuv420p \"{yuv}\""))
+        throw new Exception("ffmpeg rejected VP9 at 640x480 - tile_info formula regression?");
+    var dec = File.ReadAllBytes(yuv);
+    int min = 255, max = 0;
+    for (int i = 0; i < W * H; i++) { if (dec[i] < min) min = dec[i]; if (dec[i] > max) max = dec[i]; }
+    if (Math.Abs(min - 128) > 4 || Math.Abs(max - 128) > 4)
+        throw new Exception($"VP9 640x480 Y range [{min},{max}] far from 128");
+    Console.WriteLine($"  PASS: {frame.Length}B VP9 640x480 -> ffmpeg native decode Y range=[{min}, {max}]");
+    summary.AppendLine($"  PASS: {frame.Length}B VP9 640x480 -> ffmpeg native, Y range=[{min}, {max}] (tile_info regression guard)");
+});
+
 // === AV1 encoder -> dav1d decode round-trip ===
 // The AV1 encoder produces a TD+SH+Frame OBU bitstream that libdav1d
 // (via ffmpeg -c:v libdav1d) accepts. 16x16 flat Y=128 reconstructs
