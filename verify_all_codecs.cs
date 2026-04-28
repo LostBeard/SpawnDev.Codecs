@@ -89,42 +89,21 @@ Section("VP9 encoder (60-frame animation)", () =>
     summary.AppendLine($"  PASS: {Frames} frames -> {mp4} ({sz:N0}B) - PLAYABLE IN VLC");
 });
 
-// === VP8 keyframe encoder -> IVF -> MP4 ===
-// Known limitation: the VP8 encoder has a coefficient-magnitude bug
-// for non-flat input. Flat frames (constant Y) round-trip pixel-perfect
-// through ffmpeg; gradient/sine input decodes to mostly-black via
-// ffmpeg. The bitstream is structurally valid (ffmpeg accepts it +
-// header parses cleanly). To give a visually honest demo we emit a
-// brightness-pulsing constant-gray sequence instead of the rolling
-// gradient, since constants ARE encoded correctly. The pixel fidelity
-// fix is on the polish list.
-Section("VP8 encoder (60-frame brightness pulse, flat-Y workaround)", () =>
+// === VP8 encoder: SKIPPED (known pixel-fidelity bug) ===
+// VP8 encoder produces structurally valid bitstreams (ffmpeg accepts +
+// parses headers cleanly) but the Y4 DC <-> Y2 Walsh round-trip has
+// a coefficient-magnitude bug. ONLY flat Y=128 (residual=0) decodes
+// correctly via ffmpeg. Any other flat value, gradient, or animation
+// produces clipped (mostly-black or mostly-white) output. Removed
+// from the visual harness entirely until the fix lands. See
+// vp8_pixel_check.cs for the diagnostic + characterization data
+// (luma sweep at Q=30 confirms ~5x residual-magnitude amplification).
+Section("VP8 encoder (SKIPPED - pixel-fidelity bug)", () =>
 {
-    int W = 16, H = 16, Frames = 60;
-    string ivf = Path.Combine(outDir, "vp8_animation.ivf");
-    string mp4 = Path.Combine(outDir, "vp8_animation.mp4");
-    using (var fs = File.Create(ivf))
-    {
-        var w = new IvfWriter(fs, "VP80", W, H, frameRate: 30, timeScale: 1, numFrames: 0, leaveOpen: true);
-        var ySrc = new byte[W * H]; var uSrc = new byte[(W / 2) * (H / 2)]; var vSrc = new byte[(W / 2) * (H / 2)];
-        for (int f = 0; f < Frames; f++)
-        {
-            // Flat Y per frame, smoothly pulsing between 64 and 192.
-            byte luma = (byte)(128 + 64 * Math.Sin(2.0 * Math.PI * f / Frames));
-            Array.Fill(ySrc, luma);
-            // Color cycling on UV - chroma DC also encodes correctly for flat input.
-            byte u = (byte)(128 + 32 * Math.Cos(2.0 * Math.PI * f / Frames));
-            byte v = (byte)(128 + 32 * Math.Sin(2.0 * Math.PI * f / Frames));
-            Array.Fill(uSrc, u);
-            Array.Fill(vSrc, v);
-            w.WriteFrame(Vp8KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 30), f);
-        }
-        w.Finish();
-    }
-    if (!RunFfmpeg($"-y -i \"{ivf}\" -c:v libx264 -pix_fmt yuv420p \"{mp4}\"")) throw new Exception("ffmpeg failed on VP8 IVF");
-    long sz = new FileInfo(mp4).Length;
-    Console.WriteLine($"  PASS: {Frames} frames -> {mp4} ({sz:N0}B)");
-    summary.AppendLine($"  PASS: {Frames} flat-Y pulsing frames -> {mp4} ({sz:N0}B) - VLC plays a brightness/color pulse");
+    Console.WriteLine($"  SKIPPED - encoder bitstream is structurally valid but pixel-broken");
+    Console.WriteLine($"            (only Y=128 flat input round-trips; see vp8_pixel_check.cs)");
+    summary.AppendLine($"  SKIPPED - encoder bitstream is structurally valid but pixel-broken");
+    summary.AppendLine($"            (only Y=128 flat input round-trips; see vp8_pixel_check.cs)");
 });
 
 // === Opus encoder -> raw Opus packets concatenated as .opus stream ===
