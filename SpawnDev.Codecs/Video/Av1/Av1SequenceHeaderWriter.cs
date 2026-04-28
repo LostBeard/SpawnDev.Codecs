@@ -415,6 +415,22 @@ public sealed class Av1BitWriter
         }
     }
 
+    /// <summary>
+    /// Write zero bits to the next byte boundary (no-op if already aligned).
+    /// Spec sec 5.3.5 byte_alignment(). Differs from <see cref="WriteTrailingBits"/>
+    /// in that it does NOT emit a leading 1 bit - it just pads zeros until
+    /// the bit cursor is byte-aligned. Used inside Frame OBU between the
+    /// uncompressed header and the tile group payload.
+    /// </summary>
+    public void ByteAlign()
+    {
+        if (_bitsInCur != 0)
+        {
+            int pad = 8 - _bitsInCur;
+            WriteBits(0, pad);
+        }
+    }
+
     /// <summary>Snapshot the produced bytes (caller flushes via WriteTrailingBits first).</summary>
     public byte[] ToArray()
     {
