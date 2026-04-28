@@ -331,6 +331,32 @@ Section("VP9 encoder -> ffmpeg native decode (640x480 tile_info regression guard
     summary.AppendLine($"  PASS: {frame.Length}B VP9 640x480 -> ffmpeg native, Y range=[{min}, {max}] (tile_info regression guard)");
 });
 
+// === AV1 encoder -> libdav1d at multi-block sizes (regression guard for 8a43b8f) ===
+// The 4-bug multi-block fix unblocked all flat-content sizes from 16x16
+// through FullHD. Sweep a few sizes to catch any regression.
+Section("AV1 encoder -> libdav1d (multi-block flat sizes 32-256)", () =>
+{
+    foreach (var (W, H) in new[] { (32, 32), (64, 64), (128, 128), (256, 256) })
+    {
+        var ySrc = new byte[W * H]; Array.Fill(ySrc, (byte)128);
+        var uSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc, (byte)128);
+        var vSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc, (byte)128);
+        var frame = Av1KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 32);
+
+        string ivf = Path.Combine(outDir, $"av1_flat_{W}x{H}.ivf");
+        string yuv = Path.Combine(outDir, $"av1_flat_{W}x{H}.yuv");
+        using (var fs = File.Create(ivf))
+        {
+            var w = new IvfWriter(fs, "AV01", W, H, frameRate: 1, timeScale: 30, numFrames: 0, leaveOpen: true);
+            w.WriteFrame(frame, 0); w.Finish();
+        }
+        if (!RunFfmpeg($"-y -c:v libdav1d -i \"{ivf}\" -f rawvideo -pix_fmt yuv420p \"{yuv}\""))
+            throw new Exception($"libdav1d rejected our AV1 at {W}x{H} - multi-block regression?");
+    }
+    Console.WriteLine("  PASS: AV1 32x32 + 64x64 + 128x128 + 256x256 flat all accepted by libdav1d");
+    summary.AppendLine("  PASS: AV1 multi-block flat 32-256 all accepted by libdav1d (8a43b8f regression guard)");
+});
+
 // === AV1 encoder -> dav1d decode round-trip ===
 // The AV1 encoder produces a TD+SH+Frame OBU bitstream that libdav1d
 // (via ffmpeg -c:v libdav1d) accepts. 16x16 flat Y=128 reconstructs
