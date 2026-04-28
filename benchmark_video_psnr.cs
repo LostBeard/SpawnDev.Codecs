@@ -94,13 +94,13 @@ void EvalFf(string name, int crf, string codec, string fourcc, string decArg)
     Console.WriteLine($"{name,-15}{crf,-5}{psnr,-12:F2}{avgKB,-12:F2}{encFps,-10:F2}");
 }
 
-// VP8 ours at multiple Q levels
-foreach (int q in new[] { 5, 30, 80, 150 })
+// VP8 ours - BaseQIndex is a 7-bit field per spec (0..127).
+foreach (int q in new[] { 5, 30, 80, 127 })
     Eval("VP8 (ours)", q, (y, u, v) => Vp8KeyframeEncoder.EncodeKeyFrame(y, W, u, W / 2, v, W, H, baseQIndex: q),
         "VP80", "", "ivf");
 
-// VP9 ours at multiple Q levels
-foreach (int q in new[] { 5, 30, 80, 150 })
+// VP9 ours - base_q_idx is 8-bit (0..255).
+foreach (int q in new[] { 5, 30, 80, 200 })
     Eval("VP9 (ours)", q, (y, u, v) => Vp9KeyframeEncoder.EncodeKeyFrame(y, W, u, W / 2, v, W, H, baseQIndex: q),
         "VP90", "", "ivf");
 

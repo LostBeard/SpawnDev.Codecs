@@ -41,6 +41,10 @@ public static class Vp8KeyframeEncoder
         if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException();
         if ((width & 15) != 0 || (height & 15) != 0)
             throw new ArgumentException("Width and height must be multiples of 16 (v1)");
+        if (baseQIndex < 0 || baseQIndex > 127)
+            throw new ArgumentOutOfRangeException(nameof(baseQIndex),
+                "VP8 BaseQIndex is a 7-bit field (0..127); larger values wrap modulo 128 in the bitstream " +
+                "while the encoder still uses the original quantizer, producing decode garbage.");
 
         int mbRows = height / 16;
         int mbCols = width / 16;
