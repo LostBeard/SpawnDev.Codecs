@@ -308,7 +308,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_Vert_ConstantInput_ConstantOutput()
     {
-        const int rows = 64, cols = 8, stride = 8;
+        const int rows = 64, stride = 8;
         var src = new byte[rows * stride];
         for (int i = 0; i < src.Length; i++) src[i] = 137;
         var dst = new byte[8 * 8];
