@@ -174,6 +174,8 @@ internal static class Av1CoefEncoder
             int coefCtx;
             if (c == eob - 1)
             {
+                // EOB position uses the position-only context (libaom
+                // av1_get_nz_map_contexts: get_nz_map_ctx with is_eob=true).
                 coefCtx = Av1TxbCommon.GetLowerLevelsCtxEob(bhl, width, c);
                 var baseEobCdf = Av1DefaultCoefCdfs.DefaultCoeffBaseEobMultiCdf[qctx][txsCtx][planeType][coefCtx];
                 int sym = Math.Min(level, 3) - 1;

@@ -252,29 +252,38 @@ internal static class Av1TxbCommon
     /// <summary>
     /// libaom <c>get_nz_mag(levels, bhl, tx_class)</c>. Computes the 5-tap
     /// neighbor magnitude sum used to bucket the level CDF context.
+    /// <para>
+    /// Note: <paramref name="levels"/> is the raw padded buffer (output of
+    /// <c>new byte[paddedStride * paddedRows + TxPadEnd]</c>). The libaom
+    /// equivalent passes <c>set_levels(levels_buf, height)</c> which returns
+    /// <c>levels_buf + TxPadTop * stride</c>. This helper compensates by
+    /// adding <c>TxPadTop * stride</c> internally so callers pass the raw
+    /// <c>levelsBuf</c> directly, matching <see cref="GetBrCtx"/>.
+    /// </para>
     /// </summary>
     public static int GetNzMag(byte[] levels, int basePadIdx, int bhl, int txClass)
     {
         int stride = (1 << bhl) + TxPadHor;
-        int mag = ClipMax3[levels[basePadIdx + stride]];
-        mag += ClipMax3[levels[basePadIdx + 1]];
+        int baseIdx = TxPadTop * stride + basePadIdx;
+        int mag = ClipMax3[levels[baseIdx + stride]];
+        mag += ClipMax3[levels[baseIdx + 1]];
         if (txClass == TxClass2d)
         {
-            mag += ClipMax3[levels[basePadIdx + stride + 1]];
-            mag += ClipMax3[levels[basePadIdx + (2 * stride)]];
-            mag += ClipMax3[levels[basePadIdx + 2]];
+            mag += ClipMax3[levels[baseIdx + stride + 1]];
+            mag += ClipMax3[levels[baseIdx + (2 * stride)]];
+            mag += ClipMax3[levels[baseIdx + 2]];
         }
         else if (txClass == TxClassVert)
         {
-            mag += ClipMax3[levels[basePadIdx + 2]];
-            mag += ClipMax3[levels[basePadIdx + 3]];
-            mag += ClipMax3[levels[basePadIdx + 4]];
+            mag += ClipMax3[levels[baseIdx + 2]];
+            mag += ClipMax3[levels[baseIdx + 3]];
+            mag += ClipMax3[levels[baseIdx + 4]];
         }
         else // TxClassHoriz
         {
-            mag += ClipMax3[levels[basePadIdx + (2 * stride)]];
-            mag += ClipMax3[levels[basePadIdx + (3 * stride)]];
-            mag += ClipMax3[levels[basePadIdx + (4 * stride)]];
+            mag += ClipMax3[levels[baseIdx + (2 * stride)]];
+            mag += ClipMax3[levels[baseIdx + (3 * stride)]];
+            mag += ClipMax3[levels[baseIdx + (4 * stride)]];
         }
         return mag;
     }
@@ -287,6 +296,14 @@ internal static class Av1TxbCommon
     public static int GetNzMapCtxFromStats(int stats, int coeffIdx, int bhl,
         Av1TxSize txSize, int txClass)
     {
+        // libaom special-case at txb_common.h get_nz_map_ctx_from_stats:
+        // `if ((tx_class | coeff_idx) == 0) return 0;` hardcodes ctx=0 at
+        // the DC (coeff_idx=0) for TX_CLASS_2D (txClass=0). Equivalent to
+        // our existing GetLowerLevelsCtxEob(bhl, width, 0)=0 short-circuit
+        // at c==0, but mirrored here so non-encoder/decoder callers (any
+        // future code that calls GetLowerLevelsCtx directly) hit the same
+        // libaom behaviour.
+        if ((txClass | coeffIdx) == 0) return 0;
         int ctx;
         if (txClass == TxClass2d)
         {
@@ -318,17 +335,25 @@ internal static class Av1TxbCommon
         return GetNzMapCtxFromStats(stats, coeffIdx, bhl, txSize, txClass);
     }
 
-    /// <summary>libaom <c>get_lower_levels_ctx_2d</c>: optimized 5-tap path for TX_CLASS_2D.</summary>
+    /// <summary>
+    /// libaom <c>get_lower_levels_ctx_2d</c>: optimized 5-tap path for TX_CLASS_2D.
+    /// <para>
+    /// Note: <paramref name="levels"/> is the raw padded buffer; this helper
+    /// adds <c>TxPadTop * stride</c> internally to skip the leading zero-pad
+    /// rows (libaom's equivalent passes <c>set_levels(levels_buf, height)</c>).
+    /// </para>
+    /// </summary>
     public static int GetLowerLevelsCtx2d(byte[] levels, int coeffIdx, int bhl, Av1TxSize txSize)
     {
         if (coeffIdx == 0) throw new InvalidOperationException("coeff_idx must be >0 for 2D path");
         int basePadIdx = GetPaddedIdx(coeffIdx, bhl);
         int stride = (1 << bhl) + TxPadHor;
-        int mag = Math.Min((int)levels[basePadIdx + stride], 3);
-        mag += Math.Min((int)levels[basePadIdx + 1], 3);
-        mag += Math.Min((int)levels[basePadIdx + stride + 1], 3);
-        mag += Math.Min((int)levels[basePadIdx + (2 * stride)], 3);
-        mag += Math.Min((int)levels[basePadIdx + 2], 3);
+        int baseIdx = TxPadTop * stride + basePadIdx;
+        int mag = Math.Min((int)levels[baseIdx + stride], 3);
+        mag += Math.Min((int)levels[baseIdx + 1], 3);
+        mag += Math.Min((int)levels[baseIdx + stride + 1], 3);
+        mag += Math.Min((int)levels[baseIdx + (2 * stride)], 3);
+        mag += Math.Min((int)levels[baseIdx + 2], 3);
         int ctx = Math.Min((mag + 1) >> 1, 4);
         return ctx + Av1ScanTables.NzMapCtxOffset[(int)txSize][coeffIdx];
     }
