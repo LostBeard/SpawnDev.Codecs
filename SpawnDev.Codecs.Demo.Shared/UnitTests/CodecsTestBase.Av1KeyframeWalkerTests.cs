@@ -59,30 +59,15 @@ public abstract partial class CodecsTestBase
         const double yRef = 97.40;
         const double uRef = 108.98;
         const double vRef = 124.76;
-        // Current measured baseline (2026-04-27, partial port):
-        //   Y=54.39 U=40.12 V=40.04
+        // Progress over the agent + post-agent fixes:
+        //   2026-04-27 baseline: Y=54.39 U=40.12 V=40.04 (gap: -43, -69, -85)
+        //   2026-04-28 post 8e61258: Y=94.95 U=65.25 V=65.10 (gap: -2.5, -44, -60)
         //
-        // Gap vs ffmpeg ground truth (Y=97.40 U=108.98 V=124.76):
-        //   Y delta: -43.01  U delta: -68.86  V delta: -84.72
-        //
-        // Sources of remaining drift (filed for follow-up work):
-        //   1. Scan tables: programmatic anti-diagonal builder vs libaom's
-        //      hand-tuned 60-table set. Not bit-exact for non-2D classes.
-        //   2. Q-context: hardcoded to 3 (high quality bin). libaom binds
-        //      dynamically per qindex; differs at low qindex like BBB's 5.
-        //   3. CFL alpha magnitudes not read - causes entropy desync on the
-        //      few BBB blocks that use UV_CFL_PRED.
-        //   4. Directional intra modes (D45/D67/D113/D135/D157/D203) fall
-        //      back to DC; libaom uses per-pixel angular interpolation.
-        //   5. tx_type is hardcoded to DCT_DCT; the intra_ext_tx CDF read +
-        //      tx_type lookup table aren't wired yet.
-        //   6. 32x32 and 64x64 inverse 1D transforms not yet ported (will
-        //      throw inside Av1Inverse2dTransform but caught + zero-residual).
-        //
-        // Tolerance set to capture this baseline exactly so future work can
-        // tighten as items 1-6 land.
+        // Y plane is now within tolerance vs ffmpeg's libdav1d. U and V
+        // still drift due to chroma-side bugs (likely CFL alpha or
+        // chroma scan/qctx) - tracked as follow-up.
         string summary = $"Y={yMean:F2} U={uMean:F2} V={vMean:F2} (target Y={yRef:F2} U={uRef:F2} V={vRef:F2})";
-        True(Math.Abs(yMean - yRef) < 100,
+        True(Math.Abs(yMean - yRef) < 10,
             $"Y mean {yMean:F2} far from ffmpeg {yRef:F2} (delta {yMean - yRef:F2}) | {summary}");
         True(Math.Abs(uMean - uRef) < 100,
             $"U mean {uMean:F2} far from ffmpeg {uRef:F2} (delta {uMean - uRef:F2}) | {summary}");
