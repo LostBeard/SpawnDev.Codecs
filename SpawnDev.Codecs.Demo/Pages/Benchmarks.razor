@@ -4,6 +4,9 @@
 @using SpawnDev.Codecs.Audio.Transforms
 @using SpawnDev.Codecs.Audio.Wav
 @using SpawnDev.Codecs.Audio.Aiff
+@using SpawnDev.Codecs.Video.Av1
+@using SpawnDev.Codecs.Video.Vp8
+@using SpawnDev.Codecs.Video.Vp9
 
 <PageTitle>SpawnDev.Codecs Benchmarks</PageTitle>
 
@@ -74,6 +77,14 @@
             BenchImdct(n: 256, iterations: 50, label: "IMDCT N=256 x50");
             BenchImdct(n: 960, iterations: 10, label: "IMDCT N=960 x10 (Opus/CELT 20ms-48k frame)");
             BenchMdct(n: 256, iterations: 50, label: "MDCT N=256 x50");
+
+            // Video keyframe encoders (synthetic gradient).
+            BenchVp8Keyframe(width: 32, height: 32, iterations: 50, q: 30, label: "VP8 32x32 Q=30 x50");
+            BenchVp8Keyframe(width: 64, height: 64, iterations: 20, q: 30, label: "VP8 64x64 Q=30 x20");
+            BenchVp9Keyframe(width: 32, height: 32, iterations: 30, q: 30, label: "VP9 32x32 Q=30 x30");
+            BenchVp9Keyframe(width: 64, height: 64, iterations: 15, q: 30, label: "VP9 64x64 Q=30 x15");
+            BenchAv1Keyframe(width: 32, height: 32, iterations: 20, q: 32, label: "AV1 32x32 Q=32 x20");
+            BenchAv1Keyframe(width: 64, height: 64, iterations: 10, q: 32, label: "AV1 64x64 Q=32 x10");
         }
         finally
         {
@@ -163,6 +174,47 @@
         _log.Add(new BenchEntry(label, $"N={n}, iter={iterations}", sw.Elapsed.TotalMilliseconds,
             $"{(iterations * n * 1000.0 / sw.Elapsed.TotalMilliseconds) / 1e6:F2} Mpoints/s",
             "CPU O(N²) reference"));
+    }
+
+    void BenchVp8Keyframe(int width, int height, int iterations, int q, string label)
+        => BenchVideoKeyframe(width, height, iterations, q, label, "VP8",
+            (y, u, v, w, h, qq) => Vp8KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: qq));
+
+    void BenchVp9Keyframe(int width, int height, int iterations, int q, string label)
+        => BenchVideoKeyframe(width, height, iterations, q, label, "VP9",
+            (y, u, v, w, h, qq) => Vp9KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: qq));
+
+    void BenchAv1Keyframe(int width, int height, int iterations, int q, string label)
+        => BenchVideoKeyframe(width, height, iterations, q, label, "AV1",
+            (y, u, v, w, h, qq) => Av1KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: qq));
+
+    void BenchVideoKeyframe(int width, int height, int iterations, int q, string label, string codec,
+        Func<byte[], byte[], byte[], int, int, int, byte[]> encode)
+    {
+        var ySrc = new byte[width * height];
+        for (int r = 0; r < height; r++)
+            for (int c = 0; c < width; c++)
+                ySrc[r * width + c] = (byte)Math.Clamp(96 + 32 * Math.Sin(2.0 * Math.PI * c / 16.0) + r * 2, 0, 255);
+        var uSrc = new byte[(width / 2) * (height / 2)]; System.Array.Fill(uSrc, (byte)128);
+        var vSrc = new byte[(width / 2) * (height / 2)]; System.Array.Fill(vSrc, (byte)128);
+
+        // Warm up once to amortize Concentus / range coder JIT.
+        encode(ySrc, uSrc, vSrc, width, height, q);
+
+        long totalBytes = 0;
+        var sw = Stopwatch.StartNew();
+        for (int i = 0; i < iterations; i++)
+            totalBytes += encode(ySrc, uSrc, vSrc, width, height, q).Length;
+        sw.Stop();
+        double fps = iterations * 1000.0 / sw.Elapsed.TotalMilliseconds;
+        double avgB = (double)totalBytes / iterations;
+        int rawBytes = width * height + 2 * (width / 2) * (height / 2);
+        double rawMbps = (rawBytes * fps) / 1_000_000.0;
+        _log.Add(new BenchEntry(label,
+            $"{width}x{height}, raw {rawBytes}B, iter={iterations}",
+            sw.Elapsed.TotalMilliseconds,
+            $"{fps:F1} fps ({rawMbps:F2} MB/s in)",
+            $"avg {avgB:F0}B / frame"));
     }
 
     int[] GenerateSine(int samplesPerChannel, int channels, int rate, int bps)
