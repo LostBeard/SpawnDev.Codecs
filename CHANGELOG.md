@@ -37,10 +37,13 @@ working feature matrix.
 - VP8 encoder: validate `baseQIndex` 0..127 at the API boundary - 7-bit field per RFC 6386 sec 9.6, larger values silently wrapped causing decoder/encoder quantizer mismatch (Q=150 PSNR collapsed to 8.76 dB) (commit `179d56a`).
 - Vorbis encoder: fit floor 1 curve to per-block spectrum envelope. Encoder was forcing floor to a constant ~0.94 and asking the residue book to carry the entire dynamic range alone; real audio bins peaked at ~0.005 and rounded to zero. Per-block adaptive floor + 1024-entry residue book. BBB SNR 0.35 dB -> 35.71 dB (now beating ffmpeg's libvorbis at 20.88 dB) (commit `c67d8ec`).
 - AV1 encoder + walker: 4 multi-block bugs closed - mi_cols formula was `>>3` should be `>>2` (mi units are 4 px not 8); min_log2_tiles formula used `64` should use `max_tile_area_sb = 2304`; `disable_cdf_update` was 0 should be 1; `GatherVertAlike` / `GatherHorzAlike` were 50/50 stubs replaced with libaom prob-summing formulas; `DecodePartition` now handles all four `has_rows / has_cols` cases per `read_partition`. libdav1d acceptance: 16x16 only -> ALL sizes 16x16..256x256 + 1920x1072 flat input (commit `8a43b8f`).
+- AV1 walker: prediction always uses full tx-block dimensions, not frame-edge clip. Smooth/SmoothV/SmoothH/Paeth/directional predictors throw on non-power-of-2 dims at frame edge; libaom convention is to predict full size and clip on recon write. BBB Y mean 49.4 -> 94.95 (vs ffmpeg 97.4 = delta -2.5, was -48). Y plane drift essentially closed (commit `8e61258`).
+- VP8 encoder + walker: multi-token-partition (Log2NumPartitions=0..3 = 1/2/4/8 partitions) per RFC 6386 sec 9.5. Encoder writes (n-1) 3-byte LE size headers + concatenated partition data; walker dispatches MB row M coefs to partition (M mod n). Round-trip + ffmpeg native VP8 decode all 4 counts: Y mean=124 exact across all (commits `86c2209` walker, `32c00cc` encoder).
 
 **Known remaining gaps:**
 
-- AV1 multi-block with content variation: a separate bug fires when scan order has non-skip → skip block transitions. All-skip multi-block frames work; constant-content frames work to 1920x1072. BBB content (varied) still has 56/60 frames rejected by libdav1d. Distinct from the bugs closed in `8a43b8f`.
+- AV1 multi-block with content variation: a separate bug fires when scan order has non-skip → skip block transitions. All-skip multi-block frames work; constant-content frames work to 1920x1072. BBB content (varied) still has 56/60 frames rejected by libdav1d. Distinct from the bugs closed in `8a43b8f`. Sub-agent in flight.
+- AV1 walker chroma drift: U/V means at 65 vs ffmpeg 109/125 on real BBB. Y plane fully closed; chroma path needs follow-up.
 - VP8/VP9 inter frames + loop filter still NotImplementedException.
 
 
