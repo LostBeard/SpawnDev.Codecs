@@ -255,6 +255,36 @@ try
 catch (Exception ex) { Report("AV1 stream analyze (BBB IVF)", false, ex.Message); }
 
 // =================================================================
+// VIDEO: AV1 forward 2D DCT 4x4 round-trip via Av1Forward2dTransform
+//   exercises the full 2D dispatcher (libaom shifts + cos_bits) with
+//   the matching Av1Inverse2dTransform.
+// =================================================================
+try
+{
+    var input = new short[16];
+    for (int i = 0; i < 16; i++) input[i] = (short)((i * 13 - 80) % 64);
+
+    var coefs = new int[16];
+    Av1Forward2dTransform.Apply(Av1TxSize.Tx4x4, Av1TxType.DctDct, input, coefs);
+
+    var residual = new int[16];
+    Av1Inverse2dTransform.Apply(Av1TxSize.Tx4x4, Av1TxType.DctDct, coefs, residual);
+
+    int e1 = 0, e2 = 0, e4 = 0, e8 = 0;
+    for (int i = 0; i < 16; i++)
+    {
+        e1 = Math.Max(e1, Math.Abs(residual[i] - input[i]));
+        e2 = Math.Max(e2, Math.Abs(residual[i] - input[i] * 2));
+        e4 = Math.Max(e4, Math.Abs(residual[i] - input[i] * 4));
+        e8 = Math.Max(e8, Math.Abs(residual[i] - input[i] * 8));
+    }
+    int best = Math.Min(Math.Min(e1, e2), Math.Min(e4, e8));
+    Report("AV1 forward 2D DCT 4x4 (full dispatcher)", best <= 16,
+        $"min round-trip err = {best} (s1={e1} s2={e2} s4={e4} s8={e8})");
+}
+catch (Exception ex) { Report("AV1 forward 2D DCT 4x4 (full dispatcher)", false, ex.Message); }
+
+// =================================================================
 // VIDEO: AV1 forward DCT 4-point round-trip vs inverse oracle
 //   exercises libaom-bit-exact Av1ForwardDct4 + Av1InverseDct4
 // =================================================================
