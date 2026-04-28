@@ -14,10 +14,6 @@
 //     report.txt                <- Summary of what each file demonstrates
 //
 // Notes:
-//   - VP8 frames stay at 16x16 (single macroblock) until the encoder's
-//     reconstruction write-back lands. Multi-MB frames currently use
-//     127/129 edge fills for non-leftmost MBs, which produces
-//     "flashing" appearance.
 //   - Vorbis encoder has a known amplitude bug (~12% peak delta vs
 //     ffmpeg, README documented); the audio chord demo uses Opus
 //     instead, which round-trips bit-exact via the Concentus backbone.
@@ -89,21 +85,36 @@ Section("VP9 encoder (60-frame animation)", () =>
     summary.AppendLine($"  PASS: {Frames} frames -> {mp4} ({sz:N0}B) - PLAYABLE IN VLC");
 });
 
-// === VP8 encoder: SKIPPED (known pixel-fidelity bug) ===
-// VP8 encoder produces structurally valid bitstreams (ffmpeg accepts +
-// parses headers cleanly) but the Y4 DC <-> Y2 Walsh round-trip has
-// a coefficient-magnitude bug. ONLY flat Y=128 (residual=0) decodes
-// correctly via ffmpeg. Any other flat value, gradient, or animation
-// produces clipped (mostly-black or mostly-white) output. Removed
-// from the visual harness entirely until the fix lands. See
-// vp8_pixel_check.cs for the diagnostic + characterization data
-// (luma sweep at Q=30 confirms ~5x residual-magnitude amplification).
-Section("VP8 encoder (SKIPPED - pixel-fidelity bug)", () =>
+// === VP8 keyframe encoder -> IVF -> MP4 ===
+// Pixel-fidelity bug fixed (Y2 was using PLANE_TYPE 3 instead of 1, plus
+// the encoder skipped recon write-back for multi-MB frames). All flat
+// luma values + rolling gradient now round-trip via ffmpeg.
+Section("VP8 encoder (60-frame animation)", () =>
 {
-    Console.WriteLine($"  SKIPPED - encoder bitstream is structurally valid but pixel-broken");
-    Console.WriteLine($"            (only Y=128 flat input round-trips; see vp8_pixel_check.cs)");
-    summary.AppendLine($"  SKIPPED - encoder bitstream is structurally valid but pixel-broken");
-    summary.AppendLine($"            (only Y=128 flat input round-trips; see vp8_pixel_check.cs)");
+    int W = 32, H = 32, Frames = 60;
+    string ivf = Path.Combine(outDir, "vp8_animation.ivf");
+    string mp4 = Path.Combine(outDir, "vp8_animation.mp4");
+    using (var fs = File.Create(ivf))
+    {
+        var w = new IvfWriter(fs, "VP80", W, H, frameRate: 30, timeScale: 1, numFrames: 0, leaveOpen: true);
+        var ySrc = new byte[W * H]; var uSrc = new byte[(W / 2) * (H / 2)]; var vSrc = new byte[(W / 2) * (H / 2)];
+        for (int f = 0; f < Frames; f++)
+        {
+            for (int r = 0; r < H; r++) for (int c = 0; c < W; c++)
+                ySrc[r * W + c] = (byte)Math.Clamp(80 + 40 * Math.Sin(2.0 * Math.PI * (c + f) / W) + r * 2, 0, 255);
+            for (int r = 0; r < H / 2; r++) for (int c = 0; c < W / 2; c++)
+            {
+                uSrc[r * (W / 2) + c] = (byte)(128 + (f - 30));
+                vSrc[r * (W / 2) + c] = (byte)(128 - (f - 30));
+            }
+            w.WriteFrame(Vp8KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 30), f);
+        }
+        w.Finish();
+    }
+    if (!RunFfmpeg($"-y -i \"{ivf}\" -c:v libx264 -pix_fmt yuv420p \"{mp4}\"")) throw new Exception("ffmpeg failed on VP8 IVF");
+    long sz = new FileInfo(mp4).Length;
+    Console.WriteLine($"  PASS: {Frames} frames -> {mp4} ({sz:N0}B)");
+    summary.AppendLine($"  PASS: {Frames} frames -> {mp4} ({sz:N0}B) - PLAYABLE IN VLC");
 });
 
 // === Opus encoder -> raw Opus packets concatenated as .opus stream ===
@@ -219,16 +230,6 @@ summary.AppendLine("Codec-tool / not VLC-friendly:");
 summary.AppendLine("  *.ivf   - Raw VP8/VP9 in IVF container; ffmpeg/libvpx tools open them; VLC may not.");
 summary.AppendLine();
 summary.AppendLine("=== Known limitations ===");
-summary.AppendLine("VP8 encoder has a coefficient-magnitude bug for non-flat input. Flat-Y frames");
-summary.AppendLine("round-trip pixel-perfect via ffmpeg; gradient/sine inputs decode to mostly-black.");
-summary.AppendLine("Bitstream is structurally valid (ffmpeg accepts headers + writes the YUV plane);");
-summary.AppendLine("the bug is in the Y4 DC <-> Y2 Walsh round-trip magnitude. Demo emits a flat-Y");
-summary.AppendLine("brightness/chroma pulsing sequence as a workaround that exercises the encoder");
-summary.AppendLine("WITHOUT triggering the bug. Pixel fidelity fix is on the polish list.");
-summary.AppendLine();
-summary.AppendLine("VP8 multi-MB frames also need encoder reconstruction write-back; non-leftmost");
-summary.AppendLine("MBs currently use 127/129 neutral fill, producing 'flashing' for frames > 16x16.");
-summary.AppendLine();
 summary.AppendLine("Vorbis encoder has a known peak-amplitude bug (~12% delta vs ffmpeg, README");
 summary.AppendLine("documented). The audio chord demo uses Opus instead, which round-trips bit-exact");
 summary.AppendLine("via the Concentus 2.2.2 BSD-3 backbone.");

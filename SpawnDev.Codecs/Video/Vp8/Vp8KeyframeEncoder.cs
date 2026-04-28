@@ -271,15 +271,20 @@ public static class Vp8KeyframeEncoder
         EncodeUvMode(partition0, (int)Vp8UvMode.DcPred);
 
         // === 6. Encode coefficients into tokenPartition ===
-        // Y2 first (block type 3).
+        // VP8 PLANE_TYPE constants (libvpx vp8/common/blockd.h):
+        //   PLANE_TYPE_Y_NO_DC    = 0  (Y4 when Y2 present, firstCoef=1)
+        //   PLANE_TYPE_Y2         = 1  (the 16 Y4-DC values via Walsh)
+        //   PLANE_TYPE_UV         = 2
+        //   PLANE_TYPE_Y_WITH_DC  = 3  (Y4 when Y2 absent / B_PRED, firstCoef=0)
+        // Y2 first (block type 1).
         var aboveCtx = contexts.GetAbove(mbCol);
         int y2Ctx = aboveCtx[Vp8EntropyContexts.Plane.Y2Slot] + contexts.Left[Vp8EntropyContexts.Plane.Y2Slot];
-        int y2Eob = Vp8CoefBlockEncoder.Encode(tokenPartition, coefProbsByType[3], y2Ctx, 0, y2Coefs);
+        int y2Eob = Vp8CoefBlockEncoder.Encode(tokenPartition, coefProbsByType[1], y2Ctx, 0, y2Coefs);
         byte y2HasCoef = (byte)(y2Eob > 0 ? 1 : 0);
         aboveCtx[Vp8EntropyContexts.Plane.Y2Slot] = y2HasCoef;
         contexts.Left[Vp8EntropyContexts.Plane.Y2Slot] = y2HasCoef;
 
-        // Y4 (block type 0, firstCoef=1 since Y2 has DC).
+        // Y4 (block type 0 = PLANE_TYPE_Y_NO_DC, firstCoef=1 since Y2 carries DC).
         for (int by = 0; by < 4; by++)
         {
             for (int bx = 0; bx < 4; bx++)
@@ -289,7 +294,11 @@ public static class Vp8KeyframeEncoder
                 int leftSlot = Vp8EntropyContexts.Plane.YBase + by;
                 int ctx = aboveCtx[aboveSlot] + contexts.Left[leftSlot];
                 int eob = Vp8CoefBlockEncoder.Encode(tokenPartition, coefProbsByType[0], ctx, 1, y4Coefs.Slice(blockIdx * 16, 16));
-                byte hasCoef = (byte)(eob > 1 ? 1 : 0);
+                // Match decoder: any non-zero coefficient flips the context to 1.
+                // For firstCoef=1, Encode returns the EOB position which is >=1 if any AC coef
+                // is non-zero (eob == 0 means "block emitted EOB at position firstCoef = 1, no coefs").
+                // Use eob > firstCoef test: equivalent to "any coef present".
+                byte hasCoef = (byte)(eob > 0 ? 1 : 0);
                 aboveCtx[aboveSlot] = hasCoef;
                 contexts.Left[leftSlot] = hasCoef;
             }
@@ -327,11 +336,134 @@ public static class Vp8KeyframeEncoder
         }
 
         // === 7. Reconstruct: dequantize, inverse transform, write back to recon ===
-        // (Optional for v1 - not needed if we don't predict from this MB. But
-        // first-row/col MBs of subsequent MBs need this MB's recon pixels.)
-        // For v1 SCAFFOLD: skip recon write-back; subsequent MBs will use 127/129 edge fills.
-        // This degrades quality but keeps the encoder bitstream-valid.
-        // Real recon path is a future enhancement.
+        //
+        // The encoder MUST reproduce exactly what the decoder will reconstruct
+        // for this MB - subsequent MBs predict from these recon pixels, and
+        // any drift between encoder and decoder views compounds across the frame.
+        //
+        // Steps mirror the decoder (Vp8KeyframeWalker.ReconstructMb):
+        //   - Dequantize Y2 -> inverse Walsh (or DC-only fast path)
+        //   - For each Y4 block: dequantize AC, inject Y2 inverse-derived DC,
+        //     IDCT, add to predictor, clamp, write recon
+        //   - For each UV block: dequantize, IDCT, add to UV predictor, write recon
+
+        // ---- Y2 dequant + inverse Walsh ----
+        Span<short> y2Dq = stackalloc short[16];
+        Span<short> y2Inv = stackalloc short[16];
+        // Dequantize Y2: slot 0 uses Y2Dc, slots 1..15 use Y2Ac.
+        y2Dq[0] = (short)(y2Coefs[0] * dequant.Y2Dc);
+        for (int i = 1; i < 16; i++) y2Dq[i] = (short)(y2Coefs[i] * dequant.Y2Ac);
+        // Match decoder's two paths: full Walsh when AC present, broadcast DC otherwise.
+        if (y2Eob > 1)
+        {
+            Vp8InverseTransform.ShortInvWalsh4x4(y2Dq, y2Inv);
+        }
+        else
+        {
+            // libvpx vp8_short_inv_walsh4x4_1: when only Y2 DC is non-zero,
+            // each output is (input_dc + 3) >> 3, broadcast to all 16 slots.
+            short v = (short)((y2Dq[0] + 3) >> 3);
+            for (int i = 0; i < 16; i++) y2Inv[i] = v;
+        }
+
+        // ---- Per-Y4 block: dequantize + IDCT + add to predictor ----
+        Span<short> dq16 = stackalloc short[16];
+        Span<byte> predCopy = stackalloc byte[16];
+        for (int by = 0; by < 4; by++)
+        {
+            for (int bx = 0; bx < 4; bx++)
+            {
+                int blockIdx = by * 4 + bx;
+                Span<short> raw = y4Coefs.Slice(blockIdx * 16, 16);
+                // Y4 carries DC=0 at slot 0 (cleared after fdct); decoder injects
+                // y2Inv[blockIdx] there and uses the rest as AC.
+                dq16[0] = y2Inv[blockIdx];
+                for (int i = 1; i < 16; i++) dq16[i] = (short)(raw[i] * dequant.Y1Ac);
+
+                // Build the 4x4 predictor patch from the per-MB pred buffer.
+                for (int r = 0; r < 4; r++)
+                    for (int c = 0; c < 4; c++)
+                        predCopy[r * 4 + c] = yPredMb[(by * 4 + r) * 16 + bx * 4 + c];
+
+                // Recon write target: directly into the frame buffer at this MB.
+                int reconOff = (mbRow * 16 + by * 4) * recon.YStride + mbCol * 16 + bx * 4;
+                Span<byte> reconDst = recon.YPlane.AsSpan(reconOff);
+
+                // Decode-side has a DC-only fast path when eobs[i]==0 && y2Inv!=0.
+                // For correctness we don't need that branch on the encoder side -
+                // the full IDCT with AC=0 and DC=y2Inv produces the same result
+                // as DcOnlyIdctAdd. Use the DC-only fast path when AC is empty
+                // to match the decoder path bit-for-bit (avoids any rounding drift).
+                bool acAllZero = true;
+                for (int i = 1; i < 16; i++) { if (dq16[i] != 0) { acAllZero = false; break; } }
+                if (acAllZero && y2Inv[blockIdx] == 0)
+                {
+                    // No residual at all - just write the predictor.
+                    for (int r = 0; r < 4; r++)
+                        for (int c = 0; c < 4; c++)
+                            reconDst[r * recon.YStride + c] = predCopy[r * 4 + c];
+                }
+                else if (acAllZero)
+                {
+                    Vp8InverseTransform.DcOnlyIdctAdd(y2Inv[blockIdx], predCopy, 4, reconDst, recon.YStride);
+                }
+                else
+                {
+                    Vp8InverseTransform.ShortIdct4x4Llm(dq16, predCopy, 4, reconDst, recon.YStride);
+                }
+            }
+        }
+
+        // ---- Per-UV block: dequantize + IDCT + add to predictor ----
+        for (int by = 0; by < 2; by++)
+        {
+            for (int bx = 0; bx < 2; bx++)
+            {
+                int blockIdx = by * 2 + bx;
+                ReconUvBlock(uCoefs.Slice(blockIdx * 16, 16), uPredMb, by, bx, dequant.UvDc, dequant.UvAc,
+                             recon.UPlane, recon.UvStride, mbRow, mbCol, predCopy, dq16);
+                ReconUvBlock(vCoefs.Slice(blockIdx * 16, 16), vPredMb, by, bx, dequant.UvDc, dequant.UvAc,
+                             recon.VPlane, recon.UvStride, mbRow, mbCol, predCopy, dq16);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Dequantize a single 4x4 UV block, IDCT it, add to the predictor patch,
+    /// write into the recon plane. Used by the encoder reconstruction step.
+    /// </summary>
+    private static void ReconUvBlock(
+        Span<short> raw, ReadOnlySpan<byte> uvPred, int by, int bx,
+        int uvDc, int uvAc,
+        byte[] reconPlane, int uvStride, int mbRow, int mbCol,
+        Span<byte> predCopy, Span<short> dq16)
+    {
+        dq16[0] = (short)(raw[0] * uvDc);
+        for (int i = 1; i < 16; i++) dq16[i] = (short)(raw[i] * uvAc);
+
+        for (int r = 0; r < 4; r++)
+            for (int c = 0; c < 4; c++)
+                predCopy[r * 4 + c] = uvPred[(by * 4 + r) * 8 + bx * 4 + c];
+
+        int reconOff = (mbRow * 8 + by * 4) * uvStride + mbCol * 8 + bx * 4;
+        Span<byte> dst = reconPlane.AsSpan(reconOff);
+
+        bool acAllZero = true;
+        for (int i = 1; i < 16; i++) { if (dq16[i] != 0) { acAllZero = false; break; } }
+        if (acAllZero && dq16[0] == 0)
+        {
+            for (int r = 0; r < 4; r++)
+                for (int c = 0; c < 4; c++)
+                    dst[r * uvStride + c] = predCopy[r * 4 + c];
+        }
+        else if (acAllZero)
+        {
+            Vp8InverseTransform.DcOnlyIdctAdd(dq16[0], predCopy, 4, dst, uvStride);
+        }
+        else
+        {
+            Vp8InverseTransform.ShortIdct4x4Llm(dq16, predCopy, 4, dst, uvStride);
+        }
     }
 
     private static void EncodeUvBlock(
