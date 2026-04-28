@@ -72,6 +72,7 @@ public sealed class Av1Decoder : IVideoDecoder
         // Parse all OBUs in this Temporal Unit.
         var counts = new Dictionary<Av1ObuType, int>();
         bool hasFrameData = false;
+        ReadOnlyMemory<byte>? frameObuPayload = null;
 
         foreach (var obu in Av1ObuParser.EnumerateObus(compressedPacket))
         {
@@ -91,6 +92,13 @@ public sealed class Av1Decoder : IVideoDecoder
             else if (obu.IsCodedFrameData)
             {
                 hasFrameData = true;
+                if (obu.Type == Av1ObuType.Frame)
+                {
+                    // Capture the Frame OBU payload for the walker; only
+                    // the Frame OBU carries both the complete header and
+                    // the tile data the walker needs.
+                    frameObuPayload = compressedPacket.Slice(obu.PayloadOffset, obu.PayloadLength);
+                }
                 if (LastSequenceHeader is not null)
                 {
                     var fh = Av1FrameHeaderParser.Parse(
@@ -107,18 +115,38 @@ public sealed class Av1Decoder : IVideoDecoder
                         _cumulativeFrameTypeCounts[fh.FrameType] = fc + 1;
                     }
                 }
-                // Per-frame block decode goes here once the inverse-transform
-                // + prediction + entropy-decode pipeline is wired up.
             }
         }
 
         LastFrameObuCounts = counts;
 
-        // Emit a placeholder mid-gray frame for every Temporal Unit
-        // that carried coded frame data, at current learned dimensions.
-        // Once block decode lands these become real pixels.
         if (hasFrameData && Width > 0 && Height > 0)
         {
+            // Drive the walker if we have a Frame OBU + sequence header.
+            // Walker handles intra-only frames; non-keyframe paths +
+            // multi-tile-group bitstreams fall back to placeholder.
+            if (frameObuPayload is { } payload && LastSequenceHeader is { } seq)
+            {
+                try
+                {
+                    var complete = Av1CompleteFrameHeaderParser.Parse(payload.Span, seq);
+                    var tg = Av1TileGroupExtractor.Extract(payload.Span, complete);
+                    var walker = new Av1KeyframeWalker();
+                    var fb = walker.DecodeFrame(payload, seq, complete, tg);
+                    await frameSink.OnFrameAsync(
+                        fb.Y, fb.LumaWidth,
+                        fb.U, fb.ChromaWidth,
+                        fb.V, fb.ChromaWidth,
+                        pts: 0L).ConfigureAwait(false);
+                    return 1;
+                }
+                catch (NotImplementedException)
+                {
+                    // Walker doesn't support this configuration yet
+                    // (inter frames, screen content tools, etc.); fall
+                    // back to placeholder.
+                }
+            }
             await EmitPlaceholderFrameAsync(frameSink, ct).ConfigureAwait(false);
             return 1;
         }

@@ -156,7 +156,42 @@ public sealed class Vp9Decoder : IVideoDecoder
             // fall through to a placeholder at current visible dimensions.
             if (Width <= 0 || Height <= 0) continue;
 
-            await EmitPlaceholderFrameAsync(frameSink, ct).ConfigureAwait(false);
+            // For intra-only frames with a complete pipeline, drive the
+            // walker. Inter frames + show_existing_frame still fall back
+            // to the placeholder until the reference pool + inter
+            // prediction land.
+            bool walkerOk = sizeCarrying
+                && !header.ShowExistingFrame
+                && LastCompleteHeader is not null
+                && LastTileGroup is not null;
+            if (walkerOk)
+            {
+                try
+                {
+                    var walker = new Vp9KeyframeWalker();
+                    var fb = walker.DecodeFrame(
+                        frameBytes,
+                        LastCompleteHeader!,
+                        _compressedState,
+                        LastCompressedResult!,
+                        LastTileGroup!);
+                    await frameSink.OnFrameAsync(
+                        fb.Y, fb.LumaWidth,
+                        fb.U, fb.ChromaWidth,
+                        fb.V, fb.ChromaWidth,
+                        pts: 0L).ConfigureAwait(false);
+                }
+                catch (NotImplementedException)
+                {
+                    // Walker doesn't support this configuration yet (e.g.
+                    // 4:2:2 / 4:4:4); fall back to placeholder.
+                    await EmitPlaceholderFrameAsync(frameSink, ct).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                await EmitPlaceholderFrameAsync(frameSink, ct).ConfigureAwait(false);
+            }
             emitted++;
             TotalVisibleFrames++;
         }
