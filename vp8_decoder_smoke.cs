@@ -37,6 +37,27 @@ if (Math.Abs(meanY - 128) > 8)
     Environment.Exit(1);
 }
 
+// === Multi-MB exercise (32x32 = 4 MBs) ===
+// Confirms the decoder works past a single MB. Uses the same gradient
+// pattern the verify harness produces.
+{
+    const int W2 = 32, H2 = 32;
+    var ySrc2 = new byte[W2 * H2];
+    for (int r = 0; r < H2; r++)
+        for (int c = 0; c < W2; c++)
+            ySrc2[r * W2 + c] = (byte)Math.Clamp(80 + 40 * Math.Sin(2.0 * Math.PI * c / W2) + r * 2, 0, 255);
+    var uSrc2 = new byte[(W2 / 2) * (H2 / 2)]; Array.Fill(uSrc2, (byte)128);
+    var vSrc2 = new byte[(W2 / 2) * (H2 / 2)]; Array.Fill(vSrc2, (byte)128);
+    var frame2 = Vp8KeyframeEncoder.EncodeKeyFrame(ySrc2, W2, uSrc2, W2 / 2, vSrc2, W2, H2, baseQIndex: 30);
+    var sink2 = new CaptureSink();
+    var dec2 = new Vp8Decoder();
+    int n2 = await dec2.DecodeFrameAsync(frame2, sink2);
+    if (n2 != 1 || sink2.LastY!.Length != W2 * H2) { Console.WriteLine($"FAIL: multi-MB frame, n={n2} len={sink2.LastY?.Length}"); Environment.Exit(1); }
+    int srcMin = 255, srcMax = 0; foreach (var b in ySrc2) { if (b < srcMin) srcMin = b; if (b > srcMax) srcMax = b; }
+    int outMin = 255, outMax = 0; foreach (var b in sink2.LastY!) { if (b < outMin) outMin = b; if (b > outMax) outMax = b; }
+    Console.WriteLine($"PASS: 32x32 multi-MB frame decoded; source Y range=[{srcMin}, {srcMax}], decoded Y range=[{outMin}, {outMax}]");
+}
+
 // Verify inter-frame rejection.
 try
 {
