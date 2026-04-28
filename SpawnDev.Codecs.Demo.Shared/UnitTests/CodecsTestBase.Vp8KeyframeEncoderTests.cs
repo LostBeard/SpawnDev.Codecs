@@ -126,6 +126,37 @@ public abstract partial class CodecsTestBase
         Equal((short)-76, y2_via_type1[0], "Y2 qcoef[0] at PLANE_TYPE=1 must equal the expected -76");
     }
 
+    [TestMethod]
+    public void Vp8KeyframeEncoder_RejectsBaseQIndex_OutOfRange()
+    {
+        // BaseQIndex is a 7-bit field per RFC 6386 sec 9.6 (range 0..127).
+        // Q >= 128 wraps to 7 bits in the bitstream while the encoder uses
+        // the original value internally => decoder + encoder use different
+        // quantizers => PSNR collapses to ~9 dB. The encoder must reject at
+        // the API boundary so this never silently happens.
+        const int W = 16, H = 16;
+        var ySrc = new byte[W * H];
+        Array.Fill(ySrc, (byte)128);
+        var uSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc, (byte)128);
+        var vSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc, (byte)128);
+
+        bool threw128 = false;
+        try { Vp8KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 128); }
+        catch (ArgumentOutOfRangeException) { threw128 = true; }
+        True(threw128, "Q=128 (overflow first invalid value) must throw");
+
+        bool threwNeg = false;
+        try { Vp8KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: -1); }
+        catch (ArgumentOutOfRangeException) { threwNeg = true; }
+        True(threwNeg, "Q=-1 must throw");
+
+        // 0 and 127 must be accepted (boundaries of the legal range).
+        var atZero = Vp8KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 0);
+        True(atZero.Length > 0);
+        var atMax = Vp8KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 127);
+        True(atMax.Length > 0);
+    }
+
     /// <summary>Decode a complete VP8 keyframe via Vp8KeyframeWalker and return the buffer + entropy contexts.</summary>
     private static (Vp8FrameBuffer fb, Vp8EntropyContexts ec) DecodeFrameViaWalker(byte[] frame, int width, int height)
     {
