@@ -70,17 +70,61 @@ WavFileCodec.WriteFile("roundtrip.wav", flac.InterleavedSamples, flac.StreamInfo
     flac.StreamInfo.Channels, flac.StreamInfo.BitsPerSample);
 ```
 
+## Host is Pure Coordinator — 100% Accelerator-Resident
+
+**Every codec encoder and decoder in this library runs entirely as ILGPU kernels.** The host (the .NET environment that uses the accelerator) is treated as a pure coordinator — it allocates GPU buffers, uploads source data, dispatches kernel chains, and reads back the final output bytes. Nothing CPU-side touches the encoded bitstream or the decoded pixels. **No CPU math, no CPU iteration, no CPU bool encoding, no CPU bitstream assembly.**
+
+This is a hard design rule, not an aspiration. Every kernel in this repo, every integration class, every encoder + decoder pipeline holds to it. When a piece of work is still on the CPU, it gets ported.
+
+### Why this matters
+
+- **Blazor WASM UI thread.** In the browser, the .NET runtime IS the UI thread. Any meaningful CPU work freezes the page. Pushing every codec stage to ILGPU means the UI stays responsive while a 1080p frame transcodes underneath.
+- **Zero CPU↔GPU bouncing in the hot path.** Each round-trip across the PCIe / WebGPU / WebGL / Wasm boundary costs latency and throughput. Once source data is on the accelerator, it stays there until the final output buffer is ready.
+- **Backend uniformity.** The same kernels run on CUDA, OpenCL, CPU emulator, WebGPU, WebGL, and Wasm. The host code doesn't branch on backend - it dispatches the same chain everywhere.
+- **Scales with the silicon, not the .NET runtime.** The performance ceiling is whatever the accelerator can deliver, not whatever the host can spare around UI work and JS interop.
+
+### What this looks like in practice
+
+The VP8 keyframe encoder (`Vp8KeyframeEncoderGpu`) is the first complete v3 reference. Its `EncodeKeyFrame` method is a textbook example of the pattern:
+
+```csharp
+// PURE COORDINATOR. No math, no iteration, no bitstream work.
+public byte[] EncodeKeyFrame(/* YUV planes + dims + baseQ */)
+{
+    using var dY = _accelerator.Allocate1D<byte>(...);
+    // ... allocate other GPU buffers ...
+
+    UploadPlane(ySrc, ...);  // necessary I/O - source from outside accelerator
+    UploadPlane(uSrc, ...);
+    UploadPlane(vSrc, ...);
+
+    _setup.Run(/* compute dequantizers + write frame header */);
+    _sequentialEncode.Run(/* per-MB predict + transform + quant + recon */);
+    _entropy.Run(/* per-MB modes + coef tokens to bool streams */);
+    _assemble.Run(/* frame tag + concat partitions into output */);
+
+    _accelerator.Synchronize();
+
+    var lenArr = dOutLen.GetAsArray1D();              // 1 int readback
+    var outputBuffer = dOutput.GetAsArray1D();        // final bytes readback
+    return outputBuffer.AsSpan(0, lenArr[0]).ToArray();
+}
+```
+
+That's the whole encoder. Every byte of the output bitstream is written by an ILGPU kernel. See `Plans/VP8-GPU-encoder-architecture.md` for the kernel chain breakdown.
+
 ## Architecture
 
-Every codec has three zones:
+Every codec is decomposed into kernel-resident stages. Even stages that look "inherently sequential" (entropy coders, range coders, bool encoders) run on the GPU - just as a single thread per stream rather than parallel across many. Single-thread on GPU is still GPU-resident, and that's what the host-as-coordinator rule demands.
 
-| Zone | Work | Where |
-|------|------|-------|
+| Stage | Work | Where |
+|-------|------|-------|
 | **Massively parallel** | DCT / MDCT, motion estimation, quantization, loop filter, inverse transforms, motion compensation | **ILGPU kernels** - backend-agnostic |
-| **Inherently sequential** | Entropy coding (arithmetic / Huffman / range coders), LPC prediction, rate control | **C# CPU** |
-| **Coordination** | Frame buffering, codec negotiation, API | **C# CPU** |
+| **Sequential per stream** | Range coding (Daala/VP8 bool/SILK), Huffman, LPC prediction, rate control feedback | **ILGPU kernels** - one thread per stream, multiple streams in parallel where the spec allows (token partitions, tiles) |
+| **Frame-level orchestration** | Per-MB predict→transform→recon dependency loops, header bit emission | **ILGPU kernels** - single-thread per frame for v1/v2 correctness; wave-parallel scheduling planned for v4 throughput |
+| **Coordination** | Buffer alloc, source upload, kernel dispatch order, final readback | **C# host** - pure coordinator, no math |
 
-Entropy coders cannot be parallelized - arithmetic coding is inherently sequential. GPU pays off for transform coding, motion estimation, quantization, loop filter; CPU handles the sequential back-end.
+The "host CPU does the entropy stage" pattern other codec libraries use is explicitly rejected here. Bool encoders, range coders, Huffman trees - all of them run on the accelerator.
 
 ## Testing
 
