@@ -101,8 +101,15 @@ public sealed class VorbisAudioEncoder
     // alone carries the spectrum magnitude. With 256 levels uniformly spaced
     // across [-ResidueRange, +ResidueRange], quantisation noise is
     // 2*ResidueRange/256 per bin.
+    //
+    // ResidueRange is tuned for libvorbis-convention MDCT scaling
+    // (4/N applied at the encoder forward MDCT). For a windowed sine of
+    // amplitude A, the libvorbis-convention peak coefficient is approximately
+    // A. We allow ResidueRange = 4.0 to comfortably encode signals up to
+    // amplitude 4.0 without clipping, while keeping per-bin quantisation
+    // noise at 8/256 = 0.031 of the floor magnitude.
     private const int ResidueBookEntries = 256;
-    private const float ResidueRange = 256.0f;
+    private const float ResidueRange = 4.0f;
 
     /// <summary>
     /// Encode an entire mono PCM input into a complete Ogg-Vorbis byte stream.
@@ -186,8 +193,19 @@ public sealed class VorbisAudioEncoder
         for (int i = 0; i < n; i++) windowed[i] = block[i] * window[i];
 
         // 2. Forward MDCT to get N/2 spectral coefficients.
+        //    Apply the 4/N normalization on the encoder side per libvorbis
+        //    convention (lib/mdct.c sets lookup->scale = 4.f/n in mdct_init
+        //    and applies it inside mdct_forward; mdct_backward is unscaled).
+        //    Without this, our spectrum would be N/4 times libvorbis's, and
+        //    third-party decoders (ffmpeg/libavcodec) would emit at N/4 the
+        //    intended amplitude (deafening / clipping). MdctReference itself
+        //    stays the literal direct formula; the scale lives at the Vorbis
+        //    boundary so the same reference transform can be reused by codecs
+        //    that put the normalization on the inverse side.
         var spectrum = new float[half];
         MdctReference.Transform(windowed, spectrum);
+        float forwardScale = 4f / n;
+        for (int i = 0; i < half; i++) spectrum[i] *= forwardScale;
 
         // 3. Floor curve: forced to maximum (~1.0). The residue alone carries
         //    the spectrum magnitude. This is intentionally simple - a real
@@ -317,17 +335,20 @@ public sealed class VorbisAudioEncoder
     }
 
     /// <summary>
-    /// Quantise a residue sample (already divided by the floor curve, so
-    /// approximately in [-1, 1]) into the residue codebook entry index.
+    /// Quantise a residue sample (already divided by the floor curve) into the
+    /// residue codebook entry index. Codebook layout is anchored so entry
+    /// <c>ResidueBookEntries/2</c> decodes to exactly 0; entry <c>i</c> decodes
+    /// to <c>(i - N/2) * step</c> where <c>step = 2R/N</c>.
     /// </summary>
     private int QuantiseResidueValue(float v)
     {
-        // Residue codebook has ResidueBookEntries entries spaced uniformly
-        // across [-ResidueRange, +ResidueRange]. Find nearest.
-        float clipped = Math.Max(-ResidueRange, Math.Min(ResidueRange, v));
-        // Centre of bin for entry i is (-R + (i+0.5) * 2R/N).
+        // Codebook is anchored: entry 0 = -ResidueRange, entry N/2 = 0,
+        // entry N-1 = +ResidueRange - step. Find nearest entry.
         float step = 2f * ResidueRange / ResidueBookEntries;
-        int idx = (int)Math.Floor((clipped + ResidueRange) / step);
+        int half = ResidueBookEntries / 2;
+        // Inverse of decode formula val = (i - half) * step:
+        //   i = round(v / step) + half
+        int idx = (int)Math.Round(v / step) + half;
         if (idx < 0) idx = 0;
         if (idx >= ResidueBookEntries) idx = ResidueBookEntries - 1;
         return idx;
@@ -392,10 +413,16 @@ public sealed class VorbisAudioEncoder
         //   val[d] = abs(multiplicand[(entry / quantvals^d) % quantvals]) * delta + mindel
         // For dim 1, quantvals = lookup1_values(entries, 1) = entries, and
         //   val[0] = abs(multiplicand[entry]) * delta + mindel
-        // We choose mindel and delta so that val ranges symmetrically across
-        // [-ResidueRange, +ResidueRange] in N uniformly-spaced steps:
-        //   delta = 2*ResidueRange / N
-        //   mindel = -ResidueRange + 0.5 * delta = -ResidueRange + ResidueRange/N
+        //
+        // We anchor entry N/2 at value 0 exactly so noise-gated bins decode to
+        // silence rather than to ±half-step noise. With 256 entries and step =
+        // 2R/N, entry 128 must yield 0:
+        //   mindel + 128 * delta = 0  =>  mindel = -128 * delta = -ResidueRange
+        // Entries 0..255 then cover [-ResidueRange, +ResidueRange - step]
+        // (slightly asymmetric on the positive side, but the negative-going
+        // peak still has full ResidueRange). Without this anchoring, EVERY
+        // near-zero bin emits ~step/2 noise; summed over N/2 bins that's a
+        // catastrophic decoded-amplitude inflation across the spectrum.
         var residueMultiplicands = new int[ResidueBookEntries];
         for (int i = 0; i < ResidueBookEntries; i++) residueMultiplicands[i] = i;
         var residueLengths = new int[ResidueBookEntries];
@@ -406,7 +433,7 @@ public sealed class VorbisAudioEncoder
         int residueValueBits = 0;
         while ((1 << residueValueBits) < ResidueBookEntries) residueValueBits++;
         double residueDelta = 2.0 * ResidueRange / ResidueBookEntries;
-        double residueMin = -ResidueRange + 0.5 * residueDelta;
+        double residueMin = -ResidueRange;
         var residueBook = new VorbisCodebook
         {
             Dimensions = 1,

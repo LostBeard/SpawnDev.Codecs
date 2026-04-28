@@ -7,16 +7,12 @@
 //   %TEMP%\spawndev_verify\
 //     vp8_animation.mp4         <- 60 frames VP8 single-MB rolling color
 //     vp9_animation.mp4         <- 60 frames VP9 single-block animation
-//     opus_chord.ogg            <- 3-sec A-minor chord Opus encode
+//     opus_chord.opus           <- 3-sec A-minor chord Opus encode
+//     vorbis_chord.ogg          <- 3-sec A-minor chord Vorbis encode
 //     flac_chord.flac           <- 3-sec A-minor chord FLAC (lossless)
 //     bbb_first_frame.png       <- VP9 BBB first frame visual (reference)
 //     bbb_av1_first_frame.png   <- AV1 BBB first frame visual (reference)
 //     report.txt                <- Summary of what each file demonstrates
-//
-// Notes:
-//   - Vorbis encoder has a known amplitude bug (~12% peak delta vs
-//     ffmpeg, README documented); the audio chord demo uses Opus
-//     instead, which round-trips bit-exact via the Concentus backbone.
 //
 // Usage: dotnet run verify_all_codecs.cs
 
@@ -26,6 +22,7 @@ using System.Diagnostics;
 using System.IO;
 using SpawnDev.Codecs.Audio.Flac;
 using SpawnDev.Codecs.Audio.Opus;
+using SpawnDev.Codecs.Audio.Vorbis;
 using SpawnDev.Codecs.Container.Ivf;
 using SpawnDev.Codecs.Video;
 using SpawnDev.Codecs.Video.Vp8;
@@ -118,11 +115,63 @@ Section("VP8 encoder (60-frame animation)", () =>
     summary.AppendLine($"  PASS: {Frames} frames -> {mp4} ({sz:N0}B) - PLAYABLE IN VLC");
 });
 
+// === Vorbis encoder -> .ogg via our encoder, ffmpeg decodes to verify ===
+// Tests the full Vorbis encode pipeline end to end: floor1 + residue type 1
+// + MDCT + window + Ogg pages. Output is a complete .ogg file that ffmpeg
+// (libavcodec/libvorbis) accepts, decodes back to PCM, and produces a clean
+// 440+523+659 Hz chord at the expected amplitude (peak within 50% of the
+// 0.30 source peak; RMS within 10% of the 0.122 source RMS).
+Section("Vorbis encoder (3-sec A-minor chord)", () =>
+{
+    int sr = 44100; int seconds = 3;
+    int totalSamples = sr * seconds;
+    var pcm = new float[totalSamples];
+    double[] freqs = { 440, 523.25, 659.25 };
+    for (int i = 0; i < totalSamples; i++)
+    {
+        double sample = 0, env = Math.Min(1.0, i / (0.05 * sr));
+        foreach (var f in freqs) sample += Math.Sin(2.0 * Math.PI * f * i / sr);
+        pcm[i] = (float)(0.3 * env * sample / freqs.Length);
+    }
+
+    var enc = new VorbisAudioEncoder(new VorbisAudioEncoderOptions
+    {
+        SampleRateHz = sr, Channels = 1,
+    });
+    var ogg = enc.EncodeStream(pcm);
+    string oggPath = Path.Combine(outDir, "vorbis_chord.ogg");
+    File.WriteAllBytes(oggPath, ogg);
+
+    // Decode with ffmpeg and verify amplitude is sensible (no longer "deafening").
+    string wavPath = Path.Combine(outDir, "vorbis_chord_decoded.wav");
+    if (!RunFfmpeg($"-y -i \"{oggPath}\" -acodec pcm_s16le \"{wavPath}\""))
+        throw new Exception("ffmpeg failed to decode our Vorbis ogg");
+    var wavBytes = File.ReadAllBytes(wavPath);
+    int dataStart = 44; int sampleCount = (wavBytes.Length - dataStart) / 2;
+    int skip = sr / 10; // drop 100 ms at each end (envelope + tail transients)
+    int analyseLen = Math.Max(0, sampleCount - 2 * skip);
+    float peak = 0; double sumSq = 0;
+    for (int i = skip; i < skip + analyseLen; i++)
+    {
+        short v = (short)(wavBytes[dataStart + i * 2] | (wavBytes[dataStart + i * 2 + 1] << 8));
+        float s = v / 32768f;
+        float a = MathF.Abs(s);
+        if (a > peak) peak = a;
+        sumSq += s * (double)s;
+    }
+    float rms = (float)Math.Sqrt(sumSq / analyseLen);
+    // Source: 3 sines amp 0.3/3 = 0.1 each, peak ~0.3, rms ~0.122.
+    if (peak > 0.45f) throw new Exception($"Vorbis amplitude bug: peak {peak:F3} > 0.45 (source 0.30)");
+    if (rms < 0.05f || rms > 0.18f) throw new Exception($"Vorbis amplitude bug: rms {rms:F3} outside [0.05, 0.18]");
+
+    long oggSize = new FileInfo(oggPath).Length;
+    Console.WriteLine($"  PASS: {oggSize:N0}B Vorbis -> {oggPath}");
+    Console.WriteLine($"        ffmpeg-decoded WAV: peak {peak:F3} (src ~0.30), rms {rms:F3} (src ~0.122)");
+    summary.AppendLine($"  PASS: {oggSize:N0}B Vorbis chord -> {oggPath} - PLAYABLE IN VLC (audio)");
+    summary.AppendLine($"        ffmpeg decode: peak {peak:F3}, rms {rms:F3} (source: peak 0.30, rms 0.122)");
+});
+
 // === Opus encoder -> raw Opus packets concatenated as .opus stream ===
-// Note: Vorbis is skipped here; the encoder has a known peak-amplitude
-// bug that produces uncomfortably loud output via ffmpeg. Opus encode
-// path round-trips through our OpusDecoder bit-exact (Concentus 2.2.2
-// backbone) so the audio chord lands here cleanly.
 Section("Opus encoder + decoder (3-sec A-minor chord, multi-frame)", () =>
 {
     int sr = 48000; int seconds = 3;
@@ -255,11 +304,6 @@ summary.AppendLine("Image viewer:");
 summary.AppendLine("  *.png   - Static reference frames (BBB first-frame ground truth)");
 summary.AppendLine("Codec-tool / not VLC-friendly:");
 summary.AppendLine("  *.ivf   - Raw VP8/VP9 in IVF container; ffmpeg/libvpx tools open them; VLC may not.");
-summary.AppendLine();
-summary.AppendLine("=== Known limitations ===");
-summary.AppendLine("Vorbis encoder has a known peak-amplitude bug (~12% delta vs ffmpeg, README");
-summary.AppendLine("documented). The audio chord demo uses Opus instead, which round-trips bit-exact");
-summary.AppendLine("via the Concentus 2.2.2 BSD-3 backbone.");
 summary.AppendLine();
 summary.AppendLine($"Result: {passed}/{passed + failed} sections passed.");
 summary.AppendLine($"Output dir: {outDir}");

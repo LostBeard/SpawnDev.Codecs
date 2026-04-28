@@ -140,21 +140,25 @@ public sealed class VorbisAudioDecoder
         VorbisInverseCoupling.Apply(spectra, mapping);
 
         // ----- IMDCT + window per channel -----
-        // Our ImdctReference is the literal unscaled inverse (matches the
-        // direct-formula MDCT in MdctReference). The MDCT->IMDCT round-trip
-        // for these reference impls produces N/4 times the original signal.
-        // Vorbis I expects unity round-trip, so we scale IMDCT output by 4/N.
-        // libvorbis bakes this normalisation into its FFT-based MDCT; our
-        // reference impls keep the bare formula and do the scaling at the
-        // decoder boundary so MdctReference and ImdctReference stay literal.
+        // Per libvorbis convention (lib/mdct.c), the 4/N normalisation lives
+        // on the FORWARD MDCT (encoder side), and mdct_backward is unscaled.
+        // We follow that convention: VorbisAudioEncoder applies 4/N to its
+        // MdctReference output, and here we feed that libvorbis-scaled
+        // spectrum directly into ImdctReference with no extra scale. This
+        // makes our decoder produce correct amplitudes from any libvorbis-
+        // convention bitstream (libvorbis, ffmpeg/libavcodec, our encoder).
+        // Earlier versions applied 4/N here and left the encoder unscaled;
+        // that produced ~256x amplitude error on third-party-decoded streams
+        // (ffmpeg-decoded our-ogg) AND ~512x undershoot on libvorbis-encoded
+        // streams decoded by us. Both are fixed by this single convention
+        // alignment.
         var timeDomain = new float[channels][];
         var window = VorbisWindow.GenerateCanonical(blockSize);
-        float imdctScale = 4f / blockSize;
         for (int ch = 0; ch < channels; ch++)
         {
             var td = new float[blockSize];
             ImdctReference.Transform(spectra[ch], td);
-            for (int i = 0; i < blockSize; i++) td[i] *= window[i] * imdctScale;
+            for (int i = 0; i < blockSize; i++) td[i] *= window[i];
             timeDomain[ch] = td;
         }
 
