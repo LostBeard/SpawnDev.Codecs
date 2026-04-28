@@ -7,6 +7,7 @@
 @using SpawnDev.Codecs.Audio.Transforms
 @using SpawnDev.Codecs.Audio.Wav
 @using SpawnDev.Codecs.Audio.Aiff
+@using SpawnDev.Codecs.Container.Ivf
 @using SpawnDev.Codecs.Video
 @using SpawnDev.Codecs.Video.Av1
 @using SpawnDev.Codecs.Video.Vp8
@@ -170,6 +171,13 @@
                     iters: 5));
             }
 
+            // BBB real-content AV1 decode benchmark (libaom-encoded BBB IVF, 320x180, 60 frames @ 2s)
+            await StepAsync(6, "Loading BBB AV1 IVF from /testdata/", LoadBbbAv1IvfAsync);
+            if (_bbbAv1Frames is not null)
+            {
+                await Step(7, $"AV1 decode BBB IVF (real libaom-encoded)", BenchBbbAv1Decode);
+            }
+
             // Audio encoders
             await Step(7, "FLAC encode (1ch 16bit 44.1k 1s)", () =>
                 BenchFlacEncode(44100, 1, 16, 44100));
@@ -297,6 +305,44 @@
             sw.Elapsed.TotalMilliseconds,
             $"{fps:F1} fps",
             $"avg {avgB:F0}B/fr ({ratio:P2})"));
+    }
+
+    // BBB AV1 IVF (libaom-encoded) for decode benchmarking.
+    byte[][]? _bbbAv1Frames;
+
+    async Task LoadBbbAv1IvfAsync()
+    {
+        if (_bbbAv1Frames is not null) return;
+        try
+        {
+            var bytes = await Http.GetByteArrayAsync("testdata/bbb_180_2s.ivf");
+            _bbbAv1Frames = IvfReader.EnumerateFrames(bytes)
+                .Select(f => f.Data.ToArray())
+                .ToArray();
+        }
+        catch { /* fixture missing */ }
+    }
+
+    void BenchBbbAv1Decode()
+    {
+        if (_bbbAv1Frames is null || _bbbAv1Frames.Length == 0) return;
+        var sink = new CaptureSink();
+        var dec = new Av1Decoder();
+        // Warm up + decode one frame to learn dimensions.
+        dec.DecodeFrameAsync(_bbbAv1Frames[0], sink).GetAwaiter().GetResult();
+        int totalFrames = Math.Min(_bbbAv1Frames.Length, 30); // first 30 frames
+        var sw = Stopwatch.StartNew();
+        for (int i = 0; i < totalFrames; i++)
+            dec.DecodeFrameAsync(_bbbAv1Frames[i], sink).GetAwaiter().GetResult();
+        sw.Stop();
+        dec.DisposeAsync().GetAwaiter().GetResult();
+        double fps = totalFrames * 1000.0 / sw.Elapsed.TotalMilliseconds;
+        _log.Add(new BenchEntry("video-decode",
+            "AV1 BBB IVF decode (libaom-encoded real content)",
+            $"{totalFrames} frames @ 320x180, total {_bbbAv1Frames.Take(totalFrames).Sum(f => f.Length):N0}B",
+            sw.Elapsed.TotalMilliseconds,
+            $"{fps:F1} fps",
+            "Av1Decoder API"));
     }
 
     void BenchFlacEncode(int samplesPerChannel, int channels, int bps, int rate)
