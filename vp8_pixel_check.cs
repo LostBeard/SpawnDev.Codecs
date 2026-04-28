@@ -15,9 +15,40 @@ Directory.CreateDirectory(outDir);
 string ivfPath = Path.Combine(outDir, "gray.ivf");
 string yuvPath = Path.Combine(outDir, "gray_decoded.yuv");
 
-// Encode a single 16x16 frame of a gradient pattern.
-// Y goes from 80 (top-left) to ~180 (bottom-right) so the result
-// should be visibly non-flat.
+string ffmpeg = "C:\\Users\\TJ\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1-full_build\\bin\\ffmpeg.exe";
+if (!File.Exists(ffmpeg)) ffmpeg = "ffmpeg";
+
+// Sweep flat luma values to find which encode/decode correctly.
+Console.WriteLine($"Flat-luma sweep at Q=30 (predictor=128):");
+Console.WriteLine($"  {"input",-6}  {"decoded mean",-14}  {"min",-5}  {"max",-5}  {"verdict",-10}");
+foreach (int luma in new int[] { 64, 96, 110, 128, 144, 160, 192 })
+{
+    var ySrc2 = new byte[W * H];
+    Array.Fill(ySrc2, (byte)luma);
+    var uSrc2 = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc2, (byte)128);
+    var vSrc2 = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc2, (byte)128);
+    var frame2 = Vp8KeyframeEncoder.EncodeKeyFrame(ySrc2, W, uSrc2, W / 2, vSrc2, W, H, baseQIndex: 30);
+    string ivf2 = Path.Combine(outDir, $"flat_{luma}.ivf");
+    string yuv2 = Path.Combine(outDir, $"flat_{luma}.yuv");
+    using (var fs = File.Create(ivf2))
+    {
+        var w = new IvfWriter(fs, "VP80", W, H, frameRate: 1, timeScale: 30, numFrames: 0, leaveOpen: true);
+        w.WriteFrame(frame2, 0); w.Finish();
+    }
+    var p2 = Process.Start(new ProcessStartInfo(ffmpeg, $"-y -i \"{ivf2}\" -f rawvideo -pix_fmt yuv420p \"{yuv2}\"") { RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true })!;
+    p2.StandardError.ReadToEnd();
+    p2.WaitForExit();
+    if (!File.Exists(yuv2)) { Console.WriteLine($"  {luma,-6}  ffmpeg failed"); continue; }
+    var dec2 = File.ReadAllBytes(yuv2);
+    int yMin2 = 255, yMax2 = 0, ySum2 = 0;
+    for (int i = 0; i < W * H; i++) { yMin2 = Math.Min(yMin2, dec2[i]); yMax2 = Math.Max(yMax2, dec2[i]); ySum2 += dec2[i]; }
+    int mean = ySum2 / (W * H);
+    string verdict = Math.Abs(mean - luma) <= 4 ? "OK" : Math.Abs(mean - luma) <= 16 ? "drifted" : "BROKEN";
+    Console.WriteLine($"  {luma,-6}  {mean,-14}  {yMin2,-5}  {yMax2,-5}  {verdict,-10}");
+}
+Console.WriteLine();
+
+// Original gradient test for reference.
 var ySrc = new byte[W * H];
 for (int r = 0; r < H; r++)
     for (int c = 0; c < W; c++)
@@ -25,9 +56,8 @@ for (int r = 0; r < H; r++)
 var uSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc, (byte)128);
 var vSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc, (byte)128);
 
-// Compute source mean for comparison.
 int srcMean = 0; foreach (var b in ySrc) srcMean += b;
-Console.WriteLine($"Source Y plane: min={Min(ySrc)}, max={Max(ySrc)}, mean={srcMean / (W * H)}");
+Console.WriteLine($"Gradient Y plane: min={Min(ySrc)}, max={Max(ySrc)}, mean={srcMean / (W * H)}");
 static byte Min(byte[] a) { byte m = 255; foreach (var b in a) if (b < m) m = b; return m; }
 static byte Max(byte[] a) { byte m = 0; foreach (var b in a) if (b > m) m = b; return m; }
 
@@ -40,9 +70,6 @@ using (var fs = File.Create(ivfPath))
     w.WriteFrame(frame, 0);
     w.Finish();
 }
-
-string ffmpeg = "C:\\Users\\TJ\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1-full_build\\bin\\ffmpeg.exe";
-if (!File.Exists(ffmpeg)) ffmpeg = "ffmpeg";
 
 var p = Process.Start(new ProcessStartInfo(ffmpeg, $"-y -i \"{ivfPath}\" -f rawvideo -pix_fmt yuv420p \"{yuvPath}\"")
 {
