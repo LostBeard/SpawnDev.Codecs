@@ -99,6 +99,24 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         int width, int height,
         int baseQIndex = 30)
     {
+        var (bytes, _, _, _) = await EncodeKeyFrameWithReconAsync(
+            yPlane, uPlane, vPlane, width, height, baseQIndex);
+        return bytes;
+    }
+
+    /// <summary>
+    /// Encode + return both the encoded bytes AND the encoder's
+    /// internal recon planes. The recon is the same data the
+    /// downstream decoder must reconstruct from the encoded bytes -
+    /// useful for self-consistency tests of the encoder/decoder
+    /// kernel chain.
+    /// </summary>
+    public async Task<(byte[] bytes, byte[] yRecon, byte[] uRecon, byte[] vRecon)>
+        EncodeKeyFrameWithReconAsync(
+        byte[] yPlane, byte[] uPlane, byte[] vPlane,
+        int width, int height,
+        int baseQIndex = 30)
+    {
         if (yPlane is null) throw new ArgumentNullException(nameof(yPlane));
         if (uPlane is null) throw new ArgumentNullException(nameof(uPlane));
         if (vPlane is null) throw new ArgumentNullException(nameof(vPlane));
@@ -225,7 +243,19 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         var fullBuf = await dOutFrame.CopyToHostAsync();
         var result = new byte[outFrameLen];
         Array.Copy(fullBuf, result, outFrameLen);
-        return result;
+
+        // Read back recon planes for self-consistency testing.
+        var yReconBuf = await dYRecon.CopyToHostAsync();
+        var uReconBuf = await dURecon.CopyToHostAsync();
+        var vReconBuf = await dVRecon.CopyToHostAsync();
+        var yReconResult = new byte[yLen];
+        var uReconResult = new byte[uvLen];
+        var vReconResult = new byte[uvLen];
+        Array.Copy(yReconBuf, yReconResult, yLen);
+        Array.Copy(uReconBuf, uReconResult, uvLen);
+        Array.Copy(vReconBuf, vReconResult, uvLen);
+
+        return (result, yReconResult, uReconResult, vReconResult);
     }
 
     /// <summary>Release every resource the encoder owns.</summary>

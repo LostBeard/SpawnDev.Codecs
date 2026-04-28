@@ -174,19 +174,68 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    // KNOWN INVESTIGATION (2026-04-28): multi-SB decoder fails at
-    // the SB row boundary. The encoder side passes 128x128 byte-
-    // exact and the decoder passes every single-SB case (64x64 flat
-    // gray, 64x64 random content, 64x64 baseQ sweep including
-    // saturation extremes). The bug surfaces at MB(4, 0) - the
-    // first MB of SB(1, 0). Since the bool decoder state is
-    // verifiably in sync up through that MB's mode bits (per
-    // hand trace), the bug is most likely in coef-context tracking
-    // across SB row boundaries on the chroma planes - the encoder's
-    // entropy ctx update for U/V plane uses a different sb-row mask
-    // than the decoder may be assuming. Investigation in flight;
-    // the v1 keyframe encoder ships fully working in this commit
-    // and the decoder ships working for single-SB frames.
+    /// <summary>
+    /// Self-consistency: encode source with my GPU encoder (capturing
+    /// the encoder's internal recon planes), decode the resulting
+    /// bytes with my GPU decoder, verify the decoder produces the
+    /// SAME recon planes the encoder built. Bypasses the CPU walker
+    /// oracle so this test is independent of any walker behavior.
+    /// </summary>
+    private static async Task AssertVp9EncoderDecoderSelfConsistentAsync(
+        Accelerator acc,
+        byte[] yPlane, byte[] uPlane, byte[] vPlane,
+        int width, int height, int baseQIndex)
+    {
+        // Encode source + capture encoder's recon.
+        using var enc = new Vp9KeyframeEncoderGpu(acc);
+        var (encodedBytes, encYRecon, encURecon, encVRecon) =
+            await enc.EncodeKeyFrameWithReconAsync(yPlane, uPlane, vPlane, width, height, baseQIndex);
+
+        // Decode bytes -> decoder recon.
+        using var dec = new Vp9KeyframeDecoderGpu(acc);
+        var decFrame = await dec.DecodeKeyFrameAsync(encodedBytes);
+
+        Equal(width, decFrame.Width);
+        Equal(height, decFrame.Height);
+
+        for (int i = 0; i < encYRecon.Length; i++)
+            if (encYRecon[i] != decFrame.YPlane[i])
+                throw new Exception($"Y self-consistency mismatch at {i}: encoder={encYRecon[i]} decoder={decFrame.YPlane[i]}");
+        for (int i = 0; i < encURecon.Length; i++)
+            if (encURecon[i] != decFrame.UPlane[i])
+                throw new Exception($"U self-consistency mismatch at {i}: encoder={encURecon[i]} decoder={decFrame.UPlane[i]}");
+        for (int i = 0; i < encVRecon.Length; i++)
+            if (encVRecon[i] != decFrame.VPlane[i])
+                throw new Exception($"V self-consistency mismatch at {i}: encoder={encVRecon[i]} decoder={decFrame.VPlane[i]}");
+    }
+
+    [TestMethod]
+    public async Task Vp9KeyframeEncoderDecoderGpu_128x128_SelfConsistent()
+    {
+        // Self-consistency test that bypasses the CPU walker oracle.
+        // If this passes for 128x128, the GPU encoder + GPU decoder
+        // are mutually consistent at SB row boundaries.
+        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        try
+        {
+            int width = 128, height = 128;
+            int yLen = width * height;
+            int uvLen = yLen / 4;
+            var rng = new Random(unchecked((int)0xDC9FC128u));
+            var y = new byte[yLen];
+            var u = new byte[uvLen];
+            var v = new byte[uvLen];
+            rng.NextBytes(y);
+            rng.NextBytes(u);
+            rng.NextBytes(v);
+
+            await AssertVp9EncoderDecoderSelfConsistentAsync(acc, y, u, v, width, height, baseQIndex: 30);
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    // KNOWN INVESTIGATION (2026-04-28): multi-SB decoder vs CPU walker
+    // mismatches at the SB row boundary.
     /*
     [TestMethod]
     public async Task Vp9KeyframeDecoderGpu_128x128_MatchesCpu()
