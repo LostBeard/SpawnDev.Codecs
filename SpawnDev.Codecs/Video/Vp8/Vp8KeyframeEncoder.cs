@@ -30,13 +30,15 @@ public static class Vp8KeyframeEncoder
     /// <param name="ySrcStride">Y plane row stride in bytes.</param>
     /// <param name="uvSrcStride">UV plane row stride in bytes.</param>
     /// <param name="baseQIndex">Base quantizer index 0..127 (lower = higher quality).</param>
+    /// <param name="log2NumPartitions">Number of token partitions = 1 &lt;&lt; log2NumPartitions; legal values 0..3 (1/2/4/8 partitions).</param>
     /// <returns>Complete VP8 frame bytes ready to wrap in IVF or webm.</returns>
     public static byte[] EncodeKeyFrame(
         ReadOnlySpan<byte> ySrc, int ySrcStride,
         ReadOnlySpan<byte> uSrc, int uvSrcStride,
         ReadOnlySpan<byte> vSrc,
         int width, int height,
-        int baseQIndex = 30)
+        int baseQIndex = 30,
+        int log2NumPartitions = 0)
     {
         if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException();
         if ((width & 15) != 0 || (height & 15) != 0)
@@ -45,6 +47,9 @@ public static class Vp8KeyframeEncoder
             throw new ArgumentOutOfRangeException(nameof(baseQIndex),
                 "VP8 BaseQIndex is a 7-bit field (0..127); larger values wrap modulo 128 in the bitstream " +
                 "while the encoder still uses the original quantizer, producing decode garbage.");
+        if (log2NumPartitions < 0 || log2NumPartitions > 3)
+            throw new ArgumentOutOfRangeException(nameof(log2NumPartitions),
+                "VP8 Log2NumPartitions is a 2-bit field; must be 0..3 (1/2/4/8 partitions).");
 
         int mbRows = height / 16;
         int mbCols = width / 16;
@@ -67,10 +72,12 @@ public static class Vp8KeyframeEncoder
         var entropyContexts = new Vp8EntropyContexts(mbCols);
 
         // Encode the first partition (frame header + mode info) into one
-        // bool encoder, then the second partition (coefficient tokens) into
-        // another. Concatenate at the end.
+        // bool encoder, then per-token-partition (RFC 6386 sec 9.5) bool
+        // encoders. MB row N coefs go to token partition (N mod npart).
+        int npart = 1 << log2NumPartitions;
         var partition0 = new Vp8BoolEncoder();
-        var tokenPartition = new Vp8BoolEncoder();
+        var tokenPartitions = new Vp8BoolEncoder[npart];
+        for (int p = 0; p < npart; p++) tokenPartitions[p] = new Vp8BoolEncoder();
 
         // Build frame header.
         var hdr = new Vp8FrameHeader
@@ -89,7 +96,7 @@ public static class Vp8KeyframeEncoder
                 ModeRefLfDeltaEnabled = false,
                 RefLfDeltas = new int[4], ModeLfDeltas = new int[4],
             },
-            Log2NumPartitions = 0,
+            Log2NumPartitions = log2NumPartitions,
             Quantizer = new Vp8QuantizerIndices
             {
                 BaseQIndex = baseQIndex,
@@ -114,10 +121,12 @@ public static class Vp8KeyframeEncoder
             coefProbsByType[t] = slice;
         }
 
-        // Per-MB iteration. Mode info goes into partition0; coef tokens into tokenPartition.
+        // Per-MB iteration. Mode info goes into partition0; coef tokens go
+        // into the token partition for the current MB row (RFC 6386 sec 9.5).
         for (int mbRow = 0; mbRow < mbRows; mbRow++)
         {
             entropyContexts.ClearLeft();
+            var tokenPartition = tokenPartitions[mbRow & (npart - 1)];
             for (int mbCol = 0; mbCol < mbCols; mbCol++)
             {
                 EncodeMb(
@@ -130,11 +139,33 @@ public static class Vp8KeyframeEncoder
             }
         }
 
-        // Finalize both partitions.
+        // Finalize partitions.
         var partition0Bytes = partition0.Stop();
-        var tokenBytes = tokenPartition.Stop();
+        var tokenPartitionBytes = new byte[npart][];
+        for (int p = 0; p < npart; p++) tokenPartitionBytes[p] = tokenPartitions[p].Stop();
 
-        // Build the frame: tag + partition0 + tokenPartition.
+        // Token blob layout: (npart-1) 3-byte LE size headers (for partitions
+        // 0..npart-2) + concatenated partition data (the last partition takes
+        // the remainder, no size header).
+        int sizesLen = 3 * (npart - 1);
+        int tokenTotalLen = sizesLen;
+        for (int p = 0; p < npart; p++) tokenTotalLen += tokenPartitionBytes[p].Length;
+        var tokenBlob = new byte[tokenTotalLen];
+        for (int p = 0; p < npart - 1; p++)
+        {
+            int s = tokenPartitionBytes[p].Length;
+            tokenBlob[3 * p] = (byte)(s & 0xFF);
+            tokenBlob[3 * p + 1] = (byte)((s >> 8) & 0xFF);
+            tokenBlob[3 * p + 2] = (byte)((s >> 16) & 0xFF);
+        }
+        int writeOff = sizesLen;
+        for (int p = 0; p < npart; p++)
+        {
+            Buffer.BlockCopy(tokenPartitionBytes[p], 0, tokenBlob, writeOff, tokenPartitionBytes[p].Length);
+            writeOff += tokenPartitionBytes[p].Length;
+        }
+
+        // Build the frame: tag + partition0 + token blob.
         var tag = new Vp8FrameTag
         {
             IsKeyFrame = true,
@@ -146,10 +177,10 @@ public static class Vp8KeyframeEncoder
         };
         var tagBytes = Vp8FrameTagWriter.WriteTag(tag);
 
-        var output = new byte[tagBytes.Length + partition0Bytes.Length + tokenBytes.Length];
+        var output = new byte[tagBytes.Length + partition0Bytes.Length + tokenBlob.Length];
         Buffer.BlockCopy(tagBytes, 0, output, 0, tagBytes.Length);
         Buffer.BlockCopy(partition0Bytes, 0, output, tagBytes.Length, partition0Bytes.Length);
-        Buffer.BlockCopy(tokenBytes, 0, output, tagBytes.Length + partition0Bytes.Length, tokenBytes.Length);
+        Buffer.BlockCopy(tokenBlob, 0, output, tagBytes.Length + partition0Bytes.Length, tokenBlob.Length);
         return output;
     }
 

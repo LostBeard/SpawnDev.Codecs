@@ -15,27 +15,34 @@ string ffmpeg = "C:\\Users\\TJ\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gya
 string outDir = Path.Combine(Path.GetTempPath(), "vp8_multi_part");
 Directory.CreateDirectory(outDir);
 
-// Encode a 256x144 testsrc keyframe via libvpx with token-partitions=4
-// (Log2NumPartitions=2). We use ffmpeg's --token-partitions option
-// indirectly by setting -threads 4 on libvpx (which auto-picks 4
-// partitions for parallel decode).
+// Encode our OWN multi-partition VP8 frames at each log2NumPartitions and
+// round-trip them through Vp8KeyframeWalker. This proves the encoder +
+// walker symmetric multi-partition path works.
 string yuvIn = Path.Combine(outDir, "src.yuv");
 RunFfmpeg($"-y -f lavfi -i testsrc=size={W}x{H}:rate=30:duration=1 -frames:v 1 -f rawvideo -pix_fmt yuv420p \"{yuvIn}\"");
+
+var srcBytes = File.ReadAllBytes(yuvIn);
+int yLen = W * H;
+int uvLen = (W / 2) * (H / 2);
+var ySrc = srcBytes[0..yLen];
+var uSrc = srcBytes[yLen..(yLen + uvLen)];
+var vSrc = srcBytes[(yLen + uvLen)..(yLen + 2 * uvLen)];
 
 foreach (int log2Parts in new[] { 0, 1, 2, 3 })
 {
     int npart = 1 << log2Parts;
-    string ivf = Path.Combine(outDir, $"vp8_p{npart}.ivf");
-    // libvpx --token-parts=N maps to log2 of N. ffmpeg lacks a direct flag
-    // so we use -threads which libvpx interprets as token-partition hint
-    // for n_threads <= 4 (n_partitions = next-pow-2-le-threads).
-    int threads = npart;
-    RunFfmpeg($"-y -f rawvideo -pix_fmt yuv420p -s {W}x{H} -i \"{yuvIn}\" -c:v libvpx -threads {threads} -keyint_min 1 -g 1 -auto-alt-ref 0 -frames:v 1 -f ivf \"{ivf}\"");
+    var encoded = Vp8KeyframeEncoder.EncodeKeyFrame(
+        ySrc, W, uSrc, W / 2, vSrc, W, H,
+        baseQIndex: 30, log2NumPartitions: log2Parts);
+    string ivf = Path.Combine(outDir, $"vp8_p{npart}_ours.ivf");
+    using (var fs = File.Create(ivf))
+    {
+        var w = new IvfWriter(fs, "VP80", W, H, frameRate: 1, timeScale: 30, numFrames: 0, leaveOpen: true);
+        w.WriteFrame(encoded, 0); w.Finish();
+    }
 
     // Parse via our walker.
-    var ivfBytes = File.ReadAllBytes(ivf);
-    var firstFrame = IvfReader.EnumerateFrames(ivfBytes).First();
-    var frame = firstFrame.Data.ToArray();
+    var frame = encoded;
     var tag = Vp8FrameTagParser.Parse(frame.AsSpan());
     int firstPartOffset = 10;
     int firstPartLen = tag.FirstPartitionSize;
@@ -69,7 +76,31 @@ foreach (int log2Parts in new[] { 0, 1, 2, 3 })
         detail = ex.Message;
     }
 
-    Console.WriteLine($"Log2NumPartitions={log2Parts} ({npart} partitions, ffmpeg threads={threads}): hdr says {hdr.Log2NumPartitions} | {verdict} | {detail}");
+    Console.WriteLine($"Log2NumPartitions={log2Parts} ({npart} partitions): hdr says {hdr.Log2NumPartitions} | {verdict} | {detail}");
+}
+
+// Also verify ffmpeg's libvpx-vp8 decoder accepts our multi-partition output.
+Console.WriteLine();
+Console.WriteLine("ffmpeg native VP8 decode of our multi-partition outputs:");
+foreach (int log2Parts in new[] { 0, 1, 2, 3 })
+{
+    int npart = 1 << log2Parts;
+    string ivf = Path.Combine(outDir, $"vp8_p{npart}_ours.ivf");
+    string yuv = Path.Combine(outDir, $"vp8_p{npart}_ours.yuv");
+    var p = Process.Start(new ProcessStartInfo(ffmpeg,
+        $"-y -i \"{ivf}\" -f rawvideo -pix_fmt yuv420p \"{yuv}\"")
+    { RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true })!;
+    p.StandardError.ReadToEnd();
+    p.WaitForExit();
+    string verdict = p.ExitCode == 0 ? "OK" : "REJECT";
+    string detail = "";
+    if (p.ExitCode == 0)
+    {
+        var dec = File.ReadAllBytes(yuv);
+        long ySum = 0; for (int i = 0; i < yLen; i++) ySum += dec[i];
+        detail = $"Y mean={ySum / yLen}";
+    }
+    Console.WriteLine($"  p{npart}: {verdict} | {detail}");
 }
 
 void RunFfmpeg(string args)
