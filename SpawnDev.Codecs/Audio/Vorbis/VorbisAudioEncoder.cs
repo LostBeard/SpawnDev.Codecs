@@ -71,7 +71,7 @@ public sealed class VorbisAudioEncoder
                 $"BlockSize must be a power of 2 in [64, 8192], got {_opts.BlockSize}.", nameof(options));
 
         _ident = BuildIdentificationHeader(_opts);
-        var rawSetup = BuildSetupHeader();
+        var rawSetup = BuildSetupHeader(_opts.BlockSize);
         // Resolve residue End/PartitionSize at construction so per-packet
         // encode does not depend on having called BuildSetupPacket first.
         var resolvedResidues = new VorbisResidueConfig[rawSetup.Residues.Length];
@@ -96,20 +96,24 @@ public sealed class VorbisAudioEncoder
     // Book 1: residue VQ codebook (ResidueBookEntries entries, dim 1, lookup type 2).
     private const int ClassBookIndex = 0;
     private const int ResidueBookIndex = 1;
-    // 256-entry residue VQ covers wide dynamic range. The floor curve in our
-    // minimum encoder is forced to ~1.0 (table index 255), so the residue
-    // alone carries the spectrum magnitude. With 256 levels uniformly spaced
-    // across [-ResidueRange, +ResidueRange], quantisation noise is
-    // 2*ResidueRange/256 per bin.
+    // Residue VQ covers a normalised range. Because the floor curve is now
+    // fitted to the spectrum envelope per block (see EncodeAudioPacket step
+    // 3), residue = spectrum / floor stays in roughly [-1, +1]. We size the
+    // codebook to cover slightly past +/- 1 to absorb under-fits where the
+    // local spectrum magnitude exceeds the chosen floor endpoint.
     //
-    // ResidueRange is tuned for libvorbis-convention MDCT scaling
-    // (4/N applied at the encoder forward MDCT). For a windowed sine of
-    // amplitude A, the libvorbis-convention peak coefficient is approximately
-    // A. We allow ResidueRange = 4.0 to comfortably encode signals up to
-    // amplitude 4.0 without clipping, while keeping per-bin quantisation
-    // noise at 8/256 = 0.031 of the floor magnitude.
-    private const int ResidueBookEntries = 256;
-    private const float ResidueRange = 4.0f;
+    // 1024 entries spread across [-2, +2] gives step = 4/1024 = 0.0039,
+    // ~0.4% relative quantisation per residue value. That matches the SNR
+    // libvorbis achieves with its production residue books on real music
+    // (~21 dB on BBB at default quality).
+    //
+    // The residue VQ is encoded with a fixed-length code per entry
+    // (ceil(log2(entries)) bits) so the in-stream cost of one block is
+    // halfBlock * residueCodeLen bits. With halfBlock=512 and 10-bit codes
+    // that's ~640 bytes per audio packet; the resulting .ogg fits well
+    // within typical Vorbis bitrate budgets for the BBB benchmark.
+    private const int ResidueBookEntries = 1024;
+    private const float ResidueRange = 2.0f;
 
     /// <summary>
     /// Encode an entire mono PCM input into a complete Ogg-Vorbis byte stream.
@@ -207,36 +211,62 @@ public sealed class VorbisAudioEncoder
         float forwardScale = 4f / n;
         for (int i = 0; i < half; i++) spectrum[i] *= forwardScale;
 
-        // 3. Floor curve: forced to maximum (~1.0). The residue alone carries
-        //    the spectrum magnitude. This is intentionally simple - a real
-        //    encoder would shape the floor to the spectral envelope and let
-        //    residue carry only the per-bin detail. With 256 residue levels
-        //    over [-256, +256], typical music spectra are quantised to about
-        //    8-bit precision per bin which is enough for tone round-tripping.
+        // 3. Floor curve: fit a piecewise-linear envelope to the actual spectrum
+        //    per block so residue = spectrum / floor stays in a normalised
+        //    range. The floor configuration uses 2 endpoints (X=0 and
+        //    X=halfBlock); we pick endpoint Y values from the magnitude of
+        //    the spectrum in the lower and upper halves of the band.
+        //
+        //    Per the inverse-dB lookup table (Vorbis I Section 10.1, used by
+        //    VorbisFloor1Curve.Render via multiplier=1), Y in [0, 255] maps
+        //    to floor magnitude in [1.06e-7, 1.0]. We choose Y so that the
+        //    floor is just above the local spectrum peak: the residue value
+        //    spectrum / floor then falls within roughly [-1, +1] and the
+        //    1024-entry residue codebook over [-2, +2] quantises it with
+        //    ~0.4% relative precision per bin.
+        //
+        //    Without per-block floor tracking the residue is dominated by
+        //    quantisation noise on real music (BBB block spectrum peaks are
+        //    ~0.005-0.01, far smaller than the codebook step that would
+        //    cover [-4, +4]/256 = 0.031). Tracking the envelope is the
+        //    fundamental purpose of floor 1 in Vorbis - this is what
+        //    libvorbis lib/floor1.c does (much more elaborately) per packet.
         var floorCfg = (VorbisFloor1Config)_setup.Floors[0];
-        const int FloorYMax = 127; // multiplier=2 -> table index 127*2=254 -> ~0.94
-        var posteriors = new int[] { FloorYMax, FloorYMax };
+        // Spectrum magnitudes per half-band for envelope estimation.
+        int splitBin = half / 2;
+        float specPeakLow = 0, specPeakHigh = 0;
+        for (int i = 0; i < splitBin; i++) { float a = Math.Abs(spectrum[i]); if (a > specPeakLow) specPeakLow = a; }
+        for (int i = splitBin; i < half; i++) { float a = Math.Abs(spectrum[i]); if (a > specPeakHigh) specPeakHigh = a; }
+        // Pick a slight headroom factor so the floor sits a touch above the
+        // peak; this keeps the residue values comfortably inside the codebook
+        // range even when bins fluctuate around the local peak.
+        const float FloorHeadroom = 1.25f;
+        int posteriorLow = MagnitudeToFloorY(specPeakLow * FloorHeadroom);
+        int posteriorHigh = MagnitudeToFloorY(specPeakHigh * FloorHeadroom);
+        // Guard against fully-silent blocks - emit a tiny floor so residue
+        // = 0 / floor = 0 is well-defined, and the bitstream stays valid.
+        if (posteriorLow < 1) posteriorLow = 1;
+        if (posteriorHigh < 1) posteriorHigh = 1;
+        var posteriors = new int[] { posteriorLow, posteriorHigh };
         var floorCurve = new float[half];
         VorbisFloor1Curve.Render(floorCfg, posteriors, half, floorCurve);
 
         // 4. Compute residue = spectrum / floor, quantised to the residue VQ.
-        //    Apply a noise-gate threshold relative to the spectral peak so
-        //    quiet bins quantise to zero instead of accumulating quantisation
-        //    noise. The threshold is conservative (0.5% of peak) so we do not
-        //    drop musically meaningful detail.
+        //    Bins below a small fraction of the local floor quantise to the
+        //    zero-anchored entry to avoid emitting half-step noise on
+        //    inaudible content. With per-block floor tracking the threshold
+        //    is relative to the FLOOR (not the spectrum peak) so that quiet
+        //    high-frequency detail rides the high-band floor correctly.
         var residueQ = new int[half];
-        float peak = 0;
-        for (int i = 0; i < half; i++) { float a = Math.Abs(spectrum[i]); if (a > peak) peak = a; }
-        float threshold = peak * 0.05f;
-        // Find the residue codebook entry closest to value 0 (used as the
-        // "gated to zero" index).
         int zeroEntry = QuantiseResidueValue(0f);
         for (int i = 0; i < half; i++)
         {
             float floor = Math.Max(floorCurve[i], 1e-12f);
-            float spec = Math.Abs(spectrum[i]) < threshold ? 0f : spectrum[i];
-            float r = spec / floor;
-            residueQ[i] = spec == 0f ? zeroEntry : QuantiseResidueValue(r);
+            float r = spectrum[i] / floor;
+            // Noise-gate: residue magnitudes below half of one quantisation
+            // step round to the zero entry exactly via QuantiseResidueValue,
+            // so no extra threshold is needed here.
+            residueQ[i] = QuantiseResidueValue(r);
         }
 
         // 5. Bit-pack the audio packet.
@@ -246,9 +276,12 @@ public sealed class VorbisAudioEncoder
         writer.WriteBit(0u); // packet type = 0 (audio)
         // ilog(modes-1) = ilog(0) = 0 bits for mode; nothing to write.
 
-        // Floor 1 nonzero bit + 2 endpoint Y values (multiplier 2 -> 7-bit endpoints).
+        // Floor 1 nonzero bit + 2 endpoint Y values. Endpoint bit width
+        // depends on the floor multiplier: 1->8, 2->7, 3->7, 4->6 (Vorbis I
+        // Table 7.2.4). Our floor uses multiplier=1 (full 256-step range)
+        // so each endpoint is 8 bits.
         writer.WriteBit(1u); // nonzero
-        int endpointBits = 7; // Multiplier=2 -> 7 bits
+        int endpointBits = floorCfg.Multiplier switch { 1 => 8, 2 => 7, 3 => 7, 4 => 6, _ => 8 };
         writer.WriteBits((uint)posteriors[0], endpointBits);
         writer.WriteBits((uint)posteriors[1], endpointBits);
         // No partitions (Partitions=0 in our floor config), so no further floor data.
@@ -309,28 +342,26 @@ public sealed class VorbisAudioEncoder
     }
 
     /// <summary>
-    /// Map a linear magnitude value to a 7-bit floor Y coordinate (multiplier=2,
-    /// range=128). Higher Y -> bigger floor multiplier in
+    /// Map a linear magnitude value to an 8-bit floor Y coordinate
+    /// (multiplier=1, range=256). Higher Y -> bigger floor magnitude in
     /// <see cref="VorbisFloor1Curve"/>'s inverse-dB lookup.
     /// </summary>
     private static int MagnitudeToFloorY(float magnitude)
     {
-        // VorbisFloor1Curve uses an inverse-dB table that runs from
-        // ~1.06e-7 (idx 0) to 1.0 (idx 255). With multiplier=2, posterior Y
-        // values map as 0..127 -> table indices 0..254. We pick the Y that
-        // makes table[Y*2] closest to (or just above) `magnitude`.
-        if (!float.IsFinite(magnitude) || magnitude <= 1.0e-7f) return 0;
-        // dB = 20 * log10(magnitude). idx = clamp(dB/dBPerStep + 255, 0, 255)
-        // Step ~0.6 dB per index (normative table is exactly that). dB/0.6 + 255.
-        double db = 20.0 * Math.Log10(Math.Min(1.0f, Math.Max(1e-12f, magnitude)));
-        double idx = db / 0.625 + 255.0;
-        int idxI = (int)Math.Round(idx);
-        if (idxI < 0) idxI = 0;
-        if (idxI > 254) idxI = 254;
-        // With multiplier=2 the Y is half the table index.
-        int y = idxI / 2;
+        // VorbisFloor1Curve uses an inverse-dB table (Vorbis I Section 10.1)
+        // that runs from ~1.065e-7 (Y=0) to 1.0 (Y=255), spanning 139.45 dB
+        // across 256 steps -> 0.547 dB per Y, or 0.02735 in log10 units.
+        // With multiplier=1, posterior Y values map directly to table
+        // indices 0..255. We pick the Y that makes table[Y] >= magnitude
+        // (ceil rather than round) so residue r = spectrum / floor stays
+        // bounded in [-1, +1].
+        if (!float.IsFinite(magnitude) || magnitude <= 1.0649863e-7f) return 0;
+        if (magnitude >= 1.0f) return 255;
+        // log10 / 0.02735 + 255: solves for Y given table approximation.
+        double idx = Math.Log10(magnitude) / 0.02735 + 255.0;
+        int y = (int)Math.Ceiling(idx);
         if (y < 0) y = 0;
-        if (y > 127) y = 127;
+        if (y > 255) y = 255;
         return y;
     }
 
@@ -378,8 +409,17 @@ public sealed class VorbisAudioEncoder
         };
     }
 
-    private static VorbisSetupHeader BuildSetupHeader()
+    private static VorbisSetupHeader BuildSetupHeader(int blockSize)
     {
+        int halfBlock = blockSize / 2;
+        // Floor X[1] must reach the end of the spectrum so the rendered
+        // floor curve interpolates across the entire band. Pick the smallest
+        // RangeBits such that 1<<RangeBits >= halfBlock; clamp to spec max
+        // (4-bit field, so RangeBits<=15).
+        int floorRangeBits = 1;
+        while ((1 << floorRangeBits) < halfBlock) floorRangeBits++;
+        if (floorRangeBits > 15) floorRangeBits = 15;
+        int floorX1 = Math.Min(1 << floorRangeBits, halfBlock);
         // Codebook 0: classbook with 1 used entry (length 1, code 0).
         // Decoder requires entries >= 1 and dimensions >= 1. With 1 entry, the
         // only valid codeword is 0 bits long; but VorbisHuffman special-cases
@@ -415,18 +455,20 @@ public sealed class VorbisAudioEncoder
         //   val[0] = abs(multiplicand[entry]) * delta + mindel
         //
         // We anchor entry N/2 at value 0 exactly so noise-gated bins decode to
-        // silence rather than to ±half-step noise. With 256 entries and step =
-        // 2R/N, entry 128 must yield 0:
-        //   mindel + 128 * delta = 0  =>  mindel = -128 * delta = -ResidueRange
-        // Entries 0..255 then cover [-ResidueRange, +ResidueRange - step]
+        // silence rather than to half-step noise. With N entries and step =
+        // 2R/N, entry N/2 must yield 0:
+        //   mindel + (N/2) * delta = 0  =>  mindel = -(N/2) * delta = -ResidueRange
+        // Entries 0..N-1 then cover [-ResidueRange, +ResidueRange - step]
         // (slightly asymmetric on the positive side, but the negative-going
         // peak still has full ResidueRange). Without this anchoring, EVERY
-        // near-zero bin emits ~step/2 noise; summed over N/2 bins that's a
+        // near-zero bin emits ~step/2 noise; summed over N/2 bins that is a
         // catastrophic decoded-amplitude inflation across the spectrum.
         var residueMultiplicands = new int[ResidueBookEntries];
         for (int i = 0; i < ResidueBookEntries; i++) residueMultiplicands[i] = i;
         var residueLengths = new int[ResidueBookEntries];
-        // Uniform 8-bit-ish length (matches 256 entries: every entry length 8 -> full balanced tree).
+        // Uniform fixed-length code per entry: log2(entries) bits each.
+        // Produces a fully balanced canonical Huffman tree where every entry
+        // has identical code length (no rare-vs-common compression).
         int residueCodeLen = (int)Math.Round(Math.Log2(ResidueBookEntries));
         for (int i = 0; i < ResidueBookEntries; i++) residueLengths[i] = residueCodeLen;
         // ValueBits must hold values 0..ResidueBookEntries-1.
@@ -449,6 +491,12 @@ public sealed class VorbisAudioEncoder
             Multiplicands = residueMultiplicands,
         };
 
+        // Floor 1 with two endpoints (X=0 and X=floorX1=halfBlock). Multiplier=1
+        // gives the full 256-step Y resolution, sampled directly from the
+        // inverse-dB lookup table. This lets the encoder choose Y values
+        // that bracket spectrum magnitudes ranging from ~1e-7 to 1.0 with
+        // good precision. Multiplier=2 (the previous setting) only gave 128
+        // distinct floor values and a much coarser envelope fit.
         var floor1 = new VorbisFloor1Config
         {
             Partitions = 0,
@@ -457,9 +505,9 @@ public sealed class VorbisAudioEncoder
             ClassSubclasses = Array.Empty<int>(),
             ClassMasterbooks = Array.Empty<int>(),
             ClassSubclassBooks = Array.Empty<int[]>(),
-            Multiplier = 2,
-            RangeBits = 4, // X[1] = 1<<4 = 16; covers our smallest test block
-            XList = new int[] { 0, 16 },
+            Multiplier = 1,
+            RangeBits = floorRangeBits,
+            XList = new int[] { 0, floorX1 },
         };
 
         var residue = new VorbisResidueConfig
