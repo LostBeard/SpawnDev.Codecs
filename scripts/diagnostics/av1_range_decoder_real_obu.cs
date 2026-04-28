@@ -8,7 +8,7 @@
 // proves: the range coder initializes correctly on real AV1 bytes,
 // renormalize/refill don't crash, Tell reports a plausible progression.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.IO;
 using SpawnDev.Codecs.Container.Ivf;

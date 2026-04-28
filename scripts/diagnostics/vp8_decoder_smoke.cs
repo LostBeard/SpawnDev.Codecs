@@ -3,7 +3,7 @@
 // frame in a sink, and report mean luma. Verifies the keyframe walker is
 // now wired into the IVideoDecoder surface.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Threading.Tasks;
 using SpawnDev.Codecs.Video;

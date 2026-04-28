@@ -4,7 +4,7 @@
 //
 // Usage: dotnet run flac_encode_chord.cs
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

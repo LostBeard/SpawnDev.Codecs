@@ -5,7 +5,7 @@
 //
 // Usage: dotnet run benchmark_video_psnr.cs [frameCount=5] [W=320] [H=240]
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

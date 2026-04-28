@@ -5,7 +5,7 @@
 // extraction and bitstream QA. No ffmpeg dependency - pure SpawnDev
 // parsing + validation.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.IO;
 using System.Linq;

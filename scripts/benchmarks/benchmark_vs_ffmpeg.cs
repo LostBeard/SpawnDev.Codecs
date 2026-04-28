@@ -3,7 +3,7 @@
 // reports encode time, output size, compression ratio, and (where
 // applicable) decoded-pixel PSNR vs source.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

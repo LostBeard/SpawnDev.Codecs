@@ -12,7 +12,7 @@
 //
 // Usage: dotnet run vp9_encode_animation.cs
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

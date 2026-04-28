@@ -3,7 +3,7 @@
 // to walkers), and verify the sink received a real frame at the
 // expected dimensions and a sensible Y mean.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.IO;
 using System.Threading.Tasks;

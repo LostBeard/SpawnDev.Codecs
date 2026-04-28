@@ -2,7 +2,7 @@
 // Smoke-decodes the encoded bytes via FlacDecoder + reports which
 // subframe types appear.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

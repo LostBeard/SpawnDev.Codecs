@@ -2,7 +2,7 @@
 // widths/heights and report which sizes ffmpeg's VP9 decoder accepts vs
 // rejects. Localizes the FullHD failure surface.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

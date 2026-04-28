@@ -1,6 +1,6 @@
 // Inspect BBB AV1 SequenceHeader bytes - what does libaom emit?
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.IO;
 using System.Linq;

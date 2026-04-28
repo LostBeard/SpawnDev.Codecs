@@ -4,7 +4,7 @@
 //
 // Usage: dotnet run vp9_encoder_benchmark.cs [iterations]
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using SpawnDev.Codecs.Video.Vp9;

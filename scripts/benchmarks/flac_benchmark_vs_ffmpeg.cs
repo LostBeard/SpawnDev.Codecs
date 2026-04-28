@@ -10,7 +10,7 @@
 // than ffmpeg's full LPC + Rice. Speed and bit-exactness are the
 // primary metrics.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

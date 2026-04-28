@@ -6,7 +6,7 @@
 //
 // Usage: dotnet run bbb_transcode_artifacts.cs [seconds=1]
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

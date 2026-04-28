@@ -13,7 +13,7 @@
 // substituting our SH is not a goal of this demo - we keep the source
 // SH OBU verbatim and prove the framing + container.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

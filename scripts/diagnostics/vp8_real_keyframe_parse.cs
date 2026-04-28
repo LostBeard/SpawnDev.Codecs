@@ -7,7 +7,7 @@
 // coef update probs. Block-level decode + macroblock walker land in the
 // next slice.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

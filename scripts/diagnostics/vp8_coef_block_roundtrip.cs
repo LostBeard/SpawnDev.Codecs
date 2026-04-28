@@ -2,7 +2,7 @@
 // Encode known coefficient blocks via the encoder, then decode them
 // back through the bool decoder + decoder pair, verify exact match.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using SpawnDev.Codecs.Video.Vp8;
 

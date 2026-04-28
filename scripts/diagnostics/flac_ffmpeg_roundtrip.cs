@@ -9,7 +9,7 @@
 // Run with:
 //   cd D:/users/tj/Projects/SpawnDev.Codecs && dotnet run flac_ffmpeg_roundtrip.cs
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

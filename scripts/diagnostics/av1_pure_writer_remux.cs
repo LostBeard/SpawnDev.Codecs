@@ -18,7 +18,7 @@
 // Only the entropy-coded inner bodies of frames are pulled from source -
 // because those require the Daala range coder we haven't built yet.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

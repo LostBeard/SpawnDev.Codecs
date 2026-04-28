@@ -1,7 +1,7 @@
 // Multi-frame VP8 encode -> IVF -> ffmpeg verify -> visual MP4.
 // Mirrors vp9_encode_animation.cs for the VP8 encoder.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

@@ -6,7 +6,7 @@
 //
 // Mirrors av1_frame_timeline.cs for VP9.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.IO;
 using System.Linq;

@@ -1,7 +1,7 @@
 // SpawnDev.Codecs end-to-end demo: drives every working codec
 // pipeline against real-world data and ffmpeg reference decoders.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

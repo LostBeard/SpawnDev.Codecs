@@ -11,7 +11,7 @@
 // If they match, the VP9 packet path round-trips through SpawnDev.Codecs
 // without losing any bytes - same encoded body, same container output.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

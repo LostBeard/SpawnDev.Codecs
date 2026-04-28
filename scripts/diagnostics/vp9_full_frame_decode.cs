@@ -7,7 +7,7 @@
 // blocky vs ffmpeg's loop-filtered reference but should be the
 // recognizable BBB scene at correct mean / variance.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.IO;
 using System.Linq;

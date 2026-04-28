@@ -8,7 +8,7 @@
 //
 // If no out path is given, writes to ./<input>_visual.png next to the input.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

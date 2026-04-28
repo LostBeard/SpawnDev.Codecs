@@ -3,7 +3,7 @@
 // against zero prediction, verify the result matches the original input
 // within fixed-point rounding error.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using SpawnDev.Codecs.Video.Vp8;
 

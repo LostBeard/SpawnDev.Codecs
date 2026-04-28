@@ -4,7 +4,7 @@
 // refresh_frame_flags, and frame size for every coded frame in
 // bbb_180_2s.ivf.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.IO;
 using System.Linq;

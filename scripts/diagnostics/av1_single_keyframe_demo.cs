@@ -7,7 +7,7 @@
 // pixel frame" demonstration. Strongest possible "encoder framing
 // works" signal for AV1 keyframes.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

@@ -2,7 +2,7 @@
 // Now uses the proper Vp9BoolDecoder pair after the encoder was fixed
 // to emit the leading marker bit per libvpx vpx_start_encode.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using SpawnDev.Codecs.Video.Vp9;
 

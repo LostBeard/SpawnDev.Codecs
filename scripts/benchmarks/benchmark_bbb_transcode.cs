@@ -9,7 +9,7 @@
 //
 // Usage: dotnet run benchmark_bbb_transcode.cs [frameCount=10]
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

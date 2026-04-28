@@ -13,7 +13,7 @@
 // (mean / range should be close, first-row samples should show the same
 // gross color pattern with small per-pixel differences).
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

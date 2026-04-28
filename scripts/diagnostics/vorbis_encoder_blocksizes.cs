@@ -1,6 +1,6 @@
 // Verify the Vorbis encoder works across multiple block sizes.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Numerics;
 using SpawnDev.Codecs.Audio.Vorbis;

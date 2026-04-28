@@ -1,7 +1,7 @@
 // Encode 1s 440Hz mono with our Vorbis encoder, then decode with ffmpeg.
 // Verify ffmpeg accepts our stream and produces sensible output.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

@@ -1,6 +1,6 @@
 // Round-trip test for Vp8FrameHeaderWriter + Vp8FrameHeaderParser.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using SpawnDev.Codecs.Video.Vp8;
 

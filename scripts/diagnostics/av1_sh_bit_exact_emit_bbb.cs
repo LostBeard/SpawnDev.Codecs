@@ -3,7 +3,7 @@
 // validation that our writer is spec-equivalent: same input config
 // produces the same bitstream as the reference encoder.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.IO;
 using System.Linq;

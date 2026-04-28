@@ -3,7 +3,7 @@
 // real VP9 tile bytes to show the entropy decode path producing a
 // meaningful symbol.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.IO;
 using System.Linq;

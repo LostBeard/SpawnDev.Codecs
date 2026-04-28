@@ -1,7 +1,7 @@
 // AV1 encoder dimension bisection: encode flat-Y=128 frames at multiple
 // widths/heights and report which sizes libdav1d (via ffmpeg) accepts.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

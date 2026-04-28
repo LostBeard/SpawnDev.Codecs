@@ -2,7 +2,7 @@
 // decode via SpawnDev.Codecs Vorbis decoder. Verify round-trip basic
 // statistics (samples count, dominant frequency via zero-crossing).
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.IO;
 using SpawnDev.Codecs.Audio.Vorbis;

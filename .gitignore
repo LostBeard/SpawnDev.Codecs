@@ -375,3 +375,10 @@ SpawnDev.Codecs.Demo/wwwroot/models/gpt2/
 SpawnDev.Codecs.Demo/wwwroot/models/whisper-tiny/
 **/distilgpt2/
 bbb_frame0.yuv
+
+# Scratch from agent investigations - reference dumps from libaom/libvorbis/etc
+# and one-off test scripts. Keep agents from polluting the repo root.
+/_*.txt
+/_*.cs
+# Old PMT run artifacts
+/playwright-*.json

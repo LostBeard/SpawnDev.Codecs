@@ -2,7 +2,7 @@
 // ffmpeg, and report the actual decoded pixel values. Diagnoses
 // the "black output" issue TJ sees.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;

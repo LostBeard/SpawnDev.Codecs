@@ -1,5 +1,5 @@
 // Minimal repro: 40 alternating bools at prob 128, no raw values.
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using SpawnDev.Codecs.Video.Vp8;
 

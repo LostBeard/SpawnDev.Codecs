@@ -1,7 +1,7 @@
 // Round-trip the Vp8BoolEncoder + Vp8BoolDecoder pair. Encodes mixed
 // boolean + raw-value sequences and verifies decode equality.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using SpawnDev.Codecs.Video.Vp8;
 

@@ -3,7 +3,7 @@
 // equality. Proves the pair is consistent. (Cross-verification against
 // libaom on a real AV1 frame comes later when block decode lands.)
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using SpawnDev.Codecs.EntropyCoders;
 

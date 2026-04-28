@@ -3,7 +3,7 @@
 // the codec / dimensions. Stronger validation that our SH bytes are
 // well-formed than a parser-only round-trip.
 
-#:project SpawnDev.Codecs/SpawnDev.Codecs.csproj
+#:project ../../SpawnDev.Codecs/SpawnDev.Codecs.csproj
 using System;
 using System.Diagnostics;
 using System.IO;
