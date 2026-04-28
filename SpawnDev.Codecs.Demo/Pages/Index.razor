@@ -16,10 +16,9 @@
     <tbody>
         <tr><td>FLAC (native)</td><td>Complete</td><td>Complete (CONSTANT + FIXED + LPC, stereo decor, MD5)</td></tr>
         <tr><td>FLAC-in-Ogg</td><td>Complete</td><td>Manual via OggPageWriter</td></tr>
-        <tr><td>Opus (SILK)</td><td>Complete - NB/MB/WB x 10/20/40/60 ms, mono + stereo</td><td>-</td></tr>
-        <tr><td>Opus (CELT)</td><td>Stub</td><td>-</td></tr>
-        <tr><td>Opus-in-Ogg</td><td>SILK decode end-to-end</td><td>Packages pre-encoded Opus packets</td></tr>
-        <tr><td>Vorbis</td><td>Structural decoder: setup parse + floor-1 + residue + coupling + IMDCT + overlap-add composed; awaits bit-accuracy validation against libvorbis test vectors</td><td>-</td></tr>
+        <tr><td>Opus (SILK + CELT + Hybrid)</td><td>Complete via Concentus 2.2.2 backbone</td><td>Complete - mono/stereo, 8/16/24/48 kHz, 2.5/5/10/20 ms frames</td></tr>
+        <tr><td>Opus-in-Ogg</td><td>End-to-end</td><td>Packages encoded packets</td></tr>
+        <tr><td>Vorbis</td><td>End-to-end with EOP-aware residue (spec sec 8.6.5)</td><td>Working at correct amplitude; spectral quality improvement pending</td></tr>
     </tbody>
 </table>
 
@@ -41,13 +40,24 @@
 </ul>
 
 <h3>Video codecs</h3>
-<p>Not started. VP8 / VP9 / AV1 are planned (patent-clean via AOMedia pledge).</p>
+<table>
+    <thead>
+        <tr><th>Codec</th><th>Decoder</th><th>Encoder</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>VP8 (RFC 6386)</td><td>Keyframe walker - ffmpeg accepts our output bit-exact through pixel level</td><td>Keyframe encoder - ffmpeg accepts at 1920x1072 (5 fps); inter frames + multi-token partition + loop filter pending</td></tr>
+        <tr><td>VP9 (libvpx parity)</td><td>Keyframe walker - first 16x16 Y BIT-EXACT; multi-block via per-plane ENTROPY_CONTEXT</td><td>Keyframe encoder - ffmpeg native VP9 decodes 16x16-1920x1088 (1.5-2 fps at FullHD); inter frames + loop filter + 4:2:2/4:4:4 pending</td></tr>
+        <tr><td>AV1 (libaom parity)</td><td>Keyframe walker - 6 gaps closed (scan tables, qctx, CFL alpha, directional intra, tx_type, 32/64-pt inverse DCT); pixel-mean drift pending</td><td>Keyframe encoder - libdav1d accepts 16x16 Y=128 exact; multi-block FullHD context bug pending</td></tr>
+    </tbody>
+</table>
+<p>Patent-clean via the AOMedia patent pledge. Containers wired: IVF reader + writer, Matroska/WebM via SpawnDev.EBML, Ogg.</p>
 
 <h3>Out of scope (patent-encumbered)</h3>
 <p>H.264, H.265, AAC, MP3 — delegated to platform encoders via <code>SpawnDev.MultiMedia</code>.</p>
 
 <h2>Pages</h2>
 <ul>
+    <li><a href="/transcode">Transcode</a> — encode + decode all 3 video codecs in the browser, render YUV->RGBA on canvas</li>
     <li><a href="/benchmarks">Benchmarks</a> — throughput + compression measurements for FLAC + transforms</li>
     <li><a href="/tests">Tests</a> — SpawnDev.UnitTesting cross-backend test harness</li>
 </ul>
