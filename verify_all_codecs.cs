@@ -396,6 +396,35 @@ Section("AV1 encoder -> libdav1d (16x16 flat Y=128)", () =>
     summary.AppendLine($"  PASS: {frame.Length}B AV1 frame -> libdav1d Y mean={yMean}, range=[{yMin}, {yMax}] (third-party decode)");
 });
 
+// === VP8 multi-token-partition encode + ffmpeg accept (regression guard for 32c00cc) ===
+Section("VP8 multi-token-partition (ffmpeg accepts log2parts=0..3)", () =>
+{
+    int W2 = 32, H2 = 32;
+    var ySrc2 = new byte[W2 * H2];
+    for (int r = 0; r < H2; r++)
+        for (int c = 0; c < W2; c++)
+            ySrc2[r * W2 + c] = (byte)Math.Clamp(96 + 32 * Math.Sin(2.0 * Math.PI * c / 16.0) + r * 2, 0, 255);
+    var uSrc2 = new byte[(W2 / 2) * (H2 / 2)]; Array.Fill(uSrc2, (byte)128);
+    var vSrc2 = new byte[(W2 / 2) * (H2 / 2)]; Array.Fill(vSrc2, (byte)128);
+    foreach (int log2P in new[] { 0, 1, 2, 3 })
+    {
+        var frame = Vp8KeyframeEncoder.EncodeKeyFrame(
+            ySrc2, W2, uSrc2, W2 / 2, vSrc2, W2, H2,
+            baseQIndex: 30, log2NumPartitions: log2P);
+        string ivf = Path.Combine(outDir, $"vp8_p{1 << log2P}.ivf");
+        string yuv = Path.Combine(outDir, $"vp8_p{1 << log2P}.yuv");
+        using (var fs = File.Create(ivf))
+        {
+            var w = new IvfWriter(fs, "VP80", W2, H2, frameRate: 1, timeScale: 30, numFrames: 0, leaveOpen: true);
+            w.WriteFrame(frame, 0); w.Finish();
+        }
+        if (!RunFfmpeg($"-y -i \"{ivf}\" -f rawvideo -pix_fmt yuv420p \"{yuv}\""))
+            throw new Exception($"ffmpeg rejected VP8 with log2NumPartitions={log2P}");
+    }
+    Console.WriteLine("  PASS: VP8 log2NumPartitions=0/1/2/3 (1/2/4/8 partitions) all accepted by ffmpeg");
+    summary.AppendLine("  PASS: VP8 multi-token-partition 1/2/4/8 all accepted by ffmpeg (32c00cc regression guard)");
+});
+
 // === Vp8Decoder API smoke (encode -> decode through public IVideoDecoder) ===
 // Verifies Vp8Decoder.DecodeFrameAsync routes a real keyframe through the
 // walker rather than throwing NotImplementedException.
