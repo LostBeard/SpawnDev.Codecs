@@ -50,14 +50,15 @@ foreach (var (W, H) in new[] { (16, 16), (32, 32), (64, 64) })
 
     foreach (int q in new[] { 30, 100, 200 })
     {
-        // VP8
-        Vp8KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: q); // warmup
+        // VP8 (clamps to 7-bit BaseQIndex max of 127 per RFC 6386 sec 9.6).
+        int vp8Q = Math.Min(q, 127);
+        Vp8KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: vp8Q); // warmup
         var sw = Stopwatch.StartNew();
         long total = 0;
         for (int i = 0; i < iterations; i++)
-            total += Vp8KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: q).Length;
+            total += Vp8KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: vp8Q).Length;
         sw.Stop();
-        Append("VP8", W, H, q, iterations, sw.Elapsed.TotalSeconds, total, rawBytes);
+        Append("VP8", W, H, vp8Q, iterations, sw.Elapsed.TotalSeconds, total, rawBytes);
 
         // VP9
         Vp9KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: q);
