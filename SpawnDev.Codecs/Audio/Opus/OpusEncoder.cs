@@ -1,13 +1,21 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
+// See NOTICE.md for upstream attributions.
 //
 // Top-level Opus encoder. Routes per-frame encode requests to the SILK or
 // CELT subsystem based on the configured mode. Mirrors the structure of
 // OpusDecoder so consumers can encode/decode through symmetric APIs.
 //
-// State (Phase 1a): the SILK and CELT encoder paths are not yet implemented;
-// each throws NotImplementedException with a descriptive message. Packet
-// framing (TOC byte, frame count, padding) is wired so once a per-frame
-// encoder lands the top-level structure can be reused.
+// Per the user's instruction to mirror the CELT decoder pattern (see
+// Audio/Opus/Celt/CeltDecoder.cs and the CELT decoder commit message), the
+// encode path currently delegates the per-frame work to the BSD-3 Concentus
+// pure-C# port of libopus. This delivers a working encoder today against the
+// libopus reference and gives a verifiable backbone for a future hand-port
+// that will live behind the same public API in Audio/Opus/Silk/ and
+// Audio/Opus/Celt/. The Concentus runtime dependency is documented in
+// NOTICE.md and SpawnDev.Codecs.csproj.
+
+using Concentus;
+using Concentus.Enums;
 
 namespace SpawnDev.Codecs.Audio.Opus;
 
@@ -63,14 +71,22 @@ public enum OpusEncoderApplication
 }
 
 /// <summary>
-/// Top-level Opus encoder. Phase 1a state: structure and packet framing are
-/// in place; the per-frame SILK and CELT encode paths are stubs. Subsequent
-/// slices will wire up Concentus-derived SILK encode and a fresh CELT encode
-/// that mirrors libopus.
+/// Top-level Opus encoder. Encodes float PCM frames into RFC 6716 Opus
+/// packets. The current implementation delegates the per-frame work to the
+/// BSD-3 Concentus pure-C# port of libopus so the encoder is fully working
+/// today; the SILK and CELT scaffolding in <c>Audio/Opus/Silk/</c> and
+/// <c>Audio/Opus/Celt/</c> stays in place for the future hand-port. The
+/// public surface here is stable: replacing the Concentus dependency with the
+/// hand-port internally is an implementation detail.
+///
+/// Stateful: maintains the encoder's per-stream rate-control history,
+/// adaptive prediction state, and (for SILK) LSF/LPC predictors across
+/// frames. NOT thread-safe; one encoder per stream.
 /// </summary>
-public sealed class OpusEncoder
+public sealed class OpusEncoder : IDisposable
 {
     private readonly OpusEncoderConfig _config;
+    private IOpusEncoder? _concentusEnc;
     private bool _disposed;
 
     /// <summary>Construct an encoder with the given configuration.</summary>
@@ -90,12 +106,26 @@ public sealed class OpusEncoder
     /// <summary>Channel count.</summary>
     public int ChannelCount => _config.ChannelCount;
 
+    /// <summary>The application hint configured for this encoder.</summary>
+    public OpusEncoderApplication Application => _config.Application;
+
     /// <summary>
     /// Encode one PCM frame into a complete Opus packet. The frame size in
     /// samples per channel must be one of the Opus-legal values
     /// (2.5/5/10/20/40/60 ms at the configured sample rate).
-    /// Currently throws <see cref="NotImplementedException"/>.
     /// </summary>
+    /// <param name="pcmInput">
+    /// Interleaved float PCM in [-1, +1]. Length must be at least
+    /// <paramref name="frameSizeSamples"/> * channels. Values outside [-1, +1]
+    /// are clipped before being passed to the underlying encoder.
+    /// </param>
+    /// <param name="opusPacketOut">
+    /// Destination buffer for the produced Opus packet. Should be at least
+    /// 1275 bytes (the maximum Opus packet size per RFC 6716 sec 3.2.1) to
+    /// guarantee that any encoder decision fits.
+    /// </param>
+    /// <param name="frameSizeSamples">Frame size in samples per channel.</param>
+    /// <returns>The number of bytes written to <paramref name="opusPacketOut"/>.</returns>
     public int EncodeFrame(
         ReadOnlySpan<float> pcmInput,
         Span<byte> opusPacketOut,
@@ -109,30 +139,83 @@ public sealed class OpusEncoder
             throw new ArgumentException(
                 $"pcmInput too small: need {requiredInputLen} samples, got {pcmInput.Length}.",
                 nameof(pcmInput));
-        _ = opusPacketOut;
+        if (opusPacketOut.IsEmpty)
+            throw new ArgumentException("opusPacketOut must not be empty.", nameof(opusPacketOut));
 
-        // Phase 1a: per-mode encoders (SILK and CELT) are not yet implemented.
-        // Until both land, this top-level encoder cannot produce valid Opus
-        // packets. We throw a clear NotImplementedException so consumers know
-        // to wait for the per-mode encoders.
-        throw new NotImplementedException(
-            "OpusEncoder.EncodeFrame is not yet implemented. " +
-            "Phase 1a target: SILK encode requires a port of libopus' " +
-            "silk/enc_API.c (or Concentus equivalent); CELT encode requires " +
-            "a port of libopus celt/celt_encoder.c. Neither is implemented " +
-            "yet. When both per-mode encoders land, this top-level encoder " +
-            "will wire them through OpusPacketParser-shaped framing.");
+        EnsureConcentusEncoder();
+
+        // Concentus accepts the float overload directly and clips internally,
+        // but to make the contract explicit at our boundary we present the
+        // exact requested-length slice (no trailing junk past the frame).
+        var trimmed = pcmInput.Slice(0, requiredInputLen);
+        int bytes = _concentusEnc!.Encode(trimmed, frameSizeSamples, opusPacketOut, opusPacketOut.Length);
+        if (bytes <= 0)
+        {
+            throw new InvalidOperationException(
+                $"Opus encoder returned {bytes} bytes for a {frameSizeSamples}-sample frame at " +
+                $"{_config.SampleRateHz} Hz, {_config.ChannelCount} ch. Negative values match libopus " +
+                "OPUS_* error codes; 0 means 'frame fully consumed by DTX'.");
+        }
+        return bytes;
+    }
+
+    /// <summary>
+    /// Reset the encoder's inter-frame state. Call after a stream restart so
+    /// the next packet does not depend on prior history. Mirrors libopus
+    /// <c>opus_encoder_ctl(OPUS_RESET_STATE)</c>.
+    /// </summary>
+    public void ResetState()
+    {
+        ThrowIfDisposed();
+        _concentusEnc?.ResetState();
     }
 
     /// <summary>Releases resources held by the encoder.</summary>
     public ValueTask DisposeAsync()
     {
-        _disposed = true;
+        Dispose();
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>Releases resources held by the encoder.</summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _concentusEnc?.Dispose();
+        _concentusEnc = null;
     }
 
     private void ThrowIfDisposed()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+    }
+
+    private void EnsureConcentusEncoder()
+    {
+        if (_concentusEnc is not null) return;
+
+        // Force pure-managed Concentus path (no native libopus probe). Matches
+        // the policy used by CeltDecoder + ReferenceOracle so every code path
+        // (encode, decode, oracle) goes through the same pure-managed Opus
+        // implementation across desktop AND Blazor WASM.
+        OpusCodecFactory.AttemptToUseNativeLibrary = false;
+
+        var application = _config.Application switch
+        {
+            OpusEncoderApplication.Voip => OpusApplication.OPUS_APPLICATION_VOIP,
+            OpusEncoderApplication.Audio => OpusApplication.OPUS_APPLICATION_AUDIO,
+            OpusEncoderApplication.RestrictedLowDelay => OpusApplication.OPUS_APPLICATION_RESTRICTED_LOWDELAY,
+            _ => throw new InvalidOperationException(
+                $"Unsupported OpusEncoderApplication '{_config.Application}'."),
+        };
+
+        _concentusEnc = OpusCodecFactory.CreateEncoder(
+            _config.SampleRateHz, _config.ChannelCount, application);
+
+        if (_config.BitrateBitsPerSecond > 0)
+        {
+            _concentusEnc.Bitrate = _config.BitrateBitsPerSecond;
+        }
     }
 }

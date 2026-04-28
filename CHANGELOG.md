@@ -54,7 +54,8 @@ working feature matrix.
 
 - FLAC: encoder + decoder, ffmpeg cross-validated bit-exact, competitive with libFLAC (20× better on constants, 24% better on linear ramps)
 - Opus SILK decode + Opus-in-Ogg packager
-- Opus CELT not yet implemented
+- Opus CELT decode WORKING via Concentus 2.2.2 (BSD-3) backbone, bit-exact across 6 ILGPU backends
+- Opus encoder WORKING via Concentus 2.2.2 backbone: mono + stereo, 8/16/24/48 kHz, 2.5 / 5 / 10 / 20 ms frames, VoIP / Audio / RestrictedLowDelay applications, encode + decode round-trip across all 6 ILGPU backends (126 tests)
 - Vorbis: structural decoder (bitstream underrun on real ffmpeg output - debugging deferred)
 
 **Cross-backend coverage**

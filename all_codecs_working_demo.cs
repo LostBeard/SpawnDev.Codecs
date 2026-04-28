@@ -354,6 +354,59 @@ try
 catch (Exception ex) { Report("Opus decoder construct (CELT-ready)", false, ex.Message); }
 
 // =================================================================
+// AUDIO: Opus encoder + decoder round-trip
+//   Encodes a 3-second 48 kHz mono sine through OpusEncoder (20 ms
+//   frames -> 960 samples/frame -> 150 frames) and decodes it back via
+//   OpusDecoder, confirming the produced sample count matches the input.
+// =================================================================
+try
+{
+    const int sampleRateHz = 48000;
+    const int channelCount = 1;
+    const int frameSizeSamples = 960; // 20 ms at 48 kHz
+    const int seconds = 3;
+    int totalSamples = sampleRateHz * seconds;
+    int frameCount = totalSamples / frameSizeSamples;
+
+    var pcm = new float[totalSamples];
+    for (int n = 0; n < pcm.Length; n++)
+        pcm[n] = 0.4f * (float)Math.Sin(2 * Math.PI * 440 * n / sampleRateHz);
+
+    using var enc = new OpusEncoder(new OpusEncoderConfig
+    {
+        SampleRateHz = sampleRateHz,
+        ChannelCount = channelCount,
+        Application = OpusEncoderApplication.Audio,
+    });
+    var dec = new OpusDecoder(new OpusDecoderConfig
+    {
+        SampleRateHz = sampleRateHz,
+        ChannelCount = channelCount,
+    });
+
+    var packetBuf = new byte[1275];
+    var decodeBuf = new float[frameSizeSamples * channelCount];
+    long encodedBytes = 0, decodedSamples = 0;
+    for (int f = 0; f < frameCount; f++)
+    {
+        int bytes = enc.EncodeFrame(
+            pcm.AsSpan(f * frameSizeSamples * channelCount, frameSizeSamples * channelCount),
+            packetBuf,
+            frameSizeSamples);
+        encodedBytes += bytes;
+        int samples = dec.DecodePacketAsync(
+            packetBuf.AsMemory(0, bytes),
+            decodeBuf.AsMemory()).Result;
+        decodedSamples += samples;
+    }
+
+    bool ok = decodedSamples == frameSizeSamples * frameCount;
+    Report("Opus encoder + decoder round-trip", ok,
+        $"{frameCount} frames -> {encodedBytes}B encoded, {decodedSamples} samples decoded (expected {frameSizeSamples * frameCount})");
+}
+catch (Exception ex) { Report("Opus encoder + decoder round-trip", false, ex.Message); }
+
+// =================================================================
 // AUDIO: FLAC encoder + decoder round-trip
 // =================================================================
 try

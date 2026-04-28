@@ -54,19 +54,28 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Concentus is a BSD-3-Clause pure-C# port of libopus 1.1.2.
 
-**Status as of CELT slice:** SpawnDev.Codecs depends on Concentus at runtime
-through `<PackageReference Include="Concentus" Version="2.2.2" />` in
+**Status as of CELT decoder + Opus encoder slices:** SpawnDev.Codecs depends
+on Concentus at runtime through
+`<PackageReference Include="Concentus" Version="2.2.2" />` in
 `SpawnDev.Codecs.csproj`. The CELT decode path in
-`Audio/Opus/Celt/CeltDecoder.cs` delegates the heavy lifting (range coding,
-bit allocation, energy decode, PVQ shape decode, IMDCT, comb-filter,
-de-emphasis) to the Concentus implementation. This delivers bit-exact CELT
-decode against the libopus reference today and gives a verifiable oracle for
-a future hand-port.
+`Audio/Opus/Celt/CeltDecoder.cs` and the top-level
+`Audio/Opus/OpusEncoder.cs` both delegate the heavy lifting to the Concentus
+implementation:
+
+* **CELT decode:** range coding, bit allocation, energy decode, PVQ shape
+  decode, IMDCT, comb-filter, de-emphasis.
+* **Opus encode:** SILK / CELT / Hybrid mode selection, rate control, full
+  per-frame analysis + entropy coding, packet framing.
+
+This delivers bit-exact-vs-libopus CELT decode and a fully working RFC 6716
+Opus encoder today, and gives a verifiable oracle to compare future
+hand-ports against.
 
 The local files in `Audio/Opus/Celt/` (`CeltConstants`, `CeltMode`,
-`CeltDecoderState`) scaffold the eventual hand-port: when the per-module
-hand-port replaces the Concentus delegation inside `CeltDecoder`, the public
-API surface and the `OpusDecoder` integration do not change. BSD-3 terms
+`CeltDecoderState`) and `Audio/Opus/Silk/` scaffold the eventual hand-ports:
+when the per-module hand-ports replace the Concentus delegation inside
+`CeltDecoder` and `OpusEncoder`, the public API surface and the
+`OpusDecoder` / `OpusEncoder` integration do not change. BSD-3 terms
 propagate to all consuming distributions of SpawnDev.Codecs.
 
 ```
