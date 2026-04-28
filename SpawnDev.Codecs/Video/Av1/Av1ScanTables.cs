@@ -92,9 +92,14 @@ internal static class Av1ScanTables
     }
 
     /// <summary>
-    /// Build a column-major raster index ordered by anti-diagonal (zigzag-2d).
-    /// Position encoding: pos = col * height + row (libaom uses bhl-stride layout).
-    /// Walks anti-diagonals (col + row = d) for d in 0..(w+h-2).
+    /// Build the libaom default 2D zigzag scan. Position encoding:
+    /// pos = col * height + row (libaom bhl-stride layout).
+    ///
+    /// Scan direction is aspect-ratio dependent (verified bit-exact vs libaom
+    /// av1/common/scan.c default_scan_NxM tables):
+    ///   - SQUARE  (W == H): alternating - even d goes col lo->hi, odd d goes hi->lo
+    ///   - TALL    (W &lt; H): every diagonal walks col hi->lo (row hi->lo would be bad)
+    ///   - WIDE    (W &gt; H): every diagonal walks col lo->hi
     /// </summary>
     private static short[] BuildZigZagScan(int width, int height)
     {
@@ -103,16 +108,40 @@ internal static class Av1ScanTables
         int idx = 0;
         for (int d = 0; d < width + height - 1; d++)
         {
-            // For each anti-diagonal (col + row = d), walk col=0..d, row=d-col,
-            // producing positions in increasing column (= "row-then-col" in
-            // libaom's bhl convention). Skip out-of-bounds entries.
             int colStart = Math.Max(0, d - (height - 1));
             int colEnd = Math.Min(width - 1, d);
-            for (int col = colStart; col <= colEnd; col++)
+            // Direction: square alternates per-diagonal; tall is always hi->lo;
+            // wide is always lo->hi.
+            bool hiToLo;
+            if (width == height)
             {
-                int row = d - col;
-                int pos = col * height + row; // libaom bhl-stride: pos = col*(1<<bhl) + row
-                scan[idx++] = (short)pos;
+                hiToLo = (d & 1) == 1;
+            }
+            else if (width < height)
+            {
+                hiToLo = true;
+            }
+            else
+            {
+                hiToLo = false;
+            }
+            if (!hiToLo)
+            {
+                for (int col = colStart; col <= colEnd; col++)
+                {
+                    int row = d - col;
+                    int pos = col * height + row;
+                    scan[idx++] = (short)pos;
+                }
+            }
+            else
+            {
+                for (int col = colEnd; col >= colStart; col--)
+                {
+                    int row = d - col;
+                    int pos = col * height + row;
+                    scan[idx++] = (short)pos;
+                }
             }
         }
         return scan;

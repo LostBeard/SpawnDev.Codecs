@@ -177,17 +177,14 @@ public static class Av1ModeInfoReader
             var uvCdf = Av1DefaultIntraModeCdfs.DefaultUvModeCdf[cflAllowed][(int)mi.YMode];
             mi.UvMode = (byte)rd.DecodeCdfQ15(uvCdf, nsyms);
 
-            // CFL alphas (UV_CFL_PRED == 13). When CFL is selected the bitstream
-            // signals 6 extra symbols (cfl_alpha_signs CDF + 2 magnitudes if not
-            // both alphas are zero). Without those reads we'd desync the entropy
-            // stream. For now consume the alpha bits with the DefaultCflSignCdf
-            // reader so the stream stays in sync, then treat the chroma block as
-            // if it had been UV_DC_PRED. This keeps subsequent blocks decodable.
+            // CFL alphas (UV_CFL_PRED == 13). Reads joint sign + per-channel
+            // magnitudes per libaom read_cfl_alphas. The decoded values are
+            // stored on mi for the chroma reconstruction pipeline.
             if (mi.UvMode == 13)
             {
-                ReadCflAlphas(rd);
-                // Map CFL onto DC for downstream prediction.
-                mi.UvMode = (byte)Av1IntraMode.Dc;
+                ReadCflAlphas(rd, mi);
+                // Keep mi.UvMode == 13 (CFL) so the walker dispatches CFL
+                // prediction. The walker maps CFL -> DC predictor + alpha*AC.
             }
 
             // libaom maps uv_mode -> intra_mode for the angle delta lookup; for
@@ -242,25 +239,39 @@ public static class Av1ModeInfoReader
     }
 
     /// <summary>
-    /// libaom <c>read_cfl_alphas</c> - reads the CFL joint sign + per-channel
-    /// magnitude(s). For now we only read the joint sign symbol (which is what
-    /// most BBB-style content emits when CFL is selected at a chroma block);
-    /// reading the magnitudes when present requires the per-sign CFL alpha
-    /// CDFs which haven't been ported yet. This may desync on CFL-heavy
-    /// streams but recovers the common case.
+    /// libaom <c>read_cfl_alphas</c>: read the joint sign symbol from
+    /// cfl_sign_cdf, then per-channel 4-bit magnitude indices from
+    /// cfl_alpha_cdf. Stores the result on <paramref name="mi"/>.
+    ///
+    /// Magnitudes:
+    ///   CFL_SIGN_U(js) = ((js + 1) * 11) &gt;&gt; 5   -- 0/1/2 = ZERO/NEG/POS
+    ///   CFL_SIGN_V(js) = (js + 1) - 3 * CFL_SIGN_U(js)
+    ///   CFL_CONTEXT_U(js) = js + 1 - 3
+    ///   CFL_CONTEXT_V(js) = CFL_SIGN_V(js) * 3 + CFL_SIGN_U(js) - 3
     /// </summary>
-    private static void ReadCflAlphas(Av1RangeDecoder rd)
+    private static void ReadCflAlphas(Av1RangeDecoder rd, Av1ModeInfo mi)
     {
-        // joint sign symbol
         int jointSign = rd.DecodeCdfQ15(Av1DefaultIntraModeCdfs.DefaultCflSignCdf, 8);
-        // The sign maps to two 2-bit fields encoding which alphas are nonzero.
-        // signU = (joint_sign + 1) / 3 - 1, signV = (joint_sign + 1) % 3 - 1
-        int signU = (jointSign + 1) / 3 - 1;
-        int signV = (jointSign + 1) % 3 - 1;
-        // For each non-zero side we'd read a 4-symbol magnitude CDF. Without
-        // the per-context CFL alpha CDFs we can't read these without desync;
-        // skip them and accept the (rare) desync hit on this block.
-        _ = signU; _ = signV;
+        int signU = ((jointSign + 1) * 11) >> 5;
+        int signV = (jointSign + 1) - 3 * signU;
+        byte idx = 0;
+        if (signU != 0)
+        {
+            int ctxU = jointSign + 1 - 3;
+            var cdfU = Av1DefaultIntraModeCdfs.DefaultCflAlphaCdf[ctxU];
+            int mag = rd.DecodeCdfQ15(cdfU, 16);
+            idx = (byte)(mag << 4);
+        }
+        if (signV != 0)
+        {
+            int ctxV = signV * 3 + signU - 3;
+            var cdfV = Av1DefaultIntraModeCdfs.DefaultCflAlphaCdf[ctxV];
+            int mag = rd.DecodeCdfQ15(cdfV, 16);
+            idx |= (byte)mag;
+        }
+        mi.UseCfl = true;
+        mi.CflAlphaSigns = (sbyte)jointSign;
+        mi.CflAlphaIdx = idx;
     }
 
     /// <summary>libaom <c>av1_is_directional_mode</c>: V_PRED..D67_PRED.</summary>

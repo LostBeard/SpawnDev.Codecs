@@ -40,6 +40,12 @@ public sealed class Av1ModeInfo
     public byte FilterIntraMode;
     /// <summary>True when filter_intra is enabled for this block.</summary>
     public bool UseFilterIntra;
+    /// <summary>True when this block uses CFL_PRED for chroma (uv_mode == UV_CFL_PRED).</summary>
+    public bool UseCfl;
+    /// <summary>CFL packed alpha index (libaom <c>cfl_alpha_idx</c>): bits 0..3 = V mag, bits 4..7 = U mag.</summary>
+    public byte CflAlphaIdx;
+    /// <summary>CFL joint sign (libaom <c>cfl_alpha_signs</c>): 0..7 (CFL_JOINT_SIGNS).</summary>
+    public sbyte CflAlphaSigns;
 }
 
 /// <summary>

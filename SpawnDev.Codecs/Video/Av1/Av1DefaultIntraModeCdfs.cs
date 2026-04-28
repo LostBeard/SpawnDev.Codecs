@@ -199,4 +199,19 @@ internal static class Av1DefaultIntraModeCdfs
     /// </summary>
     public static readonly ushort[] DefaultCflSignCdf =
         new ushort[] { 31350, 30645, 19428, 14363, 5796, 4425, 474, 0, 0 };
+
+    /// <summary>
+    /// <c>default_cfl_alpha_cdf[CFL_ALPHA_CONTEXTS][CDF_SIZE(CFL_ALPHABET_SIZE)]</c>.
+    /// 6 contexts (one per non-zero joint sign combo for U or V), 16 magnitudes.
+    /// Indexed by libaom's CFL_CONTEXT(joint_sign, plane).
+    /// </summary>
+    public static readonly ushort[][] DefaultCflAlphaCdf = new ushort[][]
+    {
+        new ushort[] { 25131, 12049, 1367, 287, 111, 80, 76, 72, 68, 64, 60, 56, 52, 48, 44, 0, 0 },
+        new ushort[] { 18403, 9165, 4633, 1600, 601, 373, 281, 195, 148, 121, 100, 96, 92, 88, 84, 0, 0 },
+        new ushort[] { 21236, 10388, 4323, 1408, 419, 245, 184, 119, 95, 91, 87, 83, 79, 75, 71, 0, 0 },
+        new ushort[] { 5778, 1366, 486, 197, 76, 72, 68, 64, 60, 56, 52, 48, 44, 40, 36, 0, 0 },
+        new ushort[] { 15520, 6710, 3864, 2160, 1463, 891, 642, 447, 374, 304, 252, 208, 192, 175, 146, 0, 0 },
+        new ushort[] { 18030, 11090, 6989, 4867, 3744, 2466, 1788, 925, 624, 355, 248, 174, 146, 112, 108, 0, 0 },
+    };
 }

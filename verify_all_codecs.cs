@@ -248,6 +248,48 @@ Section("FLAC encoder + bit-exact decoder", () =>
     summary.AppendLine($"  PASS: {flacSize:N0}B FLAC, lossless round-trip -> {flacPath} - PLAYABLE IN VLC (audio)");
 });
 
+// === VP9 encoder -> ffmpeg native decode (32x32 round-trip via ffmpeg) ===
+// The multi-block bitstream divergence bug is fixed (per-plane
+// ENTROPY_CONTEXT now propagates). Confirm ffmpeg accepts our 32x32
+// frame without error and the decoded pixels are within encoder
+// quantization tolerance of the source (Q=8 -> Y max abs diff <= 2).
+Section("VP9 encoder -> ffmpeg native decode (32x32 multi-block)", () =>
+{
+    int W = 32, H = 32;
+    var ySrc = new byte[W * H];
+    for (int r = 0; r < H; r++)
+        for (int c = 0; c < W; c++)
+            ySrc[r * W + c] = (byte)(64 + r * 4 + c * 2);
+    var uSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc, (byte)128);
+    var vSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc, (byte)128);
+    var frame = Vp9KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 8);
+
+    string ivf = Path.Combine(outDir, "vp9_multiblock.ivf");
+    string yuv = Path.Combine(outDir, "vp9_multiblock.yuv");
+    using (var fs = File.Create(ivf))
+    {
+        var w = new IvfWriter(fs, "VP90", W, H, frameRate: 1, timeScale: 30, numFrames: 0, leaveOpen: true);
+        w.WriteFrame(frame, 0); w.Finish();
+    }
+    if (!RunFfmpeg($"-y -i \"{ivf}\" -f rawvideo -pix_fmt yuv420p \"{yuv}\""))
+        throw new Exception("ffmpeg failed to decode our VP9 IVF");
+
+    var dec = File.ReadAllBytes(yuv);
+    int yLen = W * H, uvLen = (W / 2) * (H / 2);
+    int yMaxAbs = 0;
+    for (int i = 0; i < yLen; i++) yMaxAbs = Math.Max(yMaxAbs, Math.Abs(dec[i] - ySrc[i]));
+    int uMaxAbs = 0;
+    for (int i = 0; i < uvLen; i++) uMaxAbs = Math.Max(uMaxAbs, Math.Abs(dec[yLen + i] - uSrc[i]));
+    int vMaxAbs = 0;
+    for (int i = 0; i < uvLen; i++) vMaxAbs = Math.Max(vMaxAbs, Math.Abs(dec[yLen + uvLen + i] - vSrc[i]));
+    // Q=8 quantization noise expected within +/-2; pre-fix this would have been
+    // 26+ for block (0,1), 67+ for (1,0), 132+ for (1,1).
+    if (yMaxAbs > 2 || uMaxAbs > 2 || vMaxAbs > 2)
+        throw new Exception($"VP9 multi-block divergence beyond quant tolerance: Y={yMaxAbs} U={uMaxAbs} V={vMaxAbs}");
+    Console.WriteLine($"  PASS: {frame.Length}B VP9 32x32 multi-block -> ffmpeg max diff Y={yMaxAbs} U={uMaxAbs} V={vMaxAbs}");
+    summary.AppendLine($"  PASS: {frame.Length}B VP9 32x32 multi-block -> ffmpeg max diff Y={yMaxAbs} U={uMaxAbs} V={vMaxAbs} (was 132+ pre-fix)");
+});
+
 // === AV1 encoder -> dav1d decode round-trip ===
 // The AV1 encoder produces a TD+SH+Frame OBU bitstream that libdav1d
 // (via ffmpeg -c:v libdav1d) accepts. 16x16 flat Y=128 reconstructs

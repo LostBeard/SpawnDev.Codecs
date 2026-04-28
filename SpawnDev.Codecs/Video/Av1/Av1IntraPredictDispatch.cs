@@ -15,19 +15,20 @@ namespace SpawnDev.Codecs.Video.Av1;
 /// <summary>AV1 intra prediction dispatch helpers.</summary>
 public static class Av1IntraPredictDispatch
 {
+    /// <summary>libaom <c>ANGLE_STEP</c>: angle delta units are multiplied by 3.</summary>
+    private const int AngleStep = 3;
+
     /// <summary>
-    /// Predict a (bw, bh) block from the supplied edge buffers using the requested mode.
+    /// Predict a (bw, bh) block from the supplied edge buffers using the requested mode
+    /// and (for directional modes) the supplied angle delta in [-3, +3].
     /// Writes the predictor into <paramref name="dst"/> at row stride <paramref name="stride"/>.
     /// </summary>
     public static void Predict(
         Av1IntraMode mode,
         Av1IntraEdge edge,
-        Span<byte> dst, int stride, int bw, int bh)
+        Span<byte> dst, int stride, int bw, int bh,
+        int angleDelta = 0)
     {
-        // Unify above buffer + corner into a single span for predictors that
-        // index above[-1] (Paeth). The Av1IntraPredictor.Paeth method takes
-        // a separate aboveMinus1 - we adapt by passing a 1-byte span for the
-        // corner.
         switch (mode)
         {
             case Av1IntraMode.Dc:
@@ -41,10 +42,28 @@ public static class Av1IntraPredictDispatch
                     Av1IntraPredictor.Dc128(dst, stride, bw, bh, edge.Above, edge.Left);
                 break;
             case Av1IntraMode.Vertical:
-                Av1IntraPredictor.Vertical(dst, stride, bw, bh, edge.Above, edge.Left);
+                if (angleDelta == 0)
+                {
+                    Av1IntraPredictor.Vertical(dst, stride, bw, bh, edge.Above, edge.Left);
+                }
+                else
+                {
+                    int p = 90 + angleDelta * AngleStep;
+                    Av1DirectionalPredictor.Predict(p, dst, stride, bw, bh,
+                        edge.Above, edge.Left, edge.AboveLeft);
+                }
                 break;
             case Av1IntraMode.Horizontal:
-                Av1IntraPredictor.Horizontal(dst, stride, bw, bh, edge.Above, edge.Left);
+                if (angleDelta == 0)
+                {
+                    Av1IntraPredictor.Horizontal(dst, stride, bw, bh, edge.Above, edge.Left);
+                }
+                else
+                {
+                    int p = 180 + angleDelta * AngleStep;
+                    Av1DirectionalPredictor.Predict(p, dst, stride, bw, bh,
+                        edge.Above, edge.Left, edge.AboveLeft);
+                }
                 break;
             case Av1IntraMode.Smooth:
                 Av1IntraPredictor.Smooth(dst, stride, bw, bh, edge.Above, edge.Left);
@@ -61,26 +80,20 @@ public static class Av1IntraPredictDispatch
                 Av1IntraPredictor.Paeth(dst, stride, bw, bh, edge.Above, corner, edge.Left);
                 break;
             }
-            // Directional modes - fallback to DC predictor (best non-throwing approximation).
-            // Implementing per-pixel angular interpolation requires the dx/dy/angle
-            // tables + intra_edge_filter + intra_edge_upsampler chain (libaom
-            // av1/common/reconintra.c lines 850-1100). Without that, we
-            // approximate with DC so the pipeline produces a valid YUV plane.
+            // Directional modes: dispatch through Av1DirectionalPredictor.
             case Av1IntraMode.D45:
             case Av1IntraMode.D67:
             case Av1IntraMode.D113:
             case Av1IntraMode.D135:
             case Av1IntraMode.D157:
             case Av1IntraMode.D203:
-                if (edge.HaveAbove && edge.HaveLeft)
-                    Av1IntraPredictor.Dc(dst, stride, bw, bh, edge.Above, edge.Left);
-                else if (edge.HaveAbove)
-                    Av1IntraPredictor.DcTop(dst, stride, bw, bh, edge.Above, edge.Left);
-                else if (edge.HaveLeft)
-                    Av1IntraPredictor.DcLeft(dst, stride, bw, bh, edge.Above, edge.Left);
-                else
-                    Av1IntraPredictor.Dc128(dst, stride, bw, bh, edge.Above, edge.Left);
+            {
+                int baseAngle = Av1DirectionalPredictor.ModeToAngleMap[(int)mode];
+                int pAngle = baseAngle + angleDelta * AngleStep;
+                Av1DirectionalPredictor.Predict(pAngle, dst, stride, bw, bh,
+                    edge.Above, edge.Left, edge.AboveLeft);
                 break;
+            }
             default:
                 throw new ArgumentException($"Unknown intra mode {mode}", nameof(mode));
         }
