@@ -231,6 +231,10 @@ public sealed class Av1KeyframeWalker
         var rd = ctx.Rd;
         var pctx = ctx.Pctx;
 
+        // Out of frame? Skip (no bits, no recon). libaom does the same in
+        // decode_partition (av1/decoder/decodeframe.c line 1312).
+        if (miRow >= FrameMiRows(header) || miCol >= FrameMiCols(header)) return;
+
         // Per AV1 spec sec 5.11.4: minimum partition size is BLOCK_8X8;
         // smaller blocks have an implicit PARTITION_NONE.
         if (bsize < Av1PartitionContext.Block8x8)
@@ -239,13 +243,47 @@ public sealed class Av1KeyframeWalker
             return;
         }
 
-        // Compute the partition context (combination of above + left split bits).
-        int partitionCtx = pctx.GetContext(miRow, miCol, bsize);
-        int nsyms = Av1PartitionContext.PartitionCdfLength(bsize);
+        // Per libaom read_partition (av1/decoder/decodeframe.c:1267):
+        //   - !has_rows && !has_cols: implicit PARTITION_SPLIT, no bit read.
+        //   - has_rows && has_cols:   standard CDF read with partition_cdf_length syms.
+        //   - !has_rows && has_cols:  read SPLIT-or-HORZ via partition_gather_vert_alike.
+        //   - has_rows && !has_cols:  read SPLIT-or-VERT via partition_gather_horz_alike.
+        int hbsCheck = Av1PartitionContext.MiSizeWide[bsize] >> 1;
+        bool hasRowsForCdf = (miRow + hbsCheck) < FrameMiRows(header);
+        bool hasColsForCdf = (miCol + hbsCheck) < FrameMiCols(header);
 
-        // Decode the partition symbol from the appropriate CDF row.
-        var cdf = Av1DefaultPartitionCdfs.DefaultPartitionCdf[partitionCtx];
-        Av1PartitionType partition = (Av1PartitionType)rd.DecodeCdfQ15(cdf, nsyms);
+        Av1PartitionType partition;
+        if (!hasRowsForCdf && !hasColsForCdf)
+        {
+            // Forced SPLIT, no bit read.
+            partition = Av1PartitionType.Split;
+        }
+        else
+        {
+            int partitionCtx = pctx.GetContext(miRow, miCol, bsize);
+            var cdf = Av1DefaultPartitionCdfs.DefaultPartitionCdf[partitionCtx];
+
+            if (hasRowsForCdf && hasColsForCdf)
+            {
+                // Standard CDF read.
+                int nsyms = Av1PartitionContext.PartitionCdfLength(bsize);
+                partition = (Av1PartitionType)rd.DecodeCdfQ15(cdf, nsyms);
+            }
+            else if (!hasRowsForCdf && hasColsForCdf)
+            {
+                // Bottom edge: SPLIT or HORZ. Use partition_gather_vert_alike.
+                ushort[] cdf2 = GatherVertAlike(cdf, bsize);
+                int sym = rd.DecodeCdfQ15(cdf2, 2);
+                partition = sym == 1 ? Av1PartitionType.Split : Av1PartitionType.Horz;
+            }
+            else
+            {
+                // Right edge: SPLIT or VERT. Use partition_gather_horz_alike.
+                ushort[] cdf2 = GatherHorzAlike(cdf, bsize);
+                int sym = rd.DecodeCdfQ15(cdf2, 2);
+                partition = sym == 1 ? Av1PartitionType.Split : Av1PartitionType.Vert;
+            }
+        }
 
         // Map (bsize, partition) -> sub-block size via subsize_lookup.
         int sqrIdx = SqrBlockSizeIndex(bsize);
@@ -626,6 +664,53 @@ public sealed class Av1KeyframeWalker
     private static int FrameMiCols(Av1CompleteFrameHeader header)
     {
         return ((header.Prefix.FrameWidth + 7) >> 3) << 1;
+    }
+
+    /// <summary>
+    /// Mirrors libaom <c>partition_gather_vert_alike</c> for the right-edge
+    /// "SPLIT or HORZ" 2-symbol CDF when reading partitions at frame edges.
+    /// Sym 0 = HORZ, Sym 1 = SPLIT.
+    /// </summary>
+    private static ushort[] GatherVertAlike(ushort[] cdf, int bsize)
+    {
+        const int CdfProbTop = 1 << 15;
+        int outVal = CdfProbTop;
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.Vert);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.Split);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.HorzA);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.VertA);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.VertB);
+        if (bsize != Av1PartitionContext.Block128x128)
+            outVal -= CdfElementProb(cdf, (int)Av1PartitionType.Vert4);
+        outVal = CdfProbTop - outVal; // AOM_ICDF
+        return new ushort[] { (ushort)outVal, 0, 0 };
+    }
+
+    /// <summary>
+    /// Mirrors libaom <c>partition_gather_horz_alike</c> for the bottom-edge
+    /// "SPLIT or VERT" 2-symbol CDF when reading partitions at frame edges.
+    /// Sym 0 = VERT, Sym 1 = SPLIT.
+    /// </summary>
+    private static ushort[] GatherHorzAlike(ushort[] cdf, int bsize)
+    {
+        const int CdfProbTop = 1 << 15;
+        int outVal = CdfProbTop;
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.Horz);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.Split);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.HorzA);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.HorzB);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.VertA);
+        if (bsize != Av1PartitionContext.Block128x128)
+            outVal -= CdfElementProb(cdf, (int)Av1PartitionType.Horz4);
+        outVal = CdfProbTop - outVal; // AOM_ICDF
+        return new ushort[] { (ushort)outVal, 0, 0 };
+    }
+
+    private static int CdfElementProb(ushort[] cdf, int element)
+    {
+        const int CdfProbTop = 1 << 15;
+        int prev = element > 0 ? cdf[element - 1] : CdfProbTop;
+        return prev - cdf[element];
     }
 
     /// <summary>

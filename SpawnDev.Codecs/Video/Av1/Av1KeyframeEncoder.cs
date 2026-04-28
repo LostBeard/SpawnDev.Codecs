@@ -209,7 +209,14 @@ public static class Av1KeyframeEncoder
         bw.WriteBits((int)Av1FrameType.KeyFrame, 2);
         bw.WriteFlag(true);  // show_frame
         // error_resilient_mode is implicit (true) for visible KeyFrame; no bit emitted.
-        bw.WriteFlag(false); // disable_cdf_update
+        // disable_cdf_update = 1: tells the decoder NOT to adaptively update
+        // CDFs after each symbol read. Our encoder uses the static default
+        // CDFs (no adaptation). For the bitstream to round-trip with libaom /
+        // libdav1d / ffmpeg, we MUST signal disable_cdf_update so the decoder
+        // also keeps the CDFs frozen at the defaults. Without this flag, even
+        // a 2-block frame produces a stream the decoder rejects (it expects
+        // adapted CDFs that we never wrote).
+        bw.WriteFlag(true); // disable_cdf_update
         // SH chose force=0 (no SELECT), so allow_screen_content_tools NOT emitted.
         // SH SCC=0 means force_integer_mv not emitted.
         // FrameIdNumbersPresent=false: no current_frame_id.
@@ -223,8 +230,8 @@ public static class Av1KeyframeEncoder
         // SH.EnableSuperres=false: no superres bits.
         bw.WriteFlag(false); // render_and_frame_size_different
         // allowSccTools=0 -&gt; no allow_intrabc emission.
-        // disable_cdf_update=false -&gt; mightBwdAdapt=true -&gt; emit refresh_frame_context.
-        bw.WriteBits(1, 1);  // refresh_frame_context = 1 (any value works)
+        // disable_cdf_update=true -&gt; mightBwdAdapt=false -&gt; NO refresh_frame_context bit.
+        // (libaom encoder gates this on `!disable_cdf_update`.)
 
         // ---- Tile info (Av1CompleteFrameHeaderParser.ReadTileInfo) ----
         EmitTileInfo(bw, sh, width, height);
@@ -289,19 +296,32 @@ public static class Av1KeyframeEncoder
     private static void EmitTileInfo(Av1BitWriter bw, Av1SequenceHeader sh, int width, int height)
     {
         // Compute the tile geometry the parser uses.
+        // Mirrors libaom av1_get_tile_limits (tile_common.c):
+        //   max_width_sb     = MAX_TILE_WIDTH >> sb_size_log2  (= 64 for 64-px SB)
+        //   max_tile_area_sb = MAX_TILE_AREA  >> (2 * sb_size_log2)  (= 2304 for 64-px SB)
+        //   min_log2_cols = tile_log2(max_width_sb, sb_cols)
+        //   min_log2      = tile_log2(max_tile_area_sb, sb_cols * sb_rows)
+        // MAX_TILE_WIDTH = 4096 px, MAX_TILE_AREA = 4096 * 2304 px (per AV1 spec).
         int sbSize = sh.Use128x128Superblock ? 128 : 64;
         int sbSizeLog2 = sh.Use128x128Superblock ? 7 : 6;
         int miSizeLog2 = 2;
         int mibSizeLog2 = sbSizeLog2 - miSizeLog2;
-        int miCols = (width + 7) >> 3;
-        int miRows = (height + 7) >> 3;
+        // mi_cols = ceil(width_px / 4), mi_rows = ceil(height_px / 4).
+        // Width/height are multiples of 16 (v1 invariant) so no rounding needed,
+        // but the spec uses ceiling-div so we follow the formula. Note: AV1 mi
+        // units are 4-px, NOT 8-px; a previous version incorrectly used >>3 which
+        // gave 8-px column count and produced widthSb half what it should be.
+        int miCols = (width + 3) >> 2;
+        int miRows = (height + 3) >> 2;
         int widthSb = (miCols + (1 << mibSizeLog2) - 1) >> mibSizeLog2;
         int heightSb = (miRows + (1 << mibSizeLog2) - 1) >> mibSizeLog2;
 
+        int maxWidthSb = 4096 >> sbSizeLog2;            // = 64 for 64-px SB
+        int maxTileAreaSb = (4096 * 2304) >> (2 * sbSizeLog2); // = 2304 for 64-px SB
         int maxLog2TileCols = TileLog2(1, Math.Min(widthSb, 64));
         int maxLog2TileRows = TileLog2(1, Math.Min(heightSb, 64));
-        int minLog2Tiles = Math.Max(0, TileLog2(64, widthSb * heightSb));
-        int minLog2TileCols = Math.Max(0, TileLog2(64, widthSb));
+        int minLog2TileCols = Math.Max(0, TileLog2(maxWidthSb, widthSb));
+        int minLog2Tiles = Math.Max(minLog2TileCols, TileLog2(maxTileAreaSb, widthSb * heightSb));
         int minLog2TileRows = Math.Max(0, minLog2Tiles - minLog2TileCols);
 
         // Single tile: log2_cols = minLog2TileCols, log2_rows = max(0, minLog2Tiles - log2_cols).
@@ -470,21 +490,22 @@ public static class Av1KeyframeEncoder
             }
             else if (!hasRows /* &amp;&amp; hasCols */)
             {
-                // Choose between SPLIT and HORZ via the gathered_vert_alike CDF.
+                // Bottom edge (!hasRows && hasCols): partition is SPLIT or HORZ.
+                // libaom uses partition_gather_vert_alike on the per-context CDF
+                // to derive a 2-symbol CDF, then writes (p == SPLIT) as sym 1.
                 int ctx = st.Pctx.GetContext(miRow, miCol, bsize);
                 var rowCdf = Av1DefaultPartitionCdfs.DefaultPartitionCdf[ctx];
-                int nsyms = Av1PartitionContext.PartitionCdfLength(bsize);
-                ushort[] cdf2 = GatherVertAlike(rowCdf, nsyms);
+                ushort[] cdf2 = GatherVertAlike(rowCdf, bsize);
                 st.Re.EncodeCdfQ15(1 /* SPLIT */, cdf2, 2);
                 partition = Av1PartitionType.Split;
             }
             else
             {
-                // hasRows &amp;&amp; !hasCols -&gt; choose between SPLIT and VERT.
+                // Right edge (hasRows && !hasCols): partition is SPLIT or VERT.
+                // libaom uses partition_gather_horz_alike to derive the 2-sym CDF.
                 int ctx = st.Pctx.GetContext(miRow, miCol, bsize);
                 var rowCdf = Av1DefaultPartitionCdfs.DefaultPartitionCdf[ctx];
-                int nsyms = Av1PartitionContext.PartitionCdfLength(bsize);
-                ushort[] cdf2 = GatherHorzAlike(rowCdf, nsyms);
+                ushort[] cdf2 = GatherHorzAlike(rowCdf, bsize);
                 st.Re.EncodeCdfQ15(1 /* SPLIT */, cdf2, 2);
                 partition = Av1PartitionType.Split;
             }
@@ -529,24 +550,69 @@ public static class Av1KeyframeEncoder
 
     /// <summary>
     /// Mirrors libaom <c>partition_gather_vert_alike</c>: derive the 2-symbol
-    /// CDF used at the right edge (partition is SPLIT or HORZ).
+    /// CDF used at the bottom edge (!hasRows && hasCols) where the only valid
+    /// partitions are SPLIT and HORZ.
     /// </summary>
-    private static ushort[] GatherVertAlike(ushort[] cdf, int nsyms)
+    private static ushort[] GatherVertAlike(ushort[] cdf, int bsize)
     {
-        // The "vert-alike" CDF concentrates probability mass on (HORZ, SPLIT).
-        // In libaom: out[0] = CDF_PROB_TOP - sum-of-non-vert-non-split-probs.
-        // We construct it so symbol 0 means HORZ and 1 means SPLIT.
-        // Conservative: use 50/50 split -&gt; icdf[0] = 16384, icdf[1] = 0, pad 0.
-        return new ushort[] { 16384, 0, 0 };
+        // libaom: out[0] = CDF_PROB_TOP - sum_of_probs(VERT, SPLIT, HORZ_A,
+        //   VERT_A, VERT_B [, VERT_4 if bsize != 128x128]).
+        // Then out[0] = AOM_ICDF(out[0]).
+        // The 2-symbol CDF: sym 0 = HORZ, sym 1 = SPLIT. The encoder writes
+        // (p == SPLIT) so sym 1 fires for SPLIT.
+        const int CdfProbTop = 1 << 15;
+        int outVal = CdfProbTop;
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.Vert);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.Split);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.HorzA);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.VertA);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.VertB);
+        if (bsize != Av1PartitionContext.Block128x128)
+            outVal -= CdfElementProb(cdf, (int)Av1PartitionType.Vert4);
+        outVal = CdfProbTop - outVal; // AOM_ICDF
+        return new ushort[] { (ushort)outVal, 0, 0 };
     }
 
     /// <summary>
     /// Mirrors libaom <c>partition_gather_horz_alike</c>: derive the 2-symbol
-    /// CDF used at the bottom edge (partition is SPLIT or VERT).
+    /// CDF used at the right edge (hasRows && !hasCols) where the only valid
+    /// partitions are SPLIT and VERT.
     /// </summary>
-    private static ushort[] GatherHorzAlike(ushort[] cdf, int nsyms)
+    private static ushort[] GatherHorzAlike(ushort[] cdf, int bsize)
     {
-        return new ushort[] { 16384, 0, 0 };
+        // libaom: out[0] = CDF_PROB_TOP - sum_of_probs(HORZ, SPLIT, HORZ_A,
+        //   HORZ_B, VERT_A [, HORZ_4 if bsize != 128x128]).
+        // Then out[0] = AOM_ICDF(out[0]).
+        // The 2-symbol CDF: sym 0 = VERT, sym 1 = SPLIT.
+        const int CdfProbTop = 1 << 15;
+        int outVal = CdfProbTop;
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.Horz);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.Split);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.HorzA);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.HorzB);
+        outVal -= CdfElementProb(cdf, (int)Av1PartitionType.VertA);
+        if (bsize != Av1PartitionContext.Block128x128)
+            outVal -= CdfElementProb(cdf, (int)Av1PartitionType.Horz4);
+        outVal = CdfProbTop - outVal; // AOM_ICDF
+        return new ushort[] { (ushort)outVal, 0, 0 };
+    }
+
+    /// <summary>
+    /// Mirrors libaom <c>cdf_element_prob</c>: returns the probability mass for
+    /// the given element index, computed as (cumprob[element-1] - cumprob[element])
+    /// where cumprob is derived from the inverse-CDF storage.
+    /// libaom storage: cdf[i] = AOM_ICDF(cumprob[i]) = CDF_PROB_TOP - cumprob[i].
+    /// So prob(element) = cdf[element] - cdf[element-1] (or CDF_PROB_TOP for element 0).
+    /// Wait, let's recompute: prob(elem) = cumprob(elem) - cumprob(elem-1).
+    ///   = (CDF_PROB_TOP - cdf[elem]) - (CDF_PROB_TOP - cdf[elem-1])
+    ///   = cdf[elem-1] - cdf[elem].
+    /// libaom impl: `(element > 0 ? cdf[element - 1] : CDF_PROB_TOP) - cdf[element]`.
+    /// </summary>
+    private static int CdfElementProb(ushort[] cdf, int element)
+    {
+        const int CdfProbTop = 1 << 15;
+        int prev = element > 0 ? cdf[element - 1] : CdfProbTop;
+        return prev - cdf[element];
     }
 
     /// <summary>

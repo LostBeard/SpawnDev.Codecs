@@ -306,20 +306,27 @@ public static class Av1CompleteFrameHeaderParser
     private static Av1TileInfo ReadTileInfo(ref Av1BitReader br, Av1SequenceHeader sh, Av1FrameHeader prefix)
     {
         // Compute mi grid size. AV1 superblock size = 64x64 (Use128=false) or 128x128.
+        // AV1 mi units are 4 luma samples; mi_cols = ceil(width_px / 4).
         int sbSize = sh.Use128x128Superblock ? 128 : 64;
         int sbSizeLog2 = sh.Use128x128Superblock ? 7 : 6;
         int miSizeLog2 = 2; // 4x4 mi units
         int mibSizeLog2 = sbSizeLog2 - miSizeLog2;
-        int miCols = (prefix.FrameWidth + 7) >> 3;
-        int miRows = (prefix.FrameHeight + 7) >> 3;
+        int miCols = (prefix.FrameWidth + 3) >> 2;
+        int miRows = (prefix.FrameHeight + 3) >> 2;
         // CEIL to mibSize
         int widthSb = (miCols + (1 << mibSizeLog2) - 1) >> mibSizeLog2;
         int heightSb = (miRows + (1 << mibSizeLog2) - 1) >> mibSizeLog2;
 
+        // Mirrors libaom av1_get_tile_limits (tile_common.c):
+        //   max_width_sb     = MAX_TILE_WIDTH >> sb_size_log2
+        //   max_tile_area_sb = MAX_TILE_AREA  >> (2 * sb_size_log2)
+        // MAX_TILE_WIDTH = 4096 px, MAX_TILE_AREA = 4096 * 2304 px.
+        int maxWidthSb = 4096 >> sbSizeLog2;            // = 64 for 64-px SB
+        int maxTileAreaSb = (4096 * 2304) >> (2 * sbSizeLog2); // = 2304 for 64-px SB
         int maxLog2TileCols = TileLog2(1, Math.Min(widthSb, 64));
         int maxLog2TileRows = TileLog2(1, Math.Min(heightSb, 64));
-        int minLog2Tiles = Math.Max(0, TileLog2(64, widthSb * heightSb)); // avoids div-by-zero
-        int minLog2TileCols = Math.Max(0, TileLog2(64, widthSb));
+        int minLog2TileCols = Math.Max(0, TileLog2(maxWidthSb, widthSb));
+        int minLog2Tiles = Math.Max(minLog2TileCols, TileLog2(maxTileAreaSb, widthSb * heightSb));
         int minLog2TileRows = Math.Max(0, minLog2Tiles - minLog2TileCols);
 
         bool uniform = br.ReadFlag();
