@@ -34,6 +34,12 @@ public abstract partial class CodecsTestBase
         await RunEncoderMatchesCpuTest(width: 64, height: 64, seed: 0x60D8);
     }
 
+    [TestMethod]
+    public async Task Vp8KeyframeEncoderGpu_MultiMb_8x8_MatchesCpuEncoder()
+    {
+        await RunEncoderMatchesCpuTest(width: 128, height: 128, seed: 0x60D9);
+    }
+
     private async Task RunEncoderMatchesCpuTest(int width, int height, int seed)
     {
         var (ctx, acc) = await CreateKernelAcceleratorAsync();
