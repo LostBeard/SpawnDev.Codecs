@@ -1,5 +1,6 @@
 @page "/benchmarks"
 @using System.Diagnostics
+@using System.Net.Http
 @using SpawnDev.Codecs.Audio.Flac
 @using SpawnDev.Codecs.Audio.Opus
 @using SpawnDev.Codecs.Audio.Vorbis
@@ -10,6 +11,7 @@
 @using SpawnDev.Codecs.Video.Av1
 @using SpawnDev.Codecs.Video.Vp8
 @using SpawnDev.Codecs.Video.Vp9
+@inject HttpClient Http
 
 <PageTitle>Benchmarks - SpawnDev.Codecs</PageTitle>
 
@@ -155,8 +157,21 @@
 
         try
         {
+            // BBB real-content encode benchmark (320x180 first frame)
+            await StepAsync(2, "Loading BBB first frame from /testdata/", LoadBbbAsync);
+            if (_bbbY is not null)
+            {
+                await Step(3, "VP8 BBB 320x180 Q=30 x10", () => BenchBbbEncode("VP8", 30,
+                    (y, u, v, q) => Vp8KeyframeEncoder.EncodeKeyFrame(y, BbbW, u, BbbW / 2, v, BbbW, BbbH, baseQIndex: q)));
+                await Step(4, "VP9 BBB 320x180 Q=30 x10", () => BenchBbbEncode("VP9", 30,
+                    (y, u, v, q) => Vp9KeyframeEncoder.EncodeKeyFrame(y, BbbW, u, BbbW / 2, v, BbbW, BbbH, baseQIndex: q)));
+                await Step(5, "AV1 BBB 320x180 Q=32 x5", () => BenchBbbEncode("AV1", 32,
+                    (y, u, v, q) => Av1KeyframeEncoder.EncodeKeyFrame(y, BbbW, u, BbbW / 2, v, BbbW, BbbH, baseQIndex: q),
+                    iters: 5));
+            }
+
             // Audio encoders
-            await Step(5, "FLAC encode (1ch 16bit 44.1k 1s)", () =>
+            await Step(7, "FLAC encode (1ch 16bit 44.1k 1s)", () =>
                 BenchFlacEncode(44100, 1, 16, 44100));
             await Step(10, "FLAC encode (2ch 16bit 44.1k 5s)", () =>
                 BenchFlacEncode(44100 * 5, 2, 16, 44100));
@@ -225,6 +240,63 @@
         body();
         StateHasChanged();
         await Task.Yield();
+    }
+
+    async Task StepAsync(int pct, string label, Func<Task> body)
+    {
+        _progressPct = pct;
+        _currentStep = label;
+        StateHasChanged();
+        await Task.Yield();
+        await body();
+        StateHasChanged();
+        await Task.Yield();
+    }
+
+    // BBB first-frame fixture (320x180 YUV420). Loaded lazily.
+    const int BbbW = 320, BbbH = 180;
+    byte[]? _bbbY;
+    byte[]? _bbbU;
+    byte[]? _bbbV;
+
+    async Task LoadBbbAsync()
+    {
+        if (_bbbY is not null) return;
+        try
+        {
+            var bytes = await Http.GetByteArrayAsync("testdata/bbb_first_frame.yuv");
+            int yLen = BbbW * BbbH;
+            int uvLen = (BbbW / 2) * (BbbH / 2);
+            if (bytes.Length < yLen + 2 * uvLen) return;
+            _bbbY = bytes[0..yLen];
+            _bbbU = bytes[yLen..(yLen + uvLen)];
+            _bbbV = bytes[(yLen + uvLen)..(yLen + 2 * uvLen)];
+        }
+        catch { /* fixture missing - skip BBB section */ }
+    }
+
+    void BenchBbbEncode(string codec, int q,
+        Func<byte[], byte[], byte[], int, byte[]> encode, int iters = 10)
+    {
+        if (_bbbY is null) return;
+        encode(_bbbY, _bbbU!, _bbbV!, q); // warm
+
+        long totalBytes = 0;
+        var sw = Stopwatch.StartNew();
+        for (int i = 0; i < iters; i++)
+            totalBytes += encode(_bbbY, _bbbU!, _bbbV!, q).Length;
+        sw.Stop();
+
+        double fps = iters * 1000.0 / sw.Elapsed.TotalMilliseconds;
+        double avgB = (double)totalBytes / iters;
+        int rawBytes = BbbW * BbbH + 2 * (BbbW / 2) * (BbbH / 2);
+        double ratio = avgB / rawBytes;
+        _log.Add(new BenchEntry("video-encode",
+            $"{codec} BBB 320x180 (real content)",
+            $"raw {rawBytes:N0}B/fr, iter={iters}",
+            sw.Elapsed.TotalMilliseconds,
+            $"{fps:F1} fps",
+            $"avg {avgB:F0}B/fr ({ratio:P2})"));
     }
 
     void BenchFlacEncode(int samplesPerChannel, int channels, int bps, int rate)
