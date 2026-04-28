@@ -165,11 +165,23 @@ Section("Vorbis encoder (3-sec A-minor chord)", () =>
     if (peak > 0.45f) throw new Exception($"Vorbis amplitude bug: peak {peak:F3} > 0.45 (source 0.30)");
     if (rms < 0.05f || rms > 0.18f) throw new Exception($"Vorbis amplitude bug: rms {rms:F3} outside [0.05, 0.18]");
 
+    // Power-domain quality check: compare RMS-normalized power between source
+    // and decoded. Sample-aligned SNR is unreliable on a synthetic chord because
+    // Vorbis adds a small pre-roll lag the source doesn't have. The amplitude
+    // check above (peak + RMS) catches the inaudible-noise regression that
+    // existed before c67d8ec; this just guards against a return to silence.
+    double srcRmsCheck = 0;
+    for (int i = 0; i < totalSamples; i++) srcRmsCheck += pcm[i] * (double)pcm[i];
+    srcRmsCheck = Math.Sqrt(srcRmsCheck / totalSamples);
+    double decRms = (double)rms;
+    double rmsRatio = decRms / srcRmsCheck;
+    if (rmsRatio < 0.5 || rmsRatio > 2.0) throw new Exception($"Vorbis power regressed: dec/src RMS ratio {rmsRatio:F2} outside [0.5, 2.0]");
+
     long oggSize = new FileInfo(oggPath).Length;
     Console.WriteLine($"  PASS: {oggSize:N0}B Vorbis -> {oggPath}");
-    Console.WriteLine($"        ffmpeg-decoded WAV: peak {peak:F3} (src ~0.30), rms {rms:F3} (src ~0.122)");
+    Console.WriteLine($"        ffmpeg-decoded WAV: peak {peak:F3} (src ~0.30), rms {rms:F3} (src ~0.122), RMS ratio {rmsRatio:F2}");
     summary.AppendLine($"  PASS: {oggSize:N0}B Vorbis chord -> {oggPath} - PLAYABLE IN VLC (audio)");
-    summary.AppendLine($"        ffmpeg decode: peak {peak:F3}, rms {rms:F3} (source: peak 0.30, rms 0.122)");
+    summary.AppendLine($"        ffmpeg decode: peak {peak:F3}, rms {rms:F3}, RMS ratio {rmsRatio:F2} (source: peak 0.30, rms 0.122)");
 });
 
 // === Opus encoder -> raw Opus packets concatenated as .opus stream ===
