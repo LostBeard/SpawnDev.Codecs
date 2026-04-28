@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         True(sh is not null, "expected SequenceHeader OBU in first IVF frame");
         True(frameObu.HasValue, "expected Frame OBU in first IVF frame");
 
-        var payload = firstIvf.Data.Span.Slice(frameOffset, frameObu.Value.PayloadLength);
+        var payload = firstIvf.Data.Span.Slice(frameOffset, frameObu!.Value.PayloadLength);
         var complete = Av1CompleteFrameHeaderParser.Parse(payload, sh!);
 
         True(complete.Prefix.FrameType == Av1FrameType.KeyFrame,

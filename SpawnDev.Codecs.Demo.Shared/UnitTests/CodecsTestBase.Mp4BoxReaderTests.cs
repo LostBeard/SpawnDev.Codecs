@@ -58,10 +58,10 @@ public abstract partial class CodecsTestBase
         Equal(1, boxes.Count);
         Equal("moov", boxes[0].Type);
         Equal(2, boxes[0].Children!.Count);
-        Equal("mvhd", boxes[0].Children[0].Type);
-        Equal("trak", boxes[0].Children[1].Type);
-        Equal(1, boxes[0].Children[1].Children!.Count);
-        Equal("tkhd", boxes[0].Children[1].Children![0].Type);
+        Equal("mvhd", boxes[0].Children![0].Type);
+        Equal("trak", boxes[0].Children![1].Type);
+        Equal(1, boxes[0].Children![1].Children!.Count);
+        Equal("tkhd", boxes[0].Children![1].Children![0].Type);
     }
 
     [TestMethod]

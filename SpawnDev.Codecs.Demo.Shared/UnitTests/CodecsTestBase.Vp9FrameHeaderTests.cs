@@ -218,8 +218,8 @@ public abstract partial class CodecsTestBase
                     }
                     else
                     {
-                        Equal(firstW.Value, h.FrameWidth);
-                        Equal(firstH.Value, h.FrameHeight);
+                        Equal(firstW!.Value, h.FrameWidth);
+                        Equal(firstH!.Value, h.FrameHeight);
                     }
                     keyframesSeen++;
                 }
