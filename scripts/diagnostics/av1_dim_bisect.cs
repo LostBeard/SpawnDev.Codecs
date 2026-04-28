@@ -17,15 +17,21 @@ Directory.CreateDirectory(outDir);
     (320, 240), (640, 480), (1280, 720), (1920, 1072),
 };
 
-Console.WriteLine("AV1 dimension bisection (flat Y=128, libdav1d decoder):");
+// Flat input (Y=128) tests the all-skip multi-block path. Gradient
+// tests scan-order non-skip→skip transitions (separate bug surface).
+bool useGradient = args.Length > 0 && args[0] == "gradient";
+Console.WriteLine($"AV1 dimension bisection ({(useGradient ? "GRADIENT" : "FLAT Y=128")} input, libdav1d decoder):");
 Console.WriteLine($"  {"WxH",-12}{"frame B",-10}{"dav1d",-10}{"detail"}");
 
 foreach (var (W, H) in sizes)
 {
     var ySrc = new byte[W * H];
-    for (int r = 0; r < H; r++)
-        for (int c = 0; c < W; c++)
-            ySrc[r * W + c] = (byte)Math.Clamp(96 + (r + c) % 64, 0, 255);
+    if (useGradient)
+        for (int r = 0; r < H; r++)
+            for (int c = 0; c < W; c++)
+                ySrc[r * W + c] = (byte)Math.Clamp(96 + (r + c) % 64, 0, 255);
+    else
+        Array.Fill(ySrc, (byte)128);
     var uSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc, (byte)128);
     var vSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc, (byte)128);
     byte[] frame;
