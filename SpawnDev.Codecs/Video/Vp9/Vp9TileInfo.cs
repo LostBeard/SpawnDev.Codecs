@@ -73,14 +73,19 @@ public static class Vp9TileInfoParser
         // sb_cols = mi_cols rounded up to multiple of 8 (SB64), divided by 8.
         int sbCols = AlignUp(miCols, 1 << Vp9TileInfo.MiBlockSizeLog2) >> Vp9TileInfo.MiBlockSizeLog2;
 
+        // VP9 spec sec 6.2.14 calc_min/max_log2_tile_cols. min_log2 is the
+        // forced-multi-tile floor (driven by MAX_TILE_WIDTH); max_log2 is
+        // the splitting ceiling (driven by MIN_TILE_WIDTH). Previously
+        // these formulas were transposed which gave min > max for any
+        // sb_cols >= MIN_TILE_WIDTH (broke widths > 320 vs ffmpeg).
         int minLog2 = 0;
-        int maxLog2 = 0;
-        while ((Vp9TileInfo.MaxTileWidthSb64 << maxLog2) < sbCols)
-            maxLog2++;
-        while ((sbCols >> minLog2) >= Vp9TileInfo.MinTileWidthSb64)
+        while ((Vp9TileInfo.MaxTileWidthSb64 << minLog2) < sbCols)
             minLog2++;
-        minLog2--;
-        if (minLog2 < 0) minLog2 = 0;
+
+        int maxLog2 = 1;
+        while ((sbCols >> maxLog2) >= Vp9TileInfo.MinTileWidthSb64)
+            maxLog2++;
+        maxLog2--;
 
         return (minLog2, maxLog2);
     }
