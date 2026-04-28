@@ -532,14 +532,19 @@ public sealed class Av1KeyframeWalker
                     continue;
                 }
 
-                // Build edge buffer from already-reconstructed pixels.
+                // Build edge buffer + run prediction at the FULL tx-block dimensions
+                // (libaom convention: prediction fills txW x txH always; partial
+                // tx-blocks at frame edge are handled by clipping the recon write
+                // below). Passing the clipped curW/curH would route through
+                // Av1SmoothWeights.GetWeights which throws on dims that aren't
+                // 4/8/16/32/64.
                 var edge = Av1IntraEdge.Build(planeBuf, planeStride, planeW, planeH,
-                    xb, yb, curW, curH);
+                    xb, yb, txW, txH);
 
                 // Apply intra prediction into a scratch buffer.
                 var predict = new byte[txW * txH];
                 int angleDelta = isChromaPlane ? mi.UvAngleDelta : mi.YAngleDelta;
-                Av1IntraPredictDispatch.Predict(mode, edge, predict, txW, curW, curH, angleDelta);
+                Av1IntraPredictDispatch.Predict(mode, edge, predict, txW, txW, txH, angleDelta);
 
                 // CFL: add alpha * AC luma to the DC predictor for chroma
                 // tx-blocks. Only applied when uv_mode == UV_CFL_PRED. The
