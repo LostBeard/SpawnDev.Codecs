@@ -126,6 +126,22 @@ public sealed class Vp8BoolEncoder
         return _buf.ToArray();
     }
 
+    /// <summary>
+    /// Snapshot of the encoder's mid-stream state. Used to hand off to a
+    /// separate encoder (e.g. a GPU kernel resuming what CPU started).
+    /// The bool coder is fully restartable from these four fields.
+    /// </summary>
+    public sealed record Snapshot(byte[] Buf, uint LowValue, uint Range, int Count);
+
+    /// <summary>
+    /// Capture the encoder's current state without finalizing. Caller can
+    /// continue encoding via another path (e.g. GPU kernel) by uploading
+    /// <see cref="Snapshot.Buf"/> + (<see cref="Snapshot.LowValue"/>,
+    /// <see cref="Snapshot.Range"/>, <see cref="Snapshot.Count"/>) into a
+    /// fresh encoder state.
+    /// </summary>
+    public Snapshot GetSnapshot() => new Snapshot(_buf.ToArray(), _lowvalue, _range, _count);
+
     private static int LeadingZeros8(byte b)
     {
         if (b == 0) return 0;

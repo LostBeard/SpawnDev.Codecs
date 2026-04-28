@@ -51,7 +51,7 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
         ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
         ArrayView<byte>, ArrayView<byte>,
         ArrayView<byte>, ArrayView<byte>, ArrayView<long>,
-        ArrayView<byte>,
+        ArrayView<byte>, ArrayView<int>,
         int, int> _kernel;
 
     /// <summary>Compile.</summary>
@@ -64,7 +64,7 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
             ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<byte>, ArrayView<byte>,
             ArrayView<byte>, ArrayView<byte>, ArrayView<long>,
-            ArrayView<byte>,
+            ArrayView<byte>, ArrayView<int>,
             int, int>(EncodeFrameKernel);
     }
 
@@ -96,6 +96,7 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
     /// <param name="tokenP0Out">Coef tokens output bool stream.</param>
     /// <param name="outLens">2 longs: [partition0Len, tokenP0Len].</param>
     /// <param name="aboveCtx">Frame-wide above-context buffer (mbCols * 9 bytes). Caller zero-initializes.</param>
+    /// <param name="initialP0State">Initial partition0 bool encoder state (5 ints): [LowValue, Range, Count, OutLen, _]. Encoded as int because of ILGPU type-handling rules; LowValue/Range fit in 32 bits unsigned; Count is signed (starts at -24); OutLen is the byte offset into partition0Out where partition0 currently ends. The 5th int is reserved/unused. Pass [0, 255, -24, 0, 0] to start fresh.</param>
     /// <param name="mbCols">Macroblock columns.</param>
     /// <param name="mbRows">Macroblock rows.</param>
     public void Run(
@@ -109,6 +110,7 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
         ArrayView<byte> tokenP0Out,
         ArrayView<long> outLens,
         ArrayView<byte> aboveCtx,
+        ArrayView<int> initialP0State,
         int mbCols, int mbRows)
     {
         if (mbCols <= 0 || mbRows <= 0) throw new ArgumentOutOfRangeException();
@@ -116,10 +118,12 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
         if (aboveCtx.Length < mbCols * 9L) throw new ArgumentException("aboveCtx must hold mbCols*9 bytes.", nameof(aboveCtx));
         if (constsExtended.Length < ConstsExtendedTotalBytes)
             throw new ArgumentException("constsExtended must be at least ConstsExtendedTotalBytes.", nameof(constsExtended));
+        if (initialP0State.Length < 5)
+            throw new ArgumentException("initialP0State must hold 5 ints.", nameof(initialP0State));
         _kernel(1, y4Coefs, y2Coefs, uCoefs, vCoefs,
             coefProbsByType, constsExtended,
             partition0Out, tokenP0Out, outLens,
-            aboveCtx,
+            aboveCtx, initialP0State,
             mbCols, mbRows);
     }
 
@@ -135,6 +139,7 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
         ArrayView<byte> tokenP0Out,
         ArrayView<long> outLens,
         ArrayView<byte> aboveCtx,
+        ArrayView<int> initialP0State,
         int mbCols, int mbRows)
     {
         // Probe slices in coefProbsByType. Block types: 0=Y_no_DC,
@@ -144,8 +149,15 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
         var probsY2 = coefProbsByType.SubView(1L * probsPerType, probsPerType);
         var probsUv = coefProbsByType.SubView(2L * probsPerType, probsPerType);
 
-        // Two bool encoders.
-        var p0State = Vp8BoolEncoderGpu.Init();
+        // Initialize partition0 state from the snapshot the CPU provided
+        // after writing the frame header. tokenP0 always starts fresh.
+        var p0State = new Vp8BoolEncoderGpuState
+        {
+            LowValue = (uint)initialP0State[0],
+            Range = (uint)initialP0State[1],
+            Count = initialP0State[2],
+            OutLen = (long)initialP0State[3],
+        };
         var tpState = Vp8BoolEncoderGpu.Init();
 
         // Per-row left context (9 cells); reset per row.

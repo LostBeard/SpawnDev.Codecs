@@ -172,6 +172,7 @@ public abstract partial class CodecsTestBase
             using var dTp = acc.Allocate1D<byte>(tp0Stride);
             using var dLens = acc.Allocate1D<long>(2);
             using var dAbove = acc.Allocate1D<byte>(mbCols * 9);
+            using var dInitialState = acc.Allocate1D<int>(5);
             dY4.View.CopyFromCPU(y4Coefs);
             dY2.View.CopyFromCPU(y2Coefs);
             dU.View.CopyFromCPU(uCoefs);
@@ -181,10 +182,12 @@ public abstract partial class CodecsTestBase
             dP0.View.MemSetToZero();
             dTp.View.MemSetToZero();
             dAbove.View.MemSetToZero();
+            // Fresh state: lowvalue=0, range=255, count=-24, outLen=0.
+            dInitialState.View.CopyFromCPU(new int[] { 0, 255, -24, 0, 0 });
 
             kernel.Run(dY4.View, dY2.View, dU.View, dV.View,
                 dProbs.View, dConsts.View, dP0.View, dTp.View, dLens.View,
-                dAbove.View, mbCols, mbRows);
+                dAbove.View, dInitialState.View, mbCols, mbRows);
             await acc.SynchronizeAsync();
 
             var lens = await SpawnDev.ILGPU.SpawnDevContextExtensions.CopyToHostAsync(dLens);
