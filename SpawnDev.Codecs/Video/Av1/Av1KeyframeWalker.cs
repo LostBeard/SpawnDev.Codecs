@@ -389,7 +389,9 @@ public sealed class Av1KeyframeWalker
         // ----- Y plane prediction + transform + reconstruct -----
         DecodePlane(ctx, sh, header, mi, plane: 0, isChromaPlane: false,
             xPx, yPx, blockWY, blockHY, miRow, miCol, bsize,
-            y, planeStrideY, planeWidthY, planeHeightY);
+            y, planeStrideY, planeWidthY, planeHeightY,
+            lumaRecon: null, lumaStride: 0,
+            lumaXPx: 0, lumaYPx: 0, subX: 0, subY: 0);
 
         // ----- U/V planes -----
         if (!sh.Monochrome)
@@ -409,10 +411,14 @@ public sealed class Av1KeyframeWalker
             {
                 DecodePlane(ctx, sh, header, mi, plane: 1, isChromaPlane: true,
                     xPxC, yPxC, blockWC, blockHC, miRow, miCol, bsize,
-                    u, planeStrideC, planeWidthC, planeHeightC);
+                    u, planeStrideC, planeWidthC, planeHeightC,
+                    lumaRecon: y, lumaStride: planeStrideY,
+                    lumaXPx: xPx, lumaYPx: yPx, subX, subY);
                 DecodePlane(ctx, sh, header, mi, plane: 2, isChromaPlane: true,
                     xPxC, yPxC, blockWC, blockHC, miRow, miCol, bsize,
-                    v, planeStrideC, planeWidthC, planeHeightC);
+                    v, planeStrideC, planeWidthC, planeHeightC,
+                    lumaRecon: y, lumaStride: planeStrideY,
+                    lumaXPx: xPx, lumaYPx: yPx, subX, subY);
             }
         }
     }
@@ -421,6 +427,8 @@ public sealed class Av1KeyframeWalker
     /// Decode + reconstruct one plane of the current block. Walks the tx
     /// blocks within the block, decodes coefficients per-tx-block, applies
     /// the inverse transform, predicts from edges, adds residual, clips.
+    /// For CFL chroma blocks, applies the AC alpha contribution after the
+    /// DC predictor and before adding the residual.
     /// </summary>
     private void DecodePlane(
         DecodeContext ctx,
@@ -430,7 +438,9 @@ public sealed class Av1KeyframeWalker
         int plane, bool isChromaPlane,
         int xPx, int yPx, int blockW, int blockH,
         int miRow, int miCol, int bsize,
-        byte[] planeBuf, int planeStride, int planeW, int planeH)
+        byte[] planeBuf, int planeStride, int planeW, int planeH,
+        byte[]? lumaRecon, int lumaStride,
+        int lumaXPx, int lumaYPx, int subX, int subY)
     {
         // Pick the tx size for this plane. For Y plane use mi.TxSize.
         // For chroma use the largest tx size that fits in the chroma block dimensions.
@@ -453,6 +463,9 @@ public sealed class Av1KeyframeWalker
         int txHMi = Math.Max(1, txH >> 2);
 
         // Choose intra mode for this plane.
+        // CFL_PRED (uv_mode == 13) uses DC for the base predictor; the AC
+        // contribution from luma is added after.
+        bool isCfl = isChromaPlane && mi.UseCfl;
         Av1IntraMode mode = isChromaPlane
             ? (mi.UvMode < 13 ? (Av1IntraMode)mi.UvMode : Av1IntraMode.Dc)
             : mi.YMode;
@@ -487,7 +500,26 @@ public sealed class Av1KeyframeWalker
 
                 // Apply intra prediction into a scratch buffer.
                 var predict = new byte[txW * txH];
-                Av1IntraPredictDispatch.Predict(mode, edge, predict, txW, curW, curH);
+                int angleDelta = isChromaPlane ? mi.UvAngleDelta : mi.YAngleDelta;
+                Av1IntraPredictDispatch.Predict(mode, edge, predict, txW, curW, curH, angleDelta);
+
+                // CFL: add alpha * AC luma to the DC predictor for chroma
+                // tx-blocks. Only applied when uv_mode == UV_CFL_PRED. The
+                // luma block has already been fully reconstructed by this
+                // point so we can sub-sample it directly.
+                if (isCfl && lumaRecon is not null)
+                {
+                    int lumaTxXPx = lumaXPx + (tx << subX);
+                    int lumaTxYPx = lumaYPx + (ty << subY);
+                    Av1CflPredictor.Apply(
+                        lumaRecon, lumaStride,
+                        lumaTxXPx, lumaTxYPx,
+                        subX, subY,
+                        predict, txW,
+                        curW, curH,
+                        mi.CflAlphaIdx, mi.CflAlphaSigns,
+                        plane: plane - 1 /* 1->U=0, 2->V=1 */);
+                }
 
                 // Decode coefficients for this tx block (skip if mi.SkipTxfm).
                 int[] residual = new int[txW * txH];
@@ -495,7 +527,15 @@ public sealed class Av1KeyframeWalker
                 {
                     int miRowTx = miRow + (ty >> 2);
                     int miColTx = miCol + (tx >> 2);
-                    int txbSkipCtx = ctx.EntropyCtx.GetTxbSkipContext(plane, miRowTx, miColTx, txWMi, txHMi);
+                    // Most decode paths in this walker use partitions where the
+                    // single-block tx size matches the plane block size. When
+                    // blockW != txW or blockH != txH, libaom's context formula
+                    // diverges (planeBsizeIsTxsize=false). For now we accept
+                    // the common-case context; future work will refine this for
+                    // partitioned transforms.
+                    bool planeBsizeIsTxsize = (txW == blockW && txH == blockH);
+                    int txbSkipCtx = ctx.EntropyCtx.GetTxbSkipContext(plane, miRowTx, miColTx, txWMi, txHMi,
+                        planeBsizeIsTxsize, planeBsizeLargerThanTxBsize: false);
                     int dcSignCtx = ctx.EntropyCtx.GetDcSignContext(plane, miRowTx, miColTx, txWMi, txHMi);
 
                     int qindex = ctx.SbState.CurrentBaseQindex;

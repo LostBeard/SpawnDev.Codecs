@@ -49,53 +49,111 @@ internal sealed class Av1EntropyContext
 
     /// <summary>
     /// Compute the txb_skip CDF context for a tx block at (miRow, miCol)
-    /// of size (txWMi, txHMi) (in mi units). Mirrors libaom <c>get_entropy_context</c>.
+    /// of size (txWMi, txHMi) (in mi units). Bit-exact port of libaom
+    /// <c>get_txb_ctx</c> (av1/common/txb_common.h SPECIALIZE_GET_TXB_CTX).
+    ///
+    /// The context depends on whether the transform fills the entire plane
+    /// block (planeBsizeIsTxsize) and the plane:
+    ///   - Y, planeBsizeIsTxsize: returns 0
+    ///   - Y, !planeBsizeIsTxsize: skip_contexts[top][left] table
+    ///   - Chroma: get_entropy_context() + ctx_offset (7 or 10)
     /// </summary>
-    public int GetTxbSkipContext(int plane, int miRow, int miCol, int txWMi, int txHMi)
+    public int GetTxbSkipContext(int plane, int miRow, int miCol, int txWMi, int txHMi,
+        bool planeBsizeIsTxsize, bool planeBsizeLargerThanTxBsize)
     {
-        // libaom: skip context = above_skip_count + left_skip_count, clamped to TXB_SKIP_CONTEXTS-1.
-        // The above/left "skip" is determined by whether the cul_level is nonzero.
-        int aboveSkip = 0;
-        int leftSkip = 0;
-        for (int i = 0; i < txWMi && miCol + i < _above[plane].Length; i++)
+        if (plane == 0)
         {
-            if (_above[plane][miCol + i] == 0) aboveSkip++;
-        }
-        for (int i = 0; i < txHMi && (miRow + i) < 32 * 100; i++) // bounded by left buffer + frame height
-        {
-            int idx = (miRow + i) & 31;
-            if (_left[plane][idx] == 0) leftSkip++;
-        }
-        // Combine both into a 0..12 context.
-        int ctx = (aboveSkip == txWMi ? 1 : 0) + (leftSkip == txHMi ? 1 : 0);
-        return Math.Min(ctx + (txWMi > 1 ? 1 : 0) + (txHMi > 1 ? 1 : 0), Av1TxbCommon.TxbSkipContexts - 1);
-    }
+            if (planeBsizeIsTxsize) return 0;
 
-    /// <summary>
-    /// Compute dc_sign CDF context for the given block. Mirrors libaom
-    /// <c>get_dc_sign_context</c>: sums the 2-bit dc-sign halves of the
-    /// above + left cul_level cells and maps to 0..2.
-    /// </summary>
-    public int GetDcSignContext(int plane, int miRow, int miCol, int txWMi, int txHMi)
-    {
-        int signAccum = 0;
+            // libaom: top |= a[k] for k in 0..txb_w_unit; same for left;
+            // top &= COEFF_CONTEXT_MASK; top = min(top, 4); same for left.
+            int top = 0;
+            int left = 0;
+            for (int i = 0; i < txWMi && miCol + i < _above[plane].Length; i++)
+            {
+                top |= _above[plane][miCol + i];
+            }
+            for (int i = 0; i < txHMi; i++)
+            {
+                int idx = (miRow + i) & 31;
+                left |= _left[plane][idx];
+            }
+            top &= Av1TxbCommon.CoeffContextMask;
+            top = Math.Min(top, 4);
+            left &= Av1TxbCommon.CoeffContextMask;
+            left = Math.Min(left, 4);
+            return SkipContexts[top][left];
+        }
+
+        // Chroma: get_entropy_context combines (above_ec != 0) + (left_ec != 0)
+        // for each of txWMi above + txHMi left mi-units, then we add ctx_offset.
+        bool aboveNz = false;
+        bool leftNz = false;
         for (int i = 0; i < txWMi && miCol + i < _above[plane].Length; i++)
         {
-            byte v = _above[plane][miCol + i];
-            int sign = (v >> Av1TxbCommon.CoeffContextBits) & 0x3;
-            if (sign == 1) signAccum--;
-            else if (sign == 2) signAccum++;
+            if (_above[plane][miCol + i] != 0) { aboveNz = true; break; }
         }
         for (int i = 0; i < txHMi; i++)
         {
             int idx = (miRow + i) & 31;
-            byte v = _left[plane][idx];
-            int sign = (v >> Av1TxbCommon.CoeffContextBits) & 0x3;
-            if (sign == 1) signAccum--;
-            else if (sign == 2) signAccum++;
+            if (_left[plane][idx] != 0) { leftNz = true; break; }
         }
-        return Av1TxbCommon.GetDcSignContext(signAccum);
+        int ctxBase = (aboveNz ? 1 : 0) + (leftNz ? 1 : 0);
+        int ctxOffset = planeBsizeLargerThanTxBsize ? 10 : 7;
+        return ctxBase + ctxOffset;
     }
+
+    /// <summary>
+    /// libaom <c>skip_contexts[5][5]</c> table from txb_common.h. Indexed by
+    /// (top, left), each clipped to [0, 4]. Returns the txb_skip CDF context
+    /// when planeBsize != txsize_to_bsize[tx_size].
+    /// </summary>
+    private static readonly byte[][] SkipContexts = new byte[][]
+    {
+        new byte[] { 1, 2, 2, 2, 3 },
+        new byte[] { 2, 4, 4, 4, 5 },
+        new byte[] { 2, 4, 4, 4, 5 },
+        new byte[] { 2, 4, 4, 4, 5 },
+        new byte[] { 3, 5, 5, 5, 6 },
+    };
+
+    /// <summary>
+    /// Compute dc_sign CDF context for the given block. Bit-exact port of
+    /// libaom <c>get_txb_ctx</c> (dc_sign portion). Sums signs (0/-1/+1) from
+    /// above + left cul_level cells, then maps to 0..2 via dc_sign_contexts[].
+    /// </summary>
+    public int GetDcSignContext(int plane, int miRow, int miCol, int txWMi, int txHMi)
+    {
+        int dcSign = 0;
+        for (int i = 0; i < txWMi && miCol + i < _above[plane].Length; i++)
+        {
+            int sign = ((int)_above[plane][miCol + i]) >> Av1TxbCommon.CoeffContextBits;
+            dcSign += DcSigns[sign & 0x3];
+        }
+        for (int i = 0; i < txHMi; i++)
+        {
+            int idx = (miRow + i) & 31;
+            int sign = ((int)_left[plane][idx]) >> Av1TxbCommon.CoeffContextBits;
+            dcSign += DcSigns[sign & 0x3];
+        }
+        // libaom's dc_sign_contexts is sized 4*MAX_TX_SIZE_UNIT+1 = 65 with
+        // MAX_TX_SIZE_UNIT = 16. We reproduce it inline; index = dc_sign + 32.
+        int idxFinal = dcSign + 32;
+        if (idxFinal < 0) idxFinal = 0;
+        else if (idxFinal >= DcSignContextsTable.Length) idxFinal = DcSignContextsTable.Length - 1;
+        return DcSignContextsTable[idxFinal];
+    }
+
+    /// <summary>libaom <c>signs[3]</c>: sign accumulator delta per packed sign bits.</summary>
+    private static readonly sbyte[] DcSigns = new sbyte[] { 0, -1, 1, 0 };
+
+    /// <summary>libaom <c>dc_sign_contexts[4 * 16 + 1]</c> from txb_common.h.</summary>
+    private static readonly byte[] DcSignContextsTable = new byte[]
+    {
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+        2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+    };
 
     /// <summary>Update the above + left arrays after decoding a tx block.</summary>
     public void Update(int plane, int miRow, int miCol, int txWMi, int txHMi, int culLevelWithSign)

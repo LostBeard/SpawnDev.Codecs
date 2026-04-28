@@ -632,19 +632,22 @@ public static class Av1KeyframeEncoder
             blockWidthPx: 16, blockHeightPx: 16,
             txSize: Av1TxSize.Tx16x16,
             qDc: Av1DequantTables.DcQuantQtx(baseQIndex, 0, 8),
-            qAc: Av1DequantTables.AcQuantQtx(baseQIndex, 0, 8));
+            qAc: Av1DequantTables.AcQuantQtx(baseQIndex, 0, 8),
+            baseQIndex: baseQIndex);
         EncodePlane(st, plane: 1, miRow, miCol,
             uSrc, uvSrcStride, st.ReconU, st.ChromaW, st.ChromaH,
             blockWidthPx: 8, blockHeightPx: 8,
             txSize: Av1TxSize.Tx8x8,
             qDc: Av1DequantTables.DcQuantQtx(baseQIndex, 0, 8),
-            qAc: Av1DequantTables.AcQuantQtx(baseQIndex, 0, 8));
+            qAc: Av1DequantTables.AcQuantQtx(baseQIndex, 0, 8),
+            baseQIndex: baseQIndex);
         EncodePlane(st, plane: 2, miRow, miCol,
             vSrc, uvSrcStride, st.ReconV, st.ChromaW, st.ChromaH,
             blockWidthPx: 8, blockHeightPx: 8,
             txSize: Av1TxSize.Tx8x8,
             qDc: Av1DequantTables.DcQuantQtx(baseQIndex, 0, 8),
-            qAc: Av1DequantTables.AcQuantQtx(baseQIndex, 0, 8));
+            qAc: Av1DequantTables.AcQuantQtx(baseQIndex, 0, 8),
+            baseQIndex: baseQIndex);
 
         // ---- Update mode-info contexts so subsequent blocks see DC + skip=0 ----
         int miW = 4; // BLOCK_16X16 = 4 mi wide
@@ -674,7 +677,8 @@ public static class Av1KeyframeEncoder
         ReadOnlySpan<byte> src, int srcStride,
         byte[] reconBuf, int planeW, int planeH,
         int blockWidthPx, int blockHeightPx,
-        Av1TxSize txSize, short qDc, short qAc)
+        Av1TxSize txSize, short qDc, short qAc,
+        int baseQIndex)
     {
         // Block origin in pixels for this plane.
         int xPx, yPx;
@@ -750,15 +754,20 @@ public static class Av1KeyframeEncoder
                     miRowTx = miRow;
                     miColTx = miCol;
                 }
-                int txbSkipCtx = st.EntropyCtx.GetTxbSkipContext(plane, miRowTx, miColTx, txWMi, txHMi);
+                // v1 encoder: BLOCK_16X16+TX_16X16 (Y) and BLOCK_8X8+TX_8X8 (UV).
+                // Both have planeBsize == txsize_to_bsize[tx_size], so
+                // planeBsizeIsTxsize=true and planeBsizeLargerThanTxBsize=false.
+                int txbSkipCtx = st.EntropyCtx.GetTxbSkipContext(plane, miRowTx, miColTx, txWMi, txHMi,
+                    planeBsizeIsTxsize: true, planeBsizeLargerThanTxBsize: false);
                 int dcSignCtx = st.EntropyCtx.GetDcSignContext(plane, miRowTx, miColTx, txWMi, txHMi);
 
-                // Emit coefficient stream.
+                // Emit coefficient stream. Pass baseQIndex so the encoder uses
+                // the same q-context CDF buckets as the libaom decoder.
                 var encResult = Av1CoefEncoder.WriteCoeffsTxb(
                     st.Re, txSize, plane, Av1IntraMode.Dc,
                     reducedTxSet: true,
                     txbSkipCtx, dcSignCtx,
-                    coefsRaster, Av1TxType.DctDct);
+                    coefsRaster, baseQIndex, Av1TxType.DctDct);
 
                 // Update entropy context for subsequent blocks.
                 st.EntropyCtx.Update(plane, miRowTx, miColTx, txWMi, txHMi, encResult.CulLevel);

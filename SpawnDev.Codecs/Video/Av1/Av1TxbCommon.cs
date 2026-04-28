@@ -78,15 +78,33 @@ internal static class Av1TxbCommon
         0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
     };
 
-    /// <summary>libaom <c>txsize_log2_minus4[TX_SIZES_ALL]</c>.</summary>
+    /// <summary>
+    /// libaom <c>txsize_log2_minus4[TX_SIZES_ALL]</c> from av1/common/common_data.h.
+    /// Selects the eob_multi CDF (0=cdf16, 1=cdf32, 2=cdf64, 3=cdf128,
+    /// 4=cdf256, 5=cdf512, 6=cdf1024). Computed as log2(num pixels) - 4
+    /// where the pixel count is capped at 1024 (32x32) for the 64x64+ family.
+    /// </summary>
     public static readonly int[] TxSizeLog2Minus4 = new int[]
     {
-        0, // TX_4X4
-        0, // TX_8X8 -- libaom's actual value is 0; eob_multi_size==0 uses cdf16
-        1, // TX_16X16
-        2, // TX_32X32
-        3, // TX_64X64 (capped to 32x32 for coefs but uses cdf128)
-        0, 0, 1, 1, 2, 2, 3, 3, 0, 0, 1, 1, 2, 2,
+        0, // TX_4X4    (16 px  -> cdf16)
+        2, // TX_8X8    (64 px  -> cdf64)
+        4, // TX_16X16  (256 px -> cdf256)
+        6, // TX_32X32  (1024 px-> cdf1024)
+        6, // TX_64X64  (capped to 1024 for entropy-coded coefs)
+        1, // TX_4X8    (32 px  -> cdf32)
+        1, // TX_8X4    (32 px)
+        3, // TX_8X16   (128 px -> cdf128)
+        3, // TX_16X8   (128 px)
+        5, // TX_16X32  (512 px -> cdf512)
+        5, // TX_32X16  (512 px)
+        6, // TX_32X64  (capped 1024)
+        6, // TX_64X32  (capped 1024)
+        2, // TX_4X16   (64 px  -> cdf64)
+        2, // TX_16X4   (64 px)
+        4, // TX_8X32   (256 px -> cdf256)
+        4, // TX_32X8   (256 px)
+        5, // TX_16X64  (capped 512)
+        5, // TX_64X16  (capped 512)
     };
 
     /// <summary>
@@ -376,11 +394,13 @@ internal static class Av1TxbCommon
 
     /// <summary>
     /// libaom <c>rec_eob_pos(eob_pt, eob_extra)</c>: reconstruct exact EOB scan
-    /// position from the (size class, low-bits) decomposition.
+    /// position from the (size class, low-bits) decomposition. <paramref name="eobPt"/>
+    /// is the libaom-convention eob_pt (group index 0..11), matching the
+    /// value the decoder computes as (CDF symbol + 1).
     /// </summary>
     public static int RecEobPos(int eobPt, int eobExtra)
     {
-        int eob = EobGroupStart[eobPt - 1];
+        int eob = EobGroupStart[eobPt];
         if (eob > 2)
         {
             eob += eobExtra;

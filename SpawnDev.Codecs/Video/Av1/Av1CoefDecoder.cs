@@ -50,6 +50,79 @@ internal static class Av1CoefDecoder
     }
 
     /// <summary>
+    /// libaom <c>get_q_ctx</c>. Token CDFs are quantized into 4 buckets by qindex:
+    ///   qindex &lt;= 20  -> 0
+    ///   qindex &lt;= 60  -> 1
+    ///   qindex &lt;= 120 -> 2
+    ///   else            -> 3
+    /// </summary>
+    public static int GetQctx(int qindex)
+    {
+        if (qindex <= 20) return 0;
+        if (qindex <= 60) return 1;
+        if (qindex <= 120) return 2;
+        return 3;
+    }
+
+    /// <summary>
+    /// libaom <c>av1_get_ext_tx_set_type</c>. EXT_TX_SET_TYPE enum:
+    ///   0 = DCTONLY, 1 = DCT_IDTX, 2 = DTT4_IDTX, 3 = DTT4_IDTX_1DDCT,
+    ///   4 = DTT9_IDTX_1DDCT, 5 = ALL16.
+    /// </summary>
+    private static int GetExtTxSetType(Av1TxSize txSize, bool isInter, bool useReducedSet)
+    {
+        int w = Av1TxSizeInfo.TxWide[(int)txSize];
+        int h = Av1TxSizeInfo.TxHigh[(int)txSize];
+        int sqrUp = Math.Max(w, h);
+        if (sqrUp > 32) return 0;
+        if (sqrUp == 32) return isInter ? 1 : 0;
+        if (useReducedSet) return isInter ? 1 : 2;
+        int sqr = Math.Min(w, h);
+        bool is16 = (sqr == 16);
+        if (!isInter) return is16 ? 2 : 3;
+        return is16 ? 4 : 5;
+    }
+
+    /// <summary>libaom <c>get_ext_tx_set</c>: ext_tx_set_index[is_inter][set_type].</summary>
+    private static int GetExtTxSetIndex(int setType, bool isInter)
+    {
+        if (!isInter)
+        {
+            return setType switch { 0 => 0, 2 => 2, 3 => 1, _ => -1 };
+        }
+        return setType switch { 0 => 0, 1 => 3, 4 => 2, 5 => 1, _ => -1 };
+    }
+
+    /// <summary>libaom <c>av1_num_ext_tx_set[EXT_TX_SET_TYPES]</c>.</summary>
+    private static readonly int[] NumExtTxSet = new int[] { 1, 2, 5, 7, 12, 16 };
+
+    /// <summary>
+    /// libaom <c>av1_ext_tx_inv[EXT_TX_SET_TYPES][TX_TYPES]</c>: maps a CDF
+    /// symbol (read index) back to the actual TX_TYPE for the active set.
+    /// </summary>
+    private static readonly int[][] ExtTxInv = new int[][]
+    {
+        new int[] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        new int[] { 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        new int[] { 9, 0, 3, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        new int[] { 9, 0, 10, 11, 3, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        new int[] { 9, 10, 11, 0, 1, 2, 4, 5, 3, 6, 7, 8, 0, 0, 0, 0 },
+        new int[] { 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 4, 5, 3, 6, 7, 8 },
+    };
+
+    /// <summary>
+    /// Map a tx_size to the 0..3 "square TX size" index used by intra_ext_tx CDF
+    /// (4x4=0, 8x8=1, 16x16=2, 32x32=3, capping by max(w,h)).
+    /// </summary>
+    private static int SquareTxSizeIndex(Av1TxSize txSize)
+    {
+        int w = Av1TxSizeInfo.TxWide[(int)txSize];
+        int h = Av1TxSizeInfo.TxHigh[(int)txSize];
+        int s = Math.Min(Math.Max(w, h), 32);
+        return s switch { 4 => 0, 8 => 1, 16 => 2, 32 => 3, _ => 3 };
+    }
+
+    /// <summary>
     /// Decode one transform block. Mirrors libaom <c>av1_read_coeffs_txb</c>.
     /// </summary>
     public static CoefBlock ReadCoeffsTxb(
@@ -78,8 +151,11 @@ internal static class Av1CoefDecoder
         int outH = Av1TxSizeInfo.TxHigh[(int)txSize];
         int n = outW * outH;
 
+        // qctx: token CDFs are quantized by the per-frame qindex (libaom get_q_ctx).
+        int qctx = GetQctx(qindex);
+
         // Step 1: txb_skip - one bit per tx block.
-        var skipCdf = Av1DefaultCoefCdfs.DefaultTxbSkipCdf[3][txsCtx][txbSkipCtx]; // q-ctx=3 (high quality)
+        var skipCdf = Av1DefaultCoefCdfs.DefaultTxbSkipCdf[qctx][txsCtx][txbSkipCtx];
         int allZero = rd.DecodeCdfQ15(skipCdf, 2);
         var result = new CoefBlock
         {
@@ -93,22 +169,29 @@ internal static class Av1CoefDecoder
             return result;
         }
 
-        // Step 2: tx_type read (Y plane only). For BBB intra keyframe at low
-        // qindex this is mostly DCT_DCT, but the bits MUST be consumed when
-        // the spec calls for a tx_type read.
+        // Step 2: tx_type read (Y plane only, qindex > 0). Mirrors libaom
+        // av1_read_tx_type: reads a symbol from intra_ext_tx_cdf and remaps
+        // through av1_ext_tx_inv to a TX_TYPE enum value.
         Av1TxType txType = Av1TxType.DctDct;
         if (forcedTxType.HasValue)
         {
             txType = forcedTxType.Value;
         }
-        else if (plane == 0)
+        else if (plane == 0 && qindex > 0)
         {
-            // Per spec sec 5.11.40: tx_type is read when:
-            //   - txSize <= TX_32X32 (skipped for 64x64)
-            //   - !reducedTxSet OR ext_tx_set_used[0]
-            // For now, default to DctDct for unsupported size paths.
-            // BBB at qindex=5 mostly uses DctDct anyway.
-            txType = Av1TxType.DctDct;
+            int setType = GetExtTxSetType(txSize, false, reducedTxSet);
+            int numSyms = NumExtTxSet[setType];
+            if (numSyms > 1)
+            {
+                int eset = GetExtTxSetIndex(setType, false);
+                if (eset > 0)
+                {
+                    int squareIdx = SquareTxSizeIndex(txSize);
+                    var extCdf = Av1DefaultTxfmCdfs.DefaultIntraExtTxCdf[eset][squareIdx][(int)intraMode];
+                    int sym = rd.DecodeCdfQ15(extCdf, numSyms);
+                    txType = (Av1TxType)ExtTxInv[setType][sym];
+                }
+            }
         }
         result.TxType = txType;
 
@@ -116,15 +199,16 @@ internal static class Av1CoefDecoder
         var scan = Av1ScanTables.Scan[(int)txSize][(int)txType];
 
         // Step 3: eob_multi - coarse EOB position class.
-        int eobPt = ReadEobMulti(rd, txSize, planeType, txClass);
+        int eobPt = ReadEobMulti(rd, txSize, planeType, txClass, qctx);
 
-        // Step 4: eob_extra - raw bits to refine.
+        // Step 4: eob_extra - raw bits to refine. libaom uses
+        // av1_eob_offset_bits[eob_pt] (0-indexed lookup).
         int eobExtra = 0;
-        int eobOffsetBits = Av1TxbCommon.EobOffsetBits[eobPt - 1];
+        int eobOffsetBits = Av1TxbCommon.EobOffsetBits[eobPt];
         if (eobOffsetBits > 0)
         {
             int eobCtx = eobPt - 3;
-            var extraCdf = Av1DefaultCoefCdfs.DefaultEobExtraCdf[3][txsCtx][planeType][eobCtx];
+            var extraCdf = Av1DefaultCoefCdfs.DefaultEobExtraCdf[qctx][txsCtx][planeType][eobCtx];
             int bit = rd.DecodeCdfQ15(extraCdf, 2);
             if (bit != 0) eobExtra += 1 << (eobOffsetBits - 1);
             for (int i = 1; i < eobOffsetBits; i++)
@@ -152,12 +236,12 @@ internal static class Av1CoefDecoder
             int c = eob - 1;
             int pos = scan[c];
             int coefCtx = Av1TxbCommon.GetLowerLevelsCtxEob(bhl, width, c);
-            var baseEobCdf = Av1DefaultCoefCdfs.DefaultCoeffBaseEobMultiCdf[3][txsCtx][planeType][coefCtx];
+            var baseEobCdf = Av1DefaultCoefCdfs.DefaultCoeffBaseEobMultiCdf[qctx][txsCtx][planeType][coefCtx];
             int level = rd.DecodeCdfQ15(baseEobCdf, 3) + 1;
             if (level > Av1TxbCommon.NumBaseLevels)
             {
                 int brCtx = Av1TxbCommon.GetBrCtxEob(pos, bhl, txClass);
-                var brCdf = Av1DefaultCoefCdfs.DefaultCoeffLpsMultiCdf[3][Math.Min(txsCtx, 3)][planeType][brCtx];
+                var brCdf = Av1DefaultCoefCdfs.DefaultCoeffLpsMultiCdf[qctx][Math.Min(txsCtx, 3)][planeType][brCtx];
                 for (int idx = 0; idx < Av1TxbCommon.CoeffBaseRange; idx += Av1TxbCommon.BrCdfSize - 1)
                 {
                     int k = rd.DecodeCdfQ15(brCdf, Av1TxbCommon.BrCdfSize);
@@ -181,12 +265,12 @@ internal static class Av1CoefDecoder
                         ? Av1TxbCommon.GetLowerLevelsCtx2d(levelsBuf, pos, bhl, txSize)
                         : Av1TxbCommon.GetLowerLevelsCtx(levelsBuf, pos, bhl, txSize, txClass));
 
-                var baseCdf = Av1DefaultCoefCdfs.DefaultCoeffBaseMultiCdf[3][txsCtx][planeType][coefCtx];
+                var baseCdf = Av1DefaultCoefCdfs.DefaultCoeffBaseMultiCdf[qctx][txsCtx][planeType][coefCtx];
                 int level = rd.DecodeCdfQ15(baseCdf, 4);
                 if (level > Av1TxbCommon.NumBaseLevels)
                 {
                     int brCtx = Av1TxbCommon.GetBrCtx(levelsBuf, pos, bhl, txClass);
-                    var brCdf = Av1DefaultCoefCdfs.DefaultCoeffLpsMultiCdf[3][Math.Min(txsCtx, 3)][planeType][brCtx];
+                    var brCdf = Av1DefaultCoefCdfs.DefaultCoeffLpsMultiCdf[qctx][Math.Min(txsCtx, 3)][planeType][brCtx];
                     for (int idx = 0; idx < Av1TxbCommon.CoeffBaseRange; idx += Av1TxbCommon.BrCdfSize - 1)
                     {
                         int k = rd.DecodeCdfQ15(brCdf, Av1TxbCommon.BrCdfSize);
@@ -228,7 +312,7 @@ internal static class Av1CoefDecoder
             int sign;
             if (c == 0)
             {
-                var dcSignCdf = Av1DefaultCoefCdfs.DefaultDcSignCdf[3][planeType][dcSignCtx];
+                var dcSignCdf = Av1DefaultCoefCdfs.DefaultDcSignCdf[qctx][planeType][dcSignCtx];
                 sign = rd.DecodeCdfQ15(dcSignCdf, 2);
             }
             else
@@ -295,34 +379,33 @@ internal static class Av1CoefDecoder
     /// (cdf16 / cdf32 / .. / cdf1024) and adds 1 to convert from 0-based to
     /// the 1-based eob_pt expected by RecEobPos.
     /// </summary>
-    private static int ReadEobMulti(Av1RangeDecoder rd, Av1TxSize txSize, int planeType, int txClass)
+    private static int ReadEobMulti(Av1RangeDecoder rd, Av1TxSize txSize, int planeType, int txClass, int qctx)
     {
         int eobMultiCtx = (txClass == Av1TxbCommon.TxClass2d) ? 0 : 1;
         int eobMultiSize = Av1TxbCommon.TxSizeLog2Minus4[(int)txSize];
-        // Use q-ctx 3 (high quality).
         switch (eobMultiSize)
         {
             case 0:
                 return rd.DecodeCdfQ15(
-                    Av1DefaultCoefCdfs.DefaultEobMulti16Cdf[3][planeType][eobMultiCtx], 5) + 1;
+                    Av1DefaultCoefCdfs.DefaultEobMulti16Cdf[qctx][planeType][eobMultiCtx], 5) + 1;
             case 1:
                 return rd.DecodeCdfQ15(
-                    Av1DefaultCoefCdfs.DefaultEobMulti32Cdf[3][planeType][eobMultiCtx], 6) + 1;
+                    Av1DefaultCoefCdfs.DefaultEobMulti32Cdf[qctx][planeType][eobMultiCtx], 6) + 1;
             case 2:
                 return rd.DecodeCdfQ15(
-                    Av1DefaultCoefCdfs.DefaultEobMulti64Cdf[3][planeType][eobMultiCtx], 7) + 1;
+                    Av1DefaultCoefCdfs.DefaultEobMulti64Cdf[qctx][planeType][eobMultiCtx], 7) + 1;
             case 3:
                 return rd.DecodeCdfQ15(
-                    Av1DefaultCoefCdfs.DefaultEobMulti128Cdf[3][planeType][eobMultiCtx], 8) + 1;
+                    Av1DefaultCoefCdfs.DefaultEobMulti128Cdf[qctx][planeType][eobMultiCtx], 8) + 1;
             case 4:
                 return rd.DecodeCdfQ15(
-                    Av1DefaultCoefCdfs.DefaultEobMulti256Cdf[3][planeType][eobMultiCtx], 9) + 1;
+                    Av1DefaultCoefCdfs.DefaultEobMulti256Cdf[qctx][planeType][eobMultiCtx], 9) + 1;
             case 5:
                 return rd.DecodeCdfQ15(
-                    Av1DefaultCoefCdfs.DefaultEobMulti512Cdf[3][planeType][eobMultiCtx], 10) + 1;
+                    Av1DefaultCoefCdfs.DefaultEobMulti512Cdf[qctx][planeType][eobMultiCtx], 10) + 1;
             default:
                 return rd.DecodeCdfQ15(
-                    Av1DefaultCoefCdfs.DefaultEobMulti1024Cdf[3][planeType][eobMultiCtx], 11) + 1;
+                    Av1DefaultCoefCdfs.DefaultEobMulti1024Cdf[qctx][planeType][eobMultiCtx], 11) + 1;
         }
     }
 }

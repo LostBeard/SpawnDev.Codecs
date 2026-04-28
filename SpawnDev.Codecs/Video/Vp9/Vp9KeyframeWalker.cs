@@ -102,6 +102,18 @@ public sealed class Vp9KeyframeWalker
         // value of the chosen tx_size for each block; missing = max_tx.
         var aboveTxSize = new byte[miColsAligned];
 
+        // Per-plane ENTROPY_CONTEXT byte arrays driving the per-tx-block
+        // initial coefficient context (libvpx vp9_decode_block_tokens
+        // -> combine_entropy_contexts(a, b) = (a != 0) + (b != 0)).
+        // 1 byte per 4x4 cell of the plane. Above is frame-wide; left is
+        // per-tile-row (16 cells = MI_BLOCK_SIZE * 2 for luma; chroma
+        // halved by subsampling). Set to (eob > 0) after each tx-block.
+        int aboveYEcCells = miColsAligned * 2;
+        int aboveUvEcCells = (miColsAligned * 2) >> subsampling.SubsamplingX;
+        var aboveYEntropyCtx = new byte[aboveYEcCells];
+        var aboveUEntropyCtx = new byte[aboveUvEcCells];
+        var aboveVEntropyCtx = new byte[aboveUvEcCells];
+
         var ctx = new WalkerContext
         {
             FrameBytes = frameBytes,
@@ -117,6 +129,9 @@ public sealed class Vp9KeyframeWalker
             AboveSkip = aboveSkip,
             AbovePartCtx = abovePartCtx,
             AboveTxSize = aboveTxSize,
+            AboveYEntropyCtx = aboveYEntropyCtx,
+            AboveUEntropyCtx = aboveUEntropyCtx,
+            AboveVEntropyCtx = aboveVEntropyCtx,
             Trace = Trace,
         };
 
@@ -145,6 +160,13 @@ public sealed class Vp9KeyframeWalker
                 ctx.LeftSkip = new byte[8];
                 ctx.LeftPartCtx = new byte[8];
                 ctx.LeftTxSize = new byte[8];
+                // Per-plane left ENTROPY_CONTEXT (libvpx left_context):
+                // 16 cells for luma, (16 >> ssY) for chroma. Reset at
+                // every SB row within a tile per libvpx's vp9_zero call
+                // in decode_tiles.
+                ctx.LeftYEntropyCtx = new byte[16];
+                ctx.LeftUEntropyCtx = new byte[16 >> subsampling.SubsamplingY];
+                ctx.LeftVEntropyCtx = new byte[16 >> subsampling.SubsamplingY];
                 ctx.TileBounds = bounds;
 
                 // Walk SBs in tile order (row-major). libvpx zeroes the
@@ -196,6 +218,17 @@ public sealed class Vp9KeyframeWalker
         public required byte[] AboveSkip { get; init; }
         public required byte[] AbovePartCtx { get; init; }
         public required byte[] AboveTxSize { get; init; }
+
+        // Per-plane ENTROPY_CONTEXT byte arrays (libvpx vp9_decode_block_tokens
+        // initial coef context input). 1 byte per 4x4 cell of the plane; cell
+        // is set to (eob > 0) after each tx-block decode. Above is frame-wide;
+        // left is reset at every SB row within a tile.
+        public byte[] AboveYEntropyCtx { get; init; } = Array.Empty<byte>();
+        public byte[] AboveUEntropyCtx { get; init; } = Array.Empty<byte>();
+        public byte[] AboveVEntropyCtx { get; init; } = Array.Empty<byte>();
+        public byte[] LeftYEntropyCtx { get; set; } = Array.Empty<byte>();
+        public byte[] LeftUEntropyCtx { get; set; } = Array.Empty<byte>();
+        public byte[] LeftVEntropyCtx { get; set; } = Array.Empty<byte>();
 
         // Per-tile-row left contexts (mutable, replaced per tile).
         public Vp9IntraMode[] LeftYMode { get; set; } = Array.Empty<Vp9IntraMode>();
@@ -617,6 +650,25 @@ public sealed class Vp9KeyframeWalker
             ? Vp9BlockCoefDecoder.PlaneType.Uv
             : Vp9BlockCoefDecoder.PlaneType.Y;
 
+        // Per-plane ENTROPY_CONTEXT byte arrays for the per-tx-block
+        // initial coef context (libvpx vp9_decode_block_tokens).
+        byte[] aboveEntropyCtx = plane switch
+        {
+            0 => ctx.AboveYEntropyCtx,
+            1 => ctx.AboveUEntropyCtx,
+            _ => ctx.AboveVEntropyCtx,
+        };
+        byte[] leftEntropyCtx = plane switch
+        {
+            0 => ctx.LeftYEntropyCtx,
+            1 => ctx.LeftUEntropyCtx,
+            _ => ctx.LeftVEntropyCtx,
+        };
+        // SB-row mask for the left context in plane pixels. Luma SB =
+        // 64 px; chroma 4:2:0 SB = 32 px. (yPx & sbRowMask) >> 2
+        // produces the 4x4 cell offset within the SB row.
+        int sbRowMaskPx = (64 >> ssY) - 1;
+
         // Per-plane quantizer.
         int qindex = Vp9SegmentationLookup.ResolveQIndex(
             ctx.Header.Segmentation, segmentId,
@@ -719,23 +771,61 @@ public sealed class Vp9KeyframeWalker
                     dstLocal[..(txN * txN)], txN, txN,
                     haveAbove: hasAbove, haveLeft: hasLeft);
 
+                // Per-plane entropy context cell offsets for this
+                // tx-block (libvpx pd->above_context + x / left_context + y).
+                int aboveCellOff = xPx >> 2;
+                int leftCellOff = (yPx & sbRowMaskPx) >> 2;
+                int cellsPerTx = txN >> 2;
+
+                // Initial coefficient context for scan position 0:
+                // libvpx combine_entropy_contexts(a, b) = (a != 0) + (b != 0).
+                // For TX_NxN this aggregates N/4 above cells and N/4 left
+                // cells via OR-then-bool.
+                int aboveAgg = 0;
+                for (int i = 0; i < cellsPerTx; i++)
+                {
+                    int idx = aboveCellOff + i;
+                    if (idx < aboveEntropyCtx.Length) aboveAgg |= aboveEntropyCtx[idx];
+                }
+                int leftAgg = 0;
+                for (int i = 0; i < cellsPerTx; i++)
+                {
+                    int idx = leftCellOff + i;
+                    if (idx < leftEntropyCtx.Length) leftAgg |= leftEntropyCtx[idx];
+                }
+                int initialCoefCtx = (aboveAgg != 0 ? 1 : 0) + (leftAgg != 0 ? 1 : 0);
+
+                int decodedEob = 0;
                 if (skipFlag == 0)
                 {
                     // Read this tx-block's coefficients then dequant + iDCT.
                     coeffs.Clear();
-                    int eob = Vp9BlockCoefDecoder.DecodeBlockCoefficients(
+                    decodedEob = Vp9BlockCoefDecoder.DecodeBlockCoefficients(
                         p => br.Read(p),
                         txSize, scanType, planeType,
                         Vp9BlockCoefDecoder.RefType.Intra,
                         coeffs, isHighBitDepth: false,
-                        coefProbs: coefProbs);
-                    if (eob > 0)
+                        coefProbs: coefProbs,
+                        initialCtx: initialCoefCtx);
+                    if (decodedEob > 0)
                     {
                         Vp9Dequantizer.DequantizeInPlace(coeffs[..(txN * txN)], planeQuant);
                         Vp9InverseTransform.Apply(
                             txType, txSize, coeffs[..(txN * txN)],
                             dstLocal[..(txN * txN)], stride: txN);
                     }
+                }
+                // libvpx vp9_decode_block_tokens: writes (eob > 0) to all
+                // cells covered by the tx-block. For skipped blocks
+                // dec_reset_skip_context already cleared the cells (see
+                // call site below for skip handling).
+                byte ec = (byte)(decodedEob > 0 ? 1 : 0);
+                for (int i = 0; i < cellsPerTx; i++)
+                {
+                    int aIdx = aboveCellOff + i;
+                    int lIdx = leftCellOff + i;
+                    if (aIdx < aboveEntropyCtx.Length) aboveEntropyCtx[aIdx] = ec;
+                    if (lIdx < leftEntropyCtx.Length) leftEntropyCtx[lIdx] = ec;
                 }
 
                 // Copy local prediction (post-residual) into frame buffer.
