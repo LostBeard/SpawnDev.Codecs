@@ -8,21 +8,35 @@ using static SpawnDev.Codecs.Demo.Shared.UnitTests.TestHelpers;
 namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 /// <summary>
-/// Tests for the video codec scaffolding. All three decoders currently throw
-/// a descriptive <see cref="NotImplementedException"/> from <c>DecodeFrameAsync</c>;
-/// construction + dispose + codec identification are expected to work so
-/// callers can route by <see cref="VideoCodec"/> enum.
+/// Tests for the public IVideoDecoder surface. VP8 routes a real keyframe
+/// through Vp8KeyframeWalker; VP9 + AV1 currently parse headers and emit
+/// placeholder mid-gray frames while their walker integrations land.
+/// Construction + dispose + codec identification are part of the contract
+/// so callers can route by <see cref="VideoCodec"/> enum.
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    private sealed class NoopFrameSink : IVideoFrameSink
+    private sealed class CapturingFrameSink : IVideoFrameSink
     {
+        public byte[]? Y { get; private set; }
+        public int YStride { get; private set; }
+        public int Width { get; private set; }
+        public int Height { get; private set; }
+        public int FrameCount { get; private set; }
+
         public ValueTask OnFrameAsync(
             ReadOnlyMemory<byte> y, int ys,
             ReadOnlyMemory<byte> u, int us,
             ReadOnlyMemory<byte> v, int vs,
             long pts)
-            => ValueTask.CompletedTask;
+        {
+            Y = y.ToArray();
+            YStride = ys;
+            Width = ys; // sink contract: stride == width for the wired decoders
+            Height = Y.Length / Math.Max(1, ys);
+            FrameCount++;
+            return ValueTask.CompletedTask;
+        }
     }
 
     [TestMethod]
@@ -47,18 +61,52 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
-    public async Task Vp8Decoder_DecodeFrame_ThrowsDescriptive()
+    public async Task Vp8Decoder_DecodesOwnEncoderKeyframe()
     {
+        // Encode a 16x16 flat Y=128 keyframe with our encoder, then decode
+        // it through the public IVideoDecoder surface and verify the sink
+        // received a frame of the right dimensions with luma close to 128.
+        const int W = 16, H = 16;
+        var ySrc = new byte[W * H]; Array.Fill(ySrc, (byte)128);
+        var uSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc, (byte)128);
+        var vSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc, (byte)128);
+        var frame = Vp8KeyframeEncoder.EncodeKeyFrame(
+            ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 30);
+
+        var sink = new CapturingFrameSink();
+        await using var dec = new Vp8Decoder();
+        int n = await dec.DecodeFrameAsync(frame, sink);
+
+        Equal(1, n);
+        Equal(1, sink.FrameCount);
+        Equal(W, dec.Width);
+        Equal(H, dec.Height);
+        True(sink.Y is not null);
+        Equal(W * H, sink.Y!.Length);
+        // Flat luma=128 should reconstruct close to 128 across the plane.
+        long sum = 0;
+        foreach (var b in sink.Y) sum += b;
+        int mean = (int)(sum / sink.Y.Length);
+        True(Math.Abs(mean - 128) <= 8);
+    }
+
+    [TestMethod]
+    public async Task Vp8Decoder_InterFrame_ThrowsDescriptive()
+    {
+        // Synthesise a non-keyframe tag (low bit of byte 0 = 1 -> P-frame).
+        // The decoder should reject it with a clear message rather than
+        // crashing inside the walker.
+        var fakeInter = new byte[] { 0x01, 0x00, 0x00 };
         await using var dec = new Vp8Decoder();
         bool threw = false;
         try
         {
-            await dec.DecodeFrameAsync(new byte[] { 0 }, new NoopFrameSink());
+            await dec.DecodeFrameAsync(fakeInter, new CapturingFrameSink());
         }
         catch (NotImplementedException ex)
         {
             threw = true;
-            Contains("VP8", ex.Message);
+            Contains("inter", ex.Message);
         }
         True(threw);
     }
