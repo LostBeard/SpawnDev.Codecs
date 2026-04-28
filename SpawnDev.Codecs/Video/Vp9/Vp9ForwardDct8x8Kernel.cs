@@ -148,15 +148,29 @@ public sealed class Vp9ForwardDct8x8Kernel : IDisposable
                 out int o4, out int o5, out int o6, out int o7);
 
             // Final post-pass: divide by 2 (truncate-toward-zero).
-            output[outBase + col * 8 + 0] = o0 / 2;
-            output[outBase + col * 8 + 1] = o1 / 2;
-            output[outBase + col * 8 + 2] = o2 / 2;
-            output[outBase + col * 8 + 3] = o3 / 2;
-            output[outBase + col * 8 + 4] = o4 / 2;
-            output[outBase + col * 8 + 5] = o5 / 2;
-            output[outBase + col * 8 + 6] = o6 / 2;
-            output[outBase + col * 8 + 7] = o7 / 2;
+            // Some ILGPU backends lower `int / 2` as arithmetic-shift-right
+            // which floors toward -infinity for odd negative values (off-
+            // by-one against the libvpx reference). Use the explicit
+            // HalveTruncateTowardZero helper to preserve bit-exactness.
+            output[outBase + col * 8 + 0] = HalveTruncateTowardZero(o0);
+            output[outBase + col * 8 + 1] = HalveTruncateTowardZero(o1);
+            output[outBase + col * 8 + 2] = HalveTruncateTowardZero(o2);
+            output[outBase + col * 8 + 3] = HalveTruncateTowardZero(o3);
+            output[outBase + col * 8 + 4] = HalveTruncateTowardZero(o4);
+            output[outBase + col * 8 + 5] = HalveTruncateTowardZero(o5);
+            output[outBase + col * 8 + 6] = HalveTruncateTowardZero(o6);
+            output[outBase + col * 8 + 7] = HalveTruncateTowardZero(o7);
         }
+    }
+
+    /// <summary>
+    /// Bit-exact mirror of C# <c>x / 2</c> (truncate toward zero). See
+    /// <see cref="Vp9ForwardDct8x8Gpu"/> for the rationale.
+    /// </summary>
+    private static int HalveTruncateTowardZero(int x)
+    {
+        if (x >= 0) return x >> 1;
+        return -((-x) >> 1);
     }
 
     /// <summary>

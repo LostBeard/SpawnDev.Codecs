@@ -61,6 +61,64 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task Vp9ForwardDct8x8Kernel_SaturationLimits_MatchesCpuReference()
+    {
+        // Saturation extremes (all +/-255, alternating) flag the
+        // truncate-vs-floor divide-by-2 mismatch the helper guards
+        // against. Without the explicit HalveTruncateTowardZero helper
+        // some backends lower `int / 2` as arithmetic-shift-right which
+        // is off-by-one for odd negative outputs.
+        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        try
+        {
+            using var kernel = new Vp9ForwardDct8x8Kernel(acc);
+            short[][] cases =
+            {
+                Make64((short)255),
+                Make64((short)-255),
+                MakeAlternating64(255),
+            };
+
+            foreach (var input in cases)
+            {
+                var cpuOut = new int[64];
+                Vp9ForwardDct8x8.Transform(input, rowStrideShorts: 8, cpuOut);
+
+                using var dIn = acc.Allocate1D<short>(64);
+                using var dOut = acc.Allocate1D<int>(64);
+                dIn.View.CopyFromCPU(input);
+                kernel.Run(dIn.View, dOut.View, blockCount: 1);
+                await acc.SynchronizeAsync();
+                var readback = await SpawnDev.ILGPU.SpawnDevContextExtensions.CopyToHostAsync(dOut);
+                var gpuOut = new int[64];
+                readback.AsSpan(0, 64).CopyTo(gpuOut);
+
+                for (int i = 0; i < 64; i++)
+                {
+                    if (cpuOut[i] != gpuOut[i])
+                        throw new Exception(
+                            $"Saturation FDCT mismatch at output[{i}]: cpu={cpuOut[i]} gpu={gpuOut[i]}");
+                }
+            }
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    private static short[] Make64(short value)
+    {
+        var arr = new short[64];
+        for (int i = 0; i < 64; i++) arr[i] = value;
+        return arr;
+    }
+
+    private static short[] MakeAlternating64(int magnitude)
+    {
+        var arr = new short[64];
+        for (int i = 0; i < 64; i++) arr[i] = (short)((i & 1) == 0 ? magnitude : -magnitude);
+        return arr;
+    }
+
+    [TestMethod]
     public async Task Vp9ForwardDct8x8Kernel_RandomInput_MatchesCpuReference()
     {
         var (ctx, acc) = await CreateKernelAcceleratorAsync();
