@@ -27,6 +27,7 @@ using System.IO;
 using SpawnDev.Codecs.Audio.Flac;
 using SpawnDev.Codecs.Audio.Opus;
 using SpawnDev.Codecs.Container.Ivf;
+using SpawnDev.Codecs.Video;
 using SpawnDev.Codecs.Video.Vp8;
 using SpawnDev.Codecs.Video.Vp9;
 
@@ -197,6 +198,32 @@ Section("FLAC encoder + bit-exact decoder", () =>
     summary.AppendLine($"  PASS: {flacSize:N0}B FLAC, lossless round-trip -> {flacPath} - PLAYABLE IN VLC (audio)");
 });
 
+// === Vp8Decoder API smoke (encode -> decode through public IVideoDecoder) ===
+// Verifies Vp8Decoder.DecodeFrameAsync routes a real keyframe through the
+// walker rather than throwing NotImplementedException.
+Section("Vp8Decoder API (encode -> Vp8Decoder.DecodeFrameAsync)", () =>
+{
+    int W = 16, H = 16;
+    var ySrc = new byte[W * H]; Array.Fill(ySrc, (byte)128);
+    var uSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc, (byte)128);
+    var vSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc, (byte)128);
+    var frame = Vp8KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 30);
+
+    var sink = new Vp8VerifySink();
+    var dec = new Vp8Decoder();
+    int n = dec.DecodeFrameAsync(frame, sink).GetAwaiter().GetResult();
+    dec.DisposeAsync().GetAwaiter().GetResult();
+
+    if (n != 1 || sink.FrameCount != 1) throw new Exception($"expected 1 frame, got n={n} sink={sink.FrameCount}");
+    if (dec.Width != W || dec.Height != H) throw new Exception($"dims wrong: {dec.Width}x{dec.Height}");
+    if (sink.LastY is null || sink.LastY.Length != W * H) throw new Exception($"Y plane wrong: {sink.LastY?.Length ?? 0}");
+    long sum = 0; foreach (var b in sink.LastY) sum += b;
+    int mean = (int)(sum / sink.LastY.Length);
+    if (Math.Abs(mean - 128) > 8) throw new Exception($"Y mean {mean} too far from 128");
+    Console.WriteLine($"  PASS: 1 frame, {W}x{H}, Y mean={mean}");
+    summary.AppendLine($"  PASS: Vp8Decoder.DecodeFrameAsync round-trip, {W}x{H}, Y mean={mean}");
+});
+
 // === Visual reference frames ===
 Section("Visual reference (BBB first frames)", () =>
 {
@@ -244,3 +271,19 @@ Console.WriteLine($"  Output: {outDir}");
 Console.WriteLine($"  Report: {reportPath}");
 Console.WriteLine($"========================================================");
 if (failed != 0) Environment.Exit(1);
+
+sealed class Vp8VerifySink : IVideoFrameSink
+{
+    public int FrameCount { get; private set; }
+    public byte[]? LastY { get; private set; }
+    public ValueTask OnFrameAsync(
+        ReadOnlyMemory<byte> y, int ys,
+        ReadOnlyMemory<byte> u, int us,
+        ReadOnlyMemory<byte> v, int vs,
+        long pts)
+    {
+        FrameCount++;
+        LastY = y.ToArray();
+        return ValueTask.CompletedTask;
+    }
+}
