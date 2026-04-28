@@ -27,7 +27,7 @@
 {
     <table>
         <thead>
-            <tr><th>Codec</th><th>Encoded bytes</th><th>Encode ms</th><th>Decode ms</th><th>Y mean</th><th>Y range</th><th>Result</th></tr>
+            <tr><th>Codec</th><th>Encoded bytes</th><th>Encode ms</th><th>Decode ms</th><th>Y mean</th><th>Y range</th><th>Y PSNR (dB)</th><th>Result</th></tr>
         </thead>
         <tbody>
             @foreach (var r in _results)
@@ -39,6 +39,7 @@
                     <td>@r.DecMs.ToString("F1")</td>
                     <td>@r.YMean</td>
                     <td>[@r.YMin, @r.YMax]</td>
+                    <td>@(double.IsInfinity(r.YPsnr) ? "inf" : r.YPsnr.ToString("F1"))</td>
                     <td>@r.Status</td>
                 </tr>
             }
@@ -70,7 +71,7 @@
     int H = 64;
     int Q = 30;
     bool _running;
-    sealed record Result(string Codec, int EncBytes, double EncMs, double DecMs, int YMean, int YMin, int YMax, string Status);
+    sealed record Result(string Codec, int EncBytes, double EncMs, double DecMs, int YMean, int YMin, int YMax, double YPsnr, string Status);
     List<Result> _results = new();
 
     sealed class CaptureSink : IVideoFrameSink
@@ -109,6 +110,7 @@
         var uSrc = new byte[(W / 2) * (H / 2)]; System.Array.Fill(uSrc, (byte)128);
         var vSrc = new byte[(W / 2) * (H / 2)]; System.Array.Fill(vSrc, (byte)128);
 
+        _ySource = ySrc;
         DrawYuv("src-canvas", ySrc, uSrc, vSrc, W, H, W, W / 2, W / 2);
 
         // VP8
@@ -133,29 +135,49 @@
 
     CaptureSink _capture = new();
 
+    byte[]? _ySource;
+
     async Task EncodeDecode(string codec, string canvasId, Func<byte[]> encode, Func<byte[], Task<int>> decode)
     {
         var swEnc = Stopwatch.StartNew();
         byte[] encoded;
         try { encoded = encode(); }
-        catch (Exception ex) { _results.Add(new Result(codec, 0, 0, 0, 0, 0, 0, $"ENCODE FAIL: {ex.Message}")); StateHasChanged(); return; }
+        catch (Exception ex) { _results.Add(new Result(codec, 0, 0, 0, 0, 0, 0, 0, $"ENCODE FAIL: {ex.Message}")); StateHasChanged(); return; }
         swEnc.Stop();
 
         _capture = new CaptureSink();
         var swDec = Stopwatch.StartNew();
         try { await decode(encoded); }
-        catch (Exception ex) { _results.Add(new Result(codec, encoded.Length, swEnc.Elapsed.TotalMilliseconds, 0, 0, 0, 0, $"DECODE FAIL: {ex.Message}")); StateHasChanged(); return; }
+        catch (Exception ex) { _results.Add(new Result(codec, encoded.Length, swEnc.Elapsed.TotalMilliseconds, 0, 0, 0, 0, 0, $"DECODE FAIL: {ex.Message}")); StateHasChanged(); return; }
         swDec.Stop();
 
-        if (_capture.Y is null) { _results.Add(new Result(codec, encoded.Length, swEnc.Elapsed.TotalMilliseconds, swDec.Elapsed.TotalMilliseconds, 0, 0, 0, "no frame")); StateHasChanged(); return; }
+        if (_capture.Y is null) { _results.Add(new Result(codec, encoded.Length, swEnc.Elapsed.TotalMilliseconds, swDec.Elapsed.TotalMilliseconds, 0, 0, 0, 0, "no frame")); StateHasChanged(); return; }
 
         int min = 255, max = 0; long sum = 0;
         foreach (var b in _capture.Y) { sum += b; if (b < min) min = b; if (b > max) max = b; }
         int mean = (int)(sum / _capture.Y.Length);
 
+        // Compute PSNR vs source Y plane - use YStride to walk decoded since some
+        // sinks may pad rows. Source is tightly packed.
+        double psnr = 0;
+        if (_ySource is not null && _capture.Y.Length >= W * H)
+        {
+            long sumSq = 0; long n = 0;
+            for (int row = 0; row < H; row++)
+                for (int col = 0; col < W; col++)
+                {
+                    int s = _ySource[row * W + col];
+                    int d = _capture.Y[row * _capture.YStride + col];
+                    int e = s - d;
+                    sumSq += e * e; n++;
+                }
+            double mse = sumSq / (double)n;
+            psnr = mse <= 0 ? double.PositiveInfinity : 10.0 * Math.Log10(255.0 * 255.0 / mse);
+        }
+
         DrawYuv(canvasId, _capture.Y, _capture.U!, _capture.V!, W, H, _capture.YStride, _capture.UStride, _capture.VStride);
 
-        _results.Add(new Result(codec, encoded.Length, swEnc.Elapsed.TotalMilliseconds, swDec.Elapsed.TotalMilliseconds, mean, min, max, "OK"));
+        _results.Add(new Result(codec, encoded.Length, swEnc.Elapsed.TotalMilliseconds, swDec.Elapsed.TotalMilliseconds, mean, min, max, psnr, "OK"));
         StateHasChanged();
         await Task.Yield();
     }
