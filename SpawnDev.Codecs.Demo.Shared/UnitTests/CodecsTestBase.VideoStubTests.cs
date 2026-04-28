@@ -111,4 +111,60 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
+    [TestMethod]
+    public async Task Vp9Decoder_DecodesOwnEncoderKeyframe()
+    {
+        // Encode a 16x16 flat Y=128 keyframe with our VP9 encoder, then run
+        // it through the public Vp9Decoder API which now drives the walker
+        // (was a placeholder mid-gray emitter before commit 2814322).
+        const int W = 16, H = 16;
+        var ySrc = new byte[W * H]; Array.Fill(ySrc, (byte)128);
+        var uSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc, (byte)128);
+        var vSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc, (byte)128);
+        var frame = SpawnDev.Codecs.Video.Vp9.Vp9KeyframeEncoder.EncodeKeyFrame(
+            ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 30);
+
+        var sink = new CapturingFrameSink();
+        await using var dec = new Vp9Decoder();
+        int n = await dec.DecodeFrameAsync(frame, sink);
+
+        Equal(1, n);
+        Equal(1, sink.FrameCount);
+        True(sink.Y is not null);
+        Equal(W * H, sink.Y!.Length);
+        long sum = 0;
+        foreach (var b in sink.Y) sum += b;
+        int mean = (int)(sum / sink.Y.Length);
+        // Walker now drives real pixels; flat Y=128 should reconstruct exactly.
+        True(Math.Abs(mean - 128) <= 4);
+    }
+
+    [TestMethod]
+    public async Task Av1Decoder_DecodesOwnEncoderKeyframe()
+    {
+        // Encode a 16x16 flat Y=128 keyframe with our AV1 encoder, then run
+        // it through the public Av1Decoder API which now drives the walker.
+        // AV1 has a known small per-block drift so the tolerance is wider
+        // than VP8/VP9.
+        const int W = 16, H = 16;
+        var ySrc = new byte[W * H]; Array.Fill(ySrc, (byte)128);
+        var uSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc, (byte)128);
+        var vSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc, (byte)128);
+        var frame = SpawnDev.Codecs.Video.Av1.Av1KeyframeEncoder.EncodeKeyFrame(
+            ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 32);
+
+        var sink = new CapturingFrameSink();
+        await using var dec = new Av1Decoder();
+        int n = await dec.DecodeFrameAsync(frame, sink);
+
+        Equal(1, n);
+        Equal(1, sink.FrameCount);
+        True(sink.Y is not null);
+        Equal(W * H, sink.Y!.Length);
+        long sum = 0;
+        foreach (var b in sink.Y) sum += b;
+        int mean = (int)(sum / sink.Y.Length);
+        True(Math.Abs(mean - 128) <= 16);
+    }
+
 }
