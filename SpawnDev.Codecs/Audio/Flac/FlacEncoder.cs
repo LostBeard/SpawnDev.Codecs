@@ -2,10 +2,10 @@
 //
 // FLAC encoder. Emits a valid FLAC stream (fLaC marker + STREAMINFO +
 // audio frames + MD5). FlacSubframeWriter chooses among CONSTANT, FIXED
-// (orders 0-4 per spec), and LPC (Levinson-Durbin estimator with order
-// search up to MAX_LPC_ORDER=32) by encoded bit cost. Stereo mode is
-// selected from {LEFT_SIDE, MID_SIDE, RIGHT_SIDE, INDEPENDENT} via the
-// same cost-estimation. Optional VORBIS_COMMENT block via FlacEncoderOptions.
+// (orders 0-4 per spec), and LPC (Levinson-Durbin estimator searching
+// orders 4/6/8/10/12) by encoded bit cost. Stereo mode is selected from
+// {LEFT_SIDE, MID_SIDE, RIGHT_SIDE, INDEPENDENT} via the same
+// cost-estimation. Optional VORBIS_COMMENT block via FlacEncoderOptions.
 
 namespace SpawnDev.Codecs.Audio.Flac;
 
