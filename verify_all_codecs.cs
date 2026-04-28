@@ -331,6 +331,35 @@ Section("VP9 encoder -> ffmpeg native decode (640x480 tile_info regression guard
     summary.AppendLine($"  PASS: {frame.Length}B VP9 640x480 -> ffmpeg native, Y range=[{min}, {max}] (tile_info regression guard)");
 });
 
+// === AV1 encoder -> libdav1d on varied content (regression guard for d9ba4b2) ===
+// The GetNzMag / GetLowerLevelsCtx2d levels-buffer offset fix unblocked
+// natural content (BBB transcode 4/60 -> 60/60 frames). Verify a
+// gradient frame at multi-block sizes still decodes cleanly.
+Section("AV1 encoder -> libdav1d (gradient content, regression guard)", () =>
+{
+    foreach (var (W, H) in new[] { (32, 32), (64, 64), (128, 128) })
+    {
+        var ySrc = new byte[W * H];
+        for (int r = 0; r < H; r++)
+            for (int c = 0; c < W; c++)
+                ySrc[r * W + c] = (byte)Math.Clamp(96 + (r + c) % 64, 0, 255);
+        var uSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(uSrc, (byte)128);
+        var vSrc = new byte[(W / 2) * (H / 2)]; Array.Fill(vSrc, (byte)128);
+        var frame = Av1KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 32);
+        string ivf = Path.Combine(outDir, $"av1_gradient_{W}x{H}.ivf");
+        string yuv = Path.Combine(outDir, $"av1_gradient_{W}x{H}.yuv");
+        using (var fs = File.Create(ivf))
+        {
+            var w = new IvfWriter(fs, "AV01", W, H, frameRate: 1, timeScale: 30, numFrames: 0, leaveOpen: true);
+            w.WriteFrame(frame, 0); w.Finish();
+        }
+        if (!RunFfmpeg($"-y -c:v libdav1d -i \"{ivf}\" -f rawvideo -pix_fmt yuv420p \"{yuv}\""))
+            throw new Exception($"libdav1d rejected our AV1 gradient at {W}x{H} - non-skip→skip regression?");
+    }
+    Console.WriteLine("  PASS: AV1 gradient 32x32 + 64x64 + 128x128 all accepted by libdav1d");
+    summary.AppendLine("  PASS: AV1 gradient (non-skip→skip transitions) all accepted by libdav1d (d9ba4b2 regression guard)");
+});
+
 // === AV1 encoder -> libdav1d at multi-block sizes (regression guard for 8a43b8f) ===
 // The 4-bug multi-block fix unblocked all flat-content sizes from 16x16
 // through FullHD. Sweep a few sizes to catch any regression.
