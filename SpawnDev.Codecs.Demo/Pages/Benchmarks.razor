@@ -1,99 +1,233 @@
 @page "/benchmarks"
 @using System.Diagnostics
 @using SpawnDev.Codecs.Audio.Flac
+@using SpawnDev.Codecs.Audio.Opus
+@using SpawnDev.Codecs.Audio.Vorbis
 @using SpawnDev.Codecs.Audio.Transforms
 @using SpawnDev.Codecs.Audio.Wav
 @using SpawnDev.Codecs.Audio.Aiff
+@using SpawnDev.Codecs.Video
 @using SpawnDev.Codecs.Video.Av1
 @using SpawnDev.Codecs.Video.Vp8
 @using SpawnDev.Codecs.Video.Vp9
 
-<PageTitle>SpawnDev.Codecs Benchmarks</PageTitle>
+<PageTitle>Benchmarks - SpawnDev.Codecs</PageTitle>
 
-<h1>Benchmarks</h1>
+<div class="bench-page">
+    <div class="bench-header">
+        <h1 class="bench-title"><span class="gradient-text">⚡ Live Codec Benchmarks</span></h1>
+        <p class="bench-subtitle">All 6 codecs running in your browser via Blazor WASM. Encode + decode timed end-to-end with real synthetic content.</p>
 
-<p>Runs in the browser against the same code paths the unit tests exercise. Sample signals are synthesised on the fly, encoded/decoded, and the resulting throughput is measured against <code>Stopwatch.GetTimestamp</code> wall time.</p>
+        <div class="bench-controls">
+            <button class="btn-run @(_running ? "disabled" : "")" @onclick="RunAllAsync" disabled="@_running">
+                @if (_running) {
+                    <span class="spinner"></span>
+                    <span>Running...</span>
+                } else {
+                    <span>▶ Run All Benchmarks</span>
+                }
+            </button>
+            @if (_running)
+            {
+                <span class="status-pill status-info">@_currentStep</span>
+            }
+            else if (_log.Count > 0)
+            {
+                <span class="status-pill status-info">Done in @_lastTotalMs.ToString("F0") ms - @_log.Count benchmarks</span>
+            }
+        </div>
 
-<div style="margin-bottom: 1rem;">
-    <button class="btn btn-primary" @onclick="RunAllAsync" disabled="@_running">
-        @(_running ? "Running..." : "Run all benchmarks")
-    </button>
+        @if (_running)
+        {
+            <div class="progress-section">
+                <div class="progress-bar-track">
+                    <div class="progress-bar-fill" style="width: @_progressPct%"></div>
+                </div>
+                <div class="progress-label">@_currentStep</div>
+            </div>
+        }
+    </div>
+
+    @if (_log.Count > 0)
+    {
+        @* Group by category. *@
+        @foreach (var group in _log.GroupBy(e => e.Category).OrderBy(g => g.Key))
+        {
+            <div class="bench-card">
+                <div class="bench-card-header">
+                    <h2>@CategoryDisplay(group.Key)</h2>
+                </div>
+                <div class="bench-table-wrap">
+                    <table class="bench-table">
+                        <thead>
+                            <tr>
+                                <th>Benchmark</th>
+                                <th>Input</th>
+                                <th>Time (ms)</th>
+                                <th>Throughput</th>
+                                <th>Output</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var e in group)
+                            {
+                                <tr>
+                                    <td>@e.Name</td>
+                                    <td>@e.Input</td>
+                                    <td>@e.TimeMs.ToString("F2")</td>
+                                    <td>@e.Throughput</td>
+                                    <td>@e.Extra</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    }
 </div>
 
-@if (_log.Count > 0)
-{
-    <h2>Results</h2>
-    <table>
-        <thead>
-            <tr>
-                <th>Benchmark</th>
-                <th>Input</th>
-                <th>Time (ms)</th>
-                <th>Throughput</th>
-                <th>Compression / Notes</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var entry in _log)
-            {
-                <tr>
-                    <td>@entry.Name</td>
-                    <td>@entry.Input</td>
-                    <td>@entry.TimeMs.ToString("F2")</td>
-                    <td>@entry.Throughput</td>
-                    <td>@entry.Extra</td>
-                </tr>
-            }
-        </tbody>
-    </table>
-}
+@* ==================== STYLES ==================== *@
+<style>
+    .bench-page { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+    .bench-header { text-align: center; margin-bottom: 2rem; }
+    .bench-title { font-size: 2rem; margin: 0; }
+    .gradient-text { background: linear-gradient(135deg, #3b82f6, #a855f7, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .bench-subtitle { color: #94a3b8; margin-top: 0.4rem; font-size: 1rem; max-width: 760px; margin-left: auto; margin-right: auto; }
+    .bench-controls { display: flex; align-items: center; gap: 1rem; justify-content: center; margin: 1.5rem 0 0.5rem; flex-wrap: wrap; }
+    .btn-run { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.7rem 2rem; border: none; border-radius: 8px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff; font-weight: 600; font-size: 1rem; cursor: pointer; transition: all 0.2s; }
+    .btn-run:hover:not(.disabled) { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(139,92,246,0.35); }
+    .btn-run.disabled { opacity: 0.6; cursor: not-allowed; }
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite; }
+    @@keyframes spin { to { transform: rotate(360deg); } }
+    .status-pill { padding: 0.35rem 1rem; border-radius: 999px; font-size: 0.85rem; font-weight: 500; background: rgba(59,130,246,0.15); color: #93c5fd; }
+    .progress-section { margin-top: 1.2rem; }
+    .progress-bar-track { height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; max-width: 500px; margin: 0 auto; }
+    .progress-bar-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #a855f7); transition: width 0.3s ease; border-radius: 3px; }
+    .progress-label { font-size: 0.8rem; color: #94a3b8; margin-top: 0.5rem; text-align: center; }
+    .bench-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+    .bench-card-header h2 { font-size: 1.2rem; margin: 0 0 1rem; }
+    .bench-table-wrap { overflow-x: auto; }
+    .bench-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    .bench-table th { text-align: left; padding: 0.5rem 0.7rem; color: #94a3b8; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.08); white-space: nowrap; }
+    .bench-table td { padding: 0.5rem 0.7rem; border-bottom: 1px solid rgba(255,255,255,0.04); white-space: nowrap; }
+</style>
 
 @code {
-    sealed record BenchEntry(string Name, string Input, double TimeMs, string Throughput, string Extra);
+    sealed record BenchEntry(string Category, string Name, string Input, double TimeMs, string Throughput, string Extra);
+
+    sealed class CaptureSink : IVideoFrameSink
+    {
+        public byte[]? Y;
+        public ValueTask OnFrameAsync(
+            ReadOnlyMemory<byte> y, int ys, ReadOnlyMemory<byte> u, int us,
+            ReadOnlyMemory<byte> v, int vs, long pts)
+        { Y = y.ToArray(); return ValueTask.CompletedTask; }
+    }
 
     List<BenchEntry> _log = new();
     bool _running;
+    int _progressPct;
+    string _currentStep = "";
+    double _lastTotalMs;
+
+    string CategoryDisplay(string cat) => cat switch
+    {
+        "video-encode" => "🎬 Video Encoders",
+        "video-decode" => "📺 Video Decoders",
+        "audio-encode" => "🎵 Audio Encoders",
+        "audio-decode" => "🔊 Audio Decoders",
+        "transforms" => "🧮 Transforms",
+        "containers" => "📦 Containers",
+        _ => cat,
+    };
 
     async Task RunAllAsync()
     {
         _running = true;
-        _log = new List<BenchEntry>();
+        _log = new();
+        _progressPct = 0;
+        _currentStep = "Starting...";
         StateHasChanged();
         await Task.Yield();
 
+        var swTotal = Stopwatch.StartNew();
+
         try
         {
-            BenchFlacEncode(samplesPerChannel: 48_000, channels: 2, bps: 16, rate: 48_000, label: "FLAC encode (2ch 16bit 48k 1sec sine)");
-            BenchFlacEncode(samplesPerChannel: 44_100 * 5, channels: 2, bps: 16, rate: 44_100, label: "FLAC encode (2ch 16bit 44.1k 5sec sine)");
-            BenchFlacEncode(samplesPerChannel: 44_100, channels: 1, bps: 24, rate: 44_100, label: "FLAC encode (1ch 24bit 44.1k 1sec sine)");
+            // Audio encoders
+            await Step(5, "FLAC encode (1ch 16bit 44.1k 1s)", () =>
+                BenchFlacEncode(44100, 1, 16, 44100));
+            await Step(10, "FLAC encode (2ch 16bit 44.1k 5s)", () =>
+                BenchFlacEncode(44100 * 5, 2, 16, 44100));
 
-            BenchFlacDecode(samplesPerChannel: 48_000, channels: 2, bps: 16, rate: 48_000, label: "FLAC decode (2ch 16bit 48k 1sec)");
-            BenchFlacDecode(samplesPerChannel: 44_100 * 5, channels: 2, bps: 16, rate: 44_100, label: "FLAC decode (2ch 16bit 44.1k 5sec)");
+            await Step(15, "Opus encode (mono 48k 1s @ 20ms frames)", BenchOpusEncode);
+            await Step(20, "Vorbis encode (mono 44.1k 1s)", BenchVorbisEncode);
 
-            BenchWavRoundtrip(samplesPerChannel: 48_000, channels: 2, bps: 16, rate: 48_000, label: "WAV write+read (2ch 16bit 1sec)");
-            BenchAiffRoundtrip(samplesPerChannel: 48_000, channels: 2, bps: 24, rate: 48_000, label: "AIFF write+read (2ch 24bit 1sec)");
+            // Audio decoders
+            await Step(25, "FLAC decode round-trip", () => BenchFlacDecode(44100, 2, 16, 44100));
+            await Step(30, "Opus decode round-trip", BenchOpusDecode);
+            await Step(35, "Vorbis decode round-trip", BenchVorbisDecode);
 
-            BenchImdct(n: 128, iterations: 100, label: "IMDCT N=128 x100");
-            BenchImdct(n: 256, iterations: 50, label: "IMDCT N=256 x50");
-            BenchImdct(n: 960, iterations: 10, label: "IMDCT N=960 x10 (Opus/CELT 20ms-48k frame)");
-            BenchMdct(n: 256, iterations: 50, label: "MDCT N=256 x50");
+            // Containers
+            await Step(40, "WAV write+read (2ch 16bit 1s)", () => BenchWavRoundtrip(44100, 2, 16, 44100));
+            await Step(43, "AIFF write+read (2ch 24bit 1s)", () => BenchAiffRoundtrip(44100, 2, 24, 44100));
 
-            // Video keyframe encoders (synthetic gradient).
-            BenchVp8Keyframe(width: 32, height: 32, iterations: 50, q: 30, label: "VP8 32x32 Q=30 x50");
-            BenchVp8Keyframe(width: 64, height: 64, iterations: 20, q: 30, label: "VP8 64x64 Q=30 x20");
-            BenchVp9Keyframe(width: 32, height: 32, iterations: 30, q: 30, label: "VP9 32x32 Q=30 x30");
-            BenchVp9Keyframe(width: 64, height: 64, iterations: 15, q: 30, label: "VP9 64x64 Q=30 x15");
-            BenchAv1Keyframe(width: 32, height: 32, iterations: 20, q: 32, label: "AV1 32x32 Q=32 x20");
-            BenchAv1Keyframe(width: 64, height: 64, iterations: 10, q: 32, label: "AV1 64x64 Q=32 x10");
+            // Transforms
+            await Step(46, "MDCT N=256 x100", () => BenchMdct(256, 100));
+            await Step(49, "IMDCT N=256 x100", () => BenchImdct(256, 100));
+
+            // Video encoders
+            await Step(55, "VP8 32x32 Q=30 x30", () => BenchVideoEncode("VP8", 32, 32, 30, 30,
+                (y, u, v, w, h, q) => Vp8KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: q)));
+            await Step(60, "VP9 32x32 Q=30 x30", () => BenchVideoEncode("VP9", 32, 32, 30, 30,
+                (y, u, v, w, h, q) => Vp9KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: q)));
+            await Step(65, "AV1 32x32 Q=32 x20", () => BenchVideoEncode("AV1", 32, 32, 20, 32,
+                (y, u, v, w, h, q) => Av1KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: q)));
+
+            await Step(70, "VP8 64x64 Q=30 x10", () => BenchVideoEncode("VP8", 64, 64, 10, 30,
+                (y, u, v, w, h, q) => Vp8KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: q)));
+            await Step(75, "VP9 64x64 Q=30 x10", () => BenchVideoEncode("VP9", 64, 64, 10, 30,
+                (y, u, v, w, h, q) => Vp9KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: q)));
+            await Step(80, "AV1 64x64 Q=32 x5", () => BenchVideoEncode("AV1", 64, 64, 5, 32,
+                (y, u, v, w, h, q) => Av1KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: q)));
+
+            // Video decoders (encode once, decode N times via public IVideoDecoder API)
+            await Step(85, "VP8Decoder API 32x32 x30", () => BenchVideoDecode("VP8", 32, 32, 30, 30,
+                () => new Vp8Decoder(),
+                (y, u, v, w, h, q) => Vp8KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: q)));
+            await Step(90, "Vp9Decoder API 32x32 x30", () => BenchVideoDecode("VP9", 32, 32, 30, 30,
+                () => new Vp9Decoder(),
+                (y, u, v, w, h, q) => Vp9KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: q)));
+            await Step(95, "Av1Decoder API 32x32 x20", () => BenchVideoDecode("AV1", 32, 32, 20, 32,
+                () => new Av1Decoder(),
+                (y, u, v, w, h, q) => Av1KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: q)));
+
+            _progressPct = 100;
+            _currentStep = "Complete";
         }
         finally
         {
+            swTotal.Stop();
+            _lastTotalMs = swTotal.Elapsed.TotalMilliseconds;
             _running = false;
             StateHasChanged();
         }
     }
 
-    void BenchFlacEncode(int samplesPerChannel, int channels, int bps, int rate, string label)
+    async Task Step(int pct, string label, Action body)
+    {
+        _progressPct = pct;
+        _currentStep = label;
+        StateHasChanged();
+        await Task.Yield();
+        await Task.Delay(1); // let UI repaint
+        body();
+        StateHasChanged();
+        await Task.Yield();
+    }
+
+    void BenchFlacEncode(int samplesPerChannel, int channels, int bps, int rate)
     {
         var input = GenerateSine(samplesPerChannel, channels, rate, bps);
         var sw = Stopwatch.StartNew();
@@ -102,15 +236,15 @@
         int rawBytes = input.Length * ((bps + 7) / 8);
         double ratio = (double)bytes.Length / rawBytes;
         double samplesPerSec = (input.Length * 1000.0) / sw.Elapsed.TotalMilliseconds;
-        _log.Add(new BenchEntry(
-            label,
-            $"{input.Length:N0} samples ({rawBytes:N0} B raw)",
+        _log.Add(new BenchEntry("audio-encode",
+            $"FLAC {channels}ch {bps}b {rate}Hz",
+            $"{input.Length:N0} samples ({rawBytes:N0}B raw)",
             sw.Elapsed.TotalMilliseconds,
             $"{samplesPerSec / 1e6:F2} Msamples/s",
-            $"{bytes.Length:N0} B FLAC ({ratio:P1})"));
+            $"{bytes.Length:N0}B FLAC ({ratio:P1})"));
     }
 
-    void BenchFlacDecode(int samplesPerChannel, int channels, int bps, int rate, string label)
+    void BenchFlacDecode(int samplesPerChannel, int channels, int bps, int rate)
     {
         var input = GenerateSine(samplesPerChannel, channels, rate, bps);
         byte[] encoded = FlacEncoder.EncodeStream(input, rate, channels, bps, blockSize: 4096);
@@ -118,52 +252,137 @@
         var decoded = FlacDecoder.Decode(encoded);
         sw.Stop();
         double samplesPerSec = (decoded.InterleavedSamples.Length * 1000.0) / sw.Elapsed.TotalMilliseconds;
-        _log.Add(new BenchEntry(
-            label,
-            $"{encoded.Length:N0} B FLAC",
+        _log.Add(new BenchEntry("audio-decode",
+            $"FLAC decode",
+            $"{encoded.Length:N0}B FLAC",
             sw.Elapsed.TotalMilliseconds,
             $"{samplesPerSec / 1e6:F2} Msamples/s",
             $"{decoded.InterleavedSamples.Length:N0} samples"));
     }
 
-    void BenchWavRoundtrip(int samplesPerChannel, int channels, int bps, int rate, string label)
+    void BenchOpusEncode()
+    {
+        const int sr = 48000, frameSize = 960;
+        var pcm = new float[sr]; // 1s
+        for (int n = 0; n < pcm.Length; n++)
+            pcm[n] = 0.4f * (float)Math.Sin(2 * Math.PI * 440 * n / sr);
+        using var enc = new OpusEncoder(new OpusEncoderConfig { SampleRateHz = sr, ChannelCount = 1 });
+        var buf = new byte[1275];
+        int frames = pcm.Length / frameSize;
+        long total = 0;
+        var sw = Stopwatch.StartNew();
+        for (int f = 0; f < frames; f++) total += enc.EncodeFrame(pcm.AsSpan(f * frameSize, frameSize), buf, frameSize);
+        sw.Stop();
+        double rt = (pcm.Length * 1000.0 / sr) / sw.Elapsed.TotalMilliseconds;
+        _log.Add(new BenchEntry("audio-encode",
+            "Opus 1ch 48kHz",
+            $"{pcm.Length:N0} samples (1s)",
+            sw.Elapsed.TotalMilliseconds,
+            $"{rt:F1}x realtime",
+            $"{total:N0}B ({(double)total / (pcm.Length * 4):P1})"));
+    }
+
+    void BenchOpusDecode()
+    {
+        const int sr = 48000, frameSize = 960;
+        var pcm = new float[sr];
+        for (int n = 0; n < pcm.Length; n++)
+            pcm[n] = 0.4f * (float)Math.Sin(2 * Math.PI * 440 * n / sr);
+        using var enc = new OpusEncoder(new OpusEncoderConfig { SampleRateHz = sr, ChannelCount = 1 });
+        var buf = new byte[1275];
+        int frames = pcm.Length / frameSize;
+        var packets = new List<byte[]>();
+        for (int f = 0; f < frames; f++)
+        {
+            int n = enc.EncodeFrame(pcm.AsSpan(f * frameSize, frameSize), buf, frameSize);
+            packets.Add(buf.AsSpan(0, n).ToArray());
+        }
+        var dec = new OpusDecoder(new OpusDecoderConfig { SampleRateHz = sr, ChannelCount = 1 });
+        var outBuf = new float[frameSize];
+        long totalSamples = 0;
+        var sw = Stopwatch.StartNew();
+        foreach (var p in packets)
+            totalSamples += dec.DecodePacketAsync(p.AsMemory(), outBuf.AsMemory()).GetAwaiter().GetResult();
+        sw.Stop();
+        double rt = (totalSamples * 1000.0 / sr) / sw.Elapsed.TotalMilliseconds;
+        _log.Add(new BenchEntry("audio-decode",
+            "Opus decode",
+            $"{packets.Count} packets",
+            sw.Elapsed.TotalMilliseconds,
+            $"{rt:F1}x realtime",
+            $"{totalSamples:N0} samples"));
+    }
+
+    void BenchVorbisEncode()
+    {
+        const int sr = 44100;
+        var pcm = new float[sr]; // 1s
+        for (int n = 0; n < pcm.Length; n++)
+            pcm[n] = 0.4f * (float)Math.Sin(2 * Math.PI * 440 * n / sr);
+        var enc = new VorbisAudioEncoder(new VorbisAudioEncoderOptions { SampleRateHz = sr, Channels = 1 });
+        var sw = Stopwatch.StartNew();
+        var ogg = enc.EncodeStream(pcm);
+        sw.Stop();
+        double rt = (pcm.Length * 1000.0 / sr) / sw.Elapsed.TotalMilliseconds;
+        _log.Add(new BenchEntry("audio-encode",
+            "Vorbis 1ch 44.1kHz",
+            $"{pcm.Length:N0} samples (1s)",
+            sw.Elapsed.TotalMilliseconds,
+            $"{rt:F1}x realtime",
+            $"{ogg.Length:N0}B"));
+    }
+
+    void BenchVorbisDecode()
+    {
+        const int sr = 44100;
+        var pcm = new float[sr];
+        for (int n = 0; n < pcm.Length; n++)
+            pcm[n] = 0.4f * (float)Math.Sin(2 * Math.PI * 440 * n / sr);
+        var enc = new VorbisAudioEncoder(new VorbisAudioEncoderOptions { SampleRateHz = sr, Channels = 1 });
+        var ogg = enc.EncodeStream(pcm);
+        var sw = Stopwatch.StartNew();
+        var dec = VorbisOggDecoder.Decode(ogg);
+        sw.Stop();
+        double rt = (dec.InterleavedSamples.Length * 1000.0 / sr) / sw.Elapsed.TotalMilliseconds;
+        _log.Add(new BenchEntry("audio-decode",
+            "Vorbis decode",
+            $"{ogg.Length:N0}B Ogg",
+            sw.Elapsed.TotalMilliseconds,
+            $"{rt:F1}x realtime",
+            $"{dec.InterleavedSamples.Length:N0} samples"));
+    }
+
+    void BenchWavRoundtrip(int samplesPerChannel, int channels, int bps, int rate)
     {
         var input = GenerateSine(samplesPerChannel, channels, rate, bps);
         var sw = Stopwatch.StartNew();
         byte[] bytes = WavFileCodec.Write(input, rate, channels, bps);
         _ = WavFileCodec.Read(bytes);
         sw.Stop();
-        _log.Add(new BenchEntry(label, $"{input.Length:N0} samples", sw.Elapsed.TotalMilliseconds,
+        _log.Add(new BenchEntry("containers",
+            "WAV write+read",
+            $"{input.Length:N0} samples",
+            sw.Elapsed.TotalMilliseconds,
             $"{(input.Length * 1000.0 / sw.Elapsed.TotalMilliseconds) / 1e6:F2} Msamples/s",
-            $"{bytes.Length:N0} B"));
+            $"{bytes.Length:N0}B"));
     }
 
-    void BenchAiffRoundtrip(int samplesPerChannel, int channels, int bps, int rate, string label)
+    void BenchAiffRoundtrip(int samplesPerChannel, int channels, int bps, int rate)
     {
         var input = GenerateSine(samplesPerChannel, channels, rate, bps);
         var sw = Stopwatch.StartNew();
         byte[] bytes = AiffFileCodec.Write(input, rate, channels, bps);
         _ = AiffFileCodec.Read(bytes);
         sw.Stop();
-        _log.Add(new BenchEntry(label, $"{input.Length:N0} samples", sw.Elapsed.TotalMilliseconds,
+        _log.Add(new BenchEntry("containers",
+            "AIFF write+read",
+            $"{input.Length:N0} samples",
+            sw.Elapsed.TotalMilliseconds,
             $"{(input.Length * 1000.0 / sw.Elapsed.TotalMilliseconds) / 1e6:F2} Msamples/s",
-            $"{bytes.Length:N0} B"));
+            $"{bytes.Length:N0}B"));
     }
 
-    void BenchImdct(int n, int iterations, string label)
-    {
-        var input = new float[n];
-        for (int i = 0; i < n; i++) input[i] = (float)Math.Cos(i * 0.17);
-        var output = new float[2 * n];
-        var sw = Stopwatch.StartNew();
-        for (int k = 0; k < iterations; k++) ImdctReference.Transform(input, output);
-        sw.Stop();
-        _log.Add(new BenchEntry(label, $"N={n}, iter={iterations}", sw.Elapsed.TotalMilliseconds,
-            $"{(iterations * n * 1000.0 / sw.Elapsed.TotalMilliseconds) / 1e6:F2} Mpoints/s",
-            "CPU O(N²) reference"));
-    }
-
-    void BenchMdct(int n, int iterations, string label)
+    void BenchMdct(int n, int iterations)
     {
         var input = new float[2 * n];
         for (int i = 0; i < 2 * n; i++) input[i] = (float)Math.Sin(i * 0.13);
@@ -171,35 +390,35 @@
         var sw = Stopwatch.StartNew();
         for (int k = 0; k < iterations; k++) MdctReference.Transform(input, output);
         sw.Stop();
-        _log.Add(new BenchEntry(label, $"N={n}, iter={iterations}", sw.Elapsed.TotalMilliseconds,
+        _log.Add(new BenchEntry("transforms",
+            $"MDCT N={n}",
+            $"iter={iterations}",
+            sw.Elapsed.TotalMilliseconds,
             $"{(iterations * n * 1000.0 / sw.Elapsed.TotalMilliseconds) / 1e6:F2} Mpoints/s",
-            "CPU O(N²) reference"));
+            "CPU O(N²)"));
     }
 
-    void BenchVp8Keyframe(int width, int height, int iterations, int q, string label)
-        => BenchVideoKeyframe(width, height, iterations, q, label, "VP8",
-            (y, u, v, w, h, qq) => Vp8KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: qq));
+    void BenchImdct(int n, int iterations)
+    {
+        var input = new float[n];
+        for (int i = 0; i < n; i++) input[i] = (float)Math.Cos(i * 0.17);
+        var output = new float[2 * n];
+        var sw = Stopwatch.StartNew();
+        for (int k = 0; k < iterations; k++) ImdctReference.Transform(input, output);
+        sw.Stop();
+        _log.Add(new BenchEntry("transforms",
+            $"IMDCT N={n}",
+            $"iter={iterations}",
+            sw.Elapsed.TotalMilliseconds,
+            $"{(iterations * n * 1000.0 / sw.Elapsed.TotalMilliseconds) / 1e6:F2} Mpoints/s",
+            "CPU O(N²)"));
+    }
 
-    void BenchVp9Keyframe(int width, int height, int iterations, int q, string label)
-        => BenchVideoKeyframe(width, height, iterations, q, label, "VP9",
-            (y, u, v, w, h, qq) => Vp9KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: qq));
-
-    void BenchAv1Keyframe(int width, int height, int iterations, int q, string label)
-        => BenchVideoKeyframe(width, height, iterations, q, label, "AV1",
-            (y, u, v, w, h, qq) => Av1KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: qq));
-
-    void BenchVideoKeyframe(int width, int height, int iterations, int q, string label, string codec,
+    void BenchVideoEncode(string codec, int width, int height, int iterations, int q,
         Func<byte[], byte[], byte[], int, int, int, byte[]> encode)
     {
-        var ySrc = new byte[width * height];
-        for (int r = 0; r < height; r++)
-            for (int c = 0; c < width; c++)
-                ySrc[r * width + c] = (byte)Math.Clamp(96 + 32 * Math.Sin(2.0 * Math.PI * c / 16.0) + r * 2, 0, 255);
-        var uSrc = new byte[(width / 2) * (height / 2)]; System.Array.Fill(uSrc, (byte)128);
-        var vSrc = new byte[(width / 2) * (height / 2)]; System.Array.Fill(vSrc, (byte)128);
-
-        // Warm up once to amortize Concentus / range coder JIT.
-        encode(ySrc, uSrc, vSrc, width, height, q);
+        var (ySrc, uSrc, vSrc) = GenerateVideoFrame(width, height);
+        encode(ySrc, uSrc, vSrc, width, height, q); // warm up
 
         long totalBytes = 0;
         var sw = Stopwatch.StartNew();
@@ -210,11 +429,55 @@
         double avgB = (double)totalBytes / iterations;
         int rawBytes = width * height + 2 * (width / 2) * (height / 2);
         double rawMbps = (rawBytes * fps) / 1_000_000.0;
-        _log.Add(new BenchEntry(label,
-            $"{width}x{height}, raw {rawBytes}B, iter={iterations}",
+        _log.Add(new BenchEntry("video-encode",
+            $"{codec} {width}x{height}",
+            $"raw {rawBytes:N0}B/fr, iter={iterations}",
             sw.Elapsed.TotalMilliseconds,
             $"{fps:F1} fps ({rawMbps:F2} MB/s in)",
-            $"avg {avgB:F0}B / frame"));
+            $"avg {avgB:F0}B/fr"));
+    }
+
+    void BenchVideoDecode(string codec, int width, int height, int iterations, int q,
+        Func<IVideoDecoder> newDecoder,
+        Func<byte[], byte[], byte[], int, int, int, byte[]> encode)
+    {
+        var (ySrc, uSrc, vSrc) = GenerateVideoFrame(width, height);
+        var frame = encode(ySrc, uSrc, vSrc, width, height, q);
+        var sink = new CaptureSink();
+
+        // Warm up: one decode through a fresh decoder.
+        var warm = newDecoder();
+        warm.DecodeFrameAsync(frame, sink).GetAwaiter().GetResult();
+        warm.DisposeAsync().GetAwaiter().GetResult();
+
+        var sw = Stopwatch.StartNew();
+        for (int i = 0; i < iterations; i++)
+        {
+            var d = newDecoder();
+            d.DecodeFrameAsync(frame, sink).GetAwaiter().GetResult();
+            d.DisposeAsync().GetAwaiter().GetResult();
+        }
+        sw.Stop();
+        double fps = iterations * 1000.0 / sw.Elapsed.TotalMilliseconds;
+        int outBytes = width * height + 2 * (width / 2) * (height / 2);
+        double outMbps = (outBytes * fps) / 1_000_000.0;
+        _log.Add(new BenchEntry("video-decode",
+            $"{codec}Decoder API {width}x{height}",
+            $"frame {frame.Length:N0}B, iter={iterations}",
+            sw.Elapsed.TotalMilliseconds,
+            $"{fps:F1} fps ({outMbps:F2} MB/s out)",
+            $"YUV {outBytes:N0}B/fr"));
+    }
+
+    (byte[] y, byte[] u, byte[] v) GenerateVideoFrame(int width, int height)
+    {
+        var y = new byte[width * height];
+        for (int r = 0; r < height; r++)
+            for (int c = 0; c < width; c++)
+                y[r * width + c] = (byte)Math.Clamp(96 + 32 * Math.Sin(2.0 * Math.PI * c / 16.0) + r * 2, 0, 255);
+        var u = new byte[(width / 2) * (height / 2)]; System.Array.Fill(u, (byte)128);
+        var v = new byte[(width / 2) * (height / 2)]; System.Array.Fill(v, (byte)128);
+        return (y, u, v);
     }
 
     int[] GenerateSine(int samplesPerChannel, int channels, int rate, int bps)
