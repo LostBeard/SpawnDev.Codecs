@@ -1,18 +1,20 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
-// Minimal FLAC encoder. Emits a valid FLAC stream (fLaC marker + STREAMINFO +
-// audio frames) using VERBATIM subframes - i.e., no prediction, no Rice
-// compression. This is lossless by construction (it's literally raw PCM with
-// framing) and proves the encoder-side pipeline end-to-end. Later slices can
-// add FIXED/LPC subframes and channel decorrelation analysis for actual
-// compression while reusing this skeleton.
+// FLAC encoder. Emits a valid FLAC stream (fLaC marker + STREAMINFO +
+// audio frames + MD5). FlacSubframeWriter chooses among CONSTANT, FIXED
+// (orders 0-4 per spec), and LPC (Levinson-Durbin estimator with order
+// search up to MAX_LPC_ORDER=32) by encoded bit cost. Stereo mode is
+// selected from {LEFT_SIDE, MID_SIDE, RIGHT_SIDE, INDEPENDENT} via the
+// same cost-estimation. Optional VORBIS_COMMENT block via FlacEncoderOptions.
 
 namespace SpawnDev.Codecs.Audio.Flac;
 
 /// <summary>
-/// Minimal FLAC encoder. Produces a fully valid FLAC byte stream that the
-/// built-in <see cref="FlacDecoder"/> (or any conforming decoder) can consume.
-/// Does not yet attempt compression; every frame uses VERBATIM subframes.
+/// FLAC encoder. Produces a valid FLAC byte stream the built-in
+/// <see cref="FlacDecoder"/> (or any conforming decoder) consumes.
+/// Subframe selection chooses among CONSTANT / FIXED (orders 0-4) /
+/// LPC (Levinson-Durbin); stereo mode chooses among LEFT_SIDE,
+/// MID_SIDE, RIGHT_SIDE, INDEPENDENT.
 /// </summary>
 public static class FlacEncoder
 {
