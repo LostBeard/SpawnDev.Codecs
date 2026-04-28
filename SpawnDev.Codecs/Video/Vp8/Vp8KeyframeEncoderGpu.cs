@@ -39,6 +39,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
     private readonly Vp8SubtractKernel _subtract;
     private readonly Vp8FramePredictorGpu _predictor;
     private readonly Vp8FrameReconstructGpu _reconstruct;
+    private readonly Vp8FrameSequentialEncodeKernel _sequentialEncode;
 
     /// <summary>Compile + cache all the kernels onto <paramref name="accelerator"/>.</summary>
     public Vp8KeyframeEncoderGpu(Accelerator accelerator)
@@ -51,6 +52,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         _subtract = new Vp8SubtractKernel(accelerator);
         _predictor = new Vp8FramePredictorGpu(accelerator);
         _reconstruct = new Vp8FrameReconstructGpu(accelerator);
+        _sequentialEncode = new Vp8FrameSequentialEncodeKernel(accelerator);
     }
 
     /// <summary>
@@ -158,33 +160,138 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         UploadPlane(uSrc, uvSrcStride, uvWidth, uvHeight, dU);
         UploadPlane(vSrc, uvSrcStride, uvWidth, uvHeight, dV);
 
-        // The GPU encoder pipeline. v1 NOTE: per-MB recon dependency is
-        // fundamental to multi-MB frames. For 1-MB frames (16x16 input)
-        // there are no neighbours, so this v1 only supports single-MB
-        // frames bit-exactly. Larger frames need wave-parallel
-        // scheduling (planned).
-        if (mbRows != 1 || mbCols != 1)
-        {
-            throw new NotSupportedException(
-                "Vp8KeyframeEncoderGpu v1 supports 16x16 single-MB frames only. " +
-                "Multi-MB support requires wave-parallel predictor + recon scheduling " +
-                "to honour the per-MB recon dependency chain. Filed for follow-up.");
-        }
-
-        return EncodeSingleMacroblockFrame(
+        // GPU encoder pipeline. v2 uses the sequential multi-MB kernel
+        // for any frame size (including 1x1). Single-thread per frame
+        // for v2; data stays GPU-resident throughout. Wave-parallel
+        // dispatch is a future optimization.
+        return EncodeFrame(
             dY, dU, dV, dYRecon, dURecon, dVRecon,
-            dY16Packed, dU8Packed, dV8Packed, dY4Src,
-            dY4Pred, dUPred, dVPred,
-            dY4Residual, dURes, dVRes,
             dY4Coefs, dY2Coefs, dUCoefs, dVCoefs,
-            dY1Dc, dY1Ac, dY2Dc, dY2Ac, dUvDc, dUvAc,
-            width, height, baseQIndex, dequant);
+            mbCols, mbRows, baseQIndex, dequant);
     }
 
     /// <summary>
-    /// Single-MB v1 fast path. Predictor is 128-fill (no neighbours);
-    /// no recon-dependency loop. Runs the GPU pipeline once for the
-    /// frame's lone MB.
+    /// v2 multi-MB encoder path. Uses Vp8FrameSequentialEncodeKernel
+    /// (single-thread-per-frame GPU kernel) to do all per-MB math +
+    /// recon, then the existing Vp8FrameEntropyKernel for entropy.
+    /// </summary>
+    private byte[] EncodeFrame(
+        MemoryBuffer1D<byte, Stride1D.Dense> dY,
+        MemoryBuffer1D<byte, Stride1D.Dense> dU,
+        MemoryBuffer1D<byte, Stride1D.Dense> dV,
+        MemoryBuffer1D<byte, Stride1D.Dense> dYRecon,
+        MemoryBuffer1D<byte, Stride1D.Dense> dURecon,
+        MemoryBuffer1D<byte, Stride1D.Dense> dVRecon,
+        MemoryBuffer1D<short, Stride1D.Dense> dY4Coefs,
+        MemoryBuffer1D<short, Stride1D.Dense> dY2Coefs,
+        MemoryBuffer1D<short, Stride1D.Dense> dUCoefs,
+        MemoryBuffer1D<short, Stride1D.Dense> dVCoefs,
+        int mbCols, int mbRows, int baseQIndex,
+        Vp8MbDequant dequant)
+    {
+        // Recon planes are NOT pre-initialized; the encoder kernel only
+        // reads neighbour pixels for MBs with haveAbove or haveLeft, and
+        // those positions get written by previous MBs' recon writeback.
+        // For (mbRow=0, mbCol=0) which has no neighbours, no recon
+        // reads happen. So no init is needed - but zero-init the recon
+        // buffers anyway as defensive coding.
+        dYRecon.View.MemSetToZero();
+        dURecon.View.MemSetToZero();
+        dVRecon.View.MemSetToZero();
+
+        // Upload dequantizers as 6 ints.
+        using var dDequant = _accelerator.Allocate1D<int>(6);
+        dDequant.View.CopyFromCPU(new int[]
+        {
+            dequant.Y1Dc, dequant.Y1Ac, dequant.Y2Dc, dequant.Y2Ac, dequant.UvDc, dequant.UvAc,
+        });
+
+        // Step 1: Run the sequential encode kernel for the entire frame.
+        _sequentialEncode.Run(
+            dY.View, dU.View, dV.View,
+            dYRecon.View, dURecon.View, dVRecon.View,
+            dY4Coefs.View, dY2Coefs.View, dUCoefs.View, dVCoefs.View,
+            dDequant.View,
+            mbCols, mbRows);
+
+        // Step 2: Write frame header on CPU; snapshot bool encoder state.
+        int width = mbCols * 16;
+        int height = mbRows * 16;
+        var partition0 = new Vp8BoolEncoder();
+        var hdr = BuildFrameHeader(width, height, baseQIndex);
+        Vp8FrameHeaderWriter.WriteKeyFrameHeader(partition0, hdr);
+        var snapshot = partition0.GetSnapshot();
+
+        // Step 3: GPU entropy. Pre-load partition0Out with header bytes;
+        // pass snapshot state via initialP0State.
+        int p0Stride = 64 * 1024 + mbCols * mbRows * 32;
+        int tp0Stride = 64 * 1024 + mbCols * mbRows * 256;
+        using var dP0 = _accelerator.Allocate1D<byte>(p0Stride);
+        using var dTp = _accelerator.Allocate1D<byte>(tp0Stride);
+        using var dLens = _accelerator.Allocate1D<long>(2);
+        using var dAbove = _accelerator.Allocate1D<byte>(mbCols * 9);
+        using var dInitState = _accelerator.Allocate1D<int>(5);
+        using var dCoefProbs = _accelerator.Allocate1D<byte>(4 * 264);
+        using var dConstsExtended = _accelerator.Allocate1D<byte>(Vp8FrameEntropyKernel.ConstsExtendedTotalBytes);
+
+        var primedP0 = new byte[p0Stride];
+        Array.Copy(snapshot.Buf, 0, primedP0, 0, snapshot.Buf.Length);
+        dP0.View.CopyFromCPU(primedP0);
+        dTp.View.MemSetToZero();
+        dAbove.View.MemSetToZero();
+        dInitState.View.CopyFromCPU(new int[]
+        {
+            (int)snapshot.LowValue, (int)snapshot.Range, snapshot.Count,
+            snapshot.Buf.Length, 0,
+        });
+
+        var coefProbsByType = new byte[4 * 264];
+        var defaults = hdr.CoefProbs;
+        for (int t = 0; t < 4; t++)
+            for (int band = 0; band < 8; band++)
+                for (int c = 0; c < 3; c++)
+                    for (int n = 0; n < 11; n++)
+                        coefProbsByType[t * 264 + band * 33 + c * 11 + n] = defaults[t, band, c, n];
+        dCoefProbs.View.CopyFromCPU(coefProbsByType);
+        dConstsExtended.View.CopyFromCPU(Vp8FrameEntropyKernel.BuildExtendedConstsBuffer());
+
+        _entropy.Run(
+            dY4Coefs.View, dY2Coefs.View, dUCoefs.View, dVCoefs.View,
+            dCoefProbs.View, dConstsExtended.View,
+            dP0.View, dTp.View, dLens.View,
+            dAbove.View, dInitState.View,
+            mbCols, mbRows);
+        _accelerator.Synchronize();
+
+        // Step 4: read back partition0 + tokenP0.
+        var lensBack = dLens.GetAsArray1D();
+        var p0Back = dP0.GetAsArray1D();
+        var tpBack = dTp.GetAsArray1D();
+
+        // Step 5: assemble final frame bytes.
+        var tag = new Vp8FrameTag
+        {
+            IsKeyFrame = true,
+            Version = Vp8Version.Bicubic,
+            ShowFrame = true,
+            FirstPartitionSize = (int)lensBack[0],
+            Width = width, Height = height,
+            HorizontalScale = 0, VerticalScale = 0,
+        };
+        var tagBytes = Vp8FrameTagWriter.WriteTag(tag);
+
+        long p0Len = lensBack[0];
+        long tp0Len = lensBack[1];
+        var output = new byte[tagBytes.Length + p0Len + tp0Len];
+        Buffer.BlockCopy(tagBytes, 0, output, 0, tagBytes.Length);
+        Array.Copy(p0Back, 0, output, tagBytes.Length, (int)p0Len);
+        Array.Copy(tpBack, 0, output, tagBytes.Length + (int)p0Len, (int)tp0Len);
+        return output;
+    }
+
+    /// <summary>
+    /// (Legacy v1 single-MB path; kept for reference but unused now
+    /// that EncodeFrame handles all sizes.)
     /// </summary>
     private byte[] EncodeSingleMacroblockFrame(
         MemoryBuffer1D<byte, Stride1D.Dense> dY,
@@ -461,5 +568,6 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         _subtract.Dispose();
         _predictor.Dispose();
         _reconstruct.Dispose();
+        _sequentialEncode.Dispose();
     }
 }
