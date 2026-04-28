@@ -33,6 +33,14 @@ public abstract partial class CodecsTestBase
         Equal(57_600, fb.Y.Length);
         Equal(14_400, fb.U.Length);
         Equal(14_400, fb.V.Length);
+
+        // Walker must produce real content - not a flat fallback. Y plane
+        // should span at least 50 levels of value (BBB first frame goes
+        // from sky highlights ~234 to character outlines ~24).
+        int yMin = 255, yMax = 0;
+        foreach (var b in fb.Y) { if (b < yMin) yMin = b; if (b > yMax) yMax = b; }
+        True(yMax - yMin > 50,
+            $"Y plane range only {yMin}..{yMax} - walker may have collapsed to flat output");
     }
 
     [TestMethod]
