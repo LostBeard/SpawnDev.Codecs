@@ -148,10 +148,10 @@ public sealed class Vp9ForwardDct8x8Kernel : IDisposable
                 out int o4, out int o5, out int o6, out int o7);
 
             // Final post-pass: divide by 2 (truncate-toward-zero).
-            // Some ILGPU backends lower `int / 2` as arithmetic-shift-right
-            // which floors toward -infinity for odd negative values (off-
-            // by-one against the libvpx reference). Use the explicit
-            // HalveTruncateTowardZero helper to preserve bit-exactness.
+            // WORKAROUND retained on rc.28 - IlgpuIntDivByTwoRepro
+            // still fails identically despite the rc.28 fix shipping.
+            // See Vp9ForwardDct8x8Gpu.HalveTruncateTowardZero comment
+            // for rationale. Geordi pinged 2026-04-28.
             output[outBase + col * 8 + 0] = HalveTruncateTowardZero(o0);
             output[outBase + col * 8 + 1] = HalveTruncateTowardZero(o1);
             output[outBase + col * 8 + 2] = HalveTruncateTowardZero(o2);
@@ -163,10 +163,7 @@ public sealed class Vp9ForwardDct8x8Kernel : IDisposable
         }
     }
 
-    /// <summary>
-    /// Bit-exact mirror of C# <c>x / 2</c> (truncate toward zero). See
-    /// <see cref="Vp9ForwardDct8x8Gpu"/> for the rationale.
-    /// </summary>
+    /// <summary>WORKAROUND: same helper as Vp9ForwardDct8x8Gpu.</summary>
     private static int HalveTruncateTowardZero(int x)
     {
         if (x >= 0) return x >> 1;

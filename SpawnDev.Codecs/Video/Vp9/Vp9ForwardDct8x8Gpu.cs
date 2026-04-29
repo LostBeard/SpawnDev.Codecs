@@ -99,11 +99,12 @@ public static class Vp9ForwardDct8x8Gpu
 
             long b = outBase + col * 8;
             // libvpx final_output[i] /= 2 - signed integer division
-            // truncates toward zero. Some ILGPU backends lower `int / 2`
-            // as arithmetic-shift-right, which rounds toward -infinity
-            // for odd negative values (off-by-one against the CPU
-            // reference). Use HalveTruncateTowardZero to preserve the
-            // bit-exact reference semantics on every backend.
+            // truncates toward zero. SpawnDev.ILGPU 4.9.2-rc.28
+            // shipped a fix for the IR-level Div-by-pow2 -> Shr
+            // rewrite on signed dividends, but a follow-up test
+            // (2026-04-28 21:57) showed IlgpuIntDivByTwoRepro STILL
+            // fails identically on rc.28. WORKAROUND retained until
+            // root cause is found. Pinged Geordi.
             output[b + 0] = HalveTruncateTowardZero(o0);
             output[b + 1] = HalveTruncateTowardZero(o1);
             output[b + 2] = HalveTruncateTowardZero(o2);
@@ -116,11 +117,10 @@ public static class Vp9ForwardDct8x8Gpu
     }
 
     /// <summary>
-    /// Bit-exact mirror of C# <c>x / 2</c> (truncate toward zero) using
-    /// only sign + arithmetic-shift-right. Necessary because some ILGPU
-    /// backends lower <c>int / 2</c> directly to <c>shr 1</c>, which
-    /// floors toward -infinity for odd negative inputs (-32639 / 2:
-    /// CPU = -16319, naive shr = -16320).
+    /// WORKAROUND: bit-exact mirror of C# <c>x / 2</c> (truncate toward
+    /// zero). rc.28's gate-on-Unsigned fix should make plain `int / 2`
+    /// work but verification 2026-04-28 21:57 showed the test still
+    /// fails identically. Helper retained until the root cause is found.
     /// </summary>
     private static int HalveTruncateTowardZero(int x)
     {
