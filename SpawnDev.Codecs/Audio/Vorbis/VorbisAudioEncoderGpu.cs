@@ -196,9 +196,8 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         await _accelerator.SynchronizeAsync();
 
         long outLen = (await dOutLen.CopyToHostAsync())[0];
-        var fullBytes = await dOutBytes.CopyToHostAsync();
-        var result = new byte[outLen];
-        Array.Copy(fullBytes, result, outLen);
+        // Partial readback - lib returns a fresh byte[] sized to outLen.
+        var result = await dOutBytes.CopyToHostAsync(0, outLen);
         return result;
     }
 

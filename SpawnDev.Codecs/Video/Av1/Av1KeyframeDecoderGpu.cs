@@ -127,13 +127,12 @@ public sealed class Av1KeyframeDecoderGpu : IDisposable
 
         await _accelerator.SynchronizeAsync();
 
-        var reconBuf = await dRecon.CopyToHostAsync();
-        var y = new byte[yLen];
-        var u = new byte[uvLen];
-        var v = new byte[uvLen];
-        Buffer.BlockCopy(reconBuf, 0, y, 0, yLen);
-        Buffer.BlockCopy(reconBuf, yLen, u, 0, uvLen);
-        Buffer.BlockCopy(reconBuf, yLen + uvLen, v, 0, uvLen);
+        // Three per-plane partial readbacks of dRecon at the YPlaneOff /
+        // UPlaneOff / VPlaneOff offsets. No host-side iteration over
+        // codec output bytes at the call site.
+        var y = await dRecon.CopyToHostAsync(0, yLen);
+        var u = await dRecon.CopyToHostAsync(yLen, uvLen);
+        var v = await dRecon.CopyToHostAsync(yLen + uvLen, uvLen);
         return (y, u, v);
     }
 

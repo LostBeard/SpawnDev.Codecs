@@ -175,11 +175,11 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         using var dScratchShort = _accelerator.Allocate1D<short>(scratchShortLen);
 
         // ---- Upload sources + zero outputs ----
-        var srcInterleaved = new byte[srcLen];
-        Buffer.BlockCopy(yPlane, 0, srcInterleaved, 0, yLen);
-        Buffer.BlockCopy(uPlane, 0, srcInterleaved, yLen, uvLen);
-        Buffer.BlockCopy(vPlane, 0, srcInterleaved, yLen + uvLen, uvLen);
-        dSrc.View.CopyFromCPU(srcInterleaved);
+        // Three direct uploads to subviews of dSrc - no host-side packed
+        // buffer, no Buffer.BlockCopy iteration over input pixels.
+        dSrc.View.SubView(0, yLen).CopyFromCPU(yPlane);
+        dSrc.View.SubView(yLen, uvLen).CopyFromCPU(uPlane);
+        dSrc.View.SubView(yLen + uvLen, uvLen).CopyFromCPU(vPlane);
 
         // Pre-zero recon (sequential kernel writes every pixel; safe to skip
         // but explicit zero gives stable carry-back state if the kernel
@@ -203,19 +203,19 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         await _accelerator.SynchronizeAsync();
 
         // ---- Read back tile bytes ----
+        // Per-range CopyToHostAsync: lib returns a fresh T[] sized to the
+        // requested range. No host-side iteration over codec data at the
+        // call site.
         long tileLen = (await dTileLen.CopyToHostAsync())[0];
-        var fullBuf = await dTile.CopyToHostAsync();
-        var tileResult = new byte[tileLen];
-        Array.Copy(fullBuf, tileResult, tileLen);
+        var tileResult = await dTile.CopyToHostAsync(0, tileLen);
 
         // ---- Read back recon planes ----
-        var reconBuf = await dRecon.CopyToHostAsync();
-        var yReconResult = new byte[yLen];
-        var uReconResult = new byte[uvLen];
-        var vReconResult = new byte[uvLen];
-        Buffer.BlockCopy(reconBuf, 0, yReconResult, 0, yLen);
-        Buffer.BlockCopy(reconBuf, yLen, uReconResult, 0, uvLen);
-        Buffer.BlockCopy(reconBuf, yLen + uvLen, vReconResult, 0, uvLen);
+        // Three per-plane partial readbacks of dRecon at the YPlaneOff /
+        // UPlaneOff / VPlaneOff offsets the kernel wrote to. No host
+        // BlockCopy on decoded pixels at this layer.
+        var yReconResult = await dRecon.CopyToHostAsync(0, yLen);
+        var uReconResult = await dRecon.CopyToHostAsync(yLen, uvLen);
+        var vReconResult = await dRecon.CopyToHostAsync(yLen + uvLen, uvLen);
 
         return (tileResult, yReconResult, uReconResult, vReconResult);
     }

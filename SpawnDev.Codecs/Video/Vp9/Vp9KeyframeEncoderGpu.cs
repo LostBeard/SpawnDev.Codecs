@@ -240,9 +240,8 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
 
         await _accelerator.SynchronizeAsync();
         long outFrameLen = (await dOutFrameLen.CopyToHostAsync())[0];
-        var fullBuf = await dOutFrame.CopyToHostAsync();
-        var result = new byte[outFrameLen];
-        Array.Copy(fullBuf, result, outFrameLen);
+        // Partial readback - lib returns a fresh byte[] sized to outFrameLen.
+        var result = await dOutFrame.CopyToHostAsync(0, outFrameLen);
 
         // Read back recon planes for self-consistency testing.
         // CopyToHostAsync returns fresh byte[] arrays sized to dY/dU/dV
