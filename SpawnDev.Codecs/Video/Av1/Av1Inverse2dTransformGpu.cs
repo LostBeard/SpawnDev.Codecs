@@ -126,66 +126,24 @@ public static class Av1Inverse2dTransformGpu
         }
 
         // === Column pass ===
-        // Need to gather column then apply Inverse16. Use residual as
-        // staging - write column input there, run Inverse16 in place,
-        // read back, scatter to final residual location with shift.
-        // Simpler: gather column to a temporary 16-int ArrayView region
-        // inside scratch (use a different region).
-        // The scratch buffer is 256 ints; we used [0..256) for the row
-        // pass output. We need 16 more ints for the column input. We
-        // can reuse residual[resBase + 0..16) as temp for the column
-        // input, since we write the final residual with the correct
-        // values afterward via the column loop's outer write.
-        //
-        // Actually simpler: write column input to a region inside the
-        // scratch by re-purposing the second half of a larger scratch.
-        // Caller must size scratch as 256+16 = 272 ints? No - to keep
-        // the API simple, gather to a 16-int local region inside
-        // residual and run Inverse16 in place there.
+        // Gather column into the second half of the scratch buffer
+        // (offsets [256..272) within the per-block scratch region) so
+        // we don't conflict with the row-pass output. Caller must size
+        // scratch as 272 ints per block.
+        // Inverse16 on column gather, write back to column buffer
+        // in-place, then scatter shifted values to the final residual
+        // positions (raster row*W+c).
+        long colBuf = scratchBase + 256;
         for (int c = 0; c < W; c++)
         {
-            // Gather column c into residual[resBase..resBase+16).
             for (int r = 0; r < H; r++)
             {
-                residual[resBase + r] = scratch[scratchBase + r * W + c];
+                scratch[colBuf + r] = scratch[scratchBase + r * W + c];
             }
-            // Inverse16 in place.
-            Av1InverseDct16Gpu.Inverse16(residual, resBase, residual, resBase, CosBit);
-            // Apply shift and scatter to final positions.
-            // BUT we need to be careful: residual[resBase..resBase+16) is being
-            // used as scratch for column c. After scattering to final positions
-            // (residual[r*W + c]), we move on to column c+1. Make sure
-            // we don't overwrite values we need.
-            //
-            // Strategy: for column c, gather into residual[resBase..+16),
-            // transform, then scatter to residual[r*W + c]. For c=0 that
-            // overwrites residual[resBase..+16) at positions 0, 16, 32, ...
-            // The first position 0 is the same as resBase+0. So scattering
-            // overwrites the gather buffer. Need the scattered values to
-            // match what we'd compute from scratch for column 0 - we just
-            // computed those, so scattering them is fine.
-            //
-            // For c >= 1: gather to residual[resBase..+16), transform,
-            // scatter to residual[r*W + 1] for r in 0..15. None of those
-            // positions overlap residual[resBase + 1..+15] (which are
-            // scratch positions r=1..15 col=0 - but we already populated
-            // those from the previous column's scatter? Actually NO -
-            // the previous column scattered to residual[r*W + 0] which
-            // is different from residual[resBase + r] for r >= 1.
-            //
-            // Wait: residual[resBase + r] = residual[resBase + r]. That's
-            // the same memory. residual[r*W + 0] = residual[resBase + r*W].
-            // For r=1, that's resBase+16, NOT resBase+1. So scatter
-            // positions don't overlap the gather positions for resBase+1..15.
-            //
-            // OK so the gather/transform/scatter for each column is safe
-            // as long as the scatter writes column c (positions resBase+r*W+c)
-            // and the gather reads from residual[resBase..+16) (positions
-            // resBase+0..+15). For c=0 they overlap at r=0 (resBase+0); we
-            // scatter at the end so that's fine.
+            Av1InverseDct16Gpu.Inverse16(scratch, colBuf, scratch, colBuf, CosBit);
             for (int r = 0; r < H; r++)
             {
-                int v = residual[resBase + r];
+                int v = scratch[colBuf + r];
                 int shifted = (v + 8) >> 4;
                 residual[resBase + r * W + c] = shifted;
             }

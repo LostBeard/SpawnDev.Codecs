@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
 
             using var dCoefs = acc.Allocate1D<int>(n);
             using var dRes = acc.Allocate1D<int>(n);
-            using var dScratch = acc.Allocate1D<int>(n);
+            using var dScratch = acc.Allocate1D<int>(Av1Inverse2dTransformGpuKernel.ScratchPerBlock(1));
             dCoefs.View.CopyFromCPU(coefs);
             kernel.Run(dCoefs.View, dRes.View, dScratch.View, blockCount: 1, txSize: 1);
             await acc.SynchronizeAsync();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
 
             using var dCoefs = acc.Allocate1D<int>(blockCount * n);
             using var dRes = acc.Allocate1D<int>(blockCount * n);
-            using var dScratch = acc.Allocate1D<int>(blockCount * n);
+            using var dScratch = acc.Allocate1D<int>(blockCount * Av1Inverse2dTransformGpuKernel.ScratchPerBlock(1));
             dCoefs.View.CopyFromCPU(coefs);
             kernel.Run(dCoefs.View, dRes.View, dScratch.View, blockCount, txSize: 1);
             await acc.SynchronizeAsync();
@@ -92,7 +92,7 @@ public abstract partial class CodecsTestBase
 
             using var dCoefs = acc.Allocate1D<int>(n);
             using var dRes = acc.Allocate1D<int>(n);
-            using var dScratch = acc.Allocate1D<int>(n);
+            using var dScratch = acc.Allocate1D<int>(Av1Inverse2dTransformGpuKernel.ScratchPerBlock(2));
             dCoefs.View.CopyFromCPU(coefs);
             kernel.Run(dCoefs.View, dRes.View, dScratch.View, blockCount: 1, txSize: 2);
             await acc.SynchronizeAsync();
@@ -122,7 +122,7 @@ public abstract partial class CodecsTestBase
 
             using var dCoefs = acc.Allocate1D<int>(blockCount * n);
             using var dRes = acc.Allocate1D<int>(blockCount * n);
-            using var dScratch = acc.Allocate1D<int>(blockCount * n);
+            using var dScratch = acc.Allocate1D<int>(blockCount * Av1Inverse2dTransformGpuKernel.ScratchPerBlock(2));
             dCoefs.View.CopyFromCPU(coefs);
             kernel.Run(dCoefs.View, dRes.View, dScratch.View, blockCount, txSize: 2);
             await acc.SynchronizeAsync();
