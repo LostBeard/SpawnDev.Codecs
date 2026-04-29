@@ -76,4 +76,33 @@ public static class VorbisBitWriterGpu
             state.BitPos = 0;
         }
     }
+
+    /// <summary>
+    /// Write a canonical Huffman codebook entry. The codeword's bits are
+    /// emitted MSB-first within the codeword (which is the canonical
+    /// Vorbis convention; the LSB-first stream packing is handled by
+    /// the underlying WriteBits). Mirrors
+    /// VorbisAudioEncoder.WriteCodebookEntry.
+    /// </summary>
+    /// <param name="state">Bit writer state (mutated).</param>
+    /// <param name="outBuf">Output byte buffer.</param>
+    /// <param name="codes">Flat codeword array; codes[entry] is the canonical bit pattern.</param>
+    /// <param name="codesBase">Base offset.</param>
+    /// <param name="lengths">Flat codeword length array (bits per entry).</param>
+    /// <param name="lengthsBase">Base offset.</param>
+    /// <param name="entry">Codebook entry index.</param>
+    public static void WriteCodebookEntry(
+        ref VorbisBitWriterGpuState state, ArrayView<byte> outBuf,
+        ArrayView<uint> codes, long codesBase,
+        ArrayView<int> lengths, long lengthsBase,
+        int entry)
+    {
+        uint code = codes[codesBase + entry];
+        int length = lengths[lengthsBase + entry];
+        for (int b = length - 1; b >= 0; b--)
+        {
+            uint bit = (code >> b) & 1u;
+            WriteBits(ref state, outBuf, bit, 1);
+        }
+    }
 }
