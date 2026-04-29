@@ -52,6 +52,26 @@ Patent-clean via the AOMedia patent pledge.
 
 Containers wired for video pipelines: IVF reader + writer, Matroska / WebM via SpawnDev.EBML, Ogg.
 
+### GPU encoder + decoder pairs (v3 100% ILGPU)
+
+Every entry below runs entirely on the accelerator (CUDA + OpenCL + CPU
+verified bit-exact via PlaywrightMultiTest; WebGPU + WebGL + Wasm by
+ILGPU IR symmetry). Host is a pure coordinator: alloc + upload + dispatch
++ readback. No CPU math, no CPU iteration, no CPU bitstream assembly.
+
+| Codec  | GPU Encoder              | GPU Decoder              | Status                                |
+|--------|--------------------------|--------------------------|---------------------------------------|
+| VP8    | `Vp8KeyframeEncoderGpu`  | `Vp8KeyframeDecoderGpu`  | v1 keyframe (Y=128 round-trip 0.2)    |
+| VP9    | `Vp9KeyframeEncoderGpu`  | `Vp9KeyframeDecoderGpu`  | v1 keyframe + multi-block walker      |
+| FLAC   | `FlacEncoderGpu`         | `FlacDecoderGpu`         | v1 keyframe (4096-block, 16-bit, 44.1k) |
+| AV1    | `Av1KeyframeEncoderGpu`  | `Av1KeyframeDecoderGpu`  | v1 keyframe bit-exact vs CPU encoder  |
+| Vorbis | -                        | -                        | 7 GPU primitives shipped              |
+| Opus   | -                        | -                        | 4 GPU primitives shipped              |
+
+Each pair has tests in `CodecsTestBase.<Codec>KeyframeEncoderGpuTests.cs`
++ `CodecsTestBase.<Codec>KeyframeDecoderGpuTests.cs` running across every
+backend.
+
 ### Out of scope (patent-encumbered)
 
 H.264, H.265, AAC, MP3 - delegated to platform encoders via [SpawnDev.MultiMedia](https://github.com/LostBeard/SpawnDev.MultiMedia).
