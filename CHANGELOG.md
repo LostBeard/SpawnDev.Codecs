@@ -5,6 +5,51 @@
 Initial development. Project still in pre-release. See README.md for the
 working feature matrix.
 
+### 2026-04-29 - AV1 GPU encoder + decoder pair complete (4 of 6 codecs on GPU)
+
+**Status:** 4 of 6 codecs now have working encoder + decoder pairs on every
+ILGPU backend (CUDA + OpenCL + CPU verified, WebGPU/WebGL/Wasm by symmetry).
+
+| Codec  | Encoder | Decoder | Notes                                         |
+|--------|---------|---------|-----------------------------------------------|
+| VP8    | ✅      | ✅      | v3 100% ILGPU since 2026-04-26                |
+| VP9    | ✅      | ✅      | v3 100% ILGPU since 2026-04-27                |
+| FLAC   | ✅      | ✅      | v3 100% ILGPU since 2026-04-28                |
+| AV1    | ✅ NEW  | ✅ NEW  | v3 100% ILGPU bit-exact vs CPU encoder        |
+| Vorbis | -       | -       | 5 GPU primitives shipped, integration pending |
+| Opus   | -       | -       | 4 GPU primitives shipped, integration pending |
+
+**New:**
+
+- `Av1FrameSequentialEncodeKernel` + `Av1KeyframeEncoderGpu` - v3 100%
+  ILGPU AV1 v1 keyframe encoder. Single GPU thread runs the entire
+  EncodeSingleTile pipeline (partition recursion + skip + ymode + uvmode +
+  per-plane predict + 2D DCT + quantize + coef tokens + dequant + iDCT +
+  recon) bit-exact vs the CPU `Av1KeyframeEncoder.EncodeSingleTile` reference.
+  `EncodeKeyFrameAsync` returns the full TD + SH + Frame OBU stream bit-exact
+  vs CPU encoder. Verified across CUDA + OpenCL + CPU (commit `a53e26d`).
+- `Av1FrameSequentialDecodeKernel` + `Av1KeyframeDecoderGpu` - companion
+  decoder. Round-trip tests prove the GPU decoder reconstructs the same
+  YUV planes the GPU encoder produces internally - bit-exact across all 3
+  backends (commit `4832234`).
+- `SilkBwexpanderGpu` - third Opus SILK primitive on GPU. Chirp expansion
+  for AR filter coefficients (Expand16 + Expand32). Used by NLSF
+  stabilization and LPC whitening (commit `ea7cc52`).
+
+**Bug found + fixed:** `GetQctx` quantizer-bin thresholds were
+`[32, 128, 192]` instead of correct libaom `[20, 60, 120]` per
+`Av1CoefDecoder.GetQctx`. This shifted the txb_skip CDF row used for the
+first per-plane emit, producing 18-byte output where CPU produced 21 bytes.
+Diagnosed via a CPU-shadow walker that mirrored the GPU walker logic
+through the same `Av1RangeEncoder`; emit-trace comparison pinpointed the
+divergence at emit #6.
+
+**Test counts added:**
+- 9 SilkBwexpanderGpu tests
+- 12 Av1KeyframeEncoderGpu tests (4 cases x 3 backends)
+- 6 Av1KeyframeDecoderGpu tests (2 cases x 3 backends)
+- Full AV1 sweep: 696/696 PASS (zero regressions from walker additions).
+
 ### 2026-04-27/28 - all encoders + decoders working through public APIs
 
 **Bug fixes (4 critical, 2 follow-on):**
