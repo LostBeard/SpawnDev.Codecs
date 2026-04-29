@@ -20,6 +20,9 @@ public static class VorbisWindowGpu
     /// Compute one canonical Vorbis synthesis window sample at index
     /// <paramref name="i"/> for window length <paramref name="n"/>.
     /// Window shape: w[i] = sin(pi/2 * sin^2(pi/n * (i + 0.5))).
+    /// Uses float-precision XMath.Sin; cross-backend tests compare with
+    /// 1e-6 tolerance vs the CPU double-precision reference (the
+    /// difference is &lt; 1 ULP at typical inputs and audibly inaudible).
     /// </summary>
     public static float CanonicalSample(int i, int n)
     {
@@ -41,5 +44,19 @@ public static class VorbisWindowGpu
         int i)
     {
         output[outBase + i] = previousRightHalf[prevBase + i] + currentLeftHalf[currBase + i];
+    }
+
+    /// <summary>
+    /// Apply the canonical window to one input sample at index <paramref name="i"/>:
+    /// <c>output[outBase + i] = input[inBase + i] * CanonicalSample(i, n)</c>.
+    /// Per-sample independent; one thread per output sample. Used by the
+    /// Vorbis encoder's pre-MDCT windowing step.
+    /// </summary>
+    public static void ApplyWindowAt(
+        ArrayView<float> input, long inBase,
+        ArrayView<float> output, long outBase,
+        int i, int n)
+    {
+        output[outBase + i] = input[inBase + i] * CanonicalSample(i, n);
     }
 }
