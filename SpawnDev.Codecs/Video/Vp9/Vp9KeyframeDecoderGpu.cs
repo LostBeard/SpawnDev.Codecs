@@ -143,18 +143,14 @@ public sealed class Vp9KeyframeDecoderGpu : IDisposable
         await _accelerator.SynchronizeAsync();
 
         // ---- 3. Read back recon ----
+        // CopyToHostAsync returns fresh byte[] arrays sized to the GPU
+        // buffers (yLen / uvLen / uvLen). No CPU iteration on codec data
+        // needed - we hand them directly to the result record.
         var yRecon = await dYRecon.CopyToHostAsync();
         var uRecon = await dURecon.CopyToHostAsync();
         var vRecon = await dVRecon.CopyToHostAsync();
 
-        var yResult = new byte[yLen];
-        var uResult = new byte[uvLen];
-        var vResult = new byte[uvLen];
-        Array.Copy(yRecon, yResult, yLen);
-        Array.Copy(uRecon, uResult, uvLen);
-        Array.Copy(vRecon, vResult, uvLen);
-
-        return new Vp9DecodedFrame(yResult, uResult, vResult, width, height);
+        return new Vp9DecodedFrame(yRecon, uRecon, vRecon, width, height);
     }
 
     /// <summary>Release every resource the decoder owns.</summary>
