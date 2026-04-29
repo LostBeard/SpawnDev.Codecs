@@ -59,6 +59,9 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     private int _previousHalfBlock = 0;
 
     // Compiled kernels.
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>>
+        _multiplyKernel;
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>> _inverseCouplingKernel;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, int> _imdctKernel;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>,
         ArrayView<float>, ArrayView<float>, int> _postImdctKernel;
@@ -81,6 +84,10 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         _setup = setup ?? throw new ArgumentNullException(nameof(setup));
         _cpuRef = new VorbisAudioDecoder(ident, setup);
 
+        _multiplyKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>>(MultiplyKernel);
+        _inverseCouplingKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<float>, ArrayView<float>>(InverseCouplingKernel);
         _imdctKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<float>, ArrayView<float>, int>(ImdctKernel);
         _postImdctKernel = accelerator.LoadAutoGroupedStreamKernel<
@@ -102,28 +109,41 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         int channels = _ident.AudioChannels;
 
         // Step 1: CPU spectrum decode (bit-stream parse + Huffman + floor +
-        // residue + multiply + inverse coupling). v1 hybrid - the bit-stream
-        // path will move to GPU once the Vorbis-Huffman bit-reader keystone
-        // primitive lands. Returns per-channel spectrum coefficients
-        // (length halfBlock per channel, post-inverse-coupling).
-        var (spectra, blockSize) = DecodeSpectrumOnCpu(packet);
+        // residue). v1 hybrid - the bit-stream path will move to GPU once the
+        // Vorbis-Huffman bit-reader keystone primitive lands. Returns
+        // per-channel floor curves + residue buffers + floor flags + the
+        // mapping config (coupling steps for the inverse-coupling stage).
+        var bitstream = DecodeSpectrumOnCpu(packet);
+        int blockSize = bitstream.BlockSize;
         int halfBlock = blockSize / 2;
 
         // Allocate per-call GPU buffers.
         long tdBufferLen = (long)channels * blockSize;
         long specBufferLen = (long)channels * halfBlock;
+        using var dFloor = _accelerator.Allocate1D<float>(specBufferLen);
+        using var dResidue = _accelerator.Allocate1D<float>(specBufferLen);
         using var dSpec = _accelerator.Allocate1D<float>(specBufferLen);
         using var dTd = _accelerator.Allocate1D<float>(tdBufferLen);
         using var dWindow = _accelerator.Allocate1D<float>(blockSize);
         using var dPcmCm = _accelerator.Allocate1D<float>((long)channels * halfBlock);
         using var dPcmInterleaved = _accelerator.Allocate1D<float>((long)channels * halfBlock);
 
-        // Upload spectra (per-channel concatenated) + window.
-        var specFlat = new float[specBufferLen];
+        // Upload floor curves + residues (channel-major concatenated) + window.
+        var floorFlat = new float[specBufferLen];
+        var residueFlat = new float[specBufferLen];
         for (int ch = 0; ch < channels; ch++)
-            Array.Copy(spectra[ch], 0, specFlat, (long)ch * halfBlock, halfBlock);
-        dSpec.View.CopyFromCPU(specFlat);
+        {
+            Array.Copy(bitstream.FloorCurves[ch], 0, floorFlat, (long)ch * halfBlock, halfBlock);
+            Array.Copy(bitstream.Residues[ch], 0, residueFlat, (long)ch * halfBlock, halfBlock);
+        }
+        dFloor.View.CopyFromCPU(floorFlat);
+        dResidue.View.CopyFromCPU(residueFlat);
         dWindow.View.CopyFromCPU(VorbisWindow.GenerateCanonical(blockSize));
+
+        // Spec must start zeroed - silent-floor channels are left as zero
+        // (the GPU multiply only runs for floorOk channels).
+        var zeroSpec = new float[specBufferLen];
+        dSpec.View.CopyFromCPU(zeroSpec);
 
         // Allocate / re-allocate previous-right-half buffer if blockSize changed.
         bool havePrevious = _previousBlockSize == blockSize && _dPrevRightHalf is not null;
@@ -145,7 +165,34 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         // Allocate the new-right-half buffer (replaces dPrev after this call).
         var dNewRight = _accelerator.Allocate1D<float>((long)channels * halfBlock);
 
-        // Step 2: GPU IMDCT per channel (one thread per output sample).
+        // Step 2: GPU floor x residue multiply (per-bin parallel). Silent-
+        // floor channels stay zero (we don't dispatch their multiply).
+        for (int ch = 0; ch < channels; ch++)
+        {
+            if (!bitstream.FloorOk[ch]) continue;
+            long offs = (long)ch * halfBlock;
+            var floorView = dFloor.View.SubView(offs, halfBlock);
+            var residueView = dResidue.View.SubView(offs, halfBlock);
+            var specView = dSpec.View.SubView(offs, halfBlock);
+            _multiplyKernel(new Index1D(halfBlock), floorView, residueView, specView);
+        }
+
+        // Step 3: GPU inverse channel coupling per coupling step in REVERSE
+        // order (Vorbis I sec 4.3.8). Mono streams have zero coupling steps.
+        var couplingMag = bitstream.Mapping.CouplingMagnitudeChannels;
+        var couplingAng = bitstream.Mapping.CouplingAngleChannels;
+        for (int step = couplingMag.Length - 1; step >= 0; step--)
+        {
+            int magCh = couplingMag[step];
+            int angCh = couplingAng[step];
+            long magOffs = (long)magCh * halfBlock;
+            long angOffs = (long)angCh * halfBlock;
+            var magView = dSpec.View.SubView(magOffs, halfBlock);
+            var angView = dSpec.View.SubView(angOffs, halfBlock);
+            _inverseCouplingKernel(new Index1D(halfBlock), magView, angView);
+        }
+
+        // Step 4: GPU IMDCT per channel (one thread per output sample).
         // Reads from dSpec (halfBlock floats / channel), writes 2N=blockSize
         // samples / channel to dTd. Bit-near-exact mirror of CPU
         // ImdctReference.Transform via the GPU helper.
@@ -159,7 +206,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
             _imdctKernel(new Index1D(blockSize), specView, tdView, halfBlock);
         }
 
-        // Step 3: GPU PostImdct (window + overlap-add + new-right-half-save) per channel.
+        // Step 5: GPU PostImdct (window + overlap-add + new-right-half-save) per channel.
         for (int ch = 0; ch < channels; ch++)
         {
             long tdBase = (long)ch * blockSize;
@@ -173,7 +220,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
                 tdView, dWindow.View, prevView, newRightView, pcmView, halfBlock);
         }
 
-        // Step 4: GPU interleave channel-major PCM -> sample-major PCM.
+        // Step 6: GPU interleave channel-major PCM -> sample-major PCM.
         if (havePrevious)
         {
             _interleaveKernel(new Index1D(halfBlock * channels),
@@ -196,15 +243,19 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         return pcm;
     }
 
+    /// <summary>Result of the v1 CPU bit-stream parse.</summary>
+    private readonly record struct CpuBitstream(
+        float[][] FloorCurves, float[][] Residues, bool[] FloorOk,
+        VorbisMappingConfig Mapping, int BlockSize);
+
     /// <summary>
     /// CPU helper for v1: parse packet via the existing CPU decoder + return
-    /// channel-major spectrum coefficients (post-floor-multiply + post-inverse-
-    /// coupling, pre-IMDCT). Pulls in the existing VorbisAudioDecoder bit-
-    /// stream path so the GPU integration class has a working spectrum
-    /// pipeline today; the hot path moves to GPU as the Vorbis-Huffman GPU
-    /// bit-reader lands.
+    /// per-channel floor curves + residue buffers + floor flags + mapping
+    /// (for inverse coupling steps). The multiply + inverse coupling + IMDCT
+    /// + post-IMDCT + interleave steps all run on GPU. The hot path moves to
+    /// GPU as the Vorbis-Huffman GPU bit-reader keystone primitive lands.
     /// </summary>
-    private (float[][] spectra, int blockSize) DecodeSpectrumOnCpu(ReadOnlyMemory<byte> packet)
+    private CpuBitstream DecodeSpectrumOnCpu(ReadOnlyMemory<byte> packet)
     {
         // Parse packet header on CPU to learn blockSize.
         var bitReader = new VorbisBitReader(packet.Span);
@@ -270,22 +321,30 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
                 subBuffers, subSkip, halfBlock);
         }
 
-        // Multiply floor curve by residue + inverse coupling.
-        var spectra = new float[channels][];
-        for (int ch = 0; ch < channels; ch++)
-        {
-            var spec = new float[halfBlock];
-            if (floorOk[ch])
-            {
-                for (int i = 0; i < halfBlock; i++)
-                    spec[i] = floorCurves[ch][i] * residueBuffers[ch][i];
-            }
-            spectra[ch] = spec;
-        }
-        VorbisInverseCoupling.Apply(spectra, mapping);
+        // Multiply, inverse coupling, IMDCT, and the rest of the chain now
+        // all run on GPU - we hand the raw decoded floor + residue + flags +
+        // mapping to the caller.
+        return new CpuBitstream(floorCurves, residueBuffers, floorOk, mapping, blockSize);
+    }
 
-        // IMDCT now runs on GPU - we return spectrum coefficients directly.
-        return (spectra, blockSize);
+    /// <summary>
+    /// Per-bin floor x residue multiply kernel. One thread per spectrum bin.
+    /// </summary>
+    private static void MultiplyKernel(
+        Index1D index, ArrayView<float> floor, ArrayView<float> residue,
+        ArrayView<float> spectrum)
+    {
+        VorbisFloorMultiplyGpu.MultiplyAt(floor, 0, residue, 0, spectrum, 0, index.X);
+    }
+
+    /// <summary>
+    /// Per-coefficient inverse coupling kernel. One thread per coefficient
+    /// of the (magnitude, angle) channel pair.
+    /// </summary>
+    private static void InverseCouplingKernel(
+        Index1D index, ArrayView<float> magBuf, ArrayView<float> angBuf)
+    {
+        VorbisInverseCouplingGpu.ApplyAtCoefficient(magBuf, 0, angBuf, 0, index.X);
     }
 
     /// <summary>

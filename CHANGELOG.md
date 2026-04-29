@@ -5,6 +5,30 @@
 Initial development. Project still in pre-release. See README.md for the
 working feature matrix.
 
+### 2026-04-29 - VorbisAudioDecoderGpu floor*residue multiply + inverse coupling move to GPU
+
+`VorbisAudioDecoderGpu` now dispatches `VorbisFloorMultiplyGpu` and
+`VorbisInverseCouplingGpu` instead of doing the corresponding scalar
+loops in the CPU helper. Per-channel floor curves + residue buffers
+upload once; multiply runs as one Index1D dispatch per non-silent
+channel; the (mag, ang) coupling pairs run as one Index1D dispatch each
+in REVERSE step order per Vorbis I sec 4.3.8.
+
+Pipeline state after this commit (v1 hybrid):
+
+| Stage                            | Where  |
+|----------------------------------|--------|
+| Bit-stream parse + Huffman + floor decode + residue decode | CPU |
+| Floor curve x residue multiply   | GPU    |
+| Inverse channel coupling         | GPU    |
+| IMDCT                            | GPU    |
+| Window apply + overlap-add + new-right-half-save | GPU    |
+| Channel interleave               | GPU    |
+
+Mono test path covers no coupling steps (mapping has zero pairs); the
+inverse-coupling kernel will get exercised by future stereo tests.
+Silence-path round-trip 6/6 PMT (CUDA + OpenCL + CPU) PASS.
+
 ### 2026-04-29 - VorbisAudioDecoderGpu IMDCT step moves from CPU to GPU
 
 `VorbisAudioDecoderGpu.DecodePacketAsync` now dispatches `ImdctReferenceGpu`
