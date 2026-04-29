@@ -5,6 +5,36 @@
 Initial development. Project still in pre-release. See README.md for the
 working feature matrix.
 
+### 2026-04-29 - VorbisAudioDecoderGpu floor curve render moves to GPU
+
+`VorbisAudioDecoderGpu` now dispatches `VorbisFloor1RenderCurveGpu`
+instead of calling the CPU `VorbisFloor1Curve.Render`. Per-floor
+`xList` arrays + the 256-entry inverse-dB lookup are pre-flattened +
+uploaded once at construction; per packet the CPU bit-stream parse
+produces the per-channel posterior Y values, which upload to GPU and
+drive a single-thread floor render kernel per non-silent channel.
+
+Tone round-trip test still PASSES on CUDA + OpenCL + CPU (9/9 PMT).
+This is a meaningful proof point because the floor render IS exercised
+on the tone path (silent floors get zero-curve fallback + skip the
+dispatch entirely).
+
+Pipeline state (v1 hybrid):
+
+| Stage                      | Where |
+|----------------------------|-------|
+| Parse + Huffman + floor decode + residue decode | CPU |
+| Floor curve render         | **GPU** |
+| Floor x residue multiply   | GPU |
+| Inverse coupling           | GPU |
+| IMDCT                      | GPU |
+| Window + overlap-add + right-half save | GPU |
+| Channel interleave         | GPU |
+
+Remaining CPU side: bit-stream parse + Huffman, floor 1 posterior
+decode, residue decode. Vorbis-Huffman GPU bit-reader keystone
+primitive is what unlocks moving those.
+
 ### 2026-04-29 - VorbisAudioDecoderGpu non-silence tone round-trip test
 
 `VorbisAudioDecoderGpu_ToneRoundTrip_MatchesCpuDecoder` exercises the

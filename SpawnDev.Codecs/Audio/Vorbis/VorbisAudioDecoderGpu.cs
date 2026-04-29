@@ -58,7 +58,17 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     private int _previousBlockSize = 0;
     private int _previousHalfBlock = 0;
 
+    // Pre-uploaded static lookups (lifetime = decoder lifetime).
+    private readonly MemoryBuffer1D<float, Stride1D.Dense> _dInverseDb;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dXListsFlat;
+    private readonly int[] _xListOffsets;   // [floorIdx] -> offset into _dXListsFlat
+    private readonly int[] _xListLengths;   // [floorIdx] -> XList.Length
+    private readonly int _maxXListLength;
+
     // Compiled kernels.
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<float>,
+        ArrayView<float>, ArrayView<int>, ArrayView<byte>, int, int, int, int>
+        _floorRenderKernel;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>>
         _multiplyKernel;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>> _inverseCouplingKernel;
@@ -84,6 +94,32 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         _setup = setup ?? throw new ArgumentNullException(nameof(setup));
         _cpuRef = new VorbisAudioDecoder(ident, setup);
 
+        // Pre-flatten + upload static floor data: xLists per floor + 256-entry inverse-dB lookup.
+        int totalXList = 0, maxXList = 0;
+        _xListOffsets = new int[setup.Floors.Length];
+        _xListLengths = new int[setup.Floors.Length];
+        for (int f = 0; f < setup.Floors.Length; f++)
+        {
+            var floor = setup.Floors[f];
+            _xListOffsets[f] = totalXList;
+            _xListLengths[f] = floor.XList.Length;
+            totalXList += floor.XList.Length;
+            if (floor.XList.Length > maxXList) maxXList = floor.XList.Length;
+        }
+        _maxXListLength = maxXList;
+        var xListsFlat = new int[Math.Max(1, totalXList)];
+        for (int f = 0; f < setup.Floors.Length; f++)
+        {
+            Array.Copy(setup.Floors[f].XList, 0, xListsFlat, _xListOffsets[f], _xListLengths[f]);
+        }
+        _dXListsFlat = accelerator.Allocate1D<int>(xListsFlat.Length);
+        _dXListsFlat.View.CopyFromCPU(xListsFlat);
+        _dInverseDb = accelerator.Allocate1D<float>(256);
+        _dInverseDb.View.CopyFromCPU(VorbisFloor1InverseDbGpu.BuildInverseDbTable());
+
+        _floorRenderKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<int>, ArrayView<int>, ArrayView<float>,
+            ArrayView<float>, ArrayView<int>, ArrayView<byte>, int, int, int, int>(FloorRenderKernel);
         _multiplyKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>>(MultiplyKernel);
         _inverseCouplingKernel = accelerator.LoadAutoGroupedStreamKernel<
@@ -128,22 +164,62 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         using var dPcmCm = _accelerator.Allocate1D<float>((long)channels * halfBlock);
         using var dPcmInterleaved = _accelerator.Allocate1D<float>((long)channels * halfBlock);
 
-        // Upload floor curves + residues (channel-major concatenated) + window.
-        var floorFlat = new float[specBufferLen];
+        // Per-channel decodedY (posteriors) + floor render scratch buffers
+        // (sized for the largest possible xList across all floors).
+        using var dPosteriors = _accelerator.Allocate1D<int>((long)channels * _maxXListLength);
+        using var dScratchInt = _accelerator.Allocate1D<int>((long)channels * 2 * _maxXListLength);
+        using var dScratchByte = _accelerator.Allocate1D<byte>((long)channels * _maxXListLength);
+
+        // Upload posteriors (channel-major) + residues (channel-major) + window.
+        // Floor curves are produced by the GPU render kernel below; dFloor
+        // pre-zeroed so silent-floor channels stay zero (they don't get a render dispatch).
+        var posteriorFlat = new int[(long)channels * _maxXListLength];
         var residueFlat = new float[specBufferLen];
+        var zeroFloor = new float[specBufferLen];
         for (int ch = 0; ch < channels; ch++)
         {
-            Array.Copy(bitstream.FloorCurves[ch], 0, floorFlat, (long)ch * halfBlock, halfBlock);
+            if (bitstream.FloorOk[ch] && bitstream.FloorPosteriors[ch] is { } yArr)
+                Array.Copy(yArr, 0, posteriorFlat, (long)ch * _maxXListLength, yArr.Length);
             Array.Copy(bitstream.Residues[ch], 0, residueFlat, (long)ch * halfBlock, halfBlock);
         }
-        dFloor.View.CopyFromCPU(floorFlat);
+        dPosteriors.View.CopyFromCPU(posteriorFlat);
         dResidue.View.CopyFromCPU(residueFlat);
+        dFloor.View.CopyFromCPU(zeroFloor);
         dWindow.View.CopyFromCPU(VorbisWindow.GenerateCanonical(blockSize));
 
         // Spec must start zeroed - silent-floor channels are left as zero
         // (the GPU multiply only runs for floorOk channels).
         var zeroSpec = new float[specBufferLen];
         dSpec.View.CopyFromCPU(zeroSpec);
+
+        // Step 1.5: GPU floor curve render per non-silent channel. Single-
+        // thread kernel orchestrating the per-channel render via
+        // VorbisFloor1RenderCurveGpu.Render. dFloor was pre-zeroed for the
+        // silent channels above so we can skip their dispatches entirely.
+        for (int ch = 0; ch < channels; ch++)
+        {
+            if (!bitstream.FloorOk[ch]) continue;
+            int floorIdx = bitstream.FloorIndexPerChannel[ch];
+            int values = _xListLengths[floorIdx];
+            int xListBase = _xListOffsets[floorIdx];
+            int multiplier = _setup.Floors[floorIdx].Multiplier;
+
+            long posteriorOffs = (long)ch * _maxXListLength;
+            long scratchIntOffs = (long)ch * 2 * _maxXListLength;
+            long scratchByteOffs = (long)ch * _maxXListLength;
+            long floorOffs = (long)ch * halfBlock;
+
+            var posteriorView = dPosteriors.View.SubView(posteriorOffs, values);
+            var scratchIntView = dScratchInt.View.SubView(scratchIntOffs, 2 * values);
+            var scratchByteView = dScratchByte.View.SubView(scratchByteOffs, values);
+            var floorView = dFloor.View.SubView(floorOffs, halfBlock);
+
+            _floorRenderKernel(
+                new Index1D(1),
+                _dXListsFlat.View, posteriorView, floorView,
+                _dInverseDb.View, scratchIntView, scratchByteView,
+                xListBase, values, multiplier, halfBlock);
+        }
 
         // Allocate / re-allocate previous-right-half buffer if blockSize changed.
         bool havePrevious = _previousBlockSize == blockSize && _dPrevRightHalf is not null;
@@ -243,9 +319,12 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         return pcm;
     }
 
-    /// <summary>Result of the v1 CPU bit-stream parse.</summary>
+    /// <summary>Result of the v1 CPU bit-stream parse. Floor curves are
+    /// rendered on GPU, so we hand back the per-channel posterior Y values
+    /// + the floor index for each channel + the residue buffers.</summary>
     private readonly record struct CpuBitstream(
-        float[][] FloorCurves, float[][] Residues, bool[] FloorOk,
+        int[]?[] FloorPosteriors, int[] FloorIndexPerChannel,
+        float[][] Residues, bool[] FloorOk,
         VorbisMappingConfig Mapping, int BlockSize);
 
     /// <summary>
@@ -264,10 +343,12 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         int halfBlock = blockSize / 2;
         int channels = _ident.AudioChannels;
 
-        // Per-channel floor decode + render.
+        // Per-channel floor decode (CPU bit-stream + Huffman). The
+        // posterior int[] is handed to the GPU floor render kernel below.
         var mapping = _setup.Mappings[_setup.Modes[header.ModeNumber].Mapping];
         var floorOk = new bool[channels];
-        var floorCurves = new float[channels][];
+        var posteriors = new int[]?[channels];
+        var floorIndexPerChannel = new int[channels];
         var huffmanField = typeof(VorbisAudioDecoder).GetField(
             "_huffmanDecoders", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
         var huffman = (VorbisHuffmanDecoder[])huffmanField!.GetValue(_cpuRef)!;
@@ -276,19 +357,11 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         {
             int submap = mapping.Mux[ch];
             int floorIdx = mapping.SubmapFloor[submap];
+            floorIndexPerChannel[ch] = floorIdx;
             var floorCfg = _setup.Floors[floorIdx];
             int[]? posterior = VorbisFloor1Decoder.Decode(ref bitReader, floorCfg, huffman);
             floorOk[ch] = posterior is not null;
-            if (floorOk[ch])
-            {
-                var curve = new float[halfBlock];
-                VorbisFloor1Curve.Render(floorCfg, posterior!, halfBlock, curve);
-                floorCurves[ch] = curve;
-            }
-            else
-            {
-                floorCurves[ch] = new float[halfBlock]; // silent floor -> zero curve
-            }
+            posteriors[ch] = posterior;
         }
 
         // Residue decode per submap.
@@ -321,10 +394,31 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
                 subBuffers, subSkip, halfBlock);
         }
 
-        // Multiply, inverse coupling, IMDCT, and the rest of the chain now
-        // all run on GPU - we hand the raw decoded floor + residue + flags +
-        // mapping to the caller.
-        return new CpuBitstream(floorCurves, residueBuffers, floorOk, mapping, blockSize);
+        // Floor render, multiply, inverse coupling, IMDCT, and the rest of
+        // the chain now all run on GPU - we hand the raw posteriors +
+        // residues + flags + mapping to the caller.
+        return new CpuBitstream(
+            posteriors, floorIndexPerChannel, residueBuffers, floorOk, mapping, blockSize);
+    }
+
+    /// <summary>
+    /// Single-thread floor 1 curve render kernel orchestrator.
+    /// Dispatches to <see cref="VorbisFloor1RenderCurveGpu.Render"/>.
+    /// </summary>
+    private static void FloorRenderKernel(
+        Index1D _,
+        ArrayView<int> xList, ArrayView<int> decodedY, ArrayView<float> curveOut,
+        ArrayView<float> inverseDb, ArrayView<int> scratchInt, ArrayView<byte> scratchByte,
+        int xListBase, int values, int multiplier, int halfBlock)
+    {
+        VorbisFloor1RenderCurveGpu.Render(
+            xList, xListBase, values,
+            decodedY, 0,
+            multiplier, halfBlock,
+            curveOut, 0,
+            inverseDb, 0,
+            scratchInt, 0,
+            scratchByte, 0);
     }
 
     /// <summary>
@@ -390,5 +484,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     public void Dispose()
     {
         _dPrevRightHalf?.Dispose();
+        _dInverseDb.Dispose();
+        _dXListsFlat.Dispose();
     }
 }
