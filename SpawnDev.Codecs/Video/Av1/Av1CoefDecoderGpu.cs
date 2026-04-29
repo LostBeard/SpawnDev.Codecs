@@ -75,26 +75,15 @@ public static class Av1CoefDecoderGpu
             return;
         }
 
-        // ---- Step 2: tx_type. v1 always DCT_DCT. ----
+        // ---- Step 2: tx_type. v1 always DCT_DCT under reducedTxSet=true. ----
         if (plane == 0 && qindex > 0)
         {
-            long extTxCdfBase;
-            int numSet;
-            if (txSize == 1)
-            {
-                extTxCdfBase = Av1KeyframeConstantsGpu.IntraExtTxCdfTx8DcOffset;
-                numSet = 7;
-            }
-            else
-            {
-                extTxCdfBase = Av1KeyframeConstantsGpu.IntraExtTxCdfTx16DcOffset;
-                numSet = 5;
-            }
-            // Decoded sym is consumed (we don't need to remap it back to
-            // tx_type since v1 always emits DCT_DCT and the encoder
-            // wrote sym=1 for DCT_DCT; here we read it back for entropy
-            // state symmetry but ignore the value).
-            int unused = Av1RangeDecoderGpu.DecodeCdfQ15(ref rd, inBuf, constsUshort, extTxCdfBase, numSet);
+            long extTxCdfBase = txSize == 1
+                ? Av1KeyframeConstantsGpu.IntraExtTxCdfTx8DcOffset
+                : Av1KeyframeConstantsGpu.IntraExtTxCdfTx16DcOffset;
+            // Decoded sym is consumed (read back for entropy state
+            // symmetry; value ignored since v1 always emits DCT_DCT).
+            int unused = Av1RangeDecoderGpu.DecodeCdfQ15(ref rd, inBuf, constsUshort, extTxCdfBase, 5);
         }
 
         int txClass = Av1TxbCommonGpu.TxClass2d;

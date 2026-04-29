@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
     {
         var enc = new Av1RangeEncoder();
         var result = Av1CoefEncoder.WriteCoeffsTxb(
-            enc, txSize, plane, Av1IntraMode.Dc, reducedTxSet: false,
+            enc, txSize, plane, Av1IntraMode.Dc, reducedTxSet: true,
             txbSkipCtx, dcSignCtx, coefs, qindex, Av1TxType.DctDct);
         eob = result.Eob;
         culLevel = result.CulLevel;

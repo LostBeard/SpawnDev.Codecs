@@ -107,25 +107,15 @@ public static class Av1CoefEncoderGpu
         }
 
         // ---- Step 2: tx_type. Y plane only with qindex > 0; for v1 we
-        // always emit DCT_DCT. The CDF row + sym index depend on tx size:
-        //   Tx8x8  -> set 3, 7 syms, DCT_DCT sym = 1
-        //   Tx16x16 -> set 2, 5 syms, DCT_DCT sym = 1
-        // ----
+        // always emit DCT_DCT under reducedTxSet=true. Both Tx8x8 and
+        // Tx16x16 use ext_tx_set 2 (DTT4_IDTX, 5 syms); DCT_DCT sym = 1
+        // per ExtTxInd[2, 0]. ----
         if (plane == 0 && qindex > 0)
         {
-            long extTxCdfBase;
-            int numSet;
-            if (txSize == 1)
-            {
-                extTxCdfBase = Av1KeyframeConstantsGpu.IntraExtTxCdfTx8DcOffset;
-                numSet = 7;
-            }
-            else
-            {
-                extTxCdfBase = Av1KeyframeConstantsGpu.IntraExtTxCdfTx16DcOffset;
-                numSet = 5;
-            }
-            Av1RangeEncoderGpu.EncodeCdfQ15(ref re, outBuf, 1, constsUshort, extTxCdfBase, numSet);
+            long extTxCdfBase = txSize == 1
+                ? Av1KeyframeConstantsGpu.IntraExtTxCdfTx8DcOffset
+                : Av1KeyframeConstantsGpu.IntraExtTxCdfTx16DcOffset;
+            Av1RangeEncoderGpu.EncodeCdfQ15(ref re, outBuf, 1, constsUshort, extTxCdfBase, 5);
         }
 
         // tx_class for DCT_DCT is 2D = 0.

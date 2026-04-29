@@ -139,11 +139,12 @@ public abstract partial class CodecsTestBase
             + ((1 * Av1KeyframeConstantsGpu.PlaneTypes + 1) * Av1KeyframeConstantsGpu.DcSignContexts + 2) * 3 + 0;
         Equal(srcDcSign, ushortBuf[dstDcSign], "DcSignCdf sentinel");
 
-        // Sentinel: IntraExtTxCdf for Tx8x8 DC_PRED ext_tx_set 3 (eset=1, square=1).
-        var srcIntraExtTx8 = Av1DefaultTxfmCdfs.DefaultIntraExtTxCdf[1][1][(int)Av1IntraMode.Dc];
+        // Sentinel: IntraExtTxCdf for Tx8x8 DC_PRED under reducedTxSet=true
+        // (matches v1 keyframe encoder default): both Tx8x8 and Tx16x16
+        // map to ext_tx_set 2, eset=2.
+        var srcIntraExtTx8 = Av1DefaultTxfmCdfs.DefaultIntraExtTxCdf[2][1][(int)Av1IntraMode.Dc];
         Equal(srcIntraExtTx8[0], ushortBuf[Av1KeyframeConstantsGpu.IntraExtTxCdfTx8DcOffset + 0], "IntraExtTx tx8 DC sentinel");
 
-        // Sentinel: IntraExtTxCdf for Tx16x16 DC_PRED ext_tx_set 2 (eset=2, square=2).
         var srcIntraExtTx16 = Av1DefaultTxfmCdfs.DefaultIntraExtTxCdf[2][2][(int)Av1IntraMode.Dc];
         Equal(srcIntraExtTx16[0], ushortBuf[Av1KeyframeConstantsGpu.IntraExtTxCdfTx16DcOffset + 0], "IntraExtTx tx16 DC sentinel");
     }

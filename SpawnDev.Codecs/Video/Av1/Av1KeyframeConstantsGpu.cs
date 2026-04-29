@@ -167,14 +167,15 @@ public static class Av1KeyframeConstantsGpu
     /// <summary>Length: 4 * 2 * 3 * 3 = 72.</summary>
     public const int DcSignCdfLength = TokenCdfQCtxs * PlaneTypes * DcSignContexts * 3;
 
-    /// <summary>IntraExtTxCdf row for Tx8x8 + DC_PRED + ext_tx_set 3 (DTT4_IDTX, 7 syms).
-    /// CDF row width = libaom CDF_SIZE(7) = 8.</summary>
-    public const int IntraExtTxCdfTx8DcOffset = DcSignCdfOffset + DcSignCdfLength;
-    /// <summary>Length: 8 entries.</summary>
-    public const int IntraExtTxCdfTx8DcLength = 8;
-
-    /// <summary>IntraExtTxCdf row for Tx16x16 + DC_PRED + ext_tx_set 2 (DTT4_IDTX_1DDCT, 5 syms).
+    /// <summary>IntraExtTxCdf row for Tx8x8 + DC_PRED + ext_tx_set 2 (DTT4_IDTX,
+    /// 5 syms - the v1 encoder uses reducedTxSet=true so both sizes use set 2).
     /// CDF row width = libaom CDF_SIZE(5) = 6.</summary>
+    public const int IntraExtTxCdfTx8DcOffset = DcSignCdfOffset + DcSignCdfLength;
+    /// <summary>Length: 6 entries.</summary>
+    public const int IntraExtTxCdfTx8DcLength = 6;
+
+    /// <summary>IntraExtTxCdf row for Tx16x16 + DC_PRED + ext_tx_set 2 (DTT4_IDTX,
+    /// 5 syms). CDF row width = libaom CDF_SIZE(5) = 6.</summary>
     public const int IntraExtTxCdfTx16DcOffset = IntraExtTxCdfTx8DcOffset + IntraExtTxCdfTx8DcLength;
     /// <summary>Length: 6 entries.</summary>
     public const int IntraExtTxCdfTx16DcLength = 6;
@@ -253,15 +254,14 @@ public static class Av1KeyframeConstantsGpu
         PackCoeffLpsMultiCdf(buf);
         // DcSignCdf - 4D table flatten.
         PackDcSignCdf(buf);
-        // IntraExtTxCdf - just the two specific rows for Tx8x8 / Tx16x16 DC_PRED.
-        // libaom indexing: DefaultIntraExtTxCdf[eset][ext_tx_size][intra_mode].
-        // ext_tx_set 3 (Tx8x8 intra non-reduced) -> eset = ExtTxSetIndexIntra[3] = 1
-        // squareTxSize for Tx8x8 = 1 (libaom EXT_TX_SIZES index for 8x8)
-        var rowTx8 = Av1DefaultTxfmCdfs.DefaultIntraExtTxCdf[1][1][(int)Av1IntraMode.Dc];
+        // IntraExtTxCdf - the two specific rows for Tx8x8 / Tx16x16 DC_PRED
+        // under the v1 encoder's reducedTxSet=true config. Per libaom
+        // GetExtTxSetType with reducedTxSet=true: BOTH Tx8x8 and Tx16x16
+        // map to ext_tx_set 2 (DTT4_IDTX) -> eset = ExtTxSetIndexIntra[2] = 2.
+        // Tx8x8 squareTxSize = 1; Tx16x16 squareTxSize = 2.
+        var rowTx8 = Av1DefaultTxfmCdfs.DefaultIntraExtTxCdf[2][1][(int)Av1IntraMode.Dc];
         for (int i = 0; i < IntraExtTxCdfTx8DcLength && i < rowTx8.Length; i++)
             buf[IntraExtTxCdfTx8DcOffset + i] = rowTx8[i];
-        // ext_tx_set 2 (Tx16x16 intra non-reduced) -> eset = ExtTxSetIndexIntra[2] = 2
-        // squareTxSize for Tx16x16 = 2
         var rowTx16 = Av1DefaultTxfmCdfs.DefaultIntraExtTxCdf[2][2][(int)Av1IntraMode.Dc];
         for (int i = 0; i < IntraExtTxCdfTx16DcLength && i < rowTx16.Length; i++)
             buf[IntraExtTxCdfTx16DcOffset + i] = rowTx16[i];
