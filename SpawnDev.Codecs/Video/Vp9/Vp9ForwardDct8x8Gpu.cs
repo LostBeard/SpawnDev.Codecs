@@ -99,33 +99,19 @@ public static class Vp9ForwardDct8x8Gpu
 
             long b = outBase + col * 8;
             // libvpx final_output[i] /= 2 - signed integer division
-            // truncates toward zero. SpawnDev.ILGPU 4.9.2-rc.28
-            // shipped a fix for the IR-level Div-by-pow2 -> Shr
-            // rewrite on signed dividends, but a follow-up test
-            // (2026-04-28 21:57) showed IlgpuIntDivByTwoRepro STILL
-            // fails identically on rc.28. WORKAROUND retained until
-            // root cause is found. Pinged Geordi.
-            output[b + 0] = HalveTruncateTowardZero(o0);
-            output[b + 1] = HalveTruncateTowardZero(o1);
-            output[b + 2] = HalveTruncateTowardZero(o2);
-            output[b + 3] = HalveTruncateTowardZero(o3);
-            output[b + 4] = HalveTruncateTowardZero(o4);
-            output[b + 5] = HalveTruncateTowardZero(o5);
-            output[b + 6] = HalveTruncateTowardZero(o6);
-            output[b + 7] = HalveTruncateTowardZero(o7);
+            // truncates toward zero. SpawnDev.ILGPU 4.9.2-rc.29 ships
+            // the IR-level Div-by-pow2 -> Shr rewrite gated on the
+            // Unsigned flag, so plain `int / 2` lowers to the backend's
+            // native signed-divide on every backend.
+            output[b + 0] = o0 / 2;
+            output[b + 1] = o1 / 2;
+            output[b + 2] = o2 / 2;
+            output[b + 3] = o3 / 2;
+            output[b + 4] = o4 / 2;
+            output[b + 5] = o5 / 2;
+            output[b + 6] = o6 / 2;
+            output[b + 7] = o7 / 2;
         }
-    }
-
-    /// <summary>
-    /// WORKAROUND: bit-exact mirror of C# <c>x / 2</c> (truncate toward
-    /// zero). rc.28's gate-on-Unsigned fix should make plain `int / 2`
-    /// work but verification 2026-04-28 21:57 showed the test still
-    /// fails identically. Helper retained until the root cause is found.
-    /// </summary>
-    private static int HalveTruncateTowardZero(int x)
-    {
-        if (x >= 0) return x >> 1;
-        return -((-x) >> 1);
     }
 
     /// <summary>

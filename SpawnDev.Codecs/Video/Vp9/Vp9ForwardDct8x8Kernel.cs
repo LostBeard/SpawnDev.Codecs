@@ -148,26 +148,19 @@ public sealed class Vp9ForwardDct8x8Kernel : IDisposable
                 out int o4, out int o5, out int o6, out int o7);
 
             // Final post-pass: divide by 2 (truncate-toward-zero).
-            // WORKAROUND retained on rc.28 - IlgpuIntDivByTwoRepro
-            // still fails identically despite the rc.28 fix shipping.
-            // See Vp9ForwardDct8x8Gpu.HalveTruncateTowardZero comment
-            // for rationale. Geordi pinged 2026-04-28.
-            output[outBase + col * 8 + 0] = HalveTruncateTowardZero(o0);
-            output[outBase + col * 8 + 1] = HalveTruncateTowardZero(o1);
-            output[outBase + col * 8 + 2] = HalveTruncateTowardZero(o2);
-            output[outBase + col * 8 + 3] = HalveTruncateTowardZero(o3);
-            output[outBase + col * 8 + 4] = HalveTruncateTowardZero(o4);
-            output[outBase + col * 8 + 5] = HalveTruncateTowardZero(o5);
-            output[outBase + col * 8 + 6] = HalveTruncateTowardZero(o6);
-            output[outBase + col * 8 + 7] = HalveTruncateTowardZero(o7);
+            // SpawnDev.ILGPU 4.9.2-rc.29 ships the IR-level
+            // Div-by-pow2 -> Shr rewrite gated on Unsigned, so plain
+            // `int / 2` lowers to the backend's native signed-divide
+            // on every backend.
+            output[outBase + col * 8 + 0] = o0 / 2;
+            output[outBase + col * 8 + 1] = o1 / 2;
+            output[outBase + col * 8 + 2] = o2 / 2;
+            output[outBase + col * 8 + 3] = o3 / 2;
+            output[outBase + col * 8 + 4] = o4 / 2;
+            output[outBase + col * 8 + 5] = o5 / 2;
+            output[outBase + col * 8 + 6] = o6 / 2;
+            output[outBase + col * 8 + 7] = o7 / 2;
         }
-    }
-
-    /// <summary>WORKAROUND: same helper as Vp9ForwardDct8x8Gpu.</summary>
-    private static int HalveTruncateTowardZero(int x)
-    {
-        if (x >= 0) return x >> 1;
-        return -((-x) >> 1);
     }
 
     /// <summary>
