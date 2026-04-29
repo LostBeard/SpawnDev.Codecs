@@ -35,14 +35,25 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    // Non-silent tone test deferred: GPU MagnitudeToFloorY uses binary
-    // search on the inverse-dB lookup (cross-backend safe; doesn't need
-    // EnableAlgorithms which CUDA + OpenCL backends don't invoke).
-    // CPU uses Log10/Ceiling. Both produce the same Y for most magnitudes
-    // but can differ by ±1 step at boundary magnitudes, which cascades
-    // through the bit stream. The silence path (clamp to Y=1) avoids
-    // this and produces byte-identical output across all backends; the
-    // non-silent bit-exact match needs CPU/GPU to use the same Y formula.
+    // Non-silent (tone, random PCM) bit-exact match deferred. Root cause:
+    // CPU MdctReference uses double-precision Math.Cos accumulator while
+    // GPU MdctReferenceGpu uses float-precision XMath.Cos. The two produce
+    // different float spectrum values; downstream the spectrum peaks
+    // differ, producing different floor Y values, which cascades through
+    // the bit stream. The silence path produces byte-identical output
+    // because all spectrum values are 0 regardless of MDCT precision and
+    // the floor clamps to Y=1 on both sides.
+    //
+    // Resolving non-silent bit-exact requires either:
+    //   (a) Aligning MDCT precision (port MdctReferenceGpu to use double
+    //       precision XMath.Cos - works only on backends with f64 native
+    //       support; needs Dekker emulation on Wasm/WebGL).
+    //   (b) Switching CPU encoder to use float-precision MdctReference
+    //       (changes CPU encoder behavior for non-silent input).
+    // Both paths are deeper than this integration class and are tracked
+    // as follow-up. The encoder currently produces a valid Vorbis
+    // bitstream that any decoder accepts; bit-exact match to CPU is the
+    // tighter check we're punting on.
 
     private static async Task EncodeAndCompare(
         Accelerator acc, VorbisAudioEncoderOptions options, float[] pcm)
