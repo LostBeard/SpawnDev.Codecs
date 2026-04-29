@@ -5,6 +5,45 @@
 Initial development. Project still in pre-release. See README.md for the
 working feature matrix.
 
+### 2026-04-29 - Opus SILK GPU primitive build-out (9 -> 23 primitives)
+
+**Continuing 2026-04-29 (late evening session): Opus SILK primitive expansion
+from 9 to 23 primitives.** 14 new commits. Now have GPU coverage of every
+major SILK decode + analysis stage: LPC analysis + synthesis, full resampler
+chain (Up2Hq + Ar2 + DownFirInterpol + IirFirInterpol), stereo M/S->L/R + the
+predictor dequantizer, gain adjust + DivVarQ, excitation dequant (PRNG-driven
+with long-arithmetic bypass for ILGPU OpenCL signed overflow quirk), LPC fit,
+NLSF -> Q12 LPC pipeline (composes 3 GPU primitives in a single kernel
+thread), NLSF table-index unpacker.
+
+| Codec  | Encoder | Decoder | GPU primitives |
+|--------|---------|---------|----------------|
+| Opus   | -       | -       | 23 SILK + 1 shared range coder |
+
+**New Opus SILK GPU primitives shipped this session (10th-23rd):**
+- SilkLpcAnalysisFilterGpu (`6bbba73`) - per-sample MA prediction-error filter
+- SilkResamplerUp2HqGpu (`74f3aa1`) - 2x HQ upsampler (sequential IIR, one-thread-per-stream)
+- SilkResamplerAr2Gpu (`e475cd0`) - AR2 IIR pre-filter for downsample chain
+- SilkResamplerDownFirInterpolGpu (`c2939b9`) - 3 FIR variants (Fir0/Fir1/Fir2), per-output-sample parallel
+- SilkResamplerIirFirInterpolGpu (`40a3c9b`) - 12-phase fractional FIR upsample, per-output-sample parallel
+- SilkLpcSynthesisFilterGpu (`868e9d2`) - decoder LPC synthesis inner loop
+- SilkStereoMsToLrGpu (`8998230`) - M/S -> L/R (ApplySideAt + ApplyMixAt, both per-sample parallel)
+- SilkDivVarQGpu + SilkGainAdjustGpu (`6a77c5c`) - reusable variable-Q division + LPC state rescale
+- SilkExcitationDequantizerGpu (`879116d`) - PRNG-driven excitation dequant (long-arithmetic for OpenCL)
+- SilkLpcFitGpu (`87568d4`) - LPC coefficient quantization with iterative bandwidth expansion
+- SilkNlsf2AGpu (`00700e6`) - full NLSF -> Q12 LPC pipeline (composes LpcFitGpu + LpcInvPredGainGpu + BwexpanderGpu)
+- SilkNlsfUnpackGpu (`aaf1496`) - per-coefficient-pair NLSF table-index unpacker
+- SilkStereoDecodePredGpu (`b8aeb62`) - stereo predictor dequantizer (pairs with StereoMsToLrGpu)
+
+**Library quirk discovered + worked around:** ILGPU OpenCL backend does NOT
+preserve `unchecked(int * int)` overflow semantics for signed int
+multiplication. Saved `feedback_ilgpu_opencl_signed_overflow.md` so future
+GPU PRNG ports start with the right pattern: use long arithmetic
+(`(long)(uint)x * y`) for portable modular semantics across all 6 ILGPU
+backends. Discovered while shipping SilkExcitationDequantizerGpu where
+all 4 OpenCL tests sign-flipped at i=0 of the PRNG until the long-
+arithmetic form was used.
+
 ### 2026-04-29 - AV1 GPU encoder + decoder pair complete (4 of 6 codecs on GPU)
 
 **Status:** 4 of 6 codecs now have working encoder + decoder pairs on every
