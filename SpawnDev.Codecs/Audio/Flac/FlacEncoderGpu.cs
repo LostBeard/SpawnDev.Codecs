@@ -45,6 +45,8 @@ public sealed class FlacEncoderGpu : IDisposable
 
     private readonly Accelerator _accelerator;
     private readonly FlacFrameWriterGpuKernel _frameKernel;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int>
+        _deinterleaveKernel;
 
     /// <summary>Construct an encoder bound to <paramref name="accelerator"/>.</summary>
     public FlacEncoderGpu(Accelerator accelerator)
@@ -52,6 +54,21 @@ public sealed class FlacEncoderGpu : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _frameKernel = new FlacFrameWriterGpuKernel(accelerator);
+        _deinterleaveKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<int>, ArrayView<int>, int, int>(DeinterleaveKernel);
+    }
+
+    /// <summary>
+    /// Per-element de-interleave kernel. One thread per (channel, sample).
+    /// Reads from dInterleaved, writes to channel-major dSamples.
+    /// </summary>
+    private static void DeinterleaveKernel(
+        Index1D index,
+        ArrayView<int> interleaved, ArrayView<int> channelMajor,
+        int channels, int numFrames)
+    {
+        FlacDeinterleaveInputGpu.DeinterleaveAt(
+            interleaved, 0, channelMajor, 0, channels, numFrames, index.X);
     }
 
     /// <summary>
@@ -95,44 +112,46 @@ public sealed class FlacEncoderGpu : IDisposable
         // ---- Audio frames (GPU) ----
         int frameCount = totalPerChannel / BlockSize;
 
-        // Per-frame upload + dispatch loop. For v1 simplicity we
-        // upload + encode per frame; future optimization is to
-        // batch-encode many frames in one dispatch (the kernel is
-        // single-thread so the wins come from amortizing the
-        // dispatch overhead, not parallelism).
-        // Worst-case bytes per frame: header (~16) + samples + CRC (16).
+        // Single upload of the entire interleaved input (necessary I/O
+        // step - source data comes from outside the accelerator). All
+        // per-frame work after that is GPU dispatches: de-interleave,
+        // encode, partial readback.
         int worstCasePerFrame = 32 + BlockSize * channels * 4;
-        using var dSamples = _accelerator.Allocate1D<int>(BlockSize * channels);
+        int perFrameSamples = BlockSize * channels;
+        using var dAllInterleaved = _accelerator.Allocate1D<int>(totalSamples);
+        using var dSamples = _accelerator.Allocate1D<int>(perFrameSamples);
         using var dOut = _accelerator.Allocate1D<byte>(worstCasePerFrame);
         using var dOutLen = _accelerator.Allocate1D<long>(1);
+        var zeroOut = new byte[worstCasePerFrame];
 
-        // Per-channel sample buffer for upload to dSamples (channel-
-        // major: ch0[0..N-1], ch1[0..N-1], ...).
-        var perChannelBuffer = new int[BlockSize * channels];
+        // ReadOnlyMemory<int>.ToArray() copies once into the upload buffer.
+        // After this the entire interleaved stream lives on the GPU and
+        // every per-frame step is dispatched.
+        dAllInterleaved.View.CopyFromCPU(interleavedSamples.ToArray());
 
         for (int frameIdx = 0; frameIdx < frameCount; frameIdx++)
         {
-            // De-interleave: channel-major layout for the GPU encoder.
-            int frameSampleStart = frameIdx * BlockSize * channels;
-            for (int ch = 0; ch < channels; ch++)
-            {
-                for (int i = 0; i < BlockSize; i++)
-                {
-                    perChannelBuffer[ch * BlockSize + i] =
-                        interleavedSamples.Span[frameSampleStart + i * channels + ch];
-                }
-            }
+            // De-interleave per frame: SubView the right slice of the
+            // pre-uploaded interleaved buffer + dispatch the kernel into
+            // dSamples (channel-major). No host-side copy of the slice.
+            long frameSampleStart = (long)frameIdx * perFrameSamples;
+            var frameInterleavedView =
+                dAllInterleaved.View.SubView(frameSampleStart, perFrameSamples);
 
-            dSamples.View.CopyFromCPU(perChannelBuffer);
-            dOut.View.CopyFromCPU(new byte[worstCasePerFrame]);
+            _deinterleaveKernel(new Index1D(perFrameSamples),
+                frameInterleavedView, dSamples.View, channels, BlockSize);
+
+            dOut.View.CopyFromCPU(zeroOut);
 
             _frameKernel.Run(dSamples.View, dOut.View, dOutLen.View,
                 BlockSize, channels, BitsPerSample, (ulong)frameIdx);
             await _accelerator.SynchronizeAsync();
 
             long frameLen = (await dOutLen.CopyToHostAsync())[0];
-            var frameBytes = await dOut.CopyToHostAsync();
-            for (int i = 0; i < frameLen; i++) output.Add(frameBytes[i]);
+            // Partial readback of just the encoded frame bytes; AddRange
+            // appends the slice without a per-byte CPU loop at this layer.
+            var frameBytes = await dOut.CopyToHostAsync(0, frameLen);
+            output.AddRange(frameBytes);
         }
 
         return output.ToArray();

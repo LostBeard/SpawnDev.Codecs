@@ -43,6 +43,8 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
     private readonly MemoryBuffer1D<int, global::ILGPU.Stride1D.Dense> _dXList;
 
     // Compiled kernels.
+    private readonly Action<Index1D, ArrayView<float>, int, int, ArrayView<float>>
+        _inputWindowKernel;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, int> _windowKernel;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, int> _mdctKernel;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, float> _floorFitKernel;
@@ -90,6 +92,8 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         _dXList.View.CopyFromCPU(floorCfg.XList);
 
         // Compile kernels.
+        _inputWindowKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<float>, int, int, ArrayView<float>>(InputWindowKernel);
         _windowKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<float>, ArrayView<float>, int>(WindowKernel);
         _mdctKernel = accelerator.LoadAutoGroupedStreamKernel<
@@ -121,9 +125,27 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
     public async Task<byte[]> EncodeAudioPacketAsync(ReadOnlyMemory<float> block)
     {
         int n = _opts.BlockSize;
-        int half = n / 2;
         if (block.Length != n)
             throw new ArgumentException($"block must be {n} samples, got {block.Length}.");
+
+        // Upload the input PCM block once (necessary I/O - source comes
+        // from outside the accelerator) and delegate to the GPU-input
+        // overload that runs the kernel chain.
+        using var dInput = _accelerator.Allocate1D<float>(n);
+        dInput.View.CopyFromCPU(block.ToArray());
+        return await EncodePacketFromGpuInputAsync(dInput.View);
+    }
+
+    /// <summary>
+    /// Encode one audio packet from a per-packet input buffer that is
+    /// already on the accelerator. Used by <see cref="EncodeStreamAsync"/>
+    /// to avoid the per-packet host -> GPU round-trip when the source
+    /// PCM lives on the GPU already.
+    /// </summary>
+    private async Task<byte[]> EncodePacketFromGpuInputAsync(ArrayView<float> dInput)
+    {
+        int n = _opts.BlockSize;
+        int half = n / 2;
 
         var floorCfg = (VorbisFloor1Config)_cpuRef.Setup.Floors[0];
         const float headroom = 1.25f;
@@ -132,7 +154,6 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
 
         long worstCaseBytes = (long)half * 4 + 256;
 
-        using var dInput = _accelerator.Allocate1D<float>(n);
         using var dWindowed = _accelerator.Allocate1D<float>(n);
         using var dSpectrum = _accelerator.Allocate1D<float>(half);
         using var dPosteriors = _accelerator.Allocate1D<int>(2);
@@ -143,7 +164,6 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         using var dOutBytes = _accelerator.Allocate1D<byte>(worstCaseBytes);
         using var dOutLen = _accelerator.Allocate1D<long>(1);
 
-        dInput.View.CopyFromCPU(block.ToArray());
         dWindowed.View.CopyFromCPU(new float[n]);
         dSpectrum.View.CopyFromCPU(new float[half]);
         dPosteriors.View.CopyFromCPU(new int[2]);
@@ -155,7 +175,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         dOutLen.View.CopyFromCPU(new long[1]);
 
         // 1. Window apply (parallel over n samples).
-        _windowKernel(new Index1D(n), dInput.View, dWindowed.View, n);
+        _windowKernel(new Index1D(n), dInput, dWindowed.View, n);
 
         // 2. Forward MDCT + 4/N scale (parallel over half bins).
         _mdctKernel(new Index1D(half), dWindowed.View, dSpectrum.View, half);
@@ -237,21 +257,22 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         int audioPackets = (int)Math.Ceiling((double)(totalSamples + half) / half);
         if (audioPackets < 2) audioPackets = 2;
 
-        var inputBuffer = new float[n];
+        // Upload the entire mono PCM stream to the accelerator once. The
+        // per-packet windowed input prep is then a GPU kernel dispatch
+        // (no host-side per-sample loop, no host inputBuffer).
+        using var dMono = _accelerator.Allocate1D<float>(totalSamples);
+        using var dPacketInput = _accelerator.Allocate1D<float>(n);
+        dMono.View.CopyFromCPU(mono.ToArray());
+
         long granule = 0;
 
         for (int p = 0; p < audioPackets; p++)
         {
             int srcStart = p * half - half;
-            // Re-acquire the span on every iteration so it doesn't cross
-            // an `await` boundary (Span<T> is a ref struct).
-            var monoSpan = mono.Span;
-            for (int i = 0; i < n; i++)
-            {
-                int srcIdx = srcStart + i;
-                inputBuffer[i] = (srcIdx >= 0 && srcIdx < totalSamples) ? monoSpan[srcIdx] : 0f;
-            }
-            byte[] packet = await EncodeAudioPacketAsync(inputBuffer);
+            _inputWindowKernel(new Index1D(n),
+                dMono.View, totalSamples, srcStart, dPacketInput.View);
+
+            byte[] packet = await EncodePacketFromGpuInputAsync(dPacketInput.View);
             if (p > 0) granule += half;
             packets.Add(new Container.Ogg.OggOutgoingPacket
             {
@@ -278,6 +299,18 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
     // ===========================================================================
     // Kernel entry points (thin wrappers around the existing primitives)
     // ===========================================================================
+
+    /// <summary>
+    /// Per-sample windowed input copy with zero-pad for the
+    /// EncodeStreamAsync per-packet input prep.
+    /// </summary>
+    private static void InputWindowKernel(
+        Index1D idx, ArrayView<float> srcMono, int totalSamples, int srcStart,
+        ArrayView<float> dst)
+    {
+        VorbisInputWindowGpu.WindowedCopyAt(
+            srcMono, 0, totalSamples, srcStart, dst, 0, idx.X);
+    }
 
     private static void WindowKernel(
         Index1D idx, ArrayView<float> input, ArrayView<float> output, int n)
