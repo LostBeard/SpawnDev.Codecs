@@ -60,11 +60,45 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
     }
 
     /// <summary>
+    /// Encode + return both the encoded keyframe bytes AND the
+    /// encoder's internal recon planes. The recon is the same data
+    /// the downstream decoder must reconstruct - useful for
+    /// self-consistency tests of the encoder/decoder pair.
+    /// </summary>
+    public async Task<(byte[] bytes, byte[] yRecon, byte[] uRecon, byte[] vRecon)>
+        EncodeKeyFrameWithReconAsync(
+        byte[] yPlane, byte[] uPlane, byte[] vPlane,
+        int width, int height,
+        int baseQIndex = 32)
+    {
+        var (tileBytes, yRecon, uRecon, vRecon) = await EncodeSingleTileWithReconAsync(
+            yPlane, uPlane, vPlane, width, height, baseQIndex);
+        var fullBytes = Av1KeyframeEncoder.EncodeKeyFrameWithExternalTile(
+            width, height, baseQIndex, tileBytes);
+        return (fullBytes, yRecon, uRecon, vRecon);
+    }
+
+    /// <summary>
     /// Run the GPU walker on the supplied YUV 4:2:0 frame and return
     /// the raw range-coder tile bytes (the same bytes the CPU
     /// Av1KeyframeEncoder.EncodeSingleTile produces).
     /// </summary>
     public async Task<byte[]> EncodeSingleTileAsync(
+        byte[] yPlane, byte[] uPlane, byte[] vPlane,
+        int width, int height,
+        int baseQIndex = 32)
+    {
+        var (bytes, _, _, _) = await EncodeSingleTileWithReconAsync(
+            yPlane, uPlane, vPlane, width, height, baseQIndex);
+        return bytes;
+    }
+
+    /// <summary>
+    /// Encode one keyframe tile and return the encoded bytes alongside
+    /// the encoder's internal recon planes.
+    /// </summary>
+    public async Task<(byte[] tileBytes, byte[] yRecon, byte[] uRecon, byte[] vRecon)>
+        EncodeSingleTileWithReconAsync(
         byte[] yPlane, byte[] uPlane, byte[] vPlane,
         int width, int height,
         int baseQIndex = 32)
@@ -171,9 +205,19 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         // ---- Read back tile bytes ----
         long tileLen = (await dTileLen.CopyToHostAsync())[0];
         var fullBuf = await dTile.CopyToHostAsync();
-        var result = new byte[tileLen];
-        Array.Copy(fullBuf, result, tileLen);
-        return result;
+        var tileResult = new byte[tileLen];
+        Array.Copy(fullBuf, tileResult, tileLen);
+
+        // ---- Read back recon planes ----
+        var reconBuf = await dRecon.CopyToHostAsync();
+        var yReconResult = new byte[yLen];
+        var uReconResult = new byte[uvLen];
+        var vReconResult = new byte[uvLen];
+        Buffer.BlockCopy(reconBuf, 0, yReconResult, 0, yLen);
+        Buffer.BlockCopy(reconBuf, yLen, uReconResult, 0, uvLen);
+        Buffer.BlockCopy(reconBuf, yLen + uvLen, vReconResult, 0, uvLen);
+
+        return (tileResult, yReconResult, uReconResult, vReconResult);
     }
 
     /// <summary>
