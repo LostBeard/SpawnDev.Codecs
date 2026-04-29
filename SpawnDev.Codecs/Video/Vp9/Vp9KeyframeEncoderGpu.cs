@@ -245,17 +245,14 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         Array.Copy(fullBuf, result, outFrameLen);
 
         // Read back recon planes for self-consistency testing.
+        // CopyToHostAsync returns fresh byte[] arrays sized to dY/dU/dV
+        // (yLen / uvLen / uvLen). No host-side iteration over codec data
+        // needed - hand them straight to the result tuple.
         var yReconBuf = await dYRecon.CopyToHostAsync();
         var uReconBuf = await dURecon.CopyToHostAsync();
         var vReconBuf = await dVRecon.CopyToHostAsync();
-        var yReconResult = new byte[yLen];
-        var uReconResult = new byte[uvLen];
-        var vReconResult = new byte[uvLen];
-        Array.Copy(yReconBuf, yReconResult, yLen);
-        Array.Copy(uReconBuf, uReconResult, uvLen);
-        Array.Copy(vReconBuf, vReconResult, uvLen);
 
-        return (result, yReconResult, uReconResult, vReconResult);
+        return (result, yReconBuf, uReconBuf, vReconBuf);
     }
 
     /// <summary>Release every resource the encoder owns.</summary>
