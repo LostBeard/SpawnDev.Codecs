@@ -76,7 +76,20 @@ internal static class SilkStereoDecodePred
         ix1[0] = rangeDec.DecodeIcdf(SilkIcdfTables.Uniform3, 8);
         ix1[1] = rangeDec.DecodeIcdf(SilkIcdfTables.Uniform5, 8);
 
-        // Dequantize each predictor. SILK_FIX_CONST(0.5 / 5, 16) = (int)(0.1 * 65536 + 0.5) = 6554.
+        DequantizePredictors(ix0, ix1, predQ13);
+    }
+
+    /// <summary>
+    /// Dequantize a pair of stereo predictor index triples into Q13 predictor
+    /// values + apply the libopus pre-subtraction. Factored out of <see cref="DecodePred"/>
+    /// so it can be invoked from the GPU mirror with externally supplied indices.
+    /// </summary>
+    /// <param name="ix0">First predictor's [low3, mid5, high5] index triple. May be modified.</param>
+    /// <param name="ix1">Second predictor's [low3, mid5, high5] index triple. May be modified.</param>
+    /// <param name="predQ13">Output: 2 Q13 predictor values.</param>
+    internal static void DequantizePredictors(Span<int> ix0, Span<int> ix1, Span<int> predQ13)
+    {
+        // SILK_FIX_CONST(0.5 / 5, 16) = (int)(0.1 * 65536 + 0.5) = 6554.
         const int halfOverSubStepsQ16 = 6554;
 
         ix0[0] += 3 * ix0[2];
