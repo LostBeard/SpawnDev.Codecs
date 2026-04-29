@@ -293,7 +293,7 @@ internal static class SilkResampler
     /// high half (rows <c>11 - tableIdx</c>), applied to 8 consecutive buffer samples.
     /// Matches libopus <c>silk_resampler_private_IIR_FIR_INTERPOL</c>.
     /// </summary>
-    private static int IirFirInterpol(Span<short> output, int outOffset, ReadOnlySpan<short> buf,
+    internal static int IirFirInterpol(Span<short> output, int outOffset, ReadOnlySpan<short> buf,
         long maxIndexQ16, int indexIncrementQ16)
     {
         for (long indexQ16 = 0; indexQ16 < maxIndexQ16; indexQ16 += indexIncrementQ16)
