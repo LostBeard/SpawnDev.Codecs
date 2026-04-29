@@ -32,6 +32,8 @@ public sealed class FlacDecoderGpu : IDisposable
 {
     private readonly Accelerator _accelerator;
     private readonly FlacFrameReaderGpuKernel _frameKernel;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int, long, long>
+        _interleaveKernel;
 
     /// <summary>Construct a decoder bound to <paramref name="accelerator"/>.</summary>
     public FlacDecoderGpu(Accelerator accelerator)
@@ -39,6 +41,23 @@ public sealed class FlacDecoderGpu : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _frameKernel = new FlacFrameReaderGpuKernel(accelerator);
+        _interleaveKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<int>, ArrayView<int>, int, int, long, long>(InterleaveKernel);
+    }
+
+    /// <summary>
+    /// Per-element interleave kernel. One thread per (channel, sample).
+    /// Reads from channel-major dSamples, writes to interleaved dOutput at
+    /// the per-frame offset.
+    /// </summary>
+    private static void InterleaveKernel(
+        Index1D index,
+        ArrayView<int> channelMajor, ArrayView<int> interleavedOut,
+        int channels, int numFrames, long cmBase, long outBase)
+    {
+        FlacInterleaveOutputGpu.InterleaveAt(
+            channelMajor, cmBase, interleavedOut, outBase,
+            channels, numFrames, index.X);
     }
 
     /// <summary>
@@ -101,37 +120,23 @@ public sealed class FlacDecoderGpu : IDisposable
 
         int totalPerChannel = (int)totalSamples;
         int frameCount = (totalPerChannel + blockSize - 1) / blockSize;
-        var output = new int[totalPerChannel * channels];
 
         // ---- Per-frame decode (GPU) ----
-        // Each call uploads the full remaining bytes + decodes one
-        // frame. For a v1 demo this is sufficient; throughput
-        // optimization (single upload + multiple kernel dispatches)
-        // is a follow-up.
+        // Each frame's decode + interleave runs on the accelerator;
+        // host only does sync-code scanning (metadata) + per-frame
+        // status check + the final single readback of the interleaved
+        // output buffer.
         using var dData = _accelerator.Allocate1D<byte>(flacBytes.Length);
         using var dSamples = _accelerator.Allocate1D<int>(blockSize * channels);
         using var dStatus = _accelerator.Allocate1D<int>(1);
         using var dFrameLen = _accelerator.Allocate1D<long>(1);
+        using var dOutput = _accelerator.Allocate1D<int>((long)totalPerChannel * channels);
         dData.View.CopyFromCPU(flacBytes);
 
         long frameBase = pos;
         for (int frameIdx = 0; frameIdx < frameCount; frameIdx++)
         {
-            // The GPU reader needs to know the frame length up front
-            // to verify CRC-16. Compute it by scanning forward to the
-            // next sync code (or end-of-stream). For v1 with
-            // fixed-block-size we can predict the length precisely:
-            //   header bytes = 5 (sync + flags + fixed-codes + 1-byte
-            //                     UTF-8 frame number assuming idx < 128)
-            //   + 1 (CRC8)
-            //   + per-channel subframe = 8-bit hdr + samples bps bits
-            //                          = 1 + (blockSize * bps + 7) / 8
-            //   + 2 (CRC16)
-            // For frame numbers >= 128 the UTF-8 length grows; we
-            // compute it on host since pos is host-known.
             int fLen = (int)EstimateFrameLength((ulong)frameIdx, blockSize, channels, bps);
-            // Alternative: scan from frameBase to find next sync code.
-            // For robustness we use the scan when fLen would overshoot.
             long actualFLen = ScanFrameLength(flacBytes, (int)frameBase, fLen);
 
             _frameKernel.Run(dData.View, dSamples.View, dStatus.View, dFrameLen.View,
@@ -144,18 +149,22 @@ public sealed class FlacDecoderGpu : IDisposable
                 throw new InvalidDataException(
                     $"FLAC frame {frameIdx} decode failed at byte {frameBase} (status={status}).");
 
-            // Copy decoded samples (channel-major) into output (interleaved).
-            var frameSamples = await dSamples.CopyToHostAsync();
-            int frameSampleStart = frameIdx * blockSize * channels;
-            for (int ch = 0; ch < channels; ch++)
-            {
-                for (int i = 0; i < blockSize; i++)
-                {
-                    output[frameSampleStart + i * channels + ch] = frameSamples[ch * blockSize + i];
-                }
-            }
+            // GPU interleave: dispatch one thread per (channel, sample),
+            // writing this frame's samples into dOutput at the right offset.
+            // The last frame may have fewer than blockSize samples; clip to
+            // remaining samples so we don't write past totalPerChannel.
+            int framesThisCall = Math.Min(blockSize, totalPerChannel - frameIdx * blockSize);
+            long outBase = (long)frameIdx * blockSize * channels;
+            _interleaveKernel(
+                new Index1D(framesThisCall * channels),
+                dSamples.View, dOutput.View,
+                channels, blockSize, /*cmBase*/ 0, outBase);
+
             frameBase += consumed;
         }
+
+        await _accelerator.SynchronizeAsync();
+        var output = await dOutput.CopyToHostAsync();
 
         return new FlacGpuDecodeResult
         {

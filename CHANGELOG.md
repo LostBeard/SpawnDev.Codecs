@@ -5,6 +5,25 @@
 Initial development. Project still in pre-release. See README.md for the
 working feature matrix.
 
+### 2026-04-29 - FlacDecoderGpu output interleave moves from CPU to GPU
+
+`FlacDecoderGpu.DecodeStreamAsync` previously copied each frame's
+samples back to host (`dSamples.CopyToHostAsync()`) and ran a per-sample
+channel-major -> interleaved CPU loop into the output array. That
+violated the cardinal rule (host doing per-sample iteration on codec
+data). Now: a new `FlacInterleaveOutputGpu` primitive does the same
+work GPU-side as one thread per (channel, sample); the integration
+class allocates the full interleaved output on the accelerator and
+dispatches the kernel per frame. Single readback of the full output
+buffer at end.
+
+Net effect: the host is back to pure coordinator status for FLAC
+decode - alloc, upload, kernel dispatch, single per-frame status check
++ frame-length scan, single readback. No per-frame `dSamples`
+readback, no per-sample CPU iteration on codec data.
+
+FLAC decoder PMT 6/6 PASS on CUDA + OpenCL + CPU.
+
 ### 2026-04-29 - VorbisAudioDecoderGpu floor curve render moves to GPU
 
 `VorbisAudioDecoderGpu` now dispatches `VorbisFloor1RenderCurveGpu`
