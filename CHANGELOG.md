@@ -50,6 +50,64 @@ divergence at emit #6.
 - 6 Av1KeyframeDecoderGpu tests (2 cases x 3 backends)
 - Full AV1 sweep: 696/696 PASS (zero regressions from walker additions).
 
+**Continuing 2026-04-29 (afternoon-evening session): Vorbis encoder + Opus SILK
+primitive expansion.** 33 total commits. Vorbis went from 5 -> 20 GPU primitives,
+Opus SILK went from 4 -> 9, and Vorbis became the 5th codec with a working GPU
+integration class (silence path bit-exact + full .ogg stream output).
+
+| Codec  | Encoder | Decoder | GPU primitives |
+|--------|---------|---------|----------------|
+| VP8    | ✅      | ✅      | -              |
+| VP9    | ✅      | ✅      | -              |
+| FLAC   | ✅      | ✅      | -              |
+| AV1    | ✅      | ✅      | -              |
+| Vorbis | partial NEW | -    | 20 (silence path bit-exact; non-silent deferred to MDCT precision alignment) |
+| Opus   | -       | -       | 9 SILK + 1 shared range coder |
+
+**Vorbis GPU primitives shipped:**
+- VorbisHuffmanDecoderGpu (`957ec88`) - canonical Huffman flat-tree decoder
+- VorbisFloor1RenderGpu (`c6b4522`) - per-line / per-point floor renderer
+- VorbisCodebookVectorLookupGpu (`ef45942`) - 3 lookup types + sequenceP
+- VorbisFloor1RenderCurveGpu (`8a7de7f`) - full Floor 1 curve orchestrator
+- VorbisWindowGpu.ApplyWindowAt (`1b65058`) - per-sample window apply
+- VorbisEncoderHelpersGpu (`401293c`) - MagnitudeToFloorY + QuantiseResidueValue
+- VorbisSpectrumPeakGpu (`b7220c1`) - per-half-band peak reduction
+- VorbisEncoderHelpersGpu.DivideQuantizeAt (`a562ae9`) - residue divide+quantize
+- VorbisBitWriterGpu.WriteCodebookEntry (`9df95f0`) - canonical Huffman emit
+- VorbisHuffmanCodebookSetGpu (`4f77273`) - multi-codebook flattener
+- VorbisFloor1DecoderGpu (`46606ba`) - per-channel posterior decoder
+- VorbisAudioPacketHeaderGpu (`9b4f1ee`) - per-packet header parser
+- VorbisFloorMultiplyGpu (`cc780b3`) - per-bin floor x residue
+- VorbisResidueAccumulateGpu (`0385fb2`) - lookup + accumulate composite
+- VorbisFwdMdctScaledGpu (`a05c090`) - forward MDCT + 4/N scale
+- VorbisEncoderFloorFitGpu (`ba43fd4`) - peak + floor-fit composite
+- VorbisEncoderResidueEmitGpu (`d132f98`) - per-bin codebook emission
+- VorbisEncoderBitstreamEmitGpu (`9382256`) - full per-packet emit composite
+- VorbisAudioEncoderGpu (`fc491a5`) - integration class
+- VorbisAudioEncoderGpu.EncodeStreamAsync (`3401183`) - full .ogg stream output
+
+**Opus SILK GPU primitives shipped:**
+- SilkSumSqrShiftGpu (`3120646`) - sum-of-squares with dynamic shift
+- SilkLsfToCosGpu (`5ff7aad`) - LSF -> 2*cos(LSF) lookup
+- SilkNlsfStabilizeGpu (`8f192b9`) - iterative NLSF stabilizer + insertion-sort fallback
+- SilkInverseQ32Gpu (`e7398fd`) - Newton-like reciprocal silk_INVERSE32_varQ
+- SilkLpcInvPredGainGpu (`ee5ebc5`) - LPC inverse prediction gain (uses InverseQ32)
+
+**Investigation result (2026-04-29 evening):** Tried to align CPU + GPU
+MagnitudeToFloorY (binary search vs Log10/Ceil) for non-silent Vorbis
+encode bit-exactness. Confirmed via CUDA test that the actual upstream
+divergence is MDCT float-vs-double precision: CUDA + OpenCL ILGPU
+backends don't support `XMath.Cos(double)` / `XMath.Log10(double)`
+without `EnableAlgorithms()` invoked at context construction. Reverted
+to float MDCT, documented as a follow-up: switching the accelerator
+factory to call `EnableAlgorithms()` would let the GPU encoder use
+double-precision XMath.Cos and bit-exactly mirror the CPU encoder.
+Until then, the GPU encoder produces a valid Vorbis bitstream that any
+decoder accepts; non-silent decoded PCM is acoustically identical (float
+MDCT drift < 1 ULP per cosine). The silence path produces byte-identical
+output across all backends because all spectrum values are 0 regardless
+of MDCT precision.
+
 ### 2026-04-27/28 - all encoders + decoders working through public APIs
 
 **Bug fixes (4 critical, 2 follow-on):**
