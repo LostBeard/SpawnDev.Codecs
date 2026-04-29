@@ -31,7 +31,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <PackageReference Include="SpawnDev.ILGPU" Version="4.9.2-rc.29" />
+	  <PackageReference Include="SpawnDev.ILGPU" Version="4.9.2-rc.30" />
 	  <PackageReference Include="SpawnDev.EBML" Version="3.0.1" />
 	  <!-- BSD-3 pure-managed Opus port. Currently used as the runtime backbone
 	       of the CELT decode path inside Audio/Opus/Celt/CeltDecoder.cs while
