@@ -47,6 +47,24 @@ public static class VorbisEncoderHelpersGpu
     }
 
     /// <summary>
+    /// Per-bin residue divide + quantize at index <paramref name="i"/>:
+    /// <c>residueQ[outBase + i] = QuantiseResidueValue(spectrum[i] / max(floorCurve[i], 1e-12))</c>.
+    /// Per-bin parallel; one thread per output bin. Used by the future
+    /// Vorbis GPU encoder's residue stage.
+    /// </summary>
+    public static void DivideQuantizeAt(
+        ArrayView<float> spectrum, long spectrumBase,
+        ArrayView<float> floorCurve, long floorBase,
+        ArrayView<int> residueQ, long residueQBase,
+        int i, float residueRange, int bookEntries)
+    {
+        float floor = floorCurve[floorBase + i];
+        if (floor < 1e-12f) floor = 1e-12f;
+        float r = spectrum[spectrumBase + i] / floor;
+        residueQ[residueQBase + i] = QuantiseResidueValue(r, residueRange, bookEntries);
+    }
+
+    /// <summary>
     /// Quantize a residue sample (already divided by the floor curve)
     /// into the residue codebook entry index. Codebook is anchored:
     /// entry N/2 decodes to 0, entry i decodes to (i - N/2) * step
