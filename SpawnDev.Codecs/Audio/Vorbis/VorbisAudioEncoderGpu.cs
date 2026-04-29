@@ -202,6 +202,69 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         return result;
     }
 
+    /// <summary>
+    /// Encode a complete mono PCM stream to a valid .ogg byte sequence.
+    /// 3 header packets (Identification + Comment + Setup) come from the
+    /// CPU encoder helpers (metadata struct setup, allowed); per-block
+    /// audio packets are encoded on GPU; OggPageWriter wraps everything.
+    /// </summary>
+    public async Task<byte[]> EncodeStreamAsync(
+        ReadOnlyMemory<float> mono, string vendor = "SpawnDev.Codecs")
+    {
+        if (_opts.Channels != 1) throw new NotSupportedException();
+        var packets = new List<Container.Ogg.OggOutgoingPacket>();
+
+        // 3 header packets via CPU encoder (metadata only).
+        packets.Add(new Container.Ogg.OggOutgoingPacket
+        {
+            Data = _cpuRef.BuildIdentPacket(),
+            GranulePosition = 0,
+        });
+        packets.Add(new Container.Ogg.OggOutgoingPacket
+        {
+            Data = _cpuRef.BuildCommentPacket(vendor),
+            GranulePosition = 0,
+        });
+        packets.Add(new Container.Ogg.OggOutgoingPacket
+        {
+            Data = _cpuRef.BuildSetupPacket(),
+            GranulePosition = 0,
+        });
+
+        // Audio packets: one per block; first packet primes the overlap.
+        int n = _opts.BlockSize;
+        int half = n / 2;
+        int totalSamples = mono.Length;
+        int audioPackets = (int)Math.Ceiling((double)(totalSamples + half) / half);
+        if (audioPackets < 2) audioPackets = 2;
+
+        var inputBuffer = new float[n];
+        long granule = 0;
+
+        for (int p = 0; p < audioPackets; p++)
+        {
+            int srcStart = p * half - half;
+            // Re-acquire the span on every iteration so it doesn't cross
+            // an `await` boundary (Span<T> is a ref struct).
+            var monoSpan = mono.Span;
+            for (int i = 0; i < n; i++)
+            {
+                int srcIdx = srcStart + i;
+                inputBuffer[i] = (srcIdx >= 0 && srcIdx < totalSamples) ? monoSpan[srcIdx] : 0f;
+            }
+            byte[] packet = await EncodeAudioPacketAsync(inputBuffer);
+            if (p > 0) granule += half;
+            packets.Add(new Container.Ogg.OggOutgoingPacket
+            {
+                Data = packet,
+                GranulePosition = granule,
+            });
+        }
+
+        return Container.Ogg.OggPageWriter.WriteStream(
+            (uint)Random.Shared.Next(1, int.MaxValue), packets);
+    }
+
     /// <summary>Release every resource owned by this encoder.</summary>
     public void Dispose()
     {

@@ -552,7 +552,7 @@ public sealed class VorbisAudioEncoder
         };
     }
 
-    private byte[] BuildIdentPacket()
+    internal byte[] BuildIdentPacket()
     {
         var bytes = new byte[30];
         bytes[0] = 0x01;
@@ -571,7 +571,7 @@ public sealed class VorbisAudioEncoder
         return bytes;
     }
 
-    private byte[] BuildCommentPacket(string vendor)
+    internal byte[] BuildCommentPacket(string vendor)
     {
         var vendorBytes = System.Text.Encoding.UTF8.GetBytes(vendor);
         var bytes = new byte[7 + 4 + vendorBytes.Length + 4 + 1];
@@ -585,7 +585,7 @@ public sealed class VorbisAudioEncoder
         return bytes;
     }
 
-    private byte[] BuildSetupPacket()
+    internal byte[] BuildSetupPacket()
     {
         var writer = new VorbisBitWriter();
         // Setup packets begin LSB-first AFTER the 7-byte header. We write the

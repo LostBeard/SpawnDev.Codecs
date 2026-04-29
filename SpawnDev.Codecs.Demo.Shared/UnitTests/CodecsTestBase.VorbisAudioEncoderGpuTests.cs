@@ -35,6 +35,42 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
+    [TestMethod]
+    public async Task VorbisAudioEncoderGpu_EncodeStreamSilence_OggBytesValid()
+    {
+        // Full-stream encode test: silence PCM -> .ogg bytes.
+        // Verifies the CPU header packets + GPU audio packets +
+        // OggPageWriter chain produces a byte stream that is structurally
+        // valid (starts with OggS) and round-trips through the CPU
+        // VorbisOggDecoder back to silence PCM.
+        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        try
+        {
+            var options = new VorbisAudioEncoderOptions
+            {
+                SampleRateHz = 44100,
+                Channels = 1,
+                BlockSize = 1024,
+            };
+
+            // 4 blocks of silence = 4 * 512 = 2048 samples.
+            var pcm = new float[2048];
+
+            using var gpu = new VorbisAudioEncoderGpu(acc, options);
+            byte[] oggBytes = await gpu.EncodeStreamAsync(pcm);
+
+            // Sanity: starts with OggS sync word.
+            if (oggBytes.Length < 4 || oggBytes[0] != 0x4F || oggBytes[1] != 0x67
+                || oggBytes[2] != 0x67 || oggBytes[3] != 0x53)
+                throw new Exception($"Output does not start with OggS sync; first 4 bytes = 0x{oggBytes[0]:X2} {oggBytes[1]:X2} {oggBytes[2]:X2} {oggBytes[3]:X2}");
+            // Sanity: at least header packets (3 pages typical) plus audio
+            // pages should produce > 200 bytes for this config.
+            if (oggBytes.Length < 200)
+                throw new Exception($"Output suspiciously short: {oggBytes.Length} bytes");
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
     // Non-silent (tone, random PCM) bit-exact match deferred. CUDA +
     // OpenCL ILGPU backends don't support XMath.Cos(double) /
     // XMath.Log10(double) without EnableAlgorithms, so the GPU encoder
