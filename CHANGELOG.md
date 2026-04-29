@@ -5,6 +5,39 @@
 Initial development. Project still in pre-release. See README.md for the
 working feature matrix.
 
+### 2026-04-29 - Opus SILK GPU primitive build-out continued (23 -> 31 primitives)
+
+**Continuing 2026-04-29 late-night session: 8 more Opus SILK GPU primitives
+beyond the earlier 23-primitive milestone.** Brings Opus SILK to 31 GPU
+primitives total + 1 shared Daala range coder. Now have GPU coverage of every
+non-entropy SILK decode stage including a full composite NLSF decode pipeline
+(Unpack -> ResidualDequant -> WeightedAdd -> Stabilize) running in a single
+kernel thread.
+
+| Codec  | Encoder | Decoder | GPU primitives |
+|--------|---------|---------|----------------|
+| Opus   | -       | -       | 31 SILK + 1 shared range coder |
+
+**New Opus SILK GPU primitives shipped this session (24th-31st):**
+- SilkGainDecoderGpu (`c885b86`) - per-subframe gain dequantizer (delta-coded hysteresis, composes SilkLog2Gpu)
+- SilkLtpGainVectorGpu (`4808113`) - per-tap LTP gain vector codebook lookup (per-tap parallel)
+- SilkPitchContourGpu (`cbeb1bc`) - per-subframe pitch contour expansion (per-subframe parallel)
+- SilkNlsfInterpolateGpu (`5fa485a`) - per-coefficient NLSF inter-frame interpolation (per-coefficient parallel)
+- SilkNlsfResidualDequantGpu (`95f356d`) - reverse-iterating NLSF residual dequant (sequential per-stream)
+- SilkNlsfWeightedAddGpu (`5a8944b`) - per-coefficient NLSF inverse-weight + first-stage add (per-coef parallel)
+- SilkNlsfDecodeGpu (`65cbddf`) - composite NLSF decode pipeline (single-thread, composes 4 GPU primitives)
+- SilkLtpScaleGpu - 3-entry LTP scale Q14 lookup
+
+**Second library quirk discovered + worked around (composite NLSF decode):**
+ILGPU CUDA + OpenCL backends do NOT preserve C# byte<->sbyte cast semantics
+through ArrayView storage. Initial SilkNlsfDecodeGpu used ArrayView<sbyte>
+for predQ8 scratch with explicit (sbyte)/(byte) casts; CPU backend passed
+all 4 tests but CUDA + OpenCL produced random divergences (8/12 tests
+failed). Fix: use ArrayView<byte> directly with implicit conversions. Saved
+`feedback_ilgpu_byte_sbyte_roundtrip.md` so future composite primitives
+avoid the trap. The cross-backend pattern (CPU passes, hardware fails) is
+the smoking gun for the bug.
+
 ### 2026-04-29 - Opus SILK GPU primitive build-out (9 -> 23 primitives)
 
 **Continuing 2026-04-29 (late evening session): Opus SILK primitive expansion
