@@ -495,7 +495,7 @@ internal static class SilkResampler
     /// <param name="output">Output samples (length &gt;= 2 * len).</param>
     /// <param name="input">Input samples (length &gt;= len).</param>
     /// <param name="len">Number of input samples.</param>
-    private static void Up2Hq(Span<int> S, Span<short> output, ReadOnlySpan<short> input, int len)
+    internal static void Up2Hq(Span<int> S, Span<short> output, ReadOnlySpan<short> input, int len)
     {
         // All state + internal variables are in Q10.
         for (int k = 0; k < len; k++)
