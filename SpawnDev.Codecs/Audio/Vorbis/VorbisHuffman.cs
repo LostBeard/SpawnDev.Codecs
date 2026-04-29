@@ -165,6 +165,24 @@ internal sealed class VorbisHuffmanDecoder
         }
         throw new InvalidDataException("Vorbis Huffman decode: exceeded max depth without hitting a leaf.");
     }
+
+    /// <summary>
+    /// Flatten the decision tree to fixed arrays suitable for upload
+    /// to <see cref="VorbisHuffmanDecoderGpu.TryDecode"/>. Returns
+    /// (children, leafToEntry, maxDepth) such that:
+    ///   - children[node*2 + bit] = next child index, or (leafIdx | 1&lt;&lt;30)
+    ///     if the child is a leaf, or -1 if the path is invalid.
+    ///   - leafToEntry[leafIdx] = codebook entry index for that leaf.
+    ///   - maxDepth = the deepest codeword length in this codebook.
+    /// </summary>
+    internal (int[] children, int[] leafToEntry, int maxDepth) BuildFlatGpu()
+    {
+        int leafCount = _isLeaf.Length;
+        var leafToEntry = new int[leafCount];
+        foreach (var kv in _leafToEntry) leafToEntry[kv.Key] = kv.Value;
+        // _children is already the flat representation - just clone for ownership.
+        return ((int[])_children.Clone(), leafToEntry, _maxDepth);
+    }
 }
 
 internal static class VorbisHuffman
