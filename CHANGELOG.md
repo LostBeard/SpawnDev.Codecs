@@ -5,6 +5,26 @@
 Initial development. Project still in pre-release. See README.md for the
 working feature matrix.
 
+### 2026-04-29 - VorbisAudioDecoderGpu IMDCT step moves from CPU to GPU
+
+`VorbisAudioDecoderGpu.DecodePacketAsync` now dispatches `ImdctReferenceGpu`
+on the accelerator instead of the CPU `ImdctReference.Transform`. The
+spectrum coefficients (post-floor + post-residue + post-inverse-coupling)
+upload to GPU once, and the IMDCT, post-IMDCT (window + overlap-add +
+right-half save), and channel interleave all chain accelerator-resident
+without intermediate CPU readback. Per-channel dispatch: one GPU thread
+per output time-domain sample (2N=blockSize threads / channel).
+
+Silence-path round-trip test still PASSES on CUDA + OpenCL + CPU
+(`VorbisAudioDecoderGpu_SilenceRoundTrip_MatchesCpuDecoder` 6/6 PMT).
+The CPU reference uses `double` accumulators for the IMDCT and the GPU
+uses `float`, so non-silence inputs would diverge slightly; silence
+remains bit-exact zero.
+
+Remaining CPU-side work in the v1 hybrid: bit-stream parse + Huffman +
+floor decode + residue decode + multiply + inverse coupling. Vorbis-
+Huffman GPU bit-reader is the keystone primitive for moving those.
+
 ### 2026-04-29 - VorbisAudioDecoderGpu - closes the Vorbis encoder/decoder pair
 
 **Vorbis is now 6 of 6 codec encoders + 6 of 6 codec decoders end-to-end on

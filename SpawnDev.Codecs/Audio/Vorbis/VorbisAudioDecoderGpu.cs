@@ -59,6 +59,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     private int _previousHalfBlock = 0;
 
     // Compiled kernels.
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, int> _imdctKernel;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>,
         ArrayView<float>, ArrayView<float>, int> _postImdctKernel;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, int, int> _interleaveKernel;
@@ -80,6 +81,8 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         _setup = setup ?? throw new ArgumentNullException(nameof(setup));
         _cpuRef = new VorbisAudioDecoder(ident, setup);
 
+        _imdctKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<float>, ArrayView<float>, int>(ImdctKernel);
         _postImdctKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>,
             ArrayView<float>, ArrayView<float>, int>(PostImdctKernel);
@@ -98,24 +101,28 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         if (packet.Length == 0) return Array.Empty<float>();
         int channels = _ident.AudioChannels;
 
-        // Step 1: CPU spectrum decode + IMDCT (v1 hybrid - the bit-stream
-        // parse + Huffman lookup will move to GPU once the Vorbis-Huffman
-        // bit-reader keystone primitive lands).
-        var (timeDomain, blockSize) = DecodeAndImdctOnCpu(packet);
+        // Step 1: CPU spectrum decode (bit-stream parse + Huffman + floor +
+        // residue + multiply + inverse coupling). v1 hybrid - the bit-stream
+        // path will move to GPU once the Vorbis-Huffman bit-reader keystone
+        // primitive lands. Returns per-channel spectrum coefficients
+        // (length halfBlock per channel, post-inverse-coupling).
+        var (spectra, blockSize) = DecodeSpectrumOnCpu(packet);
         int halfBlock = blockSize / 2;
 
         // Allocate per-call GPU buffers.
         long tdBufferLen = (long)channels * blockSize;
+        long specBufferLen = (long)channels * halfBlock;
+        using var dSpec = _accelerator.Allocate1D<float>(specBufferLen);
         using var dTd = _accelerator.Allocate1D<float>(tdBufferLen);
         using var dWindow = _accelerator.Allocate1D<float>(blockSize);
         using var dPcmCm = _accelerator.Allocate1D<float>((long)channels * halfBlock);
         using var dPcmInterleaved = _accelerator.Allocate1D<float>((long)channels * halfBlock);
 
-        // Upload time-domain (per-channel concatenated) + window.
-        var tdFlat = new float[tdBufferLen];
+        // Upload spectra (per-channel concatenated) + window.
+        var specFlat = new float[specBufferLen];
         for (int ch = 0; ch < channels; ch++)
-            Array.Copy(timeDomain[ch], 0, tdFlat, (long)ch * blockSize, blockSize);
-        dTd.View.CopyFromCPU(tdFlat);
+            Array.Copy(spectra[ch], 0, specFlat, (long)ch * halfBlock, halfBlock);
+        dSpec.View.CopyFromCPU(specFlat);
         dWindow.View.CopyFromCPU(VorbisWindow.GenerateCanonical(blockSize));
 
         // Allocate / re-allocate previous-right-half buffer if blockSize changed.
@@ -138,7 +145,21 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         // Allocate the new-right-half buffer (replaces dPrev after this call).
         var dNewRight = _accelerator.Allocate1D<float>((long)channels * halfBlock);
 
-        // Step 2: GPU PostImdct (window + overlap-add + new-right-half-save) per channel.
+        // Step 2: GPU IMDCT per channel (one thread per output sample).
+        // Reads from dSpec (halfBlock floats / channel), writes 2N=blockSize
+        // samples / channel to dTd. Bit-near-exact mirror of CPU
+        // ImdctReference.Transform via the GPU helper.
+        for (int ch = 0; ch < channels; ch++)
+        {
+            long specBase = (long)ch * halfBlock;
+            long tdBase = (long)ch * blockSize;
+            var specView = dSpec.View.SubView(specBase, halfBlock);
+            var tdView = dTd.View.SubView(tdBase, blockSize);
+
+            _imdctKernel(new Index1D(blockSize), specView, tdView, halfBlock);
+        }
+
+        // Step 3: GPU PostImdct (window + overlap-add + new-right-half-save) per channel.
         for (int ch = 0; ch < channels; ch++)
         {
             long tdBase = (long)ch * blockSize;
@@ -152,7 +173,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
                 tdView, dWindow.View, prevView, newRightView, pcmView, halfBlock);
         }
 
-        // Step 3: GPU interleave channel-major PCM -> sample-major PCM.
+        // Step 4: GPU interleave channel-major PCM -> sample-major PCM.
         if (havePrevious)
         {
             _interleaveKernel(new Index1D(halfBlock * channels),
@@ -177,12 +198,13 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
 
     /// <summary>
     /// CPU helper for v1: parse packet via the existing CPU decoder + return
-    /// channel-major time-domain samples (post-IMDCT, pre-window). Pulls in
-    /// the existing VorbisAudioDecoder bit-stream + IMDCT path so the GPU
-    /// integration class has a working spectrum pipeline today; the hot
-    /// path moves to GPU as the Vorbis-Huffman GPU bit-reader lands.
+    /// channel-major spectrum coefficients (post-floor-multiply + post-inverse-
+    /// coupling, pre-IMDCT). Pulls in the existing VorbisAudioDecoder bit-
+    /// stream path so the GPU integration class has a working spectrum
+    /// pipeline today; the hot path moves to GPU as the Vorbis-Huffman GPU
+    /// bit-reader lands.
     /// </summary>
-    private (float[][] timeDomain, int blockSize) DecodeAndImdctOnCpu(ReadOnlyMemory<byte> packet)
+    private (float[][] spectra, int blockSize) DecodeSpectrumOnCpu(ReadOnlyMemory<byte> packet)
     {
         // Parse packet header on CPU to learn blockSize.
         var bitReader = new VorbisBitReader(packet.Span);
@@ -262,15 +284,19 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         }
         VorbisInverseCoupling.Apply(spectra, mapping);
 
-        // IMDCT per channel.
-        var timeDomain = new float[channels][];
-        for (int ch = 0; ch < channels; ch++)
-        {
-            var td = new float[blockSize];
-            ImdctReference.Transform(spectra[ch], td);
-            timeDomain[ch] = td;
-        }
-        return (timeDomain, blockSize);
+        // IMDCT now runs on GPU - we return spectrum coefficients directly.
+        return (spectra, blockSize);
+    }
+
+    /// <summary>
+    /// Per-sample IMDCT kernel: compute one time-domain output sample
+    /// from N=halfBlockSize spectrum coefficients. One thread per
+    /// 2N=blockSize output sample.
+    /// </summary>
+    private static void ImdctKernel(
+        Index1D index, ArrayView<float> spectrum, ArrayView<float> td, int halfBlockSize)
+    {
+        td[index.X] = ImdctReferenceGpu.Sample(spectrum, 0, halfBlockSize, index.X);
     }
 
     /// <summary>
