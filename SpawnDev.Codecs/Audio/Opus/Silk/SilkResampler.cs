@@ -397,7 +397,7 @@ internal static class SilkResampler
     /// AR2 IIR pre-filter (2 coefficients in Q14). Matches libopus
     /// <c>silk_resampler_private_AR2</c>.
     /// </summary>
-    private static void Ar2(Span<int> S, Span<int> outQ8, ReadOnlySpan<short> input, ReadOnlySpan<short> aQ14)
+    internal static void Ar2(Span<int> S, Span<int> outQ8, ReadOnlySpan<short> input, ReadOnlySpan<short> aQ14)
     {
         for (int k = 0; k < outQ8.Length; k++)
         {
