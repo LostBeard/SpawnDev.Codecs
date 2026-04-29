@@ -26,6 +26,8 @@ public static class Av1TxbCommonGpu
     public const int BrCdfSize = Av1TxbCommon.BrCdfSize;
     /// <summary>libaom COEFF_BASE_RANGE = 12.</summary>
     public const int CoeffBaseRange = Av1TxbCommon.CoeffBaseRange;
+    /// <summary>libaom MAX_BASE_BR_RANGE = COEFF_BASE_RANGE + NUM_BASE_LEVELS + 1 = 15.</summary>
+    public const int MaxBaseBrRange = Av1TxbCommon.MaxBaseBrRange;
     /// <summary>libaom COEFF_CONTEXT_BITS = 6.</summary>
     public const int CoeffContextBits = Av1TxbCommon.CoeffContextBits;
     /// <summary>libaom COEFF_CONTEXT_MASK = 63.</summary>

@@ -303,11 +303,13 @@ public static class Av1CoefEncoderGpu
         ArrayView<byte> levels, long levelsBase)
     {
         // Zero the buffer first - libaom zeroes the levels buffer
-        // before the per-coef writes.
+        // before the per-coef writes. Buffer size fits in int (max
+        // ~456 bytes for Tx16x16); use int counter for OpenCL backend
+        // codegen safety.
         int paddedStride = (1 << bhl) + Av1TxbCommonGpu.TxPadHor;
         int paddedRows = height + Av1TxbCommonGpu.TxPadVer;
-        long bufBytes = (long)paddedStride * paddedRows + Av1TxbCommonGpu.TxPadEnd;
-        for (long i = 0; i < bufBytes; i++) levels[levelsBase + i] = 0;
+        int bufBytes = paddedStride * paddedRows + Av1TxbCommonGpu.TxPadEnd;
+        for (int i = 0; i < bufBytes; i++) levels[levelsBase + i] = 0;
 
         int levelsOff = Av1TxbCommonGpu.SetLevelsOffset(height);
         for (int col = 0; col < width; col++)
