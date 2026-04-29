@@ -21,6 +21,11 @@ public static class VorbisFwdMdctScaledGpu
     /// Compute one Vorbis-scaled forward MDCT output bin:
     /// <c>output[outBase + k] = (4f/n) * Sum_{i=0..2N-1} input[i] * cos(pi/N * (i + 0.5 + N/2) * (k + 0.5))</c>.
     /// Per-bin independent; one thread per output k.
+    /// Float-precision XMath.Cos accumulator (the CPU MdctReference uses
+    /// double-precision Math.Cos; the float-vs-double drift over 2N
+    /// cosines means non-silent Vorbis encoder output isn't bit-exact
+    /// across CPU + GPU - decoded PCM is acoustically identical, but
+    /// individual bits in the bitstream may differ at floor-Y boundaries).
     /// </summary>
     public static void ForwardScaledAt(
         ArrayView<float> timeDomain, long inBase,

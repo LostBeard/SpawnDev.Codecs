@@ -35,25 +35,16 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    // Non-silent (tone, random PCM) bit-exact match deferred. Root cause:
-    // CPU MdctReference uses double-precision Math.Cos accumulator while
-    // GPU MdctReferenceGpu uses float-precision XMath.Cos. The two produce
-    // different float spectrum values; downstream the spectrum peaks
-    // differ, producing different floor Y values, which cascades through
-    // the bit stream. The silence path produces byte-identical output
-    // because all spectrum values are 0 regardless of MDCT precision and
-    // the floor clamps to Y=1 on both sides.
-    //
-    // Resolving non-silent bit-exact requires either:
-    //   (a) Aligning MDCT precision (port MdctReferenceGpu to use double
-    //       precision XMath.Cos - works only on backends with f64 native
-    //       support; needs Dekker emulation on Wasm/WebGL).
-    //   (b) Switching CPU encoder to use float-precision MdctReference
-    //       (changes CPU encoder behavior for non-silent input).
-    // Both paths are deeper than this integration class and are tracked
-    // as follow-up. The encoder currently produces a valid Vorbis
-    // bitstream that any decoder accepts; bit-exact match to CPU is the
-    // tighter check we're punting on.
+    // Non-silent (tone, random PCM) bit-exact match deferred. CUDA +
+    // OpenCL ILGPU backends don't support XMath.Cos(double) /
+    // XMath.Log10(double) without EnableAlgorithms, so the GPU encoder
+    // can't bit-exactly mirror the CPU MdctReference (double accumulator).
+    // Float-precision MDCT produces acoustically identical decoded PCM
+    // but a few bitstream bytes can diverge at floor-Y boundaries.
+    // The silence path produces byte-identical output regardless.
+    // Resolution path: configure ILGPU contexts to call
+    // EnableAlgorithms() so XMath double-precision intrinsics are
+    // available (test factory change); follow-up.
 
     private static async Task EncodeAndCompare(
         Accelerator acc, VorbisAudioEncoderOptions options, float[] pcm)
