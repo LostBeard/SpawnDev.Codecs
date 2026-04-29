@@ -108,16 +108,75 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    private static void CompareSamples(float[] expected, float[] actual, int count, string context)
+    [TestMethod]
+    public async Task VorbisAudioDecoderGpu_ToneRoundTrip_MatchesCpuDecoder()
+    {
+        // Non-silence: 440 Hz mono tone. Same packets feed BOTH the CPU
+        // VorbisAudioDecoder reference AND the GPU VorbisAudioDecoderGpu.
+        // Output drift comes from the IMDCT float (GPU) vs double (CPU)
+        // accumulator difference - the test allows ~1e-3 absolute on
+        // sample magnitudes that peak near 0.5.
+        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        try
+        {
+            var options = new VorbisAudioEncoderOptions
+            {
+                SampleRateHz = 44100,
+                Channels = 1,
+                BlockSize = 1024,
+            };
+
+            // Generate 4 blocks of a 440 Hz tone at 0.5 amplitude.
+            int totalSamples = options.BlockSize * 4;
+            var pcm = new float[totalSamples];
+            double w = 2.0 * Math.PI * 440.0 / options.SampleRateHz;
+            for (int i = 0; i < totalSamples; i++)
+                pcm[i] = 0.5f * (float)Math.Sin(w * i);
+
+            using var encoder = new VorbisAudioEncoderGpu(acc, options);
+            byte[] packet1 = await encoder.EncodeAudioPacketAsync(
+                pcm.AsMemory(0, options.BlockSize).ToArray());
+            byte[] packet2 = await encoder.EncodeAudioPacketAsync(
+                pcm.AsMemory(options.BlockSize, options.BlockSize).ToArray());
+            byte[] packet3 = await encoder.EncodeAudioPacketAsync(
+                pcm.AsMemory(2 * options.BlockSize, options.BlockSize).ToArray());
+
+            // CPU reference decode.
+            var cpuDec = new VorbisAudioDecoder(encoder.Identification, encoder.Setup);
+            int halfBlock = options.BlockSize / 2;
+            var cpuOut1 = new float[halfBlock * options.Channels];
+            cpuDec.DecodePacket(packet1, cpuOut1);
+            var cpuOut2 = new float[halfBlock * options.Channels];
+            int cpuFrames2 = cpuDec.DecodePacket(packet2, cpuOut2);
+            var cpuOut3 = new float[halfBlock * options.Channels];
+            int cpuFrames3 = cpuDec.DecodePacket(packet3, cpuOut3);
+
+            // GPU decode.
+            using var gpuDec = new VorbisAudioDecoderGpu(
+                acc, encoder.Identification, encoder.Setup);
+            _ = await gpuDec.DecodePacketAsync(packet1);
+            float[] gpuOut2 = await gpuDec.DecodePacketAsync(packet2);
+            float[] gpuOut3 = await gpuDec.DecodePacketAsync(packet3);
+
+            CompareSamples(cpuOut2, gpuOut2, cpuFrames2 * options.Channels,
+                "tone-packet2", absTol: 1e-3f);
+            CompareSamples(cpuOut3, gpuOut3, cpuFrames3 * options.Channels,
+                "tone-packet3", absTol: 1e-3f);
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    private static void CompareSamples(
+        float[] expected, float[] actual, int count, string context,
+        float absTol = 1e-5f)
     {
         if (actual.Length < count)
             throw new Exception($"[{context}] GPU buffer too short: {actual.Length} < {count}");
-        const float kAbsTol = 1e-5f;
         for (int i = 0; i < count; i++)
         {
             float diff = expected[i] - actual[i];
             if (diff < 0) diff = -diff;
-            if (diff > kAbsTol)
+            if (diff > absTol)
                 throw new Exception($"[{context}] sample[{i}]: cpu={expected[i]:R} gpu={actual[i]:R} diff={diff:R}");
         }
     }

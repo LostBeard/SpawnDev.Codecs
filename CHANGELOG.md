@@ -5,6 +5,20 @@
 Initial development. Project still in pre-release. See README.md for the
 working feature matrix.
 
+### 2026-04-29 - VorbisAudioDecoderGpu non-silence tone round-trip test
+
+`VorbisAudioDecoderGpu_ToneRoundTrip_MatchesCpuDecoder` exercises the
+full GPU decoder chain on a non-silent 440 Hz mono tone (peak 0.5).
+Same packets feed both the CPU `VorbisAudioDecoder` reference (double-
+precision IMDCT) AND the GPU `VorbisAudioDecoderGpu` (float-precision
+IMDCT). PCM compared sample-by-sample with 1e-3 absolute tolerance to
+absorb the float-vs-double divergence in the IMDCT accumulator.
+
+Result: 3/3 backends PASS (CUDA + OpenCL + CPU = 9/9 PMT counting all
+three Vorbis decoder tests). This is the first non-silence proof point
+for the GPU multiply + inverse-coupling + IMDCT + post-IMDCT chain
+running end-to-end on real spectral data.
+
 ### 2026-04-29 - VorbisAudioDecoderGpu floor*residue multiply + inverse coupling move to GPU
 
 `VorbisAudioDecoderGpu` now dispatches `VorbisFloorMultiplyGpu` and
