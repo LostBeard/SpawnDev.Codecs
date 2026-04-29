@@ -5,6 +5,30 @@
 Initial development. Project still in pre-release. See README.md for the
 working feature matrix.
 
+### 2026-04-29 - FLAC subframe decode chain GPU coverage (7 new primitives)
+
+**Continuing 2026-04-29 late-night session: 7 new FLAC GPU primitives plus 1
+new Vorbis primitive.** The FLAC subframe decode chain is now fully GPU-
+callable end-to-end - both FIXED and LPC predictor types have composite
+decode primitives that compose 4 individual primitives in a single kernel
+thread.
+
+**New FLAC GPU primitives shipped this session (5 standalone + 2 composite):**
+- VorbisOverlapAddGpu (`c9417b2`) - per-sample-parallel post-IMDCT overlap-add
+- FlacFixedReconstructGpu (`46bc459`) - decoder-side FIXED predictor reconstruction (orders 0-4)
+- FlacLpcReconstructGpu (`2aabcb3`) - decoder-side LPC predictor reconstruction (orders 1-32, quant 0-15)
+- FlacChannelDecorrelationGpu (`e7e2dd1`) - per-sample stereo decorrelation (LeftSide / RightSide / MidSide)
+- FlacResidualDecoderGpu (`80b73d3`) - Rice-coded residual decoder (PartitionedRice + PartitionedRice2)
+- FlacSubframeHeaderGpu (`38d0fda`) - subframe header parser (CONSTANT / VERBATIM / FIXED / LPC)
+- FlacFixedSubframeDecodeGpu (`1ab8a84`) - composite end-to-end FIXED subframe decoder
+- FlacLpcSubframeDecodeGpu (`7319d1c`) - composite end-to-end LPC subframe decoder
+
+**FLAC subframe decode chain (now fully GPU-callable):**
+SubframeHeader -> FixedSubframeDecode or LpcSubframeDecode (warm-up reads ->
+ResidualDecode -> Reconstruct -> wasted-bits left-shift) -> ChannelDecorrelate
+(if stereo). Each step is bit-exact vs the libFLAC reference across CUDA +
+OpenCL + CPU.
+
 ### 2026-04-29 - Opus SILK GPU primitive build-out continued (23 -> 31 primitives)
 
 **Continuing 2026-04-29 late-night session: 8 more Opus SILK GPU primitives

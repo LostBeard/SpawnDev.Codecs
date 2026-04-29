@@ -63,9 +63,9 @@ ILGPU IR symmetry). Host is a pure coordinator: alloc + upload + dispatch
 |--------|--------------------------|--------------------------|---------------------------------------|
 | VP8    | `Vp8KeyframeEncoderGpu`  | `Vp8KeyframeDecoderGpu`  | v1 keyframe (Y=128 round-trip 0.2)    |
 | VP9    | `Vp9KeyframeEncoderGpu`  | `Vp9KeyframeDecoderGpu`  | v1 keyframe + multi-block walker      |
-| FLAC   | `FlacEncoderGpu`         | `FlacDecoderGpu`         | v1 keyframe (4096-block, 16-bit, 44.1k) |
+| FLAC   | `FlacEncoderGpu`         | `FlacDecoderGpu`         | v1 keyframe + 7 standalone subframe-decode primitives (FixedReconstruct + LpcReconstruct + ChannelDecorrelation + ResidualDecoder + SubframeHeader + Fixed/Lpc subframe composites) |
 | AV1    | `Av1KeyframeEncoderGpu`  | `Av1KeyframeDecoderGpu`  | v1 keyframe bit-exact vs CPU encoder  |
-| Vorbis | `VorbisAudioEncoderGpu`  | -                        | v1 mono encoder (silence path bit-exact + full .ogg stream output; 20 GPU primitives) |
+| Vorbis | `VorbisAudioEncoderGpu`  | -                        | v1 mono encoder (silence path bit-exact + full .ogg stream output; 21 GPU primitives including OverlapAdd) |
 | Opus   | -                        | -                        | 31 SILK GPU primitives + shared Daala range coder |
 
 Each pair has tests in `CodecsTestBase.<Codec>KeyframeEncoderGpuTests.cs`
