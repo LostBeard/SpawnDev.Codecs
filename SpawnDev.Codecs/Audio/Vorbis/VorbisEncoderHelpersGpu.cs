@@ -31,10 +31,13 @@ public static class VorbisEncoderHelpersGpu
         float magnitude,
         ArrayView<float> inverseDbTable, long inverseDbBase)
     {
-        // Sentinels for boundaries (NaN / Infinity / clamp).
+        // Binary search on the inverse-dB table (avoids the Log10
+        // intrinsic which is unsupported on some ILGPU backends without
+        // EnableAlgorithms). Returns the smallest Y such that
+        // inverseDb[Y] &gt;= magnitude (ceiling semantics, so residue =
+        // spectrum/floor stays in [-1, +1]).
         if (!(magnitude > 0)) return 0;       // catches NaN, 0, negative
         if (magnitude >= 1.0f) return 255;
-        // Binary search: smallest Y such that inverseDb[Y] >= magnitude.
         int lo = 0;
         int hi = 255;
         while (lo < hi)
