@@ -413,7 +413,7 @@ internal static class SilkResampler
     /// Polyphase interpolated FIR downsampler. Selects one of three implementations
     /// based on FIR_Order (18 / 24 / 36). Matches libopus <c>silk_resampler_private_down_FIR_INTERPOL</c>.
     /// </summary>
-    private static int DownFirInterpol(Span<short> output, int outOffset, ReadOnlySpan<int> buf,
+    internal static int DownFirInterpol(Span<short> output, int outOffset, ReadOnlySpan<int> buf,
         ReadOnlySpan<short> firCoefs, int firOrder, int firFracs, long maxIndexQ16, int indexIncrementQ16)
     {
         switch (firOrder)
