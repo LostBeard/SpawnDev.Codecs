@@ -203,19 +203,17 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         await _accelerator.SynchronizeAsync();
 
         // ---- Read back tile bytes ----
-        // Per-range CopyToHostAsync: lib returns a fresh T[] sized to the
-        // requested range. No host-side iteration over codec data at the
-        // call site.
+        // SubView -> CopyToHostAsync is a real per-backend partial readback
+        // (SpawnDev.ILGPU 4.9.3+); only the slice's bytes cross the boundary.
         long tileLen = (await dTileLen.CopyToHostAsync())[0];
-        var tileResult = await dTile.CopyToHostAsync(0, tileLen);
+        var tileResult = await dTile.View.SubView(0, tileLen).CopyToHostAsync();
 
         // ---- Read back recon planes ----
         // Three per-plane partial readbacks of dRecon at the YPlaneOff /
-        // UPlaneOff / VPlaneOff offsets the kernel wrote to. No host
-        // BlockCopy on decoded pixels at this layer.
-        var yReconResult = await dRecon.CopyToHostAsync(0, yLen);
-        var uReconResult = await dRecon.CopyToHostAsync(yLen, uvLen);
-        var vReconResult = await dRecon.CopyToHostAsync(yLen + uvLen, uvLen);
+        // UPlaneOff / VPlaneOff offsets the kernel wrote to.
+        var yReconResult = await dRecon.View.SubView(0, yLen).CopyToHostAsync();
+        var uReconResult = await dRecon.View.SubView(yLen, uvLen).CopyToHostAsync();
+        var vReconResult = await dRecon.View.SubView(yLen + uvLen, uvLen).CopyToHostAsync();
 
         return (tileResult, yReconResult, uReconResult, vReconResult);
     }

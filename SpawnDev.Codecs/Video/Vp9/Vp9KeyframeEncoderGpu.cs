@@ -240,8 +240,8 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
 
         await _accelerator.SynchronizeAsync();
         long outFrameLen = (await dOutFrameLen.CopyToHostAsync())[0];
-        // Partial readback - lib returns a fresh byte[] sized to outFrameLen.
-        var result = await dOutFrame.CopyToHostAsync(0, outFrameLen);
+        // Real per-backend partial readback (SpawnDev.ILGPU 4.9.3+).
+        var result = await dOutFrame.View.SubView(0, outFrameLen).CopyToHostAsync();
 
         // Read back recon planes for self-consistency testing.
         // CopyToHostAsync returns fresh byte[] arrays sized to dY/dU/dV

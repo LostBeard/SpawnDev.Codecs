@@ -128,11 +128,12 @@ public sealed class Av1KeyframeDecoderGpu : IDisposable
         await _accelerator.SynchronizeAsync();
 
         // Three per-plane partial readbacks of dRecon at the YPlaneOff /
-        // UPlaneOff / VPlaneOff offsets. No host-side iteration over
-        // codec output bytes at the call site.
-        var y = await dRecon.CopyToHostAsync(0, yLen);
-        var u = await dRecon.CopyToHostAsync(yLen, uvLen);
-        var v = await dRecon.CopyToHostAsync(yLen + uvLen, uvLen);
+        // UPlaneOff / VPlaneOff offsets. SubView -> CopyToHostAsync is a
+        // real per-backend partial readback (SpawnDev.ILGPU 4.9.3+); the
+        // staging copy and DMA only touch the slice's bytes.
+        var y = await dRecon.View.SubView(0, yLen).CopyToHostAsync();
+        var u = await dRecon.View.SubView(yLen, uvLen).CopyToHostAsync();
+        var v = await dRecon.View.SubView(yLen + uvLen, uvLen).CopyToHostAsync();
         return (y, u, v);
     }
 

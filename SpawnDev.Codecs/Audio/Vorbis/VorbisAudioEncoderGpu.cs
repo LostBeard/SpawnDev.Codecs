@@ -216,8 +216,8 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         await _accelerator.SynchronizeAsync();
 
         long outLen = (await dOutLen.CopyToHostAsync())[0];
-        // Partial readback - lib returns a fresh byte[] sized to outLen.
-        var result = await dOutBytes.CopyToHostAsync(0, outLen);
+        // Real per-backend partial readback (SpawnDev.ILGPU 4.9.3+).
+        var result = await dOutBytes.View.SubView(0, outLen).CopyToHostAsync();
         return result;
     }
 
