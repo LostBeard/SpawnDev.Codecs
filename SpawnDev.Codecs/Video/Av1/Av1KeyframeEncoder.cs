@@ -108,6 +108,47 @@ public static class Av1KeyframeEncoder
         return output;
     }
 
+    /// <summary>
+    /// V3 GPU encoder integration helper. Same as <see cref="EncodeKeyFrame"/>
+    /// but accepts pre-computed tile bytes (produced by the GPU walker) and
+    /// only performs OBU framing (TD + SH + Frame OBU wrap) on host. The
+    /// framing is metadata struct setup + bit-packing of fixed config, not
+    /// codec-data math, so it stays inside the CARDINAL rule's "metadata
+    /// struct setup" allowance.
+    /// </summary>
+    internal static byte[] EncodeKeyFrameWithExternalTile(
+        int width, int height, int baseQIndex, byte[] tileBytes)
+    {
+        if (tileBytes is null) throw new ArgumentNullException(nameof(tileBytes));
+        if ((width & 15) != 0 || (height & 15) != 0)
+            throw new ArgumentException("Width and height must be multiples of 16 (v1)");
+
+        // ---- TD OBU ----
+        byte[] tdObu = Av1ObuWriter.EmitObu(
+            Av1ObuType.TemporalDelimiter, ReadOnlySpan<byte>.Empty, hasSizeField: true);
+
+        // ---- SH OBU ----
+        var shConfig = BuildSequenceHeaderConfig(width, height);
+        byte[] shPayload = Av1SequenceHeaderWriter.EmitPayload(shConfig);
+        byte[] shObu = Av1ObuWriter.EmitObu(
+            Av1ObuType.SequenceHeader, shPayload, hasSizeField: true);
+        var sh = SynthesizeSequenceHeader(shConfig);
+
+        // ---- Frame OBU = uncompressed header + (GPU-produced) tile bytes ----
+        byte[] uncompressedHeader = BuildUncompressedHeader(sh, width, height, baseQIndex);
+        var frameOuter = new byte[uncompressedHeader.Length + tileBytes.Length];
+        Buffer.BlockCopy(uncompressedHeader, 0, frameOuter, 0, uncompressedHeader.Length);
+        Buffer.BlockCopy(tileBytes, 0, frameOuter, uncompressedHeader.Length, tileBytes.Length);
+        byte[] frameObu = Av1ObuWriter.EmitObu(
+            Av1ObuType.Frame, frameOuter, hasSizeField: true);
+
+        var output = new byte[tdObu.Length + shObu.Length + frameObu.Length];
+        Buffer.BlockCopy(tdObu, 0, output, 0, tdObu.Length);
+        Buffer.BlockCopy(shObu, 0, output, tdObu.Length, shObu.Length);
+        Buffer.BlockCopy(frameObu, 0, output, tdObu.Length + shObu.Length, frameObu.Length);
+        return output;
+    }
+
     // ------------------------------------------------------------------
     // Sequence header
     // ------------------------------------------------------------------
@@ -386,7 +427,13 @@ public static class Av1KeyframeEncoder
         public int ChromaH;
     }
 
-    private static byte[] EncodeSingleTile(
+    /// <summary>
+    /// Encode the single keyframe tile and return the raw range-coder
+    /// byte stream. Internal so the GPU walker test can compare
+    /// bit-exact against this CPU reference without going through the
+    /// full OBU framing.
+    /// </summary>
+    internal static byte[] EncodeSingleTile(
         ReadOnlySpan<byte> ySrc, int ySrcStride,
         ReadOnlySpan<byte> uSrc, int uvSrcStride,
         ReadOnlySpan<byte> vSrc,

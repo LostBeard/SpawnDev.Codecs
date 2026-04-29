@@ -26,6 +26,7 @@
 //   [64..319]  NzMapCtxOffset for Tx16x16 (256 sbyte cast to byte)
 //   [320..343] EobGroupStart[12] packed as ushort -> low 24 bytes
 //   [344..367] EobOffsetBits[12] packed as ushort -> 24 bytes
+//   [368..380] IntraModeContext[13] - libaom intra_mode_context table
 //
 // Ushort buffer layout:
 //   [0..63]    Scan for Tx8x8 DCT_DCT (64 entries, the libaom
@@ -49,6 +50,14 @@
 //              flat 4*2*3*3 = 72 ushort
 //   [6720..6727] IntraExtTxCdf for Tx8x8 DC_PRED set 3 (8 syms)
 //   [6728..6733] IntraExtTxCdf for Tx16x16 DC_PRED set 2 (6 syms)
+//   [6734..6742] SkipTxfmCdf - [skipCtx=3][3]
+//              3*3 = 9 ushort
+//   [6743..6962] PartitionCdf - [partitionCtx=20][11]
+//              20*11 = 220 ushort (full table; v1 only hits ctx 4..15)
+//   [6963..7312] KfYModeCdf - [aboveCtx=5][leftCtx=5][14]
+//              5*5*14 = 350 ushort
+//   [7313..7327] UvModeCdfV1Row - DefaultUvModeCdf[cflAllowed=1][yMode=DC][15]
+//              15 ushort (only the row v1 needs)
 //
 // All CDFs are stored as inverse CDF (ICDF). Compatible with the
 // Av1RangeEncoderGpu / Av1RangeDecoderGpu helpers' EncodeCdfQ15 /
@@ -110,8 +119,14 @@ public static class Av1KeyframeConstantsGpu
     /// <summary>Length: 12 entries x 2 bytes each = 24 bytes.</summary>
     public const int EobOffsetBitsLength = 24;
 
+    /// <summary>libaom <c>intra_mode_context[INTRA_MODES]</c> packed as 13 bytes
+    /// (the table values fit in 0..4 so byte storage is safe).</summary>
+    public const int IntraModeContextOffset = EobOffsetBitsOffset + EobOffsetBitsLength;
+    /// <summary>Length: 13 entries (one per INTRA_MODES enum value).</summary>
+    public const int IntraModeContextLength = 13;
+
     /// <summary>Total byte buffer size.</summary>
-    public const int ByteConstsTotalBytes = EobOffsetBitsOffset + EobOffsetBitsLength;
+    public const int ByteConstsTotalBytes = IntraModeContextOffset + IntraModeContextLength;
 
     // ---- ushort buffer layout ----
 
@@ -180,8 +195,33 @@ public static class Av1KeyframeConstantsGpu
     /// <summary>Length: 6 entries.</summary>
     public const int IntraExtTxCdfTx16DcLength = 6;
 
+    /// <summary>SkipTxfmCdf flat: [skipCtx=3][CDF_SIZE(2)=3].</summary>
+    public const int SkipTxfmCdfOffset = IntraExtTxCdfTx16DcOffset + IntraExtTxCdfTx16DcLength;
+    /// <summary>Length: 3 contexts * 3 = 9.</summary>
+    public const int SkipTxfmCdfLength = 3 * 3;
+
+    /// <summary>libaom PARTITION_CONTEXTS = 20 (5 sizes * 4 ploff combos).
+    /// CDF rows are CDF_SIZE(EXT_PARTITION_TYPES) = 11 entries each. Smaller-symbol
+    /// contexts (4 syms / 8 syms) zero-pad in the trailing entries; the
+    /// kernel passes the actual nsyms based on bsize so the padding is
+    /// never read by EncodeCdfQ15.</summary>
+    public const int PartitionCdfOffset = SkipTxfmCdfOffset + SkipTxfmCdfLength;
+    /// <summary>Length: 20 contexts * 11 = 220.</summary>
+    public const int PartitionCdfLength = 20 * 11;
+
+    /// <summary>KfYModeCdf flat: [aboveCtx=5][leftCtx=5][CDF_SIZE(13)=14].</summary>
+    public const int KfYModeCdfOffset = PartitionCdfOffset + PartitionCdfLength;
+    /// <summary>Length: 5 * 5 * 14 = 350.</summary>
+    public const int KfYModeCdfLength = 5 * 5 * 14;
+
+    /// <summary>UvModeCdf row for v1's only emission: cflAllowed=1, yMode=DC.
+    /// CDF_SIZE(UV_INTRA_MODES=14) = 15.</summary>
+    public const int UvModeCdfV1RowOffset = KfYModeCdfOffset + KfYModeCdfLength;
+    /// <summary>Length: 15 entries.</summary>
+    public const int UvModeCdfV1RowLength = 15;
+
     /// <summary>Total ushort buffer entries.</summary>
-    public const int UshortConstsTotalEntries = IntraExtTxCdfTx16DcOffset + IntraExtTxCdfTx16DcLength;
+    public const int UshortConstsTotalEntries = UvModeCdfV1RowOffset + UvModeCdfV1RowLength;
 
     /// <summary>
     /// Build the byte constants buffer for upload. Caller materialises
@@ -218,6 +258,11 @@ public static class Av1KeyframeConstantsGpu
             buf[EobOffsetBitsOffset + i * 2] = (byte)(v & 0xFF);
             buf[EobOffsetBitsOffset + i * 2 + 1] = (byte)(v >> 8);
         }
+
+        // IntraModeContext (each value fits 0..4, safe in byte storage).
+        var imc = Av1ModeInfoReader.IntraModeContext;
+        for (int i = 0; i < IntraModeContextLength && i < imc.Length; i++)
+            buf[IntraModeContextOffset + i] = (byte)imc[i];
 
         return buf;
     }
@@ -265,6 +310,36 @@ public static class Av1KeyframeConstantsGpu
         var rowTx16 = Av1DefaultTxfmCdfs.DefaultIntraExtTxCdf[2][2][(int)Av1IntraMode.Dc];
         for (int i = 0; i < IntraExtTxCdfTx16DcLength && i < rowTx16.Length; i++)
             buf[IntraExtTxCdfTx16DcOffset + i] = rowTx16[i];
+
+        // SkipTxfmCdf: 3 contexts * 3 entries.
+        var skipTxfm = Av1DefaultBlockCdfs.DefaultSkipTxfmCdf;
+        for (int c = 0; c < 3; c++)
+            for (int s = 0; s < 3 && s < skipTxfm[c].Length; s++)
+                buf[SkipTxfmCdfOffset + c * 3 + s] = skipTxfm[c][s];
+
+        // PartitionCdf: 20 contexts * 11 entries (zero-padded for short rows).
+        var partition = Av1DefaultPartitionCdfs.DefaultPartitionCdf;
+        for (int c = 0; c < 20; c++)
+        {
+            var row = partition[c];
+            int dst = PartitionCdfOffset + c * 11;
+            for (int s = 0; s < 11 && s < row.Length; s++) buf[dst + s] = row[s];
+        }
+
+        // KfYModeCdf: 5 above * 5 left * 14 entries.
+        var kfYMode = Av1DefaultIntraModeCdfs.DefaultKfYModeCdf;
+        for (int a = 0; a < 5; a++)
+            for (int l = 0; l < 5; l++)
+            {
+                var row = kfYMode[a][l];
+                int dst = KfYModeCdfOffset + (a * 5 + l) * 14;
+                for (int s = 0; s < 14 && s < row.Length; s++) buf[dst + s] = row[s];
+            }
+
+        // UvModeCdfV1Row: cflAllowed=1, yMode=DC, 15 entries.
+        var uvRow = Av1DefaultIntraModeCdfs.DefaultUvModeCdf[1][(int)Av1IntraMode.Dc];
+        for (int s = 0; s < 15 && s < uvRow.Length; s++)
+            buf[UvModeCdfV1RowOffset + s] = uvRow[s];
 
         return buf;
     }
