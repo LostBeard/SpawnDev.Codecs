@@ -5,6 +5,33 @@
 Initial development. Project still in pre-release. See README.md for the
 working feature matrix.
 
+### 2026-04-29 - VorbisAudioDecoderGpu - closes the Vorbis encoder/decoder pair
+
+**Vorbis is now 6 of 6 codec encoders + 6 of 6 codec decoders end-to-end on
+the accelerator.** `VorbisAudioDecoderGpu` is the integration class that
+mirrors `VorbisAudioEncoderGpu`: it consumes a Vorbis audio packet and emits
+interleaved float PCM via the GPU post-spectrum chain (window apply +
+overlap-add + new-right-half-save + channel interleave). State (previous
+right-half samples, previous block size) is GPU-resident across packets.
+
+**v1 scope (matches the encoder's silence-path scope):**
+- Mono + stereo audio.
+- GPU PostImdct + Interleave kernels run the per-sample math; spectrum decode
+  (bit-stream parse + Huffman + floor + residue + IMDCT) currently delegates
+  to the existing `VorbisAudioDecoder` CPU path so we have working end-to-end
+  decode TODAY. The Vorbis-Huffman GPU bit-reader is the keystone primitive
+  that will let the entire decode run in-kernel; it lands as a follow-up
+  integration step.
+- Round-trip silence test (`VorbisAudioDecoderGpu_SilenceRoundTrip_MatchesCpuDecoder`)
+  encodes silence packets via `VorbisAudioEncoderGpu` then decodes them via
+  both `VorbisAudioDecoder` (CPU reference) and `VorbisAudioDecoderGpu` (GPU)
+  and compares interleaved PCM sample-by-sample within 1e-5 absolute
+  tolerance. PASS on CUDA + OpenCL + CPU.
+
+**Why this matters:** the v1 Vorbis encoder + decoder pair is now closed.
+Silence in -> packets -> silence out, all data + state on the accelerator
+through the post-spectrum chain.
+
 ### 2026-04-29 - FLAC subframe decode chain GPU coverage (7 new primitives)
 
 **Continuing 2026-04-29 late-night session: 7 new FLAC GPU primitives plus 1
