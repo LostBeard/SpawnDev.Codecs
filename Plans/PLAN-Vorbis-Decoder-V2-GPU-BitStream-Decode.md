@@ -1,7 +1,20 @@
 # PLAN - Vorbis Decoder v2: Move Bit-Stream Decode to GPU
 
 **Owner:** Tuvok
-**Status:** Design (2026-05-03). v1 in production at 0.2.0-alpha.1; v2 unblocks the last cardinal-rule gap in the Vorbis decode pipeline.
+**Status:** Step 1 SHIPPED (2026-05-03 commit `3a1cb5c`). Steps 2-3 queued. v1 in production at 0.2.0-alpha.1 + 0.3.0-rc.1; v2 unblocks the last cardinal-rule gap in the Vorbis decode pipeline.
+
+## Progress 2026-05-03
+
+- **Step 1 (VorbisResidueDecoderGpu)**: ✓ shipped 0.3.0-rc.1 commit `3a1cb5c`. File: `Audio/Vorbis/VorbisResidueDecoderGpu.cs`. Type 0/1 + Type 2 paths covered. Static GPU-callable.
+- **Supporting infrastructure also shipped:** `VorbisSetupHeaderGpu.cs` (flat-pack of full setup header), `VorbisHuffmanCodebookSetGpu.cs` (flat-pack of all codebook trees + multiplicands).
+- **Step 2 (VorbisPacketDecodeKernel)**: NOT YET BUILT. Queued for next focused session.
+- **Step 3 (Update VorbisAudioDecoderGpu.DecodePacket)**: NOT YET BUILT. Depends on Step 2.
+
+## Cardinal-rule violation closed in 0.3.0-rc.1 (separate fix)
+
+The `VorbisAudioEncoderGpu` constructor used to call `new VorbisAudioEncoder(options)` to bootstrap its identification + setup headers. Commit `82752c1` replaces this with `VorbisAudioEncoder.BuildResolvedHeaders(options)` static call. The CPU encoder is no longer instantiated from the GPU path.
+
+`VorbisAudioDecoderGpu.DecodePacket` still uses CPU bit-stream + CPU floor decode + CPU residue decode (`DecodeSpectrumOnCpu` private method, line 349 of the file). That's the remaining cardinal-rule violation Steps 2-3 close.
 
 ## Problem statement
 
