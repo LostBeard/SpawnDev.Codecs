@@ -4,6 +4,7 @@
 @using global::ILGPU.Runtime
 @using SpawnDev.BlazorJS
 @using SpawnDev.BlazorJS.JSObjects
+@using SpawnDev.Codecs.Video.Av1
 @using SpawnDev.Codecs.Video.Vp8
 @using SpawnDev.Codecs.Video.Vp9
 @using SpawnDev.ILGPU.WebGPU
@@ -16,12 +17,19 @@
 
 <p>
     Encode + decode through the <strong>100% ILGPU</strong> integration classes
-    (<code>Vp8KeyframeEncoderGpu</code>, <code>Vp8KeyframeDecoderGpu</code>,
-    <code>Vp9KeyframeEncoderGpu</code>, <code>Vp9KeyframeDecoderGpu</code>).
+    (<code>Vp8KeyframeEncoderGpu</code> / <code>Vp8KeyframeDecoderGpu</code>,
+    <code>Vp9KeyframeEncoderGpu</code> / <code>Vp9KeyframeDecoderGpu</code>,
+    <code>Av1KeyframeEncoderGpu</code> / <code>Av1KeyframeDecoderGpu</code>).
     Every byte of the encoded bitstream is written by an ILGPU kernel; every
     pixel of the decoded recon plane comes back from a kernel readback. The
     host (this page) is a pure coordinator: alloc, upload, dispatch, readback.
     Runs on whichever ILGPU backend the browser exposes (WebGPU preferred).
+</p>
+<p>
+    AV1 round-trip uses the tile-bytes flow (<code>EncodeSingleTileAsync</code> -&gt;
+    <code>DecodeSingleTileAsync</code>) - the encoder's full TD/SH/Frame OBU
+    bitstream output isn't needed for in-library round-trip; both sides
+    operate on the entropy-coded tile bytes directly.
 </p>
 
 <div style="margin-bottom: 1rem;">
@@ -29,6 +37,7 @@
     <label>Height: <input type="number" @bind="H" style="width:5em" min="16" max="256" step="16" /></label>
     <label>Q (VP8): <input type="number" @bind="Vp8Q" style="width:5em" min="1" max="127" /></label>
     <label>Q (VP9): <input type="number" @bind="Vp9Q" style="width:5em" min="1" max="255" /></label>
+    <label>Q (AV1): <input type="number" @bind="Av1Q" style="width:5em" min="1" max="255" /></label>
     <button class="btn btn-primary" @onclick="RunAsync" disabled="@_running">
         @(_running ? "Running..." : "Encode + decode all GPU pairs")
     </button>
@@ -92,6 +101,10 @@
         <h3>VP9 (Vp9KeyframeEncoderGpu &rarr; Vp9KeyframeDecoderGpu)</h3>
         <canvas id="gpu-vp9-canvas" width="@CanvasW" height="@CanvasH" style="border:1px solid #888;"></canvas>
     </div>
+    <div>
+        <h3>AV1 (Av1KeyframeEncoderGpu &rarr; Av1KeyframeDecoderGpu, tile flow)</h3>
+        <canvas id="gpu-av1-canvas" width="@CanvasW" height="@CanvasH" style="border:1px solid #888;"></canvas>
+    </div>
 </div>
 
 @code {
@@ -99,6 +112,7 @@
     int H = 64;
     int Vp8Q = 30;
     int Vp9Q = 30;
+    int Av1Q = 32;
     bool _running;
     string _acceleratorInfo = string.Empty;
 
@@ -149,6 +163,9 @@
 
             // VP9 GPU pair.
             await RunVp9Async(acc, ySrc, uSrc, vSrc);
+
+            // AV1 GPU pair (tile-byte flow).
+            await RunAv1Async(acc, ySrc, uSrc, vSrc);
         }
         catch (Exception ex)
         {
@@ -274,6 +291,54 @@
             swEnc.Elapsed.TotalMilliseconds, swDec.Elapsed.TotalMilliseconds,
             decoded.YPlane, decoded.UPlane, decoded.VPlane,
             decoded.Width, decoded.Height, ySrc);
+        await Task.Yield();
+    }
+
+    async Task RunAv1Async(Accelerator acc, byte[] ySrc, byte[] uSrc, byte[] vSrc)
+    {
+        // AV1 round-trip via the tile-bytes flow: encoder's
+        // EncodeSingleTileAsync produces the entropy-coded tile bytes,
+        // decoder's DecodeSingleTileAsync reconstructs YUV planes from
+        // those same bytes. The full TD/SH/Frame OBU bitstream output
+        // (EncodeKeyFrameAsync) is for ffmpeg / dav1d compatibility;
+        // for in-library round-trip the tile bytes are sufficient.
+        int q = Math.Clamp(Av1Q, 1, 255);
+        var swEnc = Stopwatch.StartNew();
+        byte[] tileBytes;
+        try
+        {
+            using var enc = new Av1KeyframeEncoderGpu(acc);
+            tileBytes = await enc.EncodeSingleTileAsync(
+                ySrc, uSrc, vSrc, W, H, baseQIndex: q);
+        }
+        catch (Exception ex)
+        {
+            _results.Add(new Result("AV1-GPU", 0, 0, 0, 0, 0, 0, 0, $"ENCODE FAIL: {ex.Message}"));
+            StateHasChanged();
+            return;
+        }
+        swEnc.Stop();
+
+        var swDec = Stopwatch.StartNew();
+        byte[] yRecon, uRecon, vRecon;
+        try
+        {
+            using var dec = new Av1KeyframeDecoderGpu(acc);
+            (yRecon, uRecon, vRecon) = await dec.DecodeSingleTileAsync(
+                tileBytes, W, H, baseQIndex: q);
+        }
+        catch (Exception ex)
+        {
+            _results.Add(new Result("AV1-GPU", tileBytes.Length, swEnc.Elapsed.TotalMilliseconds, 0, 0, 0, 0, 0, $"DECODE FAIL: {ex.Message}"));
+            StateHasChanged();
+            return;
+        }
+        swDec.Stop();
+
+        ReportAndDraw("AV1-GPU", "gpu-av1-canvas", tileBytes.Length,
+            swEnc.Elapsed.TotalMilliseconds, swDec.Elapsed.TotalMilliseconds,
+            yRecon, uRecon, vRecon,
+            W, H, ySrc);
         await Task.Yield();
     }
 
