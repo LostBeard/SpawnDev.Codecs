@@ -1,6 +1,8 @@
 @page "/benchmarks"
 @using System.Diagnostics
 @using System.Net.Http
+@using global::ILGPU
+@using global::ILGPU.Runtime
 @using SpawnDev.Codecs.Audio.Flac
 @using SpawnDev.Codecs.Audio.Opus
 @using SpawnDev.Codecs.Audio.Vorbis
@@ -12,7 +14,10 @@
 @using SpawnDev.Codecs.Video.Av1
 @using SpawnDev.Codecs.Video.Vp8
 @using SpawnDev.Codecs.Video.Vp9
+@using SpawnDev.ILGPU.WebGPU
+@using SpawnDev.ILGPU.Wasm
 @inject HttpClient Http
+@implements IDisposable
 
 <PageTitle>Benchmarks - SpawnDev.Codecs</PageTitle>
 
@@ -136,12 +141,17 @@
 
     string CategoryDisplay(string cat) => cat switch
     {
-        "video-encode" => "🎬 Video Encoders",
-        "video-decode" => "📺 Video Decoders",
-        "audio-encode" => "🎵 Audio Encoders",
-        "audio-decode" => "🔊 Audio Decoders",
+        "video-encode" => "🎬 Video Encoders (CPU)",
+        "video-decode" => "📺 Video Decoders (CPU)",
+        "video-encode-gpu" => "🚀 Video Encoders (GPU pair)",
+        "video-decode-gpu" => "🚀 Video Decoders (GPU pair)",
+        "audio-encode" => "🎵 Audio Encoders (CPU)",
+        "audio-decode" => "🔊 Audio Decoders (CPU)",
+        "audio-encode-gpu" => "🚀 Audio Encoders (GPU pair)",
+        "audio-decode-gpu" => "🚀 Audio Decoders (GPU pair)",
         "transforms" => "🧮 Transforms",
         "containers" => "📦 Containers",
+        "accelerator" => "💻 Accelerator",
         _ => cat,
     };
 
@@ -225,6 +235,37 @@
             await Step(95, "Av1Decoder API 32x32 x20", () => BenchVideoDecode("AV1", 32, 32, 20, 32,
                 () => new Av1Decoder(),
                 (y, u, v, w, h, q) => Av1KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: q)));
+
+            // ---- GPU PAIR BENCHMARKS ----
+            // Acquire an accelerator (WebGPU preferred, Wasm fallback) and
+            // exercise the 100% ILGPU encoder + decoder pairs alongside the
+            // CPU benchmarks above. These are the headline feature of
+            // SpawnDev.Codecs - the same kernel chain runs on every backend.
+            await StepAsync(96, "Acquiring ILGPU accelerator for GPU pair benchmarks", AcquireAcceleratorAsync);
+            if (_acc is not null && _ctx is not null)
+            {
+                _log.Add(new BenchEntry("accelerator",
+                    "ILGPU backend in use",
+                    "for GPU pair benchmarks below",
+                    0,
+                    $"{_acc.AcceleratorType}",
+                    _acc.Name));
+
+                await Step(97, "VP8-GPU 64x64 Q=30 x10", () => BenchVp8Gpu(64, 64, 30, 10));
+                await Step(97, "VP9-GPU 64x64 Q=30 x5", () => BenchVp9Gpu(64, 64, 30, 5));
+                await Step(98, "AV1-GPU 64x64 Q=32 x3", () => BenchAv1Gpu(64, 64, 32, 3));
+                await Step(99, "FLAC-GPU 1ch 16b 44.1k 1s round-trip", BenchFlacGpu);
+                await Step(99, "Vorbis-GPU 1ch 44.1k 1s round-trip", BenchVorbisGpu);
+            }
+            else
+            {
+                _log.Add(new BenchEntry("accelerator",
+                    "No GPU accelerator available",
+                    "GPU pair benchmarks skipped",
+                    0,
+                    "n/a",
+                    "WebGPU + Wasm both failed to initialize"));
+            }
 
             _progressPct = 100;
             _currentStep = "Complete";
@@ -611,5 +652,282 @@
                 samples[n * channels + ch] = v;
         }
         return samples;
+    }
+
+    // ---- GPU pair plumbing ----
+    Context? _ctx;
+    Accelerator? _acc;
+
+    async Task AcquireAcceleratorAsync()
+    {
+        if (_acc is not null) return;
+        try
+        {
+            var builder = Context.Create();
+            await builder.WebGPU();
+            var ctx = builder.ToContext();
+            var devices = ctx.GetWebGPUDevices();
+            if (devices.Count > 0)
+            {
+                _acc = await devices[0].CreateAcceleratorAsync(ctx);
+                _ctx = ctx;
+                return;
+            }
+            ctx.Dispose();
+        }
+        catch { /* fall through */ }
+        try
+        {
+            var builder = Context.Create();
+            builder.Wasm();
+            var ctx = builder.ToContext();
+            _acc = await ctx.CreateWasmAcceleratorAsync();
+            _ctx = ctx;
+        }
+        catch { _acc = null; _ctx = null; }
+    }
+
+    void BenchVp8Gpu(int width, int height, int q, int iterations)
+    {
+        if (_acc is null) return;
+        var (ySrc, uSrc, vSrc) = GenerateVideoFrame(width, height);
+        try
+        {
+            using var enc = new Vp8KeyframeEncoderGpu(_acc);
+            using var dec = new Vp8KeyframeDecoderGpu(_acc);
+            // Warm.
+            var warm = enc.EncodeKeyFrame(ySrc, width, uSrc, width / 2, vSrc, width, height, q);
+            _ = dec.DecodeKeyFrame(warm, q);
+
+            long encBytes = 0;
+            var swEnc = Stopwatch.StartNew();
+            byte[] encoded = warm;
+            for (int i = 0; i < iterations; i++)
+            {
+                encoded = enc.EncodeKeyFrame(ySrc, width, uSrc, width / 2, vSrc, width, height, q);
+                encBytes += encoded.Length;
+            }
+            swEnc.Stop();
+
+            var swDec = Stopwatch.StartNew();
+            for (int i = 0; i < iterations; i++) _ = dec.DecodeKeyFrame(encoded, q);
+            swDec.Stop();
+
+            double encFps = iterations * 1000.0 / swEnc.Elapsed.TotalMilliseconds;
+            double decFps = iterations * 1000.0 / swDec.Elapsed.TotalMilliseconds;
+            int rawBytes = width * height + 2 * (width / 2) * (height / 2);
+            _log.Add(new BenchEntry("video-encode-gpu",
+                $"VP8-GPU {width}x{height}",
+                $"raw {rawBytes:N0}B/fr, iter={iterations}, {_acc.AcceleratorType}",
+                swEnc.Elapsed.TotalMilliseconds,
+                $"{encFps:F1} fps",
+                $"avg {encBytes / (double)iterations:F0}B/fr"));
+            _log.Add(new BenchEntry("video-decode-gpu",
+                $"VP8-GPU decode {width}x{height}",
+                $"frame {encoded.Length:N0}B, iter={iterations}, {_acc.AcceleratorType}",
+                swDec.Elapsed.TotalMilliseconds,
+                $"{decFps:F1} fps",
+                $"YUV {rawBytes:N0}B/fr"));
+        }
+        catch (Exception ex)
+        {
+            _log.Add(new BenchEntry("video-encode-gpu", $"VP8-GPU {width}x{height}", "FAIL", 0, "n/a", ex.Message));
+        }
+    }
+
+    void BenchVp9Gpu(int width, int height, int q, int iterations)
+    {
+        if (_acc is null) return;
+        var (ySrc, uSrc, vSrc) = GenerateVideoFrame(width, height);
+        try
+        {
+            using var enc = new Vp9KeyframeEncoderGpu(_acc);
+            using var dec = new Vp9KeyframeDecoderGpu(_acc);
+            var warm = enc.EncodeKeyFrameAsync(ySrc, uSrc, vSrc, width, height, q).GetAwaiter().GetResult();
+            _ = dec.DecodeKeyFrameAsync(warm).GetAwaiter().GetResult();
+
+            long encBytes = 0;
+            var swEnc = Stopwatch.StartNew();
+            byte[] encoded = warm;
+            for (int i = 0; i < iterations; i++)
+            {
+                encoded = enc.EncodeKeyFrameAsync(ySrc, uSrc, vSrc, width, height, q).GetAwaiter().GetResult();
+                encBytes += encoded.Length;
+            }
+            swEnc.Stop();
+
+            var swDec = Stopwatch.StartNew();
+            for (int i = 0; i < iterations; i++) _ = dec.DecodeKeyFrameAsync(encoded).GetAwaiter().GetResult();
+            swDec.Stop();
+
+            double encFps = iterations * 1000.0 / swEnc.Elapsed.TotalMilliseconds;
+            double decFps = iterations * 1000.0 / swDec.Elapsed.TotalMilliseconds;
+            int rawBytes = width * height + 2 * (width / 2) * (height / 2);
+            _log.Add(new BenchEntry("video-encode-gpu",
+                $"VP9-GPU {width}x{height}",
+                $"raw {rawBytes:N0}B/fr, iter={iterations}, {_acc.AcceleratorType}",
+                swEnc.Elapsed.TotalMilliseconds,
+                $"{encFps:F1} fps",
+                $"avg {encBytes / (double)iterations:F0}B/fr"));
+            _log.Add(new BenchEntry("video-decode-gpu",
+                $"VP9-GPU decode {width}x{height}",
+                $"frame {encoded.Length:N0}B, iter={iterations}, {_acc.AcceleratorType}",
+                swDec.Elapsed.TotalMilliseconds,
+                $"{decFps:F1} fps",
+                $"YUV {rawBytes:N0}B/fr"));
+        }
+        catch (Exception ex)
+        {
+            _log.Add(new BenchEntry("video-encode-gpu", $"VP9-GPU {width}x{height}", "FAIL", 0, "n/a", ex.Message));
+        }
+    }
+
+    void BenchAv1Gpu(int width, int height, int q, int iterations)
+    {
+        if (_acc is null) return;
+        var (ySrc, uSrc, vSrc) = GenerateVideoFrame(width, height);
+        try
+        {
+            using var enc = new Av1KeyframeEncoderGpu(_acc);
+            using var dec = new Av1KeyframeDecoderGpu(_acc);
+            // Warm with the tile-bytes flow (matches /gpu-transcode demo).
+            var warmTile = enc.EncodeSingleTileAsync(ySrc, uSrc, vSrc, width, height, q).GetAwaiter().GetResult();
+            _ = dec.DecodeSingleTileAsync(warmTile, width, height, q).GetAwaiter().GetResult();
+
+            long encBytes = 0;
+            var swEnc = Stopwatch.StartNew();
+            byte[] tileBytes = warmTile;
+            for (int i = 0; i < iterations; i++)
+            {
+                tileBytes = enc.EncodeSingleTileAsync(ySrc, uSrc, vSrc, width, height, q).GetAwaiter().GetResult();
+                encBytes += tileBytes.Length;
+            }
+            swEnc.Stop();
+
+            var swDec = Stopwatch.StartNew();
+            for (int i = 0; i < iterations; i++)
+                _ = dec.DecodeSingleTileAsync(tileBytes, width, height, q).GetAwaiter().GetResult();
+            swDec.Stop();
+
+            double encFps = iterations * 1000.0 / swEnc.Elapsed.TotalMilliseconds;
+            double decFps = iterations * 1000.0 / swDec.Elapsed.TotalMilliseconds;
+            int rawBytes = width * height + 2 * (width / 2) * (height / 2);
+            _log.Add(new BenchEntry("video-encode-gpu",
+                $"AV1-GPU {width}x{height} (tile)",
+                $"raw {rawBytes:N0}B/fr, iter={iterations}, {_acc.AcceleratorType}",
+                swEnc.Elapsed.TotalMilliseconds,
+                $"{encFps:F1} fps",
+                $"avg {encBytes / (double)iterations:F0}B/fr"));
+            _log.Add(new BenchEntry("video-decode-gpu",
+                $"AV1-GPU decode {width}x{height} (tile)",
+                $"tile {tileBytes.Length:N0}B, iter={iterations}, {_acc.AcceleratorType}",
+                swDec.Elapsed.TotalMilliseconds,
+                $"{decFps:F1} fps",
+                $"YUV {rawBytes:N0}B/fr"));
+        }
+        catch (Exception ex)
+        {
+            _log.Add(new BenchEntry("video-encode-gpu", $"AV1-GPU {width}x{height}", "FAIL", 0, "n/a", ex.Message));
+        }
+    }
+
+    void BenchFlacGpu()
+    {
+        if (_acc is null) return;
+        const int sr = 44100, channels = 1, bps = 16;
+        // FlacEncoderGpu.EncodeStreamAsync signature is (ReadOnlyMemory<int>
+        // interleavedSamples, int channels). Sample count per channel must
+        // be a multiple of BlockSize (4096) per v1; round up.
+        int blockSize = 4096;
+        int totalPerChannel = ((sr + blockSize - 1) / blockSize) * blockSize;
+        var pcm = GenerateSine(totalPerChannel, channels, sr, bps);
+        try
+        {
+            using var enc = new FlacEncoderGpu(_acc);
+            using var dec = new FlacDecoderGpu(_acc);
+            // Warm.
+            var warm = enc.EncodeStreamAsync(pcm, channels).GetAwaiter().GetResult();
+            _ = dec.DecodeStreamAsync(warm).GetAwaiter().GetResult();
+
+            var swEnc = Stopwatch.StartNew();
+            var encoded = enc.EncodeStreamAsync(pcm, channels).GetAwaiter().GetResult();
+            swEnc.Stop();
+
+            var swDec = Stopwatch.StartNew();
+            var result = dec.DecodeStreamAsync(encoded).GetAwaiter().GetResult();
+            swDec.Stop();
+
+            double encRt = (pcm.Length * 1000.0 / sr) / swEnc.Elapsed.TotalMilliseconds;
+            double decRt = (result.InterleavedSamples.Length * 1000.0 / sr) / swDec.Elapsed.TotalMilliseconds;
+            int rawBytes = pcm.Length * (bps / 8);
+            _log.Add(new BenchEntry("audio-encode-gpu",
+                $"FLAC-GPU {channels}ch {bps}b {sr}Hz",
+                $"{pcm.Length:N0} samples ({rawBytes:N0}B raw), {_acc.AcceleratorType}",
+                swEnc.Elapsed.TotalMilliseconds,
+                $"{encRt:F1}x realtime",
+                $"{encoded.Length:N0}B FLAC ({(double)encoded.Length / rawBytes:P1})"));
+            _log.Add(new BenchEntry("audio-decode-gpu",
+                $"FLAC-GPU decode",
+                $"{encoded.Length:N0}B FLAC, {_acc.AcceleratorType}",
+                swDec.Elapsed.TotalMilliseconds,
+                $"{decRt:F1}x realtime",
+                $"{result.InterleavedSamples.Length:N0} samples"));
+        }
+        catch (Exception ex)
+        {
+            _log.Add(new BenchEntry("audio-encode-gpu", "FLAC-GPU", "FAIL", 0, "n/a", ex.Message));
+        }
+    }
+
+    void BenchVorbisGpu()
+    {
+        if (_acc is null) return;
+        const int sr = 44100;
+        var pcm = new float[sr];
+        for (int n = 0; n < pcm.Length; n++)
+            pcm[n] = 0.4f * (float)Math.Sin(2 * Math.PI * 440 * n / sr);
+        try
+        {
+            var opts = new VorbisAudioEncoderOptions { SampleRateHz = sr, Channels = 1, BlockSize = 1024 };
+            using var enc = new VorbisAudioEncoderGpu(_acc, opts);
+            // Warm.
+            var warm = enc.EncodeStreamAsync(pcm).GetAwaiter().GetResult();
+
+            var swEnc = Stopwatch.StartNew();
+            var ogg = enc.EncodeStreamAsync(pcm).GetAwaiter().GetResult();
+            swEnc.Stop();
+
+            // Decoder side via VorbisOggDecoder.Decode (same surface as the
+            // /audio demo) - GPU decoder is per-packet so the user-visible
+            // surface is the Ogg-level decoder.
+            var swDec = Stopwatch.StartNew();
+            var result = VorbisOggDecoder.Decode(ogg);
+            swDec.Stop();
+
+            double encRt = (pcm.Length * 1000.0 / sr) / swEnc.Elapsed.TotalMilliseconds;
+            double decRt = (result.InterleavedSamples.Length * 1000.0 / sr) / swDec.Elapsed.TotalMilliseconds;
+            _log.Add(new BenchEntry("audio-encode-gpu",
+                $"Vorbis-GPU 1ch {sr}Hz",
+                $"{pcm.Length:N0} samples (1s), {_acc.AcceleratorType}",
+                swEnc.Elapsed.TotalMilliseconds,
+                $"{encRt:F1}x realtime",
+                $"{ogg.Length:N0}B"));
+            _log.Add(new BenchEntry("audio-decode-gpu",
+                "Vorbis decode (CPU Ogg + GPU per-packet)",
+                $"{ogg.Length:N0}B Ogg, {_acc.AcceleratorType}",
+                swDec.Elapsed.TotalMilliseconds,
+                $"{decRt:F1}x realtime",
+                $"{result.InterleavedSamples.Length:N0} samples"));
+        }
+        catch (Exception ex)
+        {
+            _log.Add(new BenchEntry("audio-encode-gpu", "Vorbis-GPU", "FAIL", 0, "n/a", ex.Message));
+        }
+    }
+
+    public void Dispose()
+    {
+        _acc?.Dispose();
+        _ctx?.Dispose();
     }
 }
