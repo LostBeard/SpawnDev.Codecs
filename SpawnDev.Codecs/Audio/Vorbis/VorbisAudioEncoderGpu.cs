@@ -30,7 +30,9 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
 {
     private readonly Accelerator _accelerator;
     private readonly VorbisAudioEncoderOptions _opts;
-    private readonly VorbisAudioEncoder _cpuRef;
+    private readonly VorbisIdentificationHeader _ident;
+    private readonly VorbisSetupHeader _setup;
+    private readonly VorbisFloor1Config _floorCfg;
     private readonly int _endpointBits;
     private readonly int _modeBits;
 
@@ -59,17 +61,23 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         ArgumentNullException.ThrowIfNull(options);
         _accelerator = accelerator;
         _opts = options;
-        _cpuRef = new VorbisAudioEncoder(options);
+        // Resolve the identification + setup headers once, at construction
+        // time, and store them as fields. This is the metadata-struct-setup
+        // carve-out per CLAUDE.md cardinal rule. After this point the GPU
+        // encoder needs no CPU encoder instance for production work.
+        var bootstrap = new VorbisAudioEncoder(options);
+        _ident = bootstrap.Identification;
+        _setup = bootstrap.Setup;
 
-        var floorCfg = (VorbisFloor1Config)_cpuRef.Setup.Floors[0];
-        _endpointBits = floorCfg.Multiplier switch { 1 => 8, 2 => 7, 3 => 7, _ => 6 };
+        _floorCfg = (VorbisFloor1Config)_setup.Floors[0];
+        _endpointBits = _floorCfg.Multiplier switch { 1 => 8, 2 => 7, 3 => 7, _ => 6 };
 
-        int modeCount = _cpuRef.Setup.Modes.Length;
+        int modeCount = _setup.Modes.Length;
         _modeBits = VorbisMath.Ilog(modeCount - 1);
 
         // Build classbook + residue book code/length tables.
-        var classCb = VorbisCodebookEncoder.BuildCodewords(_cpuRef.Setup.Codebooks[0].Lengths);
-        var residueCb = VorbisCodebookEncoder.BuildCodewords(_cpuRef.Setup.Codebooks[1].Lengths);
+        var classCb = VorbisCodebookEncoder.BuildCodewords(_setup.Codebooks[0].Lengths);
+        var residueCb = VorbisCodebookEncoder.BuildCodewords(_setup.Codebooks[1].Lengths);
         var classCodes = new uint[classCb.Length];
         var classLens = new int[classCb.Length];
         for (int i = 0; i < classCb.Length; i++) { classCodes[i] = classCb[i].code; classLens[i] = classCb[i].length; }
@@ -88,8 +96,8 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         _dResidueBookCodes.View.CopyFromCPU(residueCodes);
         _dResidueBookLengths = accelerator.Allocate1D<int>(residueLens.Length);
         _dResidueBookLengths.View.CopyFromCPU(residueLens);
-        _dXList = accelerator.Allocate1D<int>(floorCfg.XList.Length);
-        _dXList.View.CopyFromCPU(floorCfg.XList);
+        _dXList = accelerator.Allocate1D<int>(_floorCfg.XList.Length);
+        _dXList.View.CopyFromCPU(_floorCfg.XList);
 
         // Compile kernels.
         _inputWindowKernel = accelerator.LoadAutoGroupedStreamKernel<
@@ -111,11 +119,11 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
             EmitPacketParams>(EmitKernel);
     }
 
-    /// <summary>Identification header (delegates to CPU encoder).</summary>
-    public VorbisIdentificationHeader Identification => _cpuRef.Identification;
+    /// <summary>Identification header (resolved once at construction).</summary>
+    public VorbisIdentificationHeader Identification => _ident;
 
-    /// <summary>Setup header (delegates to CPU encoder).</summary>
-    public VorbisSetupHeader Setup => _cpuRef.Setup;
+    /// <summary>Setup header (resolved once at construction).</summary>
+    public VorbisSetupHeader Setup => _setup;
 
     /// <summary>
     /// Encode one audio packet from a single block of mono PCM. Returns
@@ -147,7 +155,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         int n = _opts.BlockSize;
         int half = n / 2;
 
-        var floorCfg = (VorbisFloor1Config)_cpuRef.Setup.Floors[0];
+        var floorCfg = _floorCfg;
         const float headroom = 1.25f;
         const float residueRange = 2.0f;
         const int residueBookEntries = 1024;
@@ -235,20 +243,24 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         if (_opts.Channels != 1) throw new NotSupportedException();
         var packets = new List<Container.Ogg.OggOutgoingPacket>();
 
-        // 3 header packets via CPU encoder (metadata only).
+        // 3 header packets via static helpers - no CPU encoder instance
+        // dependency. Per CLAUDE.md the header packets are stream-init
+        // metadata produced once per encoder; the static helpers take the
+        // already-resolved Identification and Setup headers and emit the
+        // canonical Vorbis header packet bytes.
         packets.Add(new Container.Ogg.OggOutgoingPacket
         {
-            Data = _cpuRef.BuildIdentPacket(),
+            Data = VorbisAudioEncoder.BuildIdentPacketBytes(_ident),
             GranulePosition = 0,
         });
         packets.Add(new Container.Ogg.OggOutgoingPacket
         {
-            Data = _cpuRef.BuildCommentPacket(vendor),
+            Data = VorbisAudioEncoder.BuildCommentPacketBytes(vendor),
             GranulePosition = 0,
         });
         packets.Add(new Container.Ogg.OggOutgoingPacket
         {
-            Data = _cpuRef.BuildSetupPacket(),
+            Data = VorbisAudioEncoder.BuildSetupPacketBytes(_setup),
             GranulePosition = 0,
         });
 

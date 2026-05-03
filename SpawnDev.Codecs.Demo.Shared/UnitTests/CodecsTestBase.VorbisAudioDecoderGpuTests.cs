@@ -24,9 +24,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisAudioDecoderGpu_SilenceRoundTrip_MatchesCpuDecoder()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        // Vorbis decoder kernels lean on atomics; backends without atomics
+        // (WebGL) throw NotSupportedException at accelerator creation, which
+        // the wrapper converts to UnsupportedTestException so the harness
+        // records Unsupported rather than Failed.
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
+
             var options = new VorbisAudioEncoderOptions
             {
                 SampleRateHz = 44100,
@@ -75,9 +80,14 @@ public abstract partial class CodecsTestBase
     public async Task VorbisAudioDecoderGpu_SilenceOutput_IsSilent()
     {
         // Sanity: silence in -> silence out (sample magnitudes near zero).
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        // Vorbis decoder kernels lean on atomics; backends without atomics
+        // (WebGL) throw NotSupportedException at accelerator creation, which
+        // the wrapper converts to UnsupportedTestException so the harness
+        // records Unsupported rather than Failed.
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
+
             var options = new VorbisAudioEncoderOptions
             {
                 SampleRateHz = 44100,
@@ -116,9 +126,14 @@ public abstract partial class CodecsTestBase
         // Output drift comes from the IMDCT float (GPU) vs double (CPU)
         // accumulator difference - the test allows ~1e-3 absolute on
         // sample magnitudes that peak near 0.5.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        // Vorbis decoder kernels lean on atomics; backends without atomics
+        // (WebGL) throw NotSupportedException at accelerator creation, which
+        // the wrapper converts to UnsupportedTestException so the harness
+        // records Unsupported rather than Failed.
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
+
             var options = new VorbisAudioEncoderOptions
             {
                 SampleRateHz = 44100,

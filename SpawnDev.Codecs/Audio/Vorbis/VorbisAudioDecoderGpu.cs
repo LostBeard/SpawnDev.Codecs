@@ -48,9 +48,12 @@ namespace SpawnDev.Codecs.Audio.Vorbis;
 public sealed class VorbisAudioDecoderGpu : IDisposable
 {
     private readonly Accelerator _accelerator;
-    private readonly VorbisAudioDecoder _cpuRef;
     private readonly VorbisIdentificationHeader _ident;
     private readonly VorbisSetupHeader _setup;
+    // Pre-built Huffman decoders, one per codebook in the setup header.
+    // Construction-time metadata setup per CLAUDE.md cardinal rule's
+    // "metadata struct setup" carve-out. No CPU decoder INSTANCE needed.
+    private readonly VorbisHuffmanDecoder[] _huffman;
 
     // GPU per-channel previous-right-half buffers (lifetime = decoder lifetime).
     // null until the first packet has been decoded; sized to halfBlock at that point.
@@ -92,7 +95,15 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         _accelerator = accelerator ?? throw new ArgumentNullException(nameof(accelerator));
         _ident = ident ?? throw new ArgumentNullException(nameof(ident));
         _setup = setup ?? throw new ArgumentNullException(nameof(setup));
-        _cpuRef = new VorbisAudioDecoder(ident, setup);
+        // Build Huffman decoders directly from the setup codebooks - same
+        // expression VorbisAudioDecoder uses, but here we own them so the
+        // GPU decoder needs no CPU decoder instance.
+        _huffman = new VorbisHuffmanDecoder[setup.Codebooks.Length];
+        for (int i = 0; i < setup.Codebooks.Length; i++)
+        {
+            var cb = setup.Codebooks[i];
+            _huffman[i] = new VorbisHuffmanDecoder(VorbisHuffman.Build(cb.Lengths));
+        }
 
         // Pre-flatten + upload static floor data: xLists per floor + 256-entry inverse-dB lookup.
         int totalXList = 0, maxXList = 0;
@@ -350,9 +361,9 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         var floorOk = new bool[channels];
         var posteriors = new int[]?[channels];
         var floorIndexPerChannel = new int[channels];
-        var huffmanField = typeof(VorbisAudioDecoder).GetField(
-            "_huffmanDecoders", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-        var huffman = (VorbisHuffmanDecoder[])huffmanField!.GetValue(_cpuRef)!;
+        // Use our own pre-built Huffman decoders (no reflection / no CPU
+        // decoder instance dependency).
+        var huffman = _huffman;
 
         for (int ch = 0; ch < channels; ch++)
         {

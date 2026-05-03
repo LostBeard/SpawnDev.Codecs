@@ -552,27 +552,46 @@ public sealed class VorbisAudioEncoder
         };
     }
 
-    internal byte[] BuildIdentPacket()
+    internal byte[] BuildIdentPacket() => BuildIdentPacketBytes(_ident);
+
+    /// <summary>
+    /// Build the Vorbis identification (header packet 1) bytes from the
+    /// supplied header. Static so callers (e.g. <c>VorbisAudioEncoderGpu</c>)
+    /// can produce the bytes without depending on a CPU encoder instance.
+    /// The CPU encoder is allowed to violate the "host = pure coordinator"
+    /// cardinal rule because it is a reference implementation; GPU consumers
+    /// must not require its instance to do their work.
+    /// </summary>
+    public static byte[] BuildIdentPacketBytes(VorbisIdentificationHeader ident)
     {
+        if (ident is null) throw new ArgumentNullException(nameof(ident));
         var bytes = new byte[30];
         bytes[0] = 0x01;
         var magic = new byte[] { (byte)'v', (byte)'o', (byte)'r', (byte)'b', (byte)'i', (byte)'s' };
         for (int i = 0; i < 6; i++) bytes[1 + i] = magic[i];
         // version = 0 (already)
-        bytes[11] = (byte)_ident.AudioChannels;
-        WriteInt32Le(bytes, 12, _ident.SampleRateHz);
-        WriteInt32Le(bytes, 16, _ident.BitrateMaximum);
-        WriteInt32Le(bytes, 20, _ident.BitrateNominal);
-        WriteInt32Le(bytes, 24, _ident.BitrateMinimum);
-        int log0 = Log2(_ident.BlockSize0);
-        int log1 = Log2(_ident.BlockSize1);
+        bytes[11] = (byte)ident.AudioChannels;
+        WriteInt32Le(bytes, 12, ident.SampleRateHz);
+        WriteInt32Le(bytes, 16, ident.BitrateMaximum);
+        WriteInt32Le(bytes, 20, ident.BitrateNominal);
+        WriteInt32Le(bytes, 24, ident.BitrateMinimum);
+        int log0 = Log2(ident.BlockSize0);
+        int log1 = Log2(ident.BlockSize1);
         bytes[28] = (byte)((log1 << 4) | log0);
         bytes[29] = 0x01; // framing flag
         return bytes;
     }
 
-    internal byte[] BuildCommentPacket(string vendor)
+    internal byte[] BuildCommentPacket(string vendor) => BuildCommentPacketBytes(vendor);
+
+    /// <summary>
+    /// Build the Vorbis comment (header packet 2) bytes for the supplied
+    /// vendor string with no user comments. Static so callers can produce
+    /// the bytes without a CPU encoder instance.
+    /// </summary>
+    public static byte[] BuildCommentPacketBytes(string vendor)
     {
+        if (vendor is null) throw new ArgumentNullException(nameof(vendor));
         var vendorBytes = System.Text.Encoding.UTF8.GetBytes(vendor);
         var bytes = new byte[7 + 4 + vendorBytes.Length + 4 + 1];
         bytes[0] = 0x03;
@@ -585,53 +604,61 @@ public sealed class VorbisAudioEncoder
         return bytes;
     }
 
-    internal byte[] BuildSetupPacket()
+    internal byte[] BuildSetupPacket() => BuildSetupPacketBytes(_setup);
+
+    /// <summary>
+    /// Build the Vorbis setup (header packet 3) bytes from the supplied
+    /// resolved setup header. Static so callers (e.g. <c>VorbisAudioEncoderGpu</c>)
+    /// can produce the bytes without depending on a CPU encoder instance.
+    /// </summary>
+    public static byte[] BuildSetupPacketBytes(VorbisSetupHeader setup)
     {
+        if (setup is null) throw new ArgumentNullException(nameof(setup));
         var writer = new VorbisBitWriter();
         // Setup packets begin LSB-first AFTER the 7-byte header. We write the
         // header bytes separately and prepend.
         // Codebook count - 1.
-        writer.WriteBits((uint)_setup.Codebooks.Length - 1u, 8);
-        for (int i = 0; i < _setup.Codebooks.Length; i++)
-            VorbisCodebookEncoder.Pack(writer, _setup.Codebooks[i]);
+        writer.WriteBits((uint)setup.Codebooks.Length - 1u, 8);
+        for (int i = 0; i < setup.Codebooks.Length; i++)
+            VorbisCodebookEncoder.Pack(writer, setup.Codebooks[i]);
 
         // Time count - 1 = 0 (one entry, value 0).
         writer.WriteBits(0u, 6);
         writer.WriteBits(0u, 16);
 
         // Floor count - 1.
-        writer.WriteBits((uint)_setup.Floors.Length - 1u, 6);
-        for (int i = 0; i < _setup.Floors.Length; i++)
+        writer.WriteBits((uint)setup.Floors.Length - 1u, 6);
+        for (int i = 0; i < setup.Floors.Length; i++)
         {
             writer.WriteBits(1u, 16); // floor type 1
-            PackFloor1(writer, _setup.Floors[i]);
+            PackFloor1(writer, setup.Floors[i]);
         }
 
         // Residue count - 1. Residues are already resolved (End/PartitionSize set)
         // at construction time so we just pack them as-is.
-        writer.WriteBits((uint)_setup.Residues.Length - 1u, 6);
-        for (int i = 0; i < _setup.Residues.Length; i++)
+        writer.WriteBits((uint)setup.Residues.Length - 1u, 6);
+        for (int i = 0; i < setup.Residues.Length; i++)
         {
-            writer.WriteBits((uint)_setup.Residues[i].Type, 16);
-            PackResidue(writer, _setup.Residues[i]);
+            writer.WriteBits((uint)setup.Residues[i].Type, 16);
+            PackResidue(writer, setup.Residues[i]);
         }
 
         // Mapping count - 1.
-        writer.WriteBits((uint)_setup.Mappings.Length - 1u, 6);
-        for (int i = 0; i < _setup.Mappings.Length; i++)
+        writer.WriteBits((uint)setup.Mappings.Length - 1u, 6);
+        for (int i = 0; i < setup.Mappings.Length; i++)
         {
             writer.WriteBits(0u, 16); // mapping type 0
-            PackMapping(writer, _setup.Mappings[i]);
+            PackMapping(writer, setup.Mappings[i]);
         }
 
         // Mode count - 1.
-        writer.WriteBits((uint)_setup.Modes.Length - 1u, 6);
-        for (int i = 0; i < _setup.Modes.Length; i++)
+        writer.WriteBits((uint)setup.Modes.Length - 1u, 6);
+        for (int i = 0; i < setup.Modes.Length; i++)
         {
-            writer.WriteBit(_setup.Modes[i].BlockFlag ? 1u : 0u);
+            writer.WriteBit(setup.Modes[i].BlockFlag ? 1u : 0u);
             writer.WriteBits(0u, 16); // window type
             writer.WriteBits(0u, 16); // transform type
-            writer.WriteBits((uint)_setup.Modes[i].Mapping, 8);
+            writer.WriteBits((uint)setup.Modes[i].Mapping, 8);
         }
 
         // Framing flag.

@@ -17,9 +17,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisAudioEncoderGpu_OnePacketSilence_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        // Vorbis emit kernel uses atomics; backends without atomics (WebGL)
+        // throw NotSupportedException at accelerator creation, which the
+        // wrapper converts to UnsupportedTestException so the harness records
+        // Unsupported rather than Failed.
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
+
             var options = new VorbisAudioEncoderOptions
             {
                 SampleRateHz = 44100,
@@ -43,9 +48,14 @@ public abstract partial class CodecsTestBase
         // OggPageWriter chain produces a byte stream that is structurally
         // valid (starts with OggS) and round-trips through the CPU
         // VorbisOggDecoder back to silence PCM.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        // Vorbis emit kernel uses atomics; backends without atomics (WebGL)
+        // throw NotSupportedException at accelerator creation, which the
+        // wrapper converts to UnsupportedTestException so the harness records
+        // Unsupported rather than Failed.
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
+
             var options = new VorbisAudioEncoderOptions
             {
                 SampleRateHz = 44100,
