@@ -123,8 +123,10 @@ Moved to `SpawnDev.Codecs.References` in 0.3.0-rc.1 (174+ files):
   `FlacFrameDecoder`, `FlacOggDecoder`, `FlacFixedSubframeEncoder`,
   `FlacLpcSubframeEncoder`, `FlacResidualDecoder`,
   `FlacSubframeDecoder`, `FlacSubframeWriter`
-- **Vorbis** (3 files): `VorbisAudioDecoder`, `VorbisOggDecoder`,
-  `VorbisInverseCoupling`
+- **Vorbis** (4 files): `VorbisAudioDecoder`, `VorbisOggDecoder`,
+  `VorbisInverseCoupling`, `VorbisAudioEncoder` (after extracting
+  header construction to `VorbisHeaderPackBuilder` in main),
+  + `VorbisCommentHeader` (CPU-only metadata record)
 
 **Video**:
 - **VP8** (14 files): `Vp8KeyframeEncoder`, `Vp8Decoder`,
@@ -159,10 +161,39 @@ CPU impl. Several have already been done this way (`Vp8CoefTables`,
 `Vp8ModeProbTables`, `Vp9BlockCoefEnums`, `Av1RangeDecoderGpu`
 constants).
 
+### Helper classes extracted to main (so CPU classes can move cleanly)
+
+- `Vp8CoefTables`: ZigzagScan + CoefBands + Cat3-6 probability tables
+  (libvpx kZigzag / kBands / kCatN). Replaces references to the
+  moved `Vp8CoefBlockDecoder.X` constants from
+  `Vp8CoefBlockEncoderGpu.BuildConstsBuffer`.
+- `Vp8ModeProbTables`: DefaultKfYModeProb + DefaultKfUvModeProb.
+  Replaces references to the moved `Vp8ModeTrees.X` constants from
+  `Vp8FrameEntropyKernel.BuildExtendedConstsBuffer`.
+- `Vp9BlockCoefEnums`: PlaneType + RefType. Replaces nested enums on
+  the moved `Vp9BlockCoefDecoder` class. Updated
+  `Vp9KeyframeDecodeKernel` + `Vp9FrameEntropyKernel`.
+- `Av1RangeEncoderGpu` / `Av1RangeDecoderGpu`: now define
+  EcProbShift / EcMinProb / OdEcWindowSize / OdBitRes /
+  OdEcLotsOfBits / CdfProbTop directly (AV1 spec entropy-coder
+  constants). Removes the dependency on the moved CPU
+  `Av1RangeEncoder` / `Av1RangeDecoder` classes.
+- `VorbisHeaderPackBuilder`: hosts `BuildResolvedHeaders`,
+  `BuildIdentificationHeader`, `BuildSetupHeader`,
+  `BuildIdentPacketBytes`, `BuildCommentPacketBytes`,
+  `BuildSetupPacketBytes`, plus private `PackFloor1` / `PackResidue`
+  / `PackMapping`. Moved out of `VorbisAudioEncoder` so
+  `VorbisAudioEncoderGpu` can call them without instantiating the
+  CPU encoder. The CPU encoder (now in References) delegates back
+  to this helper for behavior-preserving identity.
+- `VorbisAudioEncoderOptions`: split out from `VorbisAudioEncoder.cs`
+  (consumed by both GPU + CPU encoders).
+
 ### Dependencies
 
 `SpawnDev.Codecs` (main library):
-- `SpawnDev.ILGPU` 4.9.3 (kernel dispatch, partial readback,
+- `SpawnDev.ILGPU` 4.9.5-rc.1 (WebGPU `SubViewValue` IR codegen fix
+  + previous kernel dispatch + partial readback +
   `ArrayView<T>.CopyToHostAsync()`)
 - `SpawnDev.EBML` 3.0.1 (WebM/Matroska container)
 
