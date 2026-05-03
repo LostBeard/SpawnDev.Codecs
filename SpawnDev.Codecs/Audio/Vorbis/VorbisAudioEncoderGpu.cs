@@ -65,7 +65,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         // time, and store them as fields. This is the metadata-struct-setup
         // carve-out per CLAUDE.md cardinal rule. After this point the GPU
         // encoder needs no CPU encoder instance for production work.
-        (_ident, _setup) = VorbisAudioEncoder.BuildResolvedHeaders(options);
+        (_ident, _setup) = VorbisHeaderPackBuilder.BuildResolvedHeaders(options);
 
         _floorCfg = (VorbisFloor1Config)_setup.Floors[0];
         _endpointBits = _floorCfg.Multiplier switch { 1 => 8, 2 => 7, 3 => 7, _ => 6 };
@@ -248,17 +248,17 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         // canonical Vorbis header packet bytes.
         packets.Add(new Container.Ogg.OggOutgoingPacket
         {
-            Data = VorbisAudioEncoder.BuildIdentPacketBytes(_ident),
+            Data = VorbisHeaderPackBuilder.BuildIdentPacketBytes(_ident),
             GranulePosition = 0,
         });
         packets.Add(new Container.Ogg.OggOutgoingPacket
         {
-            Data = VorbisAudioEncoder.BuildCommentPacketBytes(vendor),
+            Data = VorbisHeaderPackBuilder.BuildCommentPacketBytes(vendor),
             GranulePosition = 0,
         });
         packets.Add(new Container.Ogg.OggOutgoingPacket
         {
-            Data = VorbisAudioEncoder.BuildSetupPacketBytes(_setup),
+            Data = VorbisHeaderPackBuilder.BuildSetupPacketBytes(_setup),
             GranulePosition = 0,
         });
 
