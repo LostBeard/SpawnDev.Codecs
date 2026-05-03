@@ -68,6 +68,67 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     private readonly int[] _xListLengths;   // [floorIdx] -> XList.Length
     private readonly int _maxXListLength;
 
+    // Vorbis v2 infrastructure (Plans/PLAN-Vorbis-Decoder-V2-...md
+    // Step 3a). Per-stream flat-packed setup + codebook tables uploaded
+    // once at construction time (CARDINAL rule "metadata struct setup"
+    // carve-out). The v2 kernel reads from these directly to do
+    // bit-stream decode on GPU - replacing the CPU work in
+    // DecodeSpectrumOnCpu. The dispatch itself (Step 3b) is a
+    // follow-up commit.
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2FloorScalars;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2FloorPartitionClassList;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2FloorPartitionClassListOffsets;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2FloorClassDimensions;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2FloorClassDimensionsOffsets;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2FloorClassSubclasses;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2FloorClassSubclassesOffsets;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2FloorClassMasterbooks;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2FloorClassMasterbooksOffsets;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2FloorClassSubclassBooks;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2FloorClassSubclassBooksOffsets;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2ResidueScalars;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2ResidueBooks;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2ResidueBooksOffsets;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2MappingScalars;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2MappingMux;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2MappingMuxOffsets;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2MappingFloors;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2MappingResidues;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2MappingSubmapOffsets;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2ModeBlockFlags;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2ModeMappings;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2AllChildren;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2AllLeafToEntry;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2ChildrenOffsets;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2LeafOffsets;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2MaxDepths;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2CodebookParams;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2AllMultiplicands;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2MultOffsets;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2MultLengths;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2CodebookDimensions;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2CodebookEntries;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2CodebookLookupTypes;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2CodebookQuantvals;
+    private readonly MemoryBuffer1D<double, Stride1D.Dense> _dV2CodebookMinValues;
+    private readonly MemoryBuffer1D<double, Stride1D.Dense> _dV2CodebookDeltaValues;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2CodebookSequenceP;
+
+    // Pre-built struct that bundles all v2 ArrayViews into one kernel parameter.
+    private readonly VorbisPacketDecodeStaticInputs _v2StaticInputs;
+
+    // The v2 packet-decode kernel.
+    private readonly Action<
+        Index1D,
+        ArrayView<byte>,
+        int, int, int, int, int, int,
+        VorbisPacketDecodeStaticInputs,
+        ArrayView<int>,
+        ArrayView<float>,
+        ArrayView<int>,
+        ArrayView<float>>
+        _v2DecodeKernel;
+
     // Compiled kernels.
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<float>,
         ArrayView<float>, ArrayView<int>, ArrayView<byte>, int, int, int, int>
@@ -127,6 +188,117 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         _dXListsFlat.View.CopyFromCPU(xListsFlat);
         _dInverseDb = accelerator.Allocate1D<float>(256);
         _dInverseDb.View.CopyFromCPU(VorbisFloor1InverseDbGpu.BuildInverseDbTable());
+
+        // Vorbis v2 infrastructure: build flat-packed setup + codebook
+        // tables, upload once, build the static-inputs struct used by
+        // VorbisPacketDecodeKernel.Run, compile the kernel.
+        var v2Setup = VorbisSetupHeaderGpu.Build(setup);
+        var v2Codebooks = VorbisHuffmanCodebookSetGpu.Build(setup.Codebooks);
+        // Codebook params for Floor1: 3 ints per codebook
+        // [childrenOff, leafOff, maxDepth].
+        var codebookParams = new int[v2Codebooks.MaxDepths.Length * 3];
+        for (int i = 0; i < v2Codebooks.MaxDepths.Length; i++)
+        {
+            codebookParams[i * 3 + 0] = v2Codebooks.ChildrenOffsets[i];
+            codebookParams[i * 3 + 1] = v2Codebooks.LeafOffsets[i];
+            codebookParams[i * 3 + 2] = v2Codebooks.MaxDepths[i];
+        }
+        // Setup tables.
+        _dV2FloorScalars = AllocAndUpload(accelerator, v2Setup.FloorScalars);
+        _dV2FloorPartitionClassList = AllocAndUpload(accelerator, v2Setup.FloorPartitionClassList);
+        _dV2FloorPartitionClassListOffsets = AllocAndUpload(accelerator, v2Setup.FloorPartitionClassListOffsets);
+        _dV2FloorClassDimensions = AllocAndUpload(accelerator, v2Setup.FloorClassDimensions);
+        _dV2FloorClassDimensionsOffsets = AllocAndUpload(accelerator, v2Setup.FloorClassDimensionsOffsets);
+        _dV2FloorClassSubclasses = AllocAndUpload(accelerator, v2Setup.FloorClassSubclasses);
+        _dV2FloorClassSubclassesOffsets = AllocAndUpload(accelerator, v2Setup.FloorClassSubclassesOffsets);
+        _dV2FloorClassMasterbooks = AllocAndUpload(accelerator, v2Setup.FloorClassMasterbooks);
+        _dV2FloorClassMasterbooksOffsets = AllocAndUpload(accelerator, v2Setup.FloorClassMasterbooksOffsets);
+        _dV2FloorClassSubclassBooks = AllocAndUpload(accelerator, v2Setup.FloorClassSubclassBooks);
+        _dV2FloorClassSubclassBooksOffsets = AllocAndUpload(accelerator, v2Setup.FloorClassSubclassBooksOffsets);
+        _dV2ResidueScalars = AllocAndUpload(accelerator, v2Setup.ResidueScalars);
+        _dV2ResidueBooks = AllocAndUpload(accelerator, v2Setup.ResidueBooks);
+        _dV2ResidueBooksOffsets = AllocAndUpload(accelerator, v2Setup.ResidueBooksOffsets);
+        _dV2MappingScalars = AllocAndUpload(accelerator, v2Setup.MappingScalars);
+        _dV2MappingMux = AllocAndUpload(accelerator, v2Setup.MappingMux);
+        _dV2MappingMuxOffsets = AllocAndUpload(accelerator, v2Setup.MappingMuxOffsets);
+        _dV2MappingFloors = AllocAndUpload(accelerator, v2Setup.MappingFloors);
+        _dV2MappingResidues = AllocAndUpload(accelerator, v2Setup.MappingResidues);
+        _dV2MappingSubmapOffsets = AllocAndUpload(accelerator, v2Setup.MappingSubmapOffsets);
+        // Mode block flags shipped as byte[]; convert to int[] for GPU.
+        var modeBlockFlagsAsInt = new int[v2Setup.ModeBlockFlags.Length];
+        for (int i = 0; i < modeBlockFlagsAsInt.Length; i++)
+            modeBlockFlagsAsInt[i] = v2Setup.ModeBlockFlags[i];
+        _dV2ModeBlockFlags = AllocAndUpload(accelerator, modeBlockFlagsAsInt);
+        _dV2ModeMappings = AllocAndUpload(accelerator, v2Setup.ModeMappings);
+        // Codebook tables.
+        _dV2AllChildren = AllocAndUpload(accelerator, v2Codebooks.AllChildren);
+        _dV2AllLeafToEntry = AllocAndUpload(accelerator, v2Codebooks.AllLeafToEntry);
+        _dV2ChildrenOffsets = AllocAndUpload(accelerator, v2Codebooks.ChildrenOffsets);
+        _dV2LeafOffsets = AllocAndUpload(accelerator, v2Codebooks.LeafOffsets);
+        _dV2MaxDepths = AllocAndUpload(accelerator, v2Codebooks.MaxDepths);
+        _dV2CodebookParams = AllocAndUpload(accelerator, codebookParams);
+        _dV2AllMultiplicands = AllocAndUpload(accelerator, v2Codebooks.AllMultiplicands);
+        _dV2MultOffsets = AllocAndUpload(accelerator, v2Codebooks.MultOffsets);
+        _dV2MultLengths = AllocAndUpload(accelerator, v2Codebooks.MultLengths);
+        _dV2CodebookDimensions = AllocAndUpload(accelerator, v2Codebooks.CodebookDimensions);
+        _dV2CodebookEntries = AllocAndUpload(accelerator, v2Codebooks.CodebookEntries);
+        _dV2CodebookLookupTypes = AllocAndUpload(accelerator, v2Codebooks.CodebookLookupTypes);
+        _dV2CodebookQuantvals = AllocAndUpload(accelerator, v2Codebooks.CodebookQuantvals);
+        _dV2CodebookMinValues = AllocAndUpload(accelerator, v2Codebooks.CodebookMinValues);
+        _dV2CodebookDeltaValues = AllocAndUpload(accelerator, v2Codebooks.CodebookDeltaValues);
+        _dV2CodebookSequenceP = AllocAndUpload(accelerator, v2Codebooks.CodebookSequenceP);
+
+        _v2StaticInputs = new VorbisPacketDecodeStaticInputs
+        {
+            FloorScalars = _dV2FloorScalars.View,
+            FloorPartitionClassList = _dV2FloorPartitionClassList.View,
+            FloorPartitionClassListOffsets = _dV2FloorPartitionClassListOffsets.View,
+            FloorClassDimensions = _dV2FloorClassDimensions.View,
+            FloorClassDimensionsOffsets = _dV2FloorClassDimensionsOffsets.View,
+            FloorClassSubclasses = _dV2FloorClassSubclasses.View,
+            FloorClassSubclassesOffsets = _dV2FloorClassSubclassesOffsets.View,
+            FloorClassMasterbooks = _dV2FloorClassMasterbooks.View,
+            FloorClassMasterbooksOffsets = _dV2FloorClassMasterbooksOffsets.View,
+            FloorClassSubclassBooks = _dV2FloorClassSubclassBooks.View,
+            FloorClassSubclassBooksOffsets = _dV2FloorClassSubclassBooksOffsets.View,
+            ResidueScalars = _dV2ResidueScalars.View,
+            ResidueBooks = _dV2ResidueBooks.View,
+            ResidueBooksOffsets = _dV2ResidueBooksOffsets.View,
+            MappingScalars = _dV2MappingScalars.View,
+            MappingMux = _dV2MappingMux.View,
+            MappingMuxOffsets = _dV2MappingMuxOffsets.View,
+            MappingFloors = _dV2MappingFloors.View,
+            MappingResidues = _dV2MappingResidues.View,
+            MappingSubmapOffsets = _dV2MappingSubmapOffsets.View,
+            ModeBlockFlags = _dV2ModeBlockFlags.View,
+            ModeMappings = _dV2ModeMappings.View,
+            AllChildren = _dV2AllChildren.View,
+            AllLeafToEntry = _dV2AllLeafToEntry.View,
+            ChildrenOffsets = _dV2ChildrenOffsets.View,
+            LeafOffsets = _dV2LeafOffsets.View,
+            MaxDepths = _dV2MaxDepths.View,
+            CodebookParams = _dV2CodebookParams.View,
+            AllMultiplicands = _dV2AllMultiplicands.View,
+            MultOffsets = _dV2MultOffsets.View,
+            MultLengths = _dV2MultLengths.View,
+            CodebookDimensions = _dV2CodebookDimensions.View,
+            CodebookEntries = _dV2CodebookEntries.View,
+            CodebookLookupTypes = _dV2CodebookLookupTypes.View,
+            CodebookQuantvals = _dV2CodebookQuantvals.View,
+            CodebookMinValues = _dV2CodebookMinValues.View,
+            CodebookDeltaValues = _dV2CodebookDeltaValues.View,
+            CodebookSequenceP = _dV2CodebookSequenceP.View,
+        };
+
+        _v2DecodeKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<byte>,
+            int, int, int, int, int, int,
+            VorbisPacketDecodeStaticInputs,
+            ArrayView<int>,
+            ArrayView<float>,
+            ArrayView<int>,
+            ArrayView<float>>(VorbisPacketDecodeKernel.Run);
 
         _floorRenderKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<int>, ArrayView<int>, ArrayView<float>,
@@ -414,6 +586,24 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     }
 
     /// <summary>
+    /// Allocate a 1D GPU buffer of length <paramref name="data"/>.Length and
+    /// upload <paramref name="data"/> into it. Helper used at construction
+    /// time for the v2 setup + codebook flat-pack uploads. Length-zero
+    /// arrays still get an allocation of length 1 (ILGPU rejects zero-
+    /// length allocations on some backends, and the shaders' offset-into-
+    /// buffer accesses simply never read length-zero slices).
+    /// </summary>
+    private static MemoryBuffer1D<T, Stride1D.Dense> AllocAndUpload<T>(
+        Accelerator accelerator, T[] data) where T : unmanaged
+    {
+        int len = Math.Max(1, data.Length);
+        var buf = accelerator.Allocate1D<T>(len);
+        if (data.Length > 0)
+            buf.View.SubView(0, data.Length).CopyFromCPU(data);
+        return buf;
+    }
+
+    /// <summary>
     /// Single-thread floor 1 curve render kernel orchestrator.
     /// Dispatches to <see cref="VorbisFloor1RenderCurveGpu.Render"/>.
     /// </summary>
@@ -498,5 +688,44 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         _dPrevRightHalf?.Dispose();
         _dInverseDb.Dispose();
         _dXListsFlat.Dispose();
+        // v2 infrastructure - 38 buffers.
+        _dV2FloorScalars.Dispose();
+        _dV2FloorPartitionClassList.Dispose();
+        _dV2FloorPartitionClassListOffsets.Dispose();
+        _dV2FloorClassDimensions.Dispose();
+        _dV2FloorClassDimensionsOffsets.Dispose();
+        _dV2FloorClassSubclasses.Dispose();
+        _dV2FloorClassSubclassesOffsets.Dispose();
+        _dV2FloorClassMasterbooks.Dispose();
+        _dV2FloorClassMasterbooksOffsets.Dispose();
+        _dV2FloorClassSubclassBooks.Dispose();
+        _dV2FloorClassSubclassBooksOffsets.Dispose();
+        _dV2ResidueScalars.Dispose();
+        _dV2ResidueBooks.Dispose();
+        _dV2ResidueBooksOffsets.Dispose();
+        _dV2MappingScalars.Dispose();
+        _dV2MappingMux.Dispose();
+        _dV2MappingMuxOffsets.Dispose();
+        _dV2MappingFloors.Dispose();
+        _dV2MappingResidues.Dispose();
+        _dV2MappingSubmapOffsets.Dispose();
+        _dV2ModeBlockFlags.Dispose();
+        _dV2ModeMappings.Dispose();
+        _dV2AllChildren.Dispose();
+        _dV2AllLeafToEntry.Dispose();
+        _dV2ChildrenOffsets.Dispose();
+        _dV2LeafOffsets.Dispose();
+        _dV2MaxDepths.Dispose();
+        _dV2CodebookParams.Dispose();
+        _dV2AllMultiplicands.Dispose();
+        _dV2MultOffsets.Dispose();
+        _dV2MultLengths.Dispose();
+        _dV2CodebookDimensions.Dispose();
+        _dV2CodebookEntries.Dispose();
+        _dV2CodebookLookupTypes.Dispose();
+        _dV2CodebookQuantvals.Dispose();
+        _dV2CodebookMinValues.Dispose();
+        _dV2CodebookDeltaValues.Dispose();
+        _dV2CodebookSequenceP.Dispose();
     }
 }
