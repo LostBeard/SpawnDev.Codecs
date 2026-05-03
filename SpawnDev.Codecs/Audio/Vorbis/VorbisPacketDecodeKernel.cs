@@ -183,11 +183,11 @@ public static class VorbisPacketDecodeKernel
     /// <param name="channels">Audio channel count (= ident.AudioChannels).</param>
     /// <param name="blockSize0">Short-block size from ident.</param>
     /// <param name="blockSize1">Long-block size from ident.</param>
-    /// <param name="halfBlock">Half-block size derived from the packet's mode (caller pre-resolves once per packet).</param>
+    /// <param name="residueStride">Residue buffer stride (max halfBlock across all modes; sized for the residueOutFlat row spacing). The kernel uses the actual halfBlock for the parsed mode internally for the residue decode 'n' parameter, but the channel-major row spacing in residuesFlatOut uses this stride.</param>
     /// <param name="maxXListLength">Maximum XList length across all floors (sized for posterior section).</param>
     /// <param name="setup">Static, per-stream flat-packed setup tables uploaded once by the caller.</param>
     /// <param name="allIntOut">Combined int output buffer; layout per <see cref="PacketHeaderOffset"/> + sections.</param>
-    /// <param name="residuesFlatOut">[channels * halfBlock] residue floats, channel-major.</param>
+    /// <param name="residuesFlatOut">[channels * residueStride] residue floats, channel-major.</param>
     /// <param name="intScratch">Combined int scratch (classifications + doNotDecode flags). Caller-allocated.</param>
     /// <param name="entryVecScratch">[max codebook dimensions] residue decode entry vector scratch.</param>
     public static void Run(
@@ -197,7 +197,7 @@ public static class VorbisPacketDecodeKernel
         int channels,
         int blockSize0,
         int blockSize1,
-        int halfBlock,
+        int residueStride,
         int maxXListLength,
         VorbisPacketDecodeStaticInputs setup,
         ArrayView<int> allIntOut,
@@ -231,6 +231,9 @@ public static class VorbisPacketDecodeKernel
         allIntOut[PacketHeaderOffset + 2] = header.IsLongBlock;
         allIntOut[PacketHeaderOffset + 3] = header.PreviousWindowLong;
         allIntOut[PacketHeaderOffset + 4] = header.NextWindowLong;
+
+        // halfBlock for THIS packet (depends on the parsed mode's block flag).
+        int halfBlock = header.BlockSize / 2;
 
         // 2. Resolve mapping for this mode.
         int mappingIdx = setup.ModeMappings[header.ModeNumber];
@@ -318,7 +321,7 @@ public static class VorbisPacketDecodeKernel
                 setup.CodebookMinValues, setup.CodebookDeltaValues,
                 setup.CodebookSequenceP,
                 membersInSubmap,
-                residuesFlatOut, (long)firstSubmapChannel * halfBlock,
+                residuesFlatOut, (long)firstSubmapChannel * residueStride,
                 halfBlock,
                 intScratch, doNotDecodeBase,
                 intScratch, 0,
