@@ -52,6 +52,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
     private readonly Vp8FrameSequentialEncodeKernel _sequentialEncode;
     private readonly Vp8FrameEntropyKernel _entropy;
     private readonly Vp8FrameAssembleKernel _assemble;
+    private readonly Vp8StridedPlanePackKernel _stridePack;
 
     // Constants uploaded once per accelerator and reused across frames.
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _dcQLookup;
@@ -70,6 +71,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         _sequentialEncode = new Vp8FrameSequentialEncodeKernel(accelerator);
         _entropy = new Vp8FrameEntropyKernel(accelerator);
         _assemble = new Vp8FrameAssembleKernel(accelerator);
+        _stridePack = new Vp8StridedPlanePackKernel(accelerator);
 
         // Upload accelerator-resident constants once.
         _dcQLookup = accelerator.Allocate1D<int>(128);
@@ -193,23 +195,35 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
 
     /// <summary>
     /// Upload a plane to GPU, stripping any source-side stride padding.
-    /// (This is necessary CPU-side data-prep because the source comes
-    /// from outside the GPU; the only host work allowed besides
-    /// dispatch coordination per Captain's directive.)
+    /// Source upload itself is necessary I/O (the bytes come from outside
+    /// the GPU); the previous version then ran a per-row CPU stride-strip
+    /// loop, which was a cardinal-rule violation. This version uploads
+    /// the strided source as a single I/O and dispatches
+    /// <see cref="Vp8StridedPlanePackKernel"/> to do the strip on-GPU,
+    /// keeping all codec data manipulation accelerator-resident per
+    /// Captain's directive: "The environment using the accelerator is
+    /// not capable of processing any data loads. It is simply the
+    /// coordinator."
     /// </summary>
-    private static void UploadPlane(
+    private void UploadPlane(
         ReadOnlySpan<byte> src, int stride, int w, int h,
         MemoryBuffer1D<byte, Stride1D.Dense> dest)
     {
         if (stride == w)
         {
+            // No padding - one I/O, done.
             dest.View.CopyFromCPU(src.Slice(0, w * h).ToArray());
         }
         else
         {
-            var packed = new byte[w * h];
-            for (int r = 0; r < h; r++) src.Slice(r * stride, w).CopyTo(packed.AsSpan(r * w));
-            dest.View.CopyFromCPU(packed);
+            // Strided source: upload the full strided region in one I/O
+            // (no per-row CPU work), then GPU-pack into the dest buffer.
+            using var dStrided = _accelerator.Allocate1D<byte>(stride * h);
+            dStrided.View.CopyFromCPU(src.Slice(0, stride * h).ToArray());
+            _stridePack.Run(dStrided.View, 0, stride, dest.View, 0, w, h);
+            // Sync before dStrided's using-scope dispose so the kernel
+            // has finished consuming it.
+            _accelerator.Synchronize();
         }
     }
 
@@ -220,6 +234,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         _sequentialEncode.Dispose();
         _entropy.Dispose();
         _assemble.Dispose();
+        _stridePack.Dispose();
         _dcQLookup.Dispose();
         _acQLookup.Dispose();
         _defaultCoefProbs.Dispose();
