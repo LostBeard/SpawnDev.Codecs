@@ -201,11 +201,28 @@ pipeline (the CPU bit-stream walk inside
   `LoadAutoGroupedStreamKernel` on each available accelerator. Catches
   binding-count limits + struct-of-ArrayView marshaling gaps before
   the integration risks breaking the working v1 decoder tests.
-- **Step 3 (DecoderGpu integration)**: not yet shipped. Constructor
-  needs to upload all flat-packed tables + compile the kernel;
-  `DecodePacketAsync` needs to dispatch the kernel + read back the
-  small header struct. Pending Step 2's smoke-test verification +
-  focused fresh session for the substantial code addition.
+- **Step 3a (DecoderGpu uploads + kernel compile)**: ✓ shipped commit
+  `afeb6b1`. 38 flat-packed buffers uploaded once per stream + kernel
+  compiled at construction. Existing 3 Vorbis decoder GPU tests pass
+  on all 5 available backends (15/0/3) via the v1 path; constructor's
+  `LoadAutoGroupedStreamKernel` for the v2 kernel verifies in-context.
+- **Step 3b (DecoderGpu actually dispatches the v2 kernel)**: ATTEMPTED
+  + REVERTED. Bit-exact correct on desktop (CPU + CUDA + OpenCL all 3
+  Vorbis decoder tests PASS) but **regresses browser backends**:
+  - **WebGPU**: 44 storage buffer bindings exceed the 10 device limit.
+    ILGPU's WebGPU backend flattens the
+    `VorbisPacketDecodeStaticInputs` struct's 38 ArrayView fields
+    into 38 separate storage-buffer bindings.
+  - **Wasm**: memory access OOB on the same dispatch (related root
+    cause + may overlap with Geordi's open Bug 2).
+  
+  Step 3b reverted to keep WebGPU + Wasm decoder tests green via v1.
+  Path forward: either restructure the kernel to combine the 36 int
+  fields into one big `ArrayView<int>` with a header offset table
+  (substantial Codecs work), or wait for ILGPU to coalesce
+  struct-of-ArrayView kernel params on WebGPU (cross-lane, higher
+  leverage - unblocks future Opus integration kernels too). Filed with
+  Geordi: `_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-vorbis-v2-binding-count-2026-05-03.md`.
 
 ### Helper classes extracted to main (so CPU classes can move cleanly)
 
