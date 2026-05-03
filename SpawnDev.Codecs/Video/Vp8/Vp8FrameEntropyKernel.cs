@@ -76,8 +76,8 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
         var buf = new byte[ConstsExtendedTotalBytes];
         var standard = Vp8CoefBlockEncoderGpu.BuildConstsBuffer();
         Array.Copy(standard, buf, standard.Length);
-        var kfY = Vp8ModeTrees.DefaultKfYModeProb;
-        var kfUv = Vp8ModeTrees.DefaultKfUvModeProb;
+        var kfY = Vp8ModeProbTables.DefaultKfYModeProb;
+        var kfUv = Vp8ModeProbTables.DefaultKfUvModeProb;
         Array.Copy(kfY, 0, buf, KfYModeProbsOffset, 3);
         Array.Copy(kfUv, 0, buf, KfUvModeProbsOffset, 3);
         return buf;

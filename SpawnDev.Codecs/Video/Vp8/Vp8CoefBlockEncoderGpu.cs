@@ -61,12 +61,12 @@ public static class Vp8CoefBlockEncoderGpu
     public static byte[] BuildConstsBuffer()
     {
         var buf = new byte[ConstsTotalBytes];
-        Array.Copy(Vp8CoefBlockDecoder.ZigzagScan, 0, buf, ZigzagOffset, 16);
-        Array.Copy(Vp8CoefBlockDecoder.CoefBands, 0, buf, BandsOffset, 17);
-        Array.Copy(Vp8CoefBlockDecoder.Cat3Probs, 0, buf, Cat3Offset, 3);
-        Array.Copy(Vp8CoefBlockDecoder.Cat4Probs, 0, buf, Cat4Offset, 4);
-        Array.Copy(Vp8CoefBlockDecoder.Cat5Probs, 0, buf, Cat5Offset, 5);
-        Array.Copy(Vp8CoefBlockDecoder.Cat6Probs, 0, buf, Cat6Offset, 11);
+        Array.Copy(Vp8CoefTables.ZigzagScan, 0, buf, ZigzagOffset, 16);
+        Array.Copy(Vp8CoefTables.CoefBands, 0, buf, BandsOffset, 17);
+        Array.Copy(Vp8CoefTables.Cat3Probs, 0, buf, Cat3Offset, 3);
+        Array.Copy(Vp8CoefTables.Cat4Probs, 0, buf, Cat4Offset, 4);
+        Array.Copy(Vp8CoefTables.Cat5Probs, 0, buf, Cat5Offset, 5);
+        Array.Copy(Vp8CoefTables.Cat6Probs, 0, buf, Cat6Offset, 11);
         return buf;
     }
 
