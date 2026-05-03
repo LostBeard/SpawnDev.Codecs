@@ -176,6 +176,37 @@ CPU impl. Several have already been done this way (`Vp8CoefTables`,
 `Vp8ModeProbTables`, `Vp9BlockCoefEnums`, `Av1RangeDecoderGpu`
 constants).
 
+### Vorbis decoder v2 GPU integration kernel - Steps 1+2 shipped
+
+Plans/PLAN-Vorbis-Decoder-V2-GPU-BitStream-Decode.md tracks the v2
+work that closes the last cardinal-rule gap in the Vorbis decode
+pipeline (the CPU bit-stream walk inside
+`VorbisAudioDecoderGpu.DecodeSpectrumOnCpu`).
+
+- **Step 1**: `VorbisResidueDecoderGpu` static helper - GPU-callable
+  Type 0/1 + Type 2 residue decoder mirroring CPU
+  `VorbisResidueDecoder.Decode`.
+- **Step 2**: `VorbisPacketDecodeKernel` - single-thread GPU
+  integration kernel that wires `VorbisAudioPacketHeaderGpu.Parse`
+  + per-channel `VorbisFloor1DecoderGpu.Decode` + per-submap
+  `VorbisResidueDecoderGpu.Decode` in one dispatch. Outputs go into
+  a single `allIntOut` buffer (header, floorOk, floorIndex,
+  posteriors, err) + `residuesFlatOut`. 13 top-level params total
+  (within ILGPU `Action<16>` ceiling).
+  `VorbisPacketDecodeStaticInputs` struct holds 38 ArrayView fields
+  for the flat-packed setup header + codebook set; the struct is a
+  plain POD so ILGPU's kernel-parameter marshaling can pack it.
+- **Step 2 verification**: `VorbisPacketDecodeKernel_LoadsOnAccelerator`
+  smoke test verifies the kernel compiles to backend IR via
+  `LoadAutoGroupedStreamKernel` on each available accelerator. Catches
+  binding-count limits + struct-of-ArrayView marshaling gaps before
+  the integration risks breaking the working v1 decoder tests.
+- **Step 3 (DecoderGpu integration)**: not yet shipped. Constructor
+  needs to upload all flat-packed tables + compile the kernel;
+  `DecodePacketAsync` needs to dispatch the kernel + read back the
+  small header struct. Pending Step 2's smoke-test verification +
+  focused fresh session for the substantial code addition.
+
 ### Helper classes extracted to main (so CPU classes can move cleanly)
 
 - `Vp8CoefTables`: ZigzagScan + CoefBands + Cat3-6 probability tables
