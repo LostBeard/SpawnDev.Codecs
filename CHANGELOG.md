@@ -96,6 +96,21 @@ manual browser click-through every commit
   explicit per-test feature gating via SpawnDev.ILGPU's
   `device.Satisfies()` API.
 
+### PMT verification at 0.3.0-rc.1
+
+GpuTranscodeDemo sweep run 2026-05-03 against ILGPU 4.9.5-rc.1:
+
+| Backend | Result | Notes |
+|---|---|---|
+| CPU | 3 PASS | Vp8 + Vp9 + Av1 GPU pair round-trip |
+| CUDA | 3 PASS | Vp8 + Vp9 + Av1 GPU pair round-trip |
+| OpenCL | 3 PASS | Vp8 + Vp9 + Av1 GPU pair round-trip |
+| WebGPU | 3 FAIL (PMT page-load timeout) | Kernels compile - SubView codegen fix verified working; Playwright `WaitForAsync` on the Run-button locator times out at 30s, page wall time hits 1m30s+. Reported to Geordi: PMT timeout tuning needed, not an ILGPU code regression. |
+| WebGL | 3 SKIP | Atomics gate (expected) |
+| Wasm | 3 SKIP | Awaiting ILGPU memory OOB fix (Geordi Bug 2 in-progress) |
+
+**Total: 9 PASS / 3 FAIL / 6 SKIP / 18 total.** Desktop GPU-pair pipeline verified bit-exact on all three desktop backends.
+
 ### Project split: SpawnDev.Codecs.References (NEW in 0.3.0-rc.1)
 
 A new sibling project, `SpawnDev.Codecs.References`, hosts the CPU
