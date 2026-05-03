@@ -431,7 +431,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             byteConsts, ushortConsts,
             yAboveCell, yLeftCell, cellsPerTx: 4,
             isTx4x4: 0, txSizeForCoefProbs: (int)Vp9TxSize.Tx16x16,
-            planeType: (int)Vp9BlockCoefDecoder.PlaneType.Y,
+            planeType: (int)Vp9BlockCoefEnums.PlaneType.Y,
             tokenCache, aboveYEntropyCtx, leftYEntropyCtx);
 
         // U plane: Tx8x8 at mbR*8, mbC*8 in chroma plane.
@@ -445,7 +445,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             byteConsts, ushortConsts,
             uvAboveCell, uvLeftCell, cellsPerTx: 2,
             isTx4x4: 0, txSizeForCoefProbs: (int)Vp9TxSize.Tx8x8,
-            planeType: (int)Vp9BlockCoefDecoder.PlaneType.Uv,
+            planeType: (int)Vp9BlockCoefEnums.PlaneType.Uv,
             tokenCache, aboveUEntropyCtx, leftUEntropyCtx);
 
         EncodePlaneCoefs(
@@ -454,7 +454,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             byteConsts, ushortConsts,
             uvAboveCell, uvLeftCell, cellsPerTx: 2,
             isTx4x4: 0, txSizeForCoefProbs: (int)Vp9TxSize.Tx8x8,
-            planeType: (int)Vp9BlockCoefDecoder.PlaneType.Uv,
+            planeType: (int)Vp9BlockCoefEnums.PlaneType.Uv,
             tokenCache, aboveVEntropyCtx, leftVEntropyCtx);
     }
 
@@ -509,7 +509,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             coefProbsView, coefConstsView, tokenCache,
             coefCount,
             planeType: planeType,
-            refType: (int)Vp9BlockCoefDecoder.RefType.Intra,
+            refType: (int)Vp9BlockCoefEnums.RefType.Intra,
             initialCtx: initialCtx,
             isHighBitDepth: 0,
             isTx4x4: isTx4x4);
