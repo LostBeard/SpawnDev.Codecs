@@ -164,15 +164,17 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         using var dOutBytes = _accelerator.Allocate1D<byte>(worstCaseBytes);
         using var dOutLen = _accelerator.Allocate1D<long>(1);
 
-        dWindowed.View.CopyFromCPU(new float[n]);
-        dSpectrum.View.CopyFromCPU(new float[half]);
-        dPosteriors.View.CopyFromCPU(new int[2]);
-        dFloorCurve.View.CopyFromCPU(new float[half]);
-        dResidueQ.View.CopyFromCPU(new int[half]);
-        dScratchInt.View.CopyFromCPU(new int[4]);
-        dScratchByte.View.CopyFromCPU(new byte[2]);
-        dOutBytes.View.CopyFromCPU(new byte[worstCaseBytes]);
-        dOutLen.View.CopyFromCPU(new long[1]);
+        // Pre-zero all scratch + output buffers via GPU-side memset
+        // (avoids allocating zero-filled CPU arrays and uploading them).
+        dWindowed.View.MemSetToZero();
+        dSpectrum.View.MemSetToZero();
+        dPosteriors.View.MemSetToZero();
+        dFloorCurve.View.MemSetToZero();
+        dResidueQ.View.MemSetToZero();
+        dScratchInt.View.MemSetToZero();
+        dScratchByte.View.MemSetToZero();
+        dOutBytes.View.MemSetToZero();
+        dOutLen.View.MemSetToZero();
 
         // 1. Window apply (parallel over n samples).
         _windowKernel(new Index1D(n), dInput, dWindowed.View, n);

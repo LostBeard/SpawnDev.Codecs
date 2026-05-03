@@ -115,9 +115,11 @@ public sealed class Av1KeyframeDecoderGpu : IDisposable
         using var dScratchInt = _accelerator.Allocate1D<int>(scratchIntLen);
 
         dTile.View.CopyFromCPU(tileBytes);
-        dRecon.View.CopyFromCPU(new byte[reconLen]);
-        dScratchByte.View.CopyFromCPU(new byte[scratchByteLen]);
-        dScratchInt.View.CopyFromCPU(new int[scratchIntLen]);
+        // Pre-zero recon + scratch via GPU-side memset (avoids host
+        // allocation + bus transfer of zeros).
+        dRecon.View.MemSetToZero();
+        dScratchByte.View.MemSetToZero();
+        dScratchInt.View.MemSetToZero();
 
         _frameKernel.Run(
             dTile.View, dRecon.View,

@@ -181,15 +181,17 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         dSrc.View.SubView(yLen, uvLen).CopyFromCPU(uPlane);
         dSrc.View.SubView(yLen + uvLen, uvLen).CopyFromCPU(vPlane);
 
-        // Pre-zero recon (sequential kernel writes every pixel; safe to skip
-        // but explicit zero gives stable carry-back state if the kernel
-        // partial-writes).
-        dRecon.View.CopyFromCPU(new byte[srcLen]);
-        dTile.View.CopyFromCPU(new byte[worstCaseTile]);
-        dTileLen.View.CopyFromCPU(new long[1]);
-        dScratchByte.View.CopyFromCPU(new byte[scratchByteLen]);
-        dScratchInt.View.CopyFromCPU(new int[scratchIntLen]);
-        dScratchShort.View.CopyFromCPU(new short[scratchShortLen]);
+        // Pre-zero recon + scratch + output via GPU-side memset
+        // (sequential kernel writes every pixel; explicit zero gives
+        // stable carry-back state if the kernel partial-writes).
+        // GPU memset avoids allocating zero-filled CPU arrays
+        // (~worstCaseTile bytes per frame) and uploading them.
+        dRecon.View.MemSetToZero();
+        dTile.View.MemSetToZero();
+        dTileLen.View.MemSetToZero();
+        dScratchByte.View.MemSetToZero();
+        dScratchInt.View.MemSetToZero();
+        dScratchShort.View.MemSetToZero();
 
         // ---- Dispatch the walker ----
         _frameKernel.Run(

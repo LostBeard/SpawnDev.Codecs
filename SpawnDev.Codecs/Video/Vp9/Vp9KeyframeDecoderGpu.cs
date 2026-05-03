@@ -122,10 +122,11 @@ public sealed class Vp9KeyframeDecoderGpu : IDisposable
         var tileSlice = new byte[tileLength];
         Array.Copy(frameBytes, tileStartOffset, tileSlice, 0, tileLength);
         dTile.View.CopyFromCPU(tileSlice);
-        // Pre-zero the recon planes (kernel overwrites every pixel).
-        dYRecon.View.CopyFromCPU(new byte[yLen]);
-        dURecon.View.CopyFromCPU(new byte[uvLen]);
-        dVRecon.View.CopyFromCPU(new byte[uvLen]);
+        // Pre-zero the recon planes via GPU-side memset (avoids host
+        // allocation + bus transfer of zeros).
+        dYRecon.View.MemSetToZero();
+        dURecon.View.MemSetToZero();
+        dVRecon.View.MemSetToZero();
 
         // ---- 1. Compute dequantizers ----
         // V1: y_dc_delta / uv_dc_delta / uv_ac_delta = 0.
