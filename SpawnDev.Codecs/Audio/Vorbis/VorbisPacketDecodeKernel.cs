@@ -37,90 +37,93 @@ namespace SpawnDev.Codecs.Audio.Vorbis;
 /// <summary>
 /// Kernel scalars + flat-packed setup header + flat-packed codebook
 /// set views grouped for ergonomics. Held by the integration class
-/// across packets - allocated once per stream.
+/// across packets - allocated once per stream. Plain public fields
+/// (no `required` / no `init`) so ILGPU's kernel-parameter struct
+/// marshaling (CUDA / OpenCL / WebGPU) can pack the struct into the
+/// kernel parameter buffer without the auto-property indirection.
 /// </summary>
-public readonly struct VorbisPacketDecodeStaticInputs
+public struct VorbisPacketDecodeStaticInputs
 {
     /// <summary>Per-floor 5 scalars: Partitions, Multiplier, RangeBits, XListLength, ClassCount.</summary>
-    public required ArrayView<int> FloorScalars { get; init; }
+    public ArrayView<int> FloorScalars;
     /// <summary>Concat of PartitionClassList across floors.</summary>
-    public required ArrayView<int> FloorPartitionClassList { get; init; }
+    public ArrayView<int> FloorPartitionClassList;
     /// <summary>Per-floor offset into FloorPartitionClassList.</summary>
-    public required ArrayView<int> FloorPartitionClassListOffsets { get; init; }
+    public ArrayView<int> FloorPartitionClassListOffsets;
     /// <summary>Concat of ClassDimensions across floors.</summary>
-    public required ArrayView<int> FloorClassDimensions { get; init; }
+    public ArrayView<int> FloorClassDimensions;
     /// <summary>Per-floor offset into FloorClassDimensions.</summary>
-    public required ArrayView<int> FloorClassDimensionsOffsets { get; init; }
+    public ArrayView<int> FloorClassDimensionsOffsets;
     /// <summary>Concat of ClassSubclasses across floors.</summary>
-    public required ArrayView<int> FloorClassSubclasses { get; init; }
+    public ArrayView<int> FloorClassSubclasses;
     /// <summary>Per-floor offset into FloorClassSubclasses.</summary>
-    public required ArrayView<int> FloorClassSubclassesOffsets { get; init; }
+    public ArrayView<int> FloorClassSubclassesOffsets;
     /// <summary>Concat of ClassMasterbooks across floors.</summary>
-    public required ArrayView<int> FloorClassMasterbooks { get; init; }
+    public ArrayView<int> FloorClassMasterbooks;
     /// <summary>Per-floor offset into FloorClassMasterbooks.</summary>
-    public required ArrayView<int> FloorClassMasterbooksOffsets { get; init; }
+    public ArrayView<int> FloorClassMasterbooksOffsets;
     /// <summary>Concat of ClassSubclassBooks across floors+classes.</summary>
-    public required ArrayView<int> FloorClassSubclassBooks { get; init; }
+    public ArrayView<int> FloorClassSubclassBooks;
     /// <summary>Per-(floor, class) offset into FloorClassSubclassBooks.</summary>
-    public required ArrayView<int> FloorClassSubclassBooksOffsets { get; init; }
+    public ArrayView<int> FloorClassSubclassBooksOffsets;
 
     /// <summary>Per-residue 6 scalars: Type, Begin, End, PartitionSize, Classifications, Classbook.</summary>
-    public required ArrayView<int> ResidueScalars { get; init; }
+    public ArrayView<int> ResidueScalars;
     /// <summary>Per-residue books table (classifications*8 ints flat).</summary>
-    public required ArrayView<int> ResidueBooks { get; init; }
+    public ArrayView<int> ResidueBooks;
     /// <summary>Per-residue offset into ResidueBooks.</summary>
-    public required ArrayView<int> ResidueBooksOffsets { get; init; }
+    public ArrayView<int> ResidueBooksOffsets;
 
     /// <summary>Per-mapping submap count.</summary>
-    public required ArrayView<int> MappingScalars { get; init; }
+    public ArrayView<int> MappingScalars;
     /// <summary>Concat of per-channel Mux across mappings.</summary>
-    public required ArrayView<int> MappingMux { get; init; }
+    public ArrayView<int> MappingMux;
     /// <summary>Per-mapping offset into MappingMux.</summary>
-    public required ArrayView<int> MappingMuxOffsets { get; init; }
+    public ArrayView<int> MappingMuxOffsets;
     /// <summary>Concat of per-submap SubmapFloor across mappings.</summary>
-    public required ArrayView<int> MappingFloors { get; init; }
+    public ArrayView<int> MappingFloors;
     /// <summary>Concat of per-submap SubmapResidue across mappings.</summary>
-    public required ArrayView<int> MappingResidues { get; init; }
+    public ArrayView<int> MappingResidues;
     /// <summary>Per-mapping offset into MappingFloors / MappingResidues.</summary>
-    public required ArrayView<int> MappingSubmapOffsets { get; init; }
+    public ArrayView<int> MappingSubmapOffsets;
 
     /// <summary>Per-mode block flag bit (0 = short, 1 = long).</summary>
-    public required ArrayView<int> ModeBlockFlags { get; init; }
+    public ArrayView<int> ModeBlockFlags;
     /// <summary>Per-mode mapping index.</summary>
-    public required ArrayView<int> ModeMappings { get; init; }
+    public ArrayView<int> ModeMappings;
 
     /// <summary>Concat children flat-tree across all codebooks.</summary>
-    public required ArrayView<int> AllChildren { get; init; }
+    public ArrayView<int> AllChildren;
     /// <summary>Concat leaf-to-entry tables across all codebooks.</summary>
-    public required ArrayView<int> AllLeafToEntry { get; init; }
+    public ArrayView<int> AllLeafToEntry;
     /// <summary>Per-codebook offset into AllChildren (length codebookCount+1).</summary>
-    public required ArrayView<int> ChildrenOffsets { get; init; }
+    public ArrayView<int> ChildrenOffsets;
     /// <summary>Per-codebook offset into AllLeafToEntry.</summary>
-    public required ArrayView<int> LeafOffsets { get; init; }
+    public ArrayView<int> LeafOffsets;
     /// <summary>Per-codebook Huffman max depth.</summary>
-    public required ArrayView<int> MaxDepths { get; init; }
+    public ArrayView<int> MaxDepths;
     /// <summary>Per-codebook 3-int params [childrenOff, leafOff, maxDepth] for Floor1.</summary>
-    public required ArrayView<int> CodebookParams { get; init; }
+    public ArrayView<int> CodebookParams;
     /// <summary>Concat multiplicand tables across codebooks.</summary>
-    public required ArrayView<int> AllMultiplicands { get; init; }
+    public ArrayView<int> AllMultiplicands;
     /// <summary>Per-codebook offset into AllMultiplicands.</summary>
-    public required ArrayView<int> MultOffsets { get; init; }
+    public ArrayView<int> MultOffsets;
     /// <summary>Per-codebook multiplicand count.</summary>
-    public required ArrayView<int> MultLengths { get; init; }
+    public ArrayView<int> MultLengths;
     /// <summary>Per-codebook dimensions.</summary>
-    public required ArrayView<int> CodebookDimensions { get; init; }
+    public ArrayView<int> CodebookDimensions;
     /// <summary>Per-codebook entries count.</summary>
-    public required ArrayView<int> CodebookEntries { get; init; }
+    public ArrayView<int> CodebookEntries;
     /// <summary>Per-codebook lookup type (0 / 1 / 2).</summary>
-    public required ArrayView<int> CodebookLookupTypes { get; init; }
+    public ArrayView<int> CodebookLookupTypes;
     /// <summary>Per-codebook quantvals (lookup1_values for type 1, 0 otherwise).</summary>
-    public required ArrayView<int> CodebookQuantvals { get; init; }
+    public ArrayView<int> CodebookQuantvals;
     /// <summary>Per-codebook MinValue (parallel array to MultOffsets).</summary>
-    public required ArrayView<double> CodebookMinValues { get; init; }
+    public ArrayView<double> CodebookMinValues;
     /// <summary>Per-codebook DeltaValue.</summary>
-    public required ArrayView<double> CodebookDeltaValues { get; init; }
+    public ArrayView<double> CodebookDeltaValues;
     /// <summary>Per-codebook SequenceP flag (0 / 1).</summary>
-    public required ArrayView<int> CodebookSequenceP { get; init; }
+    public ArrayView<int> CodebookSequenceP;
 }
 
 /// <summary>
