@@ -3,6 +3,34 @@
 **Owner:** Tuvok
 **Status:** Design (2026-05-03). Largest remaining 1.0.0 piece. OpusEncoderGpu + OpusDecoderGpu top-level integration classes + SILK integration kernel + CELT GPU primitives all need to land before Opus joins the 5 other 100%-ILGPU encoder/decoder pairs.
 
+## Architectural pattern (validated by Vorbis v2)
+
+The Vorbis v2 GPU integration kernel
+(`VorbisPacketDecodeKernel`, shipped 2026-05-03) validates the
+architectural pattern Opus will follow:
+
+- **Single-thread integration kernel** (workgroup size 1) wires the
+  bit-stream-sequential primitives (header parse + per-channel +
+  per-submap) in one dispatch.
+- **Plain POD struct** kernel parameter (`VorbisPacketDecodeStaticInputs`,
+  38 ArrayView fields) holds the per-stream flat-packed setup +
+  codebook tables. Allocated + uploaded ONCE per stream by the host
+  (metadata struct setup carve-out per CARDINAL rule).
+- **Combined int output buffer** with explicit section layout
+  (`PacketHeaderOffset`, `PacketHeaderLength`, `ComputeAllIntOutLength`,
+  `ErrOutOffset`) keeps the kernel parameter count under ILGPU's
+  Action<16> ceiling.
+- **ILGPU's `LoadAutoGroupedStreamKernel`** accepts the struct-of-
+  ArrayView pattern on every backend (CPU + CUDA + OpenCL + WebGPU
+  + Wasm; WebGL skips via atomics gate). Verified by
+  `VorbisPacketDecodeKernel_LoadsOnAccelerator` smoke test.
+
+OpusDecoderGpu / OpusEncoderGpu top-level integration classes will
+follow the same pattern: per-stream flat-packed config struct,
+combined output buffer with section layout, single-thread mode-
+specific kernels (SilkDecodeKernel, CeltDecodeKernel,
+HybridDecodeKernel) dispatched based on the parsed TOC byte.
+
 ## Why this is "the 6th GPU pair"
 
 Today's 5 ILGPU encoder/decoder pairs:
