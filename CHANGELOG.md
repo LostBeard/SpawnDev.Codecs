@@ -1,5 +1,28 @@
 # SpawnDev.Codecs CHANGELOG
 
+## 0.2.0-alpha.2 (2026-05-03)
+
+Same library code as 0.2.0-alpha.1; this point release ships the
+documentation + demo improvements that landed after the 0.2.0-alpha.1
+package was published:
+
+- README "Quickstart - GPU encoder + decoder pairs" section with
+  concrete consumer code examples for each of the 5 GPU pairs (VP8,
+  VP9, AV1, FLAC, Vorbis), including how to acquire an accelerator on
+  desktop + Blazor WASM and how to handle backends that lack atomics
+  (`AcceleratorRequirements` + `UnsupportedTestException` pattern).
+- `/gpu-transcode` browser demo now exercises all 3 video codecs end-
+  to-end through the GPU pairs (VP8 + VP9 + AV1 via the tile-bytes
+  flow `EncodeSingleTileAsync` -> `DecodeSingleTileAsync`). Previously
+  only VP8 + VP9.
+- `Plans/PLAN-Vorbis-Decoder-V2-GPU-BitStream-Decode.md` design doc
+  covers the next-session pickup target: move CPU per-packet floor +
+  Huffman + residue work in `VorbisAudioDecoderGpu.DecodePacket` into
+  a single GPU kernel, closing the v1 design gap.
+
+Net code change for library consumers: README in the package updates
+with the quickstart section. No API surface changes.
+
 ## 0.2.0-alpha.1 (2026-05-03)
 
 First version after the cardinal-rule audit pass. Every GPU integration
