@@ -16,6 +16,10 @@
   
   Reverted Step 3b to keep WebGPU + Wasm decoder tests green via the v1 path. Step 3a infrastructure remains.
 
+- **Step 3b second attempt: dual-path (desktop -> v2, browser -> v1 fallback)**: ATTEMPTED + REVERTED. Logic: at the start of `DecodePacketAsync`, branch on `_accelerator.AcceleratorType`; desktop dispatches via `DecodePacketV2Async`, browser falls through to existing v1 path. Builds clean. PMT result: **5 FAIL / 10 PASS / 3 SKIP** - browser backends (WebGPU + Wasm) PASS via v1 fallback (good), but desktop REGRESSED from the inline Step 3b's 9 PASS to a mixed pattern (CPU 0/3, CUDA 2/3 with Tone fail, OpenCL 2/3 with Tone fail). The extracted-method rewrite introduced subtle bugs the inline version didn't have - likely in return-path / sync timing / buffer lifecycle. Reverted again.
+
+  **Lesson:** the inline Step 3b had `9 PASS desktop`; my from-scratch re-write of the same logic into `DecodePacketV2Async` lost something. Next attempt should bisect the v1-vs-inline-v2 diff rather than reconstruct from scratch.
+
 ## Step 3b path forward
 
 Two paths to ship Step 3b without regressing browser backends:
