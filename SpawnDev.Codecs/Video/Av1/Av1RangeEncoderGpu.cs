@@ -25,7 +25,6 @@
 // is to keep data on the accelerator end-to-end.
 
 using ILGPU;
-using SpawnDev.Codecs.EntropyCoders;
 using SpawnDev.ILGPU;
 
 namespace SpawnDev.Codecs.Video.Av1;
@@ -58,11 +57,11 @@ public struct Av1RangeEncoderGpuState
 public static class Av1RangeEncoderGpu
 {
     /// <summary>EC_PROB_SHIFT from aom_dsp/entcode.h.</summary>
-    public const int EcProbShift = Av1RangeDecoder.EcProbShift;
+    public const int EcProbShift = Av1RangeDecoderGpu.EcProbShift;
     /// <summary>EC_MIN_PROB from aom_dsp/entcode.h.</summary>
-    public const int EcMinProb = Av1RangeDecoder.EcMinProb;
+    public const int EcMinProb = Av1RangeDecoderGpu.EcMinProb;
     /// <summary>q15 CDF top value.</summary>
-    public const int CdfProbTop = Av1RangeDecoder.CdfProbTop;
+    public const int CdfProbTop = Av1RangeDecoderGpu.CdfProbTop;
 
     /// <summary>Initial state: low=0, rng=0x8000, cnt=-9, outLen=0.</summary>
     public static Av1RangeEncoderGpuState Init() => new Av1RangeEncoderGpuState

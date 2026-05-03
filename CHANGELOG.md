@@ -1,10 +1,11 @@
 # SpawnDev.Codecs CHANGELOG
 
-## 1.0.0 (2026-05-03)
+## 0.3.0-rc.1 (2026-05-03)
 
-First public release. **Pure-.NET, ILGPU-accelerated, patent-clean
-audio + video codecs.** Runs on every ILGPU backend (CUDA, OpenCL, CPU,
-WebGPU, WebGL, Wasm) - desktop AND Blazor WebAssembly browser.
+Release candidate for the 0.3.0 cut. NOT 1.0.0 - the 1.0.0 stable
+designation requires the full architectural completion (see "Path to
+1.0.0" below). 0.3.0-rc.1 captures today's substantial progress
+toward that bar.
 
 ### Codecs in this release
 
@@ -95,11 +96,49 @@ manual browser click-through every commit
   explicit per-test feature gating via SpawnDev.ILGPU's
   `device.Satisfies()` API.
 
+### Project split: SpawnDev.Codecs.References (NEW in 0.3.0-rc.1)
+
+A new sibling project, `SpawnDev.Codecs.References`, hosts the CPU
+reference encoders + decoders. The main `SpawnDev.Codecs` library now
+ships **ZERO external dependencies** (only SpawnDev.* + Microsoft
+framework packages) per Captain's 2026-05-03 architectural directive.
+
+Moved to `SpawnDev.Codecs.References` in 0.3.0-rc.1:
+
+- **Opus**: `OpusEncoder`, `OpusDecoder`, `OpusOggEncoder`,
+  `OpusOggDecoder`, `OpusCodec` (factory) + `Concentus 2.2.2` package
+- **Opus / CELT CPU**: `CeltDecoder`, `CeltDecoderState`
+- **Opus / SILK CPU** (28 files): `SilkBwexpander`, `SilkDecodeCore`,
+  `SilkDecodeFrame`, `SilkDecoder`, `SilkExcitationDequantizer`,
+  `SilkGainAdjust`, `SilkGainDecoder`, `SilkIndicesDecoder`,
+  `SilkLog2`, `SilkLpcAnalysisFilter`, `SilkLpcFit`,
+  `SilkLpcInvPredGain`, `SilkLpcSynthesisFilter`, `SilkLtpDecoder`,
+  `SilkNlsf2A`, `SilkNlsfDecoder`, `SilkNlsfStabilize`,
+  `SilkNlsfUnpack`, `SilkParametersDecoder`, `SilkPitchDecoder`,
+  `SilkPulsesDecoder`, `SilkResampler`, `SilkShellCoder`,
+  `SilkSideInfoDecoder`, `SilkSigmoid`, `SilkStereoDecodePred`,
+  `SilkStereoMsToLr`, `SilkSumSqrShift`
+- **FLAC** (9 files): `FlacEncoder`, `FlacDecoder`,
+  `FlacFrameDecoder`, `FlacOggDecoder`, `FlacFixedSubframeEncoder`,
+  `FlacLpcSubframeEncoder`, `FlacResidualDecoder`,
+  `FlacSubframeDecoder`, `FlacSubframeWriter`
+- **Opus entropy coders**: `OpusRangeEncoder`, `OpusRangeDecoder`
+
+Still in `SpawnDev.Codecs` main library (extraction needed for 1.0.0):
+- All Vorbis, VP8, VP9, AV1 CPU classes - they currently expose static
+  data tables / OBU-framing helpers consumed by the GPU integration
+  classes. Each needs its CPU implementation split from its shared
+  helpers before the CPU class can move to References.
+
 ### Dependencies
 
+`SpawnDev.Codecs` (main library):
 - `SpawnDev.ILGPU` 4.9.3 (kernel dispatch, partial readback,
   `ArrayView<T>.CopyToHostAsync()`)
 - `SpawnDev.EBML` 3.0.1 (WebM/Matroska container)
+
+`SpawnDev.Codecs.References` (CPU reference impls):
+- `SpawnDev.Codecs` (sibling)
 - `Concentus` 2.2.2 (BSD-3 pure-C# Opus reference)
 
 ### Out of scope (patent-encumbered)
@@ -108,6 +147,37 @@ H.264, H.265, AAC, MP3 - delegated to platform encoders via
 SpawnDev.MultiMedia (P/Invoke to MediaFoundation / VideoToolbox /
 VAAPI). System encoders are licensed by Microsoft / Apple / driver
 vendors respectively; SpawnDev.Codecs stays clean.
+
+### Path to 1.0.0 stable
+
+Captain's directive 2026-05-03 defines the 1.0.0 bar. 0.3.0-rc.1 is
+release candidate work toward that bar:
+
+1. **All 6 codecs ship as 100%-ILGPU encoder + decoder pairs.** Today
+   covers 5 of 6 (VP8, VP9, AV1, FLAC, Vorbis). Opus has 31 SILK GPU
+   primitives + the shared Daala range coder; CELT has zero GPU
+   primitives (bit allocator, PVQ encode/decode, anti-collapse, spread,
+   prefilter, post-filter, stereo coupling all need to be ported). Plus
+   SILK + CELT integration kernels + OpusEncoderGpu/OpusDecoderGpu
+   top-level classes. This is the largest remaining piece.
+2. **Vorbis decoder v2 GPU bit-stream decode.** v1 still does CPU-side
+   per-packet header parse + floor + Huffman + residue work before
+   handing to the GPU IMDCT chain. v2 ports those to GPU kernels using
+   the existing `VorbisAudioPacketHeaderGpu`, `VorbisFloor1DecoderGpu`,
+   `VorbisHuffmanDecoderGpu`, `VorbisBitReaderGpu`, and the new
+   `VorbisResidueDecoderGpu` (shipped 0.3.0-rc.1) primitives. Plan in
+   `Plans/PLAN-Vorbis-Decoder-V2-GPU-BitStream-Decode.md`.
+3. **Complete the project split.** Started in 0.3.0-rc.1 (Opus, FLAC,
+   SILK CPU, OpusRange entropy coders moved + Concentus dep removed
+   from main). Remaining: Vorbis, VP8, VP9, AV1 CPU classes still
+   live in main because each one mixes CPU implementation methods
+   with static data tables consumed by the GPU integration classes.
+   For 1.0.0 each CPU class needs its data tables / framing helpers
+   extracted to a main-library "Tables" / "Helpers" class so the CPU
+   class itself can move to References cleanly.
+4. **Cross-lane SpawnDev.ILGPU bug fixes** for WebGPU `SubViewValue`
+   IR codegen + Wasm OOB. Filed at
+   `_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-webgpu-subview-codegen-and-wasm-oob-2026-05-03.md`.
 
 ## 0.2.0-alpha.2 (2026-05-03)
 

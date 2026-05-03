@@ -13,7 +13,6 @@
 // matching libaom od_ec_dec_init refill semantics.
 
 using ILGPU;
-using SpawnDev.Codecs.EntropyCoders;
 using SpawnDev.ILGPU;
 
 namespace SpawnDev.Codecs.Video.Av1;
@@ -52,16 +51,22 @@ public struct Av1RangeDecoderGpuState
 /// </summary>
 public static class Av1RangeDecoderGpu
 {
+    // AV1 spec entropy-coder constants. Defined here in main so the GPU
+    // primitives don't depend on the CPU reference encoder + decoder
+    // (which live in SpawnDev.Codecs.References). The CPU class
+    // Av1RangeDecoder reads these back via Av1RangeDecoderGpu.X.
     /// <summary>EC_PROB_SHIFT.</summary>
-    public const int EcProbShift = Av1RangeDecoder.EcProbShift;
+    public const int EcProbShift = 6;
     /// <summary>EC_MIN_PROB.</summary>
-    public const int EcMinProb = Av1RangeDecoder.EcMinProb;
+    public const int EcMinProb = 4;
     /// <summary>OD_EC_WINDOW_SIZE.</summary>
-    public const int OdEcWindowSize = Av1RangeDecoder.OdEcWindowSize;
+    public const int OdEcWindowSize = 32;
+    /// <summary>OD_BITRES.</summary>
+    public const int OdBitRes = 3;
     /// <summary>OD_EC_LOTS_OF_BITS.</summary>
-    public const int OdEcLotsOfBits = Av1RangeDecoder.OdEcLotsOfBits;
+    public const int OdEcLotsOfBits = 0x4000;
     /// <summary>q15 CDF top.</summary>
-    public const int CdfProbTop = Av1RangeDecoder.CdfProbTop;
+    public const int CdfProbTop = 1 << 15;
 
     /// <summary>
     /// Initialize the decoder state to read <paramref name="length"/>

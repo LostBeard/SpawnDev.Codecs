@@ -9,15 +9,15 @@
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<EmbedAllSources>true</EmbedAllSources>
 		<DebugType>Embedded</DebugType>
-		<Title>SpawnDev.Codecs</Title>
+		<Title>SpawnDev.Codecs.References</Title>
 		<Authors>LostBeard</Authors>
-		<Description>Pure-.NET, ILGPU-accelerated, patent-clean audio and video codecs (Opus, VP8, VP9, AV1, FLAC, Vorbis). Runs on every ILGPU backend - CUDA, OpenCL, CPU, WebGPU, WebGL, Wasm. Desktop AND Blazor WebAssembly.</Description>
+		<Description>CPU reference implementations of the codecs that ship in SpawnDev.Codecs. Used for bit-exact verification of the GPU pairs and for development reference. Pulls in external pure-managed codec libraries (e.g. Concentus for Opus) which is why this project exists separately - SpawnDev.Codecs itself ships with ZERO external dependencies (only SpawnDev.* + Microsoft framework packages). Consumers who need only the GPU pairs reference SpawnDev.Codecs alone; consumers who want CPU references too reference both.</Description>
 		<PackageProjectUrl>https://github.com/LostBeard/SpawnDev.Codecs</PackageProjectUrl>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 		<RepositoryUrl>https://github.com/LostBeard/SpawnDev.Codecs.git</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
-		<PackageTags>Codec;Audio;Video;Opus;VP8;VP9;AV1;FLAC;Vorbis;WebRTC;Blazor;BlazorWebAssembly;WebGPU;ILGPU;GPU;CrossPlatform</PackageTags>
+		<PackageTags>Codec;Audio;Video;Opus;VP8;VP9;AV1;FLAC;Vorbis;Reference;CPU;Blazor;BlazorWebAssembly</PackageTags>
 		<NoPackageAnalysis>true</NoPackageAnalysis>
 		<EnableDefaultCompileItems>true</EnableDefaultCompileItems>
 		<IsPackable>true</IsPackable>
@@ -31,25 +31,21 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <PackageReference Include="SpawnDev.ILGPU" Version="4.9.3" />
-	  <PackageReference Include="SpawnDev.EBML" Version="3.0.1" />
-	  <!-- ZERO external dependencies past this line. The CPU reference Opus
-	       encoder + decoder (which use Concentus) live in
-	       SpawnDev.Codecs.References. SpawnDev.Codecs itself ships only
-	       SpawnDev.* + Microsoft framework packages. This is the
-	       architectural directive Captain locked 2026-05-03 - the GPU
-	       library is a pure SpawnDev.ILGPU consumer. -->
+		<ProjectReference Include="..\SpawnDev.Codecs\SpawnDev.Codecs.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<!-- Test project sees internal types so SILK/CELT subsystems can be tested
-		     in isolation without polluting the public API. -->
+		<!-- BSD-3 pure-managed Opus port. Used by the CPU reference Opus
+		     encoder + decoder for bit-exact verification of the GPU
+		     OpusEncoderGpu + OpusDecoderGpu pair. Lives in this project
+		     (References) instead of the main SpawnDev.Codecs library so
+		     the main library ships zero external dependencies per the
+		     architectural directive. -->
+		<PackageReference Include="Concentus" Version="2.2.2" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<InternalsVisibleTo Include="SpawnDev.Codecs.Demo.Shared" />
-		<!-- References project hosts the CPU reference encoders + decoders; they
-		     need internal types from main (SilkStereoState, SilkResamplerState,
-		     etc.) since CPU implementations and GPU primitives share the same
-		     state shapes. -->
-		<InternalsVisibleTo Include="SpawnDev.Codecs.References" />
 	</ItemGroup>
 
 	<ItemGroup>

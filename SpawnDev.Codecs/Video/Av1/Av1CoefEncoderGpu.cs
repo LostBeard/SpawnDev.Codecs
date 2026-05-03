@@ -24,7 +24,6 @@
 // to its CPU caller for neighbor-context bookkeeping.
 
 using ILGPU;
-using SpawnDev.Codecs.EntropyCoders;
 
 namespace SpawnDev.Codecs.Video.Av1;
 

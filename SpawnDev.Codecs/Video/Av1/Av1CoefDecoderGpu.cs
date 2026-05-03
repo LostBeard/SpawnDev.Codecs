@@ -17,7 +17,6 @@
 // returned via the parallel output ArrayViews.
 
 using ILGPU;
-using SpawnDev.Codecs.EntropyCoders;
 
 namespace SpawnDev.Codecs.Video.Av1;
 

@@ -9,16 +9,15 @@
 
 	<ItemGroup>
 		<PackageReference Include="SpawnDev.UnitTesting.Blazor" Version="2.4.2" />
-		<!-- Test-only oracle: pure-C# BSD-3 port of libopus. Used ONLY in tests to
-		     generate reference Opus bitstreams and to cross-validate our decoder
-		     output bit-exactly. The SpawnDev.Codecs library itself has no Concentus
-		     dependency; this reference lives in the test project. BSD-3 attribution
-		     in NOTICE.md. -->
-		<PackageReference Include="Concentus" Version="2.2.2" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="..\SpawnDev.Codecs\SpawnDev.Codecs.csproj" />
+		<!-- Tests use the CPU reference encoders/decoders (e.g. Concentus-based
+		     OpusEncoder + OpusDecoder, ref FlacEncoder, ref Vorbis stack) as
+		     bit-exact oracles for the GPU pairs. References transitively
+		     brings Concentus, so no direct Concentus PackageReference here. -->
+		<ProjectReference Include="..\SpawnDev.Codecs.References\SpawnDev.Codecs.References.csproj" />
 	</ItemGroup>
 
 	<!-- Bundled real-world container test fixtures. Embedded as resources
