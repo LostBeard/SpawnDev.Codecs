@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLpcAnalysisFilterGpu_Order10_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Order 10 NB SILK filter. Coefficient pattern is a small set of
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLpcAnalysisFilterGpu_Order16_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Order 16 WB SILK filter, larger frame.
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLpcAnalysisFilterGpu_FullScaleStress_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Stress the SAT16 saturation path with full-scale coefficients +

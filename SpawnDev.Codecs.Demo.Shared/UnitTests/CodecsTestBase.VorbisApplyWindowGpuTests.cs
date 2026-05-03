@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisWindowGpu_ApplyWindow_RandomBlock_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int n = 1024;

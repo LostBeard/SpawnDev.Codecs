@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
 
     private async Task OrderResidualAndVerify(int order)
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int sampleCount = 1024;

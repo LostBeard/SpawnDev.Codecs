@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkResamplerIirFirInterpolGpu_ThreeQuarterIncrement_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 3/4 ratio (after 2x up = 3/8 of input rate per output): index increments
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkResamplerIirFirInterpolGpu_NonIntegerIncrement_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Non-integer ratio (e.g. 5/12 step) - exercises the full 12-phase table.
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkResamplerIirFirInterpolGpu_TightIncrement_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Tight increment (lots of outputs per input) - exercises low-tableIdx rows.

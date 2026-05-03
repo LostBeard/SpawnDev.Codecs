@@ -14,7 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisFloorMultiplyGpu_RandomBlock_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int n = 1024;
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisFloorMultiplyGpu_ZeroAt_AllZero()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int n = 256;

@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseQuantizerGpu_4x4Block_LowQ_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await DequantAndVerify(acc, blockSize: 16, dcQ: 8, acQ: 12, seed: 0xAA01_4404u);
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseQuantizerGpu_8x8Block_MidQ_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await DequantAndVerify(acc, blockSize: 64, dcQ: 50, acQ: 100, seed: 0xAA01_8808u);
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseQuantizerGpu_16x16Block_HighQ_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await DequantAndVerify(acc, blockSize: 256, dcQ: 1200, acQ: 1800, seed: 0xAA01_1616u);
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseQuantizerGpu_32x32Block_LargeQ_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await DequantAndVerify(acc, blockSize: 1024, dcQ: 5000, acQ: 7500, seed: 0xAA01_3232u);

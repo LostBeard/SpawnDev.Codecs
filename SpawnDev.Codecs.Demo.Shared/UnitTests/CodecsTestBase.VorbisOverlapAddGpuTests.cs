@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisOverlapAddGpu_Short128_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Short Vorbis block half = 128.
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisOverlapAddGpu_Long512_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Long Vorbis block half = 512.
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisOverlapAddGpu_Long1024_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Long Vorbis block half = 1024 (max for 2048-sample block).

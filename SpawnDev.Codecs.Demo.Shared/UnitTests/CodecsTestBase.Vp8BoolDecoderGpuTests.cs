@@ -19,7 +19,7 @@ public abstract partial class CodecsTestBase
         // For each of N streams: pick random bits + random probs,
         // encode on CPU via Vp8BoolEncoder, decode on GPU via the test
         // kernel, assert decoded bits == original bits.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp8BoolDecoderTestKernel(acc);

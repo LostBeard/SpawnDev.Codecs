@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardAdst4Gpu_DefaultCosBit_RandomInput_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xAA01_FA04u));
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardAdst4Gpu_AllCosBits_MatchCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int[] input = { 100, -50, 200, -150 };
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardAdst4Gpu_AllZero_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Exercises the early-out zero path.
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardAdst4Gpu_LargeInput_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Stress the 64-bit intermediate path.

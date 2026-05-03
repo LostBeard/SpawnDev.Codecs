@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
 
     private async Task RunAv1QuantizerMatchesCpu(int coefsPerBlock, int blockCount, int seed)
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardQuantizerKernel(acc);

@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisBitWriterGpu_WriteCodebookEntry_SequenceMatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 8-entry canonical Huffman codebook (lengths produce a valid prefix code).

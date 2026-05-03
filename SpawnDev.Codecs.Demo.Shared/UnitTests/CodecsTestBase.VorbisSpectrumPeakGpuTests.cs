@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisSpectrumPeakGpu_RandomSpectrum_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int halfBlock = 512;
@@ -57,7 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisSpectrumPeakGpu_AllZero_ProducesZeroPeaks()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int halfBlock = 256;

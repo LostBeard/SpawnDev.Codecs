@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9FrameUncompressedHeaderKernel_TypicalKeyframe_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Mirror the v1 encoder default: 64x64 frame, baseQ=30, small fps.
@@ -93,7 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9FrameUncompressedHeaderKernel_BaseQSweep_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Exercise the base_q_idx(8) field with values that span the
@@ -112,7 +112,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9FrameUncompressedHeaderKernel_FrameSizeSweep_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // (width, height) - all multiples of 16. Includes the
@@ -137,7 +137,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9FrameUncompressedHeaderKernel_FirstPartitionSizeSweep_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int[] sizes = { 0, 1, 16, 256, 4096, 32768, 65535 };

@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacVerbatimSubframeDecodeGpu_NoWasted_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await EncodeDecodeAndVerify(acc, blockSize: 256, bps: 16, wastedBits: 0,
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacVerbatimSubframeDecodeGpu_WastedBits_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 16-bit subframe with 4 wasted bits -> effective 12.
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacVerbatimSubframeDecodeGpu_24Bit_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 24-bit hi-res audio.
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacVerbatimSubframeDecodeGpu_FullBlock_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Full FLAC default block size.

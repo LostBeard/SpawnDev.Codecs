@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1KeyframeEncoderGpu_ConstGray64x64_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int width = 64;
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1KeyframeEncoderGpu_Random64x64_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int width = 64;
@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1KeyframeEncoderGpu_ConstGray64x128_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int width = 64;
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1KeyframeEncoderGpu_FullKeyFrame_Random64x64_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int width = 64;

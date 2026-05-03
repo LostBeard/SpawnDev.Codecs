@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         // row-pass rounding constants and the +7/+12000/+51000 column-pass
         // constants in libvpx vp8_short_fdct4x4_c. This test asserts that
         // the GPU kernel reproduces that exact non-zero pattern bit-exactly.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp8ForwardDct4x4Kernel(acc);
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp8ForwardDct4x4Kernel_RandomInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp8ForwardDct4x4Kernel(acc);
@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp8ForwardDct4x4Kernel_DcOnlyInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp8ForwardDct4x4Kernel(acc);

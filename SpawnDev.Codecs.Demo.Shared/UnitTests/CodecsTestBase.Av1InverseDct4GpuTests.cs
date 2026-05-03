@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseDct4Gpu_DefaultCosBit_RandomCoefs_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xAA01_DCC4u));
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseDct4Gpu_AllCosBits_MatchCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int[] input = { 100, -200, 300, -400 };
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseDct4Gpu_DcOnly_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int[] input = { 1000, 0, 0, 0 };
@@ -57,7 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseDct4Gpu_LargeCoefs_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int[] input = { 100000, -50000, 25000, -10000 };

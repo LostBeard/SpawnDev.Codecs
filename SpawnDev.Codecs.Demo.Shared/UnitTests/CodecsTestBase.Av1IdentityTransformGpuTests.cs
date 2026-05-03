@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1IdentityTransformGpu_Forward4_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xAA01_DD04u));
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1IdentityTransformGpu_Forward8_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xAA01_DD08u));
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1IdentityTransformGpu_Forward16_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xAA01_DD16u));
@@ -70,7 +70,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1IdentityTransformGpu_Forward32_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xAA01_DD32u));

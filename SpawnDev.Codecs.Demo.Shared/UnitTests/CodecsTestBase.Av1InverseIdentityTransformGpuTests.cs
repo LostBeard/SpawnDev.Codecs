@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseIdentityTransformGpu_Inverse4_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xAA01_DDD4u));
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseIdentityTransformGpu_Inverse8_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xAA01_DDD8u));
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseIdentityTransformGpu_Inverse16_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xAA01_DD16u));
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseIdentityTransformGpu_Inverse32_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xAA01_DD32u));

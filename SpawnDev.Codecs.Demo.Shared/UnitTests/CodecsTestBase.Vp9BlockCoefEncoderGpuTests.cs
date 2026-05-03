@@ -140,7 +140,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9BlockCoefEncoderGpu_AllZero4x4_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var block = new short[16];
@@ -155,7 +155,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9BlockCoefEncoderGpu_DcOnlyPositive4x4_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var block = new short[16];
@@ -171,7 +171,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9BlockCoefEncoderGpu_NegativeOne4x4_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var block = new short[16];
@@ -191,7 +191,7 @@ public abstract partial class CodecsTestBase
         // Mirrors the CPU coverage test - assigns magnitudes to scan
         // positions 0..9 so eob = 10 exactly, independent of raster
         // layout.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var scan = Vp9ScanTables.GetScan(Vp9TxSize.Tx4x4, Vp9ScanType.Default);
@@ -210,7 +210,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9BlockCoefEncoderGpu_RandomSparse8x8_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0x9C0E8B1Au));
@@ -234,7 +234,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9BlockCoefEncoderGpu_RandomSparse16x16_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0x163C0EFEu));
@@ -258,7 +258,7 @@ public abstract partial class CodecsTestBase
         // initialCtx is the per-plane entropy context for scan position 0;
         // it must propagate into the prob lookup at c=0 for both CPU
         // and GPU encoders identically. Sweep all 3 legal values.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             for (int initialCtx = 0; initialCtx < 3; initialCtx++)
@@ -279,7 +279,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9BlockCoefEncoderGpu_RowAndColScans4x4_MatchesCpu()
     {
         // Verify both Row and Col scan types route through the kernel.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             short[] mags = { 1, -2, 3, -4, 6 };

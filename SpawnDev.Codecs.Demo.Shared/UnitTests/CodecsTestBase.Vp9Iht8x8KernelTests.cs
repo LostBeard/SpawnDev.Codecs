@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Iht8x8Kernel_ZeroCoefficients_AllTxTypes_LeavesPredictorUnchanged()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             if (!IsIht8x8KernelSupported(acc)) return;
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Iht8x8Kernel_AllTxTypes_RandomInputs_BitExactMatchReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             if (!IsIht8x8KernelSupported(acc)) return;
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
         // size (8) and every block in the workgroup follows the same
         // control flow. Production decode groups blocks by tx_type at
         // the call site for the same reason.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             if (!IsIht8x8KernelSupported(acc)) return;

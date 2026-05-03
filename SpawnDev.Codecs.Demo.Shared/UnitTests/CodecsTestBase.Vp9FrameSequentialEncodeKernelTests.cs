@@ -279,7 +279,7 @@ public abstract partial class CodecsTestBase
     {
         // 1x1 MB frame: 16x16 luma + 8x8 U + 8x8 V. Top-left corner -
         // variant = None for every plane.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var y = new byte[256];
@@ -304,7 +304,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9FrameSequentialEncodeKernel_SingleMB_RandomContent_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xF9E12001u));
@@ -334,7 +334,7 @@ public abstract partial class CodecsTestBase
         // edge propagation - MB(0,1) uses left edge from MB(0,0)'s
         // recon, MB(1,0) uses above edge from MB(0,0)'s recon, MB(1,1)
         // uses both.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int mbCols = 2, mbRows = 2;
@@ -365,7 +365,7 @@ public abstract partial class CodecsTestBase
     {
         // Sweep across a few baseQ values to flag any quantizer-
         // dependent drift.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int[] baseQs = { 1, 30, 64, 128, 200 };

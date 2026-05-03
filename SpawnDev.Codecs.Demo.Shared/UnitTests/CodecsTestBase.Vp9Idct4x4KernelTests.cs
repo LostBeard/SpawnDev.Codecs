@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Idct4x4Kernel_ZeroCoefficients_LeavesPredictorUnchanged()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9Idct4x4Kernel(acc);
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Idct4x4Kernel_DcOnly_MatchesReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9Idct4x4Kernel(acc);
@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Idct4x4Kernel_RandomInputs_BitExactMatchReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9Idct4x4Kernel(acc);
@@ -98,7 +98,7 @@ public abstract partial class CodecsTestBase
         // THE flex: N=64 independent blocks through one kernel dispatch
         // on this runner's native accelerator. Every output byte must
         // match the single-block CPU reference.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9Idct4x4Kernel(acc);

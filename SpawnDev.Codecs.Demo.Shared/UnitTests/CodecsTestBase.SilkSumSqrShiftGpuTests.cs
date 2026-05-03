@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkSumSqrShiftGpu_SmallSignal_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             short[] x = { 100, -200, 50, -75, 300, -150, 25, 0 };
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkSumSqrShiftGpu_FullScale_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Full-scale int16 values that force the dynamic shift to engage.
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkSumSqrShiftGpu_NbWideband_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Typical SILK NB-WB analysis frame size: 320 samples (40 ms WB).

@@ -13,7 +13,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9D45Predict8x8Kernel_KnownPattern_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9D45Predict8x8Kernel(acc);
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9D45Predict8x8Kernel_FlatInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9D45Predict8x8Kernel(acc);
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9D45Predict8x8Kernel_RandomInputs_BitExact()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9D45Predict8x8Kernel(acc);
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9D45Predict8x8Kernel_BatchedDispatch_AllBlocksBitExact()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9D45Predict8x8Kernel(acc);

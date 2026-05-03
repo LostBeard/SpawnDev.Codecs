@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeEncoderGpu_64x64_FlatGray_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int width = 64, height = 64;
@@ -68,7 +68,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeEncoderGpu_64x64_RandomContent_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int width = 64, height = 64;
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeEncoderGpu_64x64_BaseQSweep_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int width = 64, height = 64;
@@ -116,7 +116,7 @@ public abstract partial class CodecsTestBase
     {
         // Multi-SB frame (4 SBs total) - exercises the SB row-major
         // walk + edge propagation across SB boundaries.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int width = 128, height = 128;

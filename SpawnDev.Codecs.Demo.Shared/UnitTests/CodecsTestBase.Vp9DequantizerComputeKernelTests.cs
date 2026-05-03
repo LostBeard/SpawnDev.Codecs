@@ -21,7 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DequantizerComputeKernel_ZeroDeltas_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DequantizerComputeKernel(acc);
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
         // (and an implicit y_ac_delta_q of 0 - VP9 ties the frame baseQ to
         // y_ac directly per spec sec 6.2.4). Test a sweep of asymmetric
         // configurations that match real-world encoder choices.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DequantizerComputeKernel(acc);
@@ -110,7 +110,7 @@ public abstract partial class CodecsTestBase
         // Indices outside [0, 255] must clamp identically to libvpx
         // vp9_dc_quant / vp9_ac_quant. Push past both boundaries to verify
         // the GPU clamp matches the CPU oracle.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DequantizerComputeKernel(acc);
@@ -155,7 +155,7 @@ public abstract partial class CodecsTestBase
         // Stress sweep: 256 random (baseQ, deltas) tuples across the legal
         // VP9 parameter space. Catches any off-by-one / sign / clamp drift
         // that hand-picked cases miss.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DequantizerComputeKernel(acc);

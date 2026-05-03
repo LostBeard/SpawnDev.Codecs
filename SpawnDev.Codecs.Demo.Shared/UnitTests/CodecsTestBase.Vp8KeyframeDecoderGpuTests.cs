@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
 
     private async Task RunDecoderRoundTripTest(int width, int height, int seed)
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var dec = new Vp8KeyframeDecoderGpu(acc);

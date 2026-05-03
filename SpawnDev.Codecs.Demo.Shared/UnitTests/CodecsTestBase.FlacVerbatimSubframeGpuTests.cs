@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacVerbatimSubframeGpu_RoundTrip_Constant_16bit()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int n = 64;
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacVerbatimSubframeGpu_RoundTrip_Random_16bit()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int n = 256;
@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacVerbatimSubframeGpu_RoundTrip_Random_24bit()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int n = 128;
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacVerbatimSubframeGpu_RoundTrip_Random_8bit()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int n = 512;

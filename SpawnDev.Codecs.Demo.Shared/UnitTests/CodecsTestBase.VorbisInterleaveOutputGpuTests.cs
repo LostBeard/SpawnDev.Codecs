@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisInterleaveOutputGpu_Mono_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await InterleaveAndVerify(acc, channels: 1, numFrames: 1024, seed: 0xC1AC0001u);
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisInterleaveOutputGpu_Stereo_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await InterleaveAndVerify(acc, channels: 2, numFrames: 1024, seed: 0xC1AC0002u);
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisInterleaveOutputGpu_5_1Surround_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await InterleaveAndVerify(acc, channels: 6, numFrames: 1024, seed: 0xC1AC0006u);
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisInterleaveOutputGpu_Stereo_LongFrame_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Long Vorbis frame half = 1024 (2048-block).

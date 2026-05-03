@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkSigmoidGpu_ExtremeValues_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var input = new[]
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkSigmoidGpu_FullRange_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Test every Q5 value in the active range plus boundaries.
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkSigmoidGpu_RandomBatch_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int n = 1024;

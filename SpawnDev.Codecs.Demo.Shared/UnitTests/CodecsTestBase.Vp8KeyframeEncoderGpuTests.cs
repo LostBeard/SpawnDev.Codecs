@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
 
     private async Task RunEncoderMatchesCpuTest(int width, int height, int seed)
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var enc = new Vp8KeyframeEncoderGpu(acc);
@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
         if (ystride < width) throw new ArgumentException("ystride must be >= width");
         if (uvstride < width / 2) throw new ArgumentException("uvstride must be >= width/2");
 
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var enc = new Vp8KeyframeEncoderGpu(acc);

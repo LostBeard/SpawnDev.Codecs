@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkGainDecoderGpu_Independent_NbSubfr4_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Independent first index, 4-subframe (20 ms) frame.
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkGainDecoderGpu_Conditional_NbSubfr4_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Conditional (delta-coded) first index, with non-zero prevInd.
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkGainDecoderGpu_NbSubfr2_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 10 ms frame: 2 subframes only.
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkGainDecoderGpu_DoubleStepBranch_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Force the double-step branch: indTmp > doubleStepThreshold for low prevInd.

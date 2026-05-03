@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardDct4Gpu_DefaultCosBit_RandomInput_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xAA01_FD04u));
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardDct4Gpu_AllCosBits_MatchCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int[] input = { 100, -50, 200, -150 };
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardDct4Gpu_FlatInput_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Flat input: should produce DC-only output (after the cospi rotation).
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardDct4Gpu_LargeInput_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Stress the long-mul path with input near int16 limits.

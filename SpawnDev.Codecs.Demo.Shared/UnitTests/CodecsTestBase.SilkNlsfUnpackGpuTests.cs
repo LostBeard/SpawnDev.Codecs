@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfUnpackGpu_NbMb_Order10_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await UnpackAndVerify(acc, SilkNlsfCodebookTables.NbMb, cb1Index: 0);
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfUnpackGpu_Wb_Order16_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await UnpackAndVerify(acc, SilkNlsfCodebookTables.Wb, cb1Index: 0);

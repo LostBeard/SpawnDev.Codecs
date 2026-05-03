@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DcPredict4x4Kernel_BothEdges_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DcPredict4x4Kernel(acc);
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DcPredict4x4Kernel_TopOnly_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DcPredict4x4Kernel(acc);
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DcPredict4x4Kernel_LeftOnly_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DcPredict4x4Kernel(acc);
@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DcPredict4x4Kernel_None_FillsWith128()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DcPredict4x4Kernel(acc);
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DcPredict4x4Kernel_RandomInputs_BitExact()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DcPredict4x4Kernel(acc);
@@ -133,7 +133,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DcPredict4x4Kernel_BatchedDispatch_AllBlocksBitExact()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DcPredict4x4Kernel(acc);

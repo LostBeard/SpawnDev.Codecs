@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkGainAdjustGpu_EqualGains_NoChange_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await GainAdjustVerify(acc, prevGainQ16: 1 << 16, curGainQ16: 1 << 16, seed: 0xCAFE0001u);
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkGainAdjustGpu_GainIncrease_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 2x gain step: prev=1.0, cur=2.0 in Q16.
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkGainAdjustGpu_GainDecrease_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 0.25x gain step: prev=4.0, cur=1.0 in Q16. Stresses the LSHIFT_SAT32 path
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkGainAdjustGpu_OddRatio_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Non-power-of-two ratio - exercises the silk_DIV32_varQ approximation.

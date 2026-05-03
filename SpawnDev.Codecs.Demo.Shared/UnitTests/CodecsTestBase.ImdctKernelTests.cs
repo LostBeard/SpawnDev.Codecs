@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task ImdctKernel_ZeroInput_ProducesAllZeroOutput()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new ImdctKernel(acc);
@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
         // Batched: 8 blocks at N=128 in one dispatch. Verifies block
         // routing inside the kernel - thread t = blockIdx*2N + idx must
         // pick the right block's coefficients per output sample.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new ImdctKernel(acc);
@@ -123,7 +123,7 @@ public abstract partial class CodecsTestBase
     /// </summary>
     private async Task RunImdctMatchesReferenceAsync(int n, int blockCount, int seed)
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new ImdctKernel(acc);

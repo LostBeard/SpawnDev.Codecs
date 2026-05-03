@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisPostImdctGpu_Short256Block_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await PostImdctAndVerify(acc, blockSize: 256, seed: 0xC1AC0256u);
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisPostImdctGpu_Long2048Block_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await PostImdctAndVerify(acc, blockSize: 2048, seed: 0xC1AC2048u);
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisPostImdctGpu_FreshStream_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Fresh stream: previousRightHalf is all zeros (no overlap yet).

@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Iadst8x8Kernel_ZeroCoefficients_LeavesPredictorUnchanged()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             if (!IsIadst8x8KernelSupported(acc)) return;
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Iadst8x8Kernel_RandomInputs_BitExactMatchReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             if (!IsIadst8x8KernelSupported(acc)) return;
@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
         // Diagnostic: isolates whether "any batching" or ">= N blocks"
         // is the failure boundary. If 2 blocks also fails but 1 passed,
         // the batch dispatch path itself is broken - not a size issue.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             if (!IsIadst8x8KernelSupported(acc)) return;
@@ -112,7 +112,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Iadst8x8Kernel_BatchedDispatch_AllBlocksMatchReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             if (!IsIadst8x8KernelSupported(acc)) return;

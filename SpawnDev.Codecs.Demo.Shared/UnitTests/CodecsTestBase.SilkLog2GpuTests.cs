@@ -15,7 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLog2Gpu_Log2Lin_FullActiveRange_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Active range: [0, 3967). Plus boundary cases.
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLog2Gpu_Log2Lin_Boundaries_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Negative + clamp boundary + above-clamp.
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLog2Gpu_Lin2Log_RandomBatch_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int n = 1024;
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLog2Gpu_RoundTrip_LinLogLin_NearIdentity()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // log2lin and lin2log are near-inverses. Verify GPU

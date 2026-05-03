@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLpcFitGpu_NoOverflow_Order10_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Q24 -> Q12 fit, all coefs fit in int16 after rshift_round so no bwexpand needed.
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLpcFitGpu_SingleTapOverflow_Order10_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Q24 -> Q12: one tap is huge, forces bwexpand iteration(s).
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLpcFitGpu_MultiBwexpand_Order16_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Q24 -> Q12, multiple coefs over int16 limit, requires multiple bwexpand passes.
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLpcFitGpu_ExtremeOverflow_TenIterations_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Force the 10-iteration clip path: coefs near int.MaxValue.

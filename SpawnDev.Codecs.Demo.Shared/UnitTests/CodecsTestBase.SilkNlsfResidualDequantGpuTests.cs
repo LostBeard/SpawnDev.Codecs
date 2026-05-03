@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfResidualDequantGpu_NbMb_Order10_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var codebook = SilkNlsfCodebookTables.NbMb;
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfResidualDequantGpu_Wb_Order16_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var codebook = SilkNlsfCodebookTables.Wb;
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfResidualDequantGpu_AllZeroIndices_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // All-zero indices stress the predictor-only path (both branches skip).
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfResidualDequantGpu_MaxIndices_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Large-magnitude indices stress both quant-adjust branches.

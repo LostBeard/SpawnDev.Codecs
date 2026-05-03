@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9FrameAssembleKernel_ThreeStreams_MatchesCpuConcat()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xA55E11B7u));
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         // this in practice (tile data carries at least the EOB token
         // emit chain), but the assembler must handle the boundary
         // condition cleanly.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var u = new byte[] { 0xDE, 0xAD, 0xBE, 0xEF };

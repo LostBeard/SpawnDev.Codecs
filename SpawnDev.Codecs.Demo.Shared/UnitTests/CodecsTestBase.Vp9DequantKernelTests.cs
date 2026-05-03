@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DequantKernel_ZeroCoefficients_StayZero()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DequantKernel(acc);
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DequantKernel_SingleBlock_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DequantKernel(acc);
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DequantKernel_BatchedBlocks_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DequantKernel(acc);
@@ -105,7 +105,7 @@ public abstract partial class CodecsTestBase
         // Deliberately push the coeff*quant product past short range and
         // verify the kernel saturates to short.MinValue / short.MaxValue
         // identically to the CPU oracle.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DequantKernel(acc);

@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfInterpolateGpu_QuarterStep_Order10_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             short[] prev = { 2000, 5000, 8000, 11000, 14500, 17500, 21000, 24500, 28000, 31000 };
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfInterpolateGpu_HalfStep_Order10_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             short[] prev = { 2000, 5000, 8000, 11000, 14500, 17500, 21000, 24500, 28000, 31000 };
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfInterpolateGpu_ThreeQuarterStep_Order16_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             short[] prev = { 1500, 3500, 5500, 7500, 9500, 11500, 13500, 15500,
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfInterpolateGpu_ZeroStep_Identity_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // interpCoefQ2 = 0 -> nlsf0 == prev (no interpolation).

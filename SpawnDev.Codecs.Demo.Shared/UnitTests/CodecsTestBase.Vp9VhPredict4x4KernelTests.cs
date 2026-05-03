@@ -15,7 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9VhPredict4x4Kernel_V_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9VhPredict4x4Kernel(acc);
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9VhPredict4x4Kernel_H_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9VhPredict4x4Kernel(acc);
@@ -57,7 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9VhPredict4x4Kernel_V_RandomInputs_BitExact()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9VhPredict4x4Kernel(acc);
@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9VhPredict4x4Kernel_H_RandomInputs_BitExact()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9VhPredict4x4Kernel(acc);
@@ -109,7 +109,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9VhPredict4x4Kernel_BatchedDispatch_AllBlocksBitExact()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9VhPredict4x4Kernel(acc);

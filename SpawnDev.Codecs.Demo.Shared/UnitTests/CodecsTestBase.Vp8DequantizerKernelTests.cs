@@ -15,7 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp8DequantizerKernel_RandomInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp8DequantizerKernel(acc);

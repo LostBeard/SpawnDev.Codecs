@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacSubframeHeaderGpu_Constant_NoWasted_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await EncodeAndVerify(acc, code: 0b000000, wastedBits: 0,
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacSubframeHeaderGpu_Verbatim_2WastedBits_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await EncodeAndVerify(acc, code: 0b000001, wastedBits: 2,
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacSubframeHeaderGpu_Fixed_Order3_NoWasted_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await EncodeAndVerify(acc, code: 0b001011, wastedBits: 0,
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacSubframeHeaderGpu_Lpc_Order8_5WastedBits_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // LPC order 8 -> code 0b100111 (8-1=7).
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacSubframeHeaderGpu_Lpc_Order32_MaxWastedBits_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // LPC order 32 -> code 0b111111 (32-1=31).

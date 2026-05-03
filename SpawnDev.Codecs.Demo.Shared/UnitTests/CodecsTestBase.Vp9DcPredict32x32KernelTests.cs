@@ -14,7 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DcPredict32x32Kernel_BothEdges_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DcPredict32x32Kernel(acc);
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DcPredict32x32Kernel_TopOnly_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DcPredict32x32Kernel(acc);
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DcPredict32x32Kernel_LeftOnly_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DcPredict32x32Kernel(acc);
@@ -81,7 +81,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DcPredict32x32Kernel_None_FillsWith128()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DcPredict32x32Kernel(acc);
@@ -97,7 +97,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DcPredict32x32Kernel_RandomInputs_BitExact()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DcPredict32x32Kernel(acc);
@@ -127,7 +127,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DcPredict32x32Kernel_BatchedDispatch_AllBlocksBitExact()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9DcPredict32x32Kernel(acc);

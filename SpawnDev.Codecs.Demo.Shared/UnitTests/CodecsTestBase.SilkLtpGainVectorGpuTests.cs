@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLtpGainVectorGpu_PerIndex0_4Subfr_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Codebook 0 has 8 entries; pick a span of valid indices.
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLtpGainVectorGpu_PerIndex1_4Subfr_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Codebook 1 has 16 entries.
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLtpGainVectorGpu_PerIndex2_4Subfr_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Codebook 2 has 32 entries; cover a wide range.
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkLtpGainVectorGpu_2Subfr_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 10 ms frame: 2 subframes only.

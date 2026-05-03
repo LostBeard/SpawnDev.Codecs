@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisEncoderFloorFitGpu_FitFloorEndpoints_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int halfBlock = 512;

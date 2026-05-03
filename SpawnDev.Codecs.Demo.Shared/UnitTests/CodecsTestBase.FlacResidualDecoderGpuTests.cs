@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacResidualDecoderGpu_RiceMethod0_SmallResiduals_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Small residuals -> small Rice parameter, partition order 0.
@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacResidualDecoderGpu_RiceMethod0_PartitionOrder2_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 4 partitions (1 << 2) of 8 samples each, predictorOrder 4.
@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacResidualDecoderGpu_RiceMethod1_LargerParam_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // PartitionedRice2 (5-bit param), partition order 0.

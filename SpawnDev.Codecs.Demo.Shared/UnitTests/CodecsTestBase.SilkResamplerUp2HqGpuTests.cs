@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkResamplerUp2HqGpu_ZeroState_RandomInput_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Typical SILK 8 kHz frame (160 samples for 20 ms) upsampled to 16 kHz.
@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkResamplerUp2HqGpu_NonZeroState_FullScale_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Stress the SAT16 path with a non-zero IIR state + full-scale input.
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkResamplerUp2HqGpu_Wb40msFrame_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Wideband 40 ms frame at 16 kHz (640 samples) upsampled to 32 kHz.

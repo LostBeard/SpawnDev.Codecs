@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9ForwardDct16x16Gpu_AllZeroInput_ProducesZeroOutput()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var input = new short[256];
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
     {
         // Single non-zero in spatial domain - exercises every butterfly
         // node because the impulse spreads to every frequency bin.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var input = new short[256];
@@ -88,7 +88,7 @@ public abstract partial class CodecsTestBase
         // Sweep 16 random 16x16 blocks across the typical residual range.
         // VP9 residuals after subtract are in [-255, 255]; we test the
         // full int8/int9 range.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xFD09CDC7u));
@@ -108,7 +108,7 @@ public abstract partial class CodecsTestBase
     {
         // Worst-case residuals at int16 saturation - extreme inputs flag
         // any overflow / sign-extension drift between CPU and GPU.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var positive = new short[256];

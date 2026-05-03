@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
         //   B) CPU encodes 100 prefix bits, snapshots; GPU loads
         //      snapshot, encodes 100 suffix bits, finalizes.
         // Final byte streams MUST be identical.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp8BoolEncoderTestKernel(acc);

@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Idct16x16Kernel_ZeroCoefficients_LeavesPredictorUnchanged()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             if (!IsIdct16x16KernelSupported(acc)) return;
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Idct16x16Kernel_DcOnly_MatchesReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             if (!IsIdct16x16KernelSupported(acc)) return;
@@ -105,7 +105,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Idct16x16Kernel_RandomInputs_BitExactMatchReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             if (!IsIdct16x16KernelSupported(acc)) return;
@@ -143,7 +143,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Idct16x16Kernel_BatchedDispatch_AllBlocksMatchReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             if (!IsIdct16x16KernelSupported(acc)) return;

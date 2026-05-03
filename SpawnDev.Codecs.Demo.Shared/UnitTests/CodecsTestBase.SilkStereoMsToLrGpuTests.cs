@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkStereoMsToLrGpu_NarrowBand_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await StereoVerify(acc, fsKHz: 8, frameLength: 160,
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkStereoMsToLrGpu_MediumBand_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await StereoVerify(acc, fsKHz: 12, frameLength: 240,
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkStereoMsToLrGpu_WideBand_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await StereoVerify(acc, fsKHz: 16, frameLength: 320,

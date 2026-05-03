@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkResamplerAr2Gpu_TypicalCoefs_RandomInput_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Coefs from libopus silk_resampler_down2_3 (AR2 head). Q14 values.
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkResamplerAr2Gpu_NonZeroState_FullScale_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Stress the IIR state path with non-zero seed + full-scale alternating.
@@ -51,7 +51,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkResamplerAr2Gpu_LongStream_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Long sequential stream covering several batch sizes worth.

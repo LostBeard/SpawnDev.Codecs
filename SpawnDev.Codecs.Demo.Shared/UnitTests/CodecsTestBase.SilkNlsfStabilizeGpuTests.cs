@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfStabilizeGpu_AlreadyStable_NoChange()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 10-tap NLSF that's already well-spaced (each adjacent pair > 100 apart).
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfStabilizeGpu_NeedsAdjustment_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // NLSF with violated spacing - some adjacent pairs are too close.
@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfStabilizeGpu_HeavyDisorder_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Severely disordered NLSF that forces the fallback insertion-sort + clamp path.

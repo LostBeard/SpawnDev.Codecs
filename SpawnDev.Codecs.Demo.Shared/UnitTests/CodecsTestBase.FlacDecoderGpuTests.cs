@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacDecoderGpu_Mono_RoundTrip_GpuEncodeGpuDecode()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int blockSize = FlacEncoderGpu.BlockSize;
@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacDecoderGpu_Stereo_MultiFrame_RoundTrip_GpuEncodeGpuDecode()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int blockSize = FlacEncoderGpu.BlockSize;

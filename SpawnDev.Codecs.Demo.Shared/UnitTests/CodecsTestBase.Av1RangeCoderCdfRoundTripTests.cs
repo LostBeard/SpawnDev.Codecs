@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1RangeCoderGpu_CdfQ15_RoundTrip_AllBackends()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Build a tiny 4-symbol ICDF + a sequence of 16 syms to encode/decode.

@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeDecoderGpu_64x64_FlatGray_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int width = 64, height = 64;
@@ -131,7 +131,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeDecoderGpu_64x64_RandomContent_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int width = 64, height = 64;
@@ -153,7 +153,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeDecoderGpu_64x64_BaseQSweep_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int width = 64, height = 64;
@@ -215,7 +215,7 @@ public abstract partial class CodecsTestBase
         // Self-consistency test that bypasses the CPU walker oracle.
         // If this passes for 128x128, the GPU encoder + GPU decoder
         // are mutually consistent at SB row boundaries.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int width = 128, height = 128;
@@ -240,7 +240,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeDecoderGpu_128x128_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int width = 128, height = 128;

@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DequantBlockGpu_AllSizes_RandomCoefs_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int[] sizes = { 16, 64, 256, 1024 };
@@ -72,7 +72,7 @@ public abstract partial class CodecsTestBase
     {
         // Push coef * dequant past short.MaxValue / short.MinValue and
         // verify GPU saturates identically to CPU.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 4096 * 16 = 65536 -> saturates to 32767.
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DequantBlockGpu_AllZeroInput_StaysZero()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var input = new short[256];

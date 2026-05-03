@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task IlgpuIntDivByTwoRepro_OddNegatives_ShouldTruncateTowardZero()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Build an input array of every odd negative int from -1 to -32767.
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
         // Positive odd values - shr 1 and / 2 always agree, this is the
         // sanity-check half. If even this fails, something more
         // fundamental is broken than just the negative path.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int n = 16384;
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
         // Int.MinValue / 2, Int.MaxValue / 2, even positives / negatives
         // (where shr and / agree). All-or-nothing pin on the canonical
         // semantics.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int[] input =

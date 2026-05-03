@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
 
     private async Task CanonicalWindowAndVerify(int n)
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var cpu = VorbisWindow.GenerateCanonical(n);

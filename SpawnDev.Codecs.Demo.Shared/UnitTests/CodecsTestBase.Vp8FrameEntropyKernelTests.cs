@@ -21,7 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp8FrameEntropyKernel_AllDcMode_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp8FrameEntropyKernel(acc);

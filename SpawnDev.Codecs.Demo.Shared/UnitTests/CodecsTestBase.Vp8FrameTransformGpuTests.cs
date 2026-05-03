@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp8FrameTransformGpu_RandomMacroblocks_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var pipeline = new Vp8FrameTransformGpu(acc);

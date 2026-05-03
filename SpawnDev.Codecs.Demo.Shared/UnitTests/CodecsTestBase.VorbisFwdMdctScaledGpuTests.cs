@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisFwdMdctScaledGpu_RandomBlock_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int n = 256;       // half-block (output bins)

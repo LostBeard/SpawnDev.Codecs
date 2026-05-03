@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardDct8Kernel_ZeroInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardDct8Kernel(acc);
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardDct8Kernel_DcOnlyInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardDct8Kernel(acc);
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardDct8Kernel_RandomBatch_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardDct8Kernel(acc);
@@ -98,7 +98,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardDct8Kernel_AllCosBits_MatchCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardDct8Kernel(acc);

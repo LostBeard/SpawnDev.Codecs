@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9FrameCompressedHeaderKernel_Allow32x32_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var cpu = BuildVp9CompressedHeaderCpu();

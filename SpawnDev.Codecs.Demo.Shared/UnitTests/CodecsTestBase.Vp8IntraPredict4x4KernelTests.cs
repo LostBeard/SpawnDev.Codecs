@@ -15,7 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp8IntraPredict4x4Kernel_AllModes_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp8IntraPredict4x4Kernel(acc);

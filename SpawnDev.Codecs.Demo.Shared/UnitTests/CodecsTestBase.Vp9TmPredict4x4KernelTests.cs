@@ -13,7 +13,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9TmPredict4x4Kernel_KnownPattern_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9TmPredict4x4Kernel(acc);
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9TmPredict4x4Kernel_ClipsAtPixelRange()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9TmPredict4x4Kernel(acc);
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9TmPredict4x4Kernel_RandomInputs_BitExact()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9TmPredict4x4Kernel(acc);
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9TmPredict4x4Kernel_BatchedDispatch_AllBlocksBitExact()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9TmPredict4x4Kernel(acc);

@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task MdctKernel_ZeroInput_ProducesAllZeroOutput()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new MdctKernel(acc);
@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
         // Batched: 8 blocks at N=128 in one dispatch. Verifies block
         // routing inside the kernel - thread t = blockIdx*N + k must
         // pick the right input window per block.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new MdctKernel(acc);
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
     /// </summary>
     private async Task RunMdctMatchesReferenceAsync(int n, int blockCount, int seed)
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new MdctKernel(acc);

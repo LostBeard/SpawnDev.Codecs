@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseDct8Gpu_ZeroInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1InverseDct8GpuKernel(acc);
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseDct8Gpu_RandomBatch_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1InverseDct8GpuKernel(acc);
@@ -70,7 +70,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseDct8Gpu_AllCosBits_MatchCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1InverseDct8GpuKernel(acc);
@@ -104,7 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseDct16Gpu_ZeroInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1InverseDct16GpuKernel(acc);
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseDct16Gpu_RandomBatch_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1InverseDct16GpuKernel(acc);
@@ -157,7 +157,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1InverseDct16Gpu_AllCosBits_MatchCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1InverseDct16GpuKernel(acc);

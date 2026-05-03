@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Iht4x4Kernel_ZeroCoefficients_AllTxTypes_LeavesPredictorUnchanged()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9Iht4x4Kernel(acc);
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Iht4x4Kernel_AllTxTypes_RandomInputs_BitExactMatchReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9Iht4x4Kernel(acc);
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Iht4x4Kernel_BatchedDispatch_PerTxType_MatchReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9Iht4x4Kernel(acc);

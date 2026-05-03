@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisFloor1RenderGpu_RenderPoint_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Test points spanning representative Floor 1 segments.
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisFloor1RenderGpu_RenderLine_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int halfBlock = 256;

@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfDecodeGpu_NbMb_FirstStageZero_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var codebook = SilkNlsfCodebookTables.NbMb;
@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfDecodeGpu_NbMb_MiddleEntry_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var codebook = SilkNlsfCodebookTables.NbMb;
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfDecodeGpu_Wb_TypicalFrame_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var codebook = SilkNlsfCodebookTables.Wb;
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkNlsfDecodeGpu_Wb_LastEntry_RandomResiduals_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var codebook = SilkNlsfCodebookTables.Wb;

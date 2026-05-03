@@ -22,7 +22,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisEncoderHelpersGpu_MagnitudeToFloorY_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Sample magnitudes spanning the full Y range:
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisEncoderHelpersGpu_QuantiseResidueValue_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Test inputs spanning the full residue range with the v1

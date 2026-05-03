@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9ForwardAdst8Kernel_ZeroInput_ProducesAllZeroCoefs()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9ForwardAdst8Kernel(acc);
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9ForwardAdst8Kernel_DcOnlyInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9ForwardAdst8Kernel(acc);
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9ForwardAdst8Kernel_RandomInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Vp9ForwardAdst8Kernel(acc);

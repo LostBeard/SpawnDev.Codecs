@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkStereoDecodePredGpu_ZeroIndices_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             await DequantAndVerify(acc, new[] { 0, 0, 0 }, new[] { 0, 0, 0 });
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkStereoDecodePredGpu_TypicalIndices_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Mid-table index triples from a typical stereo voiced frame.
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkStereoDecodePredGpu_BoundaryIndices_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Near-edge index triples (idx[0]+3*idx[2] = 14 hits the last cell).
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkStereoDecodePredGpu_AllSweep_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Sweep several combinations.

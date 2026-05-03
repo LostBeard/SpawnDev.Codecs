@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkResamplerDownFirInterpolGpu_Fir1_Half_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 1/2 downsample (16 -> 8 kHz). Order-24 symmetric.
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkResamplerDownFirInterpolGpu_Fir2_Third_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 1/3 downsample. Order-36 symmetric.
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkResamplerDownFirInterpolGpu_Fir0_ThreeQuarters_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 3/4 downsample (16 -> 12 kHz). Order-18 polyphase (3 fractions).

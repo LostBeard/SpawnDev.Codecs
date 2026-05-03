@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisFloor1ApplyGpu_FullRange_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int n = 256;
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisFloor1ApplyGpu_ClampingEdges_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Indices outside [0, 255] should clamp.
@@ -51,7 +51,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VorbisFloor1ApplyGpu_HalfBlock1024_RandomBatch_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int n = 1024;

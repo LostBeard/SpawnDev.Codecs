@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardIdentity4Kernel_ZeroInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardIdentity4Kernel(acc);
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardIdentity4Kernel_RandomBatch_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardIdentity4Kernel(acc);
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardIdentity4Kernel_DcOnlyInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardIdentity4Kernel(acc);
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardIdentity8Kernel_ZeroInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardIdentity8Kernel(acc);
@@ -127,7 +127,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardIdentity8Kernel_RandomBatch_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardIdentity8Kernel(acc);
@@ -160,7 +160,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardIdentity8Kernel_DcOnlyInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardIdentity8Kernel(acc);
@@ -187,7 +187,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardIdentity16Kernel_ZeroInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardIdentity16Kernel(acc);
@@ -211,7 +211,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardIdentity16Kernel_RandomBatch_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardIdentity16Kernel(acc);
@@ -244,7 +244,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardIdentity16Kernel_DcOnlyInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardIdentity16Kernel(acc);
@@ -271,7 +271,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardIdentity32Kernel_ZeroInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardIdentity32Kernel(acc);
@@ -295,7 +295,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardIdentity32Kernel_RandomBatch_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardIdentity32Kernel(acc);
@@ -328,7 +328,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1ForwardIdentity32Kernel_DcOnlyInput_MatchesCpuReference()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var kernel = new Av1ForwardIdentity32Kernel(acc);

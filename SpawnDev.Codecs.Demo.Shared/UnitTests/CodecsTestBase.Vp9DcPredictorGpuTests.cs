@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9DcPredictorGpu_AllVariants_AllSizes_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             int[] sizes = { 4, 8, 16, 32 };
@@ -99,7 +99,7 @@ public abstract partial class CodecsTestBase
         // Stress sweep: 32 random (above, left) pairs across all
         // sizes / variants. Catches any sum-overflow / shift / rounding
         // drift that hand-picked cases could miss.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var rng = new Random(unchecked((int)0xA1DCBA75u));
@@ -131,7 +131,7 @@ public abstract partial class CodecsTestBase
     {
         // Pin the rounding boundary cases: all-zeros must give DC=0,
         // all-255 must give DC=255 (no overflow above byte range).
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             foreach (var n in new[] { 4, 8, 16, 32 })

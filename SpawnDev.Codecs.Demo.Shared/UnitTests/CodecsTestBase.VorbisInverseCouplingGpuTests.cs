@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
 
     private async Task CouplingAndVerify(float[] mag, float[] ang)
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // CPU reference: inline the per-coefficient reconstruction

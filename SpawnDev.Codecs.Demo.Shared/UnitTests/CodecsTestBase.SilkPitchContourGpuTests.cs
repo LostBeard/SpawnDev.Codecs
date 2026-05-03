@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkPitchContourGpu_NB_20ms_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 8 kHz, 4 subframes -> Stage2, cbSize 11.
@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkPitchContourGpu_NB_10ms_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 8 kHz, 2 subframes -> Stage2_10Ms, cbSize 3.
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkPitchContourGpu_WB_20ms_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // 16 kHz, 4 subframes -> Stage3, cbSize 34.
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task SilkPitchContourGpu_WB_10ms_ClampPath_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Force clamp paths: small lagIndex (clamps low) and large lagIndex (clamps high).

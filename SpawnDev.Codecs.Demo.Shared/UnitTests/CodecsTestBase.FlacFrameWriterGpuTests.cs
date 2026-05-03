@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacFrameWriterGpu_Mono16bit_Sin440Hz_MatchesCpuRef()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int blockSize = 4096;
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task FlacFrameWriterGpu_Stereo16bit_Random_MatchesCpuRef()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             const int blockSize = 4096;

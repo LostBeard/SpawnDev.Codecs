@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9ForwardQuantizerGpu_AllSignsAllSizes_MatchesCpu()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Block sizes: 16 (Tx4x4), 64 (Tx8x8), 256 (Tx16x16), 1024 (Tx32x32).
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
         // Pin the rounding-half-up boundary cases explicitly. For divisor q
         // and value v, the CPU does (|v| + q/2) / q with sign re-applied.
         // The GPU must agree exactly.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             // Coefficients that land exactly on rounding boundaries for q=10.
@@ -100,7 +100,7 @@ public abstract partial class CodecsTestBase
         // sign path explicitly. Without the explicit RoundedDivide a
         // backend that lowers `int / q` as `>>` on the negative branch
         // would diverge here.
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var input = new int[64];
@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9ForwardQuantizerGpu_AllZeroInput_StaysZero()
     {
-        var (ctx, acc) = await CreateKernelAcceleratorAsync();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             var input = new int[256];
