@@ -1,7 +1,7 @@
 # PLAN - Vorbis Decoder v2: Move Bit-Stream Decode to GPU
 
 **Owner:** Tuvok
-**Status:** Steps 1 + 2 SHIPPED (2026-05-03 commits `3a1cb5c` + `da5e064`). Step 3 queued. v1 in production at 0.2.0-alpha.1 + 0.3.0-rc.1; v2 unblocks the last cardinal-rule gap in the Vorbis decode pipeline.
+**Status:** ✓ ALL STEPS SHIPPED (2026-05-03). Vorbis decoder v2 GPU bit-stream decode is live on desktop backends (CPU + CUDA + OpenCL); browser backends (WebGPU + Wasm) keep the v1 hybrid path until cross-lane ILGPU binding-count work lands. PMT verification: 15 PASS / 0 FAIL / 3 SKIP.
 
 ## Progress 2026-05-03
 

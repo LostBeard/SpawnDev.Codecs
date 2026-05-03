@@ -176,12 +176,15 @@ CPU impl. Several have already been done this way (`Vp8CoefTables`,
 `Vp8ModeProbTables`, `Vp9BlockCoefEnums`, `Av1RangeDecoderGpu`
 constants).
 
-### Vorbis decoder v2 GPU integration kernel - Steps 1+2 shipped
+### Vorbis decoder v2 GPU integration kernel - ALL STEPS SHIPPED
 
 Plans/PLAN-Vorbis-Decoder-V2-GPU-BitStream-Decode.md tracks the v2
 work that closes the last cardinal-rule gap in the Vorbis decode
 pipeline (the CPU bit-stream walk inside
-`VorbisAudioDecoderGpu.DecodeSpectrumOnCpu`).
+`VorbisAudioDecoderGpu.DecodeSpectrumOnCpu`). Live on desktop
+backends (CPU + CUDA + OpenCL) as of commit `a28e196`. Browser
+backends (WebGPU + Wasm) keep the v1 hybrid path until ILGPU
+binding-count work lands.
 
 - **Step 1**: `VorbisResidueDecoderGpu` static helper - GPU-callable
   Type 0/1 + Type 2 residue decoder mirroring CPU
@@ -206,23 +209,35 @@ pipeline (the CPU bit-stream walk inside
   compiled at construction. Existing 3 Vorbis decoder GPU tests pass
   on all 5 available backends (15/0/3) via the v1 path; constructor's
   `LoadAutoGroupedStreamKernel` for the v2 kernel verifies in-context.
-- **Step 3b (DecoderGpu actually dispatches the v2 kernel)**: ATTEMPTED
-  + REVERTED. Bit-exact correct on desktop (CPU + CUDA + OpenCL all 3
-  Vorbis decoder tests PASS) but **regresses browser backends**:
-  - **WebGPU**: 44 storage buffer bindings exceed the 10 device limit.
-    ILGPU's WebGPU backend flattens the
-    `VorbisPacketDecodeStaticInputs` struct's 38 ArrayView fields
-    into 38 separate storage-buffer bindings.
-  - **Wasm**: memory access OOB on the same dispatch (related root
-    cause + may overlap with Geordi's open Bug 2).
-  
-  Step 3b reverted to keep WebGPU + Wasm decoder tests green via v1.
-  Path forward: either restructure the kernel to combine the 36 int
-  fields into one big `ArrayView<int>` with a header offset table
-  (substantial Codecs work), or wait for ILGPU to coalesce
-  struct-of-ArrayView kernel params on WebGPU (cross-lane, higher
-  leverage - unblocks future Opus integration kernels too). Filed with
-  Geordi: `_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-vorbis-v2-binding-count-2026-05-03.md`.
+- **Step 3b (DecoderGpu actually dispatches the v2 kernel)**: ✓ SHIPPED
+  commit `a28e196` as a dual-path branch on `_accelerator.AcceleratorType`:
+  - **Desktop (CPU + CUDA + OpenCL)**: dispatches the v2 kernel directly.
+    Host = pure coordinator (alloc + 1 packet upload + dispatches +
+    final readback). All bit-stream decode + floor decode + residue
+    decode runs inside the GPU integration kernel. Cardinal-rule
+    compliant on desktop.
+  - **WebGPU + Wasm**: v1 hybrid path retained. WebGPU's 10-binding
+    cap (`maxStorageBuffersPerShaderStage`) rejects the v2 kernel's 44
+    storage buffers (ILGPU flattens each `ArrayView<T>` field of
+    `VorbisPacketDecodeStaticInputs` into a separate binding). Wasm
+    fails OOB on the same dispatch (related root cause + may overlap
+    with Geordi's open Bug 2). Browser backends become cardinal-rule
+    clean when ILGPU coalesces struct-of-ArrayView kernel params on
+    WebGPU OR a kernel restructure flattens the 36 int fields into
+    one offset-indexed buffer. Filed with Geordi:
+    `_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-vorbis-v2-binding-count-2026-05-03.md`.
+
+  Implementation notes: take 3 used an inline branch (post-spectrum
+  chain unchanged across paths, common variables `floorOk`,
+  `floorIndex`, `mapping`, `dPosteriorsView`, `dResidueView` populated
+  per branch). Take 2's extracted `DecodePacketV2Async` regressed
+  desktop tests via copy-paste subtleties; take 3 keeps post-spectrum
+  code untouched.
+
+  PMT verification on take 3: `Failed: 0, Passed: 15, Skipped: 3,
+  Total: 18, Duration: 58 s`. 3 desktop backends × 3 tests via v2
+  kernel = 9; 2 browser backends × 3 tests via v1 fallback = 6;
+  WebGL × 3 atomics-gated SKIP.
 
 ### Helper classes extracted to main (so CPU classes can move cleanly)
 
