@@ -144,6 +144,36 @@ public static class VorbisPacketDecodeKernel
     /// classificationsScratch + entryVecScratch with caller-allocated
     /// space.
     /// </summary>
+    /// <summary>
+    /// Layout offsets within the combined int-output buffer (allIntOut).
+    /// Section 0 [0..5)         : packet header (ModeNumber, BlockSize, IsLongBlock, PreviousWindowLong, NextWindowLong)
+    /// Section 1 [5..5+ch)      : floorOk per channel
+    /// Section 2 [5+ch..5+2ch)  : floorIndex per channel
+    /// Section 3 [5+2ch..5+2ch+ch*maxXList) : floor posteriors per channel (channel-major)
+    /// Section 4 [last 1 int]   : err flag (last position = 5+2ch + ch*maxXList)
+    /// </summary>
+    public const int PacketHeaderOffset = 0;
+    /// <summary>Length of the packet header section in ints.</summary>
+    public const int PacketHeaderLength = 5;
+
+    /// <summary>
+    /// Compute the required <c>allIntOut</c> length for the given configuration.
+    /// </summary>
+    public static long ComputeAllIntOutLength(int channels, int maxXListLength)
+        => PacketHeaderLength + (long)channels * 2 + (long)channels * maxXListLength + 1;
+
+    /// <summary>
+    /// Compute the offset of the err flag within <c>allIntOut</c>.
+    /// </summary>
+    public static long ErrOutOffset(int channels, int maxXListLength)
+        => PacketHeaderLength + (long)channels * 2 + (long)channels * maxXListLength;
+
+    /// <summary>
+    /// Decode one audio packet's spectrum on GPU. Output buffers
+    /// (allIntOut, residuesFlatOut) are written directly. Caller pre-zeroes
+    /// allIntOut + residuesFlatOut (silent-floor channels skip the floor
+    /// decode and leave their slot zero).
+    /// </summary>
     /// <param name="_">Dispatch index (unused; kernel is single-thread).</param>
     /// <param name="packet">Encoded audio packet bytes.</param>
     /// <param name="modeBits">Precomputed VorbisMath.Ilog(modes - 1); 0 if modes == 1.</param>
@@ -151,16 +181,11 @@ public static class VorbisPacketDecodeKernel
     /// <param name="blockSize0">Short-block size from ident.</param>
     /// <param name="blockSize1">Long-block size from ident.</param>
     /// <param name="halfBlock">Half-block size derived from the packet's mode (caller pre-resolves once per packet).</param>
-    /// <param name="maxXListLength">Maximum XList length across all floors (sized for posterior buffer).</param>
-    /// <param name="partitionsToReadMax">Maximum partitionsToRead across residue configs (sized for classifications scratch).</param>
+    /// <param name="maxXListLength">Maximum XList length across all floors (sized for posterior section).</param>
     /// <param name="setup">Static, per-stream flat-packed setup tables uploaded once by the caller.</param>
-    /// <param name="packetHeaderOut">[5] ModeNumber, BlockSize, IsLongBlock, PreviousWindowLong, NextWindowLong.</param>
-    /// <param name="floorOkOut">[channels] 1 if channel's floor decoded non-silent, 0 otherwise.</param>
-    /// <param name="floorIndexPerChannelOut">[channels] floor index for each channel.</param>
-    /// <param name="posteriorsFlatOut">[channels * maxXListLength] floor 1 posteriors, channel-major.</param>
+    /// <param name="allIntOut">Combined int output buffer; layout per <see cref="PacketHeaderOffset"/> + sections.</param>
     /// <param name="residuesFlatOut">[channels * halfBlock] residue floats, channel-major.</param>
-    /// <param name="errOut">[1] 0 = success.</param>
-    /// <param name="classificationsScratch">[channels * partitionsToReadMax] residue decode scratch.</param>
+    /// <param name="intScratch">Combined int scratch (classifications + doNotDecode flags). Caller-allocated.</param>
     /// <param name="entryVecScratch">[max codebook dimensions] residue decode entry vector scratch.</param>
     public static void Run(
         Index1D _,
@@ -171,19 +196,24 @@ public static class VorbisPacketDecodeKernel
         int blockSize1,
         int halfBlock,
         int maxXListLength,
-        int partitionsToReadMax,
         VorbisPacketDecodeStaticInputs setup,
-        ArrayView<int> packetHeaderOut,
-        ArrayView<int> floorOkOut,
-        ArrayView<int> floorIndexPerChannelOut,
-        ArrayView<int> posteriorsFlatOut,
+        ArrayView<int> allIntOut,
         ArrayView<float> residuesFlatOut,
-        ArrayView<int> errOut,
-        ArrayView<int> classificationsScratch,
-        ArrayView<float> entryVecScratch,
-        ArrayView<int> doNotDecodeScratch)
+        ArrayView<int> intScratch,
+        ArrayView<float> entryVecScratch)
     {
-        // 0. Initialize bit reader. Pass packet length (from view).
+        // Section offsets within allIntOut.
+        long floorOkBase = PacketHeaderLength;
+        long floorIndexBase = floorOkBase + channels;
+        long posteriorsBase = floorIndexBase + channels;
+        long errBase = posteriorsBase + (long)channels * maxXListLength;
+
+        // intScratch layout: [0..channels*partitionsToReadMax) = classifications; [tail..] = doNotDecode (channels ints)
+        // The residue decoder reads partitionsToReadMax from the runtime computed value, so we
+        // use the END of the scratch buffer for doNotDecode (channels ints).
+        long doNotDecodeBase = intScratch.Length - channels;
+
+        // 0. Initialize bit reader.
         var state = VorbisBitReaderGpu.Init((int)packet.Length);
 
         // 1. Parse audio packet header.
@@ -193,11 +223,11 @@ public static class VorbisPacketDecodeKernel
             setup.ModeBlockFlags, 0,
             blockSize0, blockSize1);
 
-        packetHeaderOut[0] = header.ModeNumber;
-        packetHeaderOut[1] = header.BlockSize;
-        packetHeaderOut[2] = header.IsLongBlock;
-        packetHeaderOut[3] = header.PreviousWindowLong;
-        packetHeaderOut[4] = header.NextWindowLong;
+        allIntOut[PacketHeaderOffset + 0] = header.ModeNumber;
+        allIntOut[PacketHeaderOffset + 1] = header.BlockSize;
+        allIntOut[PacketHeaderOffset + 2] = header.IsLongBlock;
+        allIntOut[PacketHeaderOffset + 3] = header.PreviousWindowLong;
+        allIntOut[PacketHeaderOffset + 4] = header.NextWindowLong;
 
         // 2. Resolve mapping for this mode.
         int mappingIdx = setup.ModeMappings[header.ModeNumber];
@@ -210,7 +240,7 @@ public static class VorbisPacketDecodeKernel
         {
             int submap = setup.MappingMux[mappingMuxBase + ch];
             int floorIdx = setup.MappingFloors[mappingSubmapBase + submap];
-            floorIndexPerChannelOut[ch] = floorIdx;
+            allIntOut[floorIndexBase + ch] = floorIdx;
 
             int partitions = setup.FloorScalars[floorIdx * 5 + 0];
             int multiplier = setup.FloorScalars[floorIdx * 5 + 1];
@@ -227,9 +257,9 @@ public static class VorbisPacketDecodeKernel
                 setup.FloorClassSubclassBooksOffsets, 0,
                 setup.AllChildren, setup.AllLeafToEntry,
                 setup.CodebookParams, 0,
-                posteriorsFlatOut, (long)ch * maxXListLength);
+                allIntOut, posteriorsBase + (long)ch * maxXListLength);
 
-            floorOkOut[ch] = yLen > 0 ? 1 : 0;
+            allIntOut[floorOkBase + ch] = yLen > 0 ? 1 : 0;
         }
 
         // 4. Per-submap residue decode.
@@ -247,7 +277,7 @@ public static class VorbisPacketDecodeKernel
             {
                 if (setup.MappingMux[mappingMuxBase + ch] == s)
                 {
-                    doNotDecodeScratch[membersInSubmap] = floorOkOut[ch] != 0 ? 0 : 1;
+                    intScratch[doNotDecodeBase + membersInSubmap] = allIntOut[floorOkBase + ch] != 0 ? 0 : 1;
                     membersInSubmap++;
                 }
             }
@@ -287,12 +317,12 @@ public static class VorbisPacketDecodeKernel
                 membersInSubmap,
                 residuesFlatOut, (long)firstSubmapChannel * halfBlock,
                 halfBlock,
-                doNotDecodeScratch, 0,
-                classificationsScratch, 0,
+                intScratch, doNotDecodeBase,
+                intScratch, 0,
                 entryVecScratch, 0);
         }
 
         // 5. Success.
-        errOut[0] = 0;
+        allIntOut[errBase] = 0;
     }
 }
