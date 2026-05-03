@@ -154,7 +154,12 @@ Every slice is validated through the `PlaywrightMultiTest` harness, which runs t
 dotnet test PlaywrightMultiTest/PlaywrightMultiTest.csproj --filter "FullyQualifiedName~Flac"
 ```
 
-The in-browser demo at `SpawnDev.Codecs.Demo/` also ships a `/benchmarks` page that runs throughput + compression measurements against the live library.
+The in-browser demo at `SpawnDev.Codecs.Demo/` ships several pages exercising the live library:
+
+- **`/transcode`** - encode + decode all 3 video codecs (VP8, VP9, AV1) end-to-end, render YUV-&gt;RGBA output on canvas.
+- **`/audio`** - encode + decode all 3 audio codecs (FLAC, Vorbis, Opus) end-to-end, draw source vs decoded waveforms with per-codec SNR + compression ratio + encode/decode timings.
+- **`/benchmarks`** - throughput + compression measurements for FLAC + transforms.
+- **`/tests`** - SpawnDev.UnitTesting cross-backend test harness (runs every test in `CodecsTestBase` against every available browser ILGPU backend).
 
 ## Relationship to the SpawnDev media ecosystem
 

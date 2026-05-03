@@ -1,0 +1,344 @@
+@page "/gpu-transcode"
+@using System.Diagnostics
+@using global::ILGPU
+@using global::ILGPU.Runtime
+@using SpawnDev.BlazorJS
+@using SpawnDev.BlazorJS.JSObjects
+@using SpawnDev.Codecs.Video.Vp8
+@using SpawnDev.Codecs.Video.Vp9
+@using SpawnDev.ILGPU.WebGPU
+@using SpawnDev.ILGPU.Wasm
+@inject BlazorJSRuntime JS
+
+<PageTitle>SpawnDev.Codecs GPU Pair Demo</PageTitle>
+
+<h1>GPU Encoder + Decoder Pair Demo</h1>
+
+<p>
+    Encode + decode through the <strong>100% ILGPU</strong> integration classes
+    (<code>Vp8KeyframeEncoderGpu</code>, <code>Vp8KeyframeDecoderGpu</code>,
+    <code>Vp9KeyframeEncoderGpu</code>, <code>Vp9KeyframeDecoderGpu</code>).
+    Every byte of the encoded bitstream is written by an ILGPU kernel; every
+    pixel of the decoded recon plane comes back from a kernel readback. The
+    host (this page) is a pure coordinator: alloc, upload, dispatch, readback.
+    Runs on whichever ILGPU backend the browser exposes (WebGPU preferred).
+</p>
+
+<div style="margin-bottom: 1rem;">
+    <label>Width: <input type="number" @bind="W" style="width:5em" min="16" max="256" step="16" /></label>
+    <label>Height: <input type="number" @bind="H" style="width:5em" min="16" max="256" step="16" /></label>
+    <label>Q (VP8): <input type="number" @bind="Vp8Q" style="width:5em" min="1" max="127" /></label>
+    <label>Q (VP9): <input type="number" @bind="Vp9Q" style="width:5em" min="1" max="255" /></label>
+    <button class="btn btn-primary" @onclick="RunAsync" disabled="@_running">
+        @(_running ? "Running..." : "Encode + decode all GPU pairs")
+    </button>
+</div>
+
+<p style="font-size:0.85em;color:#555;">
+    Note: VP8 GPU encoder needs width + height as multiples of 16; VP9 needs multiples of 64.
+    The page coerces the inputs to the nearest valid value at run time.
+</p>
+
+@if (!string.IsNullOrEmpty(_acceleratorInfo))
+{
+    <p><strong>Accelerator:</strong> <code>@_acceleratorInfo</code></p>
+}
+
+@if (_results.Count > 0)
+{
+    <table style="border-collapse:collapse;">
+        <thead>
+            <tr>
+                <th style="text-align:left;padding:4px 12px;">Codec</th>
+                <th style="text-align:right;padding:4px 12px;">Encoded bytes</th>
+                <th style="text-align:right;padding:4px 12px;">Encode ms</th>
+                <th style="text-align:right;padding:4px 12px;">Decode ms</th>
+                <th style="text-align:right;padding:4px 12px;">Y mean</th>
+                <th style="text-align:right;padding:4px 12px;">Y range</th>
+                <th style="text-align:right;padding:4px 12px;">Y PSNR (dB)</th>
+                <th style="text-align:left;padding:4px 12px;">Result</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in _results)
+            {
+                <tr>
+                    <td style="padding:4px 12px;">@r.Codec</td>
+                    <td style="text-align:right;padding:4px 12px;">@r.EncBytes</td>
+                    <td style="text-align:right;padding:4px 12px;">@r.EncMs.ToString("F1")</td>
+                    <td style="text-align:right;padding:4px 12px;">@r.DecMs.ToString("F1")</td>
+                    <td style="text-align:right;padding:4px 12px;">@r.YMean</td>
+                    <td style="text-align:right;padding:4px 12px;">[@r.YMin, @r.YMax]</td>
+                    <td style="text-align:right;padding:4px 12px;">
+                        @(double.IsInfinity(r.YPsnr) ? "inf" : r.YPsnr.ToString("F1"))
+                    </td>
+                    <td style="padding:4px 12px;">@r.Status</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<h2>Source frame</h2>
+<canvas id="gpu-src-canvas" width="@CanvasW" height="@CanvasH" style="border:1px solid #888;"></canvas>
+
+<h2>Decoded frames (from GPU pair)</h2>
+<div style="display:flex; gap:2rem; flex-wrap:wrap;">
+    <div>
+        <h3>VP8 (Vp8KeyframeEncoderGpu &rarr; Vp8KeyframeDecoderGpu)</h3>
+        <canvas id="gpu-vp8-canvas" width="@CanvasW" height="@CanvasH" style="border:1px solid #888;"></canvas>
+    </div>
+    <div>
+        <h3>VP9 (Vp9KeyframeEncoderGpu &rarr; Vp9KeyframeDecoderGpu)</h3>
+        <canvas id="gpu-vp9-canvas" width="@CanvasW" height="@CanvasH" style="border:1px solid #888;"></canvas>
+    </div>
+</div>
+
+@code {
+    int W = 64;
+    int H = 64;
+    int Vp8Q = 30;
+    int Vp9Q = 30;
+    bool _running;
+    string _acceleratorInfo = string.Empty;
+
+    int CanvasW => W;
+    int CanvasH => H;
+
+    sealed record Result(string Codec, int EncBytes, double EncMs, double DecMs, int YMean, int YMin, int YMax, double YPsnr, string Status);
+    List<Result> _results = new();
+
+    async Task RunAsync()
+    {
+        _running = true;
+        _results = new List<Result>();
+        StateHasChanged();
+        await Task.Yield();
+
+        // Coerce dimensions to the strictest multiple in play (VP9 needs 64).
+        int alignedW = (W + 63) & ~63;
+        int alignedH = (H + 63) & ~63;
+        if (alignedW != W || alignedH != H)
+        {
+            // Update bound values so the UI reflects what was actually used.
+            W = alignedW;
+            H = alignedH;
+            StateHasChanged();
+        }
+
+        // Build a synthetic gradient frame at the aligned size.
+        var ySrc = new byte[W * H];
+        for (int r = 0; r < H; r++)
+            for (int c = 0; c < W; c++)
+                ySrc[r * W + c] = (byte)Math.Clamp(96 + 32 * Math.Sin(2.0 * Math.PI * c / 16.0) + r * 1.5, 0, 255);
+        var uSrc = new byte[(W / 2) * (H / 2)]; System.Array.Fill(uSrc, (byte)128);
+        var vSrc = new byte[(W / 2) * (H / 2)]; System.Array.Fill(vSrc, (byte)128);
+        DrawYuv("gpu-src-canvas", ySrc, uSrc, vSrc, W, H, W, W / 2, W / 2);
+
+        Context? ctx = null;
+        Accelerator? acc = null;
+        try
+        {
+            (ctx, acc) = await CreateAcceleratorAsync();
+            _acceleratorInfo = $"{acc.Name} ({acc.AcceleratorType})";
+            StateHasChanged();
+            await Task.Yield();
+
+            // VP8 GPU pair.
+            await RunVp8Async(acc, ySrc, uSrc, vSrc);
+
+            // VP9 GPU pair.
+            await RunVp9Async(acc, ySrc, uSrc, vSrc);
+        }
+        catch (Exception ex)
+        {
+            _results.Add(new Result("(setup)", 0, 0, 0, 0, 0, 0, 0, $"FAIL: {ex.Message}"));
+        }
+        finally
+        {
+            acc?.Dispose();
+            ctx?.Dispose();
+            _running = false;
+            StateHasChanged();
+        }
+    }
+
+    async Task<(Context, Accelerator)> CreateAcceleratorAsync()
+    {
+        // Prefer WebGPU; fall back to a CPU accelerator if WebGPU isn't
+        // available so the page still works on browsers without it.
+        try
+        {
+            var builder = Context.Create();
+            await builder.WebGPU();
+            var ctx = builder.ToContext();
+            var devices = ctx.GetWebGPUDevices();
+            if (devices.Count > 0)
+            {
+                var acc = await devices[0].CreateAcceleratorAsync(ctx);
+                return (ctx, acc);
+            }
+            ctx.Dispose();
+        }
+        catch
+        {
+            // Fall through to CPU.
+        }
+
+        // Wasm is the browser-side fallback when no GPU adapter is available.
+        var fallbackBuilder = Context.Create();
+        fallbackBuilder.Wasm();
+        var fallbackCtx = fallbackBuilder.ToContext();
+        var fallbackAcc = await fallbackCtx.CreateWasmAcceleratorAsync();
+        return (fallbackCtx, fallbackAcc);
+    }
+
+    async Task RunVp8Async(Accelerator acc, byte[] ySrc, byte[] uSrc, byte[] vSrc)
+    {
+        var swEnc = Stopwatch.StartNew();
+        byte[] encoded;
+        try
+        {
+            using var enc = new Vp8KeyframeEncoderGpu(acc);
+            encoded = enc.EncodeKeyFrame(
+                ySrc, ySrcStride: W,
+                uSrc, uvSrcStride: W / 2,
+                vSrc,
+                W, H, baseQIndex: Math.Clamp(Vp8Q, 1, 127));
+        }
+        catch (Exception ex)
+        {
+            _results.Add(new Result("VP8-GPU", 0, 0, 0, 0, 0, 0, 0, $"ENCODE FAIL: {ex.Message}"));
+            StateHasChanged();
+            return;
+        }
+        swEnc.Stop();
+
+        var swDec = Stopwatch.StartNew();
+        Vp8KeyframeDecoderGpu.DecodedFrame decoded;
+        try
+        {
+            using var dec = new Vp8KeyframeDecoderGpu(acc);
+            decoded = dec.DecodeKeyFrame(encoded, baseQIndex: Math.Clamp(Vp8Q, 1, 127));
+        }
+        catch (Exception ex)
+        {
+            _results.Add(new Result("VP8-GPU", encoded.Length, swEnc.Elapsed.TotalMilliseconds, 0, 0, 0, 0, 0, $"DECODE FAIL: {ex.Message}"));
+            StateHasChanged();
+            return;
+        }
+        swDec.Stop();
+
+        ReportAndDraw("VP8-GPU", "gpu-vp8-canvas", encoded.Length,
+            swEnc.Elapsed.TotalMilliseconds, swDec.Elapsed.TotalMilliseconds,
+            decoded.YPlane, decoded.UPlane, decoded.VPlane,
+            decoded.Width, decoded.Height, ySrc);
+        await Task.Yield();
+    }
+
+    async Task RunVp9Async(Accelerator acc, byte[] ySrc, byte[] uSrc, byte[] vSrc)
+    {
+        var swEnc = Stopwatch.StartNew();
+        byte[] encoded;
+        try
+        {
+            using var enc = new Vp9KeyframeEncoderGpu(acc);
+            encoded = await enc.EncodeKeyFrameAsync(
+                ySrc, uSrc, vSrc,
+                W, H, baseQIndex: Math.Clamp(Vp9Q, 1, 255));
+        }
+        catch (Exception ex)
+        {
+            _results.Add(new Result("VP9-GPU", 0, 0, 0, 0, 0, 0, 0, $"ENCODE FAIL: {ex.Message}"));
+            StateHasChanged();
+            return;
+        }
+        swEnc.Stop();
+
+        var swDec = Stopwatch.StartNew();
+        Vp9DecodedFrame decoded;
+        try
+        {
+            using var dec = new Vp9KeyframeDecoderGpu(acc);
+            decoded = await dec.DecodeKeyFrameAsync(encoded);
+        }
+        catch (Exception ex)
+        {
+            _results.Add(new Result("VP9-GPU", encoded.Length, swEnc.Elapsed.TotalMilliseconds, 0, 0, 0, 0, 0, $"DECODE FAIL: {ex.Message}"));
+            StateHasChanged();
+            return;
+        }
+        swDec.Stop();
+
+        ReportAndDraw("VP9-GPU", "gpu-vp9-canvas", encoded.Length,
+            swEnc.Elapsed.TotalMilliseconds, swDec.Elapsed.TotalMilliseconds,
+            decoded.YPlane, decoded.UPlane, decoded.VPlane,
+            decoded.Width, decoded.Height, ySrc);
+        await Task.Yield();
+    }
+
+    void ReportAndDraw(
+        string codec, string canvasId, int encBytes,
+        double encMs, double decMs,
+        byte[] y, byte[] u, byte[] v,
+        int width, int height,
+        byte[] sourceY)
+    {
+        int min = 255, max = 0; long sum = 0;
+        foreach (var b in y) { sum += b; if (b < min) min = b; if (b > max) max = b; }
+        int mean = (int)(sum / Math.Max(1, y.Length));
+
+        // PSNR vs source Y plane (tightly packed both sides).
+        double psnr;
+        if (sourceY.Length >= width * height && y.Length >= width * height)
+        {
+            long sumSq = 0; long n = 0;
+            for (int row = 0; row < height; row++)
+                for (int col = 0; col < width; col++)
+                {
+                    int s = sourceY[row * W + col];
+                    int d = y[row * width + col];
+                    int e = s - d;
+                    sumSq += e * e; n++;
+                }
+            double mse = sumSq / (double)n;
+            psnr = mse <= 0 ? double.PositiveInfinity : 10.0 * Math.Log10(255.0 * 255.0 / mse);
+        }
+        else
+        {
+            psnr = 0;
+        }
+
+        DrawYuv(canvasId, y, u, v, width, height, width, width / 2, width / 2);
+        _results.Add(new Result(codec, encBytes, encMs, decMs, mean, min, max, psnr, "OK"));
+        StateHasChanged();
+    }
+
+    void DrawYuv(string canvasId, byte[] y, byte[] u, byte[] v, int width, int height, int yStride, int uStride, int vStride)
+    {
+        var rgba = new byte[width * height * 4];
+        for (int row = 0; row < height; row++)
+            for (int col = 0; col < width; col++)
+            {
+                int yV = y[row * yStride + col];
+                int uV = u[(row / 2) * uStride + col / 2] - 128;
+                int vV = v[(row / 2) * vStride + col / 2] - 128;
+                int r = (int)(yV + 1.402 * vV);
+                int g = (int)(yV - 0.344 * uV - 0.714 * vV);
+                int b = (int)(yV + 1.772 * uV);
+                int dst = (row * width + col) * 4;
+                rgba[dst + 0] = (byte)Math.Clamp(r, 0, 255);
+                rgba[dst + 1] = (byte)Math.Clamp(g, 0, 255);
+                rgba[dst + 2] = (byte)Math.Clamp(b, 0, 255);
+                rgba[dst + 3] = 255;
+            }
+        using var doc = JS.Get<Document>("document");
+        using var canvas = doc.GetElementById<HTMLCanvasElement>(canvasId);
+        if (canvas is null) return;
+        using var ctx = canvas.Get2DContext();
+        using var imageData = ctx.CreateImageData(width, height);
+        using var data = imageData.Data;
+        data.Set(rgba);
+        ctx.PutImageData(imageData, 0, 0);
+    }
+}
