@@ -184,12 +184,15 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
 
         _accelerator.Synchronize();
 
-        // Single readback of the final encoded keyframe.
-        var lenArr = dOutLen.GetAsArray1D();
-        int finalLen = lenArr[0];
-        var outputBuffer = dOutput.GetAsArray1D();
+        // Single partial readback of the final encoded keyframe. SubView
+        // -> CopyToCPU is a real per-backend partial readback
+        // (SpawnDev.ILGPU 4.9.3+); only the actual finalLen bytes cross
+        // the boundary, not the worst-case-sized output buffer. Replaces
+        // the previous full GetAsArray1D + Array.Copy trim, which was a
+        // cardinal-rule violation (CPU-side Array.Copy on codec data).
+        int finalLen = dOutLen.GetAsArray1D()[0];
         var result = new byte[finalLen];
-        Array.Copy(outputBuffer, 0, result, 0, finalLen);
+        dOutput.View.SubView(0, finalLen).CopyToCPU(result);
         return result;
     }
 
