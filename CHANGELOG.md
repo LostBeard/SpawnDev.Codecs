@@ -1,5 +1,114 @@
 # SpawnDev.Codecs CHANGELOG
 
+## 1.0.0 (2026-05-03)
+
+First public release. **Pure-.NET, ILGPU-accelerated, patent-clean
+audio + video codecs.** Runs on every ILGPU backend (CUDA, OpenCL, CPU,
+WebGPU, WebGL, Wasm) - desktop AND Blazor WebAssembly browser.
+
+### Codecs in this release
+
+**Audio:** FLAC, Opus, Vorbis. **Video:** VP8, VP9, AV1.
+
+Patent-clean by selection: AOMedia patent pledge for VP8/VP9/AV1, RFC
+6716 royalty-free for Opus, BSD reference for FLAC/Vorbis. H.264/H.265/
+AAC stay out (delegated to platform encoders via SpawnDev.MultiMedia).
+
+### Public API surface - CPU reference encoders + decoders
+
+Every codec ships a CPU public API that produces bytes a reference
+decoder accepts:
+
+- **FLAC**: bit-exact lossless, matches ffmpeg byte-for-byte
+- **Opus**: round-trip via Concentus 2.2.2, matches ffmpeg's libopus quality
+- **Vorbis**: 35.7 dB SNR on real BBB content (vs ffmpeg's libvorbis 20.9 dB)
+- **VP8**: keyframes accepted by ffmpeg pixel-perfect (1920x1072 @ 5 fps;
+  1/2/4/8 token partitions)
+- **VP9**: keyframes accepted by ffmpeg native decoder (16x16 -> 1920x1088,
+  max diff Y=1 at Q=8)
+- **AV1**: keyframes accepted by libdav1d (60 frames decoded on real
+  BBB content, av1.mp4 plays cleanly)
+
+### GPU encoder + decoder pairs (100% ILGPU)
+
+Five of the six codecs ship 100%-ILGPU encoder/decoder pairs:
+
+- `Vp8KeyframeEncoderGpu` / `Vp8KeyframeDecoderGpu`
+- `Vp9KeyframeEncoderGpu` / `Vp9KeyframeDecoderGpu`
+- `Av1KeyframeEncoderGpu` / `Av1KeyframeDecoderGpu`
+- `FlacEncoderGpu` / `FlacDecoderGpu`
+- `VorbisAudioEncoderGpu` / `VorbisAudioDecoderGpu`
+
+Every byte of the encoded bitstream is written by an ILGPU kernel; every
+pixel of the decoded recon plane comes back from a kernel readback. The
+host (consumer code) is a pure coordinator: alloc + upload + dispatch +
+single readback. No CPU math, no CPU iteration, no CPU bool encoding,
+no CPU bitstream assembly.
+
+Cardinal-rule compliant: every per-frame iteration on codec data,
+`Array.Copy` on bitstreams, full-buffer-readback waste, and CPU-encoder
+INSTANCE dependency in the GPU pair production paths has been closed.
+
+Opus has 31 SILK GPU primitives + the shared Daala range coder; the
+top-level OpusEncoderGpu/OpusDecoderGpu integration class is the next
+codec on the GPU port roadmap.
+
+### Browser demos (live in your browser via Blazor WASM)
+
+The `SpawnDev.Codecs.Demo` project ships browser demos for the entire
+codec surface:
+
+- `/transcode` - encode + decode all 3 video codecs (VP8/VP9/AV1) via
+  the CPU public API. Renders YUV->RGBA on canvas.
+- `/audio` - encode + decode all 3 audio codecs (FLAC/Vorbis/Opus) via
+  the CPU public API. Plots source vs decoded waveforms with per-codec
+  SNR + compression ratio + timings.
+- `/gpu-transcode` - encode + decode VP8 + VP9 + AV1 entirely through
+  the ILGPU integration classes. 100% GPU-resident. Routes to WebGPU
+  when available, Wasm fallback.
+- `/benchmarks` - live throughput numbers for every encoder + decoder,
+  both CPU and GPU pair, across the available ILGPU backends.
+
+Every demo page is covered by an end-to-end unit test that mirrors its
+exact encode -> decode flow, so the demo can be trusted to work without
+manual browser click-through every commit
+(`AudioTranscodeDemo_*` / `VideoTranscodeDemo_*` / `GpuTranscodeDemo_*`).
+
+### Containers
+
+| Container | Read | Write |
+|---|---|---|
+| RIFF / WAVE | Yes | Yes |
+| AIFF | Yes | Yes |
+| Ogg | Yes | Yes |
+| WebM / Matroska (EBML) | Via SpawnDev.EBML 3.0.1 | Via SpawnDev.EBML |
+| MP4 / ISOBMFF | Structural box reader | Not yet |
+| IVF | Yes | Yes |
+
+### Test infrastructure
+
+- `CodecsTestBase.AcquireAcceleratorOrSkipAsync()` - converts the
+  WebGL backend's `NotSupportedException` (eager kernel-feature
+  validation) into `UnsupportedTestException` so the harness records
+  Skipped rather than Failed for tests whose kernels need atomics.
+- `CodecsTestBase.RequireFeatures(acc, AcceleratorRequirements)` -
+  explicit per-test feature gating via SpawnDev.ILGPU's
+  `device.Satisfies()` API.
+
+### Dependencies
+
+- `SpawnDev.ILGPU` 4.9.3 (kernel dispatch, partial readback,
+  `ArrayView<T>.CopyToHostAsync()`)
+- `SpawnDev.EBML` 3.0.1 (WebM/Matroska container)
+- `Concentus` 2.2.2 (BSD-3 pure-C# Opus reference)
+
+### Out of scope (patent-encumbered)
+
+H.264, H.265, AAC, MP3 - delegated to platform encoders via
+SpawnDev.MultiMedia (P/Invoke to MediaFoundation / VideoToolbox /
+VAAPI). System encoders are licensed by Microsoft / Apple / driver
+vendors respectively; SpawnDev.Codecs stays clean.
+
 ## 0.2.0-alpha.2 (2026-05-03)
 
 Same library code as 0.2.0-alpha.1; this point release ships the
