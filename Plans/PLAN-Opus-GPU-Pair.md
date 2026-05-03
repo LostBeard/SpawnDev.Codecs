@@ -21,8 +21,8 @@ architectural pattern Opus will follow:
   `ErrOutOffset`) keeps the kernel parameter count under ILGPU's
   Action<16> ceiling.
 - **ILGPU's `LoadAutoGroupedStreamKernel`** accepts the struct-of-
-  ArrayView pattern on every backend (CPU + CUDA + OpenCL + WebGPU
-  + Wasm; WebGL skips via atomics gate). Verified by
+  ArrayView pattern on COMPILE on every backend (CPU + CUDA + OpenCL +
+  WebGPU + Wasm; WebGL skips via atomics gate). Verified by
   `VorbisPacketDecodeKernel_LoadsOnAccelerator` smoke test.
 
 OpusDecoderGpu / OpusEncoderGpu top-level integration classes will
@@ -30,6 +30,44 @@ follow the same pattern: per-stream flat-packed config struct,
 combined output buffer with section layout, single-thread mode-
 specific kernels (SilkDecodeKernel, CeltDecodeKernel,
 HybridDecodeKernel) dispatched based on the parsed TOC byte.
+
+### LESSON FROM VORBIS V2 STEP 3B - browser-side binding count
+
+The Vorbis v2 kernel COMPILES on every backend but DISPATCHES only
+on desktop. WebGPU's `maxStorageBuffersPerShaderStage = 10` limit
+rejects the dispatch because ILGPU's WebGPU backend flattens each
+`ArrayView<T>` field of a kernel-parameter struct into a separate
+storage buffer binding. 38 struct ArrayView fields + 6 top-level
+ArrayView params = 44 bindings, far over 10. Wasm fails OOB on the
+same dispatch (related root cause; see Geordi's open Bug 2 +
+`_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-vorbis-v2-binding-count-2026-05-03.md`).
+
+**Implication for Opus integration kernels:** SILK + CELT integration
+kernels need to AVOID a struct with many ArrayView fields. Two
+strategies, in order of preference:
+
+1. **Flatten all int data into ONE big `ArrayView<int>` with an
+   offset table.** Per-table base offsets stored as scalar kernel
+   parameters or in a small offset-table buffer. Browser-clean from
+   day 1; one storage binding for all int tables.
+2. **Wait for ILGPU's WebGPU backend to coalesce same-allocation
+   ArrayView fields into one storage binding** (Geordi's lane;
+   Tuvok flagged it as high-leverage cross-codec work). Higher
+   leverage but timing depends on Geordi's queue.
+
+Strategy 1 is the right Codecs-side bet because:
+- It works on every backend immediately (no waiting on cross-lane).
+- The flat-pack pattern already exists in `VorbisSetupHeaderFlat`
+  and `VorbisCodebookSetFlat`; SILK setup tables can follow the
+  same pattern (`SilkSetupTablesFlat`).
+- It also benefits CUDA/OpenCL by reducing the kernel parameter
+  buffer size (44 individual `(pointer, length)` pairs collapse to
+  ONE pair plus a small offsets struct).
+
+Vorbis decoder v2 dual-path (desktop v2, browser v1 fallback) is
+the intermediate-state pattern and SHOULD NOT be replicated for
+Opus. Build Opus SILK + CELT integration kernels with the flat-
+pack design from day 1; ship single-path on every backend.
 
 ## Why this is "the 6th GPU pair"
 
