@@ -394,7 +394,33 @@ public sealed class VorbisAudioEncoder
 
     // --- Header packet builders ---
 
-    private static VorbisIdentificationHeader BuildIdentificationHeader(VorbisAudioEncoderOptions opts)
+    /// <summary>
+    /// Build the identification header AND resolved setup header from
+    /// encoder options. Same logic the constructor runs - returns the
+    /// EXACT pair that <c>Identification</c> / <c>Setup</c> would expose.
+    /// Public so <c>VorbisAudioEncoderGpu</c> can produce both records
+    /// without instantiating a CPU encoder.
+    /// </summary>
+    public static (VorbisIdentificationHeader Identification, VorbisSetupHeader Setup)
+        BuildResolvedHeaders(VorbisAudioEncoderOptions opts)
+    {
+        ArgumentNullException.ThrowIfNull(opts);
+        var ident = BuildIdentificationHeader(opts);
+        var rawSetup = BuildSetupHeader(opts.BlockSize);
+        int half = opts.BlockSize / 2;
+        var resolvedResidues = new VorbisResidueConfig[rawSetup.Residues.Length];
+        for (int i = 0; i < rawSetup.Residues.Length; i++)
+            resolvedResidues[i] = rawSetup.Residues[i] with { End = half, PartitionSize = half };
+        var setup = rawSetup with { Residues = resolvedResidues };
+        return (ident, setup);
+    }
+
+    /// <summary>
+    /// Build the identification header from encoder options. Public so
+    /// callers (e.g. <c>VorbisAudioEncoderGpu</c>) can produce the header
+    /// without instantiating a CPU encoder. Static, no instance state.
+    /// </summary>
+    public static VorbisIdentificationHeader BuildIdentificationHeader(VorbisAudioEncoderOptions opts)
     {
         return new VorbisIdentificationHeader
         {
@@ -409,7 +435,13 @@ public sealed class VorbisAudioEncoder
         };
     }
 
-    private static VorbisSetupHeader BuildSetupHeader(int blockSize)
+    /// <summary>
+    /// Build the resolved setup header for the given block size. Resolves
+    /// residue End/PartitionSize so the result is the EXACT setup the
+    /// decoder will see. Public so callers (e.g. <c>VorbisAudioEncoderGpu</c>)
+    /// can produce the setup without instantiating a CPU encoder.
+    /// </summary>
+    public static VorbisSetupHeader BuildSetupHeader(int blockSize)
     {
         int halfBlock = blockSize / 2;
         // Floor X[1] must reach the end of the spectrum so the rendered

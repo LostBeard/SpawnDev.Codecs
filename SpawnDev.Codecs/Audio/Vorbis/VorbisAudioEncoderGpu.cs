@@ -65,9 +65,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         // time, and store them as fields. This is the metadata-struct-setup
         // carve-out per CLAUDE.md cardinal rule. After this point the GPU
         // encoder needs no CPU encoder instance for production work.
-        var bootstrap = new VorbisAudioEncoder(options);
-        _ident = bootstrap.Identification;
-        _setup = bootstrap.Setup;
+        (_ident, _setup) = VorbisAudioEncoder.BuildResolvedHeaders(options);
 
         _floorCfg = (VorbisFloor1Config)_setup.Floors[0];
         _endpointBits = _floorCfg.Multiplier switch { 1 => 8, 2 => 7, 3 => 7, _ => 6 };
