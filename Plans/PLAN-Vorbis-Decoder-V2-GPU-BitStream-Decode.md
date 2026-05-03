@@ -7,8 +7,26 @@
 
 - **Step 1 (VorbisResidueDecoderGpu)**: ✓ shipped 0.3.0-rc.1 commit `3a1cb5c`. File: `Audio/Vorbis/VorbisResidueDecoderGpu.cs`. Type 0/1 + Type 2 paths covered. Static GPU-callable.
 - **Supporting infrastructure also shipped:** `VorbisSetupHeaderGpu.cs` (flat-pack of full setup header), `VorbisHuffmanCodebookSetGpu.cs` (flat-pack of all codebook trees + multiplicands).
-- **Step 2 (VorbisPacketDecodeKernel)**: ✓ shipped commit `da5e064`. File: `Audio/Vorbis/VorbisPacketDecodeKernel.cs`. Single-thread GPU kernel that wires header parse + per-channel floor decode + per-submap residue decode in one dispatch. C# build clean across full solution. Backend IR-compile not yet verified - happens at first kernel load via `accelerator.LoadAutoGroupedStreamKernel`, which Step 3 will do.
-- **Step 3 (Update VorbisAudioDecoderGpu.DecodePacket)**: NOT YET BUILT. Substantial focused work pending.
+- **Step 2 (VorbisPacketDecodeKernel)**: ✓ shipped commit `da5e064`. File: `Audio/Vorbis/VorbisPacketDecodeKernel.cs`. Single-thread GPU kernel that wires header parse + per-channel floor decode + per-submap residue decode in one dispatch.
+- **Step 2 verification (smoke test)**: ✓ commit `23f24e9`. `VorbisPacketDecodeKernel_LoadsOnAccelerator` test PASSED on all 5 available backends (CPU + CUDA + OpenCL + WebGPU + Wasm). Kernel COMPILES on every backend.
+- **Step 3a (DecoderGpu uploads + kernel compile in constructor)**: ✓ shipped commit `afeb6b1`. 38 flat-packed buffers uploaded once per stream, kernel compiled. Existing 3 Vorbis decoder GPU tests still PASS on all backends via the v1 path (`DecodeSpectrumOnCpu` unchanged).
+- **Step 3b (DecodePacketAsync dispatches the kernel)**: ATTEMPTED + REVERTED. Bit-exact correct on desktop (CPU + CUDA + OpenCL all 3 tests PASS) but **regresses browser backends**:
+  - **WebGPU**: `[WebGPU] Kernel 'Kernel_Run' requires 44 storage buffer bindings but this device only supports 10 (maxStorageBuffersPerShaderStage)`. ILGPU's WebGPU backend flattens the `VorbisPacketDecodeStaticInputs` struct's 38 `ArrayView<T>` fields into 38 separate storage-buffer bindings (plus 6 other ArrayView params = 44 total). Chrome's `maxStorageBuffersPerShaderStage = 10` so the kernel cannot be DISPATCHED even though it COMPILES.
+  - **Wasm**: memory access OOB on the kernel dispatch. Same root cause class as WebGPU + likely related to Geordi's open Bug 2 (Vp8/9 KeyframeEncoderGpu Wasm OOB).
+  
+  Reverted Step 3b to keep WebGPU + Wasm decoder tests green via the v1 path. Step 3a infrastructure remains.
+
+## Step 3b path forward
+
+Two paths to ship Step 3b without regressing browser backends:
+
+1. **Restructure the kernel to fit ≤10 bindings.** Combine the 36 int fields in `VorbisPacketDecodeStaticInputs` into ONE big `ArrayView<int>` with a header offset table. Each primitive call site uses the same combined ArrayView with different `XBase` offsets (the primitives already support `(ArrayView<int>, long XBase)` patterns). Net: 1 combined int + 2 doubles + packet + outputs + scratch = 7 bindings. Substantial host-side flat-packing infra rewrite + kernel-side offset wiring. Plus all primitive call sites need to know which section offset to pass for each parameter.
+
+2. **Wait for ILGPU WebGPU binding coalescing.** If ILGPU's WebGPU backend can be enhanced to recognize that a `struct` parameter with N `ArrayView` fields = 1 storage-buffer binding (rather than N), the v2 kernel ships as-is. Cross-lane work (Geordi's lane).
+
+Path 1 is doable from Codecs side. Path 2 unblocks all future high-parameter kernels (Opus integration etc.) so it's higher leverage.
+
+Filed with Geordi: `_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-vorbis-v2-binding-count-2026-05-03.md`. While we wait, Step 3b stays out of the Vorbis decoder integration.
 
 ## Step 3 considerations + sub-steps queued
 
