@@ -148,9 +148,28 @@ Per-packet flow:
 
 ## Path to ship
 
-### Step 1 - SILK integration on existing 31 primitives
+### Step 0 - GPU range decoder primitive (in flight 2026-05-03)
 
-Build `SilkDecodeKernel` that wires the existing 31 SILK GPU primitives in the libopus order (per RFC 6716 sec 4.2). Inputs: range-coded packet bytes, frame configuration scalars. Outputs: PCM samples + state for next packet.
+Pre-Step-1 prerequisite: `OpusRangeDecoderGpu` (libopus-shape range decoder) exists as a callable primitive on every backend.
+
+**Why this is Step 0, not part of Step 1:** Every existing SILK + CELT GPU primitive (33 SILK + the planned 7 CELT) takes already-decoded indices/pulses/parameters as input. The CPU SilkIndicesDecoder / SilkPulsesDecoder / SilkParametersDecoder / SilkSideInfoDecoder all call `OpusRangeDecoder.DecodeIcdf(...)` in tight loops. The integration kernel can't wire those primitives up without a GPU-callable `DecodeIcdf` first.
+
+**Status:** Initial cut shipped 2026-05-03. The earlier `OpusRangeCoderGpu.cs` only contained scaffolding (a stub state struct mis-shaped to AV1's Daala layout + a `CdfProbTop` constant). Replaced with:
+
+- `OpusRangeDecoderGpuState` matching libopus `ec_ctx` field shape (Offs, EndOffs, EndWindow, NEndBits, NBitsTotal, Rng, Val, Ext, Rem, Error).
+- `OpusRangeDecoderGpu.Init / Normalize / DecodeIcdf / DecodeIcdf16 / DecodeBitLogP / DecodeBits` as ILGPU-callable static helpers, all bit-exact ports of the CPU `OpusRangeDecoder` methods.
+- `OpusRangeDecoderGpuTestKernel` - single-thread test integration kernel that dispatches a sequence of `DecodeIcdf` calls.
+- `CodecsTestBase.OpusRangeDecoderGpuTests` - bit-exact GPU-vs-CPU verification on Uniform4 (12 symbols), TypeOffsetVad (11 symbols), and a 256-symbol deterministic LCG draw stress test.
+
+**Note on encoder side:** `OpusRangeEncoderGpu` remains scaffolding (delegates to AV1's Daala encoder, NOT bit-correct for libopus output bytes). Will be rewritten when the encoder integration starts; not on the critical path for SILK decode integration.
+
+### Step 1 - SILK integration on existing 33 primitives
+
+Build `SilkDecodeKernel` that wires the existing 33 SILK GPU primitives in the libopus order (per RFC 6716 sec 4.2). Inputs: range-coded packet bytes, frame configuration scalars. Outputs: PCM samples + state for next packet.
+
+**Pre-requisites:** Step 0 (`OpusRangeDecoderGpu`) above. The integration kernel composes `OpusRangeDecoderGpu.DecodeIcdf(...)` reads of the SILK side-info / indices / pulses streams + the per-stage GPU primitives.
+
+**Gaps to fill before this lands:** GPU ports of `SilkIndicesDecoder`, `SilkPulsesDecoder`, `SilkParametersDecoder`, `SilkSideInfoDecoder` (they currently exist only in `SpawnDev.Codecs.References/Audio/Opus/Silk/`). Each is a sequence of `OpusRangeDecoder.DecodeIcdf(...)` reads + dequant arithmetic; mechanical port over the new `OpusRangeDecoderGpu` primitive.
 
 **Why this first:** The primitives exist; only the integration is missing. Once SILK works end-to-end, OpusDecoderGpu can ship for SILK-mode-only packets while CELT lands. (Per Rule 1, that's still a "compromise" - but it's a meaningful intermediate test point.)
 
