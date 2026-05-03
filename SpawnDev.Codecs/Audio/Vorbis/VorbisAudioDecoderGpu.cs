@@ -327,48 +327,132 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         if (packet.Length == 0) return Array.Empty<float>();
         int channels = _ident.AudioChannels;
 
-        // Step 1: CPU spectrum decode (bit-stream parse + Huffman + floor +
-        // residue). v1 hybrid - the bit-stream path will move to GPU once the
-        // Vorbis-Huffman bit-reader keystone primitive lands. Returns
-        // per-channel floor curves + residue buffers + floor flags + the
-        // mapping config (coupling steps for the inverse-coupling stage).
-        var bitstream = DecodeSpectrumOnCpu(packet);
-        int blockSize = bitstream.BlockSize;
-        int halfBlock = blockSize / 2;
+        // Dual-path dispatch: desktop backends (CPU + CUDA + OpenCL) use the
+        // v2 GPU bit-stream decode kernel (cardinal-rule compliant). Browser
+        // backends (WebGPU + Wasm) fall back to the v1 hybrid CPU bit-stream
+        // path because:
+        //   - WebGPU rejects the v2 kernel dispatch: 38 ArrayView struct
+        //     fields produce 44 storage-buffer bindings, exceeding Chrome's
+        //     maxStorageBuffersPerShaderStage = 10.
+        //   - Wasm hits a memory OOB at dispatch (overlap with Geordi's open
+        //     Bug 2). When Geordi coalesces struct-of-ArrayView bindings on
+        //     WebGPU (or we restructure to combine 36 int fields into one
+        //     ArrayView<int> with offset table), this branch goes away and v2
+        //     ships everywhere.
+        bool useV2Path = _accelerator.AcceleratorType is
+            AcceleratorType.CPU or AcceleratorType.Cuda or AcceleratorType.OpenCL;
+
+        int blockSize;
+        int halfBlock;
+        int residueStride;
+        bool[] floorOk;
+        int[] floorIndex;
+        VorbisMappingConfig mapping;
+
+        // Persistent buffers allocated conditionally per path. Disposed in
+        // the finally block at function exit.
+        MemoryBuffer1D<int, Stride1D.Dense>? dV2AllIntOut = null;
+        MemoryBuffer1D<float, Stride1D.Dense>? dV2Residue = null;
+        MemoryBuffer1D<int, Stride1D.Dense>? dV1Posteriors = null;
+        MemoryBuffer1D<float, Stride1D.Dense>? dV1Residue = null;
+
+        try
+        {
+
+        if (useV2Path)
+        {
+            // v2: dispatch the integration kernel, read back small header
+            // info, leave posteriors + residues GPU-resident.
+            residueStride = _ident.BlockSize0 / 2;
+            int modeBits = VorbisMath.Ilog(_setup.Modes.Length - 1);
+
+            var packetBytes = packet.ToArray();
+            using var dPacket = _accelerator.Allocate1D<byte>(packetBytes.Length);
+            dPacket.View.CopyFromCPU(packetBytes);
+
+            long allIntOutLen = VorbisPacketDecodeKernel.ComputeAllIntOutLength(channels, _maxXListLength);
+            dV2AllIntOut = _accelerator.Allocate1D<int>(allIntOutLen);
+            dV2Residue = _accelerator.Allocate1D<float>((long)channels * residueStride);
+            long intScratchLen = (long)channels * 256L + channels;
+            using var dIntScratch = _accelerator.Allocate1D<int>(intScratchLen);
+            using var dEntryVecScratch = _accelerator.Allocate1D<float>(256);
+
+            dV2AllIntOut.View.MemSetToZero();
+            dV2Residue.View.MemSetToZero();
+
+            _v2DecodeKernel(
+                new Index1D(1),
+                dPacket.View,
+                modeBits, channels,
+                _ident.BlockSize0, _ident.BlockSize1,
+                residueStride,
+                _maxXListLength,
+                _v2StaticInputs,
+                dV2AllIntOut.View, dV2Residue.View,
+                dIntScratch.View, dEntryVecScratch.View);
+            await _accelerator.SynchronizeAsync();
+
+            int[] headerArr = new int[VorbisPacketDecodeKernel.PacketHeaderLength];
+            dV2AllIntOut.View.SubView(VorbisPacketDecodeKernel.PacketHeaderOffset, headerArr.Length).CopyToCPU(headerArr);
+            blockSize = headerArr[1];
+            halfBlock = blockSize / 2;
+
+            int[] floorOkArr = new int[channels];
+            dV2AllIntOut.View.SubView(VorbisPacketDecodeKernel.PacketHeaderLength, channels).CopyToCPU(floorOkArr);
+            int[] floorIndexArr = new int[channels];
+            dV2AllIntOut.View.SubView(VorbisPacketDecodeKernel.PacketHeaderLength + (long)channels, channels).CopyToCPU(floorIndexArr);
+
+            floorOk = new bool[channels];
+            for (int i = 0; i < channels; i++) floorOk[i] = floorOkArr[i] != 0;
+            floorIndex = floorIndexArr;
+            mapping = _setup.Mappings[_setup.Modes[headerArr[0]].Mapping];
+        }
+        else
+        {
+            // v1: CPU bit-stream decode + per-channel uploads.
+            var bitstream = DecodeSpectrumOnCpu(packet);
+            blockSize = bitstream.BlockSize;
+            halfBlock = blockSize / 2;
+            residueStride = halfBlock;
+            floorOk = bitstream.FloorOk;
+            floorIndex = bitstream.FloorIndexPerChannel;
+            mapping = bitstream.Mapping;
+
+            dV1Posteriors = _accelerator.Allocate1D<int>((long)channels * _maxXListLength);
+            dV1Residue = _accelerator.Allocate1D<float>((long)channels * halfBlock);
+
+            dV1Posteriors.View.MemSetToZero();
+            for (int ch = 0; ch < channels; ch++)
+            {
+                if (floorOk[ch] && bitstream.FloorPosteriors[ch] is { } yArr)
+                    dV1Posteriors.View.SubView((long)ch * _maxXListLength, yArr.Length).CopyFromCPU(yArr);
+                dV1Residue.View.SubView((long)ch * halfBlock, halfBlock).CopyFromCPU(bitstream.Residues[ch]);
+            }
+        }
+
+        // Common views for post-spectrum chain (uses dPosteriorsView +
+        // dResidueView regardless of which path produced them).
+        ArrayView<int> dPosteriorsView = useV2Path
+            ? dV2AllIntOut!.View.SubView(
+                VorbisPacketDecodeKernel.PacketHeaderLength + 2L * channels,
+                (long)channels * _maxXListLength)
+            : dV1Posteriors!.View;
+        ArrayView<float> dResidueView = useV2Path ? dV2Residue!.View : dV1Residue!.View;
 
         // Allocate per-call GPU buffers.
         long tdBufferLen = (long)channels * blockSize;
         long specBufferLen = (long)channels * halfBlock;
         using var dFloor = _accelerator.Allocate1D<float>(specBufferLen);
-        using var dResidue = _accelerator.Allocate1D<float>(specBufferLen);
         using var dSpec = _accelerator.Allocate1D<float>(specBufferLen);
         using var dTd = _accelerator.Allocate1D<float>(tdBufferLen);
         using var dWindow = _accelerator.Allocate1D<float>(blockSize);
         using var dPcmCm = _accelerator.Allocate1D<float>((long)channels * halfBlock);
         using var dPcmInterleaved = _accelerator.Allocate1D<float>((long)channels * halfBlock);
 
-        // Per-channel decodedY (posteriors) + floor render scratch buffers
-        // (sized for the largest possible xList across all floors).
-        using var dPosteriors = _accelerator.Allocate1D<int>((long)channels * _maxXListLength);
+        // Floor render scratch buffers (sized for the largest possible xList).
         using var dScratchInt = _accelerator.Allocate1D<int>((long)channels * 2 * _maxXListLength);
         using var dScratchByte = _accelerator.Allocate1D<byte>((long)channels * _maxXListLength);
 
-        // Upload posteriors (channel-major) + residues (channel-major) + window.
-        // Floor curves are produced by the GPU render kernel below; dFloor
-        // is pre-zeroed via GPU memset so silent-floor channels stay zero
-        // (they don't get a render dispatch).
-        //
-        // Each channel uploads directly into its slot via SubView - no
-        // host-side flat buffer, no Array.Copy iteration over codec data.
-        // dPosteriors is pre-zeroed first because silent channels skip
-        // their upload (the if-guard) and need to be left at zero.
-        dPosteriors.View.MemSetToZero();
-        for (int ch = 0; ch < channels; ch++)
-        {
-            if (bitstream.FloorOk[ch] && bitstream.FloorPosteriors[ch] is { } yArr)
-                dPosteriors.View.SubView((long)ch * _maxXListLength, yArr.Length).CopyFromCPU(yArr);
-            dResidue.View.SubView((long)ch * halfBlock, halfBlock).CopyFromCPU(bitstream.Residues[ch]);
-        }
         dFloor.View.MemSetToZero();
         dWindow.View.CopyFromCPU(VorbisWindow.GenerateCanonical(blockSize));
 
@@ -382,8 +466,8 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         // silent channels above so we can skip their dispatches entirely.
         for (int ch = 0; ch < channels; ch++)
         {
-            if (!bitstream.FloorOk[ch]) continue;
-            int floorIdx = bitstream.FloorIndexPerChannel[ch];
+            if (!floorOk[ch]) continue;
+            int floorIdx = floorIndex[ch];
             int values = _xListLengths[floorIdx];
             int xListBase = _xListOffsets[floorIdx];
             int multiplier = _setup.Floors[floorIdx].Multiplier;
@@ -393,7 +477,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
             long scratchByteOffs = (long)ch * _maxXListLength;
             long floorOffs = (long)ch * halfBlock;
 
-            var posteriorView = dPosteriors.View.SubView(posteriorOffs, values);
+            var posteriorView = dPosteriorsView.SubView(posteriorOffs, values);
             var scratchIntView = dScratchInt.View.SubView(scratchIntOffs, 2 * values);
             var scratchByteView = dScratchByte.View.SubView(scratchByteOffs, values);
             var floorView = dFloor.View.SubView(floorOffs, halfBlock);
@@ -429,18 +513,19 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         // floor channels stay zero (we don't dispatch their multiply).
         for (int ch = 0; ch < channels; ch++)
         {
-            if (!bitstream.FloorOk[ch]) continue;
+            if (!floorOk[ch]) continue;
             long offs = (long)ch * halfBlock;
             var floorView = dFloor.View.SubView(offs, halfBlock);
-            var residueView = dResidue.View.SubView(offs, halfBlock);
+            long residueOffs = (long)ch * residueStride;
+            var residueView = dResidueView.SubView(residueOffs, halfBlock);
             var specView = dSpec.View.SubView(offs, halfBlock);
             _multiplyKernel(new Index1D(halfBlock), floorView, residueView, specView);
         }
 
         // Step 3: GPU inverse channel coupling per coupling step in REVERSE
         // order (Vorbis I sec 4.3.8). Mono streams have zero coupling steps.
-        var couplingMag = bitstream.Mapping.CouplingMagnitudeChannels;
-        var couplingAng = bitstream.Mapping.CouplingAngleChannels;
+        var couplingMag = mapping.CouplingMagnitudeChannels;
+        var couplingAng = mapping.CouplingAngleChannels;
         for (int step = couplingMag.Length - 1; step >= 0; step--)
         {
             int magCh = couplingMag[step];
@@ -501,6 +586,16 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         // Read back interleaved PCM.
         var pcm = await dPcmInterleaved.CopyToHostAsync();
         return pcm;
+
+        } // end try
+        finally
+        {
+            // Dispose the conditionally-allocated path-specific buffers.
+            dV2AllIntOut?.Dispose();
+            dV2Residue?.Dispose();
+            dV1Posteriors?.Dispose();
+            dV1Residue?.Dispose();
+        }
     }
 
     /// <summary>Result of the v1 CPU bit-stream parse. Floor curves are
