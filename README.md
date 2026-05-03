@@ -76,7 +76,7 @@ backend.
 
 H.264, H.265, AAC, MP3 - delegated to platform encoders via [SpawnDev.MultiMedia](https://github.com/LostBeard/SpawnDev.MultiMedia).
 
-## Example
+## Example - CPU public API
 
 ```csharp
 using SpawnDev.Codecs.Audio.Flac;
@@ -89,6 +89,128 @@ var flac = FlacDecoder.DecodeFile("out.flac");
 WavFileCodec.WriteFile("roundtrip.wav", flac.InterleavedSamples, flac.StreamInfo.SampleRateHz,
     flac.StreamInfo.Channels, flac.StreamInfo.BitsPerSample);
 ```
+
+## Quickstart - GPU encoder + decoder pairs
+
+The GPU pairs are the headline feature. Every encoder + decoder in the
+table below runs entirely as ILGPU kernels - the host is a pure
+coordinator (alloc + upload + dispatch + readback). The same code runs
+on CUDA, OpenCL, CPU, WebGPU, WebGL, and Wasm without changes.
+
+### Acquire an accelerator
+
+For desktop, pick a backend that satisfies your codec's feature
+requirements (most codecs need atomics; that rules out WebGL):
+
+```csharp
+using ILGPU;
+using SpawnDev.ILGPU;
+
+using var ctx = Context.Create(b => b.CPU().Cuda().OpenCL());
+using var acc = ctx.CreatePreferredAccelerator(
+    new AcceleratorRequirements { RequiresAtomics = true });
+// -> CUDA when present, then OpenCL, then CPU.
+```
+
+For Blazor WebAssembly, pick a browser backend the same way:
+
+```csharp
+using SpawnDev.ILGPU.WebGPU;
+
+var builder = Context.Create();
+await builder.WebGPU();
+var ctx = builder.ToContext();
+var devices = ctx.GetWebGPUDevices();
+using var acc = await devices[0].CreateAcceleratorAsync(ctx);
+// Falls back to ctx.Wasm() / ctx.WebGL() when WebGPU is unavailable
+// (your code can branch on context.Devices).
+```
+
+### VP8 GPU encode + decode round-trip
+
+```csharp
+using SpawnDev.Codecs.Video.Vp8;
+
+using var enc = new Vp8KeyframeEncoderGpu(acc);
+byte[] encoded = enc.EncodeKeyFrame(
+    yPlane, ySrcStride: width,
+    uPlane, uvSrcStride: width / 2,
+    vPlane,
+    width, height, baseQIndex: 30);
+
+using var dec = new Vp8KeyframeDecoderGpu(acc);
+var frame = dec.DecodeKeyFrame(encoded, baseQIndex: 30);
+// frame.YPlane, .UPlane, .VPlane, .Width, .Height
+```
+
+### VP9 GPU encode + decode round-trip
+
+```csharp
+using SpawnDev.Codecs.Video.Vp9;
+
+using var enc = new Vp9KeyframeEncoderGpu(acc);
+byte[] encoded = await enc.EncodeKeyFrameAsync(
+    yPlane, uPlane, vPlane, width, height, baseQIndex: 30);
+
+using var dec = new Vp9KeyframeDecoderGpu(acc);
+Vp9DecodedFrame frame = await dec.DecodeKeyFrameAsync(encoded);
+// frame.YPlane, .UPlane, .VPlane, .Width, .Height
+```
+
+### AV1 GPU encode + decode (single tile, v1)
+
+```csharp
+using SpawnDev.Codecs.Video.Av1;
+
+using var enc = new Av1KeyframeEncoderGpu(acc);
+byte[] encoded = await enc.EncodeKeyFrameAsync(
+    yPlane, uPlane, vPlane, width, height, baseQIndex: 32);
+
+using var dec = new Av1KeyframeDecoderGpu(acc);
+// v1 takes raw tile bytes; encoder produces TD/SH/Frame OBU stream.
+// End-to-end via the public Av1Decoder for now (CPU walker).
+var (y, u, v) = await dec.DecodeSingleTileAsync(tileBytes, width, height, baseQIndex: 32);
+```
+
+### FLAC GPU encode + decode round-trip
+
+```csharp
+using SpawnDev.Codecs.Audio.Flac;
+
+using var enc = new FlacEncoderGpu(acc);
+byte[] encoded = await enc.EncodeStreamAsync(
+    interleavedSamples, sampleRateHz, channels, bitsPerSample);
+
+using var dec = new FlacDecoderGpu(acc);
+var result = await dec.DecodeStreamAsync(encoded);
+// result.InterleavedSamples, .StreamInfo
+```
+
+### Vorbis GPU encode + decode round-trip
+
+```csharp
+using SpawnDev.Codecs.Audio.Vorbis;
+
+using var enc = new VorbisAudioEncoderGpu(acc, new VorbisAudioEncoderOptions
+{
+    SampleRateHz = 44100, Channels = 1, BlockSize = 1024
+});
+byte[] oggBytes = await enc.EncodeStreamAsync(monoFloat);
+
+// Public CPU decoder API for the .ogg side; GPU decoder consumes
+// per-packet bytes once the stream is parsed.
+var decResult = VorbisOggDecoder.Decode(oggBytes);
+// decResult.InterleavedSamples (float[])
+```
+
+### Tip - skip kernel-feature-incompatible backends
+
+WebGL has no atomics. If your kernel needs atomics (most codec
+kernels do), `device.Satisfies(new AcceleratorRequirements { RequiresAtomics = true })`
+returns false and `Context.CreatePreferredAccelerator` skips the
+backend automatically. In tests, throw `UnsupportedTestException`
+(`SpawnDev.UnitTesting`) so the harness reports the test as Skipped
+rather than Failed.
 
 ## Host is Pure Coordinator — 100% Accelerator-Resident
 
