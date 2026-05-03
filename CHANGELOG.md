@@ -103,11 +103,12 @@ reference encoders + decoders. The main `SpawnDev.Codecs` library now
 ships **ZERO external dependencies** (only SpawnDev.* + Microsoft
 framework packages) per Captain's 2026-05-03 architectural directive.
 
-Moved to `SpawnDev.Codecs.References` in 0.3.0-rc.1:
+Moved to `SpawnDev.Codecs.References` in 0.3.0-rc.1 (174+ files):
 
-- **Opus**: `OpusEncoder`, `OpusDecoder`, `OpusOggEncoder`,
-  `OpusOggDecoder`, `OpusCodec` (factory) + `Concentus 2.2.2` package
-- **Opus / CELT CPU**: `CeltDecoder`, `CeltDecoderState`
+**Audio**:
+- **Opus** (5 files): `OpusEncoder`, `OpusDecoder`, `OpusOggEncoder`,
+  `OpusOggDecoder`, `OpusCodec` (factory)
+- **Opus / CELT CPU** (2 files): `CeltDecoder`, `CeltDecoderState`
 - **Opus / SILK CPU** (28 files): `SilkBwexpander`, `SilkDecodeCore`,
   `SilkDecodeFrame`, `SilkDecoder`, `SilkExcitationDequantizer`,
   `SilkGainAdjust`, `SilkGainDecoder`, `SilkIndicesDecoder`,
@@ -122,13 +123,41 @@ Moved to `SpawnDev.Codecs.References` in 0.3.0-rc.1:
   `FlacFrameDecoder`, `FlacOggDecoder`, `FlacFixedSubframeEncoder`,
   `FlacLpcSubframeEncoder`, `FlacResidualDecoder`,
   `FlacSubframeDecoder`, `FlacSubframeWriter`
-- **Opus entropy coders**: `OpusRangeEncoder`, `OpusRangeDecoder`
+- **Vorbis** (3 files): `VorbisAudioDecoder`, `VorbisOggDecoder`,
+  `VorbisInverseCoupling`
 
-Still in `SpawnDev.Codecs` main library (extraction needed for 1.0.0):
-- All Vorbis, VP8, VP9, AV1 CPU classes - they currently expose static
-  data tables / OBU-framing helpers consumed by the GPU integration
-  classes. Each needs its CPU implementation split from its shared
-  helpers before the CPU class can move to References.
+**Video**:
+- **VP8** (14 files): `Vp8KeyframeEncoder`, `Vp8Decoder`,
+  `Vp8BoolEncoder`, `Vp8BoolDecoder`, `Vp8CoefBlockEncoder`,
+  `Vp8CoefBlockDecoder`, `Vp8MbModeInfoDecoder`, `Vp8FrameHeader`,
+  `Vp8FrameHeaderWriter`, `Vp8ModeTrees`, `Vp8SegmentationLookup`,
+  `Vp8MbDequantizer`, `Vp8KeyframeWalker`, `Vp8ForwardQuantizer`
+- **VP9** (102 files): full CPU decoder + encoder + walker stack,
+  `Vp9Decoder`, `Vp9KeyframeEncoder`, `Vp9KeyframeWalker`, all the
+  `Vp9*Mv*`, `Vp9Iadst*Reference`, `Vp9Idct*Reference`,
+  `Vp9Iht*Reference`, etc.
+- **AV1** (11 files): `Av1Decoder`, `Av1KeyframeWalker`,
+  `Av1FrameBuffer`, `Av1IvfRemuxer`, `Av1StreamAnalyzer`,
+  `Av1StreamValidator`, `Av1TileGroup`, `Av1CflPredictor`,
+  `Av1CompleteFrameHeaderParser`, `Av1DefaultSegmentCdfs`,
+  `Av1FrameHeaderWriter`
+
+**Entropy coders** (2 files): `OpusRangeEncoder`, `OpusRangeDecoder`
+
+Still in `SpawnDev.Codecs` main library (because each is consumed by
+GPU integration classes for static data tables, OBU framing helpers,
+or metadata struct setup): the Vorbis encoder + Floor1/Residue/
+PacketHeader decoders + bit IO + codebook tables, every AV1
+CDF/dequant/scan table + transforms + predictors + OBU writer + spec
+record types, every VP9 GPU-shared scan/coef/probs/neighbor table.
+
+For 1.0.0 these remaining CPU implementations need finer extraction
+(separate the CPU impl methods from the shared static tables) so
+they can also move to References. The pattern is mechanical now -
+extract tables/helpers, point GPU code at the tables class, move the
+CPU impl. Several have already been done this way (`Vp8CoefTables`,
+`Vp8ModeProbTables`, `Vp9BlockCoefEnums`, `Av1RangeDecoderGpu`
+constants).
 
 ### Dependencies
 
