@@ -1,5 +1,85 @@
 # SpawnDev.Codecs CHANGELOG
 
+## 0.2.0-alpha.1 (2026-05-03)
+
+First version after the cardinal-rule audit pass. Every GPU integration
+class is now host-as-coordinator clean: alloc + upload + dispatch +
+single readback. No CPU iteration on codec data inside any *Gpu class
+production path.
+
+### Cardinal-rule + perf wins
+
+- **VP8 keyframe encoder** now uses a GPU stride-pack kernel instead
+  of the per-row CPU stride-strip loop in `UploadPlane`. Strided source
+  planes upload via `Vp8StridedPlanePackKernel` (one thread per output
+  byte) so plane unpacking happens accelerator-resident.
+- **VP8 keyframe encoder** final readback uses
+  `dOutput.View.SubView(0, finalLen).CopyToCPU(result)` (real
+  per-backend partial readback, SpawnDev.ILGPU 4.9.3+) - drops the
+  prior `GetAsArray1D` of the worst-case-sized output buffer + CPU
+  `Array.Copy` trim.
+- **VP9 + AV1 + Vorbis encoder/decoder pairs** swap host-allocated
+  zero-arrays + uploads (`CopyFromCPU(new T[N])`) for GPU-resident
+  `MemSetToZero()`. Eliminates ~1MB of CPU allocator churn and bus
+  transfer of zeros per frame at typical sizes.
+- **VP9 keyframe decoder** drops the per-decode `Array.Copy` of tile
+  bytes. Uploads the full frame once, dispatches the decode kernel
+  with `dFrame.View.SubView(tileStartOffset, tileLength)` so the
+  kernel sees the same-shaped tile view at zero copy cost.
+- **VorbisAudioDecoderGpu** drops the per-channel `Array.Copy` flat-
+  buffer build for posteriors + residues. Each channel uploads
+  directly into its slot via `dPosteriors.View.SubView(...)` and
+  `dResidue.View.SubView(...)`. `MemSetToZero()` covers silent-channel
+  slots.
+- **VorbisAudioEncoderGpu** + **VorbisAudioDecoderGpu** drop their
+  CPU-encoder / CPU-decoder INSTANCE dependencies. The encoder used
+  to call `_cpuRef.BuildIdentPacket()` / `BuildCommentPacket()` /
+  `BuildSetupPacket()` for the 3 Ogg header packets in
+  `EncodeStreamAsync`; the decoder used reflection to extract
+  Huffman state from the CPU decoder's private fields. Now the GPU
+  encoder calls `VorbisAudioEncoder.BuildIdentPacketBytes()` /
+  `BuildCommentPacketBytes()` / `BuildSetupPacketBytes()` (new public
+  static helpers) and the GPU decoder builds its own Huffman array
+  from `setup.Codebooks` directly. CPU encoder/decoder classes
+  remain as test reference oracles only.
+
+### Demos
+
+- **`/audio` page** - encode + decode all 3 audio codecs (FLAC,
+  Vorbis, Opus) end-to-end via the CPU public API. Synthesizes a
+  mono sine wave, drives every encoder + decoder, plots source +
+  recovered waveforms with per-codec SNR + compression + timings.
+- **`/gpu-transcode` page** - encode + decode VP8 + VP9 entirely
+  through the ILGPU integration classes (`Vp8KeyframeEncoderGpu` +
+  `Vp8KeyframeDecoderGpu`, `Vp9KeyframeEncoderGpu` +
+  `Vp9KeyframeDecoderGpu`). 100% GPU-resident encode/decode chain.
+  Routes to WebGPU when the browser exposes it, Wasm otherwise.
+- `AudioTranscodeDemo_*` unit tests verify the demo pipeline
+  bit-exact for FLAC + lossy SNR floors for Vorbis (>10 dB) + Opus
+  (>5 dB), 18/18 pass on CUDA + OpenCL + CPU.
+
+### Test infrastructure
+
+- New `CodecsTestBase.AcquireAcceleratorOrSkipAsync()` wraps
+  `CreateKernelAcceleratorAsync()` to convert the WebGL backend's
+  `NotSupportedException` (eager kernel-feature validation) into
+  `UnsupportedTestException`. The harness now records "Skipped" for
+  WebGL tests whose kernels need atomics / shared memory / barriers
+  rather than reporting them as Failed. Applied across all 200+
+  GPU-using test sites.
+- New `CodecsTestBase.RequireFeatures(acc, AcceleratorRequirements)`
+  helper: explicit per-test feature gating. Throws
+  `UnsupportedTestException` when the current accelerator's backend
+  cannot satisfy declared requirements.
+
+### SpawnDev.ILGPU PackageReference: 4.9.2 -> 4.9.3
+
+Picked up `ArrayView<T>.CopyToHostAsync()` real per-backend partial
+readback (WebGPU `queue.CopyBufferToBuffer` + partial mapAsync, WebGL
+partial-range readback worker path, Wasm SAB slot view, CUDA / OpenCL
+/ CPU `view.CopyToCPU(target)`). Used at every `*KeyframeEncoderGpu`
+and `*KeyframeDecoderGpu` partial-readback site.
+
 ## Unreleased
 
 Initial development. Project still in pre-release. See README.md for the
