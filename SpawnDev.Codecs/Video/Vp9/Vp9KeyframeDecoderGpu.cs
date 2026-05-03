@@ -112,16 +112,23 @@ public sealed class Vp9KeyframeDecoderGpu : IDisposable
         int uvLen = yLen / 4;
 
         // ---- Allocate GPU buffers ----
-        using var dTile = _accelerator.Allocate1D<byte>(tileLength);
+        // dFrame holds the full encoded frame, single bulk upload. The
+        // decode kernel sees a SubView starting at tileStartOffset, so
+        // it never reads the uncompressed/compressed header bytes
+        // sitting at frame offset [0..tileStartOffset). Allocating the
+        // full frame instead of just the tile costs a few extra bytes
+        // (uncompressed header + compressed header are ~tens of bytes)
+        // and eliminates the per-decode Array.Copy of codec data on
+        // the host side per cardinal rule.
+        using var dFrame = _accelerator.Allocate1D<byte>(frameBytes.Length);
         using var dYRecon = _accelerator.Allocate1D<byte>(yLen);
         using var dURecon = _accelerator.Allocate1D<byte>(uvLen);
         using var dVRecon = _accelerator.Allocate1D<byte>(uvLen);
         using var dDequant = _accelerator.Allocate1D<int>(4);
 
-        // Upload the tile bytes.
-        var tileSlice = new byte[tileLength];
-        Array.Copy(frameBytes, tileStartOffset, tileSlice, 0, tileLength);
-        dTile.View.CopyFromCPU(tileSlice);
+        // Single bulk upload of the entire encoded frame. No host-side
+        // slice copy, no Array.Copy iteration on codec data.
+        dFrame.View.CopyFromCPU(frameBytes);
         // Pre-zero the recon planes via GPU-side memset (avoids host
         // allocation + bus transfer of zeros).
         dYRecon.View.MemSetToZero();
@@ -134,8 +141,11 @@ public sealed class Vp9KeyframeDecoderGpu : IDisposable
             baseQIndex, 0, 0, 0, 0);
 
         // ---- 2. Decode kernel ----
+        // SubView passes the tile slice without copy - the kernel sees
+        // an ArrayView<byte> of length tileLength starting at the tile's
+        // first byte, exactly the contract dTile.View used to provide.
         _decodeKernel.Run(
-            dTile.View,
+            dFrame.View.SubView(tileStartOffset, tileLength),
             dYRecon.View, dURecon.View, dVRecon.View,
             dDequant.View,
             _dByteConsts.View, _dUshortConsts.View,
