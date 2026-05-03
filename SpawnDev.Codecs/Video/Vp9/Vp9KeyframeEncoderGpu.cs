@@ -170,19 +170,19 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         using var dOutFrame = _accelerator.Allocate1D<byte>(worstCaseFrame);
         using var dOutFrameLen = _accelerator.Allocate1D<long>(1);
 
-        // Pre-zero output buffers so the bool encoder's carry-back
-        // pass reads stable bytes.
-        var zeroBytes64 = new byte[64];
-        var zeroBytes32 = new byte[32];
-        var zeroLong1 = new long[1];
-        dCompressedHeader.View.CopyFromCPU(zeroBytes64);
-        dCompressedHeaderLen.View.CopyFromCPU(zeroLong1);
-        dTile.View.CopyFromCPU(new byte[worstCaseTile]);
-        dTileLen.View.CopyFromCPU(zeroLong1);
-        dUncompressedHeader.View.CopyFromCPU(zeroBytes32);
-        dUncompressedHeaderLen.View.CopyFromCPU(zeroLong1);
-        dOutFrame.View.CopyFromCPU(new byte[worstCaseFrame]);
-        dOutFrameLen.View.CopyFromCPU(zeroLong1);
+        // Pre-zero output buffers so the bool encoder's carry-back pass
+        // reads stable bytes. Use GPU-side memset rather than allocating
+        // large CPU zero-arrays and uploading them - this matches the
+        // Vp8 encoder's pattern and avoids ~1MB of CPU-side allocations
+        // and a host->device bus transfer per frame.
+        dCompressedHeader.View.MemSetToZero();
+        dCompressedHeaderLen.View.MemSetToZero();
+        dTile.View.MemSetToZero();
+        dTileLen.View.MemSetToZero();
+        dUncompressedHeader.View.MemSetToZero();
+        dUncompressedHeaderLen.View.MemSetToZero();
+        dOutFrame.View.MemSetToZero();
+        dOutFrameLen.View.MemSetToZero();
 
         dY.View.CopyFromCPU(yPlane);
         dU.View.CopyFromCPU(uPlane);
@@ -190,9 +190,9 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         // Pre-fill recon to zero (sequential kernel overwrites every
         // pixel with prediction + residual but the carry-back path
         // for partial writes wants stable starting state).
-        dYRecon.View.CopyFromCPU(new byte[yLen]);
-        dURecon.View.CopyFromCPU(new byte[uvLen]);
-        dVRecon.View.CopyFromCPU(new byte[uvLen]);
+        dYRecon.View.MemSetToZero();
+        dURecon.View.MemSetToZero();
+        dVRecon.View.MemSetToZero();
 
         // ---- 2. Dispatch dequantizer compute kernel ----
         // y_dc_delta / uv_dc_delta / uv_ac_delta = 0 in v1.
