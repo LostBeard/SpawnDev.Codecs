@@ -1,14 +1,27 @@
 # PLAN - Vorbis Decoder v2: Move Bit-Stream Decode to GPU
 
 **Owner:** Tuvok
-**Status:** Step 1 SHIPPED (2026-05-03 commit `3a1cb5c`). Steps 2-3 queued. v1 in production at 0.2.0-alpha.1 + 0.3.0-rc.1; v2 unblocks the last cardinal-rule gap in the Vorbis decode pipeline.
+**Status:** Steps 1 + 2 SHIPPED (2026-05-03 commits `3a1cb5c` + `da5e064`). Step 3 queued. v1 in production at 0.2.0-alpha.1 + 0.3.0-rc.1; v2 unblocks the last cardinal-rule gap in the Vorbis decode pipeline.
 
 ## Progress 2026-05-03
 
 - **Step 1 (VorbisResidueDecoderGpu)**: ✓ shipped 0.3.0-rc.1 commit `3a1cb5c`. File: `Audio/Vorbis/VorbisResidueDecoderGpu.cs`. Type 0/1 + Type 2 paths covered. Static GPU-callable.
 - **Supporting infrastructure also shipped:** `VorbisSetupHeaderGpu.cs` (flat-pack of full setup header), `VorbisHuffmanCodebookSetGpu.cs` (flat-pack of all codebook trees + multiplicands).
-- **Step 2 (VorbisPacketDecodeKernel)**: NOT YET BUILT. Queued for next focused session.
-- **Step 3 (Update VorbisAudioDecoderGpu.DecodePacket)**: NOT YET BUILT. Depends on Step 2.
+- **Step 2 (VorbisPacketDecodeKernel)**: ✓ shipped commit `da5e064`. File: `Audio/Vorbis/VorbisPacketDecodeKernel.cs`. Single-thread GPU kernel that wires header parse + per-channel floor decode + per-submap residue decode in one dispatch. C# build clean across full solution. Backend IR-compile not yet verified - happens at first kernel load via `accelerator.LoadAutoGroupedStreamKernel`, which Step 3 will do.
+- **Step 3 (Update VorbisAudioDecoderGpu.DecodePacket)**: NOT YET BUILT. Substantial focused work pending.
+
+## Step 3 considerations + sub-steps queued
+
+The kernel's signature has 19 top-level parameters (Index1D + 8 scalars + 1 setup struct + 6 outputs + 3 scratch ArrayViews). `Action<>`'s 16-arity ceiling means `LoadAutoGroupedStreamKernel<...>` won't bind it as-is. Plus the `VorbisPacketDecodeStaticInputs` struct holds 38 ArrayView fields - ILGPU's handling of ArrayView-inside-struct kernel parameters is uncertain (storage-buffer-binding semantics across CUDA / OpenCL / WebGPU differ).
+
+**Step 3 sub-steps:**
+
+1. **Verify struct-of-ArrayView kernel parameter loads on each backend.** Smoke test: `accelerator.LoadAutoGroupedStreamKernel<...>` with the struct param. CUDA/OpenCL/CPU likely fine. WebGPU may need restructuring.
+2. **If struct-of-ArrayView is rejected**, restructure: pass the 38 ArrayViews individually OR flatten more aggressively into a few combined ArrayView<int> + ArrayView<double> with offset tables. Either way, parameter count must fit in Action<16>.
+3. **Pre-build the flat-packed uploads in `VorbisAudioDecoderGpu` constructor.** New fields: `_dCodebookSet` (one allocation per int/double table - ~15 buffers) + `_dSetupConfig` (similar - ~22 buffers) + `_dCodebookParams` (3-int per codebook for Floor1). Construction-time uploads only (CARDINAL rule "metadata struct setup" carve-out).
+4. **Replace `DecodeSpectrumOnCpu` call in `DecodePacketAsync` with the kernel dispatch.** Allocate per-call output buffers (header[5], floorOk[ch], floorIndex[ch], err[1]) + scratch (classifications, doNotDecode, entryVec). Read back the small header arrays.
+5. **Verify against existing 3 Vorbis decoder GPU tests** (SilenceRoundTrip, SilenceOutput_IsSilent, ToneRoundTrip) on CPU + CUDA + OpenCL. Expected: bit-exact match vs CPU reference (the existing tests already do this comparison).
+6. **WebGPU + Wasm enabling**: depends on (a) the struct/binding question above resolving cleanly, (b) Geordi's Wasm OOB Bug 2, and (c) the WebGPU PMT page-load timeout we're currently observing on existing GPU pair tests.
 
 ## Cardinal-rule violation closed in 0.3.0-rc.1 (separate fix)
 
