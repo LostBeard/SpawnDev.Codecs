@@ -59,7 +59,7 @@
 <ul>
     <li><a href="/transcode">Video Transcode</a> - encode + decode all 3 video codecs (VP8, VP9, AV1) via the CPU public API, render YUV-&gt;RGBA on canvas</li>
     <li><a href="/audio">Audio Transcode</a> - encode + decode all 3 audio codecs (FLAC, Vorbis, Opus) via the CPU public API, draw waveform comparison + SNR</li>
-    <li><a href="/gpu-transcode">GPU Pair Demo</a> - encode + decode VP8 + VP9 entirely through ILGPU integration classes (<code>Vp8KeyframeEncoderGpu</code> etc.). 100% GPU-resident. Routes to WebGPU when available, Wasm otherwise</li>
-    <li><a href="/benchmarks">Benchmarks</a> - throughput + compression measurements for FLAC + transforms</li>
+    <li><a href="/gpu-transcode">GPU Pair Demo</a> - encode + decode VP8 + VP9 + AV1 entirely through ILGPU integration classes (<code>Vp8KeyframeEncoderGpu</code> etc.). 100% GPU-resident. Routes to WebGPU when available, Wasm otherwise</li>
+    <li><a href="/benchmarks">Benchmarks</a> - live throughput numbers for every encoder + decoder, both CPU and GPU pair, across the available ILGPU backends</li>
     <li><a href="/tests">Tests</a> - SpawnDev.UnitTesting cross-backend test harness</li>
 </ul>
