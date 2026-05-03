@@ -172,25 +172,26 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
 
         // Upload posteriors (channel-major) + residues (channel-major) + window.
         // Floor curves are produced by the GPU render kernel below; dFloor
-        // pre-zeroed so silent-floor channels stay zero (they don't get a render dispatch).
-        var posteriorFlat = new int[(long)channels * _maxXListLength];
-        var residueFlat = new float[specBufferLen];
-        var zeroFloor = new float[specBufferLen];
+        // is pre-zeroed via GPU memset so silent-floor channels stay zero
+        // (they don't get a render dispatch).
+        //
+        // Each channel uploads directly into its slot via SubView - no
+        // host-side flat buffer, no Array.Copy iteration over codec data.
+        // dPosteriors is pre-zeroed first because silent channels skip
+        // their upload (the if-guard) and need to be left at zero.
+        dPosteriors.View.MemSetToZero();
         for (int ch = 0; ch < channels; ch++)
         {
             if (bitstream.FloorOk[ch] && bitstream.FloorPosteriors[ch] is { } yArr)
-                Array.Copy(yArr, 0, posteriorFlat, (long)ch * _maxXListLength, yArr.Length);
-            Array.Copy(bitstream.Residues[ch], 0, residueFlat, (long)ch * halfBlock, halfBlock);
+                dPosteriors.View.SubView((long)ch * _maxXListLength, yArr.Length).CopyFromCPU(yArr);
+            dResidue.View.SubView((long)ch * halfBlock, halfBlock).CopyFromCPU(bitstream.Residues[ch]);
         }
-        dPosteriors.View.CopyFromCPU(posteriorFlat);
-        dResidue.View.CopyFromCPU(residueFlat);
-        dFloor.View.CopyFromCPU(zeroFloor);
+        dFloor.View.MemSetToZero();
         dWindow.View.CopyFromCPU(VorbisWindow.GenerateCanonical(blockSize));
 
         // Spec must start zeroed - silent-floor channels are left as zero
         // (the GPU multiply only runs for floorOk channels).
-        var zeroSpec = new float[specBufferLen];
-        dSpec.View.CopyFromCPU(zeroSpec);
+        dSpec.View.MemSetToZero();
 
         // Step 1.5: GPU floor curve render per non-silent channel. Single-
         // thread kernel orchestrating the per-channel render via
