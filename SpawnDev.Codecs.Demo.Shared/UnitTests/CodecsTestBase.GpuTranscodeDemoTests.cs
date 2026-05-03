@@ -22,20 +22,17 @@ public abstract partial class CodecsTestBase
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            // SpawnDev.ILGPU 4.9.3 WebGPU codegen has an unhandled
-            // 'SubViewValue' IR node case for kernels invoked with a
-            // SubView ArrayView (introduced by Codecs commit 2cb38a5).
-            // Wasm has a memory OOB on the same kernel chain. Both are
-            // cross-lane bugs filed with Geordi; skip the demo round-trip
-            // on browser backends until the fixes ship. Desktop backends
-            // (CPU / CUDA / OpenCL) cover the GPU pair surface bit-exact.
-            if (acc.AcceleratorType is not (AcceleratorType.CPU
-                                            or AcceleratorType.Cuda
-                                            or AcceleratorType.OpenCL))
+            // SpawnDev.ILGPU 4.9.5-rc.1 ships the WebGPU SubView codegen
+            // fix (Geordi 2026-05-03), so WebGPU is back online for these
+            // tests. Wasm still has a memory OOB on the Vp8/9 encoder
+            // kernel chain (Geordi's Bug 2, in-progress); keep Wasm gated
+            // until that ships. Desktop backends (CPU / CUDA / OpenCL)
+            // cover the GPU pair surface bit-exact.
+            if (acc.AcceleratorType == AcceleratorType.Wasm)
             {
                 throw new UnsupportedTestException(
-                    $"GPU pair demo round-trip on {acc.AcceleratorType} backend is gated on SpawnDev.ILGPU cross-lane fixes "
-                    + "(WebGPU SubView IR codegen + Wasm memory OOB). Existing GPU pair tests cover desktop backends.");
+                    "GPU pair demo round-trip on Wasm backend is gated on SpawnDev.ILGPU Wasm memory OOB fix "
+                    + "(in-progress, Geordi). Existing GPU pair tests cover desktop + WebGPU backends.");
             }
 
             const int width = 64, height = 64, q = 30;
@@ -67,20 +64,17 @@ public abstract partial class CodecsTestBase
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            // SpawnDev.ILGPU 4.9.3 WebGPU codegen has an unhandled
-            // 'SubViewValue' IR node case for kernels invoked with a
-            // SubView ArrayView (introduced by Codecs commit 2cb38a5).
-            // Wasm has a memory OOB on the same kernel chain. Both are
-            // cross-lane bugs filed with Geordi; skip the demo round-trip
-            // on browser backends until the fixes ship. Desktop backends
-            // (CPU / CUDA / OpenCL) cover the GPU pair surface bit-exact.
-            if (acc.AcceleratorType is not (AcceleratorType.CPU
-                                            or AcceleratorType.Cuda
-                                            or AcceleratorType.OpenCL))
+            // SpawnDev.ILGPU 4.9.5-rc.1 ships the WebGPU SubView codegen
+            // fix (Geordi 2026-05-03), so WebGPU is back online for these
+            // tests. Wasm still has a memory OOB on the Vp8/9 encoder
+            // kernel chain (Geordi's Bug 2, in-progress); keep Wasm gated
+            // until that ships. Desktop backends (CPU / CUDA / OpenCL)
+            // cover the GPU pair surface bit-exact.
+            if (acc.AcceleratorType == AcceleratorType.Wasm)
             {
                 throw new UnsupportedTestException(
-                    $"GPU pair demo round-trip on {acc.AcceleratorType} backend is gated on SpawnDev.ILGPU cross-lane fixes "
-                    + "(WebGPU SubView IR codegen + Wasm memory OOB). Existing GPU pair tests cover desktop backends.");
+                    "GPU pair demo round-trip on Wasm backend is gated on SpawnDev.ILGPU Wasm memory OOB fix "
+                    + "(in-progress, Geordi). Existing GPU pair tests cover desktop + WebGPU backends.");
             }
 
             const int width = 64, height = 64, q = 30;
@@ -109,20 +103,17 @@ public abstract partial class CodecsTestBase
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            // SpawnDev.ILGPU 4.9.3 WebGPU codegen has an unhandled
-            // 'SubViewValue' IR node case for kernels invoked with a
-            // SubView ArrayView (introduced by Codecs commit 2cb38a5).
-            // Wasm has a memory OOB on the same kernel chain. Both are
-            // cross-lane bugs filed with Geordi; skip the demo round-trip
-            // on browser backends until the fixes ship. Desktop backends
-            // (CPU / CUDA / OpenCL) cover the GPU pair surface bit-exact.
-            if (acc.AcceleratorType is not (AcceleratorType.CPU
-                                            or AcceleratorType.Cuda
-                                            or AcceleratorType.OpenCL))
+            // SpawnDev.ILGPU 4.9.5-rc.1 ships the WebGPU SubView codegen
+            // fix (Geordi 2026-05-03), so WebGPU is back online for these
+            // tests. Wasm still has a memory OOB on the Vp8/9 encoder
+            // kernel chain (Geordi's Bug 2, in-progress); keep Wasm gated
+            // until that ships. Desktop backends (CPU / CUDA / OpenCL)
+            // cover the GPU pair surface bit-exact.
+            if (acc.AcceleratorType == AcceleratorType.Wasm)
             {
                 throw new UnsupportedTestException(
-                    $"GPU pair demo round-trip on {acc.AcceleratorType} backend is gated on SpawnDev.ILGPU cross-lane fixes "
-                    + "(WebGPU SubView IR codegen + Wasm memory OOB). Existing GPU pair tests cover desktop backends.");
+                    "GPU pair demo round-trip on Wasm backend is gated on SpawnDev.ILGPU Wasm memory OOB fix "
+                    + "(in-progress, Geordi). Existing GPU pair tests cover desktop + WebGPU backends.");
             }
 
             const int width = 64, height = 64, q = 32;
