@@ -1,0 +1,382 @@
+@page "/audio"
+@using System.Diagnostics
+@using SpawnDev.BlazorJS
+@using SpawnDev.BlazorJS.JSObjects
+@using SpawnDev.Codecs.Audio.Flac
+@using SpawnDev.Codecs.Audio.Opus
+@using SpawnDev.Codecs.Audio.Vorbis
+@inject BlazorJSRuntime JS
+
+<PageTitle>SpawnDev.Codecs Audio Demo</PageTitle>
+
+<h1>Browser Audio Transcode Demo</h1>
+
+<p>Encode a synthetic mono PCM signal through every audio codec in this library, decode it back, and compare the recovered waveform to the source. All work runs in the browser via SpawnDev.Codecs Blazor WASM (no native binaries, no patent-encumbered codecs).</p>
+
+<div style="margin-bottom: 1rem;">
+    <label>Frequency (Hz): <input type="number" @bind="ToneHz" style="width:6em" min="50" max="8000" step="50" /></label>
+    <label>Duration (s): <input type="number" @bind="DurationSec" style="width:5em" min="0.25" max="5" step="0.25" /></label>
+    <label>Amplitude: <input type="number" @bind="Amplitude" style="width:5em" min="0.05" max="1.0" step="0.05" /></label>
+    <button class="btn btn-primary" @onclick="RunAsync" disabled="@_running">
+        @(_running ? "Running..." : "Encode + decode all 3 codecs")
+    </button>
+</div>
+
+@if (_results.Count > 0)
+{
+    <table style="border-collapse:collapse;">
+        <thead>
+            <tr>
+                <th style="text-align:left;padding:4px 12px;">Codec</th>
+                <th style="text-align:right;padding:4px 12px;">Encoded bytes</th>
+                <th style="text-align:right;padding:4px 12px;">Compression</th>
+                <th style="text-align:right;padding:4px 12px;">Encode ms</th>
+                <th style="text-align:right;padding:4px 12px;">Decode ms</th>
+                <th style="text-align:right;padding:4px 12px;">SNR (dB)</th>
+                <th style="text-align:right;padding:4px 12px;">Decoded samples</th>
+                <th style="text-align:left;padding:4px 12px;">Result</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in _results)
+            {
+                <tr>
+                    <td style="padding:4px 12px;">@r.Codec</td>
+                    <td style="text-align:right;padding:4px 12px;">@r.EncBytes</td>
+                    <td style="text-align:right;padding:4px 12px;">@r.CompressionRatio.ToString("F2")x</td>
+                    <td style="text-align:right;padding:4px 12px;">@r.EncMs.ToString("F1")</td>
+                    <td style="text-align:right;padding:4px 12px;">@r.DecMs.ToString("F1")</td>
+                    <td style="text-align:right;padding:4px 12px;">
+                        @(double.IsInfinity(r.SnrDb) ? "inf" : r.SnrDb.ToString("F1"))
+                    </td>
+                    <td style="text-align:right;padding:4px 12px;">@r.DecodedSamples</td>
+                    <td style="padding:4px 12px;">@r.Status</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<h2>Source waveform</h2>
+<canvas id="src-wave" width="800" height="120" style="border:1px solid #888;"></canvas>
+
+<h2>Decoded waveforms</h2>
+<div style="display:flex; flex-direction:column; gap:1rem;">
+    <div>
+        <h3 style="margin-bottom:0;">FLAC (lossless)</h3>
+        <canvas id="flac-wave" width="800" height="120" style="border:1px solid #888;"></canvas>
+    </div>
+    <div>
+        <h3 style="margin-bottom:0;">Vorbis (lossy, Ogg)</h3>
+        <canvas id="vorbis-wave" width="800" height="120" style="border:1px solid #888;"></canvas>
+    </div>
+    <div>
+        <h3 style="margin-bottom:0;">Opus (lossy, Ogg, 48 kHz)</h3>
+        <canvas id="opus-wave" width="800" height="120" style="border:1px solid #888;"></canvas>
+    </div>
+</div>
+
+@code {
+    int ToneHz = 440;
+    double DurationSec = 1.0;
+    double Amplitude = 0.5;
+    bool _running;
+
+    sealed record Result(
+        string Codec,
+        int EncBytes,
+        double CompressionRatio,
+        double EncMs,
+        double DecMs,
+        double SnrDb,
+        int DecodedSamples,
+        string Status);
+
+    List<Result> _results = new();
+
+    const int SampleRateHz = 44100;
+    const int OpusSampleRateHz = 48000; // Opus is locked to 48 kHz internally
+
+    async Task RunAsync()
+    {
+        _running = true;
+        _results = new List<Result>();
+        StateHasChanged();
+        await Task.Yield();
+
+        // Synthesize a mono sine wave at SampleRateHz.
+        int sampleCount = (int)(DurationSec * SampleRateHz);
+        var srcFloat = new float[sampleCount];
+        var srcInt16 = new int[sampleCount]; // FLAC takes int samples
+        for (int i = 0; i < sampleCount; i++)
+        {
+            double t = i / (double)SampleRateHz;
+            float v = (float)(Amplitude * Math.Sin(2.0 * Math.PI * ToneHz * t));
+            srcFloat[i] = v;
+            srcInt16[i] = (int)Math.Round(v * 32767.0);
+        }
+        DrawWave("src-wave", srcFloat, 800, 120);
+
+        // FLAC: int PCM -> .flac bytes -> int PCM (lossless)
+        await RunCodec("FLAC", "flac-wave",
+            sampleCount,
+            () =>
+            {
+                var bytes = FlacEncoder.EncodeStream(srcInt16, SampleRateHz, channels: 1, bitsPerSample: 16);
+                return bytes;
+            },
+            (bytes) =>
+            {
+                var dec = FlacDecoder.Decode(bytes);
+                // FlacDecoder returns interleaved int samples in original bit-depth.
+                var decFloat = new float[dec.InterleavedSamples.Length];
+                for (int i = 0; i < decFloat.Length; i++)
+                    decFloat[i] = dec.InterleavedSamples[i] / 32767.0f;
+                return decFloat;
+            },
+            srcFloat, samplesPerSecondOfDecoded: SampleRateHz);
+
+        // Vorbis: float PCM -> .ogg -> float PCM
+        await RunCodec("Vorbis", "vorbis-wave",
+            sampleCount,
+            () =>
+            {
+                var enc = new VorbisAudioEncoder(new VorbisAudioEncoderOptions
+                {
+                    SampleRateHz = SampleRateHz,
+                    Channels = 1,
+                    BlockSize = 1024,
+                });
+                return enc.EncodeStream(srcFloat);
+            },
+            (bytes) =>
+            {
+                var dec = VorbisOggDecoder.Decode(bytes);
+                return dec.InterleavedSamples;
+            },
+            srcFloat, samplesPerSecondOfDecoded: SampleRateHz);
+
+        // Opus: chunk into 20 ms frames at 48 kHz, encode -> .opus -> 48 kHz float PCM.
+        // Resample source from SampleRateHz to 48 kHz for fair Opus comparison.
+        var srcOpus = ResampleLinear(srcFloat, SampleRateHz, OpusSampleRateHz);
+        int frameSamples48k = OpusSampleRateHz / 50; // 20 ms = 960 samples @ 48 kHz
+        await RunCodec("Opus", "opus-wave",
+            srcOpus.Length,
+            () => EncodeOpusOgg(srcOpus, frameSamples48k),
+            async (bytes) =>
+            {
+                var dec = await OpusOggDecoder.DecodeAsync(bytes);
+                return dec.InterleavedSamples48kHz;
+            },
+            srcOpus, samplesPerSecondOfDecoded: OpusSampleRateHz);
+
+        _running = false;
+        StateHasChanged();
+    }
+
+    static byte[] EncodeOpusOgg(float[] mono48k, int frameSamples)
+    {
+        using var enc = new OpusEncoder(new OpusEncoderConfig
+        {
+            SampleRateHz = OpusSampleRateHz,
+            ChannelCount = 1,
+            Application = OpusEncoderApplication.Audio,
+        });
+        var packets = new List<byte[]>();
+        var packetBuf = new byte[1500]; // RFC 6716 max ~1275, give some headroom.
+        int idx = 0;
+        while (idx + frameSamples <= mono48k.Length)
+        {
+            int n = enc.EncodeFrame(mono48k.AsSpan(idx, frameSamples), packetBuf, frameSamples);
+            packets.Add(packetBuf.AsSpan(0, n).ToArray());
+            idx += frameSamples;
+        }
+        // Tail: pad the last partial frame with silence so EncodeFrame accepts it.
+        if (idx < mono48k.Length)
+        {
+            var tail = new float[frameSamples];
+            int rem = mono48k.Length - idx;
+            mono48k.AsSpan(idx, rem).CopyTo(tail);
+            int n = enc.EncodeFrame(tail, packetBuf, frameSamples);
+            packets.Add(packetBuf.AsSpan(0, n).ToArray());
+        }
+        return OpusOggEncoder.Encode(packets, new OpusOggEncoderOptions
+        {
+            OutputChannels = 1,
+            InputSampleRateHz = OpusSampleRateHz,
+            PreSkip = 312,
+            Vendor = "SpawnDev.Codecs Audio Demo",
+        });
+    }
+
+    static float[] ResampleLinear(float[] src, int srcRate, int dstRate)
+    {
+        if (srcRate == dstRate) return src;
+        long dstLen = (long)src.Length * dstRate / srcRate;
+        var dst = new float[(int)dstLen];
+        double ratio = (double)srcRate / dstRate;
+        for (int i = 0; i < dst.Length; i++)
+        {
+            double srcIdx = i * ratio;
+            int s0 = (int)srcIdx;
+            int s1 = Math.Min(s0 + 1, src.Length - 1);
+            float frac = (float)(srcIdx - s0);
+            dst[i] = src[s0] * (1 - frac) + src[s1] * frac;
+        }
+        return dst;
+    }
+
+    async Task RunCodec(
+        string codec, string canvasId, int sourceSampleCount,
+        Func<byte[]> encode,
+        Func<byte[], float[]> decode,
+        float[] reference, int samplesPerSecondOfDecoded)
+    {
+        await RunCodecCore(codec, canvasId, sourceSampleCount,
+            () => Task.FromResult(encode()),
+            (bytes) => Task.FromResult(decode(bytes)),
+            reference, samplesPerSecondOfDecoded);
+    }
+
+    async Task RunCodec(
+        string codec, string canvasId, int sourceSampleCount,
+        Func<byte[]> encode,
+        Func<byte[], Task<float[]>> decode,
+        float[] reference, int samplesPerSecondOfDecoded)
+    {
+        await RunCodecCore(codec, canvasId, sourceSampleCount,
+            () => Task.FromResult(encode()),
+            decode,
+            reference, samplesPerSecondOfDecoded);
+    }
+
+    async Task RunCodecCore(
+        string codec, string canvasId, int sourceSampleCount,
+        Func<Task<byte[]>> encode,
+        Func<byte[], Task<float[]>> decode,
+        float[] reference, int samplesPerSecondOfDecoded)
+    {
+        var swEnc = Stopwatch.StartNew();
+        byte[] encoded;
+        try { encoded = await encode(); }
+        catch (Exception ex)
+        {
+            _results.Add(new Result(codec, 0, 0, 0, 0, 0, 0, $"ENCODE FAIL: {ex.Message}"));
+            StateHasChanged();
+            return;
+        }
+        swEnc.Stop();
+
+        var swDec = Stopwatch.StartNew();
+        float[] decoded;
+        try { decoded = await decode(encoded); }
+        catch (Exception ex)
+        {
+            _results.Add(new Result(codec, encoded.Length, 0, swEnc.Elapsed.TotalMilliseconds, 0, 0, 0,
+                $"DECODE FAIL: {ex.Message}"));
+            StateHasChanged();
+            return;
+        }
+        swDec.Stop();
+
+        // Compute SNR vs reference (over the overlapping range, after lining up
+        // potential codec-side latency by trimming the longer of the two).
+        double snr = ComputeSnrDb(reference, decoded);
+
+        // Source PCM as int16 at SampleRateHz: 2 bytes per sample.
+        int rawBytes = reference.Length * 2;
+        double compression = encoded.Length > 0 ? (double)rawBytes / encoded.Length : 0;
+
+        DrawWave(canvasId, decoded, 800, 120);
+
+        _results.Add(new Result(
+            codec,
+            encoded.Length,
+            compression,
+            swEnc.Elapsed.TotalMilliseconds,
+            swDec.Elapsed.TotalMilliseconds,
+            snr,
+            decoded.Length,
+            "OK"));
+        StateHasChanged();
+        await Task.Yield();
+    }
+
+    static double ComputeSnrDb(float[] reference, float[] decoded)
+    {
+        if (reference.Length == 0 || decoded.Length == 0) return 0;
+        // Pick the smaller length; both encoders may add or trim a bit of latency.
+        int n = Math.Min(reference.Length, decoded.Length);
+        double sigPow = 0;
+        double errPow = 0;
+        for (int i = 0; i < n; i++)
+        {
+            sigPow += (double)reference[i] * reference[i];
+            double e = reference[i] - decoded[i];
+            errPow += e * e;
+        }
+        if (errPow <= 0) return double.PositiveInfinity;
+        if (sigPow <= 0) return 0;
+        return 10.0 * Math.Log10(sigPow / errPow);
+    }
+
+    void DrawWave(string canvasId, float[] samples, int width, int height)
+    {
+        // Min/max per pixel column for a fast peak waveform.
+        var rgba = new byte[width * height * 4];
+        // Fill background light gray.
+        for (int i = 0; i < rgba.Length; i += 4)
+        {
+            rgba[i + 0] = 250;
+            rgba[i + 1] = 250;
+            rgba[i + 2] = 250;
+            rgba[i + 3] = 255;
+        }
+        // Center axis (gray).
+        int yMid = height / 2;
+        for (int x = 0; x < width; x++)
+        {
+            int dst = (yMid * width + x) * 4;
+            rgba[dst + 0] = 200;
+            rgba[dst + 1] = 200;
+            rgba[dst + 2] = 200;
+            rgba[dst + 3] = 255;
+        }
+        if (samples.Length > 0)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int s0 = (int)((long)x * samples.Length / width);
+                int s1 = (int)((long)(x + 1) * samples.Length / width);
+                if (s1 <= s0) s1 = s0 + 1;
+                if (s1 > samples.Length) s1 = samples.Length;
+                float min = float.MaxValue, max = float.MinValue;
+                for (int i = s0; i < s1; i++)
+                {
+                    float v = samples[i];
+                    if (v < min) min = v;
+                    if (v > max) max = v;
+                }
+                int yMin = (int)Math.Clamp(yMid - max * (height / 2 - 2), 0, height - 1);
+                int yMax = (int)Math.Clamp(yMid - min * (height / 2 - 2), 0, height - 1);
+                if (yMin > yMax) (yMin, yMax) = (yMax, yMin);
+                for (int y = yMin; y <= yMax; y++)
+                {
+                    int dst = (y * width + x) * 4;
+                    rgba[dst + 0] = 30;
+                    rgba[dst + 1] = 100;
+                    rgba[dst + 2] = 200;
+                    rgba[dst + 3] = 255;
+                }
+            }
+        }
+        using var doc = JS.Get<Document>("document");
+        using var canvas = doc.GetElementById<HTMLCanvasElement>(canvasId);
+        if (canvas is null) return;
+        using var ctx = canvas.Get2DContext();
+        using var imageData = ctx.CreateImageData(width, height);
+        using var data = imageData.Data;
+        data.Set(rgba);
+        ctx.PutImageData(imageData, 0, 0);
+    }
+}
