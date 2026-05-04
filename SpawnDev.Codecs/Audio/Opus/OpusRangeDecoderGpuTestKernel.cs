@@ -26,6 +26,12 @@ public sealed class OpusRangeDecoderGpuTestKernel : IDisposable
         ArrayView<byte>, int, int,
         ArrayView<int>, int> _kernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<byte>, int, int,
+        int,
+        ArrayView<int>, int> _bitLogPKernel;
+
     /// <summary>Compile.</summary>
     public OpusRangeDecoderGpuTestKernel(Accelerator accelerator)
     {
@@ -35,6 +41,44 @@ public sealed class OpusRangeDecoderGpuTestKernel : IDisposable
             ArrayView<byte>, int, int,
             ArrayView<byte>, int, int,
             ArrayView<int>, int>(DecodeIcdfKernel);
+        _bitLogPKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<byte>, int, int,
+            int,
+            ArrayView<int>, int>(DecodeBitLogPKernel);
+    }
+
+    /// <summary>
+    /// Decode <paramref name="bitCount"/> bits from <paramref name="packet"/>
+    /// via repeated <c>DecodeBitLogP</c> calls at the given
+    /// <paramref name="logp"/> probability. Decoded bits (0/1) go into
+    /// <paramref name="decodedOut"/>. Used by CELT silence-flag /
+    /// transient-flag / intra-flag / post-filter-flag bit decodes.
+    /// </summary>
+    public void RunDecodeBitLogP(
+        ArrayView<byte> packet, int packetStart, int packetStorage,
+        int logp,
+        ArrayView<int> decodedOut, int bitCount)
+    {
+        if (bitCount < 0) throw new ArgumentOutOfRangeException(nameof(bitCount));
+        if (decodedOut.Length < bitCount)
+            throw new ArgumentException("decodedOut too short.", nameof(decodedOut));
+        _bitLogPKernel(1, packet, packetStart, packetStorage,
+            logp, decodedOut, bitCount);
+    }
+
+    private static void DecodeBitLogPKernel(
+        Index1D _,
+        ArrayView<byte> packet, int packetStart, int packetStorage,
+        int logp,
+        ArrayView<int> decodedOut, int bitCount)
+    {
+        var state = OpusRangeDecoderGpu.Init(packet, packetStart, (uint)packetStorage);
+        for (int i = 0; i < bitCount; i++)
+        {
+            decodedOut[i] = OpusRangeDecoderGpu.DecodeBitLogP(
+                ref state, packet, packetStart, (uint)packetStorage, logp);
+        }
     }
 
     /// <summary>

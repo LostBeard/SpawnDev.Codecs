@@ -31,6 +31,89 @@ public abstract partial class CodecsTestBase
         return enc.ToArray();
     }
 
+    /// <summary>Encode N bits via OpusRangeEncoder.EncodeBitLogP at probability `logp`.</summary>
+    private static byte[] OpusEncodeBitLogPSequenceCpu(int[] bits, int logp, int bufCapacity)
+    {
+        var enc = new OpusRangeEncoder(bufCapacity);
+        for (int i = 0; i < bits.Length; i++)
+            enc.EncodeBitLogP(bits[i], logp);
+        enc.Done();
+        return enc.ToArray();
+    }
+
+    private static async Task<int[]> OpusDecodeBitLogPSequenceGpuAsync(
+        Accelerator acc, byte[] packetBytes, int logp, int bitCount)
+    {
+        using var dPacket = acc.Allocate1D<byte>(packetBytes.Length);
+        using var dDecoded = acc.Allocate1D<int>(bitCount);
+        dPacket.View.CopyFromCPU(packetBytes);
+        using var kernel = new OpusRangeDecoderGpuTestKernel(acc);
+        kernel.RunDecodeBitLogP(
+            dPacket.View, 0, packetBytes.Length, logp,
+            dDecoded.View, bitCount);
+        await acc.SynchronizeAsync();
+        var decoded = await dDecoded.CopyToHostAsync();
+        var slice = new int[bitCount];
+        Array.Copy(decoded, slice, bitCount);
+        return slice;
+    }
+
+    [TestMethod]
+    public async Task OpusRangeDecoderGpu_DecodeBitLogP_LogP15Mixed_BitExactVsCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            if (acc.AcceleratorType == AcceleratorType.WebGPU)
+                throw new UnsupportedTestException(
+                    "OpusRangeDecoderGpu.DecodeBitLogP fails on WebGPU at the first decoded bit "
+                    + "(returns 1 instead of 0 for fresh-init state). DecodeIcdf works on WebGPU "
+                    + "with the same Init/Normalize, so the bug is specific to DecodeBitLogP's "
+                    + "code path - likely an unsigned-compare or ternary codegen issue. Tracked at "
+                    + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-decodebitlogp-webgpu-2026-05-04.md.");
+            // logp=15 is the CELT silence-flag setting (probability ~1/2^15 for symbol 1).
+            // Encode a known mix of 0/1 bits and verify the GPU decoder reproduces them.
+            int[] bits = new int[64];
+            var rng = new Random(123456);
+            for (int i = 0; i < bits.Length; i++)
+                bits[i] = rng.Next(0, 32) == 0 ? 1 : 0; // ~3% ones, dominated by zeros (matches logp=15 distribution)
+
+            byte[] encoded = OpusEncodeBitLogPSequenceCpu(bits, logp: 15, bufCapacity: 256);
+            int[] gpuDecoded = await OpusDecodeBitLogPSequenceGpuAsync(acc, encoded, logp: 15, bitCount: bits.Length);
+
+            for (int i = 0; i < bits.Length; i++)
+                if (bits[i] != gpuDecoded[i])
+                    throw new Exception($"bit[{i}] mismatch: encoded={bits[i]} gpu={gpuDecoded[i]}");
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
+    public async Task OpusRangeDecoderGpu_DecodeBitLogP_LogP1FairCoin_BitExactVsCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            if (acc.AcceleratorType == AcceleratorType.WebGPU)
+                throw new UnsupportedTestException(
+                    "OpusRangeDecoderGpu.DecodeBitLogP gated on WebGPU codegen issue (see LogP15 test).");
+            // logp=1 is a fair-coin probability (50/50). Used by CELT transient-flag
+            // (logp=3, ~1/8 for transients) and other near-uniform binary decisions.
+            int[] bits = new int[128];
+            var rng = new Random(777);
+            for (int i = 0; i < bits.Length; i++)
+                bits[i] = rng.Next(0, 2);
+
+            byte[] encoded = OpusEncodeBitLogPSequenceCpu(bits, logp: 1, bufCapacity: 256);
+            int[] gpuDecoded = await OpusDecodeBitLogPSequenceGpuAsync(acc, encoded, logp: 1, bitCount: bits.Length);
+
+            for (int i = 0; i < bits.Length; i++)
+                if (bits[i] != gpuDecoded[i])
+                    throw new Exception($"bit[{i}] mismatch: encoded={bits[i]} gpu={gpuDecoded[i]}");
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
     private static async Task<int[]> OpusDecodeIcdfSequenceGpuAsync(
         Accelerator acc,
         byte[] packetBytes,
