@@ -1,5 +1,35 @@
 # SpawnDev.Codecs CHANGELOG
 
+## 0.3.0-rc.7 (2026-05-04, local only)
+
+**Headline: SilkDecodeFrameGpu multi-frame state-rolling proven bit-exact + signal-type/sample-rate matrix complete + ILGPU rc.11 bump.**
+
+`SilkDecodeFrameGpu_TwoFrameStateRolling_NB_BitExactVsCpu` decodes 2
+consecutive voiced NB frames threading SLpcQ14Buf + OutBuf + PrevGainQ16
+across calls, comparing both frames' PCM bit-exactly to CPU
+`SilkDecodeFrame.Decode`. Validates the orchestrator is multi-frame
+ready end-to-end - frame N+1's LTP synthesis correctly reads frame N's
+post-finalize OutBuf history, frame N+1's gain-adjust correctly chains
+from frame N's last subframe gain.
+
+Plus full signal-type × sample-rate matrix at the FRAME level:
+- Voiced + Unvoiced + Inactive (3 signal types)
+- NB (8 kHz / subfr=40) + MB (12 kHz / 60) + WB (16 kHz / 80)
+
+`SilkDecodeFrameGpuOrchestrator` constructor reduced from 6 to 5 kernels
+(`InitStateKernel` folded into `IndicesAdapterKernel`).
+
+Plus DecodeBitLogP CELT-prep tests on `OpusRangeDecoderGpu` - bit-exact
+vs CPU on CPU + CUDA + OpenCL + Wasm (WebGPU has a separate codegen
+issue tracked at
+`_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-decodebitlogp-webgpu-2026-05-04.md`).
+
+PackageReference SpawnDev.ILGPU 4.9.5-rc.11 (Wasm dispatcher
+host-write-vs-queued-dispatch race fix - YOLOv8 Softmax bug on Data's
+side; SILK pipeline benefits transitively).
+
+Source on master commit `623ca5e`. 13 commits since rc.6.
+
 ## 0.3.0-rc.6 (2026-05-04, local only)
 
 **Headline: Full SILK per-frame decoder GPU pipeline complete (bitstream → PCM).**
