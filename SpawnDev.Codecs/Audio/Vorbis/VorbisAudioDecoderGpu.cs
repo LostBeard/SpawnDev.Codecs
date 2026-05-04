@@ -339,22 +339,17 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         //     WebGPU (or we restructure to combine 36 int fields into one
         //     ArrayView<int> with offset table), this branch goes away and v2
         //     ships everywhere.
-        // 2026-05-04 rc.6 status:
+        // 2026-05-04 rc.8 status:
         //   - Desktop (CPU + CUDA + OpenCL): v2 path bit-exact.
-        //   - WebGPU: kernel COMPILES (binding-count coalesce works,
-        //     verified by VorbisPacketDecodeKernel_LoadsOnAccelerator
-        //     smoke test 3.84s) but full Vorbis decoder PMT hits a 30s
-        //     PMT-side WaitForSelectorAsync timeout during cumulative
-        //     kernel cold-start. Dispatch verification deferred until
-        //     PMT timeout source is resolved.
-        //   - Wasm: NEW Wasm dispatch OOB on the v2 kernel
-        //     (`disp=19 pages=2 mem=131072 ... 6 views`). Filed
-        //     separately. Different shape from the Vp9 KeyframeEncoder
-        //     Wasm OOB (different kernel, different views).
-        // Until both browser-backend issues close, keep v2 on desktop
-        // only and Wasm + WebGPU on v1 fallback.
-        bool useV2Path = _accelerator.AcceleratorType is
-            AcceleratorType.CPU or AcceleratorType.Cuda or AcceleratorType.OpenCL;
+        //   - WebGPU: rc.5 binding-count coalesce + rc.7 GLSL/codegen
+        //     fixes unblock the v2 kernel.
+        //   - Wasm: rc.8 multi-view body-struct decomp fix unblocks the
+        //     v2 kernel (was silently corrupting V1..V37 of the
+        //     38-ArrayView VorbisPacketDecodeStaticInputs struct prior
+        //     to rc.8; Geordi shipped fix on nuget.org with explicit
+        //     "Tuvok — Vorbis Wasm path is GO" greenlight).
+        // v2 path now ships on every backend.
+        bool useV2Path = true;
 
         int blockSize;
         int halfBlock;
