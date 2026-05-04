@@ -67,7 +67,11 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
     /// <summary>
     /// V1 cap on miColsAligned (frame width / 8). Limits frame width
     /// to 64 * 8 = 512 pixels for now. Throws at <see cref="Run"/>
-    /// time if exceeded so the limit surfaces early.
+    /// time if exceeded so the limit surfaces early. Lifting this
+    /// grows per-thread local memory (~12 × MaxMiColsAligned bytes)
+    /// which slows WebGPU kernel compile beyond PMT's 30s budget;
+    /// leave at 64 until WebGPU compile speed is addressed (likely
+    /// part of Geordi's task #33 sub-word coalesce work).
     /// </summary>
     public const int MaxMiColsAligned = 64;
 
