@@ -39,11 +39,6 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
     private readonly Action<
         Index1D,
         ArrayView<byte>, int, int,
-        ArrayView<OpusRangeDecoderGpuState>> _initStateKernel;
-
-    private readonly Action<
-        Index1D,
-        ArrayView<byte>, int, int,
         SilkIndicesInputs,
         SilkIndicesScalars,
         ArrayView<OpusRangeDecoderGpuState>,
@@ -85,11 +80,6 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
     public SilkDecodeFrameGpuOrchestrator(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
-
-        _initStateKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D,
-            ArrayView<byte>, int, int,
-            ArrayView<OpusRangeDecoderGpuState>>(InitStateKernel);
 
         _indicesKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
@@ -149,7 +139,8 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
         ArrayView<int> indicesOut,
         ArrayView<short> pulsesOut)
     {
-        _initStateKernel(1, packet, packetStart, packetStorage, stateBuf);
+        // IndicesAdapterKernel inits state from packet at the start of the
+        // first dispatch, so a separate InitStateKernel is unnecessary.
         _indicesKernel(1, packet, packetStart, packetStorage,
             indicesInputs, indicesScalars, stateBuf, indicesOut);
         _pulsesKernel(1, packet, packetStart, packetStorage,
@@ -294,19 +285,11 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
 
     // -------- Kernel bodies --------
 
-    /// <summary>Initialize the range-decoder state at <c>stateBuf[0]</c>
-    /// from the packet bytes. Run once at the start of each frame.</summary>
-    private static void InitStateKernel(
-        Index1D _,
-        ArrayView<byte> packet, int packetStart, int packetStorage,
-        ArrayView<OpusRangeDecoderGpuState> stateBuf)
-    {
-        stateBuf[0] = OpusRangeDecoderGpu.Init(packet, packetStart, (uint)packetStorage);
-    }
-
-    /// <summary>Phase A.1: load state from buffer, call
-    /// <see cref="SilkIndicesDecoderGpu.Decode"/>, save state back to
-    /// buffer.</summary>
+    /// <summary>Phase A.1: init the range-decoder state from the packet
+    /// bytes, call <see cref="SilkIndicesDecoderGpu.Decode"/>, save state
+    /// to <paramref name="stateBuf"/>[0]. Init is folded in here (vs a
+    /// separate InitStateKernel dispatch) to keep the orchestrator's kernel
+    /// count down on backends with cold-start compile pressure.</summary>
     private static void IndicesAdapterKernel(
         Index1D _,
         ArrayView<byte> packet, int packetStart, int packetStorage,
@@ -315,7 +298,7 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
         ArrayView<OpusRangeDecoderGpuState> stateBuf,
         ArrayView<int> indicesOut)
     {
-        var state = stateBuf[0];
+        var state = OpusRangeDecoderGpu.Init(packet, packetStart, (uint)packetStorage);
         SilkIndicesDecoderGpu.Decode(
             ref state, packet, packetStart, (uint)packetStorage,
             inputs.TypeOffsetVadIcdf,

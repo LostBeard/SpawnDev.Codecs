@@ -1336,23 +1336,22 @@ public abstract partial class CodecsTestBase
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            // CUDA + WebGPU gates inherited from SilkDecodeCoreGpu (same ILGPU
-            // backend bugs would apply once Phase B lands).
-            // Wasm gated because the orchestrator's 3-kernel constructor
-            // compile time on Wasm cold start exceeds PMT's 30s per-test
-            // timeout. The orchestrator math is correct (CPU + OpenCL pass
-            // bit-exact). When Wasm cold-start kernel-compile speed improves
-            // OR PMT's per-test timeout is raised for Codecs, this gate lifts.
+            // Phase A folds InitStateKernel into IndicesAdapterKernel (5 kernels
+            // total instead of 6). Tested 2026-05-04 with gate lifted on
+            // WebGPU + Wasm + CUDA:
+            //   WebGPU: NEW failure - 'Argument_InvalidTypeWithPointersNotSupported,
+            //     ILGPU.ArrayView<byte>' on kernel arg marshaling. ILGPU bug.
+            //   Wasm: 33s timeout still (5-kernel orchestrator still over PMT 30s).
+            // Re-gating until both close. Math correct (CPU + OpenCL bit-exact).
             if (acc.AcceleratorType == AcceleratorType.Cuda
                 || acc.AcceleratorType == AcceleratorType.WebGPU)
                 throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A gated on backends where SilkDecodeCoreGpu is gated. "
-                    + "See _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-silkdecodecoregpu-cuda-webgpu-2026-05-04.md.");
+                    "SilkDecodeFrameGpu Phase A gated on backends with ILGPU codegen issues. "
+                    + "WebGPU: Argument_InvalidTypeWithPointersNotSupported on ArrayView<byte> kernel arg.");
             if (acc.AcceleratorType == AcceleratorType.Wasm)
                 throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A on Wasm exceeds PMT's 30s per-test timeout - 3-kernel "
-                    + "orchestrator constructor compile time consumes the budget before the dispatch runs. "
-                    + "Math is correct (CPU + OpenCL bit-exact); Wasm cold-start compile pacing is the blocker.");
+                    "SilkDecodeFrameGpu Phase A on Wasm exceeds PMT's 30s per-test cold-start timeout "
+                    + "even with InitState folded in (5-kernel orchestrator constructor still exceeds budget).");
 
             const int fsKHz = 8, nbSubfr = 4;
             int frameLength = nbSubfr * 5 * fsKHz;
