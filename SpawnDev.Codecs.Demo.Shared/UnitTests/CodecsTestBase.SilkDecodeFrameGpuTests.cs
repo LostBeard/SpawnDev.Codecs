@@ -552,9 +552,10 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    /// <summary>Drive Phase A+P+C (full bitstream-to-PCM) and return GPU PCM
-    /// + updated SLpcQ14Buf + final PrevGainQ16 for comparison vs CPU.</summary>
-    private static async Task<(short[] pcm, int[] sLpcQ14Buf, int prevGainQ16)>
+    /// <summary>Drive Phase A+P+C (full bitstream-to-PCM, optionally with finalize)
+    /// and return GPU PCM + updated SLpcQ14Buf + final PrevGainQ16 + OutBuf
+    /// snapshot for comparison vs CPU.</summary>
+    private static async Task<(short[] pcm, int[] sLpcQ14Buf, int prevGainQ16, short[] outBuf)>
         SilkDecodeFrameGpuTest_RunPhaseAPCAsync(
             Accelerator acc,
             byte[] packet,
@@ -568,7 +569,8 @@ public abstract partial class CodecsTestBase
             int lpcOrder, int nlsfInterpEnabled,
             int initialPrevGainQ16,
             int[] initialSLpcQ14Buf,
-            short[] initialOutBuf)
+            short[] initialOutBuf,
+            bool withFinalize = false)
     {
         int frameLength = nbSubfr * 5 * fsKHz;
         int alignedPulsesLen = (frameLength + 15) & ~15;
@@ -825,26 +827,130 @@ public abstract partial class CodecsTestBase
         };
 
         using var orchestrator = new SilkDecodeFrameGpuOrchestrator(acc);
-        orchestrator.DecodeFullFrame(
-            dPacket.View, 0, packet.Length,
-            indicesInputs, indicesScalars,
-            pulsesInputs, frameLength,
-            parametersInputs, parametersState, parametersScalars,
-            decodeCoreInputs,
-            signalType, quantOffsetType, seed,
-            lpcOrder, nbSubfr, subfrLength, ltpMemLength,
-            nlsfInterpEnabled,
-            dStateBuf.View.BaseView,
-            dIndicesOut.View, dPulsesOut.View,
-            dParamsIntOut.View, dParamsShortOut.View);
+        if (withFinalize)
+        {
+            orchestrator.DecodeFullFrameWithFinalize(
+                dPacket.View, 0, packet.Length,
+                indicesInputs, indicesScalars,
+                pulsesInputs, frameLength,
+                parametersInputs, parametersState, parametersScalars,
+                decodeCoreInputs,
+                signalType, quantOffsetType, seed,
+                lpcOrder, nbSubfr, subfrLength, ltpMemLength,
+                nlsfInterpEnabled,
+                dStateBuf.View.BaseView,
+                dIndicesOut.View, dPulsesOut.View,
+                dParamsIntOut.View, dParamsShortOut.View);
+        }
+        else
+        {
+            orchestrator.DecodeFullFrame(
+                dPacket.View, 0, packet.Length,
+                indicesInputs, indicesScalars,
+                pulsesInputs, frameLength,
+                parametersInputs, parametersState, parametersScalars,
+                decodeCoreInputs,
+                signalType, quantOffsetType, seed,
+                lpcOrder, nbSubfr, subfrLength, ltpMemLength,
+                nlsfInterpEnabled,
+                dStateBuf.View.BaseView,
+                dIndicesOut.View, dPulsesOut.View,
+                dParamsIntOut.View, dParamsShortOut.View);
+        }
         await acc.SynchronizeAsync();
 
         var pcmFull = await dXqOut.CopyToHostAsync();
         var sLpcOut = await dSLpcQ14Buf.CopyToHostAsync();
         var prevGainOut = await dPrevGain.CopyToHostAsync();
+        var outBufFull = await dOutBuf.CopyToHostAsync();
         var pcm = new short[frameLength];
         Array.Copy(pcmFull, pcm, frameLength);
-        return (pcm, sLpcOut, prevGainOut[0]);
+        return (pcm, sLpcOut, prevGainOut[0], outBufFull);
+    }
+
+    [TestMethod]
+    public async Task SilkDecodeFrameGpu_PhaseAPCF_Voiced_NB_OutBufShiftBitExactVsCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            if (acc.AcceleratorType == AcceleratorType.Cuda
+                || acc.AcceleratorType == AcceleratorType.WebGPU)
+                throw new UnsupportedTestException(
+                    "SilkDecodeFrameGpu Phase A+P+C+F inherits SilkDecodeCoreGpu's CUDA + WebGPU gates. "
+                    + "See _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-silkdecodecoregpu-cuda-webgpu-2026-05-04.md.");
+            if (acc.AcceleratorType == AcceleratorType.Wasm)
+                throw new UnsupportedTestException(
+                    "SilkDecodeFrameGpu Phase A+P+C+F on Wasm exceeds PMT's 30s per-test cold-start timeout.");
+
+            const int fsKHz = 8, nbSubfr = 4, lpcOrder = 10;
+            int frameLength = nbSubfr * 5 * fsKHz;
+            int ltpMemLength = 20 * fsKHz;
+            var codebook = SilkNlsfCodebookTables.NbMb;
+
+            var indices = new SilkDecodedIndices
+            {
+                SignalType = SilkSideInfoDecoder.TypeVoiced,
+                QuantOffsetType = 0,
+                NlsfInterpCoefQ2 = 4,
+                LagIndex = 80,
+                ContourIndex = 2,
+                PerIndex = 1,
+                LtpScaleIndex = 0,
+                Seed = 1,
+            };
+            for (int i = 0; i < nbSubfr; i++) indices.GainsIndices[i] = 25;
+            indices.NlsfIndices[0] = 7;
+            for (int i = 0; i < nbSubfr; i++) indices.LtpIndices[i] = (sbyte)(i + 3);
+
+            short[] pulsesIn = new short[((frameLength + 15) & ~15)];
+            byte[] bitstream = EncodeFullSilkFrame(
+                codebook, indices, pulsesIn,
+                fsKHz: fsKHz, nbSubfr: nbSubfr, conditional: 0, vadFlag: true);
+
+            // CPU oracle.
+            var cpuState = new SilkChannelDecoderState();
+            cpuState.Configure(fsKHz: fsKHz, nbSubfr: nbSubfr, lpcOrder: lpcOrder);
+            cpuState.Reset();
+            var cpuDec = new OpusRangeDecoder(bitstream);
+            short[] cpuPcm = new short[frameLength];
+            SilkDecodeFrame.Decode(cpuState, cpuDec, cpuPcm, vadFlag: true, conditional: 0);
+            // After SilkDecodeFrame: cpuState.OutBuf is the post-shift state.
+
+            // GPU with finalize.
+            var gpuInitialState = new SilkChannelDecoderState();
+            gpuInitialState.Configure(fsKHz: fsKHz, nbSubfr: nbSubfr, lpcOrder: lpcOrder);
+            gpuInitialState.Reset();
+            var (gpuPcm, _, _, gpuOutBuf) = await SilkDecodeFrameGpuTest_RunPhaseAPCAsync(
+                acc, bitstream, codebook,
+                fsKHz: fsKHz, nbSubfr: nbSubfr,
+                vadFlag: 1, decodeLbrr: 0, conditional: 0,
+                prevLagIndex: 0, prevSignalTypeWasVoiced: 0,
+                firstFrameAfterReset: 1,
+                prevNlsfQ15In: new short[codebook.Order],
+                lastGainIndexIn: 0,
+                signalType: indices.SignalType,
+                quantOffsetType: indices.QuantOffsetType,
+                seed: indices.Seed,
+                lpcOrder: lpcOrder,
+                nlsfInterpEnabled: indices.NlsfInterpCoefQ2 < 4 ? 1 : 0,
+                initialPrevGainQ16: gpuInitialState.PrevGainQ16,
+                initialSLpcQ14Buf: gpuInitialState.SLpcQ14Buf,
+                initialOutBuf: gpuInitialState.OutBuf,
+                withFinalize: true);
+
+            for (int i = 0; i < frameLength; i++)
+                if (cpuPcm[i] != gpuPcm[i])
+                    throw new Exception($"PCM mismatch at sample {i}: cpu={cpuPcm[i]} gpu={gpuPcm[i]}");
+
+            // Verify OutBuf rotation: positions [0..ltpMemLength) on CPU should
+            // bit-exactly match GPU. (Both started from zeros; CPU did its
+            // internal shift; GPU did finalize; they must converge.)
+            for (int i = 0; i < ltpMemLength; i++)
+                if (cpuState.OutBuf[i] != gpuOutBuf[i])
+                    throw new Exception($"OutBuf[{i}] mismatch: cpu={cpuState.OutBuf[i]} gpu={gpuOutBuf[i]}");
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
     }
 
     [TestMethod]
@@ -903,7 +1009,7 @@ public abstract partial class CodecsTestBase
             var firstFrameState = new SilkChannelDecoderState();
             firstFrameState.Configure(fsKHz: fsKHz, nbSubfr: nbSubfr, lpcOrder: lpcOrder);
             firstFrameState.Reset();
-            var (gpuPcm, _, _) = await SilkDecodeFrameGpuTest_RunPhaseAPCAsync(
+            var (gpuPcm, _, _, _) = await SilkDecodeFrameGpuTest_RunPhaseAPCAsync(
                 acc, bitstream, codebook,
                 fsKHz: fsKHz, nbSubfr: nbSubfr,
                 vadFlag: 1, decodeLbrr: 0, conditional: 0,

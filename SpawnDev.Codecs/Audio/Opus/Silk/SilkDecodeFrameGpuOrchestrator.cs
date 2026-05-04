@@ -75,6 +75,12 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
         SilkDecodeCoreInputs,
         SilkDecodeCoreScalars> _decodeCoreKernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<short>,
+        ArrayView<short>,
+        int, int> _finalizeKernel;
+
     /// <summary>Compile all 3 phase kernels for the supplied accelerator.</summary>
     public SilkDecodeFrameGpuOrchestrator(Accelerator accelerator)
     {
@@ -118,6 +124,12 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             ArrayView<short>,
             SilkDecodeCoreInputs,
             SilkDecodeCoreScalars>(DecodeCoreAdapterKernel);
+
+        _finalizeKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<short>,
+            ArrayView<short>,
+            int, int>(FinalizeFrameKernel);
     }
 
     /// <summary>
@@ -234,6 +246,49 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             decodeCoreInputs, decodeCoreScalars);
     }
 
+    /// <summary>
+    /// Phase A + P + C + F: full SILK frame decode with finalize.
+    /// Same as <see cref="DecodeFullFrame"/> but also runs the OutBuf
+    /// shift kernel afterward, leaving <paramref name="decodeCoreInputs"/>'s
+    /// OutBufInOut in the post-decode-frame layout: history shifted left
+    /// by frameLength, with the freshly-decoded xq stamped into the tail
+    /// at <c>OutBufInOut[ltpMemLength - frameLength..ltpMemLength)</c>.
+    /// This is the state the next frame's decode_core sees as LTP history.
+    /// </summary>
+    public void DecodeFullFrameWithFinalize(
+        ArrayView<byte> packet, int packetStart, int packetStorage,
+        SilkIndicesInputs indicesInputs,
+        SilkIndicesScalars indicesScalars,
+        SilkPulsesInputs pulsesInputs,
+        int frameLength,
+        SilkParametersInputs parametersInputs,
+        SilkParametersState parametersState,
+        SilkParametersScalars parametersScalars,
+        SilkDecodeCoreInputs decodeCoreInputs,
+        int signalType, int quantOffsetType, int seed,
+        int lpcOrder, int nbSubfr, int subfrLength, int ltpMemLength,
+        int nlsfInterpEnabled,
+        ArrayView<OpusRangeDecoderGpuState> stateBuf,
+        ArrayView<int> indicesOut,
+        ArrayView<short> pulsesOut,
+        ArrayView<int> paramsIntOut,
+        ArrayView<short> paramsShortOut)
+    {
+        DecodeFullFrame(
+            packet, packetStart, packetStorage,
+            indicesInputs, indicesScalars,
+            pulsesInputs, frameLength,
+            parametersInputs, parametersState, parametersScalars,
+            decodeCoreInputs,
+            signalType, quantOffsetType, seed,
+            lpcOrder, nbSubfr, subfrLength, ltpMemLength,
+            nlsfInterpEnabled,
+            stateBuf, indicesOut, pulsesOut, paramsIntOut, paramsShortOut);
+        _finalizeKernel(1,
+            decodeCoreInputs.OutBufInOut, decodeCoreInputs.XqOut,
+            ltpMemLength, frameLength);
+    }
+
     /// <summary>Release.</summary>
     public void Dispose() { /* auto-grouped kernels owned by accelerator */ }
 
@@ -291,6 +346,26 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             scalars.FirstFrameAfterReset,
             indicesOut, 0);
         stateBuf[0] = state;
+    }
+
+    /// <summary>Phase F: finalize-frame state slide. Mirrors CPU
+    /// SilkDecodeFrame.Decode's outBuf rotation:
+    ///   outBuf[frameLength..ltpMemLength) -> outBuf[0..mvLen)
+    ///   xq[0..frameLength)               -> outBuf[mvLen..ltpMemLength)
+    /// where mvLen = ltpMemLength - frameLength. Single-thread kernel.</summary>
+    private static void FinalizeFrameKernel(
+        Index1D _,
+        ArrayView<short> outBuf,
+        ArrayView<short> xqOut,
+        int ltpMemLength, int frameLength)
+    {
+        int mvLen = ltpMemLength - frameLength;
+        // Slide history left.
+        for (int i = 0; i < mvLen; i++)
+            outBuf[i] = outBuf[frameLength + i];
+        // Stamp freshly-decoded xq into the tail.
+        for (int i = 0; i < frameLength; i++)
+            outBuf[mvLen + i] = xqOut[i];
     }
 
     /// <summary>Phase C: read per-frame parameters from the
