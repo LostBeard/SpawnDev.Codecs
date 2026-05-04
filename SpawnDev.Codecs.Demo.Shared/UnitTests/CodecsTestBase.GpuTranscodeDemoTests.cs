@@ -64,12 +64,15 @@ public abstract partial class CodecsTestBase
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            // SpawnDev.ILGPU 4.9.5-rc.1 ships the WebGPU SubView codegen
-            // fix (Geordi 2026-05-03), so WebGPU is back online for these
-            // tests. Wasm still has a memory OOB on the Vp8/9 encoder
-            // kernel chain (Geordi's Bug 2, in-progress); keep Wasm gated
-            // until that ships. Desktop backends (CPU / CUDA / OpenCL)
-            // cover the GPU pair surface bit-exact.
+            // 2026-05-04: rc.8 multi-view body-struct fix did NOT close
+            // the Vp9FrameEntropyKernel Wasm OOB - that kernel uses 7
+            // TOP-LEVEL ArrayView params (not a body struct), so it goes
+            // through a different dispatcher path. Verified post-rc.8:
+            // same disp=4 trap signature with V0/V1/V2/V3 overlap pattern
+            // suggesting the Wasm dispatcher may not be deduplicating
+            // SubView ranges into the same parent allocation correctly.
+            // Restoring the Wasm gate; tracked at
+            // _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-vp8-vp9-wasm-oob-kernel-identified-2026-05-03.md.
             if (acc.AcceleratorType == AcceleratorType.Wasm)
             {
                 throw new UnsupportedTestException(
