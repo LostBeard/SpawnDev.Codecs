@@ -1022,6 +1022,127 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task SilkDecodeFrameGpu_TwoFrameStateRolling_NB_BitExactVsCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            if (acc.AcceleratorType == AcceleratorType.Cuda
+                || acc.AcceleratorType == AcceleratorType.WebGPU)
+                throw new UnsupportedTestException(
+                    "SilkDecodeFrameGpu Phase A+P+C+F inherits SilkDecodeCoreGpu's CUDA + WebGPU gates.");
+            if (acc.AcceleratorType == AcceleratorType.Wasm)
+                throw new UnsupportedTestException(
+                    "SilkDecodeFrameGpu Phase A+P+C+F on Wasm exceeds PMT's 30s per-test timeout (×2 frames doubles the cold-start cost).");
+
+            // Two consecutive voiced NB frames threaded through state. Verifies
+            // the orchestrator is multi-frame-ready end-to-end: frame 2's
+            // outBuf history (LTP state) comes from frame 1's finalize; the
+            // SLpcQ14Buf carry-over comes from frame 1's decode_core; the
+            // PrevGainQ16 chains across the gain-adjust math.
+            const int fsKHz = 8, nbSubfr = 4, lpcOrder = 10;
+            int frameLength = nbSubfr * 5 * fsKHz;
+            var codebook = SilkNlsfCodebookTables.NbMb;
+
+            var indices = new SilkDecodedIndices
+            {
+                SignalType = SilkSideInfoDecoder.TypeVoiced,
+                QuantOffsetType = 0,
+                NlsfInterpCoefQ2 = 4,
+                LagIndex = 80,
+                ContourIndex = 2,
+                PerIndex = 1,
+                LtpScaleIndex = 0,
+                Seed = 1,
+            };
+            for (int i = 0; i < nbSubfr; i++) indices.GainsIndices[i] = 25;
+            indices.NlsfIndices[0] = 7;
+            for (int i = 0; i < nbSubfr; i++) indices.LtpIndices[i] = (sbyte)(i + 3);
+
+            short[] pulsesIn = new short[((frameLength + 15) & ~15)];
+            byte[] bs1 = EncodeFullSilkFrame(
+                codebook, indices, pulsesIn,
+                fsKHz: fsKHz, nbSubfr: nbSubfr, conditional: 0, vadFlag: true);
+            byte[] bs2 = EncodeFullSilkFrame(
+                codebook, indices, pulsesIn,
+                fsKHz: fsKHz, nbSubfr: nbSubfr, conditional: 0, vadFlag: true);
+
+            // CPU oracle: state-threaded across both frames.
+            var cpuState = new SilkChannelDecoderState();
+            cpuState.Configure(fsKHz: fsKHz, nbSubfr: nbSubfr, lpcOrder: lpcOrder);
+            cpuState.Reset();
+            short[] cpu1 = new short[frameLength];
+            SilkDecodeFrame.Decode(cpuState, new OpusRangeDecoder(bs1), cpu1, vadFlag: true, conditional: 0);
+            // Snapshot persistent state after frame 1 (for GPU frame 2's initial state).
+            // Take exactly `order` entries because the GPU PrevNlsfQ15 buffer is sized
+            // to the active codebook's order, not the worst-case MAX_LPC_ORDER.
+            var prevNlsfAfter1 = new short[codebook.Order];
+            Array.Copy(cpuState.PrevNlsfQ15, prevNlsfAfter1, codebook.Order);
+            sbyte lastGainIdxAfter1 = cpuState.LastGainIndex;
+            int prevLagIdxAfter1 = cpuState.PrevLagIndex;
+            int prevSignalTypeWasVoicedAfter1 = cpuState.PrevSignalTypeWasVoiced ? 1 : 0;
+            int firstFrameAfterResetAfter1 = cpuState.FirstFrameAfterReset ? 1 : 0;
+            short[] cpu2 = new short[frameLength];
+            SilkDecodeFrame.Decode(cpuState, new OpusRangeDecoder(bs2), cpu2, vadFlag: true, conditional: 0);
+
+            // GPU: frame 1 with reset state.
+            var initial = new SilkChannelDecoderState();
+            initial.Configure(fsKHz: fsKHz, nbSubfr: nbSubfr, lpcOrder: lpcOrder);
+            initial.Reset();
+            var (gpu1, sLpc1, prevGain1, outBuf1) = await SilkDecodeFrameGpuTest_RunPhaseAPCAsync(
+                acc, bs1, codebook,
+                fsKHz: fsKHz, nbSubfr: nbSubfr,
+                vadFlag: 1, decodeLbrr: 0, conditional: 0,
+                prevLagIndex: 0, prevSignalTypeWasVoiced: 0,
+                firstFrameAfterReset: 1,
+                prevNlsfQ15In: new short[codebook.Order],
+                lastGainIndexIn: 0,
+                signalType: indices.SignalType,
+                quantOffsetType: indices.QuantOffsetType,
+                seed: indices.Seed,
+                lpcOrder: lpcOrder,
+                nlsfInterpEnabled: 0,
+                initialPrevGainQ16: initial.PrevGainQ16,
+                initialSLpcQ14Buf: initial.SLpcQ14Buf,
+                initialOutBuf: initial.OutBuf,
+                withFinalize: true);
+
+            // Compare frame 1 PCM.
+            for (int i = 0; i < frameLength; i++)
+                if (cpu1[i] != gpu1[i])
+                    throw new Exception($"Frame 1 PCM mismatch at sample {i}: cpu={cpu1[i]} gpu={gpu1[i]}");
+
+            // GPU: frame 2 with state from frame 1 + CPU-oracle scalars.
+            var (gpu2, _, _, _) = await SilkDecodeFrameGpuTest_RunPhaseAPCAsync(
+                acc, bs2, codebook,
+                fsKHz: fsKHz, nbSubfr: nbSubfr,
+                vadFlag: 1, decodeLbrr: 0, conditional: 0,
+                prevLagIndex: prevLagIdxAfter1,
+                prevSignalTypeWasVoiced: prevSignalTypeWasVoicedAfter1,
+                firstFrameAfterReset: firstFrameAfterResetAfter1,
+                prevNlsfQ15In: prevNlsfAfter1,
+                lastGainIndexIn: lastGainIdxAfter1,
+                signalType: indices.SignalType,
+                quantOffsetType: indices.QuantOffsetType,
+                seed: indices.Seed,
+                lpcOrder: lpcOrder,
+                nlsfInterpEnabled: 0,
+                initialPrevGainQ16: prevGain1,
+                initialSLpcQ14Buf: sLpc1,
+                initialOutBuf: outBuf1,
+                withFinalize: true);
+
+            // Compare frame 2 PCM - this is the hard one; if frame 1's persistent state
+            // didn't transfer correctly (OutBuf history, SLpcQ14Buf carry, PrevGainQ16),
+            // frame 2's LTP synthesis + LPC synthesis would diverge.
+            for (int i = 0; i < frameLength; i++)
+                if (cpu2[i] != gpu2[i])
+                    throw new Exception($"Frame 2 PCM mismatch at sample {i}: cpu={cpu2[i]} gpu={gpu2[i]}");
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
     public async Task SilkDecodeFrameGpu_PhaseAPC_Unvoiced_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
