@@ -64,20 +64,17 @@ public abstract partial class CodecsTestBase
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            // 2026-05-04: rc.10 corrected the OOB trap diagnostic (per-view
-            // element-size fix). Re-ran on rc.10: view byte ranges now look
-            // sane (V0 yCoefs 8192 B, V1/V2 uCoefs/vCoefs 2048 B each,
-            // V3 outBuf 16640 B, V4 outLen 8 B, V5 byteConsts 5048 B,
-            // V6 ushortConsts 1920 B). All views cover [0..35904), scratch +
-            // fence land in [35904..36808). Trap STILL fires — kernel is
-            // accessing memory outside valid view ranges (genuine runtime
-            // OOB, not a sizing artifact). Tracked at
-            // _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc10-vp9-trap-still-fires-2026-05-04.md.
+            // 2026-05-04 (rc.11): Vp9 Wasm OOB STILL fires on rc.11 - the
+            // dispatcher host-write race fix did NOT close this trap.
+            // Browser tab crashes ("Aw, Snap!") on the OOB. Per Geordi the
+            // actual Vp9 trap is a separate bug needing kernel bisection;
+            // re-gating until that lands.
             if (acc.AcceleratorType == AcceleratorType.Wasm)
             {
                 throw new UnsupportedTestException(
-                    "GPU pair demo round-trip on Wasm backend is gated on SpawnDev.ILGPU Wasm memory OOB fix "
-                    + "(in-progress, Geordi). Existing GPU pair tests cover desktop + WebGPU backends.");
+                    "Vp9 Wasm OOB unchanged on rc.11 (dispatcher race fix didn't close it). "
+                    + "Tracked at _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc10-vp9-trap-still-fires-2026-05-04.md. "
+                    + "Kernel bisection pending.");
             }
 
             const int width = 64, height = 64, q = 30;
