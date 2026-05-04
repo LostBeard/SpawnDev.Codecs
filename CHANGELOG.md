@@ -1,5 +1,41 @@
 # SpawnDev.Codecs CHANGELOG
 
+## 0.3.0-rc.6 (2026-05-04, local only)
+
+**Headline: Full SILK per-frame decoder GPU pipeline complete (bitstream → PCM).**
+
+`SilkDecodeFrameGpuOrchestrator` ships as a host-orchestrated multi-kernel
+pipeline that mirrors libopus `silk_decode_frame.c` end-to-end:
+
+- **Phase A** (init→indices→pulses): seeds the range-decoder state in a
+  1-element `ArrayView<OpusRangeDecoderGpuState>` and threads it through
+  the indices + pulses kernel dispatches.
+- **Phase A+P** (+ parameters dequant): reads decoded indices buffer,
+  runs `SilkParametersDecoderGpu.Decode` to produce gainsQ16, pitchL,
+  predCoefQ12, ltpCoefQ14, ltpScaleQ14 outputs.
+- **Phase A+P+C** (+ decode core synthesis): chains
+  `SilkDecodeCoreGpu.Decode` reading parameters as SubViews into the
+  unified parameter output buffers, producing PCM bit-exact vs CPU
+  `SilkDecodeFrame.Decode`.
+- **Phase A+P+C+F** (+ finalize): adds `FinalizeFrameKernel` for the
+  OutBuf shift step (history slide + xq tail-write), so the orchestrator
+  is multi-frame ready end-to-end.
+
+All buffers + scalars are GPU-resident throughout (cardinal rule: host =
+pure coordinator). Verified bit-exact on CPU + OpenCL backends across:
+Voiced NB, Inactive NB, plus the OutBuf rotation in the finalize variant.
+
+Also extends `SilkDecodeCoreGpu` test coverage with WB (lpcOrder=16 full
+unroll), MB (12 kHz × 60-sample subframes), NLSF interpolation (k=2
+rewhitening branch), and a 3-frame state-rolling test.
+
+CUDA + WebGPU still gated on the same ILGPU backend bugs filed at
+`_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-silkdecodecoregpu-cuda-webgpu-2026-05-04.md`
+(per-thread register pressure + sub-word body-struct binding count).
+Wasm gated on PMT 30s cold-start kernel-compile timeout.
+
+Source on master commit `41c85b6`. PackageReference SpawnDev.ILGPU 4.9.5-rc.10.
+
 ## 0.3.0-rc.1 (2026-05-03)
 
 Release candidate for the 0.3.0 cut. NOT 1.0.0 - the 1.0.0 stable
