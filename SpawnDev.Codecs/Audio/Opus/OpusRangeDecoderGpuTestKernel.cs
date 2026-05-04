@@ -32,6 +32,12 @@ public sealed class OpusRangeDecoderGpuTestKernel : IDisposable
         int,
         ArrayView<int>, int> _bitLogPKernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<byte>, int, int,
+        ArrayView<uint>,
+        ArrayView<uint>, int> _uintKernel;
+
     /// <summary>Compile.</summary>
     public OpusRangeDecoderGpuTestKernel(Accelerator accelerator)
     {
@@ -46,6 +52,45 @@ public sealed class OpusRangeDecoderGpuTestKernel : IDisposable
             ArrayView<byte>, int, int,
             int,
             ArrayView<int>, int>(DecodeBitLogPKernel);
+        _uintKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<byte>, int, int,
+            ArrayView<uint>,
+            ArrayView<uint>, int>(DecodeUintKernel);
+    }
+
+    /// <summary>
+    /// Decode <paramref name="symbolCount"/> uniform integers from
+    /// <paramref name="packet"/> via repeated <c>DecodeUint</c> calls.
+    /// Each symbol's <c>ft</c> value is read from
+    /// <paramref name="ftPerSymbol"/>[i] (so a varying-range stream can be
+    /// tested with one dispatch).
+    /// </summary>
+    public void RunDecodeUint(
+        ArrayView<byte> packet, int packetStart, int packetStorage,
+        ArrayView<uint> ftPerSymbol,
+        ArrayView<uint> decodedOut, int symbolCount)
+    {
+        if (symbolCount < 0) throw new ArgumentOutOfRangeException(nameof(symbolCount));
+        if (decodedOut.Length < symbolCount)
+            throw new ArgumentException("decodedOut too short.", nameof(decodedOut));
+        _uintKernel(1, packet, packetStart, packetStorage,
+            ftPerSymbol, decodedOut, symbolCount);
+    }
+
+    private static void DecodeUintKernel(
+        Index1D _,
+        ArrayView<byte> packet, int packetStart, int packetStorage,
+        ArrayView<uint> ftPerSymbol,
+        ArrayView<uint> decodedOut, int symbolCount)
+    {
+        var state = OpusRangeDecoderGpu.Init(packet, packetStart, (uint)packetStorage);
+        for (int i = 0; i < symbolCount; i++)
+        {
+            decodedOut[i] = OpusRangeDecoderGpu.DecodeUint(
+                ref state, packet, packetStart, (uint)packetStorage,
+                ftPerSymbol[i]);
+        }
     }
 
     /// <summary>

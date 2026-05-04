@@ -260,6 +260,69 @@ public static class OpusRangeDecoderGpu
     }
 
     /// <summary>
+    /// Decode a uniformly-distributed integer in <c>[0, ft)</c> with
+    /// non-power-of-2 range. Composes <c>ec_decode</c> + <c>ec_dec_update</c>
+    /// + (for large ranges) <c>ec_dec_bits</c> per libopus <c>ec_dec_uint</c>.
+    /// Used by CELT post-filter octave (range=6), anti-collapse seed
+    /// extraction, and bit-allocator residual reads.
+    /// </summary>
+    /// <param name="state">Range decoder state (advanced in place).</param>
+    /// <param name="buf">Encoded packet buffer.</param>
+    /// <param name="bufStart">Offset of the packet in <paramref name="buf"/>.</param>
+    /// <param name="storage">Length of the packet in bytes.</param>
+    /// <param name="ft">Total range; result is in <c>[0, ft)</c>. Caller
+    /// must ensure <c>ft &gt;= 2</c> (libopus contract).</param>
+    public static uint DecodeUint(
+        ref OpusRangeDecoderGpuState state,
+        ArrayView<byte> buf, int bufStart, uint storage,
+        uint ft)
+    {
+        const int EC_UINT_BITS = 8;
+        if (ft <= 1u) { state.Error = 1; return 0; }
+        uint decoded = ft - 1u;
+        int ftb = EcIlog(decoded);
+        if (ftb > EC_UINT_BITS)
+        {
+            ftb -= EC_UINT_BITS;
+            uint scaledFt = (decoded >> ftb) + 1u;
+            // ec_decode(scaledFt): divisive uniform decode.
+            state.Ext = state.Rng / scaledFt;
+            uint sd = state.Val / state.Ext;
+            uint s = scaledFt - (sd + 1u < scaledFt ? sd + 1u : scaledFt);
+            // ec_dec_update(s, s+1, scaledFt):
+            uint upd = state.Ext * (scaledFt - (s + 1u));
+            state.Val -= upd;
+            state.Rng = s > 0u ? state.Ext * ((s + 1u) - s) : state.Rng - upd;
+            Normalize(ref state, buf, bufStart, storage);
+            // Then read raw bits for the bottom-half.
+            uint t = (s << ftb) | DecodeBits(ref state, buf, bufStart, storage, ftb);
+            if (t <= decoded) return t;
+            state.Error = 1;
+            return decoded;
+        }
+        else
+        {
+            state.Ext = state.Rng / ft;
+            uint sd = state.Val / state.Ext;
+            uint s = ft - (sd + 1u < ft ? sd + 1u : ft);
+            uint upd = state.Ext * (ft - (s + 1u));
+            state.Val -= upd;
+            state.Rng = s > 0u ? state.Ext * ((s + 1u) - s) : state.Rng - upd;
+            Normalize(ref state, buf, bufStart, storage);
+            return s;
+        }
+    }
+
+    /// <summary>Bit position of the highest set bit + 1 (libopus
+    /// <c>EC_ILOG</c>). Returns 0 for input 0.</summary>
+    private static int EcIlog(uint v)
+    {
+        int n = 0;
+        while (v != 0u) { v >>= 1; n++; }
+        return n;
+    }
+
+    /// <summary>
     /// Normalize the (rng, val) coder state, pulling additional bytes
     /// from the front of the buffer as needed. Mirrors libopus
     /// <c>ec_dec_normalize</c>.

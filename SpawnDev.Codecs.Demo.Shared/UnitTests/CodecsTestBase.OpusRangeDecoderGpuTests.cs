@@ -31,6 +31,83 @@ public abstract partial class CodecsTestBase
         return enc.ToArray();
     }
 
+    /// <summary>Encode N variable-range uints via OpusRangeEncoder.EncodeUint.</summary>
+    private static byte[] OpusEncodeUintSequenceCpu(uint[] values, uint[] ftPerSymbol, int bufCapacity)
+    {
+        var enc = new OpusRangeEncoder(bufCapacity);
+        for (int i = 0; i < values.Length; i++)
+            enc.EncodeUint(values[i], ftPerSymbol[i]);
+        enc.Done();
+        return enc.ToArray();
+    }
+
+    private static async Task<uint[]> OpusDecodeUintSequenceGpuAsync(
+        Accelerator acc, byte[] packetBytes, uint[] ftPerSymbol, int symbolCount)
+    {
+        using var dPacket = acc.Allocate1D<byte>(packetBytes.Length);
+        using var dFtPerSymbol = acc.Allocate1D<uint>(ftPerSymbol.Length);
+        using var dDecoded = acc.Allocate1D<uint>(symbolCount);
+        dPacket.View.CopyFromCPU(packetBytes);
+        dFtPerSymbol.View.CopyFromCPU(ftPerSymbol);
+        using var kernel = new OpusRangeDecoderGpuTestKernel(acc);
+        kernel.RunDecodeUint(
+            dPacket.View, 0, packetBytes.Length,
+            dFtPerSymbol.View, dDecoded.View, symbolCount);
+        await acc.SynchronizeAsync();
+        var decoded = await dDecoded.CopyToHostAsync();
+        var slice = new uint[symbolCount];
+        Array.Copy(decoded, slice, symbolCount);
+        return slice;
+    }
+
+    [TestMethod]
+    public async Task OpusRangeDecoderGpu_DecodeUint_SmallRanges_BitExactVsCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            if (acc.AcceleratorType == AcceleratorType.WebGPU)
+                throw new UnsupportedTestException(
+                    "DecodeUint shares the WebGPU codegen issue affecting DecodeBitLogP "
+                    + "(unsigned compare / divisive math). Tracked at "
+                    + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-decodebitlogp-webgpu-2026-05-04.md.");
+            // Small ranges (ft <= 2^EC_UINT_BITS = 256) take the
+            // single-decode path. Used by CELT post-filter octave (ft=6),
+            // tapset selection, etc.
+            uint[] fts = { 6u, 6u, 11u, 32u, 6u, 200u, 6u, 6u };
+            uint[] vals = { 3u, 0u, 7u, 30u, 5u, 199u, 1u, 4u };
+            byte[] encoded = OpusEncodeUintSequenceCpu(vals, fts, bufCapacity: 256);
+            uint[] gpuDecoded = await OpusDecodeUintSequenceGpuAsync(acc, encoded, fts, vals.Length);
+            for (int i = 0; i < vals.Length; i++)
+                if (vals[i] != gpuDecoded[i])
+                    throw new Exception($"uint[{i}] mismatch (ft={fts[i]}): cpu={vals[i]} gpu={gpuDecoded[i]}");
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
+    public async Task OpusRangeDecoderGpu_DecodeUint_LargeRanges_BitExactVsCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            if (acc.AcceleratorType == AcceleratorType.WebGPU)
+                throw new UnsupportedTestException(
+                    "DecodeUint gated on WebGPU codegen issue (see SmallRanges test).");
+            // Large ranges (ft > 2^EC_UINT_BITS = 256) take the long-form
+            // split path: divisive decode for the top + raw bits for the
+            // bottom. Exercises the more complex branch of DecodeUint.
+            uint[] fts = { 1024u, 65536u, 100000u, 1u << 24, 0xFFFFFFFFu };
+            uint[] vals = { 512u, 32768u, 50000u, 0x123456u, 0xDEADBEEFu };
+            byte[] encoded = OpusEncodeUintSequenceCpu(vals, fts, bufCapacity: 64);
+            uint[] gpuDecoded = await OpusDecodeUintSequenceGpuAsync(acc, encoded, fts, vals.Length);
+            for (int i = 0; i < vals.Length; i++)
+                if (vals[i] != gpuDecoded[i])
+                    throw new Exception($"uint[{i}] mismatch (ft={fts[i]}): cpu={vals[i]} gpu={gpuDecoded[i]}");
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
     /// <summary>Encode N bits via OpusRangeEncoder.EncodeBitLogP at probability `logp`.</summary>
     private static byte[] OpusEncodeBitLogPSequenceCpu(int[] bits, int logp, int bufCapacity)
     {
