@@ -67,6 +67,14 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
         ArrayView<int>,
         ArrayView<short>> _parametersKernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<int>,
+        ArrayView<short>,
+        ArrayView<short>,
+        SilkDecodeCoreInputs,
+        SilkDecodeCoreScalars> _decodeCoreKernel;
+
     /// <summary>Compile all 3 phase kernels for the supplied accelerator.</summary>
     public SilkDecodeFrameGpuOrchestrator(Accelerator accelerator)
     {
@@ -102,6 +110,14 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             SilkParametersScalars,
             ArrayView<int>,
             ArrayView<short>>(ParametersAdapterKernel);
+
+        _decodeCoreKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<int>,
+            ArrayView<short>,
+            ArrayView<short>,
+            SilkDecodeCoreInputs,
+            SilkDecodeCoreScalars>(DecodeCoreAdapterKernel);
     }
 
     /// <summary>
@@ -156,6 +172,66 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
         _parametersKernel(1,
             indicesOut, parametersInputs, parametersState, parametersScalars,
             paramsIntOut, paramsShortOut);
+    }
+
+    /// <summary>
+    /// Phase A + P + C: full SILK frame decode bitstream-to-PCM. Composes
+    /// indices + pulses + parameters + synthesis (decode_core) into one
+    /// orchestration. Mirrors the bulk of CPU
+    /// <c>SilkDecodeFrame.Decode</c>; the OutBuf shift + scalar state
+    /// updates that follow synthesis live in a separate kernel/finalizer
+    /// step (caller's responsibility, or future Phase F).
+    ///
+    /// All buffers + scalars are GPU-resident (cardinal rule). The decode
+    /// core kernel reads gainsQ16 + pitchL from <paramref name="paramsIntOut"/>,
+    /// reads predCoefQ12 + ltpCoefQ14 + ltpScaleQ14 from <paramref name="paramsShortOut"/>,
+    /// reads pulses from <paramref name="pulsesOut"/>, and writes PCM to the
+    /// orchestrator-internal XqOut view inside
+    /// <paramref name="decodeCoreInputs"/>.
+    /// </summary>
+    public void DecodeFullFrame(
+        ArrayView<byte> packet, int packetStart, int packetStorage,
+        SilkIndicesInputs indicesInputs,
+        SilkIndicesScalars indicesScalars,
+        SilkPulsesInputs pulsesInputs,
+        int frameLength,
+        SilkParametersInputs parametersInputs,
+        SilkParametersState parametersState,
+        SilkParametersScalars parametersScalars,
+        SilkDecodeCoreInputs decodeCoreInputs,
+        int signalType, int quantOffsetType, int seed,
+        int lpcOrder, int nbSubfr, int subfrLength, int ltpMemLength,
+        int nlsfInterpEnabled,
+        ArrayView<OpusRangeDecoderGpuState> stateBuf,
+        ArrayView<int> indicesOut,
+        ArrayView<short> pulsesOut,
+        ArrayView<int> paramsIntOut,
+        ArrayView<short> paramsShortOut)
+    {
+        DecodeIndicesPulsesAndParameters(
+            packet, packetStart, packetStorage,
+            indicesInputs, indicesScalars,
+            pulsesInputs, frameLength,
+            parametersInputs, parametersState, parametersScalars,
+            stateBuf, indicesOut, pulsesOut, paramsIntOut, paramsShortOut);
+
+        var decodeCoreScalars = new SilkDecodeCoreScalars
+        {
+            SignalType = signalType,
+            QuantOffsetType = quantOffsetType,
+            Seed = seed,
+            LpcOrder = lpcOrder,
+            NbSubfr = nbSubfr,
+            SubfrLength = subfrLength,
+            FrameLength = frameLength,
+            LtpMemLength = ltpMemLength,
+            // LtpScaleQ14 is read from paramsShortOut by the kernel adapter.
+            LtpScaleQ14 = 0,
+            NlsfInterpEnabled = nlsfInterpEnabled,
+        };
+        _decodeCoreKernel(1,
+            paramsIntOut, paramsShortOut, pulsesOut,
+            decodeCoreInputs, decodeCoreScalars);
     }
 
     /// <summary>Release.</summary>
@@ -215,6 +291,28 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             scalars.FirstFrameAfterReset,
             indicesOut, 0);
         stateBuf[0] = state;
+    }
+
+    /// <summary>Phase C: read per-frame parameters from the
+    /// SilkDecodedParametersLayout buffers, populate the SilkDecodeCoreInputs
+    /// scalar fields that came from those parameter buffers (gainsQ16,
+    /// predCoefQ12, etc. are already wired as ArrayView fields on the
+    /// inputs struct), and call <see cref="SilkDecodeCoreGpu.Decode"/>.
+    /// LtpScaleQ14 is read from the short parameter output and pushed into
+    /// the local scalars copy used by the synthesis chain.</summary>
+    private static void DecodeCoreAdapterKernel(
+        Index1D _,
+        ArrayView<int> paramsIntIn,
+        ArrayView<short> paramsShortIn,
+        ArrayView<short> pulsesIn,
+        SilkDecodeCoreInputs inputs,
+        SilkDecodeCoreScalars scalars)
+    {
+        // Pull the scalar LTP scale Q14 out of the short parameter buffer and
+        // patch it into the local scalars (host code pre-zeroed it).
+        var localScalars = scalars;
+        localScalars.LtpScaleQ14 = paramsShortIn[SilkDecodedParametersLayout.ShortLtpScaleQ14Offset];
+        SilkDecodeCoreGpu.Decode(inputs, localScalars);
     }
 
     /// <summary>Phase P: dequantize per-frame parameters from the
