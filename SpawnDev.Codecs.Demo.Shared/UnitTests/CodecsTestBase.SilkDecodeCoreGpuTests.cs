@@ -376,6 +376,48 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task SilkDecodeCoreGpu_Voiced_NB_NlsfInterpEnabled_BitExactVsCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            SilkDecodeCoreTest_GateBackend(acc);
+            // Voiced NB with NLSF interpolation enabled. This is the ONLY config
+            // that takes the second-half rewhitening path inside the per-subframe
+            // loop (k==2 rewhitens because nlsfInterpolationEnabled is true and
+            // the k==0 || k==2&&interp predicate fires at k==2). Exercises the
+            // OutBuf staging step (xqOut[0..2*subfrLength) -> OutBuf[ltpMemLength..])
+            // which doesn't fire on any of the other configurations.
+            var (state, parameters) = SilkDecodeCoreTest_BuildNbState(signalType: 2);
+            int frameLength = state.FrameLength;
+            var pulses = SilkDecodeCoreTest_BuildSparsePulses(frameLength, seed: 4242);
+
+            var cpuState = SilkDecodeCoreTest_CloneState(state);
+            var cpuXq = new short[frameLength];
+            SilkDecodeCore.Decode(
+                cpuState, parameters, pulses.AsSpan(0, frameLength),
+                signalType: 2, quantOffsetType: 0, seed: 17,
+                nlsfInterpolationEnabled: true,
+                cpuXq.AsSpan(0, frameLength));
+
+            var (gpuXq, gpuSLpc, gpuPrevGain) = await SilkDecodeCoreTest_RunGpuAsync(
+                acc, parameters, state, pulses,
+                signalType: 2, quantOffsetType: 0, seed: 17,
+                nlsfInterpEnabled: true);
+
+            for (int i = 0; i < frameLength; i++)
+                if (cpuXq[i] != gpuXq[i])
+                    throw new Exception($"NLSF-interp PCM mismatch at sample {i}: cpu={cpuXq[i]} gpu={gpuXq[i]}");
+            for (int i = 0; i < 16; i++)
+                if (cpuState.SLpcQ14Buf[i] != gpuSLpc[i])
+                    throw new Exception($"NLSF-interp SLpcQ14Buf mismatch at {i}: cpu={cpuState.SLpcQ14Buf[i]} gpu={gpuSLpc[i]}");
+            if (cpuState.PrevGainQ16 != gpuPrevGain)
+                throw new Exception($"NLSF-interp PrevGainQ16 mismatch: cpu={cpuState.PrevGainQ16} gpu={gpuPrevGain}");
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
     public async Task SilkDecodeCoreGpu_VoicedNB_3FramesStateRolling_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
