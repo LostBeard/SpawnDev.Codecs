@@ -1022,6 +1022,78 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task SilkDecodeFrameGpu_PhaseAPC_Unvoiced_NB_BitExactVsCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            if (acc.AcceleratorType == AcceleratorType.Cuda
+                || acc.AcceleratorType == AcceleratorType.WebGPU)
+                throw new UnsupportedTestException(
+                    "SilkDecodeFrameGpu Phase A+P+C inherits SilkDecodeCoreGpu's CUDA + WebGPU gates.");
+            if (acc.AcceleratorType == AcceleratorType.Wasm)
+                throw new UnsupportedTestException(
+                    "SilkDecodeFrameGpu Phase A+P+C on Wasm exceeds PMT's 30s per-test cold-start timeout.");
+
+            // Unvoiced signal type (TYPE_UNVOICED = 1). Exercises the VAD iCDF
+            // path in the indices decoder + the unvoiced branch in decode_core
+            // (residual = excitation, no LTP), all with vadFlag=true.
+            const int fsKHz = 8, nbSubfr = 4, lpcOrder = 10;
+            int frameLength = nbSubfr * 5 * fsKHz;
+            var codebook = SilkNlsfCodebookTables.NbMb;
+
+            var indices = new SilkDecodedIndices
+            {
+                SignalType = SilkSideInfoDecoder.TypeUnvoiced,
+                QuantOffsetType = 1,
+                NlsfInterpCoefQ2 = 4,
+                Seed = 2,
+            };
+            for (int i = 0; i < nbSubfr; i++) indices.GainsIndices[i] = (sbyte)(20 + i);
+            indices.NlsfIndices[0] = 10;
+
+            short[] pulsesIn = new short[((frameLength + 15) & ~15)];
+            byte[] bitstream = EncodeFullSilkFrame(
+                codebook, indices, pulsesIn,
+                fsKHz: fsKHz, nbSubfr: nbSubfr, conditional: 0, vadFlag: true);
+
+            // CPU oracle.
+            var cpuState = new SilkChannelDecoderState();
+            cpuState.Configure(fsKHz: fsKHz, nbSubfr: nbSubfr, lpcOrder: lpcOrder);
+            cpuState.Reset();
+            var cpuDec = new OpusRangeDecoder(bitstream);
+            short[] cpuPcm = new short[frameLength];
+            SilkDecodeFrame.Decode(cpuState, cpuDec, cpuPcm, vadFlag: true, conditional: 0);
+
+            // GPU.
+            var gpuInitialState = new SilkChannelDecoderState();
+            gpuInitialState.Configure(fsKHz: fsKHz, nbSubfr: nbSubfr, lpcOrder: lpcOrder);
+            gpuInitialState.Reset();
+            var (gpuPcm, _, _, _) = await SilkDecodeFrameGpuTest_RunPhaseAPCAsync(
+                acc, bitstream, codebook,
+                fsKHz: fsKHz, nbSubfr: nbSubfr,
+                vadFlag: 1, decodeLbrr: 0, conditional: 0,
+                prevLagIndex: 0, prevSignalTypeWasVoiced: 0,
+                firstFrameAfterReset: 1,
+                prevNlsfQ15In: new short[codebook.Order],
+                lastGainIndexIn: 0,
+                signalType: indices.SignalType,
+                quantOffsetType: indices.QuantOffsetType,
+                seed: indices.Seed,
+                lpcOrder: lpcOrder,
+                nlsfInterpEnabled: 0,
+                initialPrevGainQ16: gpuInitialState.PrevGainQ16,
+                initialSLpcQ14Buf: gpuInitialState.SLpcQ14Buf,
+                initialOutBuf: gpuInitialState.OutBuf);
+
+            for (int i = 0; i < frameLength; i++)
+                if (cpuPcm[i] != gpuPcm[i])
+                    throw new Exception($"PCM mismatch at sample {i}: cpu={cpuPcm[i]} gpu={gpuPcm[i]}");
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
     public async Task SilkDecodeFrameGpu_PhaseAPC_Inactive_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
