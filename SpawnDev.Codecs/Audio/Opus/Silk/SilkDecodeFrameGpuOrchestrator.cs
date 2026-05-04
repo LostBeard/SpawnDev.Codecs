@@ -58,6 +58,15 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
         ArrayView<OpusRangeDecoderGpuState>,
         ArrayView<short>> _pulsesKernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<int>,
+        SilkParametersInputs,
+        SilkParametersState,
+        SilkParametersScalars,
+        ArrayView<int>,
+        ArrayView<short>> _parametersKernel;
+
     /// <summary>Compile all 3 phase kernels for the supplied accelerator.</summary>
     public SilkDecodeFrameGpuOrchestrator(Accelerator accelerator)
     {
@@ -84,6 +93,15 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             int,
             ArrayView<OpusRangeDecoderGpuState>,
             ArrayView<short>>(PulsesAdapterKernel);
+
+        _parametersKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<int>,
+            SilkParametersInputs,
+            SilkParametersState,
+            SilkParametersScalars,
+            ArrayView<int>,
+            ArrayView<short>>(ParametersAdapterKernel);
     }
 
     /// <summary>
@@ -108,6 +126,36 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             indicesInputs, indicesScalars, stateBuf, indicesOut);
         _pulsesKernel(1, packet, packetStart, packetStorage,
             pulsesInputs, indicesOut, frameLength, stateBuf, pulsesOut);
+    }
+
+    /// <summary>
+    /// Phase A + P: dispatch indices + pulses + parameters dequant. Same as
+    /// <see cref="DecodeIndicesAndPulses"/> followed by a parameters kernel
+    /// that reads the indices buffer and writes <paramref name="paramsIntOut"/> +
+    /// <paramref name="paramsShortOut"/> per <see cref="SilkDecodedParametersLayout"/>.
+    /// </summary>
+    public void DecodeIndicesPulsesAndParameters(
+        ArrayView<byte> packet, int packetStart, int packetStorage,
+        SilkIndicesInputs indicesInputs,
+        SilkIndicesScalars indicesScalars,
+        SilkPulsesInputs pulsesInputs,
+        int frameLength,
+        SilkParametersInputs parametersInputs,
+        SilkParametersState parametersState,
+        SilkParametersScalars parametersScalars,
+        ArrayView<OpusRangeDecoderGpuState> stateBuf,
+        ArrayView<int> indicesOut,
+        ArrayView<short> pulsesOut,
+        ArrayView<int> paramsIntOut,
+        ArrayView<short> paramsShortOut)
+    {
+        DecodeIndicesAndPulses(
+            packet, packetStart, packetStorage,
+            indicesInputs, indicesScalars, pulsesInputs,
+            frameLength, stateBuf, indicesOut, pulsesOut);
+        _parametersKernel(1,
+            indicesOut, parametersInputs, parametersState, parametersScalars,
+            paramsIntOut, paramsShortOut);
     }
 
     /// <summary>Release.</summary>
@@ -167,6 +215,43 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             scalars.FirstFrameAfterReset,
             indicesOut, 0);
         stateBuf[0] = state;
+    }
+
+    /// <summary>Phase P: dequantize per-frame parameters from the
+    /// <paramref name="indicesIn"/> buffer. No range-decoder state crosses;
+    /// pure data-flow kernel that reads indices and writes parameters.</summary>
+    private static void ParametersAdapterKernel(
+        Index1D _,
+        ArrayView<int> indicesIn,
+        SilkParametersInputs inputs,
+        SilkParametersState state,
+        SilkParametersScalars scalars,
+        ArrayView<int> intOut,
+        ArrayView<short> shortOut)
+    {
+        SilkParametersDecoderGpu.Decode(
+            indicesIn, 0,
+            inputs.Cb1NlsfQ8,
+            inputs.Cb1WghtQ9,
+            inputs.EcSel,
+            inputs.PredQ8Source,
+            inputs.DeltaMinQ15,
+            inputs.LsfCosTabQ12,
+            inputs.ContourCb, scalars.ContourCbSize,
+            inputs.LtpGainTablesFlat,
+            inputs.LtpGainOffsets,
+            inputs.LtpScaleQ14Table,
+            state.PrevNlsfQ15, 0,
+            state.LastGainIndex, 0,
+            state.NlsfDecodeScratch, 0,
+            state.NlsfDecodePredScratch, 0,
+            state.Nlsf2aScratch, 0,
+            state.NlsfIndicesScratch, 0,
+            state.GainIndicesScratch, 0,
+            scalars.QuantStepSizeQ16,
+            scalars.Order, scalars.NbSubfr, scalars.FsKHz, scalars.Conditional,
+            intOut, 0,
+            shortOut, 0);
     }
 
     /// <summary>Phase A.2: load state from buffer, read SignalType +
