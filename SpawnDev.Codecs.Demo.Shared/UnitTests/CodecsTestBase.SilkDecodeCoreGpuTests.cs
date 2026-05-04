@@ -191,7 +191,9 @@ public abstract partial class CodecsTestBase
             throw new UnsupportedTestException(
                 "SilkDecodeCoreGpu auto-grouped launch hits 'too many resources requested for launch' on CUDA. "
                 + "ILGPU auto-grouper picks a block size whose per-thread register footprint exceeds SM limits "
-                + "for this kernel's body-struct + LPC-synthesis-unroll combination. Tracked at "
+                + "for this kernel's body-struct + LPC-synthesis-unroll combination. Verified 2026-05-04: "
+                + "removing b0..b4 local caching in the LTP loop did NOT shrink register count enough; "
+                + "the body struct's 15 ArrayView fields dominate. Tracked at "
                 + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-silkdecodecoregpu-cuda-webgpu-2026-05-04.md.");
         if (acc.AcceleratorType == AcceleratorType.WebGPU)
             throw new UnsupportedTestException(
@@ -288,5 +290,151 @@ public abstract partial class CodecsTestBase
         Array.Copy(src.SLpcQ14Buf, copy.SLpcQ14Buf, src.SLpcQ14Buf.Length);
         Array.Copy(src.ExcQ14, copy.ExcQ14, src.ExcQ14.Length);
         return copy;
+    }
+
+    /// <summary>WB (16 kHz, 4 subframes, lpcOrder=16) parameter set. Exercises
+    /// the FULL 16-tap LPC synthesis filter unroll (vs NB's 10-tap path).</summary>
+    private static (SilkChannelDecoderState state, SilkDecodedParameters parameters)
+        SilkDecodeCoreTest_BuildWbState(int signalType)
+    {
+        var state = new SilkChannelDecoderState();
+        state.Configure(fsKHz: 16, nbSubfr: 4, lpcOrder: 16);
+        state.Reset();
+
+        var parameters = new SilkDecodedParameters();
+        parameters.GainsQ16[0] = 0x18000;
+        parameters.GainsQ16[1] = 0x1A000;
+        parameters.GainsQ16[2] = 0x1C000;
+        parameters.GainsQ16[3] = 0x1E000;
+
+        // 16-tap LP filter for both halves: low-pass, all 16 taps populated.
+        for (int half = 0; half < 2; half++)
+        {
+            parameters.PredCoefQ12[half * 16 + 0] = 2800;
+            parameters.PredCoefQ12[half * 16 + 1] = -900;
+            parameters.PredCoefQ12[half * 16 + 2] = 200;
+            parameters.PredCoefQ12[half * 16 + 3] = -50;
+            parameters.PredCoefQ12[half * 16 + 4] = 30;
+            for (int i = 5; i < 16; i++) parameters.PredCoefQ12[half * 16 + i] = (short)((i % 2 == 0) ? 10 : -10);
+        }
+
+        // Pitch lags within WB max (PE_MAX_LAG_MS * fs_kHz = 18 * 16 = 288).
+        parameters.PitchL[0] = 100;
+        parameters.PitchL[1] = 110;
+        parameters.PitchL[2] = 120;
+        parameters.PitchL[3] = 130;
+
+        for (int k = 0; k < 4; k++)
+        {
+            parameters.LtpCoefQ14[k * 5 + 0] = 800;
+            parameters.LtpCoefQ14[k * 5 + 1] = 1500;
+            parameters.LtpCoefQ14[k * 5 + 2] = 3000;
+            parameters.LtpCoefQ14[k * 5 + 3] = 1500;
+            parameters.LtpCoefQ14[k * 5 + 4] = 800;
+        }
+        parameters.LtpScaleQ14 = 12288; // index 1
+
+        return (state, parameters);
+    }
+
+    [TestMethod]
+    public async Task SilkDecodeCoreGpu_Voiced_WB_BitExactVsCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            SilkDecodeCoreTest_GateBackend(acc);
+            // WB voiced: 16 kHz × 4 subframes × 80 samples = 320 samples/frame.
+            // Exercises the lpcOrder=16 full-unroll LPC synthesis path.
+            var (state, parameters) = SilkDecodeCoreTest_BuildWbState(signalType: 2);
+            int frameLength = state.FrameLength;
+            var pulses = SilkDecodeCoreTest_BuildSparsePulses(frameLength, seed: 9999);
+
+            var cpuState = SilkDecodeCoreTest_CloneState(state);
+            var cpuXq = new short[frameLength];
+            SilkDecodeCore.Decode(
+                cpuState, parameters, pulses.AsSpan(0, frameLength),
+                signalType: 2, quantOffsetType: 1, seed: 11,
+                nlsfInterpolationEnabled: false,
+                cpuXq.AsSpan(0, frameLength));
+
+            var (gpuXq, gpuSLpc, gpuPrevGain) = await SilkDecodeCoreTest_RunGpuAsync(
+                acc, parameters, state, pulses,
+                signalType: 2, quantOffsetType: 1, seed: 11,
+                nlsfInterpEnabled: false);
+
+            for (int i = 0; i < frameLength; i++)
+                if (cpuXq[i] != gpuXq[i])
+                    throw new Exception($"WB PCM mismatch at sample {i}: cpu={cpuXq[i]} gpu={gpuXq[i]}");
+            for (int i = 0; i < 16; i++)
+                if (cpuState.SLpcQ14Buf[i] != gpuSLpc[i])
+                    throw new Exception($"WB SLpcQ14Buf mismatch at {i}: cpu={cpuState.SLpcQ14Buf[i]} gpu={gpuSLpc[i]}");
+            if (cpuState.PrevGainQ16 != gpuPrevGain)
+                throw new Exception($"WB PrevGainQ16 mismatch: cpu={cpuState.PrevGainQ16} gpu={gpuPrevGain}");
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
+    public async Task SilkDecodeCoreGpu_VoicedNB_3FramesStateRolling_BitExactVsCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            SilkDecodeCoreTest_GateBackend(acc);
+            // Decode 3 consecutive voiced NB frames, threading the persistent
+            // state buffers (SLpcQ14Buf, OutBuf, PrevGainQ16) across calls.
+            // Catches state-rolling bugs that single-frame tests miss: e.g.
+            // outBuf-shift bugs visible only on frame 2+, or SLpcQ14Buf
+            // contamination between frames.
+            var (state, parameters) = SilkDecodeCoreTest_BuildNbState(signalType: 2);
+            int frameLength = state.FrameLength;
+            var cpuState = SilkDecodeCoreTest_CloneState(state);
+
+            for (int frame = 0; frame < 3; frame++)
+            {
+                var pulses = SilkDecodeCoreTest_BuildSparsePulses(frameLength, seed: 1000 + frame);
+
+                // CPU oracle.
+                var cpuXq = new short[frameLength];
+                SilkDecodeCore.Decode(
+                    cpuState, parameters, pulses.AsSpan(0, frameLength),
+                    signalType: 2, quantOffsetType: 0, seed: (sbyte)(13 + frame),
+                    nlsfInterpolationEnabled: false,
+                    cpuXq.AsSpan(0, frameLength));
+                // CPU SilkDecodeFrame normally shifts outBuf[frameLength..] -> outBuf[0..]
+                // and writes xq into outBuf[mvLen..]. Mirror that here so the LTP buffer
+                // is realistic on the next iteration.
+                int mvLen = cpuState.LtpMemLength - frameLength;
+                Array.Copy(cpuState.OutBuf, frameLength, cpuState.OutBuf, 0, mvLen);
+                Array.Copy(cpuXq, 0, cpuState.OutBuf, mvLen, frameLength);
+
+                // GPU: clone the GPU-side state to the SAME starting state CPU just used,
+                // run, then mirror the same shift on the GPU clone for next iter.
+                var (gpuXq, gpuSLpc, gpuPrevGain) = await SilkDecodeCoreTest_RunGpuAsync(
+                    acc, parameters, state, pulses,
+                    signalType: 2, quantOffsetType: 0, seed: 13 + frame,
+                    nlsfInterpEnabled: false);
+
+                for (int i = 0; i < frameLength; i++)
+                    if (cpuXq[i] != gpuXq[i])
+                        throw new Exception(
+                            $"frame {frame} sample {i} mismatch: cpu={cpuXq[i]} gpu={gpuXq[i]}");
+                for (int i = 0; i < 16; i++)
+                    if (cpuState.SLpcQ14Buf[i] != gpuSLpc[i])
+                        throw new Exception(
+                            $"frame {frame} SLpcQ14Buf mismatch at {i}: cpu={cpuState.SLpcQ14Buf[i]} gpu={gpuSLpc[i]}");
+                if (cpuState.PrevGainQ16 != gpuPrevGain)
+                    throw new Exception(
+                        $"frame {frame} PrevGainQ16 mismatch: cpu={cpuState.PrevGainQ16} gpu={gpuPrevGain}");
+
+                // Update GPU-side state for next iteration: copy persistent state from
+                // cpuState into the GPU's "state" object (since cpuState was shifted).
+                Array.Copy(cpuState.OutBuf, state.OutBuf, cpuState.OutBuf.Length);
+                Array.Copy(cpuState.SLpcQ14Buf, state.SLpcQ14Buf, cpuState.SLpcQ14Buf.Length);
+                state.PrevGainQ16 = cpuState.PrevGainQ16;
+            }
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
     }
 }
