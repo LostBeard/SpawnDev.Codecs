@@ -64,12 +64,15 @@ public abstract partial class CodecsTestBase
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            // 2026-05-04: rc.9 ArrayView<long>-Cast byte-length fix did
-            // NOT close this trap. dTileLen is `Allocate1D<long>(1)`
-            // directly (NOT a Cast view), so V4's 4-byte range is a
-            // different bug. Same disp=4 trap signature post-rc.9 with
-            // V4:[28928..28932)/131072 unchanged. Re-gating; tracked at
-            // _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc9-vp9-still-fails-non-cast-long-2026-05-04.md.
+            // 2026-05-04: rc.10 corrected the OOB trap diagnostic (per-view
+            // element-size fix). Re-ran on rc.10: view byte ranges now look
+            // sane (V0 yCoefs 8192 B, V1/V2 uCoefs/vCoefs 2048 B each,
+            // V3 outBuf 16640 B, V4 outLen 8 B, V5 byteConsts 5048 B,
+            // V6 ushortConsts 1920 B). All views cover [0..35904), scratch +
+            // fence land in [35904..36808). Trap STILL fires — kernel is
+            // accessing memory outside valid view ranges (genuine runtime
+            // OOB, not a sizing artifact). Tracked at
+            // _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc10-vp9-trap-still-fires-2026-05-04.md.
             if (acc.AcceleratorType == AcceleratorType.Wasm)
             {
                 throw new UnsupportedTestException(
