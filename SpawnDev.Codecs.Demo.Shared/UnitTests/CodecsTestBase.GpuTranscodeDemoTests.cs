@@ -64,15 +64,12 @@ public abstract partial class CodecsTestBase
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            // 2026-05-04: rc.8 multi-view body-struct fix did NOT close
-            // the Vp9FrameEntropyKernel Wasm OOB - that kernel uses 7
-            // TOP-LEVEL ArrayView params (not a body struct), so it goes
-            // through a different dispatcher path. Verified post-rc.8:
-            // same disp=4 trap signature with V0/V1/V2/V3 overlap pattern
-            // suggesting the Wasm dispatcher may not be deduplicating
-            // SubView ranges into the same parent allocation correctly.
-            // Restoring the Wasm gate; tracked at
-            // _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-vp8-vp9-wasm-oob-kernel-identified-2026-05-03.md.
+            // 2026-05-04: rc.9 ArrayView<long>-Cast byte-length fix did
+            // NOT close this trap. dTileLen is `Allocate1D<long>(1)`
+            // directly (NOT a Cast view), so V4's 4-byte range is a
+            // different bug. Same disp=4 trap signature post-rc.9 with
+            // V4:[28928..28932)/131072 unchanged. Re-gating; tracked at
+            // _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc9-vp9-still-fails-non-cast-long-2026-05-04.md.
             if (acc.AcceleratorType == AcceleratorType.Wasm)
             {
                 throw new UnsupportedTestException(
