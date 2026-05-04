@@ -337,6 +337,89 @@ public abstract partial class CodecsTestBase
         return (state, parameters);
     }
 
+    /// <summary>MB (12 kHz, 4 subframes, lpcOrder=10) parameter set. Exercises
+    /// the 12 kHz sample rate path with subfrLength=60 (vs NB's 40, WB's 80).</summary>
+    private static (SilkChannelDecoderState state, SilkDecodedParameters parameters)
+        SilkDecodeCoreTest_BuildMbState(int signalType)
+    {
+        var state = new SilkChannelDecoderState();
+        state.Configure(fsKHz: 12, nbSubfr: 4, lpcOrder: 10);
+        state.Reset();
+
+        var parameters = new SilkDecodedParameters();
+        parameters.GainsQ16[0] = 0x14000;
+        parameters.GainsQ16[1] = 0x16000;
+        parameters.GainsQ16[2] = 0x18000;
+        parameters.GainsQ16[3] = 0x1A000;
+
+        for (int half = 0; half < 2; half++)
+        {
+            parameters.PredCoefQ12[half * 16 + 0] = 3200;
+            parameters.PredCoefQ12[half * 16 + 1] = -1100;
+            parameters.PredCoefQ12[half * 16 + 2] = 100;
+            parameters.PredCoefQ12[half * 16 + 3] = -50;
+            for (int i = 4; i < 10; i++) parameters.PredCoefQ12[half * 16 + i] = 0;
+            for (int i = 10; i < 16; i++) parameters.PredCoefQ12[half * 16 + i] = 0;
+        }
+
+        // Pitch lags within MB max (PE_MAX_LAG_MS * fs_kHz = 18 * 12 = 216).
+        parameters.PitchL[0] = 80;
+        parameters.PitchL[1] = 90;
+        parameters.PitchL[2] = 100;
+        parameters.PitchL[3] = 110;
+
+        for (int k = 0; k < 4; k++)
+        {
+            parameters.LtpCoefQ14[k * 5 + 0] = 900;
+            parameters.LtpCoefQ14[k * 5 + 1] = 1800;
+            parameters.LtpCoefQ14[k * 5 + 2] = 3500;
+            parameters.LtpCoefQ14[k * 5 + 3] = 1800;
+            parameters.LtpCoefQ14[k * 5 + 4] = 900;
+        }
+        parameters.LtpScaleQ14 = 8192; // index 2
+
+        return (state, parameters);
+    }
+
+    [TestMethod]
+    public async Task SilkDecodeCoreGpu_Voiced_MB_BitExactVsCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            SilkDecodeCoreTest_GateBackend(acc);
+            // MB voiced: 12 kHz × 4 subframes × 60 = 240 samples/frame.
+            // Different subfrLength than NB (40) or WB (80), exercising the
+            // synthesis loop's per-sample stride math at a third length.
+            var (state, parameters) = SilkDecodeCoreTest_BuildMbState(signalType: 2);
+            int frameLength = state.FrameLength;
+            var pulses = SilkDecodeCoreTest_BuildSparsePulses(frameLength, seed: 31337);
+
+            var cpuState = SilkDecodeCoreTest_CloneState(state);
+            var cpuXq = new short[frameLength];
+            SilkDecodeCore.Decode(
+                cpuState, parameters, pulses.AsSpan(0, frameLength),
+                signalType: 2, quantOffsetType: 0, seed: 21,
+                nlsfInterpolationEnabled: false,
+                cpuXq.AsSpan(0, frameLength));
+
+            var (gpuXq, gpuSLpc, gpuPrevGain) = await SilkDecodeCoreTest_RunGpuAsync(
+                acc, parameters, state, pulses,
+                signalType: 2, quantOffsetType: 0, seed: 21,
+                nlsfInterpEnabled: false);
+
+            for (int i = 0; i < frameLength; i++)
+                if (cpuXq[i] != gpuXq[i])
+                    throw new Exception($"MB PCM mismatch at sample {i}: cpu={cpuXq[i]} gpu={gpuXq[i]}");
+            for (int i = 0; i < 16; i++)
+                if (cpuState.SLpcQ14Buf[i] != gpuSLpc[i])
+                    throw new Exception($"MB SLpcQ14Buf mismatch at {i}: cpu={cpuState.SLpcQ14Buf[i]} gpu={gpuSLpc[i]}");
+            if (cpuState.PrevGainQ16 != gpuPrevGain)
+                throw new Exception($"MB PrevGainQ16 mismatch: cpu={cpuState.PrevGainQ16} gpu={gpuPrevGain}");
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
     [TestMethod]
     public async Task SilkDecodeCoreGpu_Voiced_WB_BitExactVsCpu()
     {
