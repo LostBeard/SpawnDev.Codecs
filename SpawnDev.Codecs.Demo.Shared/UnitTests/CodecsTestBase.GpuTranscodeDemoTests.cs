@@ -31,8 +31,11 @@ public abstract partial class CodecsTestBase
             if (acc.AcceleratorType == AcceleratorType.Wasm)
             {
                 throw new UnsupportedTestException(
-                    "GPU pair demo round-trip on Wasm backend is gated on SpawnDev.ILGPU Wasm memory OOB fix "
-                    + "(in-progress, Geordi). Existing GPU pair tests cover desktop + WebGPU backends.");
+                    "TEMPORARY: GPU pair demo round-trip Wasm OOB. Vp8/Av1 share the same OOB class as Vp9 "
+                    + "(per-MB encode loop hits memory access out of bounds on Wasm). Tracked at "
+                    + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc10-vp9-trap-still-fires-2026-05-04.md. "
+                    + "RETRY when kernel-side bisection identifies the OOB origin OR ILGPU rc ships Wasm "
+                    + "OOB instrumentation (per-IR-instruction bounds check) to narrow it.");
             }
 
             const int width = 64, height = 64, q = 30;
@@ -72,9 +75,11 @@ public abstract partial class CodecsTestBase
             if (acc.AcceleratorType == AcceleratorType.Wasm)
             {
                 throw new UnsupportedTestException(
-                    "Vp9 Wasm OOB unchanged on rc.11 (dispatcher race fix didn't close it). "
-                    + "Tracked at _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc10-vp9-trap-still-fires-2026-05-04.md. "
-                    + "Kernel bisection pending.");
+                    "TEMPORARY: Vp9 Wasm OOB unchanged on rc.11/rc.12 (race fix + diagnostic fix did NOT close "
+                    + "the kernel-side OOB; browser tab crashes 'Aw, Snap!'). Tracked at "
+                    + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc10-vp9-trap-still-fires-2026-05-04.md. "
+                    + "RETRY when kernel-side bisection localizes the OOB origin in Vp9FrameEntropyKernel "
+                    + "(per Geordi's bisection-plan ack) OR ILGPU adds Wasm OOB IR-instruction-level diagnostic.");
             }
 
             const int width = 64, height = 64, q = 30;
@@ -112,8 +117,11 @@ public abstract partial class CodecsTestBase
             if (acc.AcceleratorType == AcceleratorType.Wasm)
             {
                 throw new UnsupportedTestException(
-                    "GPU pair demo round-trip on Wasm backend is gated on SpawnDev.ILGPU Wasm memory OOB fix "
-                    + "(in-progress, Geordi). Existing GPU pair tests cover desktop + WebGPU backends.");
+                    "TEMPORARY: GPU pair demo round-trip Wasm OOB. Vp8/Av1 share the same OOB class as Vp9 "
+                    + "(per-MB encode loop hits memory access out of bounds on Wasm). Tracked at "
+                    + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc10-vp9-trap-still-fires-2026-05-04.md. "
+                    + "RETRY when kernel-side bisection identifies the OOB origin OR ILGPU rc ships Wasm "
+                    + "OOB instrumentation (per-IR-instruction bounds check) to narrow it.");
             }
 
             const int width = 64, height = 64, q = 32;

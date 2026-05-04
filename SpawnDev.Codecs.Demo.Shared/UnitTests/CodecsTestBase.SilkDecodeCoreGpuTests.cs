@@ -189,17 +189,21 @@ public abstract partial class CodecsTestBase
     {
         if (acc.AcceleratorType == AcceleratorType.Cuda)
             throw new UnsupportedTestException(
-                "SilkDecodeCoreGpu auto-grouped launch hits 'too many resources requested for launch' on CUDA. "
-                + "ILGPU auto-grouper picks a block size whose per-thread register footprint exceeds SM limits "
-                + "for this kernel's body-struct + LPC-synthesis-unroll combination. Verified 2026-05-04: "
-                + "removing b0..b4 local caching in the LTP loop did NOT shrink register count enough; "
-                + "the body struct's 15 ArrayView fields dominate. Tracked at "
-                + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-silkdecodecoregpu-cuda-webgpu-2026-05-04.md.");
+                "TEMPORARY: SilkDecodeCoreGpu auto-grouped launch hits CUDA 'too many resources requested for "
+                + "launch'. ILGPU auto-grouper picks block size whose register × thread footprint exceeds SM "
+                + "limits for this kernel's 15-ArrayView body struct + LPC-synthesis-unroll. Verified 2026-05-04: "
+                + "shrinking kernel-side caching didn't help; body struct dominates. Tracked at "
+                + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-silkdecodecoregpu-cuda-webgpu-2026-05-04.md "
+                + "(Geordi task #32). RETRY when ILGPU rc ships auto-grouper retry-on-launch-OOR or "
+                + "[KernelLaunchHint(MaxThreadsPerBlock=1)] support.");
         if (acc.AcceleratorType == AcceleratorType.WebGPU)
             throw new UnsupportedTestException(
-                "SilkDecodeCoreGpu hits WebGPU 'Invalid BindGroupLayout' - 15 ArrayView fields in the body struct "
-                + "exceed the default storage-buffer binding count after rc.5 same-element-type coalesce. "
-                + "Tracked at _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-silkdecodecoregpu-cuda-webgpu-2026-05-04.md.");
+                "TEMPORARY: SilkDecodeCoreGpu hits WebGPU 'Invalid BindGroupLayout' - 15 ArrayView fields "
+                + "(6 short + 9 int) exceed default maxStorageBuffersPerShaderStage=8 after rc.5 same-element-type "
+                + "coalesce (rc.5 only handles i32/u32/f32 - sub-word short/byte stay as separate bindings). "
+                + "Tracked at _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-silkdecodecoregpu-cuda-webgpu-2026-05-04.md "
+                + "(Geordi task #33). RETRY when ILGPU rc extends WebGPU coalesce to sub-word fields "
+                + "(pack N shorts into u32 buffer) OR raises adapter maxStorageBuffersPerShaderStage limit.");
     }
 
     [TestMethod]
