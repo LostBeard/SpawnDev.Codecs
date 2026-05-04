@@ -66,13 +66,7 @@ public abstract partial class CodecsTestBase
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            if (acc.AcceleratorType == AcceleratorType.WebGPU)
-                throw new UnsupportedTestException(
-                    "TEMPORARY: DecodeUint fails on WebGPU at the first decode (uint[0]=0 instead of 3 for ft=6). "
-                    + "rc.12 fixed the Shr signed-shift, but DecodeUint additionally uses uint DIVISION (state.Rng / ft) "
-                    + "which has the same i32-as-uint codegen issue. Filed at "
-                    + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc12-wgsl-uint-division-2026-05-04.md. "
-                    + "RETRY on ILGPU rc.13+ once WGSL emits bitcast<i32>(bitcast<u32>(left) / u32(right)) for unsigned div.");
+            // 2026-05-04: WebGPU gate lifted on rc.13 (WGSL Div/Rem unsigned cast fix).
             // Small ranges (ft <= 2^EC_UINT_BITS = 256) take the
             // single-decode path. Used by CELT post-filter octave (ft=6),
             // tapset selection, etc.
@@ -95,8 +89,11 @@ public abstract partial class CodecsTestBase
         {
             if (acc.AcceleratorType == AcceleratorType.WebGPU)
                 throw new UnsupportedTestException(
-                    "TEMPORARY: DecodeUint WebGPU gated on uint-division codegen issue. "
-                    + "RETRY on ILGPU rc.13+. See SmallRanges test for full DevComms ref.");
+                    "TEMPORARY: DecodeUint LargeRanges still hits 30s PMT timeout on WebGPU after rc.14 "
+                    + "(SmallRanges PASSES, so Div/Rem fix landed; the long-form path uses additional "
+                    + "DecodeBits end-window reads which may be slow). Filed at "
+                    + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc14-decodeuint-largeranges-webgpu-timeout-2026-05-04.md. "
+                    + "RETRY when WebGPU end-window read codegen / cold-start kernel-compile speeds up.");
             // Large ranges (ft > 2^EC_UINT_BITS = 256) take the long-form
             // split path: divisive decode for the top + raw bits for the
             // bottom. Exercises the more complex branch of DecodeUint.
@@ -238,10 +235,10 @@ public abstract partial class CodecsTestBase
         {
             if (acc.AcceleratorType == AcceleratorType.Wasm)
                 throw new UnsupportedTestException(
-                    "TEMPORARY: Wasm DecodeIcdf hits PMT 30s per-test timeout on cold start (regressed since rc.11+). "
-                    + "Was passing on Wasm pre-rc.11. RETRY when ILGPU rc.13+ improves Wasm cold-start kernel-compile speed "
-                    + "OR when PMT raises the per-test timeout for Codecs. Filed at "
-                    + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc12-wasm-decodeicdf-timeout-2026-05-04.md.");
+                    "TEMPORARY: Wasm DecodeIcdf STILL hits PMT 30s timeout on rc.14 (rc.13 snapshot allocator "
+                    + "fix didn't fully resolve - cold-start kernel-compile + per-dispatch overhead). Filed at "
+                    + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc14-wasm-decodeicdf-still-timeout-2026-05-04.md. "
+                    + "RETRY when Wasm cold-start kernel-compile speed improves further OR PMT raises per-test timeout.");
             // Encode a known sequence of 4-symbol uniform values on CPU,
             // decode on GPU, verify bit-exact.
             int[] symbols = new[] { 0, 1, 2, 3, 1, 0, 3, 2, 0, 2, 1, 3 };
@@ -284,8 +281,10 @@ public abstract partial class CodecsTestBase
         {
             if (acc.AcceleratorType == AcceleratorType.Wasm)
                 throw new UnsupportedTestException(
-                    "TEMPORARY: Wasm DecodeIcdf hits PMT 30s timeout (rc.11+ regression). "
-                    + "RETRY on ILGPU rc.13+. See Uniform4 test for full DevComms ref.");
+                    "TEMPORARY: Wasm DecodeIcdf STILL hits PMT 30s timeout on rc.14 (rc.13 snapshot allocator "
+                    + "fix didn't fully resolve). Cold-start kernel-compile time + per-dispatch overhead remains. "
+                    + "Filed at _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc14-wasm-decodeicdf-still-timeout-2026-05-04.md. "
+                    + "RETRY when Wasm cold-start kernel-compile speed improves further OR PMT raises per-test timeout.");
             // Mix of all 4 symbols using a realistic SILK iCDF shape.
             int[] symbols = new[] { 1, 2, 0, 3, 1, 1, 2, 0, 3, 1, 2 };
             byte[] icdf = OpusTestIcdf_TypeOffsetVad;
@@ -316,8 +315,10 @@ public abstract partial class CodecsTestBase
         {
             if (acc.AcceleratorType == AcceleratorType.Wasm)
                 throw new UnsupportedTestException(
-                    "TEMPORARY: Wasm DecodeIcdf hits PMT 30s timeout (rc.11+ regression). "
-                    + "RETRY on ILGPU rc.13+. See Uniform4 test for full DevComms ref.");
+                    "TEMPORARY: Wasm DecodeIcdf STILL hits PMT 30s timeout on rc.14 (rc.13 snapshot allocator "
+                    + "fix didn't fully resolve). Cold-start kernel-compile time + per-dispatch overhead remains. "
+                    + "Filed at _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc14-wasm-decodeicdf-still-timeout-2026-05-04.md. "
+                    + "RETRY when Wasm cold-start kernel-compile speed improves further OR PMT raises per-test timeout.");
             // 256 symbols stresses Normalize byte-refill + buffer pointer
             // walk + ensures multi-byte normalization fires repeatedly.
             const int n = 256;
