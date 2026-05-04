@@ -26,19 +26,23 @@ public sealed class OpusRangeDecoderGpuTestKernel : IDisposable
         ArrayView<byte>, int, int,
         ArrayView<int>, int> _kernel;
 
-    private readonly Action<
+    private readonly Lazy<Action<
         Index1D,
         ArrayView<byte>, int, int,
         int,
-        ArrayView<int>, int> _bitLogPKernel;
+        ArrayView<int>, int>> _bitLogPKernel;
 
-    private readonly Action<
+    private readonly Lazy<Action<
         Index1D,
         ArrayView<byte>, int, int,
         ArrayView<uint>,
-        ArrayView<uint>, int> _uintKernel;
+        ArrayView<uint>, int>> _uintKernel;
 
-    /// <summary>Compile.</summary>
+    /// <summary>Compile DecodeIcdf eagerly (most-used path); DecodeBitLogP +
+    /// DecodeUint compile lazily on first use so callers that only need
+    /// DecodeIcdf don't pay their compile cost. Matters on Wasm cold-start
+    /// where every additional kernel compile eats the PMT 30s per-test
+    /// budget.</summary>
     public OpusRangeDecoderGpuTestKernel(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
@@ -47,16 +51,18 @@ public sealed class OpusRangeDecoderGpuTestKernel : IDisposable
             ArrayView<byte>, int, int,
             ArrayView<byte>, int, int,
             ArrayView<int>, int>(DecodeIcdfKernel);
-        _bitLogPKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D,
-            ArrayView<byte>, int, int,
-            int,
-            ArrayView<int>, int>(DecodeBitLogPKernel);
-        _uintKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D,
-            ArrayView<byte>, int, int,
-            ArrayView<uint>,
-            ArrayView<uint>, int>(DecodeUintKernel);
+        _bitLogPKernel = new Lazy<Action<Index1D, ArrayView<byte>, int, int, int, ArrayView<int>, int>>(
+            () => accelerator.LoadAutoGroupedStreamKernel<
+                Index1D,
+                ArrayView<byte>, int, int,
+                int,
+                ArrayView<int>, int>(DecodeBitLogPKernel));
+        _uintKernel = new Lazy<Action<Index1D, ArrayView<byte>, int, int, ArrayView<uint>, ArrayView<uint>, int>>(
+            () => accelerator.LoadAutoGroupedStreamKernel<
+                Index1D,
+                ArrayView<byte>, int, int,
+                ArrayView<uint>,
+                ArrayView<uint>, int>(DecodeUintKernel));
     }
 
     /// <summary>
@@ -74,7 +80,7 @@ public sealed class OpusRangeDecoderGpuTestKernel : IDisposable
         if (symbolCount < 0) throw new ArgumentOutOfRangeException(nameof(symbolCount));
         if (decodedOut.Length < symbolCount)
             throw new ArgumentException("decodedOut too short.", nameof(decodedOut));
-        _uintKernel(1, packet, packetStart, packetStorage,
+        _uintKernel.Value(1, packet, packetStart, packetStorage,
             ftPerSymbol, decodedOut, symbolCount);
     }
 
@@ -108,7 +114,7 @@ public sealed class OpusRangeDecoderGpuTestKernel : IDisposable
         if (bitCount < 0) throw new ArgumentOutOfRangeException(nameof(bitCount));
         if (decodedOut.Length < bitCount)
             throw new ArgumentException("decodedOut too short.", nameof(decodedOut));
-        _bitLogPKernel(1, packet, packetStart, packetStorage,
+        _bitLogPKernel.Value(1, packet, packetStart, packetStorage,
             logp, decodedOut, bitCount);
     }
 
