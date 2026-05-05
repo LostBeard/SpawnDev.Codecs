@@ -24,6 +24,7 @@
 // that's the bar for the SpawnDev.Codecs library. The whole point
 // is to keep data on the accelerator end-to-end.
 
+using System.Runtime.CompilerServices;
 using ILGPU;
 using SpawnDev.ILGPU;
 
@@ -89,6 +90,31 @@ public static class Av1RangeEncoderGpu
         if (val != 0) l += r - v;
         r = val != 0 ? v : r - v;
         Normalize(ref state, outBuf, l, r);
+    }
+
+    /// <summary>
+    /// Encode a 2-symbol binary CDF in q15 form. <paramref name="cdf0"/> is
+    /// the icdf[0] value (= AOM_ICDF of cumulative prob of sym 0); icdf[1]
+    /// is implicitly 0 (the standard 2-symbol icdf sentinel). Equivalent to
+    /// <c>EncodeCdfQ15(state, outBuf, s, [cdf0, 0], 0, 2)</c> but doesn't
+    /// require a writable icdf buffer.
+    ///
+    /// Routes through <see cref="EncodeQ15"/> rather than
+    /// <see cref="EncodeBoolQ15"/> deliberately - <see cref="EncodeQ15"/> is
+    /// already the kernel's single caller of <see cref="Normalize"/>; using
+    /// EncodeBoolQ15 would add a second Normalize caller, which triggers
+    /// the WebGPU/Wasm fn-definition codegen bug Geordi is investigating
+    /// 2026-05-05 (i64_ge / i64_eq emulation called but not defined).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void EncodeBinaryQ15(
+        ref Av1RangeEncoderGpuState state,
+        ArrayView<byte> outBuf,
+        int s, uint cdf0)
+    {
+        uint fl = s > 0 ? cdf0 : (uint)CdfProbTop;
+        uint fh = s > 0 ? 0u : cdf0;
+        EncodeQ15(ref state, outBuf, fl, fh, s, 2);
     }
 
     /// <summary>

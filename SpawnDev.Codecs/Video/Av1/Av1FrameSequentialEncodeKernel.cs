@@ -362,8 +362,32 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         int frameMiRows, int frameMiCols,
         Av1FrameSeqEncodeParams p)
     {
-        EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
-            sbMiRow, sbMiCol, BsizeBlock64x64, PartitionSplit);
+        // SB64 partition. Half = 8 mi (BLOCK_32X32 quadrant size).
+        // AV1 spec sec 5.11.4 boundary cases:
+        //   has_rows && has_cols : full 10-way partition CDF, emit SPLIT.
+        //   !has_rows && has_cols: bottom edge straddles -> binary HORZ vs SPLIT
+        //                          via vert_alike gather; v1 emits SPLIT (recurse).
+        //   has_rows && !has_cols: right edge straddles -> binary VERT vs SPLIT
+        //                          via horz_alike gather; v1 emits SPLIT (recurse).
+        //   !has_rows && !has_cols: corner -> forced SPLIT, no emit.
+        bool hasRows64 = (sbMiRow + 8) < frameMiRows;
+        bool hasCols64 = (sbMiCol + 8) < frameMiCols;
+        if (hasRows64 && hasCols64)
+        {
+            EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
+                sbMiRow, sbMiCol, BsizeBlock64x64, PartitionSplit);
+        }
+        else if (hasCols64)
+        {
+            EmitPartitionCdfBoundary(ref re, outBuf, constsUshort, scratchByte, p,
+                sbMiRow, sbMiCol, BsizeBlock64x64, isVertAlike: true, sym: 1);
+        }
+        else if (hasRows64)
+        {
+            EmitPartitionCdfBoundary(ref re, outBuf, constsUshort, scratchByte, p,
+                sbMiRow, sbMiCol, BsizeBlock64x64, isVertAlike: false, sym: 1);
+        }
+        // else corner: forced SPLIT, no emit.
 
         for (int q32 = 0; q32 < 4; q32++)
         {
@@ -373,8 +397,25 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
             int miCol32 = sbMiCol + qc32 * 8;
             if (miRow32 >= frameMiRows || miCol32 >= frameMiCols) continue;
 
-            EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
-                miRow32, miCol32, BsizeBlock32x32, PartitionSplit);
+            // SB32 partition. Half = 4 mi (BLOCK_16X16 quadrant size).
+            bool hasRows32 = (miRow32 + 4) < frameMiRows;
+            bool hasCols32 = (miCol32 + 4) < frameMiCols;
+            if (hasRows32 && hasCols32)
+            {
+                EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
+                    miRow32, miCol32, BsizeBlock32x32, PartitionSplit);
+            }
+            else if (hasCols32)
+            {
+                EmitPartitionCdfBoundary(ref re, outBuf, constsUshort, scratchByte, p,
+                    miRow32, miCol32, BsizeBlock32x32, isVertAlike: true, sym: 1);
+            }
+            else if (hasRows32)
+            {
+                EmitPartitionCdfBoundary(ref re, outBuf, constsUshort, scratchByte, p,
+                    miRow32, miCol32, BsizeBlock32x32, isVertAlike: false, sym: 1);
+            }
+            // else corner: forced SPLIT, no emit.
 
             for (int q16 = 0; q16 < 4; q16++)
             {
@@ -384,8 +425,35 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
                 int miCol16 = miCol32 + qc16 * 4;
                 if (miRow16 >= frameMiRows || miCol16 >= frameMiCols) continue;
 
-                EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
-                    miRow16, miCol16, BsizeBlock16x16, PartitionNone);
+                // SB16 partition. Half = 2 mi (BLOCK_8X8 quadrant size).
+                // Leaf level: at boundary the v1 walker emits HORZ (BLOCK_16X8 top
+                // half) or VERT (BLOCK_8X16 left half) instead of NONE+BLOCK_16X16.
+                // The leaf encode helper still produces BLOCK_16X16 coefs in this
+                // commit (Phase 1 - walker only); seq encode boundary support
+                // (2x Tx8x8 luma + 2x Tx4x4 chroma) lands in Phase 2.
+                bool hasRows16 = (miRow16 + 2) < frameMiRows;
+                bool hasCols16 = (miCol16 + 2) < frameMiCols;
+                if (hasRows16 && hasCols16)
+                {
+                    EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
+                        miRow16, miCol16, BsizeBlock16x16, PartitionNone);
+                }
+                else if (hasCols16)
+                {
+                    // !has_rows: emit HORZ (sym=0 in vert_alike binary).
+                    EmitPartitionCdfBoundary(ref re, outBuf, constsUshort, scratchByte, p,
+                        miRow16, miCol16, BsizeBlock16x16, isVertAlike: true, sym: 0);
+                }
+                else if (hasRows16)
+                {
+                    // !has_cols: emit VERT (sym=0 in horz_alike binary).
+                    EmitPartitionCdfBoundary(ref re, outBuf, constsUshort, scratchByte, p,
+                        miRow16, miCol16, BsizeBlock16x16, isVertAlike: false, sym: 0);
+                }
+                // else corner: forced SPLIT to BLOCK_8X8 children. v1 walker
+                // doesn't support BLOCK_8X8 leaves; host pre-check rejects dims
+                // that would reach this case (both width AND height non-aligned
+                // to 64). Tracked under task #23.
 
                 EncodeLeafBlock(ref re, outBuf,
                     src, recon, constsByte, constsUshort,
@@ -754,6 +822,60 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         int nsyms = PartitionCdfNsyms(bsize);
         long cdfBase = Av1KeyframeConstantsGpu.PartitionCdfOffset + ctx * 11;
         Av1RangeEncoderGpu.EncodeCdfQ15(ref re, outBuf, partition, constsUshort, cdfBase, nsyms);
+    }
+
+    /// <summary>
+    /// Emit a binary partition CDF symbol for a boundary block, using
+    /// libaom's <c>partition_gather_vert_alike</c> (!has_rows) or
+    /// <c>partition_gather_horz_alike</c> (!has_cols) gather over the full
+    /// 10-way partition CDF.
+    ///
+    /// vert_alike (sym=0 -&gt; HORZ, sym=1 -&gt; SPLIT): subtracted-prob set =
+    /// {HORZ, SPLIT, HORZ_A, HORZ_B, VERT_A, HORZ_4}. Telescopes to
+    /// <c>icdf[0]-icdf[1] + icdf[2]-icdf[6] + icdf[7]-icdf[8]</c>.
+    ///
+    /// horz_alike (sym=0 -&gt; VERT, sym=1 -&gt; SPLIT): subtracted-prob set =
+    /// {VERT, SPLIT, HORZ_A, VERT_A, VERT_B, VERT_4}. Telescopes to
+    /// <c>icdf[1]-icdf[4] + icdf[5]-icdf[7] + icdf[8]-icdf[9]</c>.
+    ///
+    /// (Both formulas assume bsize != BLOCK_128X128, which is true for
+    /// every level the v1 walker emits at: SB64/SB32/SB16.)
+    ///
+    /// The gathered cdf[0] (in AOM_ICDF format = sum of subtracted probs)
+    /// is then fed to <see cref="Av1RangeEncoderGpu.EncodeBinaryQ15"/>
+    /// which routes through <c>EncodeQ15</c> -&gt; <c>Normalize</c>.
+    ///
+    /// <see cref="MethodImplOptions.NoInlining"/> per Geordi's recommendation
+    /// after he closed the WGSL/Wasm fn-definition path bug at
+    /// SpawnDev.ILGPU master <c>a203e5e</c> (4.9.5-local.1) - the new
+    /// <c>EnumerateAllHelperMethods()</c> stream walks both inline AND
+    /// non-inline helpers when scanning for i64/f64 emulation requirements,
+    /// so the fn-def codegen path now correctly pulls in the i64_ge / i64_eq
+    /// emulation library when this helper's <c>long cdfBase</c> arithmetic
+    /// reaches WGSL emit. Compile time wins from the fn-def path.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void EmitPartitionCdfBoundary(
+        ref Av1RangeEncoderGpuState re, ArrayView<byte> outBuf,
+        ArrayView<ushort> constsUshort,
+        ArrayView<byte> scratchByte, Av1FrameSeqEncodeParams p,
+        int miRow, int miCol, int bsize, bool isVertAlike, int sym)
+    {
+        int ctx = GetPartitionContext(scratchByte, p, miRow, miCol, bsize);
+        long cdfBase = Av1KeyframeConstantsGpu.PartitionCdfOffset + ctx * 11;
+        uint c0 = constsUshort[cdfBase + 0];
+        uint c1 = constsUshort[cdfBase + 1];
+        uint c2 = constsUshort[cdfBase + 2];
+        uint c4 = constsUshort[cdfBase + 4];
+        uint c5 = constsUshort[cdfBase + 5];
+        uint c6 = constsUshort[cdfBase + 6];
+        uint c7 = constsUshort[cdfBase + 7];
+        uint c8 = constsUshort[cdfBase + 8];
+        uint c9 = constsUshort[cdfBase + 9];
+        uint binCdf0 = isVertAlike
+            ? (c0 - c1 + c2 - c6 + c7 - c8)
+            : (c1 - c4 + c5 - c7 + c8 - c9);
+        Av1RangeEncoderGpu.EncodeBinaryQ15(ref re, outBuf, sym, binCdf0);
     }
 
     /// <summary>Update partition context arrays after emitting PARTITION_NONE at subsize.</summary>

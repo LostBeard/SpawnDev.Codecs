@@ -38,7 +38,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="SpawnDev.ILGPU" Version="4.9.5-rc.14" />
+    <!-- SpawnDev.ILGPU flows transitively from SpawnDev.Codecs ProjectReference.
+         Do NOT add an explicit PackageReference here: keeps the version in lock-step
+         with the library and avoids version-conflict footgun (Demo on rc.14 / library
+         on local.1 silently produced stale runtime, observed 2026-05-05). -->
     <ProjectReference Include="..\SpawnDev.Codecs\SpawnDev.Codecs.csproj" />
     <ProjectReference Include="..\SpawnDev.Codecs.Demo.Shared\SpawnDev.Codecs.Demo.Shared.csproj" />
   </ItemGroup>
