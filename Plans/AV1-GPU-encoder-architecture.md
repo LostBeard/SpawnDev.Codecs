@@ -4,6 +4,20 @@
 100% on ILGPU; bit-exact vs CPU `Av1KeyframeEncoder.EncodeSingleTile`
 across CUDA + OpenCL + CPU. Round-trips with companion GPU decoder.
 
+**Status 2026-05-04:** AV1 GPU encoder strictly requires width AND height
+to be multiples of 64. Non-aligned dim support (e.g. FHD 1920x1080) is the
+next major item - VP9 just shipped its boundary forced-split (2026-05-04
+walker + sequential encode work at `Vp9FrameEntropyKernel` +
+`Vp9FrameSequentialEncodeKernel`); AV1 follows the same template:
+
+- Walker boundary detection at every partition level (SB128/SB64/SB32/SB16).
+- AV1 spec sec 5.11.4: at boundary blocks, emit forced-partition CDFs (or
+  no emit for both-edge corner). PARTITION_HORZ at the bottom-edge SB16.
+- Sequential encode produces 2 Tx8x8 luma + 2 Tx4x4 chroma for boundary MBs.
+- AV1 differences from VP9: range encoder (not bool), wider partition CDF
+  tree (10 outcomes vs 4), 4x4 mi units (not 8x8). Constants buffer needs
+  Tx4x4 entries (similar to what `Vp9KeyframeConstantsGpu` got).
+
 This document describes the v3 100% ILGPU walker pattern used for
 `Av1FrameSequentialEncodeKernel` + `Av1FrameSequentialDecodeKernel`.
 

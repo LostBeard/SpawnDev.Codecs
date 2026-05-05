@@ -1,5 +1,16 @@
 # VP9 GPU Encoder + Decoder Plan
 
+**Status 2026-05-04:** Native non-aligned dimension support shipped.
+1920x1080 source encodes spec-correctly via boundary forced-split path:
+walker emits PARTITION_HORZ at SB16 straddling the bottom edge; sequential
+encode produces 2 Tx8x8 luma + 2 Tx4x4 chroma transforms over the top
+BLOCK_16X8 region; out-of-frame sub-blocks skipped. `MaxMiColsAligned`
+lifted 64 -> 512 in `Vp9FrameEntropyKernel` (supports up to 4K width).
+Tx4x4 entries added to `Vp9KeyframeConstantsGpu` (Scan4x4, Neighbors4x4,
+CoefProbs4x4). All 60 BBB FHD frames decode clean via libvpx-vp9.
+
+AV1 follows the same template (task #23 pending).
+
 Roadmap for applying the v3 host-as-pure-coordinator pattern (proven
 on VP8 keyframe encoder + decoder) to VP9.
 

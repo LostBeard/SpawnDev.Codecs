@@ -1,5 +1,11 @@
 # VP8 GPU Keyframe Encoder Architecture
 
+**Status 2026-05-04:** Native non-aligned dim support shipped. VP8 accepts
+any positive (W,H); internal pad to next-16-multiple, frame tag signals
+original dims. Spec works at 1920x1080 directly (VP8 has no partition tree
+so no boundary forced-split needed). 60-frame BBB FHD batch transcode
+clean via libvpx VP8 decoder.
+
 ## Mission
 
 Per Captain's directive (2026-04-28): **encoders and decoders must be 100%
