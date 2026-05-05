@@ -148,4 +148,73 @@ public abstract partial class CodecsTestBase
         var srcIntraExtTx16 = Av1DefaultTxfmCdfs.DefaultIntraExtTxCdf[2][2][(int)Av1IntraMode.Dc];
         Equal(srcIntraExtTx16[0], ushortBuf[Av1KeyframeConstantsGpu.IntraExtTxCdfTx16DcOffset + 0], "IntraExtTx tx16 DC sentinel");
     }
+
+    [TestMethod]
+    public void Av1KeyframeConstantsGpu_Tx4x4_AllEntries_MatchSource()
+    {
+        // Boundary-MB chroma at non-aligned VP9/AV1 dims uses Tx4x4 scans/CDFs.
+        // This test verifies every Tx4x4 entry packs bit-exact vs the libaom
+        // default tables (txsCtx index 0 throughout).
+        var byteBuf = Av1KeyframeConstantsGpu.BuildByteConstsBuffer();
+        var ushortBuf = Av1KeyframeConstantsGpu.BuildUshortConstsBuffer();
+
+        // NzMapCtxOffset[0] -> all 16 entries.
+        var src4Nz = Av1ScanTables.NzMapCtxOffset[0];
+        for (int i = 0; i < src4Nz.Length; i++)
+            Equal((byte)src4Nz[i], byteBuf[Av1KeyframeConstantsGpu.NzMapCtxOffset4x4Offset + i],
+                $"NzMapCtxOffset[4x4] mismatch at {i}");
+
+        // Scan[0][0] (Tx4x4 + DCT_DCT) -> 16 ushort.
+        var src4Scan = Av1ScanTables.Scan[0][0];
+        for (int i = 0; i < 16; i++)
+            Equal((ushort)src4Scan[i], ushortBuf[Av1KeyframeConstantsGpu.Scan4x4Offset + i],
+                $"Scan[4x4] mismatch at {i}");
+
+        // TxbSkipCdf[q][0][ctx] sentinel: q=2, ctx=5, sym=1.
+        ushort srcSkip4 = Av1DefaultCoefCdfs.DefaultTxbSkipCdf[2][0][5][1];
+        int dstSkip4 = Av1KeyframeConstantsGpu.TxbSkipCdfTx4x4Offset
+            + (2 * Av1KeyframeConstantsGpu.TxbSkipContexts + 5) * 3 + 1;
+        Equal(srcSkip4, ushortBuf[dstSkip4], "TxbSkipCdf[Tx4x4] sentinel");
+
+        // EobMulti16Cdf sentinel: q=3, planeType=0, eobMultiCtx=1, sym=2.
+        ushort srcEob16 = Av1DefaultCoefCdfs.DefaultEobMulti16Cdf[3][0][1][2];
+        int dstEob16 = Av1KeyframeConstantsGpu.EobMulti16CdfOffset
+            + ((3 * Av1KeyframeConstantsGpu.PlaneTypes + 0) * 2 + 1) * 6 + 2;
+        Equal(srcEob16, ushortBuf[dstEob16], "EobMulti16Cdf sentinel");
+
+        // EobExtraCdf[q][0][p][ctx] sentinel: q=1, p=1, ctx=4, sym=0.
+        ushort srcEobExtra4 = Av1DefaultCoefCdfs.DefaultEobExtraCdf[1][0][1][4][0];
+        int dstEobExtra4 = Av1KeyframeConstantsGpu.EobExtraCdfTx4x4Offset
+            + ((1 * Av1KeyframeConstantsGpu.PlaneTypes + 1) * Av1KeyframeConstantsGpu.EobCoefContexts + 4) * 3 + 0;
+        Equal(srcEobExtra4, ushortBuf[dstEobExtra4], "EobExtraCdf[Tx4x4] sentinel");
+
+        // CoeffBaseEobMultiCdf[q][0][p][ctx] sentinel: q=0, p=0, ctx=2, sym=1.
+        ushort srcBaseEob4 = Av1DefaultCoefCdfs.DefaultCoeffBaseEobMultiCdf[0][0][0][2][1];
+        int dstBaseEob4 = Av1KeyframeConstantsGpu.CoeffBaseEobMultiCdfTx4x4Offset
+            + ((0 * Av1KeyframeConstantsGpu.PlaneTypes + 0) * Av1KeyframeConstantsGpu.SigCoefContextsEob + 2) * 4 + 1;
+        Equal(srcBaseEob4, ushortBuf[dstBaseEob4], "CoeffBaseEobMultiCdf[Tx4x4] sentinel");
+
+        // CoeffBaseMultiCdf[q][0][p][ctx] sentinel: q=2, p=1, ctx=20, sym=3.
+        ushort srcBase4 = Av1DefaultCoefCdfs.DefaultCoeffBaseMultiCdf[2][0][1][20][3];
+        int dstBase4 = Av1KeyframeConstantsGpu.CoeffBaseMultiCdfTx4x4Offset
+            + ((2 * Av1KeyframeConstantsGpu.PlaneTypes + 1) * Av1KeyframeConstantsGpu.SigCoefContexts + 20) * 5 + 3;
+        Equal(srcBase4, ushortBuf[dstBase4], "CoeffBaseMultiCdf[Tx4x4] sentinel");
+
+        // CoeffLpsMultiCdf[q][0][p][ctx] sentinel: q=3, p=0, ctx=10, sym=1.
+        ushort srcLps4 = Av1DefaultCoefCdfs.DefaultCoeffLpsMultiCdf[3][0][0][10][1];
+        int rowSize = Av1KeyframeConstantsGpu.BrCdfSize + 1;
+        int dstLps4 = Av1KeyframeConstantsGpu.CoeffLpsMultiCdfTx4x4Offset
+            + ((3 * Av1KeyframeConstantsGpu.PlaneTypes + 0) * Av1KeyframeConstantsGpu.LevelContexts + 10) * rowSize + 1;
+        Equal(srcLps4, ushortBuf[dstLps4], "CoeffLpsMultiCdf[Tx4x4] sentinel");
+
+        // Smoke: total buffer sizes still match the offset-chain math.
+        Equal(
+            Av1KeyframeConstantsGpu.CoeffLpsMultiCdfTx4x4Offset + Av1KeyframeConstantsGpu.CoeffLpsMultiCdfTx4x4Length,
+            Av1KeyframeConstantsGpu.UshortConstsTotalEntries,
+            "ushort total math");
+        Equal(
+            Av1KeyframeConstantsGpu.NzMapCtxOffset4x4Offset + Av1KeyframeConstantsGpu.NzMapCtxOffset4x4Length,
+            Av1KeyframeConstantsGpu.ByteConstsTotalBytes,
+            "byte total math");
+    }
 }

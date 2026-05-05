@@ -125,8 +125,14 @@ public static class Av1KeyframeConstantsGpu
     /// <summary>Length: 13 entries (one per INTRA_MODES enum value).</summary>
     public const int IntraModeContextLength = 13;
 
+    /// <summary>Offset of Tx4x4 NzMapCtxOffset (16 entries cast from sbyte to byte).
+    /// Used for boundary-MB chroma at non-aligned VP9/AV1 dims.</summary>
+    public const int NzMapCtxOffset4x4Offset = IntraModeContextOffset + IntraModeContextLength;
+    /// <summary>Length of Tx4x4 NzMapCtxOffset.</summary>
+    public const int NzMapCtxOffset4x4Length = 16;
+
     /// <summary>Total byte buffer size.</summary>
-    public const int ByteConstsTotalBytes = IntraModeContextOffset + IntraModeContextLength;
+    public const int ByteConstsTotalBytes = NzMapCtxOffset4x4Offset + NzMapCtxOffset4x4Length;
 
     // ---- ushort buffer layout ----
 
@@ -220,8 +226,49 @@ public static class Av1KeyframeConstantsGpu
     /// <summary>Length: 15 entries.</summary>
     public const int UvModeCdfV1RowLength = 15;
 
+    // ---- Tx4x4 entries (appended; used for boundary-MB chroma at non-aligned VP9/AV1 dims) ----
+
+    /// <summary>Tx4x4 DCT_DCT scan order (libaom default zigzag).</summary>
+    public const int Scan4x4Offset = UvModeCdfV1RowOffset + UvModeCdfV1RowLength;
+    /// <summary>Length of 4x4 scan.</summary>
+    public const int Scan4x4Length = 16;
+
+    /// <summary>TxbSkipCdf for Tx4x4 (libaom txsCtx=0) flat: [qctx][txbSkipCtx][3].</summary>
+    public const int TxbSkipCdfTx4x4Offset = Scan4x4Offset + Scan4x4Length;
+    /// <summary>Length: 4 * 13 * 3 = 156.</summary>
+    public const int TxbSkipCdfTx4x4Length = TokenCdfQCtxs * TxbSkipContexts * 3;
+
+    /// <summary>EobMulti16Cdf (used for Tx4x4) flat: [qctx][planeType][eobMultiCtx][6].
+    /// libaom Tx4x4 EOB has 5 size-classes -> CDF_SIZE(5)=6 entries per row.</summary>
+    public const int EobMulti16CdfOffset = TxbSkipCdfTx4x4Offset + TxbSkipCdfTx4x4Length;
+    /// <summary>Length: 4 * 2 * 2 * 6 = 96.</summary>
+    public const int EobMulti16CdfLength = TokenCdfQCtxs * PlaneTypes * 2 * 6;
+
+    /// <summary>EobExtraCdf for Tx4x4 (libaom txsCtx=0) flat: [qctx][planeType][eobCtx][3].</summary>
+    public const int EobExtraCdfTx4x4Offset = EobMulti16CdfOffset + EobMulti16CdfLength;
+    /// <summary>Length: 4 * 2 * 9 * 3 = 216.</summary>
+    public const int EobExtraCdfTx4x4Length = TokenCdfQCtxs * PlaneTypes * EobCoefContexts * 3;
+
+    /// <summary>CoeffBaseEobMultiCdf for Tx4x4 (libaom txsCtx=0) flat:
+    /// [qctx][planeType][SigCoefContextsEob][4].</summary>
+    public const int CoeffBaseEobMultiCdfTx4x4Offset = EobExtraCdfTx4x4Offset + EobExtraCdfTx4x4Length;
+    /// <summary>Length: 4 * 2 * 4 * 4 = 128.</summary>
+    public const int CoeffBaseEobMultiCdfTx4x4Length = TokenCdfQCtxs * PlaneTypes * SigCoefContextsEob * 4;
+
+    /// <summary>CoeffBaseMultiCdf for Tx4x4 (libaom txsCtx=0) flat:
+    /// [qctx][planeType][SigCoefContexts][5].</summary>
+    public const int CoeffBaseMultiCdfTx4x4Offset = CoeffBaseEobMultiCdfTx4x4Offset + CoeffBaseEobMultiCdfTx4x4Length;
+    /// <summary>Length: 4 * 2 * 42 * 5 = 1680.</summary>
+    public const int CoeffBaseMultiCdfTx4x4Length = TokenCdfQCtxs * PlaneTypes * SigCoefContexts * 5;
+
+    /// <summary>CoeffLpsMultiCdf for Tx4x4 (libaom min(txsCtx,3)=0) flat:
+    /// [qctx][planeType][LevelContexts][BR_CDF_SIZE+1=5].</summary>
+    public const int CoeffLpsMultiCdfTx4x4Offset = CoeffBaseMultiCdfTx4x4Offset + CoeffBaseMultiCdfTx4x4Length;
+    /// <summary>Length: 4 * 2 * 21 * 5 = 840.</summary>
+    public const int CoeffLpsMultiCdfTx4x4Length = TokenCdfQCtxs * PlaneTypes * LevelContexts * (BrCdfSize + 1);
+
     /// <summary>Total ushort buffer entries.</summary>
-    public const int UshortConstsTotalEntries = UvModeCdfV1RowOffset + UvModeCdfV1RowLength;
+    public const int UshortConstsTotalEntries = CoeffLpsMultiCdfTx4x4Offset + CoeffLpsMultiCdfTx4x4Length;
 
     /// <summary>
     /// Build the byte constants buffer for upload. Caller materialises
@@ -263,6 +310,11 @@ public static class Av1KeyframeConstantsGpu
         var imc = Av1ModeInfoReader.IntraModeContext;
         for (int i = 0; i < IntraModeContextLength && i < imc.Length; i++)
             buf[IntraModeContextOffset + i] = (byte)imc[i];
+
+        // NzMapCtxOffset for Tx4x4 (libaom TX_SIZE index 0).
+        var off4 = Av1ScanTables.NzMapCtxOffset[0];
+        for (int i = 0; i < off4.Length; i++)
+            buf[NzMapCtxOffset4x4Offset + i] = (byte)off4[i];
 
         return buf;
     }
@@ -340,6 +392,22 @@ public static class Av1KeyframeConstantsGpu
         var uvRow = Av1DefaultIntraModeCdfs.DefaultUvModeCdf[1][(int)Av1IntraMode.Dc];
         for (int s = 0; s < 15 && s < uvRow.Length; s++)
             buf[UvModeCdfV1RowOffset + s] = uvRow[s];
+
+        // ---- Tx4x4 (libaom txsCtx=0) entries, used for boundary-MB chroma. ----
+        var scan4 = Av1ScanTables.Scan[0][0]; // Tx4x4 + DCT_DCT
+        for (int i = 0; i < 16; i++) buf[Scan4x4Offset + i] = (ushort)scan4[i];
+        // TxbSkipCdf for Tx4x4 (libaom txsCtx=0).
+        PackTxbSkipCdfTx4x4(buf);
+        // EobMulti16Cdf for Tx4x4 EOB classification (5 syms -> CDF_SIZE 6).
+        PackEobMultiCdf(buf, EobMulti16CdfOffset, Av1DefaultCoefCdfs.DefaultEobMulti16Cdf, 5);
+        // EobExtraCdf for Tx4x4 (libaom txsCtx=0).
+        PackEobExtraCdfTx4x4(buf);
+        // CoeffBaseEobMultiCdf for Tx4x4.
+        PackCoeffBaseEobMultiCdfTx4x4(buf);
+        // CoeffBaseMultiCdf for Tx4x4.
+        PackCoeffBaseMultiCdfTx4x4(buf);
+        // CoeffLpsMultiCdf for Tx4x4.
+        PackCoeffLpsMultiCdfTx4x4(buf);
 
         return buf;
     }
@@ -461,6 +529,75 @@ public static class Av1KeyframeConstantsGpu
             var row = Av1DefaultCoefCdfs.DefaultDcSignCdf[q][p][c];
             int dst = DcSignCdfOffset + ((q * PlaneTypes + p) * DcSignContexts + c) * 3;
             for (int s = 0; s < 3 && s < row.Length; s++) buf[dst + s] = row[s];
+        }
+    }
+
+    // ---- Tx4x4 pack helpers (libaom txsCtx=0). All flat layouts drop the
+    // txs_ctx_local dimension since this block is Tx4x4-only. ----
+
+    private static void PackTxbSkipCdfTx4x4(ushort[] buf)
+    {
+        // Flat: (q * TxbSkipContexts + ctx) * 3 + s
+        for (int q = 0; q < TokenCdfQCtxs; q++)
+        for (int ctx = 0; ctx < TxbSkipContexts; ctx++)
+        {
+            var row = Av1DefaultCoefCdfs.DefaultTxbSkipCdf[q][0][ctx];
+            int dst = TxbSkipCdfTx4x4Offset + (q * TxbSkipContexts + ctx) * 3;
+            for (int s = 0; s < 3 && s < row.Length; s++) buf[dst + s] = row[s];
+        }
+    }
+
+    private static void PackEobExtraCdfTx4x4(ushort[] buf)
+    {
+        // libaom: DefaultEobExtraCdf[qctx][txsCtx=0][planeType][eobCtx][3]
+        // Flat: ((q * PlaneTypes + p) * EobCoefContexts + c) * 3 + s
+        for (int q = 0; q < TokenCdfQCtxs; q++)
+        for (int p = 0; p < PlaneTypes; p++)
+        for (int c = 0; c < EobCoefContexts; c++)
+        {
+            var row = Av1DefaultCoefCdfs.DefaultEobExtraCdf[q][0][p][c];
+            int dst = EobExtraCdfTx4x4Offset + ((q * PlaneTypes + p) * EobCoefContexts + c) * 3;
+            for (int s = 0; s < 3 && s < row.Length; s++) buf[dst + s] = row[s];
+        }
+    }
+
+    private static void PackCoeffBaseEobMultiCdfTx4x4(ushort[] buf)
+    {
+        // libaom: DefaultCoeffBaseEobMultiCdf[qctx][txsCtx=0][planeType][SigCoefContextsEob][CDF_SIZE(3)=4]
+        for (int q = 0; q < TokenCdfQCtxs; q++)
+        for (int p = 0; p < PlaneTypes; p++)
+        for (int c = 0; c < SigCoefContextsEob; c++)
+        {
+            var row = Av1DefaultCoefCdfs.DefaultCoeffBaseEobMultiCdf[q][0][p][c];
+            int dst = CoeffBaseEobMultiCdfTx4x4Offset + ((q * PlaneTypes + p) * SigCoefContextsEob + c) * 4;
+            for (int s = 0; s < 4 && s < row.Length; s++) buf[dst + s] = row[s];
+        }
+    }
+
+    private static void PackCoeffBaseMultiCdfTx4x4(ushort[] buf)
+    {
+        // libaom: DefaultCoeffBaseMultiCdf[qctx][txsCtx=0][planeType][SigCoefContexts][CDF_SIZE(4)=5]
+        for (int q = 0; q < TokenCdfQCtxs; q++)
+        for (int p = 0; p < PlaneTypes; p++)
+        for (int c = 0; c < SigCoefContexts; c++)
+        {
+            var row = Av1DefaultCoefCdfs.DefaultCoeffBaseMultiCdf[q][0][p][c];
+            int dst = CoeffBaseMultiCdfTx4x4Offset + ((q * PlaneTypes + p) * SigCoefContexts + c) * 5;
+            for (int s = 0; s < 5 && s < row.Length; s++) buf[dst + s] = row[s];
+        }
+    }
+
+    private static void PackCoeffLpsMultiCdfTx4x4(ushort[] buf)
+    {
+        // libaom: DefaultCoeffLpsMultiCdf[qctx][min(txsCtx,3)=0][planeType][LevelContexts][CDF_SIZE(BR_CDF_SIZE)=5]
+        int rowSize = BrCdfSize + 1;
+        for (int q = 0; q < TokenCdfQCtxs; q++)
+        for (int p = 0; p < PlaneTypes; p++)
+        for (int c = 0; c < LevelContexts; c++)
+        {
+            var row = Av1DefaultCoefCdfs.DefaultCoeffLpsMultiCdf[q][0][p][c];
+            int dst = CoeffLpsMultiCdfTx4x4Offset + ((q * PlaneTypes + p) * LevelContexts + c) * rowSize;
+            for (int s = 0; s < rowSize && s < row.Length; s++) buf[dst + s] = row[s];
         }
     }
 }
