@@ -59,6 +59,13 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         ArrayView<long>, ArrayView<long>, ArrayView<long>,
         Vp9AssembleBatchStrides> _batchKernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+        ArrayView<long>,
+        ArrayView<long>, ArrayView<long>, ArrayView<long>,
+        int, int> _multiTileKernel;
+
     /// <summary>Compile.</summary>
     public Vp9FrameAssembleKernel(Accelerator accelerator)
     {
@@ -75,6 +82,12 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
             ArrayView<long>,
             ArrayView<long>, ArrayView<long>, ArrayView<long>,
             Vp9AssembleBatchStrides>(AssembleBatchKernel);
+        _multiTileKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+            ArrayView<long>,
+            ArrayView<long>, ArrayView<long>, ArrayView<long>,
+            int, int>(AssembleMultiTileKernel);
     }
 
     /// <summary>Batch assemble: extent=N, one thread per frame.</summary>
@@ -199,6 +212,95 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         for (int i = 0; i < uncompressedLen; i++) outBuf[pos++] = uncompressedHeader[i];
         for (int i = 0; i < compressedLen; i++)   outBuf[pos++] = compressedHeader[i];
         for (int i = 0; i < tileLen; i++)         outBuf[pos++] = tileBytes[i];
+        outLenOut[0] = pos;
+    }
+
+    // ===========================================================================
+    // Multi-tile assembly (VP9 spec sec 6.4)
+    // ===========================================================================
+    //
+    // Layout differs from single-tile:
+    //   [uncompressed header]
+    //   [compressed header]
+    //   for i = 0 .. numTiles-2: [4-byte BE tile_size][tile_i bytes]
+    //   [last tile bytes]   (no length prefix, spans to end of frame)
+    //
+    // Per-tile bytes live in a contiguous byte buffer, sliced into N slots
+    // each of `perTileStride` bytes; per-tile actual lengths are in
+    // `tileLensView` (length N).
+
+    /// <summary>
+    /// Multi-tile GPU-resident assembly. Concatenates UH + CH + N-1 tiles
+    /// each prefixed with a 4-byte big-endian length + last tile (no prefix).
+    /// </summary>
+    /// <param name="tileSlotsBuf">Per-tile bytes, slot stride <paramref name="perTileStride"/>.</param>
+    /// <param name="tileLensView">Per-tile lengths (length = numTiles).</param>
+    public void RunMultiTile(
+        ArrayView<byte> uncompressedHeader,
+        ArrayView<byte> compressedHeader,
+        ArrayView<byte> tileSlotsBuf,
+        ArrayView<byte> outBuf,
+        ArrayView<long> outLen,
+        ArrayView<long> uncompressedLenView,
+        ArrayView<long> compressedLenView,
+        ArrayView<long> tileLensView,
+        int numTiles, int perTileStride)
+    {
+        if (numTiles <= 0)
+            throw new ArgumentOutOfRangeException(nameof(numTiles), $"numTiles must be positive; got {numTiles}.");
+        if (perTileStride <= 0)
+            throw new ArgumentOutOfRangeException(nameof(perTileStride), $"perTileStride must be positive; got {perTileStride}.");
+        if (outLen.Length < 1) throw new ArgumentException("outLen must hold 1 entry.", nameof(outLen));
+        if (uncompressedLenView.Length < 1) throw new ArgumentException("uncompressedLenView must hold 1 entry.", nameof(uncompressedLenView));
+        if (compressedLenView.Length < 1) throw new ArgumentException("compressedLenView must hold 1 entry.", nameof(compressedLenView));
+        if (tileLensView.Length < numTiles) throw new ArgumentException($"tileLensView must hold at least {numTiles} entries.", nameof(tileLensView));
+        if (tileSlotsBuf.Length < (long)numTiles * perTileStride)
+            throw new ArgumentException(
+                $"tileSlotsBuf must hold at least {(long)numTiles * perTileStride} bytes.", nameof(tileSlotsBuf));
+
+        _multiTileKernel(1,
+            uncompressedHeader, compressedHeader, tileSlotsBuf, outBuf, outLen,
+            uncompressedLenView, compressedLenView, tileLensView,
+            numTiles, perTileStride);
+    }
+
+    private static void AssembleMultiTileKernel(
+        Index1D _,
+        ArrayView<byte> uncompressedHeader,
+        ArrayView<byte> compressedHeader,
+        ArrayView<byte> tileSlotsBuf,
+        ArrayView<byte> outBuf,
+        ArrayView<long> outLenOut,
+        ArrayView<long> uncompressedLenView,
+        ArrayView<long> compressedLenView,
+        ArrayView<long> tileLensView,
+        int numTiles, int perTileStride)
+    {
+        int uncompressedLen = (int)uncompressedLenView[0];
+        int compressedLen = (int)compressedLenView[0];
+
+        long pos = 0;
+        for (int i = 0; i < uncompressedLen; i++) outBuf[pos++] = uncompressedHeader[i];
+        for (int i = 0; i < compressedLen; i++)   outBuf[pos++] = compressedHeader[i];
+
+        // For each tile except the last: write 4-byte big-endian length
+        // prefix + tile bytes. Last tile: bytes only (decoder spans to end).
+        for (int t = 0; t < numTiles; t++)
+        {
+            int tileLen = (int)tileLensView[t];
+            long tileBase = (long)t * perTileStride;
+
+            if (t + 1 < numTiles)
+            {
+                // 4-byte big-endian length: high byte first.
+                outBuf[pos++] = (byte)((tileLen >> 24) & 0xFF);
+                outBuf[pos++] = (byte)((tileLen >> 16) & 0xFF);
+                outBuf[pos++] = (byte)((tileLen >> 8) & 0xFF);
+                outBuf[pos++] = (byte)(tileLen & 0xFF);
+            }
+            for (int i = 0; i < tileLen; i++)
+                outBuf[pos++] = tileSlotsBuf[tileBase + i];
+        }
         outLenOut[0] = pos;
     }
 
