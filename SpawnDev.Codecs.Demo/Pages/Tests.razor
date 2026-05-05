@@ -5,13 +5,46 @@
 <PageTitle>Unit Tests</PageTitle>
 
 <h3>SpawnDev.Codecs Unit Tests</h3>
+
+<hr />
+<h4>Shader Debug Output</h4>
+<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.5rem;">
+    @if (_shaderDebug.HasDebugFolder && _shaderDebug.HasWritePermission)
+    {
+        <span style="color:green;">Auto-dumping to: <strong>@_shaderDebug.FolderName</strong></span>
+        <button @onclick="() => { _shaderDebug.ClearAsync(); }">Clear</button>
+    }
+    else if (_shaderDebug.NeedsPermissionGrant)
+    {
+        <span style="color:orange;">Debug folder: <strong>@_shaderDebug.FolderName</strong> (needs write access)</span>
+        <button @onclick="GrantWriteAccess">Grant Write Access</button>
+        <button @onclick="() => { _shaderDebug.ClearAsync(); }">Clear</button>
+    }
+    else
+    {
+        <button @onclick="PickDebugFolder">Set Debug Folder</button>
+        <span style="color:gray;font-size:0.85rem;">Pick folder to write WGSL/GLSL/Wasm to disk (persists in IndexedDB)</span>
+    }
+</div>
 <hr />
 
-<UnitTestsView TypeInstanceResolver="TestTypeResolver" TestAssemblies="Assemblies" TestTypes="Types"></UnitTestsView>
+<UnitTestsView TypeInstanceResolver="TestTypeResolver" TestAssemblies="Assemblies" TestTypes="Types" ResultsDirectory="_shaderDebug.DebugDirectory"></UnitTestsView>
+
+@inject SpawnDev.ILGPU.Services.ShaderDebugService _shaderDebug
 
 @code {
     [Inject]
     IServiceCollection ServiceDescriptors { get; set; } = default!;
+
+    private bool _suppressRender;
+    protected override bool ShouldRender()
+    {
+        if (_suppressRender) { _suppressRender = false; return false; }
+        return true;
+    }
+
+    async Task PickDebugFolder() { _suppressRender = true; await _shaderDebug.PickFolderAsync(); }
+    async Task GrantWriteAccess() { _suppressRender = true; await _shaderDebug.RequestWritePermissionAsync(); }
 
     List<Assembly>? Assemblies = new();
     List<Type>? Types = new();

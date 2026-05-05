@@ -1,5 +1,28 @@
 # SpawnDev.Codecs CHANGELOG
 
+## Unreleased — master after rc.7 (2026-05-05)
+
+**Headline: AV1 Tx4x4 transform infrastructure (forward + inverse + constants) lands on master + Vorbis encoder gets per-packet host-SubView batch dispatch (no host syncs between packets).**
+
+### AV1
+- `Av1Forward2dTransformGpu.Forward4x4DctDct` GPU helper (commit `c654e1b`) - W=4 H=4 CosBit=13, libaom shifts s0=2 s1=0 s2=0. Bit-exact vs CPU `Av1Forward2dTransform.Apply(Av1TxSize.Tx4x4, Av1TxType.DctDct, ...)` across CPU + CUDA + OpenCL + WebGPU + Wasm (15/15 backend invocations PASS; WebGL skips per existing atomics gap). Three tests: zero input, DC-only (input=16), 64-block random batch.
+- `Av1Inverse2dTransformGpu.Inverse4x4DctDct` GPU helper (commit `12a0014`) + `InverseDct4Inline` + `ResolveCospi4` private helpers. Pattern follows Inverse8x8DctDct - row pass uses Inverse4 in place, column pass uses scalar inline helper. Inverse shifts: rowShift=0, colShift=4, cosBit=12. Bit-exact across the same 5 backends.
+- `Av1KeyframeConstantsGpu` extended with Tx4x4 entries (commit `d75c0bc`): NzMapCtxOffset[0] 16 bytes + Scan4x4 16 ushort + TxbSkipCdfTx4x4 156 + EobMulti16Cdf 96 + EobExtraCdfTx4x4 216 + CoeffBaseEobMultiCdfTx4x4 128 + CoeffBaseMultiCdfTx4x4 1680 + CoeffLpsMultiCdfTx4x4 840. Total 3148 new entries appended to the existing constant offset chain. Bit-exact vs libaom default tables (36/36 backend invocations).
+
+These are Phase 2 prep for AV1 boundary chroma encoding (BLOCK_16X8 / BLOCK_8X16 leaves at non-64-multiple frame dims). Walker Phase 1 + Phase 2 wiring lands separately when SpawnDev.ILGPU's WGSL fn-def codegen path stabilizes (Geordi iterating; tracked via `phase1-walker-debug` branch).
+
+### Vorbis
+- Phase A (commit `15f4f39`): `EmitKernel` now reads floor posteriors from the device buffer instead of round-tripping to host scalars. The encoder pipeline keeps posteriors GPU-resident from `FloorFitKernel` output through `EmitKernel`, eliminating the per-packet `await acc.SynchronizeAsync()` + `dPosteriors.CopyToHostAsync()` round-trip that was forcing a sync barrier mid-encode. 10/10 single-packet round-trip tests PASS unchanged.
+- Phase B (commit `7ff3f3f`): new `EncodeAudioPacketsBatchAsync(IReadOnlyList<ReadOnlyMemory<float>> blocks)` API. Encodes N independent audio packets in a single host call. Per-packet stride buffers + per-packet host-side `SubView` dispatch into the existing single-packet kernels means 6×N kernel dispatches but only ONE host sync at the end of the batch (vs 6×N sync barriers in N sequential `EncodeAudioPacketAsync` calls). The per-packet kernels keep the same binding count + signature as the proven single-packet runs, sidestepping the WebGPU bind-group / Wasm codegen issues that tripped the Index2D / Index1D true-batch attempts. 15/15 PASS including new `BatchSilence` regression test.
+
+### Demo / debugging
+- `SpawnDev.Codecs.Demo` now wires `SpawnDev.ILGPU.Services.ShaderDebugService` (Program.cs registration) + adds the "Set Debug Folder" / "Grant Write Access" UI block on `/tests`. Pick a folder once at the demo URL and every kernel compile during PMT runs auto-dumps the WGSL/GLSL/Wasm + metadata-headed sources to `{folder}/{timestamp}/wgsl|glsl|wasm/`. Folder choice persists across sessions in IndexedDB (the PMT Chromium profile is persistent at `%TEMP%/SpawnDev.Codecs.PlaywrightProfile/`). Mirrors the pattern already in use by `SpawnDev.ILGPU.Demo`.
+- The dump folder is critical for diagnosing ILGPU codegen issues at the kernel level - e.g. AV1 walker compile failures on WebGPU were root-caused via the dump in one DevComms reply instead of the prior 3 rounds of hypothesis-mode ping-pong.
+
+### Cumulative shipped numbers today
+- 5 master commits + Demo ShaderDebugService wiring, 66/66 backend invocations green (CPU + CUDA + OpenCL + WebGPU + Wasm; WebGL skips per existing gap).
+- `SpawnDev.ILGPU` consumer reference held at `4.9.5-rc.14` on master while debug branches iterate against ILGPU local.X drops for codegen fixes.
+
 ## 0.3.0-rc.7 (2026-05-04, local only)
 
 **Headline: SilkDecodeFrameGpu multi-frame state-rolling proven bit-exact + signal-type/sample-rate matrix complete + ILGPU rc.11 bump.**
