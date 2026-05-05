@@ -167,8 +167,10 @@ if (File.Exists(Path.Combine(outDir, "av1.ivf")) && new FileInfo(Path.Combine(ou
 double clipSec = (double)frameCount / fps;
 string clipDur = clipSec.ToString("F4", System.Globalization.CultureInfo.InvariantCulture);
 string ffScale = (probe.Width == width && probe.Height == height) ? "" : $"-vf scale={width}:{height} ";
+// VP8 has no true lossless in libvpx (-lossless 1 is VP9-only). Force low Q
+// range with high target bitrate for near-source quality.
 EncodeFfmpegRef("VP8 ffmpeg", "bbb_vp8_ffmpeg.mkv",
-    $"-t {clipDur} {ffScale}-c:v libvpx -lossless 1 -auto-alt-ref 0 -c:a flac");
+    $"-t {clipDur} {ffScale}-c:v libvpx -qmin 0 -qmax 8 -b:v 50M -auto-alt-ref 0 -quality best -c:a flac");
 EncodeFfmpegRef("VP9 ffmpeg", "bbb_vp9_ffmpeg.mkv",
     $"-t {clipDur} {ffScale}-c:v libvpx-vp9 -lossless 1 -c:a flac");
 EncodeFfmpegRef("AV1 ffmpeg", "bbb_av1_ffmpeg.mkv",
