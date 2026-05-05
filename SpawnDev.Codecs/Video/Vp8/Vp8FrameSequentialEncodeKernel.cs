@@ -100,6 +100,24 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
         ArrayView<int>,
         Vp8FrameSeqEncodeBatchParams, int, int> _singleDispatchBatchKernel;
 
+    /// <summary>
+    /// Within-MB 4-way parallel single-dispatch wave-front kernel. blockSize =
+    /// peakDiag * 4 (4 threads per MB). Uses SharedMemory + Group.Barrier to
+    /// split the per-MB Y4-forward + Y4-recon work axes across 4 cooperating
+    /// threads, with the Y2 Walsh phase staying single-thread (intraIdx=0)
+    /// and the 4 chroma blocks split 1-per-thread.
+    /// Constraint: peakDiag * 4 must fit in the backend's max workgroup
+    /// (256 on WebGPU, 1024 on CUDA/OpenCL/Wasm/CPU). Caller falls back to
+    /// the 1-thread single-dispatch path when peakDiag &gt; 64.
+    /// </summary>
+    private readonly Action<
+        KernelConfig,
+        ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+        ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+        ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
+        ArrayView<int>,
+        Vp8FrameSeqEncodeBatchParams, int, int> _singleDispatch4ThreadKernel;
+
     /// <summary>Compile.</summary>
     public Vp8FrameSequentialEncodeKernel(Accelerator accelerator)
     {
@@ -125,6 +143,12 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
             ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<int>,
             Vp8FrameSeqEncodeBatchParams, int, int>(EncodeWavefrontSingleDispatchKernel);
+        _singleDispatch4ThreadKernel = accelerator.LoadStreamKernel<
+            ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+            ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+            ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
+            ArrayView<int>,
+            Vp8FrameSeqEncodeBatchParams, int, int>(EncodeWavefrontSingleDispatch4ThreadKernel);
     }
 
     /// <summary>
@@ -281,13 +305,28 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
             DiagAndRMin = 0,
             DiagCount = peakDiag,
         };
-        // gridSize = numFrames, blockSize = peakDiag.
-        _singleDispatchBatchKernel(
-            new KernelConfig(frameCount, peakDiag),
-            yPlane, uPlane, vPlane,
-            yRecon, uRecon, vRecon,
-            y4Coefs, y2Coefs, uCoefs, vCoefs,
-            dequant, p, frameCount, totalDiagonals);
+
+        // Prefer the 4-thread-per-MB kernel when blockSize (= peakDiag * 4)
+        // fits the WebGPU max workgroup of 256. Above that, fall back to
+        // the 1-thread-per-MB kernel which fits CUDA's 1024 cap.
+        if (peakDiag * 4 <= 256)
+        {
+            _singleDispatch4ThreadKernel(
+                new KernelConfig(frameCount, peakDiag * 4),
+                yPlane, uPlane, vPlane,
+                yRecon, uRecon, vRecon,
+                y4Coefs, y2Coefs, uCoefs, vCoefs,
+                dequant, p, frameCount, totalDiagonals);
+        }
+        else
+        {
+            _singleDispatchBatchKernel(
+                new KernelConfig(frameCount, peakDiag),
+                yPlane, uPlane, vPlane,
+                yRecon, uRecon, vRecon,
+                y4Coefs, y2Coefs, uCoefs, vCoefs,
+                dequant, p, frameCount, totalDiagonals);
+        }
         return true;
     }
 
@@ -352,6 +391,82 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
     }
 
     /// <summary>
+    /// 4-thread-per-MB wave-front kernel. Block = (frame, peakDiag*4 threads).
+    /// Group.IdxX decomposes to (mbInDiag, intraIdx) where intraIdx in [0,3]
+    /// cooperates inside <see cref="EncodeMacroblockSplit4"/>. SharedMemory
+    /// holds 32 ints per MB on the diagonal (16 Y4 DCs + 16 Y2 inverse DCs)
+    /// for the inter-thread DC handoff.
+    /// </summary>
+    private static void EncodeWavefrontSingleDispatch4ThreadKernel(
+        ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
+        ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
+        ArrayView<short> y4Coefs, ArrayView<short> y2Coefs,
+        ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<int> dequant,
+        Vp8FrameSeqEncodeBatchParams p, int frameCount, int totalDiagonals)
+    {
+        int frameIdx = Grid.IdxX;
+        int threadId = Group.IdxX;
+        int mbInDiag = threadId >> 2;       // / 4
+        int intraIdx = threadId & 3;        // % 4
+        int mbCols = p.MbCols;
+        int mbRows = p.MbRows;
+
+        if (frameIdx >= frameCount) return;
+
+        // 32 ints per MB: [0..15] Y4 DCs, [16..31] Y2 inverse DCs.
+        // ILGPU requires SharedMemory.Allocate size to be statically known.
+        // Host-side gating in TryEncodeBatchSingleDispatch caps blockSize at
+        // 256 (peakDiag*4), so peakDiag <= 64 -> MAX = 64*32 = 2048 ints
+        // = 8KB shared per block (fits WebGPU's 16KB minimum).
+        const int MaxPeakDiag = 64;
+        const int SharedIntsPerBlock = MaxPeakDiag * 32;
+        var sharedDcs = SharedMemory.Allocate<int>(SharedIntsPerBlock);
+
+        // Per-frame slot views (computed once per thread).
+        var fY = yPlane.SubView((long)frameIdx * p.YStride, p.YStride);
+        var fU = uPlane.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fV = vPlane.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fYR = yRecon.SubView((long)frameIdx * p.YStride, p.YStride);
+        var fUR = uRecon.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fVR = vRecon.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fY4 = y4Coefs.SubView((long)frameIdx * p.Y4CoefStride, p.Y4CoefStride);
+        var fY2 = y2Coefs.SubView((long)frameIdx * p.Y2CoefStride, p.Y2CoefStride);
+        var fUC = uCoefs.SubView((long)frameIdx * p.UvCoefStride, p.UvCoefStride);
+        var fVC = vCoefs.SubView((long)frameIdx * p.UvCoefStride, p.UvCoefStride);
+        var fDQ = dequant.SubView((long)frameIdx * p.DequantStride, p.DequantStride);
+        int yStride = mbCols * 16;
+        int uvStride = mbCols * 8;
+        int y1Dc = fDQ[0]; int y1Ac = fDQ[1];
+        int y2Dc = fDQ[2]; int y2Ac = fDQ[3];
+        int uvDc = fDQ[4]; int uvAc = fDQ[5];
+
+        for (int d = 0; d < totalDiagonals; d++)
+        {
+            int rMin = d - (mbCols - 1); if (rMin < 0) rMin = 0;
+            int rMax = d; if (rMax > mbRows - 1) rMax = mbRows - 1;
+            int diagCount = rMax - rMin + 1;
+            int mbRow = rMin + mbInDiag;
+            int mbCol = d - mbRow;
+            bool active = mbInDiag < diagCount && mbRow >= 0 && mbRow < mbRows && mbCol >= 0 && mbCol < mbCols;
+            int mbSharedBase = mbInDiag * 32;
+            // ALL threads call the function unconditionally so the internal
+            // Group.Barrier()s execute in uniform control flow on every
+            // backend (WebGPU + Wasm in particular reject divergent
+            // barrier execution). Inactive threads pass `active=false`;
+            // the function gates work but always issues the barriers.
+            EncodeMacroblockSplit4(
+                active, intraIdx, mbSharedBase, sharedDcs,
+                mbRow, mbCol, mbCols, yStride, uvStride,
+                fY, fU, fV,
+                fYR, fUR, fVR,
+                fY4, fY2, fUC, fVC,
+                y1Dc, y1Ac, y2Dc, y2Ac, uvDc, uvAc);
+            Group.Barrier();
+        }
+    }
+
+    /// <summary>
     /// Batch wave-front kernel: each thread is one (frame, mb-on-diagonal).
     /// Per-frame buffer slots are SubView'd at the kernel head; MB encode
     /// helper sees a single-frame view and runs unchanged.
@@ -403,6 +518,247 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
 
     /// <summary>Encode one MB end-to-end: predict + transform + quant + recon.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
+    /// <summary>
+    /// Within-MB 4-way parallel encode. Each MB is processed by 4 cooperating
+    /// threads (intraIdx 0..3) that split the per-block work axes:
+    ///   - Y4 forward (16 blocks): each thread does 4 blocks, writes DCs to
+    ///     <paramref name="sharedDcs"/>[mbSharedBase + 0..15].
+    ///   - Y2 forward+inverse: thread 0 only (single-threaded, gathers 16 DCs
+    ///     from shared, runs Walsh + quant + dequant + inverse Walsh, writes
+    ///     16 inverse DCs back to shared at [mbSharedBase + 16..31]).
+    ///   - Y4 inverse + recon (16 blocks): each thread does 4 blocks, reads
+    ///     its inverse DC from shared.
+    ///   - UV forward + recon (8 blocks total: 4 U + 4 V): each thread does
+    ///     1 U + 1 V (intraIdx maps to the specific block).
+    ///
+    /// Group.Barrier calls go between phases that have inter-thread data
+    /// dependencies. Caller (the wave-front kernel) is responsible for the
+    /// outer per-diagonal barrier.
+    ///
+    /// All backends in the SpawnDev.ILGPU 6-target matrix support
+    /// SharedMemory + Group.Barrier when run via LoadStreamKernel + KernelConfig.
+    /// </summary>
+    private static void EncodeMacroblockSplit4(
+        bool active,
+        int intraIdx, int mbSharedBase, ArrayView<int> sharedDcs,
+        int mbRow, int mbCol, int mbCols, int yStride, int uvStride,
+        ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
+        ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
+        ArrayView<short> y4Coefs, ArrayView<short> y2Coefs,
+        ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        int y1Dc, int y1Ac, int y2Dc, int y2Ac, int uvDc, int uvAc)
+    {
+        // Critical: barriers MUST run in uniform control flow on WebGPU/Wasm.
+        // ALL threads (active and inactive) execute every Group.Barrier in this
+        // function. Per-thread `active` flag gates only the WORK between
+        // barriers, not the barriers themselves.
+        int mbIdx = active ? mbRow * mbCols + mbCol : 0;
+        bool haveAbove = active && mbRow > 0;
+        bool haveLeft = active && mbCol > 0;
+
+        int yPred = active ? ComputeYDcPredictor(mbRow, mbCol, mbCols, yStride, yRecon, haveAbove, haveLeft) : 0;
+        int uPred = active ? ComputeUvDcPredictor(mbRow, mbCol, mbCols, uvStride, uRecon, haveAbove, haveLeft) : 0;
+        int vPred = active ? ComputeUvDcPredictor(mbRow, mbCol, mbCols, uvStride, vRecon, haveAbove, haveLeft) : 0;
+
+        long y4McBase = (long)mbIdx * 256;
+
+        // === Phase 1: Y4 forward (16 blocks, 4 per thread). ===
+        // Thread t handles blocks (4t + 0), (4t + 1), (4t + 2), (4t + 3).
+        if (active)
+        {
+        for (int sub = 0; sub < 4; sub++)
+        {
+            int blockIdxInMb = intraIdx * 4 + sub;
+            int by = blockIdxInMb >> 2;
+            int bx = blockIdxInMb & 3;
+            long y4BlockBase = y4McBase + (long)blockIdxInMb * 16;
+
+            // Read 4x4 residual = src - yPred.
+            short r00 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 0, 0, yStride, yPred);
+            short r01 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 0, 1, yStride, yPred);
+            short r02 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 0, 2, yStride, yPred);
+            short r03 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 0, 3, yStride, yPred);
+            short r10 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 1, 0, yStride, yPred);
+            short r11 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 1, 1, yStride, yPred);
+            short r12 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 1, 2, yStride, yPred);
+            short r13 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 1, 3, yStride, yPred);
+            short r20 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 2, 0, yStride, yPred);
+            short r21 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 2, 1, yStride, yPred);
+            short r22 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 2, 2, yStride, yPred);
+            short r23 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 2, 3, yStride, yPred);
+            short r30 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 3, 0, yStride, yPred);
+            short r31 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 3, 1, yStride, yPred);
+            short r32 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 3, 2, yStride, yPred);
+            short r33 = ReadResidual(yPlane, mbRow, mbCol, by, bx, 3, 3, yStride, yPred);
+
+            // FDCT 4x4. Pass 1: rows. Pass 2: cols.
+            FdctRow(r00, r01, r02, r03, out short s00, out short s01, out short s02, out short s03);
+            FdctRow(r10, r11, r12, r13, out short s10, out short s11, out short s12, out short s13);
+            FdctRow(r20, r21, r22, r23, out short s20, out short s21, out short s22, out short s23);
+            FdctRow(r30, r31, r32, r33, out short s30, out short s31, out short s32, out short s33);
+
+            FdctCol(s00, s10, s20, s30, out short c00, out short c10, out short c20, out short c30);
+            FdctCol(s01, s11, s21, s31, out short c01, out short c11, out short c21, out short c31);
+            FdctCol(s02, s12, s22, s32, out short c02, out short c12, out short c22, out short c32);
+            FdctCol(s03, s13, s23, s33, out short c03, out short c13, out short c23, out short c33);
+
+            // Save DC for Y2 (write to shared memory at this MB's DC slot for this block).
+            sharedDcs[mbSharedBase + blockIdxInMb] = c00;
+
+            // Y4 quantize: coef[0] := 0 (Y2 carries DC), [1..15] := round(c / y1Ac).
+            y4Coefs[y4BlockBase + 0] = 0;
+            y4Coefs[y4BlockBase + 1] = QuantS(c01, y1Ac);
+            y4Coefs[y4BlockBase + 2] = QuantS(c02, y1Ac);
+            y4Coefs[y4BlockBase + 3] = QuantS(c03, y1Ac);
+            y4Coefs[y4BlockBase + 4] = QuantS(c10, y1Ac);
+            y4Coefs[y4BlockBase + 5] = QuantS(c11, y1Ac);
+            y4Coefs[y4BlockBase + 6] = QuantS(c12, y1Ac);
+            y4Coefs[y4BlockBase + 7] = QuantS(c13, y1Ac);
+            y4Coefs[y4BlockBase + 8] = QuantS(c20, y1Ac);
+            y4Coefs[y4BlockBase + 9] = QuantS(c21, y1Ac);
+            y4Coefs[y4BlockBase + 10] = QuantS(c22, y1Ac);
+            y4Coefs[y4BlockBase + 11] = QuantS(c23, y1Ac);
+            y4Coefs[y4BlockBase + 12] = QuantS(c30, y1Ac);
+            y4Coefs[y4BlockBase + 13] = QuantS(c31, y1Ac);
+            y4Coefs[y4BlockBase + 14] = QuantS(c32, y1Ac);
+            y4Coefs[y4BlockBase + 15] = QuantS(c33, y1Ac);
+        }
+        }  // end if (active) - Phase 1 work
+
+        // === Phase 2: Barrier - wait for all 16 Y4 DCs to land in shared. ===
+        Group.Barrier();
+
+        // === Phase 3: Y2 forward + inverse (single thread). ===
+        // intraIdx==0 only. Reads 16 DCs from shared, runs Walsh + quant +
+        // dequant + inverse Walsh, writes 16 inverse DCs to shared.
+        if (active && intraIdx == 0)
+        {
+            short dc0 = (short)sharedDcs[mbSharedBase + 0];
+            short dc1 = (short)sharedDcs[mbSharedBase + 1];
+            short dc2 = (short)sharedDcs[mbSharedBase + 2];
+            short dc3 = (short)sharedDcs[mbSharedBase + 3];
+            short dc4 = (short)sharedDcs[mbSharedBase + 4];
+            short dc5 = (short)sharedDcs[mbSharedBase + 5];
+            short dc6 = (short)sharedDcs[mbSharedBase + 6];
+            short dc7 = (short)sharedDcs[mbSharedBase + 7];
+            short dc8 = (short)sharedDcs[mbSharedBase + 8];
+            short dc9 = (short)sharedDcs[mbSharedBase + 9];
+            short dc10 = (short)sharedDcs[mbSharedBase + 10];
+            short dc11 = (short)sharedDcs[mbSharedBase + 11];
+            short dc12 = (short)sharedDcs[mbSharedBase + 12];
+            short dc13 = (short)sharedDcs[mbSharedBase + 13];
+            short dc14 = (short)sharedDcs[mbSharedBase + 14];
+            short dc15 = (short)sharedDcs[mbSharedBase + 15];
+
+            WalshAndQuantizeY2(
+                dc0, dc1, dc2, dc3, dc4, dc5, dc6, dc7,
+                dc8, dc9, dc10, dc11, dc12, dc13, dc14, dc15,
+                y2Coefs, (long)mbIdx * 16, y2Dc, y2Ac);
+
+            // Dequant + inverse Walsh -> 16 inverse DCs into shared[16..31].
+            short y2dq0 = (short)(y2Coefs[(long)mbIdx * 16 + 0] * y2Dc);
+            short y2dq1 = (short)(y2Coefs[(long)mbIdx * 16 + 1] * y2Ac);
+            short y2dq2 = (short)(y2Coefs[(long)mbIdx * 16 + 2] * y2Ac);
+            short y2dq3 = (short)(y2Coefs[(long)mbIdx * 16 + 3] * y2Ac);
+            short y2dq4 = (short)(y2Coefs[(long)mbIdx * 16 + 4] * y2Ac);
+            short y2dq5 = (short)(y2Coefs[(long)mbIdx * 16 + 5] * y2Ac);
+            short y2dq6 = (short)(y2Coefs[(long)mbIdx * 16 + 6] * y2Ac);
+            short y2dq7 = (short)(y2Coefs[(long)mbIdx * 16 + 7] * y2Ac);
+            short y2dq8 = (short)(y2Coefs[(long)mbIdx * 16 + 8] * y2Ac);
+            short y2dq9 = (short)(y2Coefs[(long)mbIdx * 16 + 9] * y2Ac);
+            short y2dq10 = (short)(y2Coefs[(long)mbIdx * 16 + 10] * y2Ac);
+            short y2dq11 = (short)(y2Coefs[(long)mbIdx * 16 + 11] * y2Ac);
+            short y2dq12 = (short)(y2Coefs[(long)mbIdx * 16 + 12] * y2Ac);
+            short y2dq13 = (short)(y2Coefs[(long)mbIdx * 16 + 13] * y2Ac);
+            short y2dq14 = (short)(y2Coefs[(long)mbIdx * 16 + 14] * y2Ac);
+            short y2dq15 = (short)(y2Coefs[(long)mbIdx * 16 + 15] * y2Ac);
+
+            int y2InvAc =
+                y2dq1 | y2dq2 | y2dq3 | y2dq4 | y2dq5 | y2dq6 | y2dq7 |
+                y2dq8 | y2dq9 | y2dq10 | y2dq11 | y2dq12 | y2dq13 | y2dq14 | y2dq15;
+            int yInv0, yInv1, yInv2, yInv3, yInv4, yInv5, yInv6, yInv7;
+            int yInv8, yInv9, yInv10, yInv11, yInv12, yInv13, yInv14, yInv15;
+            if (y2InvAc == 0)
+            {
+                int v = (y2dq0 + 3) >> 3;
+                yInv0 = yInv1 = yInv2 = yInv3 = yInv4 = yInv5 = yInv6 = yInv7 =
+                    yInv8 = yInv9 = yInv10 = yInv11 = yInv12 = yInv13 = yInv14 = yInv15 = v;
+            }
+            else
+            {
+                InvWalsh4x4(
+                    y2dq0, y2dq1, y2dq2, y2dq3,
+                    y2dq4, y2dq5, y2dq6, y2dq7,
+                    y2dq8, y2dq9, y2dq10, y2dq11,
+                    y2dq12, y2dq13, y2dq14, y2dq15,
+                    out yInv0, out yInv1, out yInv2, out yInv3,
+                    out yInv4, out yInv5, out yInv6, out yInv7,
+                    out yInv8, out yInv9, out yInv10, out yInv11,
+                    out yInv12, out yInv13, out yInv14, out yInv15);
+            }
+
+            sharedDcs[mbSharedBase + 16 + 0] = yInv0;
+            sharedDcs[mbSharedBase + 16 + 1] = yInv1;
+            sharedDcs[mbSharedBase + 16 + 2] = yInv2;
+            sharedDcs[mbSharedBase + 16 + 3] = yInv3;
+            sharedDcs[mbSharedBase + 16 + 4] = yInv4;
+            sharedDcs[mbSharedBase + 16 + 5] = yInv5;
+            sharedDcs[mbSharedBase + 16 + 6] = yInv6;
+            sharedDcs[mbSharedBase + 16 + 7] = yInv7;
+            sharedDcs[mbSharedBase + 16 + 8] = yInv8;
+            sharedDcs[mbSharedBase + 16 + 9] = yInv9;
+            sharedDcs[mbSharedBase + 16 + 10] = yInv10;
+            sharedDcs[mbSharedBase + 16 + 11] = yInv11;
+            sharedDcs[mbSharedBase + 16 + 12] = yInv12;
+            sharedDcs[mbSharedBase + 16 + 13] = yInv13;
+            sharedDcs[mbSharedBase + 16 + 14] = yInv14;
+            sharedDcs[mbSharedBase + 16 + 15] = yInv15;
+        }
+
+        // === Phase 4: UV forward + recon (4 U + 4 V = 8 blocks total).
+        // Each thread handles 1 U + 1 V (so intraIdx 0..3 maps to the
+        // four 2x2 chroma quadrant blocks). UV is independent of Y2 so
+        // runs concurrently with Phase 3 (no extra barrier needed). ===
+        if (active)
+        {
+            int uvBy = intraIdx >> 1;
+            int uvBx = intraIdx & 1;
+            long uMcBase = (long)mbIdx * 64;
+            long vMcBase = (long)mbIdx * 64;
+            long uBlockBase = uMcBase + (long)intraIdx * 16;
+            long vBlockBase = vMcBase + (long)intraIdx * 16;
+            EncodeUvBlock(uPlane, mbRow, mbCol, uvBy, uvBx, uvStride, uPred,
+                uCoefs, uBlockBase, uvDc, uvAc);
+            EncodeUvBlock(vPlane, mbRow, mbCol, uvBy, uvBx, uvStride, vPred,
+                vCoefs, vBlockBase, uvDc, uvAc);
+            IdctAddBlock(
+                uCoefs, uBlockBase, uvDc, uvAc, injectDc: int.MinValue,
+                uPred, uRecon, mbRow, mbCol, uvBy, uvBx, uvStride, isUv: true);
+            IdctAddBlock(
+                vCoefs, vBlockBase, uvDc, uvAc, injectDc: int.MinValue,
+                vPred, vRecon, mbRow, mbCol, uvBy, uvBx, uvStride, isUv: true);
+        }
+
+        // === Phase 5: Barrier - wait for thread 0's Y2 inverse DCs to land. ===
+        Group.Barrier();
+
+        // === Phase 6: Y4 inverse + recon (16 blocks, 4 per thread). ===
+        if (active)
+        {
+            for (int sub = 0; sub < 4; sub++)
+            {
+                int blockIdxInMb = intraIdx * 4 + sub;
+                int by = blockIdxInMb >> 2;
+                int bx = blockIdxInMb & 3;
+                long y4BlockBase = y4McBase + (long)blockIdxInMb * 16;
+                int injectDc = sharedDcs[mbSharedBase + 16 + blockIdxInMb];
+                IdctAddBlock(
+                    y4Coefs, y4BlockBase, y1Dc, y1Ac, injectDc,
+                    yPred, yRecon, mbRow, mbCol, by, bx, yStride, isUv: false);
+            }
+        }
+    }
+
     private static void EncodeMacroblock(
         int mbRow, int mbCol, int mbCols, int yStride, int uvStride,
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
