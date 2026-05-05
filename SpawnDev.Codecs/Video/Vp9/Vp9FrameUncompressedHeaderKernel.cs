@@ -37,8 +37,8 @@ namespace SpawnDev.Codecs.Video.Vp9;
 public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
 {
     private readonly Accelerator _accelerator;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int> _kernel;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int, int> _batchKernel;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int, int, int> _kernel;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int, int, int, int> _batchKernel;
 
     /// <summary>Compile.</summary>
     public Vp9FrameUncompressedHeaderKernel(Accelerator accelerator)
@@ -46,42 +46,83 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int>(EmitKernel);
+            Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int, int, int>(EmitKernel);
         _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int, int>(EmitBatchKernel);
+            Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int, int, int, int>(EmitBatchKernel);
     }
 
-    /// <summary>Batch: extent=N, each thread emits one frame's uncompressed header.</summary>
+    /// <summary>
+    /// Batch: extent=N, each thread emits one frame's uncompressed header.
+    /// All N frames share the same width/height/q/tile-config (homogeneous batch).
+    /// </summary>
+    public void RunBatch(
+        ArrayView<byte> outBuf, ArrayView<long> outLen,
+        ArrayView<long> firstPartitionSizeView,
+        int width, int height, int baseQIndex,
+        int log2TileCols, int log2TileRows,
+        int frameCount, int outBufStride)
+    {
+        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        _batchKernel(frameCount, outBuf, outLen, firstPartitionSizeView,
+            width, height, baseQIndex, log2TileCols, log2TileRows, outBufStride);
+    }
+
+    /// <summary>
+    /// Single-tile batch convenience: dispatches with log2TileCols=minLog2(width)
+    /// and log2TileRows=0 (the legacy single-tile behavior).
+    /// </summary>
     public void RunBatch(
         ArrayView<byte> outBuf, ArrayView<long> outLen,
         ArrayView<long> firstPartitionSizeView,
         int width, int height, int baseQIndex,
         int frameCount, int outBufStride)
     {
-        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
-        _batchKernel(frameCount, outBuf, outLen, firstPartitionSizeView,
-            width, height, baseQIndex, outBufStride);
+        var (minLog2, _) = Vp9TileInfoParser.GetTileNBits((width + 7) >> 3);
+        RunBatch(outBuf, outLen, firstPartitionSizeView,
+            width, height, baseQIndex,
+            log2TileCols: minLog2, log2TileRows: 0,
+            frameCount: frameCount, outBufStride: outBufStride);
     }
 
     private static void EmitBatchKernel(
         Index1D idx,
         ArrayView<byte> outBuf, ArrayView<long> outLen,
         ArrayView<long> firstPartitionSizeView,
-        int width, int height, int baseQIndex, int outBufStride)
+        int width, int height, int baseQIndex,
+        int log2TileCols, int log2TileRows,
+        int outBufStride)
     {
         int f = idx.X;
         var fOut = outBuf.SubView((long)f * outBufStride, outBufStride);
         var fOutLen = outLen.SubView(f, 1);
         var fFps = firstPartitionSizeView.SubView(f, 1);
-        EmitBody(fOut, fOutLen, fFps, width, height, baseQIndex);
+        EmitBody(fOut, fOutLen, fFps, width, height, baseQIndex, log2TileCols, log2TileRows);
     }
 
     /// <summary>
     /// Emit the uncompressed header reading firstPartitionSize from a GPU buffer.
-    /// This is the GPU-resident path used by the encoder integration: the
-    /// compressed header length is in <paramref name="firstPartitionSizeView"/>[0]
-    /// (the same buffer the compressed-header kernel wrote it to), so the host
-    /// does not need to sync + read it back to launch this kernel.
+    /// GPU-resident path used by the encoder integration.
+    /// </summary>
+    /// <param name="log2TileCols">log2(tile_cols). Must be in [minLog2(width), maxLog2(width)].</param>
+    /// <param name="log2TileRows">log2(tile_rows). Must be in [0, 2].</param>
+    public void Run(
+        ArrayView<byte> outBuf,
+        ArrayView<long> outLen,
+        ArrayView<long> firstPartitionSizeView,
+        int width, int height,
+        int baseQIndex,
+        int log2TileCols, int log2TileRows)
+    {
+        if (outLen.Length < 1) throw new ArgumentException("outLen must hold 1 entry.", nameof(outLen));
+        if (firstPartitionSizeView.Length < 1) throw new ArgumentException("firstPartitionSizeView must hold 1 entry.", nameof(firstPartitionSizeView));
+        if (outBuf.Length < 32)
+            throw new ArgumentException("outBuf must hold at least 32 bytes for the v1 keyframe header.", nameof(outBuf));
+        _kernel(1, outBuf, outLen, firstPartitionSizeView, width, height, baseQIndex, log2TileCols, log2TileRows);
+    }
+
+    /// <summary>
+    /// Single-tile convenience: dispatches with log2TileCols=minLog2(width)
+    /// and log2TileRows=0 (the legacy single-tile behavior).
     /// </summary>
     public void Run(
         ArrayView<byte> outBuf,
@@ -90,17 +131,16 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
         int width, int height,
         int baseQIndex)
     {
-        if (outLen.Length < 1) throw new ArgumentException("outLen must hold 1 entry.", nameof(outLen));
-        if (firstPartitionSizeView.Length < 1) throw new ArgumentException("firstPartitionSizeView must hold 1 entry.", nameof(firstPartitionSizeView));
-        if (outBuf.Length < 32)
-            throw new ArgumentException("outBuf must hold at least 32 bytes for the v1 keyframe header.", nameof(outBuf));
-        _kernel(1, outBuf, outLen, firstPartitionSizeView, width, height, baseQIndex);
+        var (minLog2, _) = Vp9TileInfoParser.GetTileNBits((width + 7) >> 3);
+        Run(outBuf, outLen, firstPartitionSizeView,
+            width, height, baseQIndex,
+            log2TileCols: minLog2, log2TileRows: 0);
     }
 
     /// <summary>
     /// Convenience overload for tests / standalone callers that already have
     /// firstPartitionSize on the host - allocates a 1-element scratch view,
-    /// uploads, dispatches.
+    /// uploads, dispatches in single-tile mode.
     /// </summary>
     public void Run(
         ArrayView<byte> outBuf,
@@ -121,9 +161,11 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
         ArrayView<long> outLenOut,
         ArrayView<long> firstPartitionSizeView,
         int width, int height,
-        int baseQIndex)
+        int baseQIndex,
+        int log2TileCols, int log2TileRows)
     {
-        EmitBody(outBuf, outLenOut, firstPartitionSizeView, width, height, baseQIndex);
+        EmitBody(outBuf, outLenOut, firstPartitionSizeView,
+            width, height, baseQIndex, log2TileCols, log2TileRows);
     }
 
     private static void EmitBody(
@@ -131,7 +173,8 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
         ArrayView<long> outLenOut,
         ArrayView<long> firstPartitionSizeView,
         int width, int height,
-        int baseQIndex)
+        int baseQIndex,
+        int log2TileCols, int log2TileRows)
     {
         int firstPartitionSize = (int)firstPartitionSizeView[0];
         var bw = Vp9BitWriterGpu.Init();
@@ -192,7 +235,8 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
         // segmentation_params: enabled f(1) = 0
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 1);
 
-        // tile_info: tile_cols_log2 = MIN, tile_rows_log2 = 0.
+        // tile_info: tile_cols_log2 + tile_rows_log2 (per spec sec 6.2.13).
+        //
         // Inline GetTileNBits: sb_cols = AlignUp(miCols, 8) >> 3.
         int miCols = (width + 7) >> 3;
         int sbCols = ((miCols + 7) & ~7) >> 3;
@@ -207,11 +251,40 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
         while ((sbCols >> maxLog2) >= 4) maxLog2++;
         maxLog2--;
 
-        // Stay at minLog2: emit one 0 bit if there are increment bits.
-        if (maxLog2 > minLog2)
+        // Clamp caller's requested log2_tile_cols to the spec-derived range.
+        // Decoder reads up to (maxLog2 - minLog2) increment bits; encoder must
+        // match exactly. Out-of-range requests fall back to the closest legal
+        // value; passing minLog2/0 (the single-tile shape) emits the same bits
+        // as the legacy hardcoded path.
+        int clampedLog2Cols = log2TileCols;
+        if (clampedLog2Cols < minLog2) clampedLog2Cols = minLog2;
+        if (clampedLog2Cols > maxLog2) clampedLog2Cols = maxLog2;
+
+        // Emit (clampedLog2Cols - minLog2) `1` increment bits + a `0`
+        // terminator, UNLESS clampedLog2Cols == maxLog2 (no terminator needed -
+        // decoder caps reads at the increment budget).
+        int increments = clampedLog2Cols - minLog2;
+        for (int i = 0; i < increments; i++)
+            Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 1u, 1);
+        if (clampedLog2Cols < maxLog2)
             Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 1);
-        // tile_rows_log2 = 0: write a single 0 bit.
-        Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 1);
+
+        // tile_rows_log2 in [0, 2]:
+        //   0 -> emit 0 (1 bit)
+        //   1 -> emit 1, 0 (2 bits)
+        //   2 -> emit 1, 1 (2 bits)
+        int clampedLog2Rows = log2TileRows;
+        if (clampedLog2Rows < 0) clampedLog2Rows = 0;
+        if (clampedLog2Rows > 2) clampedLog2Rows = 2;
+        if (clampedLog2Rows == 0)
+        {
+            Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 1);
+        }
+        else
+        {
+            Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 1u, 1);
+            Vp9BitWriterGpu.WriteBits(ref bw, outBuf, (uint)(clampedLog2Rows - 1) & 1u, 1);
+        }
 
         // first_partition_size f(16): byte length of compressed header.
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, (uint)(firstPartitionSize & 0xFFFF), 16);
