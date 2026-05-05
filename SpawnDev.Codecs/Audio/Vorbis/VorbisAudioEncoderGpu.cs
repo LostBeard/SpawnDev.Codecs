@@ -52,7 +52,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, float> _floorFitKernel;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<byte>, int, int, int> _floorRenderKernel;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, float, int> _divQuantKernel;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, EmitPacketParams> _emitKernel;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, ArrayView<int>, EmitPacketParams> _emitKernel;
 
     /// <summary>Construct + bind to the accelerator. One-time setup uploads.</summary>
     public VorbisAudioEncoderGpu(Accelerator accelerator, VorbisAudioEncoderOptions options)
@@ -114,7 +114,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         _emitKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<int>,
             ArrayView<uint>, ArrayView<int>, ArrayView<uint>, ArrayView<int>,
-            EmitPacketParams>(EmitKernel);
+            ArrayView<int>, EmitPacketParams>(EmitKernel);
     }
 
     /// <summary>Identification header (resolved once at construction).</summary>
@@ -203,16 +203,14 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
             dSpectrum.View, dFloorCurve.View, dResidueQ.View,
             half, residueRange, residueBookEntries);
 
-        // 6. Bitstream emit (single thread, reads dPosteriors back to host
-        //    and passes as scalars).
-        await _accelerator.SynchronizeAsync();
-        var posteriors = await dPosteriors.CopyToHostAsync();
-
+        // 6. Bitstream emit (single thread; reads posteriors directly from
+        //    dPosteriors so the entire pipeline stays GPU-resident - no
+        //    intermediate sync, no host round-trip, and the same kernel
+        //    works for batch dispatch where each packet has its own
+        //    2-int posteriors slot).
         var emitParams = new EmitPacketParams
         {
             Count = half,
-            PosteriorY0 = posteriors[0],
-            PosteriorY1 = posteriors[1],
             EndpointBits = _endpointBits,
             ModeBits = _modeBits,
         };
@@ -220,6 +218,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
             dOutBytes.View, dOutLen.View, dResidueQ.View,
             _dClassbookCodes.View, _dClassbookLengths.View,
             _dResidueBookCodes.View, _dResidueBookLengths.View,
+            dPosteriors.View,
             emitParams);
         await _accelerator.SynchronizeAsync();
 
@@ -380,11 +379,19 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         ArrayView<byte> outBuf, ArrayView<long> outLen, ArrayView<int> residueQ,
         ArrayView<uint> classCodes, ArrayView<int> classLens,
         ArrayView<uint> resCodes, ArrayView<int> resLens,
+        ArrayView<int> posteriors,
         EmitPacketParams p)
     {
+        // Read posteriors directly from the device buffer (kept GPU-resident
+        // from FloorFitKernel output) instead of round-tripping to host
+        // scalars - avoids a per-packet sync barrier and unblocks the batch
+        // dispatch path where every packet's emit reads from its own
+        // posteriors slot.
+        int y0 = posteriors[0];
+        int y1 = posteriors[1];
         VorbisEncoderBitstreamEmitGpu.EmitPacket(
             outBuf, outLen, residueQ, 0, p.Count,
-            p.PosteriorY0, p.PosteriorY1,
+            y0, y1,
             p.EndpointBits, p.ModeBits,
             classCodes, 0, classLens, 0,
             resCodes, 0, resLens, 0);
@@ -395,10 +402,6 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
     {
         /// <summary>Residue entry count (= halfBlock).</summary>
         public int Count;
-        /// <summary>Floor endpoint Y[0] (low band).</summary>
-        public int PosteriorY0;
-        /// <summary>Floor endpoint Y[1] (high band).</summary>
-        public int PosteriorY1;
         /// <summary>Bits per floor endpoint (8/7/7/6).</summary>
         public int EndpointBits;
         /// <summary>ilog(modes - 1); 0 for single-mode.</summary>
