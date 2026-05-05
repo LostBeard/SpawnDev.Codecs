@@ -81,6 +81,34 @@ public struct Vp9FrameEntropyBatchStrides
 }
 
 /// <summary>
+/// Per-tile + frame-shape parameters for the multi-tile entropy kernel.
+/// Each kernel thread is one tile (extent = TileCols × TileRows); the kernel
+/// derives its tile column/row indices from <see cref="Index1D"/> and computes
+/// its SB-range via the libvpx <c>get_tile_offset</c> formula inlined.
+/// </summary>
+public struct Vp9FrameEntropyTileStrides
+{
+    /// <summary>mbCols (working dim, multiple of 4 = SB-aligned).</summary>
+    public int MbCols;
+    /// <summary>mbRows (working dim, multiple of 4 = SB-aligned).</summary>
+    public int MbRows;
+    /// <summary>Display-dim mi cols = (FrameWidth+7)>>3.</summary>
+    public int FrameMiCols;
+    /// <summary>Display-dim mi rows = (FrameHeight+7)>>3.</summary>
+    public int FrameMiRows;
+    /// <summary>1 &lt;&lt; <see cref="Log2TileCols"/>.</summary>
+    public int TileCols;
+    /// <summary>1 &lt;&lt; <see cref="Log2TileRows"/>.</summary>
+    public int TileRows;
+    /// <summary>log2 of <see cref="TileCols"/>; used for tile-offset shift math.</summary>
+    public int Log2TileCols;
+    /// <summary>log2 of <see cref="TileRows"/>; used for tile-offset shift math.</summary>
+    public int Log2TileRows;
+    /// <summary>Per-tile output buffer slot stride (bytes). Worst-case per tile.</summary>
+    public int OutBufStride;
+}
+
+/// <summary>
 /// VP9 v1 keyframe entropy coding kernel. Single thread per frame;
 /// emits the bool-coded tile bitstream from already-quantized per-
 /// MB coefs.
@@ -114,6 +142,13 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<byte>, ArrayView<ushort>,
         Vp9FrameEntropyBatchStrides> _batchKernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<short>, ArrayView<short>, ArrayView<short>,
+        ArrayView<byte>, ArrayView<long>,
+        ArrayView<byte>, ArrayView<ushort>,
+        Vp9FrameEntropyTileStrides> _multiTileKernel;
+
     /// <summary>Compile.</summary>
     public Vp9FrameEntropyKernel(Accelerator accelerator)
     {
@@ -131,6 +166,12 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             ArrayView<byte>, ArrayView<long>,
             ArrayView<byte>, ArrayView<ushort>,
             Vp9FrameEntropyBatchStrides>(BatchEncodeFrameKernel);
+        _multiTileKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<short>, ArrayView<short>, ArrayView<short>,
+            ArrayView<byte>, ArrayView<long>,
+            ArrayView<byte>, ArrayView<ushort>,
+            Vp9FrameEntropyTileStrides>(EncodeMultiTileKernel);
     }
 
     /// <summary>
@@ -191,6 +232,62 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             mbCols, mbRows, frameMi);
     }
 
+    /// <summary>
+    /// Multi-tile dispatch: extent = TileCols × TileRows. Each thread is one
+    /// tile in the same frame, written to its own output buffer slot. Caller
+    /// supplies tile-config + per-tile output stride; this method does NOT
+    /// emit tile-size-byte prefixes (that's the assembler's job, per VP9
+    /// spec sec 6.4 - 4-byte big-endian length prefix before every tile
+    /// except the last).
+    /// </summary>
+    /// <param name="outBuf">Per-tile output bytes, contiguous slots of <c>strides.OutBufStride</c> bytes each (total length = TileCols*TileRows*OutBufStride).</param>
+    /// <param name="outLen">Per-tile output lengths; length = TileCols*TileRows.</param>
+    /// <param name="strides">Tile config (TileCols/TileRows, log2 + dims, OutBufStride).</param>
+    public void RunMultiTile(
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<byte> outBuf, ArrayView<long> outLen,
+        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
+        Vp9FrameEntropyTileStrides strides)
+    {
+        if (strides.MbCols <= 0 || (strides.MbCols & 3) != 0)
+            throw new ArgumentOutOfRangeException(nameof(strides),
+                $"strides.MbCols must be a positive multiple of 4 (SB-aligned); got {strides.MbCols}.");
+        if (strides.MbRows <= 0 || (strides.MbRows & 3) != 0)
+            throw new ArgumentOutOfRangeException(nameof(strides),
+                $"strides.MbRows must be a positive multiple of 4 (SB-aligned); got {strides.MbRows}.");
+        if (strides.MbCols * 2 > MaxMiColsAligned)
+            throw new ArgumentOutOfRangeException(nameof(strides),
+                $"v1 entropy kernel caps mbCols at {MaxMiColsAligned / 2}; got {strides.MbCols}. Lift MaxMiColsAligned to grow.");
+        if (strides.TileCols <= 0 || (strides.TileCols & (strides.TileCols - 1)) != 0)
+            throw new ArgumentOutOfRangeException(nameof(strides),
+                $"strides.TileCols must be a positive power of 2; got {strides.TileCols}.");
+        if (strides.TileRows <= 0 || (strides.TileRows & (strides.TileRows - 1)) != 0)
+            throw new ArgumentOutOfRangeException(nameof(strides),
+                $"strides.TileRows must be a positive power of 2; got {strides.TileRows}.");
+        if ((1 << strides.Log2TileCols) != strides.TileCols
+            || (1 << strides.Log2TileRows) != strides.TileRows)
+            throw new ArgumentException(
+                "strides.Log2TileCols / Log2TileRows must satisfy 1 << log2 == count.", nameof(strides));
+        if (strides.OutBufStride <= 0)
+            throw new ArgumentOutOfRangeException(nameof(strides),
+                $"strides.OutBufStride must be positive; got {strides.OutBufStride}.");
+
+        int totalTiles = strides.TileCols * strides.TileRows;
+        if (outLen.Length < totalTiles)
+            throw new ArgumentException(
+                $"outLen must hold at least {totalTiles} entries (one per tile).", nameof(outLen));
+        if (outBuf.Length < (long)totalTiles * strides.OutBufStride)
+            throw new ArgumentException(
+                $"outBuf must hold at least {(long)totalTiles * strides.OutBufStride} bytes " +
+                $"({totalTiles} tiles × {strides.OutBufStride} stride).", nameof(outBuf));
+
+        _multiTileKernel(totalTiles,
+            yCoefs, uCoefs, vCoefs,
+            outBuf, outLen,
+            byteConsts, ushortConsts,
+            strides);
+    }
+
     /// <summary>Batch entropy: extent=N, each thread walks one frame's MBs.</summary>
     public void RunBatch(
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
@@ -240,6 +337,74 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             sbRowStart: 0, sbRowEnd: mbRows >> 2,
             sbColStart: 0, sbColEnd: mbCols >> 2,
             mbCols: mbCols, frameMi: frameMi);
+    }
+
+    /// <summary>
+    /// Multi-tile dispatch: extent = TileCols × TileRows. Each thread is one
+    /// tile in the same frame. Per-tile output written to its own slot in
+    /// <paramref name="outBuf"/> (stride = <c>s.OutBufStride</c>) and per-tile
+    /// length to <paramref name="outLen"/>[tileIdx]. Host-side concatenation
+    /// with 4-byte big-endian length prefixes (per VP9 spec sec 6.4) happens
+    /// in a follow-up assembler-kernel update.
+    /// </summary>
+    private static void EncodeMultiTileKernel(
+        Index1D idx,
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<byte> outBuf, ArrayView<long> outLen,
+        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
+        Vp9FrameEntropyTileStrides s)
+    {
+        int tileIdx = idx.X;
+        // tileColIdx + tileRowIdx via integer division. tile_count is power of
+        // 2 in VP9, so the column wrap is `& (TileCols - 1)`.
+        int tileColIdx = tileIdx & (s.TileCols - 1);
+        int tileRowIdx = tileIdx >> s.Log2TileCols;
+
+        int sbCols = s.MbCols >> 2;
+        int sbRows = s.MbRows >> 2;
+
+        // Compute this tile's [sbColStart, sbColEnd) × [sbRowStart, sbRowEnd)
+        // range. libvpx get_tile_offset inlined: offset = (idx*mi_count) >>
+        // log2_tile_count, mi-aligned to MI_BLOCK_SIZE (8), divided by 8.
+        // The last tile in each axis extends to the frame edge regardless.
+        int sbColStart = TileSbOffset(tileColIdx, s.Log2TileCols, sbCols);
+        int sbColEnd = (tileColIdx + 1 == s.TileCols)
+            ? sbCols
+            : TileSbOffset(tileColIdx + 1, s.Log2TileCols, sbCols);
+        int sbRowStart = TileSbOffset(tileRowIdx, s.Log2TileRows, sbRows);
+        int sbRowEnd = (tileRowIdx + 1 == s.TileRows)
+            ? sbRows
+            : TileSbOffset(tileRowIdx + 1, s.Log2TileRows, sbRows);
+
+        // Per-tile output slot. Each tile writes to its own contiguous bytes
+        // region; host stitches them together with size prefixes.
+        var tileOut = outBuf.SubView((long)tileIdx * s.OutBufStride, s.OutBufStride);
+        var tileOutLen = outLen.SubView(tileIdx, 1);
+
+        int frameMi = (s.FrameMiCols & 0xFFFF) | (s.FrameMiRows << 16);
+        EncodeFrameBody(yCoefs, uCoefs, vCoefs, tileOut, tileOutLen,
+            byteConsts, ushortConsts,
+            sbRowStart, sbRowEnd,
+            sbColStart, sbColEnd,
+            s.MbCols, frameMi);
+    }
+
+    /// <summary>
+    /// Inlined libvpx <c>get_tile_offset</c>: returns the SB64-column (or row)
+    /// where tile <paramref name="idx"/> starts. Called only from
+    /// <see cref="EncodeMultiTileKernel"/>; mirror of
+    /// <see cref="Vp9TileInfoParser.GetTileOffsetSb"/> in kernel-safe form
+    /// (no exceptions, all int math).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int TileSbOffset(int idx, int log2TileCount, int sbCount)
+    {
+        // mi_count = sbCount × MI_BLOCK_SIZE (= 8); offset = (idx*mi_count) >>
+        // log2; SB-aligned; convert back to SB.
+        int miCount = sbCount << 3;
+        int miOffset = (idx * miCount) >> log2TileCount;
+        int miAligned = (miOffset + 7) & ~7;
+        return miAligned >> 3;
     }
 
     /// <summary>
