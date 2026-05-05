@@ -59,14 +59,20 @@ public struct Vp9FrameSeqEncodeBatchParams
     public int UvCoefStride;
     /// <summary>Dequant ints per frame (4).</summary>
     public int DequantStride;
-    /// <summary>mbCols.</summary>
+    /// <summary>mbCols (working dim).</summary>
     public int MbCols;
-    /// <summary>mbRows.</summary>
+    /// <summary>mbRows (working dim).</summary>
     public int MbRows;
     /// <summary>diagD packed in high 16 bits, rMin in low 16.</summary>
     public int DiagAndRMin;
     /// <summary>Number of MBs on this diagonal.</summary>
     public int DiagCount;
+    /// <summary>
+    /// Display mi rows = (DisplayHeight+7)>>3 in 8x8 mi units. When this is
+    /// less than mbRows*2 the bottom mb row is at the SB16 boundary and uses
+    /// the BLOCK_16X8 (top-half) encode path instead of BLOCK_16X16.
+    /// </summary>
+    public int FrameMiRows;
 }
 
 /// <summary>
@@ -192,9 +198,12 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         ArrayView<int> dequant,
         int mbCols, int mbRows, int frameCount,
         int yStride, int uvStride,
-        int yCoefStride, int uvCoefStride, int dequantStride)
+        int yCoefStride, int uvCoefStride, int dequantStride,
+        int frameMiRows = 0)
     {
         if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        // Default frameMiRows = mbRows*2 (no boundary).
+        if (frameMiRows == 0) frameMiRows = mbRows * 2;
         int totalDiagonals = mbCols + mbRows - 1;
         for (int d = 0; d < totalDiagonals; d++)
         {
@@ -213,6 +222,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
                 MbRows = mbRows,
                 DiagAndRMin = diagAndRMin,
                 DiagCount = diagCount,
+                FrameMiRows = frameMiRows,
             };
             _batchKernel(frameCount * diagCount,
                 yPlane, uPlane, vPlane,
@@ -283,12 +293,14 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         ArrayView<int> dequant,
         int mbCols, int mbRows, int frameCount,
         int yStride, int uvStride,
-        int yCoefStride, int uvCoefStride, int dequantStride)
+        int yCoefStride, int uvCoefStride, int dequantStride,
+        int frameMiRows = 0)
     {
         if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
         int peakDiag = mbCols < mbRows ? mbCols : mbRows;
         int totalDiagonals = mbCols + mbRows - 1;
         if (peakDiag > 1024) return false;
+        if (frameMiRows == 0) frameMiRows = mbRows * 2;
 
         var p = new Vp9FrameSeqEncodeBatchParams
         {
@@ -301,6 +313,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             MbRows = mbRows,
             DiagAndRMin = 0,
             DiagCount = peakDiag,
+            FrameMiRows = frameMiRows,
         };
         _singleDispatchBatchKernel(
             new KernelConfig(frameCount, peakDiag),
@@ -360,6 +373,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             bool active = posInDiag < diagCount && mbRow >= 0 && mbRow < mbRows && mbCol >= 0 && mbCol < mbCols;
             if (active)
             {
+                bool isBoundary = IsBoundaryMb(mbRow, p.FrameMiRows);
                 EncodeMacroblock(
                     mbRow, mbCol, mbCols, yStride, uvStride,
                     fY, fU, fV,
@@ -368,10 +382,23 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
                     yDcQ, yAcQ, uvDcQ, uvAcQ,
                     residual, coefsInt, coefsShort,
                     fdctScratch, idctScratch,
-                    aboveLuma, leftLuma, aboveChroma, leftChroma);
+                    aboveLuma, leftLuma, aboveChroma, leftChroma,
+                    isBoundary);
             }
             Group.Barrier();
         }
+    }
+
+    /// <summary>
+    /// Compute whether an MB at (mbRow, mbCol) sits at the bottom-edge SB16
+    /// boundary given display mi rows. SB16 is 2 mi tall; boundary fires
+    /// when miRow + 1 &gt;= frameMiRows where miRow = mbRow*2.
+    /// </summary>
+    private static bool IsBoundaryMb(int mbRow, int frameMiRows)
+    {
+        // mbRow * 2 = miRow of MB top. SB16's bottom mi at miRow+1.
+        // Boundary when (miRow+1) is at or past the display boundary.
+        return frameMiRows < (mbRow * 2 + 2);
     }
 
     /// <summary>Batch wave-front kernel: thread = (frame, mb-on-diag).</summary>
@@ -418,6 +445,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         var aboveChroma = LocalMemory.Allocate<byte>(8);
         var leftChroma = LocalMemory.Allocate<byte>(8);
 
+        bool isBoundary = IsBoundaryMb(mbRow, p.FrameMiRows);
         EncodeMacroblock(
             mbRow, mbCol, p.MbCols, yStride, uvStride,
             fY, fU, fV,
@@ -426,7 +454,8 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             yDcQ, yAcQ, uvDcQ, uvAcQ,
             residual, coefsInt, coefsShort,
             fdctScratch, idctScratch,
-            aboveLuma, leftLuma, aboveChroma, leftChroma);
+            aboveLuma, leftLuma, aboveChroma, leftChroma,
+            isBoundary);
     }
 
     /// <summary>Encode a single 16x16 macroblock (Y + U + V).</summary>
@@ -443,6 +472,34 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         ArrayView<byte> aboveLuma, ArrayView<byte> leftLuma,
         ArrayView<byte> aboveChroma, ArrayView<byte> leftChroma)
     {
+        EncodeMacroblock(mbRow, mbCol, mbCols, yStride, uvStride,
+            yPlane, uPlane, vPlane, yRecon, uRecon, vRecon,
+            yCoefs, uCoefs, vCoefs, yDcQ, yAcQ, uvDcQ, uvAcQ,
+            residual, coefsInt, coefsShort, fdctScratch, idctScratch,
+            aboveLuma, leftLuma, aboveChroma, leftChroma,
+            isBoundary: false);
+    }
+
+    /// <summary>
+    /// Encode one MB. When <paramref name="isBoundary"/> is true the MB is at
+    /// the bottom-edge SB16 boundary: encode only the top BLOCK_16X8 region
+    /// (rows 0..7 within the MB) using 2 Tx8x8 luma + 2 Tx4x4 chroma transforms,
+    /// matching the walker's PARTITION_HORZ + top-leaf emit.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void EncodeMacroblock(
+        int mbRow, int mbCol, int mbCols,
+        int yStride, int uvStride,
+        ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
+        ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        int yDcQ, int yAcQ, int uvDcQ, int uvAcQ,
+        ArrayView<short> residual, ArrayView<int> coefsInt, ArrayView<short> coefsShort,
+        ArrayView<int> fdctScratch, ArrayView<int> idctScratch,
+        ArrayView<byte> aboveLuma, ArrayView<byte> leftLuma,
+        ArrayView<byte> aboveChroma, ArrayView<byte> leftChroma,
+        bool isBoundary)
+    {
         long mbIdx = (long)mbRow * mbCols + mbCol;
         long yBase = (long)mbRow * 16 * yStride + mbCol * 16;
         long uvBase = (long)mbRow * 8 * uvStride + mbCol * 8;
@@ -451,29 +508,158 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         int leftAvail = mbCol > 0 ? 1 : 0;
         int variant = ComputeVariant(topAvail, leftAvail);
 
-        EncodeLumaBlock16x16(
-            yBase, yStride,
-            yPlane, yRecon, yCoefs, mbIdx,
-            yDcQ, yAcQ,
-            topAvail, leftAvail, variant,
-            residual, coefsInt, coefsShort, fdctScratch, idctScratch,
-            aboveLuma, leftLuma);
+        if (!isBoundary)
+        {
+            EncodeLumaBlock16x16(
+                yBase, yStride,
+                yPlane, yRecon, yCoefs, mbIdx,
+                yDcQ, yAcQ,
+                topAvail, leftAvail, variant,
+                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
+                aboveLuma, leftLuma);
 
-        EncodeChromaBlock8x8(
-            uvBase, uvStride,
-            uPlane, uRecon, uCoefs, mbIdx,
-            uvDcQ, uvAcQ,
-            topAvail, leftAvail, variant,
-            residual, coefsInt, coefsShort, fdctScratch, idctScratch,
-            aboveChroma, leftChroma);
+            EncodeChromaBlock8x8(
+                uvBase, uvStride,
+                uPlane, uRecon, uCoefs, mbIdx,
+                uvDcQ, uvAcQ,
+                topAvail, leftAvail, variant,
+                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
+                aboveChroma, leftChroma);
 
-        EncodeChromaBlock8x8(
-            uvBase, uvStride,
-            vPlane, vRecon, vCoefs, mbIdx,
-            uvDcQ, uvAcQ,
-            topAvail, leftAvail, variant,
-            residual, coefsInt, coefsShort, fdctScratch, idctScratch,
-            aboveChroma, leftChroma);
+            EncodeChromaBlock8x8(
+                uvBase, uvStride,
+                vPlane, vRecon, vCoefs, mbIdx,
+                uvDcQ, uvAcQ,
+                topAvail, leftAvail, variant,
+                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
+                aboveChroma, leftChroma);
+        }
+        else
+        {
+            // Boundary MB: encode top BLOCK_16X8 only.
+            // Y: 2 Tx8x8 over (rows 0..7, cols 0..7) and (rows 0..7, cols 8..15).
+            EncodeBoundaryLuma8x8(yBase + 0, yStride,
+                yPlane, yRecon, yCoefs, mbIdx * 256 + 0,
+                yDcQ, yAcQ, topAvail, leftAvail, variant,
+                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
+                aboveLuma, leftLuma);
+
+            // For the right 8x8: top neighbor still topAvail (same row above);
+            // left neighbor is the LEFT 8x8's right column (always available).
+            int rightLeftAvail = 1;
+            int rightVariant = ComputeVariant(topAvail, rightLeftAvail);
+            EncodeBoundaryLuma8x8(yBase + 8, yStride,
+                yPlane, yRecon, yCoefs, mbIdx * 256 + 64,
+                yDcQ, yAcQ, topAvail, rightLeftAvail, rightVariant,
+                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
+                aboveLuma, leftLuma);
+
+            // Chroma U: 2 Tx4x4 over top 8x4 region.
+            EncodeBoundaryChroma4x4(uvBase + 0, uvStride,
+                uPlane, uRecon, uCoefs, mbIdx * 64 + 0,
+                uvDcQ, uvAcQ, topAvail, leftAvail, variant,
+                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
+                aboveChroma, leftChroma);
+            int rightChromaVariant = ComputeVariant(topAvail, 1);
+            EncodeBoundaryChroma4x4(uvBase + 4, uvStride,
+                uPlane, uRecon, uCoefs, mbIdx * 64 + 16,
+                uvDcQ, uvAcQ, topAvail, 1, rightChromaVariant,
+                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
+                aboveChroma, leftChroma);
+
+            // Chroma V: same shape.
+            EncodeBoundaryChroma4x4(uvBase + 0, uvStride,
+                vPlane, vRecon, vCoefs, mbIdx * 64 + 0,
+                uvDcQ, uvAcQ, topAvail, leftAvail, variant,
+                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
+                aboveChroma, leftChroma);
+            EncodeBoundaryChroma4x4(uvBase + 4, uvStride,
+                vPlane, vRecon, vCoefs, mbIdx * 64 + 16,
+                uvDcQ, uvAcQ, topAvail, 1, rightChromaVariant,
+                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
+                aboveChroma, leftChroma);
+        }
+    }
+
+    /// <summary>Boundary-MB top-half luma 8x8 sub-block (Tx8x8).</summary>
+    private static void EncodeBoundaryLuma8x8(
+        long yBase, int yStride,
+        ArrayView<byte> ySrc, ArrayView<byte> yRecon,
+        ArrayView<short> yCoefs, long coefBase,
+        int dcQ, int acQ,
+        int topAvail, int leftAvail, int variant,
+        ArrayView<short> residual, ArrayView<int> coefsInt, ArrayView<short> coefsShort,
+        ArrayView<int> fdctScratch, ArrayView<int> idctScratch,
+        ArrayView<byte> aboveBuf, ArrayView<byte> leftBuf)
+    {
+        if (topAvail != 0)
+        {
+            for (int i = 0; i < 8; i++) aboveBuf[i] = yRecon[yBase - yStride + i];
+        }
+        if (leftAvail != 0)
+        {
+            for (int r = 0; r < 8; r++) leftBuf[r] = yRecon[yBase + (long)r * yStride - 1];
+        }
+        Vp9DcPredictorGpu.Predict(aboveBuf, 0, leftBuf, 0,
+            yRecon, yBase, yStride, 8, variant);
+        for (int r = 0; r < 8; r++)
+            for (int c = 0; c < 8; c++)
+            {
+                int s = ySrc[yBase + (long)r * yStride + c];
+                int p = yRecon[yBase + (long)r * yStride + c];
+                residual[r * 8 + c] = (short)(s - p);
+            }
+        Vp9ForwardDct8x8Gpu.Forward8x8(residual, 0, 8, coefsInt, 0, fdctScratch);
+        Vp9ForwardQuantizerGpu.QuantizeBlock(coefsInt, 0, 64, dcQ, acQ);
+        for (int i = 0; i < 64; i++)
+        {
+            short q = (short)coefsInt[i];
+            yCoefs[coefBase + i] = q;
+            coefsShort[i] = q;
+        }
+        Vp9DequantBlockGpu.DequantizeBlock(coefsShort, 0, 64, dcQ, acQ);
+        Vp9Idct8x8Gpu.Idct8x8(coefsShort, 0, yRecon, yBase, yStride, idctScratch);
+    }
+
+    /// <summary>Boundary-MB top-half chroma 4x4 sub-block (Tx4x4).</summary>
+    private static void EncodeBoundaryChroma4x4(
+        long uvBase, int uvStride,
+        ArrayView<byte> src, ArrayView<byte> recon,
+        ArrayView<short> coefsOut, long coefBase,
+        int dcQ, int acQ,
+        int topAvail, int leftAvail, int variant,
+        ArrayView<short> residual, ArrayView<int> coefsInt, ArrayView<short> coefsShort,
+        ArrayView<int> fdctScratch, ArrayView<int> idctScratch,
+        ArrayView<byte> aboveBuf, ArrayView<byte> leftBuf)
+    {
+        if (topAvail != 0)
+        {
+            for (int i = 0; i < 4; i++) aboveBuf[i] = recon[uvBase - uvStride + i];
+        }
+        if (leftAvail != 0)
+        {
+            for (int r = 0; r < 4; r++) leftBuf[r] = recon[uvBase + (long)r * uvStride - 1];
+        }
+        Vp9DcPredictorGpu.Predict(aboveBuf, 0, leftBuf, 0,
+            recon, uvBase, uvStride, 4, variant);
+        for (int r = 0; r < 4; r++)
+            for (int c = 0; c < 4; c++)
+            {
+                int s = src[uvBase + (long)r * uvStride + c];
+                int p = recon[uvBase + (long)r * uvStride + c];
+                residual[r * 4 + c] = (short)(s - p);
+            }
+        Vp9ForwardDct4x4Gpu.Transform(residual, 0, 4, coefsInt, 0, fdctScratch, 0);
+        Vp9ForwardQuantizerGpu.QuantizeBlock(coefsInt, 0, 16, dcQ, acQ);
+        for (int i = 0; i < 16; i++)
+        {
+            short q = (short)coefsInt[i];
+            coefsOut[coefBase + i] = q;
+            coefsShort[i] = q;
+        }
+        Vp9DequantBlockGpu.DequantizeBlock(coefsShort, 0, 16, dcQ, acQ);
+        // Idct4x4 needs a 16-short scratch; use the second half of coefsShort.
+        Vp9Idct4x4Gpu.Idct4x4(coefsShort, 0, recon, uvBase, uvStride, coefsShort.SubView(16, 16));
     }
 
     /// <summary>Encode one Y 16x16 block end-to-end.</summary>

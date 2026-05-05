@@ -26,6 +26,10 @@ string source = args.Length >= 1 ? args[0] : @"V:\Video\Big Buck Bunny - FULL HD
 string outDir = args.Length >= 2 ? args[1] : @"V:\Video\_CodecsTest";
 int chunkFrames = args.Length >= 3 && int.TryParse(args[2], out var cf) ? cf : 60;
 int maxFrames = args.Length >= 4 && int.TryParse(args[3], out var mf) ? mf : int.MaxValue;
+// Optional "WxH" override - forces ffmpeg pipe to scale source to that
+// resolution before feeding the GPU encoders. Useful for isolating
+// pad-related vs cap-related issues at non-aligned dims.
+string? overrideRes = args.Length >= 5 ? args[4] : null;
 
 string ffmpeg = @"C:\Users\TJ\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1-full_build\bin\ffmpeg.exe";
 string ffprobe = @"C:\Users\TJ\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1-full_build\bin\ffprobe.exe";
@@ -44,6 +48,16 @@ Console.WriteLine($"Chunk:  {chunkFrames} frames per GPU batch");
 var probe = ProbeVideo(source);
 int width = probe.Width, height = probe.Height, frameCount = Math.Min(probe.FrameCount, maxFrames), fps = probe.Fps;
 int sampleRate = probe.SampleRate, channels = probe.Channels;
+// Override target resolution if requested (forces ffmpeg pipe -s WxH).
+if (!string.IsNullOrEmpty(overrideRes))
+{
+    var parts = overrideRes.Split('x');
+    if (parts.Length == 2 && int.TryParse(parts[0], out var ow) && int.TryParse(parts[1], out var oh))
+    {
+        width = ow; height = oh;
+        Console.WriteLine($"Resolution override: {width}x{height}");
+    }
+}
 Console.WriteLine($"Video: {width}x{height} @ {fps}fps, {frameCount} frames");
 Console.WriteLine($"Audio: {sampleRate}Hz x{channels}");
 
@@ -133,22 +147,32 @@ swAudio.Stop();
 // === 4. Encode each video codec via GPU at full resolution ===
 TranscodeVideoGpu("VP8 GPU", "vp8.ivf", "VP80", encVp8: true);
 TranscodeVideoGpu("VP9 GPU", "vp9.ivf", "VP90", encVp8: false, encVp9: true);
-TranscodeVideoGpu("AV1 GPU", "av1.ivf", "AV01", encVp8: false, encVp9: false, encAv1: true);
+try
+{
+    TranscodeVideoGpu("AV1 GPU", "av1.ivf", "AV01", encVp8: false, encVp9: false, encAv1: true);
+}
+catch (NotSupportedException ex)
+{
+    Console.WriteLine($"AV1 GPU SKIPPED: {ex.Message}");
+    report.AppendLine($"AV1 GPU SKIPPED: non-64-aligned dim. Walker boundary work tracked.");
+}
 
 // === 5. Mux GPU outputs into MKV ===
 MuxToMkv("vp8.ivf", "audio.flac", "bbb_vp8_gpu.mkv", "VP8");
 MuxToMkv("vp9.ivf", "audio.flac", "bbb_vp9_gpu.mkv", "VP9");
-MuxToMkv("av1.ivf", "audio.flac", "bbb_av1_gpu.mkv", "AV1");
+if (File.Exists(Path.Combine(outDir, "av1.ivf")) && new FileInfo(Path.Combine(outDir, "av1.ivf")).Length > 32)
+    MuxToMkv("av1.ivf", "audio.flac", "bbb_av1_gpu.mkv", "AV1");
 
 // === 6. ffmpeg comparable encodes (lossless / near-lossless, same frame count) ===
 double clipSec = (double)frameCount / fps;
 string clipDur = clipSec.ToString("F4", System.Globalization.CultureInfo.InvariantCulture);
+string ffScale = (probe.Width == width && probe.Height == height) ? "" : $"-vf scale={width}:{height} ";
 EncodeFfmpegRef("VP8 ffmpeg", "bbb_vp8_ffmpeg.mkv",
-    $"-t {clipDur} -c:v libvpx -lossless 1 -auto-alt-ref 0 -c:a flac");
+    $"-t {clipDur} {ffScale}-c:v libvpx -lossless 1 -auto-alt-ref 0 -c:a flac");
 EncodeFfmpegRef("VP9 ffmpeg", "bbb_vp9_ffmpeg.mkv",
-    $"-t {clipDur} -c:v libvpx-vp9 -lossless 1 -c:a flac");
+    $"-t {clipDur} {ffScale}-c:v libvpx-vp9 -lossless 1 -c:a flac");
 EncodeFfmpegRef("AV1 ffmpeg", "bbb_av1_ffmpeg.mkv",
-    $"-t {clipDur} -c:v libaom-av1 -crf 0 -b:v 0 -cpu-used 8 -c:a flac");
+    $"-t {clipDur} {ffScale}-c:v libaom-av1 -crf 0 -b:v 0 -cpu-used 8 -c:a flac");
 
 // === 7. Write report ===
 File.WriteAllText(Path.Combine(outDir, "timings.txt"), report.ToString());
@@ -182,8 +206,11 @@ void TranscodeVideoGpu(string label, string outName, string fourCc,
 
     int processed = 0;
     swExtract.Start();
+    string scaleArg = (probe.Width == width && probe.Height == height)
+        ? ""
+        : $"-vf scale={width}:{height} ";
     using var ff = StartFfmpegPipe(ffmpeg,
-        $"-i \"{source}\" -f rawvideo -pix_fmt yuv420p -");
+        $"-i \"{source}\" {scaleArg}-f rawvideo -pix_fmt yuv420p -");
     var stdout = ff.StandardOutput.BaseStream;
     swExtract.Stop();
 

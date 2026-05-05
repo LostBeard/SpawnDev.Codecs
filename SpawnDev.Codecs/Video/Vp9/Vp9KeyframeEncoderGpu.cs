@@ -470,6 +470,9 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
 
         // Phase 2: BATCH wave-front sequential encode. Single-dispatch path
         // collapses 47 per-diagonal launches into one kernel via Group.Barrier.
+        // displayMiRows drives boundary forced-split MB encoding (top BLOCK_16X8
+        // with 2 Tx8x8 luma + 2 Tx4x4 chroma) at the bottom-edge MB row.
+        int seqFrameMiRows = (height + 7) >> 3;
         bool wavefrontSingleDispatched = _sequentialKernel.TryRunBatchSingleDispatch(
             dAllY.View, dAllU.View, dAllV.View,
             dAllYR.View, dAllUR.View, dAllVR.View,
@@ -477,7 +480,8 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             dAllDQ.View,
             mbCols, mbRows, frameCount,
             yLen, uvLen,
-            yCoefStride, uvCoefStride, dequantStride);
+            yCoefStride, uvCoefStride, dequantStride,
+            seqFrameMiRows);
         if (!wavefrontSingleDispatched)
         {
             _sequentialKernel.RunBatch(
@@ -487,7 +491,8 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
                 dAllDQ.View,
                 mbCols, mbRows, frameCount,
                 yLen, uvLen,
-                yCoefStride, uvCoefStride, dequantStride);
+                yCoefStride, uvCoefStride, dequantStride,
+                seqFrameMiRows);
         }
 
         // Phase 3: BATCH entropy. Display mi dims drive boundary forced-split.

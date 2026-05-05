@@ -138,11 +138,19 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         if (baseQIndex <= 0 || baseQIndex > 255)
             throw new ArgumentOutOfRangeException(nameof(baseQIndex),
                 "baseQIndex must be in [1, 255].");
+        // AV1 v1 GPU encoder requires 64-multiple dims. Spec-compliant
+        // boundary forced-split at non-aligned dims (e.g. 1920x1080) is tracked
+        // as task #23. VP9 has shipped its boundary support; AV1 is the next
+        // codec to graduate.
+        if ((width & 63) != 0 || (height & 63) != 0)
+            throw new NotSupportedException(
+                $"AV1 v1 GPU encoder requires width and height to be multiples of 64; " +
+                $"got {width}x{height}. Non-aligned support requires walker boundary " +
+                $"forced-split work (tracked task #23). Use 1920x1024 or 1920x1088 in " +
+                $"the meantime.");
 
-        // Round up to next 64-multiple working dims; OBU framing signals
-        // original (width, height) so AV1 decoders crop the pad.
-        int workWidth = (width + 63) & ~63;
-        int workHeight = (height + 63) & ~63;
+        int workWidth = width;
+        int workHeight = height;
         int yLen = workWidth * workHeight;
         int uvLen = yLen / 4;
         int srcLen = yLen + uvLen + uvLen;
@@ -344,11 +352,14 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         if (frameCount == 0) return Array.Empty<byte[]>();
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
+        if ((width & 63) != 0 || (height & 63) != 0)
+            throw new NotSupportedException(
+                $"AV1 v1 GPU encoder requires width and height to be multiples of 64; " +
+                $"got {width}x{height}. Non-aligned support requires walker boundary " +
+                $"forced-split work (tracked task #23).");
 
-        // Round up to next 64-multiple working dims; OBU framing signals
-        // original dims so AV1 decoders crop the pad.
-        int workWidth = (width + 63) & ~63;
-        int workHeight = (height + 63) & ~63;
+        int workWidth = width;
+        int workHeight = height;
         int yLen = workWidth * workHeight;
         int uvLen = yLen / 4;
         int srcLen = yLen + uvLen + uvLen;

@@ -819,7 +819,13 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
 
         // Pick scan + neighbors based on tx size.
         long scanBase, neighborsBase, coefProbsBase;
-        if (txSizeForCoefProbs == (int)Vp9TxSize.Tx8x8)
+        if (txSizeForCoefProbs == (int)Vp9TxSize.Tx4x4)
+        {
+            scanBase = Vp9KeyframeConstantsGpu.Scan4x4Offset;
+            neighborsBase = Vp9KeyframeConstantsGpu.Neighbors4x4Offset;
+            coefProbsBase = Vp9KeyframeConstantsGpu.CoefProbs4x4Offset;
+        }
+        else if (txSizeForCoefProbs == (int)Vp9TxSize.Tx8x8)
         {
             scanBase = Vp9KeyframeConstantsGpu.Scan8x8Offset;
             neighborsBase = Vp9KeyframeConstantsGpu.Neighbors8x8Offset;

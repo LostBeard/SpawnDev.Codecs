@@ -70,8 +70,13 @@ public static class Vp9KeyframeConstantsGpu
     /// <summary>Length of SkipProbs.</summary>
     public const int SkipProbsLength = 3;
 
+    /// <summary>Offset of Vp9CoefProbs.DefaultCoefProbs4x4 (432 bytes).</summary>
+    public const int CoefProbs4x4Offset = SkipProbsOffset + SkipProbsLength;
+    /// <summary>Length of DefaultCoefProbs4x4.</summary>
+    public const int CoefProbs4x4Length = 432;
+
     /// <summary>Offset of Vp9CoefProbs.DefaultCoefProbs8x8 (432 bytes).</summary>
-    public const int CoefProbs8x8Offset = SkipProbsOffset + SkipProbsLength;
+    public const int CoefProbs8x8Offset = CoefProbs4x4Offset + CoefProbs4x4Length;
     /// <summary>Length of DefaultCoefProbs8x8.</summary>
     public const int CoefProbs8x8Length = 432;
 
@@ -81,12 +86,17 @@ public static class Vp9KeyframeConstantsGpu
     public const int CoefProbs16x16Length = 432;
 
     /// <summary>Total byte buffer size.</summary>
-    public const int ByteConstsTotalBytes = CoefProbs16x16Offset + CoefProbs16x16Length; // 5048
+    public const int ByteConstsTotalBytes = CoefProbs16x16Offset + CoefProbs16x16Length;
 
     // === Ushort buffer offsets ===
 
-    /// <summary>Offset of DefaultScan8x8 in the ushort buffer (64 ushorts).</summary>
-    public const int Scan8x8Offset = 0;
+    /// <summary>Offset of DefaultScan4x4 in the ushort buffer (16 ushorts).</summary>
+    public const int Scan4x4Offset = 0;
+    /// <summary>Length of DefaultScan4x4 (16).</summary>
+    public const int Scan4x4Length = 16;
+
+    /// <summary>Offset of DefaultScan8x8 (64 ushorts).</summary>
+    public const int Scan8x8Offset = Scan4x4Offset + Scan4x4Length;
     /// <summary>Length of DefaultScan8x8 (64).</summary>
     public const int Scan8x8Length = 64;
 
@@ -95,8 +105,13 @@ public static class Vp9KeyframeConstantsGpu
     /// <summary>Length of DefaultScan16x16 (256).</summary>
     public const int Scan16x16Length = 256;
 
+    /// <summary>Offset of Default-scan Neighbors4x4 (32 ushorts = 16*2).</summary>
+    public const int Neighbors4x4Offset = Scan16x16Offset + Scan16x16Length;
+    /// <summary>Length of Neighbors4x4.</summary>
+    public const int Neighbors4x4Length = 32;
+
     /// <summary>Offset of Default-scan Neighbors8x8 (128 ushorts).</summary>
-    public const int Neighbors8x8Offset = Scan16x16Offset + Scan16x16Length;
+    public const int Neighbors8x8Offset = Neighbors4x4Offset + Neighbors4x4Length;
     /// <summary>Length of Neighbors8x8 (128 = 64*2).</summary>
     public const int Neighbors8x8Length = 128;
 
@@ -106,7 +121,7 @@ public static class Vp9KeyframeConstantsGpu
     public const int Neighbors16x16Length = 512;
 
     /// <summary>Total ushort buffer size.</summary>
-    public const int UshortConstsTotalEntries = Neighbors16x16Offset + Neighbors16x16Length; // 960
+    public const int UshortConstsTotalEntries = Neighbors16x16Offset + Neighbors16x16Length;
 
     /// <summary>
     /// Build the byte constants buffer for upload. Caller materialises
@@ -125,6 +140,7 @@ public static class Vp9KeyframeConstantsGpu
         Array.Copy(Vp9IntraModeProbs.KfUvModeProbs, 0, buf, KfUvModeProbsOffset, KfUvModeProbsLength);
         Array.Copy(Vp9PartitionProbs.KfPartitionProbs, 0, buf, KfPartitionProbsOffset, KfPartitionProbsLength);
         Array.Copy(Vp9SkipProbs.DefaultProbs, 0, buf, SkipProbsOffset, SkipProbsLength);
+        Array.Copy(Vp9CoefProbs.DefaultCoefProbs4x4, 0, buf, CoefProbs4x4Offset, CoefProbs4x4Length);
         Array.Copy(Vp9CoefProbs.DefaultCoefProbs8x8, 0, buf, CoefProbs8x8Offset, CoefProbs8x8Length);
         Array.Copy(Vp9CoefProbs.DefaultCoefProbs16x16, 0, buf, CoefProbs16x16Offset, CoefProbs16x16Length);
 
@@ -139,11 +155,14 @@ public static class Vp9KeyframeConstantsGpu
     {
         var buf = new ushort[UshortConstsTotalEntries];
 
+        Array.Copy(Vp9ScanTables.DefaultScan4x4, 0, buf, Scan4x4Offset, Scan4x4Length);
         Array.Copy(Vp9ScanTables.DefaultScan8x8, 0, buf, Scan8x8Offset, Scan8x8Length);
         Array.Copy(Vp9ScanTables.DefaultScan16x16, 0, buf, Scan16x16Offset, Scan16x16Length);
 
+        var n4 = Vp9NeighborTables.GetNeighbors4x4(Vp9ScanType.Default);
         var n8 = Vp9NeighborTables.GetNeighbors8x8(Vp9ScanType.Default);
         var n16 = Vp9NeighborTables.GetNeighbors16x16(Vp9ScanType.Default);
+        Array.Copy(n4, 0, buf, Neighbors4x4Offset, Neighbors4x4Length);
         Array.Copy(n8, 0, buf, Neighbors8x8Offset, Neighbors8x8Length);
         Array.Copy(n16, 0, buf, Neighbors16x16Offset, Neighbors16x16Length);
 
