@@ -120,4 +120,87 @@ public abstract partial class CodecsTestBase
         Equal(1, ti.Log2TileRows);
         Equal(2, ti.TileRows);
     }
+
+    // ===========================================================================
+    // GetTileColRange / GetTileRowRange - per-tile SB-range computation.
+    // Mirrors libvpx's `get_tile_offset` from vp9/common/vp9_tile_common.c.
+    // ===========================================================================
+
+    [TestMethod]
+    public void Vp9TileInfo_GetTileColRange_SingleTile_FullFrame()
+    {
+        // 1 tile column = full frame.
+        var (s, e) = Vp9TileInfoParser.GetTileColRange(tileColIdx: 0, tileCols: 1, sbCols: 30);
+        Equal(0, s);
+        Equal(30, e);
+    }
+
+    [TestMethod]
+    public void Vp9TileInfo_GetTileColRange_2Tiles_1920Wide()
+    {
+        // 1920 wide -> mi_cols=240, sb_cols=30. 2 tile cols (log2=1).
+        // libvpx: offset[1] = ((1 * 240) >> 1) = 120 mi -> SB-aligned 120 -> sb 15.
+        var (s0, e0) = Vp9TileInfoParser.GetTileColRange(tileColIdx: 0, tileCols: 2, sbCols: 30);
+        Equal(0, s0);
+        Equal(15, e0);
+
+        var (s1, e1) = Vp9TileInfoParser.GetTileColRange(tileColIdx: 1, tileCols: 2, sbCols: 30);
+        Equal(15, s1);
+        Equal(30, e1);
+    }
+
+    [TestMethod]
+    public void Vp9TileInfo_GetTileColRange_4Tiles_1920Wide()
+    {
+        // sb_cols=30, 4 tile cols (log2=2). Tile starts:
+        //   tile 0: ((0 * 240) >> 2) = 0   -> sb 0
+        //   tile 1: ((1 * 240) >> 2) = 60  -> sb 7 ... wait 60 mi = sb 7.5, SB-aligned up = 64 mi = sb 8
+        //   tile 2: ((2 * 240) >> 2) = 120 -> sb 15
+        //   tile 3: ((3 * 240) >> 2) = 180 -> sb 22.5, aligned up = sb 23
+        // Half-open ranges: [0,8), [8,15), [15,23), [23,30).
+        var (s0, e0) = Vp9TileInfoParser.GetTileColRange(0, 4, 30);
+        Equal(0, s0); Equal(8, e0);
+        var (s1, e1) = Vp9TileInfoParser.GetTileColRange(1, 4, 30);
+        Equal(8, s1); Equal(15, e1);
+        var (s2, e2) = Vp9TileInfoParser.GetTileColRange(2, 4, 30);
+        Equal(15, s2); Equal(23, e2);
+        var (s3, e3) = Vp9TileInfoParser.GetTileColRange(3, 4, 30);
+        Equal(23, s3); Equal(30, e3); // last tile always extends to sb_cols
+    }
+
+    [TestMethod]
+    public void Vp9TileInfo_GetTileColRange_2Tiles_512Wide()
+    {
+        // 512 wide -> mi_cols=64, sb_cols=8. 2 tile cols.
+        //   tile 0 starts: ((0 * 64) >> 1) = 0 mi -> sb 0
+        //   tile 1 starts: ((1 * 64) >> 1) = 32 mi -> sb 4
+        var (s0, e0) = Vp9TileInfoParser.GetTileColRange(0, 2, 8);
+        Equal(0, s0); Equal(4, e0);
+        var (s1, e1) = Vp9TileInfoParser.GetTileColRange(1, 2, 8);
+        Equal(4, s1); Equal(8, e1);
+    }
+
+    [TestMethod]
+    public void Vp9TileInfo_GetTileRowRange_2x_1080Tall()
+    {
+        // 1080 tall -> mi_rows=135, sb_rows = AlignUp(135,8)/8 = 17. 2 tile rows.
+        // libvpx: offset[1] = ((1 * (17*8)) >> 1) = 68 mi -> SB-aligned to 72 -> sb 9
+        var (s0, e0) = Vp9TileInfoParser.GetTileRowRange(0, 2, 17);
+        Equal(0, s0); Equal(9, e0);
+        var (s1, e1) = Vp9TileInfoParser.GetTileRowRange(1, 2, 17);
+        Equal(9, s1); Equal(17, e1);
+    }
+
+    [TestMethod]
+    public void Vp9TileInfo_GetTileColRange_LastTileSpansToSbCols()
+    {
+        // Edge case: sbCols not divisible by tileCols. Last tile extends to sbCols.
+        // sb_cols=15 (rare odd dim), 4 tile cols.
+        //   tile 0: 0
+        //   tile 1: ((1 * 120) >> 2) = 30 mi -> sb 4 (30 SB-aligned to 32 mi)
+        //   tile 2: ((2 * 120) >> 2) = 60 mi -> sb 8 (64 mi)
+        //   tile 3: ((3 * 120) >> 2) = 90 mi -> sb 12 (aligned to 96 mi)
+        var (_, e3) = Vp9TileInfoParser.GetTileColRange(3, 4, 15);
+        Equal(15, e3); // last tile must reach sb_cols, not the computed boundary
+    }
 }

@@ -126,6 +126,78 @@ public static class Vp9TileInfoParser
         return Parse(ref r, miCols);
     }
 
+    /// <summary>
+    /// Compute the SB64-column boundary for tile <paramref name="tileIdx"/>
+    /// in [0, <paramref name="tileCount"/>). Mirror of libvpx
+    /// <c>get_tile_offset</c> from <c>vp9_tile_common.c</c>:
+    /// <code>
+    /// int offset = ((idx * mi_count) >> log2_tile_count);
+    /// return ALIGN_POWER_OF_TWO(offset, MI_BLOCK_SIZE_LOG2) >> MI_BLOCK_SIZE_LOG2;
+    /// </code>
+    /// Returns the starting SB64 column for the tile (0-based). Combined with
+    /// the next tile's start (or <paramref name="sbCount"/> for the last tile),
+    /// gives the half-open SB-column range <c>[start, end)</c> the tile
+    /// occupies.
+    /// </summary>
+    /// <param name="tileIdx">Tile column index, [0, tileCount).</param>
+    /// <param name="tileCount">Total tile columns = 1 &lt;&lt; log2TileCols.</param>
+    /// <param name="sbCount">Total SB64 columns in the frame (mi_cols &gt;&gt; 3, rounded up).</param>
+    public static int GetTileOffsetSb(int tileIdx, int tileCount, int sbCount)
+    {
+        if ((uint)tileIdx > (uint)tileCount)
+            throw new ArgumentOutOfRangeException(nameof(tileIdx),
+                "tileIdx must be in [0, tileCount].");
+        if (tileCount <= 0 || (tileCount & (tileCount - 1)) != 0)
+            throw new ArgumentOutOfRangeException(nameof(tileCount),
+                "tileCount must be a positive power of 2.");
+        if (sbCount < 0)
+            throw new ArgumentOutOfRangeException(nameof(sbCount),
+                "sbCount must be non-negative.");
+        // Per libvpx: offset = (idx * mi_count) >> log2_tile_count, where
+        // mi_count is mi_cols (not sb_cols). The mi-aligned offset is then
+        // SB64-aligned (round up) and converted back to SB units.
+        int log2TileCount = 0;
+        while ((1 << log2TileCount) < tileCount) log2TileCount++;
+        int miCount = sbCount << Vp9TileInfo.MiBlockSizeLog2;
+        long miOffset = ((long)tileIdx * miCount) >> log2TileCount;
+        long miAligned = AlignUp((int)miOffset, 1 << Vp9TileInfo.MiBlockSizeLog2);
+        return (int)(miAligned >> Vp9TileInfo.MiBlockSizeLog2);
+    }
+
+    /// <summary>
+    /// Compute the half-open SB64-column range
+    /// <c>[<see cref="ValueTuple{Int32,Int32}.Item1">SbColStart</see>,
+    /// <see cref="ValueTuple{Int32,Int32}.Item2">SbColEnd</see>)</c> that
+    /// tile <paramref name="tileColIdx"/> occupies in a frame with
+    /// <paramref name="tileCols"/> total tile columns and
+    /// <paramref name="sbCols"/> total SB64 columns.
+    /// </summary>
+    public static (int SbColStart, int SbColEnd) GetTileColRange(
+        int tileColIdx, int tileCols, int sbCols)
+    {
+        int start = GetTileOffsetSb(tileColIdx, tileCols, sbCols);
+        int end = (tileColIdx + 1 == tileCols)
+            ? sbCols
+            : GetTileOffsetSb(tileColIdx + 1, tileCols, sbCols);
+        return (start, end);
+    }
+
+    /// <summary>
+    /// Compute the half-open SB64-row range for tile row
+    /// <paramref name="tileRowIdx"/> in a frame with
+    /// <paramref name="tileRows"/> total tile rows and
+    /// <paramref name="sbRows"/> total SB64 rows.
+    /// </summary>
+    public static (int SbRowStart, int SbRowEnd) GetTileRowRange(
+        int tileRowIdx, int tileRows, int sbRows)
+    {
+        int start = GetTileOffsetSb(tileRowIdx, tileRows, sbRows);
+        int end = (tileRowIdx + 1 == tileRows)
+            ? sbRows
+            : GetTileOffsetSb(tileRowIdx + 1, tileRows, sbRows);
+        return (start, end);
+    }
+
     private static int AlignUp(int value, int alignment)
         => (value + alignment - 1) & ~(alignment - 1);
 }
