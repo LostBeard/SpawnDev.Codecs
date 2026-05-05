@@ -516,8 +516,6 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
             y1Dc, y1Ac, y2Dc, y2Ac, uvDc, uvAc);
     }
 
-    /// <summary>Encode one MB end-to-end: predict + transform + quant + recon.</summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
     /// <summary>
     /// Within-MB 4-way parallel encode. Each MB is processed by 4 cooperating
     /// threads (intraIdx 0..3) that split the per-block work axes:
@@ -535,8 +533,14 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
     /// dependencies. Caller (the wave-front kernel) is responsible for the
     /// outer per-diagonal barrier.
     ///
-    /// All backends in the SpawnDev.ILGPU 6-target matrix support
-    /// SharedMemory + Group.Barrier when run via LoadStreamKernel + KernelConfig.
+    /// CPU/CUDA/OpenCL: bit-exact green. WebGPU + Wasm: blocked on Bug D
+    /// phase 7 (AddressSpaceCast variable typing for shared-mem in helpers
+    /// passed via fn-def codegen path) - tracked in SpawnDev.ILGPU master.
+    ///
+    /// No <c>MethodImpl</c> attribute - per Data's 2026-05-05 MatMul bisect,
+    /// helper extraction without an explicit attribute is the safe shipping
+    /// shape on Wasm. Adding NoInlining here would force the fn-def codegen
+    /// path that has the open phase-7 bug.
     /// </summary>
     private static void EncodeMacroblockSplit4(
         bool active,
