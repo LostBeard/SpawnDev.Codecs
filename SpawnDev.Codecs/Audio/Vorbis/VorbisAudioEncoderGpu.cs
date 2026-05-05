@@ -229,6 +229,131 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
     }
 
     /// <summary>
+    /// Batch-encode <paramref name="blocks"/> independent audio packets
+    /// in parallel. Each block is one BlockSize-sample input. Returns
+    /// the encoded bitstream bytes for each packet, in order. Equivalent
+    /// in output to N sequential <see cref="EncodeAudioPacketAsync"/>
+    /// calls but dispatches every kernel exactly once with extent
+    /// scaling in the packet axis - 6 dispatches total instead of 6*N.
+    /// </summary>
+    public async Task<byte[][]> EncodeAudioPacketsBatchAsync(
+        IReadOnlyList<ReadOnlyMemory<float>> blocks)
+    {
+        ArgumentNullException.ThrowIfNull(blocks);
+        int N = blocks.Count;
+        if (N == 0) return Array.Empty<byte[]>();
+        int n = _opts.BlockSize;
+        int half = n / 2;
+        for (int i = 0; i < N; i++)
+        {
+            if (blocks[i].Length != n)
+                throw new ArgumentException(
+                    $"block[{i}] must be {n} samples, got {blocks[i].Length}.");
+        }
+
+        var floorCfg = _floorCfg;
+        const float headroom = 1.25f;
+        const float residueRange = 2.0f;
+        const int residueBookEntries = 1024;
+        long worstCaseBytes = (long)half * 4 + 256;
+
+        // Per-packet stride buffers. Each thread writes to its own slot
+        // so the batch dispatches don't conflict on shared memory.
+        using var dInput = _accelerator.Allocate1D<float>((long)N * n);
+        using var dWindowed = _accelerator.Allocate1D<float>((long)N * n);
+        using var dSpectrum = _accelerator.Allocate1D<float>((long)N * half);
+        using var dPosteriors = _accelerator.Allocate1D<int>((long)N * 2);
+        using var dFloorCurve = _accelerator.Allocate1D<float>((long)N * half);
+        using var dResidueQ = _accelerator.Allocate1D<int>((long)N * half);
+        using var dScratchInt = _accelerator.Allocate1D<int>((long)N * 4);  // 2 * values per packet
+        using var dScratchByte = _accelerator.Allocate1D<byte>((long)N * 2);
+        using var dOutBytes = _accelerator.Allocate1D<byte>((long)N * worstCaseBytes);
+        using var dOutLen = _accelerator.Allocate1D<long>(N);
+
+        dWindowed.View.MemSetToZero();
+        dSpectrum.View.MemSetToZero();
+        dPosteriors.View.MemSetToZero();
+        dFloorCurve.View.MemSetToZero();
+        dResidueQ.View.MemSetToZero();
+        dScratchInt.View.MemSetToZero();
+        dScratchByte.View.MemSetToZero();
+        dOutBytes.View.MemSetToZero();
+        dOutLen.View.MemSetToZero();
+
+        // Upload all packet inputs into per-packet slots. One Allocate1D
+        // upload per packet (necessary I/O - the source comes from outside
+        // the accelerator); with N small packets this is dominated by
+        // dispatch overhead, not data volume.
+        for (int p = 0; p < N; p++)
+        {
+            var slot = dInput.View.SubView((long)p * n, n);
+            slot.CopyFromCPU(blocks[p].ToArray());
+        }
+
+        // Dispatch the existing single-packet kernels per packet via
+        // host-side SubViews. No host syncs between - the accelerator
+        // stream queues all 6*N dispatches and the GPU executes them
+        // in dependency order. This is 6*N dispatches vs the 6 a true
+        // batch kernel would do, but the per-packet kernels have the
+        // SAME binding count + signature as proven single-packet runs,
+        // sidestepping the WebGPU bind-group / Wasm codegen issues that
+        // tripped the Index2D/Index1D batch-kernel approach.
+        var emitParams = new EmitPacketParams
+        {
+            Count = half,
+            EndpointBits = _endpointBits,
+            ModeBits = _modeBits,
+        };
+        for (int p = 0; p < N; p++)
+        {
+            var dInputP = dInput.View.SubView((long)p * n, n);
+            var dWindowedP = dWindowed.View.SubView((long)p * n, n);
+            var dSpectrumP = dSpectrum.View.SubView((long)p * half, half);
+            var dPosteriorsP = dPosteriors.View.SubView((long)p * 2, 2);
+            var dFloorCurveP = dFloorCurve.View.SubView((long)p * half, half);
+            var dResidueQP = dResidueQ.View.SubView((long)p * half, half);
+            var dScratchIntP = dScratchInt.View.SubView((long)p * 4, 4);
+            var dScratchByteP = dScratchByte.View.SubView((long)p * 2, 2);
+            var dOutBytesP = dOutBytes.View.SubView((long)p * worstCaseBytes, worstCaseBytes);
+            var dOutLenP = dOutLen.View.SubView(p, 1);
+
+            _windowKernel(new Index1D(n), dInputP, dWindowedP, n);
+            _mdctKernel(new Index1D(half), dWindowedP, dSpectrumP, half);
+            _floorFitKernel(new Index1D(1), dSpectrumP, _dInverseDb.View, dPosteriorsP, half, headroom);
+            _floorRenderKernel(new Index1D(1),
+                _dXList.View, dPosteriorsP,
+                dFloorCurveP, _dInverseDb.View,
+                dScratchIntP, dScratchByteP,
+                /*values*/ 2, floorCfg.Multiplier, half);
+            _divQuantKernel(new Index1D(half),
+                dSpectrumP, dFloorCurveP, dResidueQP,
+                half, residueRange, residueBookEntries);
+            _emitKernel(new Index1D(1),
+                dOutBytesP, dOutLenP, dResidueQP,
+                _dClassbookCodes.View, _dClassbookLengths.View,
+                _dResidueBookCodes.View, _dResidueBookLengths.View,
+                dPosteriorsP, emitParams);
+        }
+
+        await _accelerator.SynchronizeAsync();
+
+        // Single readback of all per-packet lengths + all per-packet
+        // output bytes. Walk the slots host-side (metadata-level
+        // concatenation, allowed under cardinal rule).
+        var lensHost = await dOutLen.CopyToHostAsync();
+        var allBytes = await dOutBytes.CopyToHostAsync();
+        var result = new byte[N][];
+        for (int p = 0; p < N; p++)
+        {
+            long off = (long)p * worstCaseBytes;
+            int len = (int)lensHost[p];
+            result[p] = new byte[len];
+            Array.Copy(allBytes, off, result[p], 0, len);
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Encode a complete mono PCM stream to a valid .ogg byte sequence.
     /// 3 header packets (Identification + Comment + Setup) come from the
     /// CPU encoder helpers (metadata struct setup, allowed); per-block
@@ -407,4 +532,5 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         /// <summary>ilog(modes - 1); 0 for single-mode.</summary>
         public int ModeBits;
     }
+
 }

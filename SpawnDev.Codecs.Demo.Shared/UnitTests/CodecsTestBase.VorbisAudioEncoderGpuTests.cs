@@ -41,6 +41,49 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task VorbisAudioEncoderGpu_BatchSilence_MatchesSequential()
+    {
+        // Verifies EncodeAudioPacketsBatchAsync (Phase B frame-batch) produces
+        // bit-exact same output per packet as the sequential single-packet
+        // path. Silence input -> all packets produce identical bytes, which
+        // is also the baseline shape of EncodeAudioPacketAsync(silence).
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            var options = new VorbisAudioEncoderOptions
+            {
+                SampleRateHz = 44100,
+                Channels = 1,
+                BlockSize = 1024,
+            };
+
+            const int packetCount = 4;
+            var silence = new float[options.BlockSize];
+            var blocks = new ReadOnlyMemory<float>[packetCount];
+            for (int i = 0; i < packetCount; i++) blocks[i] = silence;
+
+            using var gpu = new VorbisAudioEncoderGpu(acc, options);
+
+            // Sequential reference - one call per packet.
+            var sequential = new byte[packetCount][];
+            for (int i = 0; i < packetCount; i++)
+                sequential[i] = await gpu.EncodeAudioPacketAsync(blocks[i]);
+
+            // Batch path under test.
+            var batched = await gpu.EncodeAudioPacketsBatchAsync(blocks);
+
+            Equal(packetCount, batched.Length, "batch length");
+            for (int i = 0; i < packetCount; i++)
+            {
+                Equal(sequential[i].Length, batched[i].Length, $"packet[{i}] byte count");
+                for (int b = 0; b < sequential[i].Length; b++)
+                    Equal(sequential[i][b], batched[i][b], $"packet[{i}] byte[{b}]");
+            }
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
     public async Task VorbisAudioEncoderGpu_EncodeStreamSilence_OggBytesValid()
     {
         // Full-stream encode test: silence PCM -> .ogg bytes.
