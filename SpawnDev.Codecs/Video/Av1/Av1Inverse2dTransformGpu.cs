@@ -2,19 +2,21 @@
 //
 // AV1 2D inverse transform helpers, GPU-callable form. Bit-exact
 // mirror of Av1Inverse2dTransform.Apply (libaom av1_inv_txfm2d_add)
-// for the v1 keyframe decoder's two configurations:
-//   - Tx8x8 + DCT_DCT (chroma)
+// for the v1 keyframe decoder's three configurations:
+//   - Tx4x4 + DCT_DCT (boundary chroma at non-aligned dims)
+//   - Tx8x8 + DCT_DCT (chroma + boundary luma)
 //   - Tx16x16 + DCT_DCT (luma)
 //
 // Pipeline (per libaom inv_txfm2d):
 //   1. Row pass: read row r of coefs (with rect-scale prescale if
-//      applicable; no rect-scale for square Tx8x8 / Tx16x16),
+//      applicable; no rect-scale for square Tx4x4 / Tx8x8 / Tx16x16),
 //      apply 1D Inverse DCT, round-shift by row_shift, write into
 //      buf[r * w + c].
 //   2. Column pass: read column c of buf, apply 1D Inverse DCT,
 //      round-shift by col_shift, write into residual[r * w + c].
 //
 // Shifts (libaom inv_txfm_shift_ls):
+//   Tx4x4:   rowShift=0, colShift=4
 //   Tx8x8:   rowShift=1, colShift=4
 //   Tx16x16: rowShift=2, colShift=4
 
@@ -29,6 +31,55 @@ namespace SpawnDev.Codecs.Video.Av1;
 /// </summary>
 public static class Av1Inverse2dTransformGpu
 {
+    /// <summary>
+    /// Apply the 4x4 DCT_DCT 2D inverse transform. Reads 16 int coefs;
+    /// writes 16 int residuals. Scratch must hold at least 16 ints.
+    ///
+    /// Used for boundary-MB chroma at non-aligned VP9/AV1 dims (Tx4x4),
+    /// not used by the aligned-dim v1 decoder configuration.
+    /// </summary>
+    public static void Inverse4x4DctDct(
+        ArrayView<int> coefs, long coefBase,
+        ArrayView<int> residual, long resBase,
+        ArrayView<int> scratch, long scratchBase)
+    {
+        const int W = 4;
+        const int H = 4;
+        const int CosBit = Av1InverseDct4Gpu.DefaultCosBit;
+        // Tx4x4 shifts: rowShift=0 (no shift), colShift=4.
+
+        // === Row pass ===
+        // Inverse4 reads all 4 inputs into locals before any writes -> safe in place.
+        // Read coefs row into scratch row, then Inverse4 in place.
+        for (int r = 0; r < H; r++)
+        {
+            long rowBase = scratchBase + r * (long)W;
+            scratch[rowBase + 0] = coefs[coefBase + r * W + 0];
+            scratch[rowBase + 1] = coefs[coefBase + r * W + 1];
+            scratch[rowBase + 2] = coefs[coefBase + r * W + 2];
+            scratch[rowBase + 3] = coefs[coefBase + r * W + 3];
+            Av1InverseDct4Gpu.Inverse4(scratch, rowBase, scratch, rowBase, CosBit);
+            // No rowShift for Tx4x4.
+        }
+
+        // === Column pass ===
+        // Strided read into 4 scalar locals -> InverseDct4Inline -> shifted scatter to residual.
+        for (int c = 0; c < W; c++)
+        {
+            int t0 = scratch[scratchBase + 0 * W + c];
+            int t1 = scratch[scratchBase + 1 * W + c];
+            int t2 = scratch[scratchBase + 2 * W + c];
+            int t3 = scratch[scratchBase + 3 * W + c];
+            InverseDct4Inline(t0, t1, t2, t3, CosBit,
+                out int o0, out int o1, out int o2, out int o3);
+            // Round-shift by colShift = 4.
+            residual[resBase + 0 * W + c] = (o0 + 8) >> 4;
+            residual[resBase + 1 * W + c] = (o1 + 8) >> 4;
+            residual[resBase + 2 * W + c] = (o2 + 8) >> 4;
+            residual[resBase + 3 * W + c] = (o3 + 8) >> 4;
+        }
+    }
+
     /// <summary>
     /// Apply the 8x8 DCT_DCT 2D inverse transform. Reads 64 int coefs;
     /// writes 64 int residuals. Scratch must hold at least 64 ints.
@@ -211,6 +262,45 @@ public static class Av1Inverse2dTransformGpu
         o5 = s2 - s5;
         o6 = s1 - s6;
         o7 = s0 - s7;
+    }
+
+    // ----------------------------------------------------------------
+    // Inlined 4-point inverse DCT (mirrors Av1InverseDct4Gpu.Inverse4
+    // in scalar form so the column pass can avoid a temp scratch slot).
+    // ----------------------------------------------------------------
+    private static void InverseDct4Inline(
+        int in0, int in1, int in2, int in3,
+        int cosBit,
+        out int o0, out int o1, out int o2, out int o3)
+    {
+        ResolveCospi4(cosBit, out int c16, out int c32, out int c48);
+
+        // Stage 1: re-permute.
+        int b0 = in0;
+        int b1 = in2;
+        int b2 = in1;
+        int b3 = in3;
+
+        // Stage 2: cospi butterflies.
+        int s0 = HalfBtf( c32, b0,  c32, b1, cosBit);
+        int s1 = HalfBtf( c32, b0, -c32, b1, cosBit);
+        int s2 = HalfBtf( c48, b2, -c16, b3, cosBit);
+        int s3 = HalfBtf( c16, b2,  c48, b3, cosBit);
+
+        // Stage 3: outer butterfly.
+        o0 = s0 + s3;
+        o1 = s1 + s2;
+        o2 = s1 - s2;
+        o3 = s0 - s3;
+    }
+
+    private static void ResolveCospi4(int cosBit,
+        out int c16, out int c32, out int c48)
+    {
+        if (cosBit == 13)      { c16 = 7568; c32 = 5793; c48 = 3135; }
+        else if (cosBit == 12) { c16 = 3784; c32 = 2896; c48 = 1567; }
+        else if (cosBit == 11) { c16 = 1892; c32 = 1448; c48 = 784;  }
+        else                   { c16 = 946;  c32 = 724;  c48 = 392;  }
     }
 
     private static int HalfBtf(int w0, int in0, int w1, int in1, int bit)

@@ -10,8 +10,8 @@ namespace SpawnDev.Codecs.Video.Av1;
 
 /// <summary>
 /// Batched ILGPU kernel that drives
-/// <see cref="Av1Inverse2dTransformGpu"/>.Inverse8x8DctDct or
-/// .Inverse16x16DctDct.
+/// <see cref="Av1Inverse2dTransformGpu"/>.Inverse4x4DctDct,
+/// .Inverse8x8DctDct, or .Inverse16x16DctDct.
 /// </summary>
 public sealed class Av1Inverse2dTransformGpuKernel : IDisposable
 {
@@ -28,20 +28,20 @@ public sealed class Av1Inverse2dTransformGpuKernel : IDisposable
     }
 
     /// <summary>
-    /// Scratch ints per block. Tx8x8 needs 64; Tx16x16 needs 272 (256
-    /// row-pass output + 16 column-gather buffer to avoid overwriting
-    /// prior column's residual scatter).
+    /// Scratch ints per block. Tx4x4 needs 16; Tx8x8 needs 64; Tx16x16
+    /// needs 272 (256 row-pass output + 16 column-gather buffer to avoid
+    /// overwriting prior column's residual scatter).
     /// </summary>
-    public static int ScratchPerBlock(int txSize) => txSize == 1 ? 64 : 272;
+    public static int ScratchPerBlock(int txSize) => txSize == 0 ? 16 : (txSize == 1 ? 64 : 272);
 
-    /// <summary>Run on <paramref name="blockCount"/> blocks; txSize 1 = Tx8x8, 2 = Tx16x16.</summary>
+    /// <summary>Run on <paramref name="blockCount"/> blocks; txSize 0 = Tx4x4, 1 = Tx8x8, 2 = Tx16x16.</summary>
     public void Run(ArrayView<int> coefs, ArrayView<int> residual, ArrayView<int> scratch, int blockCount, int txSize)
     {
         if (blockCount < 0) throw new ArgumentOutOfRangeException(nameof(blockCount));
         if (blockCount == 0) return;
-        if (txSize != 1 && txSize != 2)
+        if (txSize != 0 && txSize != 1 && txSize != 2)
             throw new ArgumentOutOfRangeException(nameof(txSize));
-        int n = txSize == 1 ? 64 : 256;
+        int n = txSize == 0 ? 16 : (txSize == 1 ? 64 : 256);
         int scratchN = ScratchPerBlock(txSize);
         if (coefs.Length < blockCount * (long)n)
             throw new ArgumentException("coefs too short.", nameof(coefs));
@@ -62,13 +62,17 @@ public sealed class Av1Inverse2dTransformGpuKernel : IDisposable
     {
         int idx = blockIdx;
         if (idx >= blockCount) return;
-        int n = txSize == 1 ? 64 : 256;
-        int scratchN = txSize == 1 ? 64 : 272;
+        int n = txSize == 0 ? 16 : (txSize == 1 ? 64 : 256);
+        int scratchN = txSize == 0 ? 16 : (txSize == 1 ? 64 : 272);
         long coefBase = (long)idx * n;
         long resBase = (long)idx * n;
         long scratchBase = (long)idx * scratchN;
 
-        if (txSize == 1)
+        if (txSize == 0)
+        {
+            Av1Inverse2dTransformGpu.Inverse4x4DctDct(coefs, coefBase, residual, resBase, scratch, scratchBase);
+        }
+        else if (txSize == 1)
         {
             Av1Inverse2dTransformGpu.Inverse8x8DctDct(coefs, coefBase, residual, resBase, scratch, scratchBase);
         }
