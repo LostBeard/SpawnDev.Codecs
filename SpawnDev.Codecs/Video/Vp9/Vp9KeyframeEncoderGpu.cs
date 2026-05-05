@@ -400,8 +400,9 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             dAllCH.View, dAllCHLen.View,
             frameCount, 64);
 
-        // Phase 2: BATCH wave-front sequential encode.
-        _sequentialKernel.RunBatch(
+        // Phase 2: BATCH wave-front sequential encode. Single-dispatch path
+        // collapses 47 per-diagonal launches into one kernel via Group.Barrier.
+        bool wavefrontSingleDispatched = _sequentialKernel.TryRunBatchSingleDispatch(
             dAllY.View, dAllU.View, dAllV.View,
             dAllYR.View, dAllUR.View, dAllVR.View,
             dAllYC.View, dAllUC.View, dAllVC.View,
@@ -409,6 +410,17 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             mbCols, mbRows, frameCount,
             yLen, uvLen,
             yCoefStride, uvCoefStride, dequantStride);
+        if (!wavefrontSingleDispatched)
+        {
+            _sequentialKernel.RunBatch(
+                dAllY.View, dAllU.View, dAllV.View,
+                dAllYR.View, dAllUR.View, dAllVR.View,
+                dAllYC.View, dAllUC.View, dAllVC.View,
+                dAllDQ.View,
+                mbCols, mbRows, frameCount,
+                yLen, uvLen,
+                yCoefStride, uvCoefStride, dequantStride);
+        }
 
         // Phase 3: BATCH entropy.
         var entropyStrides = new Vp9FrameEntropyBatchStrides

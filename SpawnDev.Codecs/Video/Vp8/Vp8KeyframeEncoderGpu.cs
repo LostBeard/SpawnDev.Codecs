@@ -286,10 +286,11 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
             dAllDequant.View, dAllP0.View, dAllInitState.View,
             baseQIndex, frameCount, dequantStride, _p0Stride);
 
-        // Phase 1b: BATCH wave-front sequential encode. 47 dispatches each
-        // at extent = numFrames * diagCount; all N frames compute their
-        // diagonal-d MBs concurrently.
-        _sequentialEncode.RunBatch(
+        // Phase 1b: BATCH wave-front sequential encode. Try single-dispatch
+        // path (one kernel with internal Group.Barrier between diagonals);
+        // fall back to per-diagonal multi-dispatch if the thread budget
+        // exceeds CUDA's 1024-per-block cap.
+        bool singleDispatched = _sequentialEncode.TryRunBatchSingleDispatch(
             dAllY.View, dAllU.View, dAllV.View,
             dAllYR.View, dAllUR.View, dAllVR.View,
             dAllY4.View, dAllY2.View, dAllUC.View, dAllVC.View,
@@ -298,6 +299,18 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
             yPlaneStride, uvPlaneStride,
             y4Stride, y2Stride, uvCoefStride,
             dequantStride);
+        if (!singleDispatched)
+        {
+            _sequentialEncode.RunBatch(
+                dAllY.View, dAllU.View, dAllV.View,
+                dAllYR.View, dAllUR.View, dAllVR.View,
+                dAllY4.View, dAllY2.View, dAllUC.View, dAllVC.View,
+                dAllDequant.View,
+                mbCols, mbRows, frameCount,
+                yPlaneStride, uvPlaneStride,
+                y4Stride, y2Stride, uvCoefStride,
+                dequantStride);
+        }
 
         // Phase 2: BATCH entropy kernel - all N frames run their entropy
         // walks concurrently on independent CUDA cores.

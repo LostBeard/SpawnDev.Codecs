@@ -93,6 +93,20 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         ArrayView<int>,
         Vp9FrameSeqEncodeBatchParams> _batchKernel;
 
+    /// <summary>
+    /// Single-dispatch wave-front: gridSize=numFrames blocks, each block
+    /// has peakDiag threads, processes one full frame's wave-front using
+    /// Group.Barrier between diagonals. Eliminates per-diagonal launch
+    /// overhead.
+    /// </summary>
+    private readonly Action<
+        KernelConfig,
+        ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+        ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+        ArrayView<short>, ArrayView<short>, ArrayView<short>,
+        ArrayView<int>,
+        Vp9FrameSeqEncodeBatchParams, int, int> _singleDispatchBatchKernel;
+
     /// <summary>Compile.</summary>
     public Vp9FrameSequentialEncodeKernel(Accelerator accelerator)
     {
@@ -112,6 +126,12 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<int>,
             Vp9FrameSeqEncodeBatchParams>(EncodeWavefrontBatchKernel);
+        _singleDispatchBatchKernel = accelerator.LoadStreamKernel<
+            ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+            ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+            ArrayView<short>, ArrayView<short>, ArrayView<short>,
+            ArrayView<int>,
+            Vp9FrameSeqEncodeBatchParams, int, int>(EncodeWavefrontSingleDispatchKernel);
     }
 
     /// <summary>
@@ -248,6 +268,109 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             residual, coefsInt, coefsShort,
             fdctScratch, idctScratch,
             aboveLuma, leftLuma, aboveChroma, leftChroma);
+    }
+
+    /// <summary>
+    /// Try the single-dispatch wave-front: one block per frame, peakDiag
+    /// threads per block, all 47 diagonals folded into one kernel via
+    /// Group.Barrier.
+    /// </summary>
+    public bool TryRunBatchSingleDispatch(
+        ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
+        ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<int> dequant,
+        int mbCols, int mbRows, int frameCount,
+        int yStride, int uvStride,
+        int yCoefStride, int uvCoefStride, int dequantStride)
+    {
+        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        int peakDiag = mbCols < mbRows ? mbCols : mbRows;
+        int totalDiagonals = mbCols + mbRows - 1;
+        if (peakDiag > 1024) return false;
+
+        var p = new Vp9FrameSeqEncodeBatchParams
+        {
+            YStride = yStride,
+            UvStride = uvStride,
+            YCoefStride = yCoefStride,
+            UvCoefStride = uvCoefStride,
+            DequantStride = dequantStride,
+            MbCols = mbCols,
+            MbRows = mbRows,
+            DiagAndRMin = 0,
+            DiagCount = peakDiag,
+        };
+        _singleDispatchBatchKernel(
+            new KernelConfig(frameCount, peakDiag),
+            yPlane, uPlane, vPlane,
+            yRecon, uRecon, vRecon,
+            yCoefs, uCoefs, vCoefs,
+            dequant, p, frameCount, totalDiagonals);
+        return true;
+    }
+
+    private static void EncodeWavefrontSingleDispatchKernel(
+        ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
+        ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<int> dequant,
+        Vp9FrameSeqEncodeBatchParams p, int frameCount, int totalDiagonals)
+    {
+        int frameIdx = Grid.IdxX;
+        int posInDiag = Group.IdxX;
+        int mbCols = p.MbCols;
+        int mbRows = p.MbRows;
+        if (frameIdx >= frameCount) return;
+
+        var fY = yPlane.SubView((long)frameIdx * p.YStride, p.YStride);
+        var fU = uPlane.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fV = vPlane.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fYR = yRecon.SubView((long)frameIdx * p.YStride, p.YStride);
+        var fUR = uRecon.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fVR = vRecon.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fYC = yCoefs.SubView((long)frameIdx * p.YCoefStride, p.YCoefStride);
+        var fUC = uCoefs.SubView((long)frameIdx * p.UvCoefStride, p.UvCoefStride);
+        var fVC = vCoefs.SubView((long)frameIdx * p.UvCoefStride, p.UvCoefStride);
+        var fDQ = dequant.SubView((long)frameIdx * p.DequantStride, p.DequantStride);
+
+        int yStride = mbCols * 16;
+        int uvStride = mbCols * 8;
+        int yDcQ = fDQ[0]; int yAcQ = fDQ[1];
+        int uvDcQ = fDQ[2]; int uvAcQ = fDQ[3];
+
+        var residual = LocalMemory.Allocate<short>(256);
+        var coefsInt = LocalMemory.Allocate<int>(256);
+        var coefsShort = LocalMemory.Allocate<short>(256);
+        var fdctScratch = LocalMemory.Allocate<int>(256);
+        var idctScratch = LocalMemory.Allocate<int>(256);
+        var aboveLuma = LocalMemory.Allocate<byte>(16);
+        var leftLuma = LocalMemory.Allocate<byte>(16);
+        var aboveChroma = LocalMemory.Allocate<byte>(8);
+        var leftChroma = LocalMemory.Allocate<byte>(8);
+
+        for (int d = 0; d < totalDiagonals; d++)
+        {
+            int rMin = d - (mbCols - 1); if (rMin < 0) rMin = 0;
+            int rMax = d; if (rMax > mbRows - 1) rMax = mbRows - 1;
+            int diagCount = rMax - rMin + 1;
+            int mbRow = rMin + posInDiag;
+            int mbCol = d - mbRow;
+            bool active = posInDiag < diagCount && mbRow >= 0 && mbRow < mbRows && mbCol >= 0 && mbCol < mbCols;
+            if (active)
+            {
+                EncodeMacroblock(
+                    mbRow, mbCol, mbCols, yStride, uvStride,
+                    fY, fU, fV,
+                    fYR, fUR, fVR,
+                    fYC, fUC, fVC,
+                    yDcQ, yAcQ, uvDcQ, uvAcQ,
+                    residual, coefsInt, coefsShort,
+                    fdctScratch, idctScratch,
+                    aboveLuma, leftLuma, aboveChroma, leftChroma);
+            }
+            Group.Barrier();
+        }
     }
 
     /// <summary>Batch wave-front kernel: thread = (frame, mb-on-diag).</summary>

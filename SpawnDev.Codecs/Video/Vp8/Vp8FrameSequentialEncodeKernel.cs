@@ -84,6 +84,21 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
         ArrayView<int>,
         Vp8FrameSeqEncodeBatchParams> _batchKernel;
 
+    /// <summary>
+    /// Single-dispatch wave-front kernel. All wave-front diagonals run inside
+    /// one grouped kernel using Group.Barrier between diagonals. Eliminates
+    /// the per-diagonal launch overhead of the multi-dispatch path.
+    /// Constraint: total threads (numFrames * peakDiag) must fit in one block
+    /// (1024 max on CUDA).
+    /// </summary>
+    private readonly Action<
+        KernelConfig,
+        ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+        ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+        ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
+        ArrayView<int>,
+        Vp8FrameSeqEncodeBatchParams, int, int> _singleDispatchBatchKernel;
+
     /// <summary>Compile.</summary>
     public Vp8FrameSequentialEncodeKernel(Accelerator accelerator)
     {
@@ -103,6 +118,12 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
             ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<int>,
             Vp8FrameSeqEncodeBatchParams>(EncodeWavefrontBatchKernel);
+        _singleDispatchBatchKernel = accelerator.LoadStreamKernel<
+            ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+            ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+            ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
+            ArrayView<int>,
+            Vp8FrameSeqEncodeBatchParams, int, int>(EncodeWavefrontSingleDispatchKernel);
     }
 
     /// <summary>
@@ -219,6 +240,114 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
             yRecon, uRecon, vRecon,
             y4Coefs, y2Coefs, uCoefs, vCoefs,
             y1Dc, y1Ac, y2Dc, y2Ac, uvDc, uvAc);
+    }
+
+    /// <summary>
+    /// Try to use the single-dispatch kernel: gridSize = numFrames blocks,
+    /// each block has peakDiag threads. Each block does ONE frame's full
+    /// wave-front internally with Group.Barrier between diagonals; blocks
+    /// run in parallel on different SMs. CUDA caps block at 1024 threads
+    /// AND has register-file pressure - peakDiag rarely exceeds ~64 for
+    /// typical resolutions, so register pressure is fine per block.
+    /// Returns false only if a hard limit is hit (peakDiag > 1024).
+    /// </summary>
+    public bool TryRunBatchSingleDispatch(
+        ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
+        ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
+        ArrayView<short> y4Coefs, ArrayView<short> y2Coefs,
+        ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<int> dequant,
+        int mbCols, int mbRows, int frameCount,
+        int yStride, int uvStride,
+        int y4CoefStride, int y2CoefStride, int uvCoefStride,
+        int dequantStride)
+    {
+        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        int peakDiag = mbCols < mbRows ? mbCols : mbRows;
+        int totalDiagonals = mbCols + mbRows - 1;
+        if (peakDiag > 1024) return false;
+
+        var p = new Vp8FrameSeqEncodeBatchParams
+        {
+            YStride = yStride,
+            UvStride = uvStride,
+            Y4CoefStride = y4CoefStride,
+            Y2CoefStride = y2CoefStride,
+            UvCoefStride = uvCoefStride,
+            DequantStride = dequantStride,
+            MbCols = mbCols,
+            MbRows = mbRows,
+            DiagAndRMin = 0,
+            DiagCount = peakDiag,
+        };
+        // gridSize = numFrames, blockSize = peakDiag.
+        _singleDispatchBatchKernel(
+            new KernelConfig(frameCount, peakDiag),
+            yPlane, uPlane, vPlane,
+            yRecon, uRecon, vRecon,
+            y4Coefs, y2Coefs, uCoefs, vCoefs,
+            dequant, p, frameCount, totalDiagonals);
+        return true;
+    }
+
+    /// <summary>
+    /// Single-dispatch wave-front kernel. Each block (Grid.IdxX = frame
+    /// index) processes one full frame's wave-front; threads within a block
+    /// (Group.IdxX = MB position on diagonal) handle parallel MBs per
+    /// diagonal with Group.Barrier between diagonals.
+    /// </summary>
+    private static void EncodeWavefrontSingleDispatchKernel(
+        ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
+        ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
+        ArrayView<short> y4Coefs, ArrayView<short> y2Coefs,
+        ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<int> dequant,
+        Vp8FrameSeqEncodeBatchParams p, int frameCount, int totalDiagonals)
+    {
+        int frameIdx = Grid.IdxX;
+        int posInDiag = Group.IdxX;
+        int mbCols = p.MbCols;
+        int mbRows = p.MbRows;
+
+        if (frameIdx >= frameCount) return;
+
+        // Per-frame slot views computed once per thread.
+        var fY = yPlane.SubView((long)frameIdx * p.YStride, p.YStride);
+        var fU = uPlane.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fV = vPlane.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fYR = yRecon.SubView((long)frameIdx * p.YStride, p.YStride);
+        var fUR = uRecon.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fVR = vRecon.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fY4 = y4Coefs.SubView((long)frameIdx * p.Y4CoefStride, p.Y4CoefStride);
+        var fY2 = y2Coefs.SubView((long)frameIdx * p.Y2CoefStride, p.Y2CoefStride);
+        var fUC = uCoefs.SubView((long)frameIdx * p.UvCoefStride, p.UvCoefStride);
+        var fVC = vCoefs.SubView((long)frameIdx * p.UvCoefStride, p.UvCoefStride);
+        var fDQ = dequant.SubView((long)frameIdx * p.DequantStride, p.DequantStride);
+        int yStride = mbCols * 16;
+        int uvStride = mbCols * 8;
+        int y1Dc = fDQ[0]; int y1Ac = fDQ[1];
+        int y2Dc = fDQ[2]; int y2Ac = fDQ[3];
+        int uvDc = fDQ[4]; int uvAc = fDQ[5];
+
+        for (int d = 0; d < totalDiagonals; d++)
+        {
+            int rMin = d - (mbCols - 1); if (rMin < 0) rMin = 0;
+            int rMax = d; if (rMax > mbRows - 1) rMax = mbRows - 1;
+            int diagCount = rMax - rMin + 1;
+            int mbRow = rMin + posInDiag;
+            int mbCol = d - mbRow;
+            bool active = posInDiag < diagCount && mbRow >= 0 && mbRow < mbRows && mbCol >= 0 && mbCol < mbCols;
+            if (active)
+            {
+                EncodeMacroblock(
+                    mbRow, mbCol, mbCols, yStride, uvStride,
+                    fY, fU, fV,
+                    fYR, fUR, fVR,
+                    fY4, fY2, fUC, fVC,
+                    y1Dc, y1Ac, y2Dc, y2Ac, uvDc, uvAc);
+            }
+            Group.Barrier();
+        }
     }
 
     /// <summary>
