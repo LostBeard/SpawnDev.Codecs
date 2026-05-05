@@ -1,7 +1,7 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
 // Test/integration kernel that drives Av1Forward2dTransformGpu through
-// ILGPU. One thread per 2D transform block; supports Tx8x8 and
+// ILGPU. One thread per 2D transform block; supports Tx4x4, Tx8x8, and
 // Tx16x16 DCT_DCT.
 
 using ILGPU;
@@ -11,8 +11,9 @@ namespace SpawnDev.Codecs.Video.Av1;
 
 /// <summary>
 /// Batched ILGPU kernel that drives
-/// <see cref="Av1Forward2dTransformGpu"/>.Forward8x8DctDct or
-/// .Forward16x16DctDct based on the txSize parameter.
+/// <see cref="Av1Forward2dTransformGpu"/>.Forward4x4DctDct,
+/// .Forward8x8DctDct, or .Forward16x16DctDct based on the txSize
+/// parameter.
 /// </summary>
 public sealed class Av1Forward2dTransformGpuKernel : IDisposable
 {
@@ -30,18 +31,18 @@ public sealed class Av1Forward2dTransformGpuKernel : IDisposable
 
     /// <summary>
     /// Run the 2D forward DCT_DCT on <paramref name="blockCount"/>
-    /// independent blocks. Each block is <paramref name="txSize"/>=1
-    /// (Tx8x8, 64 elements) or 2 (Tx16x16, 256 elements).
-    /// <paramref name="scratch"/> must hold blockCount * coefsPerBlock
-    /// ints (one scratch region per block).
+    /// independent blocks. Each block is <paramref name="txSize"/>=0
+    /// (Tx4x4, 16 elements), 1 (Tx8x8, 64 elements), or 2 (Tx16x16,
+    /// 256 elements). <paramref name="scratch"/> must hold blockCount *
+    /// coefsPerBlock ints (one scratch region per block).
     /// </summary>
     public void Run(ArrayView<short> input, ArrayView<int> output, ArrayView<int> scratch, int blockCount, int txSize)
     {
         if (blockCount < 0) throw new ArgumentOutOfRangeException(nameof(blockCount));
         if (blockCount == 0) return;
-        if (txSize != 1 && txSize != 2)
-            throw new ArgumentOutOfRangeException(nameof(txSize), "Only Tx8x8 (1) and Tx16x16 (2) supported in v1.");
-        int n = txSize == 1 ? 64 : 256;
+        if (txSize != 0 && txSize != 1 && txSize != 2)
+            throw new ArgumentOutOfRangeException(nameof(txSize), "Only Tx4x4 (0), Tx8x8 (1), and Tx16x16 (2) supported in v1.");
+        int n = txSize == 0 ? 16 : (txSize == 1 ? 64 : 256);
         if (input.Length < blockCount * (long)n)
             throw new ArgumentException("input too short.", nameof(input));
         if (output.Length < blockCount * (long)n)
@@ -61,12 +62,16 @@ public sealed class Av1Forward2dTransformGpuKernel : IDisposable
     {
         int idx = blockIdx;
         if (idx >= blockCount) return;
-        int n = txSize == 1 ? 64 : 256;
+        int n = txSize == 0 ? 16 : (txSize == 1 ? 64 : 256);
         long inBase = (long)idx * n;
         long outBase = (long)idx * n;
         long scratchBase = (long)idx * n;
 
-        if (txSize == 1)
+        if (txSize == 0)
+        {
+            Av1Forward2dTransformGpu.Forward4x4DctDct(input, inBase, output, outBase, scratch, scratchBase);
+        }
+        else if (txSize == 1)
         {
             Av1Forward2dTransformGpu.Forward8x8DctDct(input, inBase, output, outBase, scratch, scratchBase);
         }

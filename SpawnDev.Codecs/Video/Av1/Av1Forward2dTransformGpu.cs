@@ -2,8 +2,9 @@
 //
 // AV1 2D forward transform helpers, GPU-callable form. Bit-exact
 // mirror of Av1Forward2dTransform.Apply (libaom av1_fwd_txfm2d) for
-// the v1 keyframe encoder's two configurations:
-//   - Tx8x8 + DCT_DCT (chroma)
+// the v1 keyframe encoder's three configurations:
+//   - Tx4x4 + DCT_DCT (boundary chroma at non-aligned dims)
+//   - Tx8x8 + DCT_DCT (chroma + boundary luma)
 //   - Tx16x16 + DCT_DCT (luma)
 //
 // Pipeline (per libaom fwd_txfm2d):
@@ -11,14 +12,16 @@
 //      apply 1D Forward DCT, round-shift by between-pass amount,
 //      store back into scratch buffer.
 //   2. Row pass: apply 1D Forward DCT on each row, round-shift by
-//      final amount (0 for both v1 sizes), write to output (raster).
+//      final amount (0 for all v1 sizes), write to output (raster).
 //
 // V1 shifts (libaom av1_fwd_txfm_shift_ls):
+//   Tx4x4:   s0=2, s1= 0, s2=0; cosBitCol=13, cosBitRow=13.
 //   Tx8x8:   s0=2, s1=-1, s2=0; cosBitCol=13, cosBitRow=13.
 //   Tx16x16: s0=2, s1=-2, s2=0; cosBitCol=13, cosBitRow=12.
 //
 // Caller pre-allocates a scratch ArrayView&lt;int&gt; sized for the column
-// intermediate buffer (64 ints for Tx8x8, 256 ints for Tx16x16).
+// intermediate buffer (16 ints for Tx4x4, 64 ints for Tx8x8, 256 ints
+// for Tx16x16).
 
 using ILGPU;
 
@@ -31,6 +34,57 @@ namespace SpawnDev.Codecs.Video.Av1;
 /// </summary>
 public static class Av1Forward2dTransformGpu
 {
+    /// <summary>
+    /// Apply the 4x4 DCT_DCT 2D forward transform. Reads 16 short
+    /// residuals from <paramref name="input"/> starting at
+    /// <paramref name="inBase"/> (raster, row-major); writes 16 int
+    /// coefs to <paramref name="output"/> starting at
+    /// <paramref name="outBase"/> (raster, row-major).
+    /// <paramref name="scratch"/> must hold at least 16 ints starting at
+    /// <paramref name="scratchBase"/>.
+    ///
+    /// Used for boundary-MB chroma at non-aligned VP9/AV1 dims (Tx4x4),
+    /// not used by the aligned-dim v1 encoder configuration.
+    /// </summary>
+    public static void Forward4x4DctDct(
+        ArrayView<short> input, long inBase,
+        ArrayView<int> output, long outBase,
+        ArrayView<int> scratch, long scratchBase)
+    {
+        const int W = 4;
+        const int H = 4;
+        const int CosBit = 13;
+        // s0 = 2 (column pre-scale left-shift).
+        // s1 = 0 (NO between-pass round-shift for Tx4x4).
+        // s2 = 0 (no final shift).
+
+        // Column pass: load + pre-scale + 1D DCT, store column-major in scratch.
+        for (int c = 0; c < W; c++)
+        {
+            long colBase = scratchBase + c * (long)H;
+            for (int r = 0; r < H; r++)
+            {
+                int v = input[inBase + r * W + c];
+                scratch[colBase + r] = v << 2;
+            }
+            // Forward4 reads all 4 inputs into locals before writing -> safe in place.
+            Av1ForwardDct4Gpu.Forward4(scratch, colBase, scratch, colBase, CosBit);
+            // No between-pass shift for Tx4x4.
+        }
+
+        // Row pass: read column-major (transposed) into output row, run Forward4 in place.
+        for (int r = 0; r < H; r++)
+        {
+            long rowBase = outBase + r * (long)W;
+            output[rowBase + 0] = scratch[scratchBase + 0 * H + r];
+            output[rowBase + 1] = scratch[scratchBase + 1 * H + r];
+            output[rowBase + 2] = scratch[scratchBase + 2 * H + r];
+            output[rowBase + 3] = scratch[scratchBase + 3 * H + r];
+            Av1ForwardDct4Gpu.Forward4(output, rowBase, output, rowBase, CosBit);
+            // No final shift.
+        }
+    }
+
     /// <summary>
     /// Apply the 8x8 DCT_DCT 2D forward transform. Reads 64 short
     /// residuals from <paramref name="input"/> starting at
