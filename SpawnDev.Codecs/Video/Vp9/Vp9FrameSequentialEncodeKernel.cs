@@ -39,6 +39,7 @@
 // only populate the available side's edge buffer and pick the
 // matching variant.
 
+using System.Runtime.CompilerServices;
 using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.ILGPU;
@@ -429,6 +430,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
     }
 
     /// <summary>Encode a single 16x16 macroblock (Y + U + V).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void EncodeMacroblock(
         int mbRow, int mbCol, int mbCols,
         int yStride, int uvStride,

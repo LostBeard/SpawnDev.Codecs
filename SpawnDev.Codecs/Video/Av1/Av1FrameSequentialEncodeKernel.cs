@@ -57,6 +57,7 @@
 //   scratchShort (per-block, reused):
 //     [0..N)               : residual (short)
 
+using System.Runtime.CompilerServices;
 using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.ILGPU;
@@ -283,6 +284,7 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
             fScratchByte, fScratchInt, fScratchShort, p);
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void EncodeFrameBody(
         ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> tileBytes, ArrayView<long> tileLen,

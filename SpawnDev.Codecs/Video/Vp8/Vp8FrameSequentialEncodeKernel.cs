@@ -20,6 +20,7 @@
 // - All MBs use Y_PRED = DC_PRED, UV_PRED = DC_PRED.
 // - No segmentation, no loop filter, single token partition.
 
+using System.Runtime.CompilerServices;
 using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.ILGPU;
@@ -401,6 +402,7 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
     }
 
     /// <summary>Encode one MB end-to-end: predict + transform + quant + recon.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void EncodeMacroblock(
         int mbRow, int mbCol, int mbCols, int yStride, int uvStride,
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,

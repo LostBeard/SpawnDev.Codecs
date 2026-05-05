@@ -133,33 +133,37 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         if (yPlane is null) throw new ArgumentNullException(nameof(yPlane));
         if (uPlane is null) throw new ArgumentNullException(nameof(uPlane));
         if (vPlane is null) throw new ArgumentNullException(nameof(vPlane));
-        if (width <= 0 || (width & 63) != 0)
-            throw new ArgumentOutOfRangeException(nameof(width),
-                "v1 GPU encoder requires width that is a positive multiple of 64.");
-        if (height <= 0 || (height & 63) != 0)
-            throw new ArgumentOutOfRangeException(nameof(height),
-                "v1 GPU encoder requires height that is a positive multiple of 64.");
+        if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
         if (baseQIndex <= 0 || baseQIndex > 255)
             throw new ArgumentOutOfRangeException(nameof(baseQIndex),
                 "baseQIndex must be in [1, 255].");
 
-        int yLen = width * height;
+        // Round up to next 64-multiple working dims; OBU framing signals
+        // original (width, height) so AV1 decoders crop the pad.
+        int workWidth = (width + 63) & ~63;
+        int workHeight = (height + 63) & ~63;
+        int yLen = workWidth * workHeight;
         int uvLen = yLen / 4;
         int srcLen = yLen + uvLen + uvLen;
+        int origYLen = width * height;
+        int origUvLen = origYLen / 4;
 
-        if (yPlane.Length < yLen) throw new ArgumentException("yPlane too short.", nameof(yPlane));
-        if (uPlane.Length < uvLen) throw new ArgumentException("uPlane too short.", nameof(uPlane));
-        if (vPlane.Length < uvLen) throw new ArgumentException("vPlane too short.", nameof(vPlane));
+        if (yPlane.Length < origYLen) throw new ArgumentException("yPlane too short.", nameof(yPlane));
+        if (uPlane.Length < origUvLen) throw new ArgumentException("uPlane too short.", nameof(uPlane));
+        if (vPlane.Length < origUvLen) throw new ArgumentException("vPlane too short.", nameof(vPlane));
 
-        // Frame mi-units. v1: 4-px per mi unit.
-        int frameMiCols = ((width + 7) >> 3) << 1;
-        int frameMiRows = ((height + 7) >> 3) << 1;
+        // Frame mi-units come from working dims.
+        int frameMiCols = ((workWidth + 7) >> 3) << 1;
+        int frameMiRows = ((workHeight + 7) >> 3) << 1;
 
         // ---- Build params struct (scratchByte layout) ----
+        // Width/Height in the params drive the per-block work area; use
+        // working dims so the kernel processes the full padded MB grid.
         var p = new Av1FrameSeqEncodeParams
         {
-            Width = width,
-            Height = height,
+            Width = workWidth,
+            Height = workHeight,
             BaseQIndex = baseQIndex,
             YPlaneOff = 0,
             UPlaneOff = yLen,
@@ -186,21 +190,38 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         int scratchIntLen = Av1FrameSequentialEncodeKernel.MinScratchIntLength;
         int scratchShortLen = 256;
 
-        // Worst-case tile bytes. AV1 keyframe entropy varies with content; for
-        // a v1 encoder hitting random YUV with default CDFs, a generous
-        // 2 KB / 16x16 leaf is safe (we measure ~150-300 bytes / leaf typical).
-        int leaves = (width >> 4) * (height >> 4);
+        // Worst-case tile bytes from working-dim leaf count.
+        int leaves = (workWidth >> 4) * (workHeight >> 4);
         long worstCaseTile = leaves * 2048L + 256L;
 
         // ---- Ensure per-frame GPU buffers (cached across same-resolution calls) ----
-        EnsureBuffers(width, height, srcLen, worstCaseTile, scratchByteLen, scratchIntLen, scratchShortLen);
+        EnsureBuffers(workWidth, workHeight, srcLen, worstCaseTile, scratchByteLen, scratchIntLen, scratchShortLen);
 
         // ---- Upload sources + zero outputs ----
-        // Three direct uploads to subviews of dSrc - no host-side packed
-        // buffer, no Buffer.BlockCopy iteration over input pixels.
-        _dSrc!.View.SubView(0, yLen).CopyFromCPU(yPlane);
-        _dSrc!.View.SubView(yLen, uvLen).CopyFromCPU(uPlane);
-        _dSrc!.View.SubView(yLen + uvLen, uvLen).CopyFromCPU(vPlane);
+        if (workWidth == width && workHeight == height)
+        {
+            // Aligned: 3 direct uploads to subviews of dSrc.
+            _dSrc!.View.SubView(0, yLen).CopyFromCPU(yPlane);
+            _dSrc!.View.SubView(yLen, uvLen).CopyFromCPU(uPlane);
+            _dSrc!.View.SubView(yLen + uvLen, uvLen).CopyFromCPU(vPlane);
+        }
+        else
+        {
+            // Non-aligned: pad-justify rows into working-dim slots.
+            _dSrc!.View.MemSetToZero();
+            int uvWorkWidth = workWidth / 2;
+            int origUvWidth = width / 2;
+            int origUvHeight = height / 2;
+            var hostSrc = new byte[srcLen];
+            for (int r = 0; r < height; r++)
+                Array.Copy(yPlane, r * width, hostSrc, r * workWidth, width);
+            for (int r = 0; r < origUvHeight; r++)
+            {
+                Array.Copy(uPlane, r * origUvWidth, hostSrc, yLen + r * uvWorkWidth, origUvWidth);
+                Array.Copy(vPlane, r * origUvWidth, hostSrc, yLen + uvLen + r * uvWorkWidth, origUvWidth);
+            }
+            _dSrc!.View.CopyFromCPU(hostSrc);
+        }
 
         // Pre-zero output + scratch buffers per frame (kernel reads them
         // as carry-back state). Recon is fully overwritten per pixel so
@@ -321,22 +342,29 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
             throw new ArgumentException("Plane arrays must have equal length.");
         int frameCount = yPlanes.Length;
         if (frameCount == 0) return Array.Empty<byte[]>();
-        if (width <= 0 || (width & 63) != 0)
-            throw new ArgumentOutOfRangeException(nameof(width));
-        if (height <= 0 || (height & 63) != 0)
-            throw new ArgumentOutOfRangeException(nameof(height));
+        if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
 
-        int yLen = width * height;
+        // Round up to next 64-multiple working dims; OBU framing signals
+        // original dims so AV1 decoders crop the pad.
+        int workWidth = (width + 63) & ~63;
+        int workHeight = (height + 63) & ~63;
+        int yLen = workWidth * workHeight;
         int uvLen = yLen / 4;
         int srcLen = yLen + uvLen + uvLen;
+        int origYLen = width * height;
+        int origUvLen = origYLen / 4;
+        int origUvWidth = width / 2;
+        int origUvHeight = height / 2;
+        int uvWorkWidth = workWidth / 2;
 
-        int frameMiCols = ((width + 7) >> 3) << 1;
-        int frameMiRows = ((height + 7) >> 3) << 1;
+        int frameMiCols = ((workWidth + 7) >> 3) << 1;
+        int frameMiRows = ((workHeight + 7) >> 3) << 1;
 
         var p = new Av1FrameSeqEncodeParams
         {
-            Width = width,
-            Height = height,
+            Width = workWidth,
+            Height = workHeight,
             BaseQIndex = baseQIndex,
             YPlaneOff = 0,
             UPlaneOff = yLen,
@@ -361,7 +389,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         int scratchIntLen = Av1FrameSequentialEncodeKernel.MinScratchIntLength;
         int scratchShortLen = 256;
 
-        int leaves = (width >> 4) * (height >> 4);
+        int leaves = (workWidth >> 4) * (workHeight >> 4);
         int worstCaseTile = leaves * 2048 + 256;
 
         // Per-frame slot buffers.
@@ -380,13 +408,35 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         dAllScratchShort.View.MemSetToZero();
 
         // Bulk upload all frames' Y/U/V planes into per-frame slots.
+        // Non-aligned source rows pad-justify into the working-dim slot.
+        bool needsPad = workWidth != width || workHeight != height;
         var hostSrc = new byte[(long)frameCount * srcLen];
-        for (int f = 0; f < frameCount; f++)
+        if (!needsPad)
         {
-            int baseOff = f * srcLen;
-            yPlanes[f].Span.CopyTo(hostSrc.AsSpan(baseOff));
-            uPlanes[f].Span.CopyTo(hostSrc.AsSpan(baseOff + yLen));
-            vPlanes[f].Span.CopyTo(hostSrc.AsSpan(baseOff + yLen + uvLen));
+            for (int f = 0; f < frameCount; f++)
+            {
+                int baseOff = f * srcLen;
+                yPlanes[f].Span.CopyTo(hostSrc.AsSpan(baseOff));
+                uPlanes[f].Span.CopyTo(hostSrc.AsSpan(baseOff + yLen));
+                vPlanes[f].Span.CopyTo(hostSrc.AsSpan(baseOff + yLen + uvLen));
+            }
+        }
+        else
+        {
+            for (int f = 0; f < frameCount; f++)
+            {
+                int baseOff = f * srcLen;
+                var ySrc = yPlanes[f].Span;
+                var uSrc = uPlanes[f].Span;
+                var vSrc = vPlanes[f].Span;
+                for (int r = 0; r < height; r++)
+                    ySrc.Slice(r * width, width).CopyTo(hostSrc.AsSpan(baseOff + r * workWidth, width));
+                for (int r = 0; r < origUvHeight; r++)
+                {
+                    uSrc.Slice(r * origUvWidth, origUvWidth).CopyTo(hostSrc.AsSpan(baseOff + yLen + r * uvWorkWidth, origUvWidth));
+                    vSrc.Slice(r * origUvWidth, origUvWidth).CopyTo(hostSrc.AsSpan(baseOff + yLen + uvLen + r * uvWorkWidth, origUvWidth));
+                }
+            }
         }
         dAllSrc.View.CopyFromCPU(hostSrc);
 

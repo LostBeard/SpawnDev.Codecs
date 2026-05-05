@@ -162,28 +162,31 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         if (yPlane is null) throw new ArgumentNullException(nameof(yPlane));
         if (uPlane is null) throw new ArgumentNullException(nameof(uPlane));
         if (vPlane is null) throw new ArgumentNullException(nameof(vPlane));
-        if (width <= 0 || (width & 63) != 0)
-            throw new ArgumentOutOfRangeException(nameof(width),
-                "v1 GPU encoder requires width that is a positive multiple of 64.");
-        if (height <= 0 || (height & 63) != 0)
-            throw new ArgumentOutOfRangeException(nameof(height),
-                "v1 GPU encoder requires height that is a positive multiple of 64.");
+        if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
         if (baseQIndex <= 0 || baseQIndex > 255)
             throw new ArgumentOutOfRangeException(nameof(baseQIndex),
                 "baseQIndex must be in [1, 255].");
 
-        int mbCols = width >> 4;
-        int mbRows = height >> 4;
-        int yLen = width * height;
+        // Round up to next 64-multiple working dims; bitstream's
+        // frame_width_minus_1 / frame_height_minus_1 fields signal the
+        // original (width, height) so decoders crop the pad.
+        int workWidth = (width + 63) & ~63;
+        int workHeight = (height + 63) & ~63;
+        int mbCols = workWidth >> 4;
+        int mbRows = workHeight >> 4;
+        int yLen = workWidth * workHeight;
         int uvLen = yLen / 4;
         int mbCount = mbCols * mbRows;
+        int origYLen = width * height;
+        int origUvLen = origYLen / 4;
 
-        if (yPlane.Length < yLen) throw new ArgumentException("yPlane too short.", nameof(yPlane));
-        if (uPlane.Length < uvLen) throw new ArgumentException("uPlane too short.", nameof(uPlane));
-        if (vPlane.Length < uvLen) throw new ArgumentException("vPlane too short.", nameof(vPlane));
+        if (yPlane.Length < origYLen) throw new ArgumentException("yPlane too short.", nameof(yPlane));
+        if (uPlane.Length < origUvLen) throw new ArgumentException("uPlane too short.", nameof(uPlane));
+        if (vPlane.Length < origUvLen) throw new ArgumentException("vPlane too short.", nameof(vPlane));
 
         // ---- 1. Ensure per-frame GPU buffers (cached across same-resolution calls) ----
-        EnsureBuffers(width, height, yLen, uvLen, mbCount);
+        EnsureBuffers(workWidth, workHeight, yLen, uvLen, mbCount);
 
         // ---- Pre-zero output buffers so the bool encoder's carry-back pass
         // reads stable bytes. Recon planes are fully overwritten by the
@@ -199,9 +202,36 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         _dOutFrame!.View.MemSetToZero();
         _dOutFrameLen!.View.MemSetToZero();
 
-        _dY!.View.CopyFromCPU(yPlane);
-        _dU!.View.CopyFromCPU(uPlane);
-        _dV!.View.CopyFromCPU(vPlane);
+        if (workWidth == width && workHeight == height)
+        {
+            _dY!.View.CopyFromCPU(yPlane);
+            _dU!.View.CopyFromCPU(uPlane);
+            _dV!.View.CopyFromCPU(vPlane);
+        }
+        else
+        {
+            // Non-aligned source: pad-justify each row into the working-dim
+            // buffer. Right-edge cols and bottom rows stay zero.
+            _dY!.View.MemSetToZero();
+            _dU!.View.MemSetToZero();
+            _dV!.View.MemSetToZero();
+            int uvWorkWidth = workWidth / 2;
+            int origUvWidth = width / 2;
+            int origUvHeight = height / 2;
+            var hostY = new byte[yLen];
+            var hostU = new byte[uvLen];
+            var hostV = new byte[uvLen];
+            for (int r = 0; r < height; r++)
+                Array.Copy(yPlane, r * width, hostY, r * workWidth, width);
+            for (int r = 0; r < origUvHeight; r++)
+            {
+                Array.Copy(uPlane, r * origUvWidth, hostU, r * uvWorkWidth, origUvWidth);
+                Array.Copy(vPlane, r * origUvWidth, hostV, r * uvWorkWidth, origUvWidth);
+            }
+            _dY!.View.CopyFromCPU(hostY);
+            _dU!.View.CopyFromCPU(hostU);
+            _dV!.View.CopyFromCPU(hostV);
+        }
 
         // ---- 2. Dispatch dequantizer compute kernel ----
         // y_dc_delta / uv_dc_delta / uv_ac_delta = 0 in v1.
@@ -332,14 +362,21 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             throw new ArgumentException("Plane arrays must have equal length.");
         int frameCount = yPlanes.Length;
         if (frameCount == 0) return Array.Empty<byte[]>();
-        if (width <= 0 || (width & 63) != 0)
-            throw new ArgumentOutOfRangeException(nameof(width));
-        if (height <= 0 || (height & 63) != 0)
-            throw new ArgumentOutOfRangeException(nameof(height));
+        if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
 
-        int mbCols = width >> 4;
-        int mbRows = height >> 4;
-        int yLen = width * height;
+        // Round up to next 64-multiple working dims. Bitstream signals
+        // original dims via frame_width_minus_1 / frame_height_minus_1.
+        int workWidth = (width + 63) & ~63;
+        int workHeight = (height + 63) & ~63;
+        int origYLen = width * height;
+        int origUvLen = origYLen / 4;
+        int origUvWidth = width / 2;
+        int origUvHeight = height / 2;
+        int uvWorkWidth = workWidth / 2;
+        int mbCols = workWidth >> 4;
+        int mbRows = workHeight >> 4;
+        int yLen = workWidth * workHeight;
         int uvLen = yLen / 4;
         int mbCount = mbCols * mbRows;
 
@@ -379,14 +416,37 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         dAllOutLen.View.MemSetToZero();
 
         // Phase 1a: bulk upload all source planes (3 host->device transfers).
+        // Non-aligned source dims pad-justify rows into the working-dim slot.
+        bool needsPad = workWidth != width || workHeight != height;
         var hostY = new byte[(long)frameCount * yLen];
         var hostU = new byte[(long)frameCount * uvLen];
         var hostV = new byte[(long)frameCount * uvLen];
-        for (int f = 0; f < frameCount; f++)
+        if (!needsPad)
         {
-            yPlanes[f].Span.CopyTo(hostY.AsSpan((int)((long)f * yLen)));
-            uPlanes[f].Span.CopyTo(hostU.AsSpan((int)((long)f * uvLen)));
-            vPlanes[f].Span.CopyTo(hostV.AsSpan((int)((long)f * uvLen)));
+            for (int f = 0; f < frameCount; f++)
+            {
+                yPlanes[f].Span.CopyTo(hostY.AsSpan((int)((long)f * yLen)));
+                uPlanes[f].Span.CopyTo(hostU.AsSpan((int)((long)f * uvLen)));
+                vPlanes[f].Span.CopyTo(hostV.AsSpan((int)((long)f * uvLen)));
+            }
+        }
+        else
+        {
+            for (int f = 0; f < frameCount; f++)
+            {
+                long ySlotBase = (long)f * yLen;
+                long uvSlotBase = (long)f * uvLen;
+                var ySrc = yPlanes[f].Span;
+                var uSrc = uPlanes[f].Span;
+                var vSrc = vPlanes[f].Span;
+                for (int r = 0; r < height; r++)
+                    ySrc.Slice(r * width, width).CopyTo(hostY.AsSpan((int)(ySlotBase + r * workWidth), width));
+                for (int r = 0; r < origUvHeight; r++)
+                {
+                    uSrc.Slice(r * origUvWidth, origUvWidth).CopyTo(hostU.AsSpan((int)(uvSlotBase + r * uvWorkWidth), origUvWidth));
+                    vSrc.Slice(r * origUvWidth, origUvWidth).CopyTo(hostV.AsSpan((int)(uvSlotBase + r * uvWorkWidth), origUvWidth));
+                }
+            }
         }
         dAllY.View.CopyFromCPU(hostY);
         dAllU.View.CopyFromCPU(hostU);

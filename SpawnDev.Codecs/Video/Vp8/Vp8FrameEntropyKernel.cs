@@ -25,6 +25,7 @@
 //   Bytes 59..61  : kfUvModeProbs (3 bytes - DefaultKfUvModeProb[0..2]).
 // Caller materializes via ExtendConstsBuffer().
 
+using System.Runtime.CompilerServices;
 using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.ILGPU;
@@ -257,6 +258,7 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
     /// Static body shared by single-frame and batch kernel paths. Takes
     /// already-frame-scoped views (callers SubView for batch).
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void EncodeFrameBody(
         ArrayView<short> y4Coefs,
         ArrayView<short> y2Coefs,

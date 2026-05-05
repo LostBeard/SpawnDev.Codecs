@@ -115,7 +115,13 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         _constsExtended.View.CopyFromCPU(Vp8FrameEntropyKernel.BuildExtendedConstsBuffer());
     }
 
-    /// <summary>Encode a single VP8 keyframe from YUV420 source.</summary>
+    /// <summary>
+    /// Encode a single VP8 keyframe from YUV420 source. Accepts any positive
+    /// (width, height); internally pads to the next 16-multiple working
+    /// dimensions. The frame tag in the output bitstream signals the original
+    /// (width, height), so spec-compliant decoders crop the working-dim
+    /// pixels back to the requested display size.
+    /// </summary>
     public byte[] EncodeKeyFrame(
         ReadOnlySpan<byte> ySrc, int ySrcStride,
         ReadOnlySpan<byte> uSrc, int uvSrcStride,
@@ -124,23 +130,35 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         int baseQIndex = 30)
     {
         if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException();
-        if ((width & 15) != 0 || (height & 15) != 0)
-            throw new ArgumentException("Width and height must be multiples of 16 (v1)");
         if (baseQIndex < 0 || baseQIndex > 127)
             throw new ArgumentOutOfRangeException(nameof(baseQIndex));
 
-        int mbCols = width / 16;
-        int mbRows = height / 16;
+        // Round up to the next 16-multiple. Source planes are zero-padded
+        // into the bottom-right region; the kernels process the full
+        // working-dim MB grid bit-exact, and the frame tag emits the
+        // original (width, height) so the decoder crops away the pad.
+        int workWidth = (width + 15) & ~15;
+        int workHeight = (height + 15) & ~15;
+        int mbCols = workWidth / 16;
+        int mbRows = workHeight / 16;
         int mbCount = mbCols * mbRows;
-        int uvWidth = width / 2;
-        int uvHeight = height / 2;
+        int uvWorkWidth = workWidth / 2;
+        int uvWorkHeight = workHeight / 2;
 
-        EnsureBuffers(width, height, uvWidth, uvHeight, mbCols, mbCount);
+        EnsureBuffers(workWidth, workHeight, uvWorkWidth, uvWorkHeight, mbCols, mbCount);
+
+        // Pre-zero so non-aligned padding rows/cols read as 0.
+        if (workWidth != width || workHeight != height)
+        {
+            _dY!.View.MemSetToZero();
+            _dU!.View.MemSetToZero();
+            _dV!.View.MemSetToZero();
+        }
 
         // === Host work: ONLY upload + dispatch ===
-        UploadPlane(ySrc, ySrcStride, width, height, _dY!);
-        UploadPlane(uSrc, uvSrcStride, uvWidth, uvHeight, _dU!);
-        UploadPlane(vSrc, uvSrcStride, uvWidth, uvHeight, _dV!);
+        UploadPaddedPlane(ySrc, ySrcStride, width, height, workWidth, _dY!);
+        UploadPaddedPlane(uSrc, uvSrcStride, width / 2, height / 2, uvWorkWidth, _dU!);
+        UploadPaddedPlane(vSrc, uvSrcStride, width / 2, height / 2, uvWorkWidth, _dV!);
         // Recon planes are fully overwritten per MB by the sequential
         // encoder; pre-zero only the buffers the bool encoder reads as
         // partial-write carry-back state (P0 / Tp / Above).
@@ -216,20 +234,25 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         if (frameCount == 0) return Array.Empty<byte[]>();
 
         if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException();
-        if ((width & 15) != 0 || (height & 15) != 0)
-            throw new ArgumentException("Width and height must be multiples of 16 (v1)");
 
-        int mbCols = width / 16;
-        int mbRows = height / 16;
+        // Round up to next 16-multiple working dims; bitstream signals
+        // original (width, height) so decoders crop the pad.
+        int workWidth = (width + 15) & ~15;
+        int workHeight = (height + 15) & ~15;
+        int mbCols = workWidth / 16;
+        int mbRows = workHeight / 16;
         int mbCount = mbCols * mbRows;
-        int uvWidth = width / 2;
-        int uvHeight = height / 2;
+        int uvWorkWidth = workWidth / 2;
+        int uvWorkHeight = workHeight / 2;
+        int origUvWidth = width / 2;
+        int origUvHeight = height / 2;
 
-        EnsureBuffers(width, height, uvWidth, uvHeight, mbCols, mbCount);
+        EnsureBuffers(workWidth, workHeight, uvWorkWidth, uvWorkHeight, mbCols, mbCount);
 
         // Per-frame slot strides for batch entropy + sequential encode.
-        int yPlaneStride = width * height;
-        int uvPlaneStride = uvWidth * uvHeight;
+        // Use working dims so kernels see padded planes for non-aligned input.
+        int yPlaneStride = workWidth * workHeight;
+        int uvPlaneStride = uvWorkWidth * uvWorkHeight;
         int y4Stride = mbCount * 256;
         int y2Stride = mbCount * 16;
         int uvCoefStride = mbCount * 64;
@@ -262,18 +285,46 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         dAllTp.View.MemSetToZero();
         dAllAbove.View.MemSetToZero();
 
-        // Phase 1a: bulk upload all frames' planes in 3 host->device transfers
-        // (Y batch, U batch, V batch) instead of 3*frameCount small uploads.
-        // PCIe4 memcpy is memory-bound; minimizing the number of CopyFromCPU
-        // calls collapses driver overhead.
+        // Phase 1a: bulk upload all frames' planes in 3 host->device transfers.
+        // For non-aligned source dims (e.g. height=1080 with workHeight=1088),
+        // each frame's source rows are pad-justified into the working-dim
+        // slot; remaining padding rows/cols stay zero (new byte[]).
+        bool needsPad = workWidth != width || workHeight != height;
         var hostY = new byte[(long)frameCount * yPlaneStride];
         var hostU = new byte[(long)frameCount * uvPlaneStride];
         var hostV = new byte[(long)frameCount * uvPlaneStride];
-        for (int f = 0; f < frameCount; f++)
+        if (!needsPad)
         {
-            yPlanes[f].Span.CopyTo(hostY.AsSpan((int)((long)f * yPlaneStride)));
-            uPlanes[f].Span.CopyTo(hostU.AsSpan((int)((long)f * uvPlaneStride)));
-            vPlanes[f].Span.CopyTo(hostV.AsSpan((int)((long)f * uvPlaneStride)));
+            for (int f = 0; f < frameCount; f++)
+            {
+                yPlanes[f].Span.CopyTo(hostY.AsSpan((int)((long)f * yPlaneStride)));
+                uPlanes[f].Span.CopyTo(hostU.AsSpan((int)((long)f * uvPlaneStride)));
+                vPlanes[f].Span.CopyTo(hostV.AsSpan((int)((long)f * uvPlaneStride)));
+            }
+        }
+        else
+        {
+            // Per-frame, per-row pad-justify into the working-dim slot.
+            for (int f = 0; f < frameCount; f++)
+            {
+                long ySlotBase = (long)f * yPlaneStride;
+                long uSlotBase = (long)f * uvPlaneStride;
+                long vSlotBase = (long)f * uvPlaneStride;
+                var ySrc = yPlanes[f].Span;
+                var uSrc = uPlanes[f].Span;
+                var vSrc = vPlanes[f].Span;
+                // Y plane
+                for (int r = 0; r < height; r++)
+                    ySrc.Slice(r * width, width).CopyTo(hostY.AsSpan((int)(ySlotBase + r * workWidth), width));
+                // UV planes
+                for (int r = 0; r < origUvHeight; r++)
+                {
+                    uSrc.Slice(r * origUvWidth, origUvWidth).CopyTo(
+                        hostU.AsSpan((int)(uSlotBase + r * uvWorkWidth), origUvWidth));
+                    vSrc.Slice(r * origUvWidth, origUvWidth).CopyTo(
+                        hostV.AsSpan((int)(vSlotBase + r * uvWorkWidth), origUvWidth));
+                }
+            }
         }
         dAllY.View.CopyFromCPU(hostY);
         dAllU.View.CopyFromCPU(hostU);
@@ -415,6 +466,45 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         _dOutLen?.Dispose(); _dOutLen = null;
         _cachedWidth = -1;
         _cachedHeight = -1;
+    }
+
+    /// <summary>
+    /// Upload a non-aligned source plane into a working-dim destination
+    /// buffer. Source plane is (origW × origH); destination's row stride is
+    /// destStride (= workWidth or uvWorkWidth). Source rows are written
+    /// contiguous-prefix into each destination row; the right-edge columns
+    /// (when origW &lt; destStride) and bottom rows (when origH &lt; workHeight)
+    /// stay at whatever the destination was pre-filled with (caller handles
+    /// pre-zero when padding is non-trivial).
+    /// </summary>
+    private void UploadPaddedPlane(
+        ReadOnlySpan<byte> src, int srcStride,
+        int origW, int origH, int destStride,
+        MemoryBuffer1D<byte, Stride1D.Dense> dest)
+    {
+        if (srcStride == 0) srcStride = origW;
+        if (origW == destStride && srcStride == origW)
+        {
+            // Aligned width AND no source padding: single contiguous upload
+            // covering all origH rows. Bottom pad rows (if any) keep whatever
+            // pre-zero state the dest already has.
+            dest.View.SubView(0, (long)origH * destStride)
+                .CopyFromCPU(src.Slice(0, origH * srcStride).ToArray());
+            return;
+        }
+
+        // General path: build a row-aligned host buffer of (destStride × origH)
+        // bytes with each source row left-justified in its destination row.
+        // Single GPU upload of the row-aligned region; pad rows below origH
+        // stay at the dest buffer's pre-zero state.
+        var hostPadded = new byte[(long)destStride * origH];
+        var hostSpan = hostPadded.AsSpan();
+        for (int r = 0; r < origH; r++)
+        {
+            src.Slice(r * srcStride, origW).CopyTo(hostSpan.Slice(r * destStride, origW));
+            // Right-edge pad cols [origW..destStride) stay zero (new byte[]).
+        }
+        dest.View.SubView(0, hostPadded.Length).CopyFromCPU(hostPadded);
     }
 
     /// <summary>

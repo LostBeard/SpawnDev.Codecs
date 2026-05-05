@@ -120,8 +120,11 @@ public static class Av1KeyframeEncoder
         int width, int height, int baseQIndex, byte[] tileBytes)
     {
         if (tileBytes is null) throw new ArgumentNullException(nameof(tileBytes));
-        if ((width & 15) != 0 || (height & 15) != 0)
-            throw new ArgumentException("Width and height must be multiples of 16 (v1)");
+        if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
+        // No alignment check - the OBU framing signals display dims directly
+        // and AV1 decoders reconstruct working dims internally as
+        // alignUp(display_dim, 64), matching the encoder's tile bytes.
 
         // ---- TD OBU ----
         byte[] tdObu = Av1ObuWriter.EmitObu(
