@@ -220,8 +220,11 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         var fOut = outBuf.SubView((long)f * s.OutBufStride, s.OutBufStride);
         var fOutLen = outLen.SubView(f, 1);
         int frameMi = (s.FrameMiCols & 0xFFFF) | (s.FrameMiRows << 16);
+        // Single-tile: full-frame SB range.
         EncodeFrameBody(fY, fU, fV, fOut, fOutLen, byteConsts, ushortConsts,
-            s.MbCols, s.MbRows, frameMi);
+            sbRowStart: 0, sbRowEnd: s.MbRows >> 2,
+            sbColStart: 0, sbColEnd: s.MbCols >> 2,
+            mbCols: s.MbCols, frameMi: frameMi);
     }
 
     private static void EncodeFrameKernel(
@@ -231,16 +234,41 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
         int mbCols, int mbRows, int frameMi)
     {
+        // Single-tile: full-frame SB range.
         EncodeFrameBody(yCoefs, uCoefs, vCoefs, outBuf, outLen,
-            byteConsts, ushortConsts, mbCols, mbRows, frameMi);
+            byteConsts, ushortConsts,
+            sbRowStart: 0, sbRowEnd: mbRows >> 2,
+            sbColStart: 0, sbColEnd: mbCols >> 2,
+            mbCols: mbCols, frameMi: frameMi);
     }
 
+    /// <summary>
+    /// Encode one VP9 tile spanning SB-range [sbRowStart, sbRowEnd) ×
+    /// [sbColStart, sbColEnd): own bool encoder (init -&gt; encode -&gt; stop),
+    /// fresh above[] context arrays at the column boundary, fresh left[]
+    /// reset at every internal sb-row.
+    ///
+    /// Single-tile callers pass (0, sbRows, 0, sbCols) — full-frame range.
+    /// Multi-tile callers (next pass) compute per-tile ranges via
+    /// <see cref="Vp9TileInfoParser.GetTileColRange"/> +
+    /// <see cref="Vp9TileInfoParser.GetTileRowRange"/> and dispatch one
+    /// thread per tile, each writing to its own per-tile output slot.
+    ///
+    /// Per VP9 spec sec 6.5: every tile carries an independent bool encoder.
+    /// Above[] arrays reset at the column boundary (this function's entry);
+    /// left[] arrays reset at every sb-row boundary inside the tile (the
+    /// inner loop). Tile bytes get a 4-byte big-endian length prefix
+    /// concatenated by the assembler (except the last tile per VP9 spec) -
+    /// for single-tile mode no prefix is emitted.
+    /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void EncodeFrameBody(
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<byte> outBuf, ArrayView<long> outLen,
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
-        int mbCols, int mbRows, int frameMi)
+        int sbRowStart, int sbRowEnd,
+        int sbColStart, int sbColEnd,
+        int mbCols, int frameMi)
     {
         // Per-thread context arrays. Sizes matter: above arrays are
         // capped at MaxMiColsAligned * 2 (= 128) for b4-cell granular
@@ -271,22 +299,23 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         for (int i = 0; i < MaxMiColsAligned * 2; i++) aboveYEntropyCtx[i] = 0;
         for (int i = 0; i < MaxMiColsAligned; i++) { aboveUEntropyCtx[i] = 0; aboveVEntropyCtx[i] = 0; }
 
-        // Initialize bool encoder + emit VP9 marker bit.
+        // Initialize bool encoder + emit VP9 marker bit. Per-tile -
+        // every tile (single-tile = the whole frame) has its own bool
+        // encoder state.
         var state = Vp8BoolEncoderGpu.Init();
         Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 0, 128);
 
-        // Walk SBs row-major. mbCols/mbRows are multiples of 4 by
-        // contract so SB grid is exact.
-        int sbRows = mbRows >> 2;
-        int sbCols = mbCols >> 2;
-
-        for (int sbRow = 0; sbRow < sbRows; sbRow++)
+        // Walk SBs row-major within this tile's SB-range.
+        // mbCols/mbRows on the FRAME are multiples of 4 by contract so the
+        // SB grid is exact; per-tile sub-ranges inherit that property
+        // because tile boundaries fall on SB-multiples per VP9 spec sec 6.5.
+        for (int sbRow = sbRowStart; sbRow < sbRowEnd; sbRow++)
         {
-            // Reset left arrays at the start of each SB row.
+            // Reset left arrays at the start of each SB row within the tile.
             for (int i = 0; i < 16; i++) { leftYMode[i] = 0; leftYEntropyCtx[i] = 0; }
             for (int i = 0; i < 8; i++) { leftSkip[i] = 0; leftPartCtx[i] = 0; leftTxSize[i] = 0; leftUEntropyCtx[i] = 0; leftVEntropyCtx[i] = 0; }
 
-            for (int sbCol = 0; sbCol < sbCols; sbCol++)
+            for (int sbCol = sbColStart; sbCol < sbColEnd; sbCol++)
             {
                 EncodeSb64(
                     ref state, outBuf,
