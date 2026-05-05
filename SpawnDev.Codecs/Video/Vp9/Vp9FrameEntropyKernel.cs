@@ -67,10 +67,17 @@ public struct Vp9FrameEntropyBatchStrides
     public int UvCoefStride;
     /// <summary>tile output bytes per frame.</summary>
     public int OutBufStride;
-    /// <summary>mbCols.</summary>
+    /// <summary>mbCols (working dim).</summary>
     public int MbCols;
-    /// <summary>mbRows.</summary>
+    /// <summary>mbRows (working dim).</summary>
     public int MbRows;
+    /// <summary>
+    /// Display-dim mi cols = (FrameWidth+7)>>3. Used for boundary
+    /// forced-partition handling at SBs that straddle the right edge.
+    /// </summary>
+    public int FrameMiCols;
+    /// <summary>Display-dim mi rows = (FrameHeight+7)>>3. Bottom-edge boundary.</summary>
+    public int FrameMiRows;
 }
 
 /// <summary>
@@ -98,7 +105,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<short>, ArrayView<short>, ArrayView<short>,
         ArrayView<byte>, ArrayView<long>,
         ArrayView<byte>, ArrayView<ushort>,
-        int, int> _kernel;
+        int, int, int> _kernel;
 
     private readonly Action<
         Index1D,
@@ -117,7 +124,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<byte>, ArrayView<long>,
             ArrayView<byte>, ArrayView<ushort>,
-            int, int>(EncodeFrameKernel);
+            int, int, int>(EncodeFrameKernel);
         _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<short>, ArrayView<short>, ArrayView<short>,
@@ -144,6 +151,23 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
         int mbCols, int mbRows)
     {
+        // Single-arg form: assumes display dims == working dims (no boundary).
+        Run(yCoefs, uCoefs, vCoefs, outBuf, outLen, byteConsts, ushortConsts,
+            mbCols, mbRows, mbCols * 2, mbRows * 2);
+    }
+
+    /// <summary>
+    /// Run with explicit display mi dims for spec-compliant boundary
+    /// forced-partition handling at SBs that straddle the right/bottom edge.
+    /// <paramref name="frameMiCols"/> = (DisplayWidth+7)>>3, similarly rows.
+    /// </summary>
+    public void Run(
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<byte> outBuf, ArrayView<long> outLen,
+        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
+        int mbCols, int mbRows,
+        int frameMiCols, int frameMiRows)
+    {
         if (mbCols <= 0 || (mbCols & 3) != 0)
             throw new ArgumentOutOfRangeException(nameof(mbCols), "mbCols must be a positive multiple of 4 (SB-aligned).");
         if (mbRows <= 0 || (mbRows & 3) != 0)
@@ -151,18 +175,20 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         if (mbCols * 2 > MaxMiColsAligned)
             throw new ArgumentOutOfRangeException(nameof(mbCols),
                 $"v1 entropy kernel caps mbCols at {MaxMiColsAligned / 2}; got {mbCols}. Lift MaxMiColsAligned to grow.");
+        if (frameMiCols <= 0 || frameMiRows <= 0
+            || frameMiCols > mbCols * 2 || frameMiRows > mbRows * 2)
+            throw new ArgumentOutOfRangeException(nameof(frameMiCols),
+                "Display mi dims must be in (0, working*2].");
         if (outLen.Length < 1)
             throw new ArgumentException("outLen must hold 1 long.", nameof(outLen));
-        if (byteConsts.Length < Vp9KeyframeConstantsGpu.ByteConstsTotalBytes)
-            throw new ArgumentException("byteConsts too short.", nameof(byteConsts));
-        if (ushortConsts.Length < Vp9KeyframeConstantsGpu.UshortConstsTotalEntries)
-            throw new ArgumentException("ushortConsts too short.", nameof(ushortConsts));
 
+        // Pack display mi dims into one int: low 16 = miCols, high 16 = miRows.
+        int frameMi = (frameMiCols & 0xFFFF) | (frameMiRows << 16);
         _kernel(1,
             yCoefs, uCoefs, vCoefs,
             outBuf, outLen,
             byteConsts, ushortConsts,
-            mbCols, mbRows);
+            mbCols, mbRows, frameMi);
     }
 
     /// <summary>Batch entropy: extent=N, each thread walks one frame's MBs.</summary>
@@ -193,7 +219,9 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         var fV = vCoefs.SubView((long)f * s.UvCoefStride, s.UvCoefStride);
         var fOut = outBuf.SubView((long)f * s.OutBufStride, s.OutBufStride);
         var fOutLen = outLen.SubView(f, 1);
-        EncodeFrameBody(fY, fU, fV, fOut, fOutLen, byteConsts, ushortConsts, s.MbCols, s.MbRows);
+        int frameMi = (s.FrameMiCols & 0xFFFF) | (s.FrameMiRows << 16);
+        EncodeFrameBody(fY, fU, fV, fOut, fOutLen, byteConsts, ushortConsts,
+            s.MbCols, s.MbRows, frameMi);
     }
 
     private static void EncodeFrameKernel(
@@ -201,10 +229,10 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<byte> outBuf, ArrayView<long> outLen,
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
-        int mbCols, int mbRows)
+        int mbCols, int mbRows, int frameMi)
     {
         EncodeFrameBody(yCoefs, uCoefs, vCoefs, outBuf, outLen,
-            byteConsts, ushortConsts, mbCols, mbRows);
+            byteConsts, ushortConsts, mbCols, mbRows, frameMi);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -212,7 +240,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<byte> outBuf, ArrayView<long> outLen,
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
-        int mbCols, int mbRows)
+        int mbCols, int mbRows, int frameMi)
     {
         // Per-thread context arrays. Sizes matter: above arrays are
         // capped at MaxMiColsAligned * 2 (= 128) for b4-cell granular
@@ -269,7 +297,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
                     leftYMode, leftSkip, leftPartCtx, leftTxSize,
                     leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
                     tokenCache,
-                    sbRow, sbCol, mbCols);
+                    sbRow, sbCol, mbCols, frameMi);
             }
         }
 
@@ -288,21 +316,47 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<byte> leftPartCtx, ArrayView<byte> leftTxSize,
         ArrayView<byte> leftYEntropyCtx, ArrayView<byte> leftUEntropyCtx, ArrayView<byte> leftVEntropyCtx,
         ArrayView<byte> tokenCache,
-        int sbRow, int sbCol, int mbCols)
+        int sbRow, int sbCol, int mbCols, int frameMi)
     {
+        int frameMiCols = frameMi & 0xFFFF;
+        int frameMiRows = frameMi >> 16;
         int miRow64 = sbRow * 8;
         int miCol64 = sbCol * 8;
 
-        // Block64x64 partition decision: SPLIT. bsl=3, sizeIdx=3.
-        EmitPartitionSplit(ref state, outBuf, byteConsts,
-            sizeIdx: 3, bsl: 3, miRow: miRow64, miCol: miCol64,
-            abovePartCtx, leftPartCtx);
+        // SB64 boundary check: bsl=3, half=4 mi.
+        bool hasRows64 = (miRow64 + 4) < frameMiRows;
+        bool hasCols64 = (miCol64 + 4) < frameMiCols;
+
+        if (hasRows64 && hasCols64)
+        {
+            // Full 4-way CDF, emit SPLIT.
+            EmitPartitionSplit(ref state, outBuf, byteConsts,
+                sizeIdx: 3, bsl: 3, miRow: miRow64, miCol: miCol64,
+                abovePartCtx, leftPartCtx);
+        }
+        else if (hasCols64)
+        {
+            // Bottom edge: 1-bit at probs[1] = SPLIT (1) vs HORZ (0).
+            EmitPartitionBoundary1Bit(ref state, outBuf, byteConsts,
+                sizeIdx: 3, bsl: 3, miRow: miRow64, miCol: miCol64,
+                abovePartCtx, leftPartCtx, probIdx: 1, value: 1);
+        }
+        else if (hasRows64)
+        {
+            // Right edge: 1-bit at probs[2] = SPLIT (1) vs VERT (0).
+            EmitPartitionBoundary1Bit(ref state, outBuf, byteConsts,
+                sizeIdx: 3, bsl: 3, miRow: miRow64, miCol: miCol64,
+                abovePartCtx, leftPartCtx, probIdx: 2, value: 1);
+        }
+        // else corner: forced split, no emit.
 
         // Walk 4 children at 32x32 in z-order: TL, TR, BL, BR.
+        // Skip out-of-frame children (top-left at or past frame boundary).
         for (int q32 = 0; q32 < 4; q32++)
         {
             int miRow32 = miRow64 + ((q32 & 2) >> 1) * 4;
             int miCol32 = miCol64 + (q32 & 1) * 4;
+            if (miRow32 >= frameMiRows || miCol32 >= frameMiCols) continue;
             EncodeBlock32x32(
                 ref state, outBuf,
                 yCoefs, uCoefs, vCoefs,
@@ -312,7 +366,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
                 leftYMode, leftSkip, leftPartCtx, leftTxSize,
                 leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
                 tokenCache,
-                miRow32, miCol32, mbCols);
+                miRow32, miCol32, mbCols, frameMi);
         }
     }
 
@@ -327,18 +381,41 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<byte> leftPartCtx, ArrayView<byte> leftTxSize,
         ArrayView<byte> leftYEntropyCtx, ArrayView<byte> leftUEntropyCtx, ArrayView<byte> leftVEntropyCtx,
         ArrayView<byte> tokenCache,
-        int miRow32, int miCol32, int mbCols)
+        int miRow32, int miCol32, int mbCols, int frameMi)
     {
-        // SPLIT at 32x32. bsl=2, sizeIdx=2.
-        EmitPartitionSplit(ref state, outBuf, byteConsts,
-            sizeIdx: 2, bsl: 2, miRow: miRow32, miCol: miCol32,
-            abovePartCtx, leftPartCtx);
+        int frameMiCols = frameMi & 0xFFFF;
+        int frameMiRows = frameMi >> 16;
 
-        // Walk 4 children at 16x16 in z-order.
+        // SB32 boundary check: bsl=2, half=2 mi.
+        bool hasRows32 = (miRow32 + 2) < frameMiRows;
+        bool hasCols32 = (miCol32 + 2) < frameMiCols;
+
+        if (hasRows32 && hasCols32)
+        {
+            EmitPartitionSplit(ref state, outBuf, byteConsts,
+                sizeIdx: 2, bsl: 2, miRow: miRow32, miCol: miCol32,
+                abovePartCtx, leftPartCtx);
+        }
+        else if (hasCols32)
+        {
+            EmitPartitionBoundary1Bit(ref state, outBuf, byteConsts,
+                sizeIdx: 2, bsl: 2, miRow: miRow32, miCol: miCol32,
+                abovePartCtx, leftPartCtx, probIdx: 1, value: 1);
+        }
+        else if (hasRows32)
+        {
+            EmitPartitionBoundary1Bit(ref state, outBuf, byteConsts,
+                sizeIdx: 2, bsl: 2, miRow: miRow32, miCol: miCol32,
+                abovePartCtx, leftPartCtx, probIdx: 2, value: 1);
+        }
+        // else corner: forced split, no emit.
+
+        // Walk 4 children at 16x16 in z-order, skipping out-of-frame children.
         for (int q16 = 0; q16 < 4; q16++)
         {
             int miRow16 = miRow32 + ((q16 & 2) >> 1) * 2;
             int miCol16 = miCol32 + (q16 & 1) * 2;
+            if (miRow16 >= frameMiRows || miCol16 >= frameMiCols) continue;
             EncodeBlock16x16(
                 ref state, outBuf,
                 yCoefs, uCoefs, vCoefs,
@@ -348,7 +425,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
                 leftYMode, leftSkip, leftPartCtx, leftTxSize,
                 leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
                 tokenCache,
-                miRow16, miCol16, mbCols);
+                miRow16, miCol16, mbCols, frameMi);
         }
     }
 
@@ -363,29 +440,63 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<byte> leftPartCtx, ArrayView<byte> leftTxSize,
         ArrayView<byte> leftYEntropyCtx, ArrayView<byte> leftUEntropyCtx, ArrayView<byte> leftVEntropyCtx,
         ArrayView<byte> tokenCache,
-        int miRow16, int miCol16, int mbCols)
+        int miRow16, int miCol16, int mbCols, int frameMi)
     {
-        // NONE at 16x16. bsl=1, sizeIdx=1. Emit single bit 0 at probs[0].
-        EmitPartitionNone(ref state, outBuf, byteConsts,
-            sizeIdx: 1, bsl: 1, miRow: miRow16, miCol: miCol16,
-            abovePartCtx, leftPartCtx);
+        int frameMiCols = frameMi & 0xFFFF;
+        int frameMiRows = frameMi >> 16;
 
-        // Encode leaf.
-        int mbR = miRow16 >> 1;
-        int mbC = miCol16 >> 1;
-        EncodeLeafBlock(
-            ref state, outBuf,
-            yCoefs, uCoefs, vCoefs,
-            byteConsts, ushortConsts,
-            aboveYMode, aboveSkip, aboveTxSize,
-            aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
-            leftYMode, leftSkip, leftTxSize,
-            leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
-            tokenCache,
-            mbR, mbC, miRow16, miCol16, mbCols);
+        // SB16 boundary check: bsl=1, half=1 mi.
+        bool hasRows = (miRow16 + 1) < frameMiRows;
+        bool hasCols = (miCol16 + 1) < frameMiCols;
 
-        // UpdatePartitionContext for 16x16+NONE: subsize=Block16x16,
-        // PartitionContextLookup[6] = (12, 12). bs = (1<<bsl) = 2.
+        if (hasRows && hasCols)
+        {
+            // Standard path: NONE + BLOCK_16X16 leaf.
+            EmitPartitionNone(ref state, outBuf, byteConsts,
+                sizeIdx: 1, bsl: 1, miRow: miRow16, miCol: miCol16,
+                abovePartCtx, leftPartCtx);
+
+            int mbR = miRow16 >> 1;
+            int mbC = miCol16 >> 1;
+            EncodeLeafBlock(
+                ref state, outBuf,
+                yCoefs, uCoefs, vCoefs,
+                byteConsts, ushortConsts,
+                aboveYMode, aboveSkip, aboveTxSize,
+                aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
+                leftYMode, leftSkip, leftTxSize,
+                leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
+                tokenCache,
+                mbR, mbC, miRow16, miCol16, mbCols);
+        }
+        else if (hasCols)
+        {
+            // Bottom-edge boundary: emit PARTITION_HORZ (1-bit value 0 at
+            // probs[1]). Encode top BLOCK_16X8 leaf only; bottom sub-block
+            // top-left is at miRow16+1 which is >= frameMiRows so the
+            // decoder skips it per spec.
+            EmitPartitionBoundary1Bit(ref state, outBuf, byteConsts,
+                sizeIdx: 1, bsl: 1, miRow: miRow16, miCol: miCol16,
+                abovePartCtx, leftPartCtx, probIdx: 1, value: 0);
+
+            int mbR = miRow16 >> 1;
+            int mbC = miCol16 >> 1;
+            EncodeLeafBlock16x8(
+                ref state, outBuf,
+                yCoefs, uCoefs, vCoefs,
+                byteConsts, ushortConsts,
+                aboveYMode, aboveSkip, aboveTxSize,
+                aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
+                leftYMode, leftSkip, leftTxSize,
+                leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
+                tokenCache,
+                mbR, mbC, miRow16, miCol16, mbCols);
+        }
+        // else hasRows-only or corner: not implemented in v1 (1920x1080
+        // doesn't hit these cases). Tracked as task #23 for full 4K + arbitrary
+        // dim support.
+
+        // UpdatePartitionContext: same for 16x16+NONE and 16x16+HORZ in our path.
         for (int i = 0; i < 2; i++)
         {
             int c = miCol16 + i;
@@ -412,6 +523,32 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 1, byteConsts[probsBase + 0]);
         Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 1, byteConsts[probsBase + 1]);
         Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 1, byteConsts[probsBase + 2]);
+    }
+
+    /// <summary>
+    /// Emit the 1-bit partition decision used at SB-grid boundary edges.
+    /// At the bottom-only boundary (!hasRows &amp;&amp; hasCols) the decoder reads
+    /// probs[1] selecting between PARTITION_HORZ (bit 0) and PARTITION_SPLIT (bit 1).
+    /// At the right-only boundary (hasRows &amp;&amp; !hasCols), probs[2] selects
+    /// between PARTITION_VERT (0) and PARTITION_SPLIT (1).
+    /// At the corner (!hasRows &amp;&amp; !hasCols) no bits are read; partition is
+    /// implicitly SPLIT - this helper isn't called for that case.
+    /// </summary>
+    private static void EmitPartitionBoundary1Bit(
+        ref Vp8BoolEncoderGpuState state, ArrayView<byte> outBuf,
+        ArrayView<byte> byteConsts,
+        int sizeIdx, int bsl, int miRow, int miCol,
+        ArrayView<byte> abovePartCtx, ArrayView<byte> leftPartCtx,
+        int probIdx, int value)
+    {
+        int leftIdx = miRow & 7;
+        int aboveIdx = miCol;
+        int leftBit = (leftPartCtx[leftIdx] >> bsl) & 1;
+        int aboveBit = (abovePartCtx[aboveIdx] >> bsl) & 1;
+        int splitState = leftBit * 2 + aboveBit;
+        long probsBase = Vp9KeyframeConstantsGpu.KfPartitionProbsOffset
+                       + ((long)sizeIdx * 4 + splitState) * 3;
+        Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, value, byteConsts[probsBase + probIdx]);
     }
 
     private static void EmitPartitionNone(
@@ -530,6 +667,131 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             byteConsts, ushortConsts,
             uvAboveCell, uvLeftCell, cellsPerTx: 2,
             isTx4x4: 0, txSizeForCoefProbs: (int)Vp9TxSize.Tx8x8,
+            planeType: (int)Vp9BlockCoefEnums.PlaneType.Uv,
+            tokenCache, aboveVEntropyCtx, leftVEntropyCtx);
+    }
+
+    /// <summary>
+    /// Encode a top-half BLOCK_16X8 leaf at the bottom-edge boundary. Same
+    /// shape as <see cref="EncodeLeafBlock"/> but with 2 Tx8x8 luma + 2 Tx4x4
+    /// U + 2 Tx4x4 V transforms (per VP9 spec for BLOCK_16X8 with TX_MODE=
+    /// ALLOW_32X32). Mode-info contexts updated for a 2-mi-wide x 1-mi-tall
+    /// region (vs 2x2 for BLOCK_16X16).
+    /// </summary>
+    private static void EncodeLeafBlock16x8(
+        ref Vp8BoolEncoderGpuState state, ArrayView<byte> outBuf,
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
+        ArrayView<byte> aboveYMode, ArrayView<byte> aboveSkip, ArrayView<byte> aboveTxSize,
+        ArrayView<byte> aboveYEntropyCtx, ArrayView<byte> aboveUEntropyCtx, ArrayView<byte> aboveVEntropyCtx,
+        ArrayView<byte> leftYMode, ArrayView<byte> leftSkip, ArrayView<byte> leftTxSize,
+        ArrayView<byte> leftYEntropyCtx, ArrayView<byte> leftUEntropyCtx, ArrayView<byte> leftVEntropyCtx,
+        ArrayView<byte> tokenCache,
+        int mbR, int mbC, int miRow, int miCol, int mbCols)
+    {
+        // Skip flag, Y mode, UV mode emit identical to BLOCK_16X16 (DC_PRED,
+        // skip=0 in v1).
+        int leftIdxMi = miRow & 7;
+        int leftSkipBit = leftSkip[leftIdxMi];
+        int aboveSkipBit = miCol < MaxMiColsAligned ? aboveSkip[miCol] : 0;
+        int skipContext = aboveSkipBit + leftSkipBit;
+        int skipFlag = 0;
+        Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, skipFlag,
+            byteConsts[Vp9KeyframeConstantsGpu.SkipProbsOffset + skipContext]);
+
+        int b4Col = miCol * 2;
+        int leftB4Idx = (miRow & 7) * 2;
+        int aboveYCell = b4Col < MaxMiColsAligned * 2 ? aboveYMode[b4Col] : 0;
+        int leftYCell = leftYMode[leftB4Idx];
+        long yProbBase = Vp9KeyframeConstantsGpu.KfYModeProbsOffset
+                       + (long)(aboveYCell * 10 + leftYCell) * 9;
+        Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 0, byteConsts[yProbBase + 0]);
+
+        long uvProbBase = Vp9KeyframeConstantsGpu.KfUvModeProbsOffset;
+        Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 0, byteConsts[uvProbBase + 0]);
+
+        // Mode-info context updates for BLOCK_16X8: b4Wide=4, b4High=2,
+        // miWide=2, miHigh=1.
+        for (int i = 0; i < 4; i++)
+        {
+            int c = b4Col + i;
+            if (c < MaxMiColsAligned * 2) aboveYMode[c] = 0;
+        }
+        for (int i = 0; i < 2; i++)
+        {
+            int r = (leftB4Idx + i) & 15;
+            leftYMode[r] = 0;
+        }
+        for (int i = 0; i < 2; i++)
+        {
+            int c = miCol + i;
+            if (c < MaxMiColsAligned) { aboveSkip[c] = (byte)skipFlag; aboveTxSize[c] = (byte)Vp9TxSize.Tx8x8; }
+        }
+        // miHigh=1: only one left row updated.
+        leftSkip[leftIdxMi] = (byte)skipFlag;
+        leftTxSize[leftIdxMi] = (byte)Vp9TxSize.Tx8x8;
+
+        long mbIdx = (long)mbR * mbCols + mbC;
+
+        // Y plane: 2 Tx8x8 over the top 16x8 (left 8x8 + right 8x8).
+        // Sequential encode stores them at yCoefs[mbIdx*256 + 0..63] and [+64..127].
+        // cellsPerTx = 8/4 = 2.
+        int yAboveCell = mbC * 4;
+        int yLeftCell = (mbR & 3) * 4;
+        EncodePlaneCoefs(
+            ref state, outBuf,
+            yCoefs, mbIdx * 256 + 0, 64,
+            byteConsts, ushortConsts,
+            yAboveCell, yLeftCell, cellsPerTx: 2,
+            isTx4x4: 0, txSizeForCoefProbs: (int)Vp9TxSize.Tx8x8,
+            planeType: (int)Vp9BlockCoefEnums.PlaneType.Y,
+            tokenCache, aboveYEntropyCtx, leftYEntropyCtx);
+        EncodePlaneCoefs(
+            ref state, outBuf,
+            yCoefs, mbIdx * 256 + 64, 64,
+            byteConsts, ushortConsts,
+            yAboveCell + 2, yLeftCell, cellsPerTx: 2,
+            isTx4x4: 0, txSizeForCoefProbs: (int)Vp9TxSize.Tx8x8,
+            planeType: (int)Vp9BlockCoefEnums.PlaneType.Y,
+            tokenCache, aboveYEntropyCtx, leftYEntropyCtx);
+
+        // U plane: 2 Tx4x4 over top 8x4 chroma (left 4x4 + right 4x4).
+        // Stored at uCoefs[mbIdx*64 + 0..15] and [+16..31].
+        // cellsPerTx = 4/4 = 1.
+        int uvAboveCell = mbC * 2;
+        int uvLeftCell = (mbR & 3) * 2;
+        EncodePlaneCoefs(
+            ref state, outBuf,
+            uCoefs, mbIdx * 64 + 0, 16,
+            byteConsts, ushortConsts,
+            uvAboveCell, uvLeftCell, cellsPerTx: 1,
+            isTx4x4: 1, txSizeForCoefProbs: (int)Vp9TxSize.Tx4x4,
+            planeType: (int)Vp9BlockCoefEnums.PlaneType.Uv,
+            tokenCache, aboveUEntropyCtx, leftUEntropyCtx);
+        EncodePlaneCoefs(
+            ref state, outBuf,
+            uCoefs, mbIdx * 64 + 16, 16,
+            byteConsts, ushortConsts,
+            uvAboveCell + 1, uvLeftCell, cellsPerTx: 1,
+            isTx4x4: 1, txSizeForCoefProbs: (int)Vp9TxSize.Tx4x4,
+            planeType: (int)Vp9BlockCoefEnums.PlaneType.Uv,
+            tokenCache, aboveUEntropyCtx, leftUEntropyCtx);
+
+        // V plane: same as U.
+        EncodePlaneCoefs(
+            ref state, outBuf,
+            vCoefs, mbIdx * 64 + 0, 16,
+            byteConsts, ushortConsts,
+            uvAboveCell, uvLeftCell, cellsPerTx: 1,
+            isTx4x4: 1, txSizeForCoefProbs: (int)Vp9TxSize.Tx4x4,
+            planeType: (int)Vp9BlockCoefEnums.PlaneType.Uv,
+            tokenCache, aboveVEntropyCtx, leftVEntropyCtx);
+        EncodePlaneCoefs(
+            ref state, outBuf,
+            vCoefs, mbIdx * 64 + 16, 16,
+            byteConsts, ushortConsts,
+            uvAboveCell + 1, uvLeftCell, cellsPerTx: 1,
+            isTx4x4: 1, txSizeForCoefProbs: (int)Vp9TxSize.Tx4x4,
             planeType: (int)Vp9BlockCoefEnums.PlaneType.Uv,
             tokenCache, aboveVEntropyCtx, leftVEntropyCtx);
     }

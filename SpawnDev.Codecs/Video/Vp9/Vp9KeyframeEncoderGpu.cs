@@ -250,15 +250,23 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             mbCols, mbRows);
 
         // ---- 5. Entropy ----
+        // Pass display mi dims so the walker can spec-correctly handle SBs
+        // that straddle the frame boundary (e.g. 1920x1080: bottom-edge SB16
+        // at miRow=134 emits PARTITION_HORZ + top BLOCK_16X8 leaf).
+        int displayMiCols = (width + 7) >> 3;
+        int displayMiRows = (height + 7) >> 3;
         _entropyKernel.Run(
             _dYCoefs!.View, _dUCoefs!.View, _dVCoefs!.View,
             _dTile!.View, _dTileLen!.View,
             _dByteConsts.View, _dUshortConsts.View,
-            mbCols, mbRows);
+            mbCols, mbRows,
+            displayMiCols, displayMiRows);
 
         // ---- 6. Uncompressed header (GPU-resident: reads compressedLen
         // directly from the buffer the compressedHeaderKernel wrote to;
-        // no host sync) ----
+        // no host sync). Bitstream signals ORIGINAL display dims; the
+        // entropy walker handles boundary-straddling SBs spec-correctly
+        // via forced-split partitions (no CDF emit at boundaries). ----
         _uncompressedHeaderKernel.Run(
             _dUncompressedHeader!.View, _dUncompressedHeaderLen!.View,
             _dCompressedHeaderLen!.View,
@@ -482,7 +490,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
                 yCoefStride, uvCoefStride, dequantStride);
         }
 
-        // Phase 3: BATCH entropy.
+        // Phase 3: BATCH entropy. Display mi dims drive boundary forced-split.
         var entropyStrides = new Vp9FrameEntropyBatchStrides
         {
             YCoefStride = yCoefStride,
@@ -490,6 +498,8 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             OutBufStride = (int)worstCaseTile,
             MbCols = mbCols,
             MbRows = mbRows,
+            FrameMiCols = (width + 7) >> 3,
+            FrameMiRows = (height + 7) >> 3,
         };
         _entropyKernel.RunBatch(
             dAllYC.View, dAllUC.View, dAllVC.View,
@@ -497,7 +507,8 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             _dByteConsts.View, _dUshortConsts.View,
             frameCount, entropyStrides);
 
-        // Phase 4: BATCH uncompressed header + assemble.
+        // Phase 4: BATCH uncompressed header + assemble. Bitstream signals
+        // original display dims; entropy walker handles boundary forced-split.
         _uncompressedHeaderKernel.RunBatch(
             dAllUH.View, dAllUHLen.View, dAllCHLen.View,
             width, height, baseQIndex,
