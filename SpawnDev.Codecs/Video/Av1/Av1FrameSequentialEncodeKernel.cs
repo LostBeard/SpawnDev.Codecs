@@ -118,6 +118,23 @@ public struct Av1FrameSeqEncodeParams
     public int FrameMiRows;
 }
 
+/// <summary>Per-frame slot strides for the batch AV1 frame walker.</summary>
+public struct Av1FrameBatchStrides
+{
+    /// <summary>src bytes per frame (yLen + 2*uvLen).</summary>
+    public int SrcStride;
+    /// <summary>recon bytes per frame (same as src).</summary>
+    public int ReconStride;
+    /// <summary>tileBytes per frame (worst-case).</summary>
+    public int TileStride;
+    /// <summary>scratchByte per frame.</summary>
+    public int ScratchByteStride;
+    /// <summary>scratchInt ints per frame (MinScratchIntLength).</summary>
+    public int ScratchIntStride;
+    /// <summary>scratchShort shorts per frame (256).</summary>
+    public int ScratchShortStride;
+}
+
 /// <summary>
 /// AV1 v1 keyframe per-frame walker kernel. Single GPU thread runs the
 /// entire EncodeSingleTile bit-exact vs Av1KeyframeEncoder.EncodeSingleTile.
@@ -138,6 +155,14 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         ArrayView<short>,   // scratchShort (residual)
         Av1FrameSeqEncodeParams> _kernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<byte>, ArrayView<byte>,
+        ArrayView<byte>, ArrayView<long>,
+        ArrayView<byte>, ArrayView<ushort>, ArrayView<short>,
+        ArrayView<byte>, ArrayView<int>, ArrayView<short>,
+        Av1FrameSeqEncodeParams, Av1FrameBatchStrides> _batchKernel;
+
     /// <summary>Slot in scratchInt where WriteCoeffsTxb writes eob (per call).</summary>
     public const int EobSlot = 1100;
     /// <summary>Slot in scratchInt where WriteCoeffsTxb writes culLevel (per call).</summary>
@@ -156,6 +181,36 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
             ArrayView<byte>, ArrayView<ushort>, ArrayView<short>,
             ArrayView<byte>, ArrayView<int>, ArrayView<short>,
             Av1FrameSeqEncodeParams>(EncodeFrameKernel);
+        _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<byte>, ArrayView<byte>,
+            ArrayView<byte>, ArrayView<long>,
+            ArrayView<byte>, ArrayView<ushort>, ArrayView<short>,
+            ArrayView<byte>, ArrayView<int>, ArrayView<short>,
+            Av1FrameSeqEncodeParams, Av1FrameBatchStrides>(BatchEncodeFrameKernel);
+    }
+
+    /// <summary>
+    /// Batch dispatch: extent=frameCount, each thread runs one full
+    /// AV1 EncodeSingleTile on its frame slot. Each thread has its own
+    /// range encoder state, its own scratch slots, and writes to its
+    /// own output slot.
+    /// </summary>
+    public void RunBatch(
+        ArrayView<byte> src, ArrayView<byte> recon,
+        ArrayView<byte> tileBytes, ArrayView<long> tileLen,
+        ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
+        ArrayView<short> dcAcQuant,
+        ArrayView<byte> scratchByte, ArrayView<int> scratchInt, ArrayView<short> scratchShort,
+        Av1FrameSeqEncodeParams p,
+        int frameCount,
+        Av1FrameBatchStrides strides)
+    {
+        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        _batchKernel(new Index1D(frameCount),
+            src, recon, tileBytes, tileLen,
+            constsByte, constsUshort, dcAcQuant,
+            scratchByte, scratchInt, scratchShort, p, strides);
     }
 
     /// <summary>Dispatch the walker (single-thread; one GPU invocation per frame).</summary>
@@ -184,6 +239,51 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
 
     private static void EncodeFrameKernel(
         Index1D _,
+        ArrayView<byte> src, ArrayView<byte> recon,
+        ArrayView<byte> tileBytes, ArrayView<long> tileLen,
+        ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
+        ArrayView<short> dcAcQuant,
+        ArrayView<byte> scratchByte,
+        ArrayView<int> scratchInt,
+        ArrayView<short> scratchShort,
+        Av1FrameSeqEncodeParams p)
+    {
+        EncodeFrameBody(src, recon, tileBytes, tileLen,
+            constsByte, constsUshort, dcAcQuant,
+            scratchByte, scratchInt, scratchShort, p);
+    }
+
+    /// <summary>
+    /// Batch kernel: thread = one frame. Per-frame buffer slots SubView'd
+    /// at kernel head; body unchanged. Each thread has its own range
+    /// encoder state and writes to its own output slot.
+    /// </summary>
+    private static void BatchEncodeFrameKernel(
+        Index1D idx,
+        ArrayView<byte> src, ArrayView<byte> recon,
+        ArrayView<byte> tileBytes, ArrayView<long> tileLen,
+        ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
+        ArrayView<short> dcAcQuant,
+        ArrayView<byte> scratchByte,
+        ArrayView<int> scratchInt,
+        ArrayView<short> scratchShort,
+        Av1FrameSeqEncodeParams p,
+        Av1FrameBatchStrides s)
+    {
+        int f = idx.X;
+        var fSrc = src.SubView((long)f * s.SrcStride, s.SrcStride);
+        var fRecon = recon.SubView((long)f * s.ReconStride, s.ReconStride);
+        var fTile = tileBytes.SubView((long)f * s.TileStride, s.TileStride);
+        var fTileLen = tileLen.SubView(f, 1);
+        var fScratchByte = scratchByte.SubView((long)f * s.ScratchByteStride, s.ScratchByteStride);
+        var fScratchInt = scratchInt.SubView((long)f * s.ScratchIntStride, s.ScratchIntStride);
+        var fScratchShort = scratchShort.SubView((long)f * s.ScratchShortStride, s.ScratchShortStride);
+        EncodeFrameBody(fSrc, fRecon, fTile, fTileLen,
+            constsByte, constsUshort, dcAcQuant,
+            fScratchByte, fScratchInt, fScratchShort, p);
+    }
+
+    private static void EncodeFrameBody(
         ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> tileBytes, ArrayView<long> tileLen,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,

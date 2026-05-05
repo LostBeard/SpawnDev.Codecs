@@ -185,8 +185,8 @@ Console.WriteLine("Encoding VP9 GPU (batch)...");
     AddVideo($"VP9 GPU batch ({backend})", swTotal.Elapsed.TotalMilliseconds, -1, total);
 }
 
-// ---- AV1 GPU (async) ----
-Console.WriteLine("Encoding AV1 GPU...");
+// ---- AV1 GPU (per-frame) ----
+Console.WriteLine("Encoding AV1 GPU (per-frame)...");
 {
     using var enc = new Av1KeyframeEncoderGpu(acc);
     long total = 0;
@@ -208,6 +208,30 @@ Console.WriteLine("Encoding AV1 GPU...");
     }
     swTotal.Stop();
     AddVideo($"AV1 GPU ({backend})", swTotal.Elapsed.TotalMilliseconds, frame0Ms, total);
+}
+
+// ---- AV1 GPU (batch) ----
+Console.WriteLine("Encoding AV1 GPU (batch)...");
+{
+    using var enc = new Av1KeyframeEncoderGpu(acc);
+    var yPlanes = new ReadOnlyMemory<byte>[frameCount];
+    var uPlanes = new ReadOnlyMemory<byte>[frameCount];
+    var vPlanes = new ReadOnlyMemory<byte>[frameCount];
+    for (int f = 0; f < frameCount; f++)
+    {
+        int yOff = f * frameSize;
+        int uOff = yOff + W * H;
+        int vOff = uOff + (W / 2) * (H / 2);
+        yPlanes[f] = new ReadOnlyMemory<byte>(allFrames, yOff, W * H);
+        uPlanes[f] = new ReadOnlyMemory<byte>(allFrames, uOff, (W / 2) * (H / 2));
+        vPlanes[f] = new ReadOnlyMemory<byte>(allFrames, vOff, (W / 2) * (H / 2));
+    }
+    var swTotal = Stopwatch.StartNew();
+    var results = await enc.EncodeKeyFramesBatchAsync(yPlanes, uPlanes, vPlanes, W, H, baseQIndex: 32);
+    swTotal.Stop();
+    long total = 0;
+    foreach (var r in results) total += r.Length;
+    AddVideo($"AV1 GPU batch ({backend})", swTotal.Elapsed.TotalMilliseconds, -1, total);
 }
 
 // ---- ffmpeg references on the same YUV ----

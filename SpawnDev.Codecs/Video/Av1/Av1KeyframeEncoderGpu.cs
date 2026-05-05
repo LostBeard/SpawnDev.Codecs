@@ -301,6 +301,132 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
             width, height, baseQIndex, tileBytes);
     }
 
+    /// <summary>
+    /// Frame-batch parallel AV1 keyframe encoder. Per-frame slots through
+    /// the kernel; extent=N dispatch runs all frames concurrently. Each
+    /// thread has its own range encoder state, scratch buffers, and tile
+    /// output slot.
+    /// </summary>
+    public async Task<byte[][]> EncodeKeyFramesBatchAsync(
+        ReadOnlyMemory<byte>[] yPlanes,
+        ReadOnlyMemory<byte>[] uPlanes,
+        ReadOnlyMemory<byte>[] vPlanes,
+        int width, int height,
+        int baseQIndex = 32)
+    {
+        if (yPlanes is null) throw new ArgumentNullException(nameof(yPlanes));
+        if (uPlanes is null) throw new ArgumentNullException(nameof(uPlanes));
+        if (vPlanes is null) throw new ArgumentNullException(nameof(vPlanes));
+        if (yPlanes.Length != uPlanes.Length || yPlanes.Length != vPlanes.Length)
+            throw new ArgumentException("Plane arrays must have equal length.");
+        int frameCount = yPlanes.Length;
+        if (frameCount == 0) return Array.Empty<byte[]>();
+        if (width <= 0 || (width & 63) != 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0 || (height & 63) != 0)
+            throw new ArgumentOutOfRangeException(nameof(height));
+
+        int yLen = width * height;
+        int uvLen = yLen / 4;
+        int srcLen = yLen + uvLen + uvLen;
+
+        int frameMiCols = ((width + 7) >> 3) << 1;
+        int frameMiRows = ((height + 7) >> 3) << 1;
+
+        var p = new Av1FrameSeqEncodeParams
+        {
+            Width = width,
+            Height = height,
+            BaseQIndex = baseQIndex,
+            YPlaneOff = 0,
+            UPlaneOff = yLen,
+            VPlaneOff = yLen + uvLen,
+            FrameMiCols = frameMiCols,
+            FrameMiRows = frameMiRows,
+        };
+        int byteOff = 0;
+        p.AboveEntropyOff = byteOff; byteOff += 3 * frameMiCols;
+        p.LeftEntropyOff = byteOff;  byteOff += 3 * 32;
+        p.AbovePartOff = byteOff;    byteOff += frameMiCols;
+        p.LeftPartOff = byteOff;     byteOff += 32;
+        p.AboveYModeOff = byteOff;   byteOff += frameMiCols;
+        p.LeftYModeOff = byteOff;    byteOff += 32;
+        p.AboveSkipOff = byteOff;    byteOff += frameMiCols;
+        p.LeftSkipOff = byteOff;     byteOff += 32;
+        p.EdgeAboveOff = byteOff;    byteOff += 33;
+        p.EdgeLeftOff = byteOff;     byteOff += 33;
+        p.PredictOff = byteOff;      byteOff += 256;
+        p.LevelsOff = byteOff;       byteOff += 1384;
+        int scratchByteLen = byteOff;
+        int scratchIntLen = Av1FrameSequentialEncodeKernel.MinScratchIntLength;
+        int scratchShortLen = 256;
+
+        int leaves = (width >> 4) * (height >> 4);
+        int worstCaseTile = leaves * 2048 + 256;
+
+        // Per-frame slot buffers.
+        using var dAllSrc = _accelerator.Allocate1D<byte>((long)frameCount * srcLen);
+        using var dAllRecon = _accelerator.Allocate1D<byte>((long)frameCount * srcLen);
+        using var dAllTile = _accelerator.Allocate1D<byte>((long)frameCount * worstCaseTile);
+        using var dAllTileLen = _accelerator.Allocate1D<long>(frameCount);
+        using var dAllScratchByte = _accelerator.Allocate1D<byte>((long)frameCount * scratchByteLen);
+        using var dAllScratchInt = _accelerator.Allocate1D<int>((long)frameCount * scratchIntLen);
+        using var dAllScratchShort = _accelerator.Allocate1D<short>((long)frameCount * scratchShortLen);
+
+        dAllTile.View.MemSetToZero();
+        dAllTileLen.View.MemSetToZero();
+        dAllScratchByte.View.MemSetToZero();
+        dAllScratchInt.View.MemSetToZero();
+        dAllScratchShort.View.MemSetToZero();
+
+        // Bulk upload all frames' Y/U/V planes into per-frame slots.
+        var hostSrc = new byte[(long)frameCount * srcLen];
+        for (int f = 0; f < frameCount; f++)
+        {
+            int baseOff = f * srcLen;
+            yPlanes[f].Span.CopyTo(hostSrc.AsSpan(baseOff));
+            uPlanes[f].Span.CopyTo(hostSrc.AsSpan(baseOff + yLen));
+            vPlanes[f].Span.CopyTo(hostSrc.AsSpan(baseOff + yLen + uvLen));
+        }
+        dAllSrc.View.CopyFromCPU(hostSrc);
+
+        var strides = new Av1FrameBatchStrides
+        {
+            SrcStride = srcLen,
+            ReconStride = srcLen,
+            TileStride = worstCaseTile,
+            ScratchByteStride = scratchByteLen,
+            ScratchIntStride = scratchIntLen,
+            ScratchShortStride = scratchShortLen,
+        };
+
+        // Single batch dispatch encodes all N frames in parallel.
+        _frameKernel.RunBatch(
+            dAllSrc.View, dAllRecon.View,
+            dAllTile.View, dAllTileLen.View,
+            _dByteConsts.View, _dUshortConsts.View, _dDcAcQuant.View,
+            dAllScratchByte.View, dAllScratchInt.View, dAllScratchShort.View,
+            p, frameCount, strides);
+
+        await _accelerator.SynchronizeAsync();
+
+        // Read back per-frame tile lengths + tile bytes + assemble OBU
+        // wrapper for each frame. The OBU framing is metadata-level
+        // serialization (same as single-frame path).
+        var tileLensHost = await dAllTileLen.CopyToHostAsync();
+        var tileBytesHost = await dAllTile.CopyToHostAsync();
+        var results = new byte[frameCount][];
+        for (int f = 0; f < frameCount; f++)
+        {
+            int tileLen = (int)tileLensHost[f];
+            var tileSlot = new byte[tileLen];
+            Array.Copy(tileBytesHost, (long)f * worstCaseTile, tileSlot, 0, tileLen);
+            results[f] = Av1KeyframeEncoder.EncodeKeyFrameWithExternalTile(
+                width, height, baseQIndex, tileSlot);
+        }
+        return results;
+    }
+
     /// <summary>Release every resource the encoder owns.</summary>
     public void Dispose()
     {
