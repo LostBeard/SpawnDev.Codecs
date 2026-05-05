@@ -313,6 +313,158 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         _cachedHeight = -1;
     }
 
+    /// <summary>
+    /// Frame-batch parallel VP9 encoder. Same architecture as VP8 batch:
+    /// per-frame buffer slots through every kernel, batch wave-front +
+    /// batch entropy run all N frames concurrently.
+    /// </summary>
+    public async Task<byte[][]> EncodeKeyFramesBatchAsync(
+        ReadOnlyMemory<byte>[] yPlanes,
+        ReadOnlyMemory<byte>[] uPlanes,
+        ReadOnlyMemory<byte>[] vPlanes,
+        int width, int height,
+        int baseQIndex = 30)
+    {
+        if (yPlanes is null) throw new ArgumentNullException(nameof(yPlanes));
+        if (uPlanes is null) throw new ArgumentNullException(nameof(uPlanes));
+        if (vPlanes is null) throw new ArgumentNullException(nameof(vPlanes));
+        if (yPlanes.Length != uPlanes.Length || yPlanes.Length != vPlanes.Length)
+            throw new ArgumentException("Plane arrays must have equal length.");
+        int frameCount = yPlanes.Length;
+        if (frameCount == 0) return Array.Empty<byte[]>();
+        if (width <= 0 || (width & 63) != 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0 || (height & 63) != 0)
+            throw new ArgumentOutOfRangeException(nameof(height));
+
+        int mbCols = width >> 4;
+        int mbRows = height >> 4;
+        int yLen = width * height;
+        int uvLen = yLen / 4;
+        int mbCount = mbCols * mbRows;
+
+        int yCoefStride = mbCount * 256;
+        int uvCoefStride = mbCount * 64;
+        int dequantStride = 4;
+        long worstCaseTile = mbCount * 1024L + 256L;
+        long worstCaseFrame = worstCaseTile + 128L;
+
+        // Per-frame slot buffers.
+        using var dAllY = _accelerator.Allocate1D<byte>((long)frameCount * yLen);
+        using var dAllU = _accelerator.Allocate1D<byte>((long)frameCount * uvLen);
+        using var dAllV = _accelerator.Allocate1D<byte>((long)frameCount * uvLen);
+        using var dAllYR = _accelerator.Allocate1D<byte>((long)frameCount * yLen);
+        using var dAllUR = _accelerator.Allocate1D<byte>((long)frameCount * uvLen);
+        using var dAllVR = _accelerator.Allocate1D<byte>((long)frameCount * uvLen);
+        using var dAllYC = _accelerator.Allocate1D<short>((long)frameCount * yCoefStride);
+        using var dAllUC = _accelerator.Allocate1D<short>((long)frameCount * uvCoefStride);
+        using var dAllVC = _accelerator.Allocate1D<short>((long)frameCount * uvCoefStride);
+        using var dAllDQ = _accelerator.Allocate1D<int>((long)frameCount * dequantStride);
+        using var dAllCH = _accelerator.Allocate1D<byte>((long)frameCount * 64);
+        using var dAllCHLen = _accelerator.Allocate1D<long>(frameCount);
+        using var dAllTile = _accelerator.Allocate1D<byte>((long)frameCount * worstCaseTile);
+        using var dAllTileLen = _accelerator.Allocate1D<long>(frameCount);
+        using var dAllUH = _accelerator.Allocate1D<byte>((long)frameCount * 32);
+        using var dAllUHLen = _accelerator.Allocate1D<long>(frameCount);
+        using var dAllOut = _accelerator.Allocate1D<byte>((long)frameCount * worstCaseFrame);
+        using var dAllOutLen = _accelerator.Allocate1D<long>(frameCount);
+
+        dAllCH.View.MemSetToZero();
+        dAllCHLen.View.MemSetToZero();
+        dAllTile.View.MemSetToZero();
+        dAllTileLen.View.MemSetToZero();
+        dAllUH.View.MemSetToZero();
+        dAllUHLen.View.MemSetToZero();
+        dAllOut.View.MemSetToZero();
+        dAllOutLen.View.MemSetToZero();
+
+        // Phase 1a: bulk upload all source planes (3 host->device transfers).
+        var hostY = new byte[(long)frameCount * yLen];
+        var hostU = new byte[(long)frameCount * uvLen];
+        var hostV = new byte[(long)frameCount * uvLen];
+        for (int f = 0; f < frameCount; f++)
+        {
+            yPlanes[f].Span.CopyTo(hostY.AsSpan((int)((long)f * yLen)));
+            uPlanes[f].Span.CopyTo(hostU.AsSpan((int)((long)f * uvLen)));
+            vPlanes[f].Span.CopyTo(hostV.AsSpan((int)((long)f * uvLen)));
+        }
+        dAllY.View.CopyFromCPU(hostY);
+        dAllU.View.CopyFromCPU(hostU);
+        dAllV.View.CopyFromCPU(hostV);
+
+        // Phase 1b: per-frame dequantizer + compressed header (tiny single-
+        // thread dispatches; loop is fine).
+        for (int f = 0; f < frameCount; f++)
+        {
+            var fDQ = dAllDQ.View.SubView((long)f * dequantStride, dequantStride);
+            var fCH = dAllCH.View.SubView((long)f * 64, 64);
+            var fCHLen = dAllCHLen.View.SubView(f, 1);
+            _dequantKernel.Run(_dDcQLookup.View, _dAcQLookup.View, fDQ,
+                baseQIndex, 0, 0, 0, 0);
+            _compressedHeaderKernel.Run(fCH, fCHLen);
+        }
+
+        // Phase 2: BATCH wave-front sequential encode.
+        _sequentialKernel.RunBatch(
+            dAllY.View, dAllU.View, dAllV.View,
+            dAllYR.View, dAllUR.View, dAllVR.View,
+            dAllYC.View, dAllUC.View, dAllVC.View,
+            dAllDQ.View,
+            mbCols, mbRows, frameCount,
+            yLen, uvLen,
+            yCoefStride, uvCoefStride, dequantStride);
+
+        // Phase 3: BATCH entropy.
+        var entropyStrides = new Vp9FrameEntropyBatchStrides
+        {
+            YCoefStride = yCoefStride,
+            UvCoefStride = uvCoefStride,
+            OutBufStride = (int)worstCaseTile,
+            MbCols = mbCols,
+            MbRows = mbRows,
+        };
+        _entropyKernel.RunBatch(
+            dAllYC.View, dAllUC.View, dAllVC.View,
+            dAllTile.View, dAllTileLen.View,
+            _dByteConsts.View, _dUshortConsts.View,
+            frameCount, entropyStrides);
+
+        // Phase 4: per-frame uncompressed header + assemble. We need
+        // compressedLen to seed the uncompressed header's first_partition_size.
+        // The kernel reads it from a view, GPU-resident; no host sync needed.
+        for (int f = 0; f < frameCount; f++)
+        {
+            var fUH = dAllUH.View.SubView((long)f * 32, 32);
+            var fUHLen = dAllUHLen.View.SubView(f, 1);
+            var fCHLen = dAllCHLen.View.SubView(f, 1);
+            _uncompressedHeaderKernel.Run(
+                fUH, fUHLen, fCHLen,
+                width, height, baseQIndex);
+
+            var fCH = dAllCH.View.SubView((long)f * 64, 64);
+            var fTile = dAllTile.View.SubView((long)f * worstCaseTile, worstCaseTile);
+            var fTileLen = dAllTileLen.View.SubView(f, 1);
+            var fOut = dAllOut.View.SubView((long)f * worstCaseFrame, worstCaseFrame);
+            var fOutLen = dAllOutLen.View.SubView(f, 1);
+            _assembleKernel.Run(
+                fUH, fCH, fTile,
+                fOut, fOutLen,
+                fUHLen, fCHLen, fTileLen);
+        }
+
+        await _accelerator.SynchronizeAsync();
+        var outLensHost = await dAllOutLen.CopyToHostAsync();
+        var outBytesHost = await dAllOut.CopyToHostAsync();
+        var results = new byte[frameCount][];
+        for (int f = 0; f < frameCount; f++)
+        {
+            int len = (int)outLensHost[f];
+            results[f] = new byte[len];
+            Array.Copy(outBytesHost, (long)f * worstCaseFrame, results[f], 0, len);
+        }
+        return results;
+    }
+
     /// <summary>Release every resource the encoder owns.</summary>
     public void Dispose()
     {

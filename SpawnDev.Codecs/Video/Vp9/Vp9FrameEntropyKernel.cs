@@ -57,6 +57,21 @@ using SpawnDev.ILGPU;
 
 namespace SpawnDev.Codecs.Video.Vp9;
 
+/// <summary>Per-frame slot strides for the batch entropy kernel.</summary>
+public struct Vp9FrameEntropyBatchStrides
+{
+    /// <summary>Y coefs per frame (mbCount*256).</summary>
+    public int YCoefStride;
+    /// <summary>UV coefs per frame (mbCount*64).</summary>
+    public int UvCoefStride;
+    /// <summary>tile output bytes per frame.</summary>
+    public int OutBufStride;
+    /// <summary>mbCols.</summary>
+    public int MbCols;
+    /// <summary>mbRows.</summary>
+    public int MbRows;
+}
+
 /// <summary>
 /// VP9 v1 keyframe entropy coding kernel. Single thread per frame;
 /// emits the bool-coded tile bitstream from already-quantized per-
@@ -83,6 +98,13 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<byte>, ArrayView<ushort>,
         int, int> _kernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<short>, ArrayView<short>, ArrayView<short>,
+        ArrayView<byte>, ArrayView<long>,
+        ArrayView<byte>, ArrayView<ushort>,
+        Vp9FrameEntropyBatchStrides> _batchKernel;
+
     /// <summary>Compile.</summary>
     public Vp9FrameEntropyKernel(Accelerator accelerator)
     {
@@ -94,6 +116,12 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             ArrayView<byte>, ArrayView<long>,
             ArrayView<byte>, ArrayView<ushort>,
             int, int>(EncodeFrameKernel);
+        _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<short>, ArrayView<short>, ArrayView<short>,
+            ArrayView<byte>, ArrayView<long>,
+            ArrayView<byte>, ArrayView<ushort>,
+            Vp9FrameEntropyBatchStrides>(BatchEncodeFrameKernel);
     }
 
     /// <summary>
@@ -135,8 +163,49 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             mbCols, mbRows);
     }
 
+    /// <summary>Batch entropy: extent=N, each thread walks one frame's MBs.</summary>
+    public void RunBatch(
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<byte> outBuf, ArrayView<long> outLen,
+        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
+        int frameCount, Vp9FrameEntropyBatchStrides strides)
+    {
+        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        _batchKernel(frameCount,
+            yCoefs, uCoefs, vCoefs,
+            outBuf, outLen,
+            byteConsts, ushortConsts, strides);
+    }
+
+    /// <summary>Batch entropy kernel: thread = one frame's entropy walk.</summary>
+    private static void BatchEncodeFrameKernel(
+        Index1D idx,
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<byte> outBuf, ArrayView<long> outLen,
+        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
+        Vp9FrameEntropyBatchStrides s)
+    {
+        int f = idx.X;
+        var fY = yCoefs.SubView((long)f * s.YCoefStride, s.YCoefStride);
+        var fU = uCoefs.SubView((long)f * s.UvCoefStride, s.UvCoefStride);
+        var fV = vCoefs.SubView((long)f * s.UvCoefStride, s.UvCoefStride);
+        var fOut = outBuf.SubView((long)f * s.OutBufStride, s.OutBufStride);
+        var fOutLen = outLen.SubView(f, 1);
+        EncodeFrameBody(fY, fU, fV, fOut, fOutLen, byteConsts, ushortConsts, s.MbCols, s.MbRows);
+    }
+
     private static void EncodeFrameKernel(
         Index1D _,
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<byte> outBuf, ArrayView<long> outLen,
+        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
+        int mbCols, int mbRows)
+    {
+        EncodeFrameBody(yCoefs, uCoefs, vCoefs, outBuf, outLen,
+            byteConsts, ushortConsts, mbCols, mbRows);
+    }
+
+    private static void EncodeFrameBody(
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<byte> outBuf, ArrayView<long> outLen,
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,

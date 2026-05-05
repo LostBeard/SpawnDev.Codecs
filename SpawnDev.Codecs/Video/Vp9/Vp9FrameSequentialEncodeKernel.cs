@@ -45,6 +45,29 @@ using SpawnDev.ILGPU;
 
 namespace SpawnDev.Codecs.Video.Vp9;
 
+/// <summary>Per-frame slot strides for the batch wave-front sequential encode kernel.</summary>
+public struct Vp9FrameSeqEncodeBatchParams
+{
+    /// <summary>Y plane bytes per frame (yLen).</summary>
+    public int YStride;
+    /// <summary>UV plane bytes per frame (uvLen).</summary>
+    public int UvStride;
+    /// <summary>Y coefs per frame (mbCount*256).</summary>
+    public int YCoefStride;
+    /// <summary>UV coefs per frame (mbCount*64).</summary>
+    public int UvCoefStride;
+    /// <summary>Dequant ints per frame (4).</summary>
+    public int DequantStride;
+    /// <summary>mbCols.</summary>
+    public int MbCols;
+    /// <summary>mbRows.</summary>
+    public int MbRows;
+    /// <summary>diagD packed in high 16 bits, rMin in low 16.</summary>
+    public int DiagAndRMin;
+    /// <summary>Number of MBs on this diagonal.</summary>
+    public int DiagCount;
+}
+
 /// <summary>
 /// VP9 v1 multi-MB sequential encoder kernel. Single thread per frame;
 /// processes all 16x16 macroblocks in row-major order with inline math
@@ -62,6 +85,14 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         ArrayView<int>,
         int, int, int> _kernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+        ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+        ArrayView<short>, ArrayView<short>, ArrayView<short>,
+        ArrayView<int>,
+        Vp9FrameSeqEncodeBatchParams> _batchKernel;
+
     /// <summary>Compile.</summary>
     public Vp9FrameSequentialEncodeKernel(Accelerator accelerator)
     {
@@ -74,6 +105,13 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<int>,
             int, int, int>(EncodeWavefrontKernel);
+        _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+            ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+            ArrayView<short>, ArrayView<short>, ArrayView<short>,
+            ArrayView<int>,
+            Vp9FrameSeqEncodeBatchParams>(EncodeWavefrontBatchKernel);
     }
 
     /// <summary>
@@ -123,6 +161,47 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
     }
 
     /// <summary>
+    /// Batch wave-front: encode N frames concurrently. 47 dispatches each
+    /// at extent = numFrames * diagCount; thread = (frame, mb-on-diagonal).
+    /// </summary>
+    public void RunBatch(
+        ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
+        ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<int> dequant,
+        int mbCols, int mbRows, int frameCount,
+        int yStride, int uvStride,
+        int yCoefStride, int uvCoefStride, int dequantStride)
+    {
+        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        int totalDiagonals = mbCols + mbRows - 1;
+        for (int d = 0; d < totalDiagonals; d++)
+        {
+            int rMin = d - (mbCols - 1); if (rMin < 0) rMin = 0;
+            int rMax = d; if (rMax > mbRows - 1) rMax = mbRows - 1;
+            int diagCount = rMax - rMin + 1;
+            int diagAndRMin = (d << 16) | (rMin & 0xFFFF);
+            var p = new Vp9FrameSeqEncodeBatchParams
+            {
+                YStride = yStride,
+                UvStride = uvStride,
+                YCoefStride = yCoefStride,
+                UvCoefStride = uvCoefStride,
+                DequantStride = dequantStride,
+                MbCols = mbCols,
+                MbRows = mbRows,
+                DiagAndRMin = diagAndRMin,
+                DiagCount = diagCount,
+            };
+            _batchKernel(frameCount * diagCount,
+                yPlane, uPlane, vPlane,
+                yRecon, uRecon, vRecon,
+                yCoefs, uCoefs, vCoefs,
+                dequant, p);
+        }
+    }
+
+    /// <summary>
     /// Wave-front kernel: each thread encodes one MB on the supplied
     /// diagonal. Per-thread LocalMemory scratch is reused only by that
     /// thread for that one MB; no cross-thread sharing on the diagonal.
@@ -165,6 +244,61 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             yPlane, uPlane, vPlane,
             yRecon, uRecon, vRecon,
             yCoefs, uCoefs, vCoefs,
+            yDcQ, yAcQ, uvDcQ, uvAcQ,
+            residual, coefsInt, coefsShort,
+            fdctScratch, idctScratch,
+            aboveLuma, leftLuma, aboveChroma, leftChroma);
+    }
+
+    /// <summary>Batch wave-front kernel: thread = (frame, mb-on-diag).</summary>
+    private static void EncodeWavefrontBatchKernel(
+        Index1D idx,
+        ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
+        ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<int> dequant,
+        Vp9FrameSeqEncodeBatchParams p)
+    {
+        int g = idx.X;
+        int frameIdx = g / p.DiagCount;
+        int posOnDiag = g - frameIdx * p.DiagCount;
+        int diagD = p.DiagAndRMin >> 16;
+        int rMin = p.DiagAndRMin & 0xFFFF;
+        int mbRow = rMin + posOnDiag;
+        int mbCol = diagD - mbRow;
+        if (mbRow < 0 || mbRow >= p.MbRows || mbCol < 0 || mbCol >= p.MbCols) return;
+
+        var fY = yPlane.SubView((long)frameIdx * p.YStride, p.YStride);
+        var fU = uPlane.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fV = vPlane.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fYR = yRecon.SubView((long)frameIdx * p.YStride, p.YStride);
+        var fUR = uRecon.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fVR = vRecon.SubView((long)frameIdx * p.UvStride, p.UvStride);
+        var fYC = yCoefs.SubView((long)frameIdx * p.YCoefStride, p.YCoefStride);
+        var fUC = uCoefs.SubView((long)frameIdx * p.UvCoefStride, p.UvCoefStride);
+        var fVC = vCoefs.SubView((long)frameIdx * p.UvCoefStride, p.UvCoefStride);
+        var fDQ = dequant.SubView((long)frameIdx * p.DequantStride, p.DequantStride);
+
+        int yStride = p.MbCols * 16;
+        int uvStride = p.MbCols * 8;
+        int yDcQ = fDQ[0]; int yAcQ = fDQ[1];
+        int uvDcQ = fDQ[2]; int uvAcQ = fDQ[3];
+
+        var residual = LocalMemory.Allocate<short>(256);
+        var coefsInt = LocalMemory.Allocate<int>(256);
+        var coefsShort = LocalMemory.Allocate<short>(256);
+        var fdctScratch = LocalMemory.Allocate<int>(256);
+        var idctScratch = LocalMemory.Allocate<int>(256);
+        var aboveLuma = LocalMemory.Allocate<byte>(16);
+        var leftLuma = LocalMemory.Allocate<byte>(16);
+        var aboveChroma = LocalMemory.Allocate<byte>(8);
+        var leftChroma = LocalMemory.Allocate<byte>(8);
+
+        EncodeMacroblock(
+            mbRow, mbCol, p.MbCols, yStride, uvStride,
+            fY, fU, fV,
+            fYR, fUR, fVR,
+            fYC, fUC, fVC,
             yDcQ, yAcQ, uvDcQ, uvAcQ,
             residual, coefsInt, coefsShort,
             fdctScratch, idctScratch,
