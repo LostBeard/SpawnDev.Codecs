@@ -340,14 +340,21 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
             frameCount, _p0Stride, _tp0Stride, outputCapacity);
 
         _accelerator.Synchronize();
+        // Read lengths first; then fetch ONLY the actual encoded bytes
+        // per frame via partial readback. Avoids transferring the full
+        // worst-case-sized strided output buffer over PCIe.
         var allLens = dAllOutputLens.GetAsArray1D();
-        var allBytes = dAllOutputs.GetAsArray1D();
         var results = new byte[frameCount][];
         for (int f = 0; f < frameCount; f++)
         {
             int len = allLens[f];
             results[f] = new byte[len];
-            Array.Copy(allBytes, (long)f * outputCapacity, results[f], 0, len);
+            if (len > 0)
+            {
+                dAllOutputs.View
+                    .SubView((long)f * outputCapacity, len)
+                    .CopyToCPU(results[f]);
+            }
         }
         return results;
     }

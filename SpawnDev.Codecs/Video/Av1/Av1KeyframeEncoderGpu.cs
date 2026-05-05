@@ -409,18 +409,16 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
             p, frameCount, strides);
 
         await _accelerator.SynchronizeAsync();
-
-        // Read back per-frame tile lengths + tile bytes + assemble OBU
-        // wrapper for each frame. The OBU framing is metadata-level
-        // serialization (same as single-frame path).
+        // Read lengths first; partial-readback only the actual tile bytes
+        // per frame.
         var tileLensHost = await dAllTileLen.CopyToHostAsync();
-        var tileBytesHost = await dAllTile.CopyToHostAsync();
         var results = new byte[frameCount][];
         for (int f = 0; f < frameCount; f++)
         {
             int tileLen = (int)tileLensHost[f];
-            var tileSlot = new byte[tileLen];
-            Array.Copy(tileBytesHost, (long)f * worstCaseTile, tileSlot, 0, tileLen);
+            byte[] tileSlot = tileLen > 0
+                ? await dAllTile.View.SubView((long)f * worstCaseTile, tileLen).CopyToHostAsync()
+                : Array.Empty<byte>();
             results[f] = Av1KeyframeEncoder.EncodeKeyFrameWithExternalTile(
                 width, height, baseQIndex, tileSlot);
         }

@@ -456,14 +456,18 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             frameCount, assembleStrides);
 
         await _accelerator.SynchronizeAsync();
+        // Read lengths first; partial-readback only the actual encoded
+        // bytes per frame to avoid transferring the worst-case-sized
+        // strided output buffer over PCIe.
         var outLensHost = await dAllOutLen.CopyToHostAsync();
-        var outBytesHost = await dAllOut.CopyToHostAsync();
         var results = new byte[frameCount][];
         for (int f = 0; f < frameCount; f++)
         {
             int len = (int)outLensHost[f];
-            results[f] = new byte[len];
-            Array.Copy(outBytesHost, (long)f * worstCaseFrame, results[f], 0, len);
+            if (len <= 0) { results[f] = Array.Empty<byte>(); continue; }
+            results[f] = await dAllOut.View
+                .SubView((long)f * worstCaseFrame, len)
+                .CopyToHostAsync();
         }
         return results;
     }
