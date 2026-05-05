@@ -81,15 +81,19 @@ Console.WriteLine($"Source: {frameCount} frames {W}x{H} ({allFrames.Length / 102
 Console.WriteLine();
 
 report.AppendLine("VIDEO ENCODERS (full BBB clip)");
-report.AppendLine($"{"Codec",-26}{"Encode ms",-12}{"fps",-8}{"Output KB",-12}{"Bitrate kbps",-14}");
-report.AppendLine($"{new string('-', 26)}{new string('-', 12)}{new string('-', 8)}{new string('-', 12)}{new string('-', 14)}");
+report.AppendLine("  'frame 0 ms' = first-frame cost (kernel JIT + buffer alloc + dispatch + readback)");
+report.AppendLine("  'steady ms/frame' = avg of frames 1..N-1 (no JIT cost; pure encode + transfer)");
+report.AppendLine();
+report.AppendLine($"{"Codec",-26}{"Total ms",-10}{"frame0 ms",-11}{"steady ms/f",-13}{"steady fps",-12}{"KB",-8}{"kbps",-8}");
+report.AppendLine($"{new string('-', 26)}{new string('-', 10)}{new string('-', 11)}{new string('-', 13)}{new string('-', 12)}{new string('-', 8)}{new string('-', 8)}");
 
-// ---- VP8 GPU ----
-Console.WriteLine("Encoding VP8 GPU...");
+// ---- VP8 GPU (per-frame) ----
+Console.WriteLine("Encoding VP8 GPU (per-frame)...");
 {
     using var enc = new Vp8KeyframeEncoderGpu(acc);
     long total = 0;
-    var sw = Stopwatch.StartNew();
+    double frame0Ms = 0;
+    var swTotal = Stopwatch.StartNew();
     for (int f = 0; f < frameCount; f++)
     {
         int yOff = f * frameSize;
@@ -98,11 +102,38 @@ Console.WriteLine("Encoding VP8 GPU...");
         var ySpan = new ReadOnlySpan<byte>(allFrames, yOff, W * H);
         var uSpan = new ReadOnlySpan<byte>(allFrames, uOff, (W / 2) * (H / 2));
         var vSpan = new ReadOnlySpan<byte>(allFrames, vOff, (W / 2) * (H / 2));
+        var swFrame = Stopwatch.StartNew();
         var bytes = enc.EncodeKeyFrame(ySpan, W, uSpan, W / 2, vSpan, W, H, baseQIndex: 30);
+        swFrame.Stop();
+        if (f == 0) frame0Ms = swFrame.Elapsed.TotalMilliseconds;
         total += bytes.Length;
     }
-    sw.Stop();
-    AddVideo($"VP8 GPU ({backend})", sw.Elapsed.TotalMilliseconds, total);
+    swTotal.Stop();
+    AddVideo($"VP8 GPU ({backend})", swTotal.Elapsed.TotalMilliseconds, frame0Ms, total);
+}
+
+// ---- VP8 GPU (batch - submits all frames as one stream chain) ----
+Console.WriteLine("Encoding VP8 GPU (batch)...");
+{
+    using var enc = new Vp8KeyframeEncoderGpu(acc);
+    var yPlanes = new ReadOnlyMemory<byte>[frameCount];
+    var uPlanes = new ReadOnlyMemory<byte>[frameCount];
+    var vPlanes = new ReadOnlyMemory<byte>[frameCount];
+    for (int f = 0; f < frameCount; f++)
+    {
+        int yOff = f * frameSize;
+        int uOff = yOff + W * H;
+        int vOff = uOff + (W / 2) * (H / 2);
+        yPlanes[f] = new ReadOnlyMemory<byte>(allFrames, yOff, W * H);
+        uPlanes[f] = new ReadOnlyMemory<byte>(allFrames, uOff, (W / 2) * (H / 2));
+        vPlanes[f] = new ReadOnlyMemory<byte>(allFrames, vOff, (W / 2) * (H / 2));
+    }
+    var swTotal = Stopwatch.StartNew();
+    var results = enc.EncodeKeyFramesBatch(yPlanes, uPlanes, vPlanes, W, H, baseQIndex: 30);
+    swTotal.Stop();
+    long total = 0;
+    foreach (var r in results) total += r.Length;
+    AddVideo($"VP8 GPU batch ({backend})", swTotal.Elapsed.TotalMilliseconds, -1, total);
 }
 
 // ---- VP9 GPU (async) ----
@@ -110,7 +141,8 @@ Console.WriteLine("Encoding VP9 GPU...");
 {
     using var enc = new Vp9KeyframeEncoderGpu(acc);
     long total = 0;
-    var sw = Stopwatch.StartNew();
+    double frame0Ms = 0;
+    var swTotal = Stopwatch.StartNew();
     for (int f = 0; f < frameCount; f++)
     {
         int yOff = f * frameSize;
@@ -119,11 +151,14 @@ Console.WriteLine("Encoding VP9 GPU...");
         var y = allFrames[yOff..uOff];
         var u = allFrames[uOff..vOff];
         var v = allFrames[vOff..(vOff + (W / 2) * (H / 2))];
+        var swFrame = Stopwatch.StartNew();
         var bytes = await enc.EncodeKeyFrameAsync(y, u, v, W, H, baseQIndex: 30);
+        swFrame.Stop();
+        if (f == 0) frame0Ms = swFrame.Elapsed.TotalMilliseconds;
         total += bytes.Length;
     }
-    sw.Stop();
-    AddVideo($"VP9 GPU ({backend})", sw.Elapsed.TotalMilliseconds, total);
+    swTotal.Stop();
+    AddVideo($"VP9 GPU ({backend})", swTotal.Elapsed.TotalMilliseconds, frame0Ms, total);
 }
 
 // ---- AV1 GPU (async) ----
@@ -131,7 +166,8 @@ Console.WriteLine("Encoding AV1 GPU...");
 {
     using var enc = new Av1KeyframeEncoderGpu(acc);
     long total = 0;
-    var sw = Stopwatch.StartNew();
+    double frame0Ms = 0;
+    var swTotal = Stopwatch.StartNew();
     for (int f = 0; f < frameCount; f++)
     {
         int yOff = f * frameSize;
@@ -140,15 +176,20 @@ Console.WriteLine("Encoding AV1 GPU...");
         var y = allFrames[yOff..uOff];
         var u = allFrames[uOff..vOff];
         var v = allFrames[vOff..(vOff + (W / 2) * (H / 2))];
+        var swFrame = Stopwatch.StartNew();
         var bytes = await enc.EncodeKeyFrameAsync(y, u, v, W, H, baseQIndex: 32);
+        swFrame.Stop();
+        if (f == 0) frame0Ms = swFrame.Elapsed.TotalMilliseconds;
         total += bytes.Length;
     }
-    sw.Stop();
-    AddVideo($"AV1 GPU ({backend})", sw.Elapsed.TotalMilliseconds, total);
+    swTotal.Stop();
+    AddVideo($"AV1 GPU ({backend})", swTotal.Elapsed.TotalMilliseconds, frame0Ms, total);
 }
 
 // ---- ffmpeg references on the same YUV ----
 Console.WriteLine("Encoding ffmpeg refs...");
+// ffmpeg encodes the whole clip in one process invocation, so frame0/steady
+// breakdown isn't directly comparable. Report total ms only for ffmpeg rows.
 TimeFfmpegVideo("VP8 (ffmpeg)", $"-c:v libvpx -keyint_min 1 -g 1 -auto-alt-ref 0 -frames:v {frameCount}", "ff_vp8.ivf");
 TimeFfmpegVideo("VP9 (ffmpeg)", $"-c:v libvpx-vp9 -keyint_min 1 -g 1 -frames:v {frameCount}", "ff_vp9.ivf");
 TimeFfmpegVideo("AV1 (ffmpeg)", $"-c:v libaom-av1 -cpu-used 8 -keyint_min 1 -g 1 -frames:v {frameCount}", "ff_av1.ivf");
@@ -207,7 +248,8 @@ void TimeFfmpegVideo(string label, string args, string outName)
     var sw = Stopwatch.StartNew();
     RunFfmpeg($"-y -f rawvideo -pix_fmt yuv420p -s {W}x{H} -i \"{yuvPath}\" {args} \"{outPath}\"");
     sw.Stop();
-    AddVideo(label, sw.Elapsed.TotalMilliseconds, new FileInfo(outPath).Length);
+    // ffmpeg: no frame0/steady split available - report total only.
+    AddVideo(label, sw.Elapsed.TotalMilliseconds, -1, new FileInfo(outPath).Length);
 }
 
 void TimeFfmpegAudio(string label, string srcPcm, int rate, int ch, string codecArgs, string outName)
@@ -219,11 +261,20 @@ void TimeFfmpegAudio(string label, string srcPcm, int rate, int ch, string codec
     AddAudio(label, sw.Elapsed.TotalMilliseconds, new FileInfo(outPath).Length, seconds);
 }
 
-void AddVideo(string label, double encMs, long sz)
+void AddVideo(string label, double totalMs, double frame0Ms, long sz)
 {
-    double fps = frameCount * 1000.0 / encMs;
     double kbps = sz * 8.0 / 1000.0 / seconds;
-    report.AppendLine($"{label,-26}{encMs,-12:F0}{fps,-8:F1}{sz / 1024.0,-12:F1}{kbps,-14:F0}");
+    string frame0Str = frame0Ms < 0 ? "n/a" : $"{frame0Ms:F0}";
+    string steadyStr = "n/a", steadyFpsStr = "n/a";
+    if (frame0Ms >= 0 && frameCount > 1)
+    {
+        double steadyMsTotal = totalMs - frame0Ms;
+        double steadyMsPerFrame = steadyMsTotal / (frameCount - 1);
+        double steadyFps = 1000.0 / steadyMsPerFrame;
+        steadyStr = $"{steadyMsPerFrame:F1}";
+        steadyFpsStr = $"{steadyFps:F1}";
+    }
+    report.AppendLine($"{label,-26}{totalMs,-10:F0}{frame0Str,-11}{steadyStr,-13}{steadyFpsStr,-12}{sz / 1024.0,-8:F1}{kbps,-8:F0}");
 }
 
 void AddAudio(string label, double encMs, long sz, int durSec)

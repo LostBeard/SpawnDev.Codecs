@@ -37,7 +37,7 @@ namespace SpawnDev.Codecs.Video.Vp9;
 public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
 {
     private readonly Accelerator _accelerator;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, int, int, int, int> _kernel;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int> _kernel;
 
     /// <summary>Compile.</summary>
     public Vp9FrameUncompressedHeaderKernel(Accelerator accelerator)
@@ -45,12 +45,34 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<long>, int, int, int, int>(EmitKernel);
+            Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int>(EmitKernel);
     }
 
     /// <summary>
-    /// Emit the uncompressed header. <paramref name="outLen"/> is
-    /// written with the number of bytes used.
+    /// Emit the uncompressed header reading firstPartitionSize from a GPU buffer.
+    /// This is the GPU-resident path used by the encoder integration: the
+    /// compressed header length is in <paramref name="firstPartitionSizeView"/>[0]
+    /// (the same buffer the compressed-header kernel wrote it to), so the host
+    /// does not need to sync + read it back to launch this kernel.
+    /// </summary>
+    public void Run(
+        ArrayView<byte> outBuf,
+        ArrayView<long> outLen,
+        ArrayView<long> firstPartitionSizeView,
+        int width, int height,
+        int baseQIndex)
+    {
+        if (outLen.Length < 1) throw new ArgumentException("outLen must hold 1 entry.", nameof(outLen));
+        if (firstPartitionSizeView.Length < 1) throw new ArgumentException("firstPartitionSizeView must hold 1 entry.", nameof(firstPartitionSizeView));
+        if (outBuf.Length < 32)
+            throw new ArgumentException("outBuf must hold at least 32 bytes for the v1 keyframe header.", nameof(outBuf));
+        _kernel(1, outBuf, outLen, firstPartitionSizeView, width, height, baseQIndex);
+    }
+
+    /// <summary>
+    /// Convenience overload for tests / standalone callers that already have
+    /// firstPartitionSize on the host - allocates a 1-element scratch view,
+    /// uploads, dispatches.
     /// </summary>
     public void Run(
         ArrayView<byte> outBuf,
@@ -59,21 +81,21 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
         int baseQIndex,
         int firstPartitionSize)
     {
-        if (outLen.Length < 1) throw new ArgumentException("outLen must hold 1 entry.", nameof(outLen));
-        // Worst case for v1 keyframe is well under 32 bytes; require at least that.
-        if (outBuf.Length < 32)
-            throw new ArgumentException("outBuf must hold at least 32 bytes for the v1 keyframe header.", nameof(outBuf));
-        _kernel(1, outBuf, outLen, width, height, baseQIndex, firstPartitionSize);
+        using var scratch = _accelerator.Allocate1D<long>(1);
+        scratch.View.CopyFromCPU(new[] { (long)firstPartitionSize });
+        Run(outBuf, outLen, scratch.View, width, height, baseQIndex);
+        _accelerator.Synchronize();
     }
 
     private static void EmitKernel(
         Index1D _,
         ArrayView<byte> outBuf,
         ArrayView<long> outLenOut,
+        ArrayView<long> firstPartitionSizeView,
         int width, int height,
-        int baseQIndex,
-        int firstPartitionSize)
+        int baseQIndex)
     {
+        int firstPartitionSize = (int)firstPartitionSizeView[0];
         var bw = Vp9BitWriterGpu.Init();
 
         // frame_marker f(2) = 0b10

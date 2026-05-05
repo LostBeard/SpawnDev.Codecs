@@ -11,11 +11,13 @@
 //   U  8x8   : same shape with 8x8 transform + uv quantizers
 //   V  8x8   : same as U on the V plane
 //
-// Why single-thread (not wave-parallel): the encoder's per-MB recon
-// is needed for the next MB's intra-prediction edges (above + left
-// neighbours come from already-encoded MBs). Wave-parallel scheduling
-// is a future optimization; this v1 prioritizes correctness over
-// throughput. Data stays GPU-resident throughout - that's the win.
+// Wave-front per-diagonal dispatch: every MB on a given anti-diagonal
+// (r+c=d) is independent because DC_PRED only reads MB(r-1,c) and
+// MB(r,c-1) - both of which are on diagonal d-1 and finished before
+// diagonal d launches. The host driver dispatches one kernel per
+// diagonal 0..mbCols+mbRows-2 in order. Peak parallelism is
+// min(mbCols, mbRows); for typical 1920x1080 that's 67 (with mbCols=120,
+// mbRows=68).
 //
 // v1 simplifications (mirror Vp9KeyframeEncoder.EncodeKeyFrame):
 //   - Profile 0, YUV 4:2:0, width + height multiples of 16
@@ -58,7 +60,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
         ArrayView<short>, ArrayView<short>, ArrayView<short>,
         ArrayView<int>,
-        int, int> _kernel;
+        int, int, int> _kernel;
 
     /// <summary>Compile.</summary>
     public Vp9FrameSequentialEncodeKernel(Accelerator accelerator)
@@ -71,7 +73,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<int>,
-            int, int>(EncodeFrameKernel);
+            int, int, int>(EncodeWavefrontKernel);
     }
 
     /// <summary>
@@ -105,26 +107,36 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         if (uCoefs.Length < mbCount * 64) throw new ArgumentException("uCoefs too short.", nameof(uCoefs));
         if (vCoefs.Length < mbCount * 64) throw new ArgumentException("vCoefs too short.", nameof(vCoefs));
 
-        _kernel(1,
-            yPlane, uPlane, vPlane,
-            yRecon, uRecon, vRecon,
-            yCoefs, uCoefs, vCoefs,
-            dequant, mbCols, mbRows);
+        int totalDiagonals = mbCols + mbRows - 1;
+        for (int d = 0; d < totalDiagonals; d++)
+        {
+            int rMin = d - (mbCols - 1); if (rMin < 0) rMin = 0;
+            int rMax = d; if (rMax > mbRows - 1) rMax = mbRows - 1;
+            int diagCount = rMax - rMin + 1;
+            int diagAndRMin = (d << 16) | (rMin & 0xFFFF);
+            _kernel(diagCount,
+                yPlane, uPlane, vPlane,
+                yRecon, uRecon, vRecon,
+                yCoefs, uCoefs, vCoefs,
+                dequant, mbCols, mbRows, diagAndRMin);
+        }
     }
 
     /// <summary>
-    /// Single-thread frame encoder. Iterates 16x16 MBs row-major,
-    /// encodes each inline through the predict + transform + quant +
-    /// save + dequant + iDCT + recon pipeline.
+    /// Wave-front kernel: each thread encodes one MB on the supplied
+    /// diagonal. Per-thread LocalMemory scratch is reused only by that
+    /// thread for that one MB; no cross-thread sharing on the diagonal.
     /// </summary>
-    private static void EncodeFrameKernel(
-        Index1D _,
+    private static void EncodeWavefrontKernel(
+        Index1D idx,
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<int> dequant,
-        int mbCols, int mbRows)
+        int mbCols, int mbRows, int diagAndRMin)
     {
+        int diagD = diagAndRMin >> 16;
+        int rMin = diagAndRMin & 0xFFFF;
         int yStride = mbCols * 16;
         int uvStride = mbCols * 8;
 
@@ -133,35 +145,30 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         int uvDcQ = dequant[2];
         int uvAcQ = dequant[3];
 
-        // Per-frame scratch buffers (LocalMemory.Allocate is per-thread;
-        // single-thread dispatch means these are reused across every MB).
-        // Total per-thread footprint: 256*2 short + 256*3 int = 4096 bytes.
+        int mbRow = rMin + idx.X;
+        int mbCol = diagD - mbRow;
+        if (mbRow < 0 || mbRow >= mbRows || mbCol < 0 || mbCol >= mbCols) return;
+
+        // Per-thread scratch (each thread on the diagonal gets its own copy).
         var residual = LocalMemory.Allocate<short>(256);
         var coefsInt = LocalMemory.Allocate<int>(256);
         var coefsShort = LocalMemory.Allocate<short>(256);
         var fdctScratch = LocalMemory.Allocate<int>(256);
         var idctScratch = LocalMemory.Allocate<int>(256);
-
         var aboveLuma = LocalMemory.Allocate<byte>(16);
         var leftLuma = LocalMemory.Allocate<byte>(16);
         var aboveChroma = LocalMemory.Allocate<byte>(8);
         var leftChroma = LocalMemory.Allocate<byte>(8);
 
-        for (int mbRow = 0; mbRow < mbRows; mbRow++)
-        {
-            for (int mbCol = 0; mbCol < mbCols; mbCol++)
-            {
-                EncodeMacroblock(
-                    mbRow, mbCol, mbCols, yStride, uvStride,
-                    yPlane, uPlane, vPlane,
-                    yRecon, uRecon, vRecon,
-                    yCoefs, uCoefs, vCoefs,
-                    yDcQ, yAcQ, uvDcQ, uvAcQ,
-                    residual, coefsInt, coefsShort,
-                    fdctScratch, idctScratch,
-                    aboveLuma, leftLuma, aboveChroma, leftChroma);
-            }
-        }
+        EncodeMacroblock(
+            mbRow, mbCol, mbCols, yStride, uvStride,
+            yPlane, uPlane, vPlane,
+            yRecon, uRecon, vRecon,
+            yCoefs, uCoefs, vCoefs,
+            yDcQ, yAcQ, uvDcQ, uvAcQ,
+            residual, coefsInt, coefsShort,
+            fdctScratch, idctScratch,
+            aboveLuma, leftLuma, aboveChroma, leftChroma);
     }
 
     /// <summary>Encode a single 16x16 macroblock (Y + U + V).</summary>

@@ -1,15 +1,16 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
-// VP8 multi-MB sequential encoder kernel. Single-thread-per-frame GPU
-// kernel that processes every MB in row-major order, doing
-// predict + subtract + FDCT + Walsh + Quant + Dequant + InvWalsh +
-// IDCT + add-pred + clip + write-recon all inline. Removes the v1
-// single-MB limitation.
+// VP8 wave-front MB encoder kernel. Per-diagonal dispatch: every MB
+// on a given anti-diagonal of the MB grid runs in parallel (one thread
+// per MB). The host driver dispatches one kernel per diagonal
+// 0..mbCols+mbRows-2 in order; within a diagonal the MBs are
+// independent because DC_PRED only reads MB(r-1, c) (diagonal d-1) and
+// MB(r, c-1) (diagonal d-1).
 //
-// Why single-thread (not wave-parallel): VP8 encoder's per-MB recon
-// is needed for the next MB's intra predictor neighbours. Wave-parallel
-// is a future optimization; this v2 prioritizes correctness over
-// throughput. Data stays GPU-resident throughout - that's the win.
+// Replaces the previous extent=1 single-thread implementation. On a
+// 32x16 grid the peak parallelism is 16 (the smaller dimension); the
+// average diagonal width is ~11, so the speedup over the single-thread
+// path is ~10x for the per-MB transform/quant/IDCT/recon stage.
 //
 // Kernel saves quantized coefs to global buffers (y4Coefs, y2Coefs,
 // uCoefs, vCoefs). After this kernel runs, Vp8FrameEntropyKernel
@@ -44,7 +45,7 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
         ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
         ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
         ArrayView<int>,
-        int, int> _kernel;
+        int, int, int> _kernel;
 
     /// <summary>Compile.</summary>
     public Vp8FrameSequentialEncodeKernel(Accelerator accelerator)
@@ -57,25 +58,16 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<int>,
-            int, int>(EncodeFrameKernel);
+            int, int, int>(EncodeWavefrontKernel);
     }
 
     /// <summary>
-    /// Encode all MBs in a frame.
+    /// Encode all MBs in a frame using wave-front per-diagonal dispatch.
+    /// Calls the kernel once per anti-diagonal d=0..mbCols+mbRows-2.
+    /// Within each diagonal the MBs are independent (DC_PRED reads only
+    /// from diagonal d-1), so a kernel dispatched at extent = diagonal-MB-count
+    /// runs every MB on that diagonal in parallel.
     /// </summary>
-    /// <param name="yPlane">Source Y plane (mbRows*16 rows of mbCols*16 bytes).</param>
-    /// <param name="uPlane">Source U plane (mbRows*8 rows of mbCols*8 bytes).</param>
-    /// <param name="vPlane">Source V plane.</param>
-    /// <param name="yRecon">Recon Y plane (in-out; caller pre-fills uninit pixels with 128).</param>
-    /// <param name="uRecon">Recon U plane.</param>
-    /// <param name="vRecon">Recon V plane.</param>
-    /// <param name="y4Coefs">Output: mbCount*256 shorts (16 Y4 blocks * 16 coefs per MB).</param>
-    /// <param name="y2Coefs">Output: mbCount*16 shorts (1 Y2 block per MB).</param>
-    /// <param name="uCoefs">Output: mbCount*64 shorts (4 UV blocks per MB).</param>
-    /// <param name="vCoefs">Output: mbCount*64 shorts.</param>
-    /// <param name="dequant">6 ints: [y1Dc, y1Ac, y2Dc, y2Ac, uvDc, uvAc].</param>
-    /// <param name="mbCols">Macroblock columns.</param>
-    /// <param name="mbRows">Macroblock rows.</param>
     public void Run(
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
@@ -86,41 +78,57 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
     {
         if (mbCols <= 0 || mbRows <= 0) throw new ArgumentOutOfRangeException();
         if (dequant.Length < 6) throw new ArgumentException("dequant must hold 6 ints.", nameof(dequant));
-        _kernel(1,
-            yPlane, uPlane, vPlane,
-            yRecon, uRecon, vRecon,
-            y4Coefs, y2Coefs, uCoefs, vCoefs,
-            dequant, mbCols, mbRows);
+        int totalDiagonals = mbCols + mbRows - 1;
+        for (int d = 0; d < totalDiagonals; d++)
+        {
+            // Range of valid (r,c) on diagonal d (r + c = d, 0<=r<mbRows, 0<=c<mbCols):
+            //   r in [max(0, d - mbCols + 1), min(d, mbRows - 1)]
+            int rMin = d - (mbCols - 1); if (rMin < 0) rMin = 0;
+            int rMax = d; if (rMax > mbRows - 1) rMax = mbRows - 1;
+            int diagCount = rMax - rMin + 1;
+            // Pack diagD (high 16 bits) + rMin (low 16 bits). mb dims fit in 16b
+            // for any reasonable VP8 frame (max 65535 MBs per axis).
+            int diagAndRMin = (d << 16) | (rMin & 0xFFFF);
+            _kernel(diagCount,
+                yPlane, uPlane, vPlane,
+                yRecon, uRecon, vRecon,
+                y4Coefs, y2Coefs, uCoefs, vCoefs,
+                dequant, mbCols, mbRows, diagAndRMin);
+        }
     }
 
-    /// <summary>Single-thread frame encoder. Iterates MBs row-major, encodes each inline.</summary>
-    private static void EncodeFrameKernel(
-        Index1D _,
+    /// <summary>
+    /// Wave-front kernel: each thread encodes one MB on the supplied
+    /// diagonal. Thread index t maps to (row=rMin+t, col=d-row). All
+    /// threads on the same diagonal are independent.
+    /// </summary>
+    private static void EncodeWavefrontKernel(
+        Index1D idx,
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
         ArrayView<short> y4Coefs, ArrayView<short> y2Coefs,
         ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<int> dequant,
-        int mbCols, int mbRows)
+        int mbCols, int mbRows, int diagAndRMin)
     {
+        int diagD = diagAndRMin >> 16;
+        int rMin = diagAndRMin & 0xFFFF;
         int yStride = mbCols * 16;
         int uvStride = mbCols * 8;
         int y1Dc = dequant[0]; int y1Ac = dequant[1];
         int y2Dc = dequant[2]; int y2Ac = dequant[3];
         int uvDc = dequant[4]; int uvAc = dequant[5];
 
-        for (int mbRow = 0; mbRow < mbRows; mbRow++)
-        {
-            for (int mbCol = 0; mbCol < mbCols; mbCol++)
-            {
-                EncodeMacroblock(
-                    mbRow, mbCol, mbCols, yStride, uvStride,
-                    yPlane, uPlane, vPlane,
-                    yRecon, uRecon, vRecon,
-                    y4Coefs, y2Coefs, uCoefs, vCoefs,
-                    y1Dc, y1Ac, y2Dc, y2Ac, uvDc, uvAc);
-            }
-        }
+        int mbRow = rMin + idx.X;
+        int mbCol = diagD - mbRow;
+        if (mbRow < 0 || mbRow >= mbRows || mbCol < 0 || mbCol >= mbCols) return;
+
+        EncodeMacroblock(
+            mbRow, mbCol, mbCols, yStride, uvStride,
+            yPlane, uPlane, vPlane,
+            yRecon, uRecon, vRecon,
+            y4Coefs, y2Coefs, uCoefs, vCoefs,
+            y1Dc, y1Ac, y2Dc, y2Ac, uvDc, uvAc);
     }
 
     /// <summary>Encode one MB end-to-end: predict + transform + quant + recon.</summary>

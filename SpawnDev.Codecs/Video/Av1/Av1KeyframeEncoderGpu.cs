@@ -34,6 +34,19 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
     private readonly MemoryBuffer1D<ushort, global::ILGPU.Stride1D.Dense> _dUshortConsts;
     private readonly MemoryBuffer1D<short, global::ILGPU.Stride1D.Dense> _dDcAcQuant;
 
+    // Per-resolution cached buffers - reallocated only when (width,height) changes.
+    // Steady-state encoding pays only kernel dispatch + plane upload + readback per frame.
+    private int _cachedWidth = -1;
+    private int _cachedHeight = -1;
+    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dSrc;
+    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dRecon;
+    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dTile;
+    private MemoryBuffer1D<long, global::ILGPU.Stride1D.Dense>? _dTileLen;
+    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dScratchByte;
+    private MemoryBuffer1D<int, global::ILGPU.Stride1D.Dense>? _dScratchInt;
+    private MemoryBuffer1D<short, global::ILGPU.Stride1D.Dense>? _dScratchShort;
+    private int _cachedScratchByteLen;
+
     /// <summary>Construct an encoder bound to <paramref name="accelerator"/>.
     /// Uploads the constant tables once.</summary>
     public Av1KeyframeEncoderGpu(Accelerator accelerator)
@@ -83,14 +96,14 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
     /// the raw range-coder tile bytes (the same bytes the CPU
     /// Av1KeyframeEncoder.EncodeSingleTile produces).
     /// </summary>
-    public async Task<byte[]> EncodeSingleTileAsync(
+    public Task<byte[]> EncodeSingleTileAsync(
         byte[] yPlane, byte[] uPlane, byte[] vPlane,
         int width, int height,
         int baseQIndex = 32)
     {
-        var (bytes, _, _, _) = await EncodeSingleTileWithReconAsync(
-            yPlane, uPlane, vPlane, width, height, baseQIndex);
-        return bytes;
+        // Fast path: skip recon readback (3 device->host transfers per
+        // frame the encode-only caller doesn't need).
+        return EncodeSingleTileInternalAsync(yPlane, uPlane, vPlane, width, height, baseQIndex, returnRecon: false);
     }
 
     /// <summary>
@@ -102,6 +115,20 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         byte[] yPlane, byte[] uPlane, byte[] vPlane,
         int width, int height,
         int baseQIndex = 32)
+    {
+        var bytes = await EncodeSingleTileInternalAsync(yPlane, uPlane, vPlane, width, height, baseQIndex, returnRecon: true);
+        return (bytes, _lastYRecon!, _lastURecon!, _lastVRecon!);
+    }
+
+    private byte[]? _lastYRecon;
+    private byte[]? _lastURecon;
+    private byte[]? _lastVRecon;
+
+    private async Task<byte[]> EncodeSingleTileInternalAsync(
+        byte[] yPlane, byte[] uPlane, byte[] vPlane,
+        int width, int height,
+        int baseQIndex,
+        bool returnRecon)
     {
         if (yPlane is null) throw new ArgumentNullException(nameof(yPlane));
         if (uPlane is null) throw new ArgumentNullException(nameof(uPlane));
@@ -165,41 +192,32 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         int leaves = (width >> 4) * (height >> 4);
         long worstCaseTile = leaves * 2048L + 256L;
 
-        // ---- Allocate per-frame GPU buffers ----
-        using var dSrc = _accelerator.Allocate1D<byte>(srcLen);
-        using var dRecon = _accelerator.Allocate1D<byte>(srcLen);
-        using var dTile = _accelerator.Allocate1D<byte>(worstCaseTile);
-        using var dTileLen = _accelerator.Allocate1D<long>(1);
-        using var dScratchByte = _accelerator.Allocate1D<byte>(scratchByteLen);
-        using var dScratchInt = _accelerator.Allocate1D<int>(scratchIntLen);
-        using var dScratchShort = _accelerator.Allocate1D<short>(scratchShortLen);
+        // ---- Ensure per-frame GPU buffers (cached across same-resolution calls) ----
+        EnsureBuffers(width, height, srcLen, worstCaseTile, scratchByteLen, scratchIntLen, scratchShortLen);
 
         // ---- Upload sources + zero outputs ----
         // Three direct uploads to subviews of dSrc - no host-side packed
         // buffer, no Buffer.BlockCopy iteration over input pixels.
-        dSrc.View.SubView(0, yLen).CopyFromCPU(yPlane);
-        dSrc.View.SubView(yLen, uvLen).CopyFromCPU(uPlane);
-        dSrc.View.SubView(yLen + uvLen, uvLen).CopyFromCPU(vPlane);
+        _dSrc!.View.SubView(0, yLen).CopyFromCPU(yPlane);
+        _dSrc!.View.SubView(yLen, uvLen).CopyFromCPU(uPlane);
+        _dSrc!.View.SubView(yLen + uvLen, uvLen).CopyFromCPU(vPlane);
 
-        // Pre-zero recon + scratch + output via GPU-side memset
-        // (sequential kernel writes every pixel; explicit zero gives
-        // stable carry-back state if the kernel partial-writes).
-        // GPU memset avoids allocating zero-filled CPU arrays
-        // (~worstCaseTile bytes per frame) and uploading them.
-        dRecon.View.MemSetToZero();
-        dTile.View.MemSetToZero();
-        dTileLen.View.MemSetToZero();
-        dScratchByte.View.MemSetToZero();
-        dScratchInt.View.MemSetToZero();
-        dScratchShort.View.MemSetToZero();
+        // Pre-zero output + scratch buffers per frame (kernel reads them
+        // as carry-back state). Recon is fully overwritten per pixel so
+        // skip its zero-fill.
+        _dTile!.View.MemSetToZero();
+        _dTileLen!.View.MemSetToZero();
+        _dScratchByte!.View.MemSetToZero();
+        _dScratchInt!.View.MemSetToZero();
+        _dScratchShort!.View.MemSetToZero();
 
         // ---- Dispatch the walker ----
         _frameKernel.Run(
-            dSrc.View, dRecon.View,
-            dTile.View, dTileLen.View,
+            _dSrc!.View, _dRecon!.View,
+            _dTile!.View, _dTileLen!.View,
             _dByteConsts.View, _dUshortConsts.View,
             _dDcAcQuant.View,
-            dScratchByte.View, dScratchInt.View, dScratchShort.View,
+            _dScratchByte!.View, _dScratchInt!.View, _dScratchShort!.View,
             p);
 
         await _accelerator.SynchronizeAsync();
@@ -207,17 +225,51 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         // ---- Read back tile bytes ----
         // SubView -> CopyToHostAsync is a real per-backend partial readback
         // (SpawnDev.ILGPU 4.9.3+); only the slice's bytes cross the boundary.
-        long tileLen = (await dTileLen.CopyToHostAsync())[0];
-        var tileResult = await dTile.View.SubView(0, tileLen).CopyToHostAsync();
+        long tileLen = (await _dTileLen!.CopyToHostAsync())[0];
+        var tileResult = await _dTile!.View.SubView(0, tileLen).CopyToHostAsync();
 
-        // ---- Read back recon planes ----
-        // Three per-plane partial readbacks of dRecon at the YPlaneOff /
-        // UPlaneOff / VPlaneOff offsets the kernel wrote to.
-        var yReconResult = await dRecon.View.SubView(0, yLen).CopyToHostAsync();
-        var uReconResult = await dRecon.View.SubView(yLen, uvLen).CopyToHostAsync();
-        var vReconResult = await dRecon.View.SubView(yLen + uvLen, uvLen).CopyToHostAsync();
+        if (returnRecon)
+        {
+            _lastYRecon = await _dRecon!.View.SubView(0, yLen).CopyToHostAsync();
+            _lastURecon = await _dRecon!.View.SubView(yLen, uvLen).CopyToHostAsync();
+            _lastVRecon = await _dRecon!.View.SubView(yLen + uvLen, uvLen).CopyToHostAsync();
+        }
 
-        return (tileResult, yReconResult, uReconResult, vReconResult);
+        return tileResult;
+    }
+
+    /// <summary>
+    /// Ensure per-frame GPU buffers are sized for (width,height). Reallocates
+    /// only when the resolution changes.
+    /// </summary>
+    private void EnsureBuffers(int width, int height, int srcLen, long worstCaseTile,
+        int scratchByteLen, int scratchIntLen, int scratchShortLen)
+    {
+        if (_cachedWidth == width && _cachedHeight == height) return;
+        DisposeFrameBuffers();
+        _cachedWidth = width;
+        _cachedHeight = height;
+        _cachedScratchByteLen = scratchByteLen;
+        _dSrc = _accelerator.Allocate1D<byte>(srcLen);
+        _dRecon = _accelerator.Allocate1D<byte>(srcLen);
+        _dTile = _accelerator.Allocate1D<byte>(worstCaseTile);
+        _dTileLen = _accelerator.Allocate1D<long>(1);
+        _dScratchByte = _accelerator.Allocate1D<byte>(scratchByteLen);
+        _dScratchInt = _accelerator.Allocate1D<int>(scratchIntLen);
+        _dScratchShort = _accelerator.Allocate1D<short>(scratchShortLen);
+    }
+
+    private void DisposeFrameBuffers()
+    {
+        _dSrc?.Dispose(); _dSrc = null;
+        _dRecon?.Dispose(); _dRecon = null;
+        _dTile?.Dispose(); _dTile = null;
+        _dTileLen?.Dispose(); _dTileLen = null;
+        _dScratchByte?.Dispose(); _dScratchByte = null;
+        _dScratchInt?.Dispose(); _dScratchInt = null;
+        _dScratchShort?.Dispose(); _dScratchShort = null;
+        _cachedWidth = -1;
+        _cachedHeight = -1;
     }
 
     /// <summary>
@@ -256,5 +308,6 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         _dByteConsts.Dispose();
         _dUshortConsts.Dispose();
         _dDcAcQuant.Dispose();
+        DisposeFrameBuffers();
     }
 }

@@ -62,6 +62,32 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
     private readonly MemoryBuffer1D<byte, Stride1D.Dense> _coefProbsByType;
     private readonly MemoryBuffer1D<byte, Stride1D.Dense> _constsExtended;
 
+    // Per-resolution cached buffers - reallocated only when (width,height) changes.
+    // First-frame cost shifts to "first frame at this resolution"; steady-state
+    // pays only kernel dispatch + plane upload + readback per frame.
+    private int _cachedWidth = -1;
+    private int _cachedHeight = -1;
+    private MemoryBuffer1D<byte, Stride1D.Dense>? _dY;
+    private MemoryBuffer1D<byte, Stride1D.Dense>? _dU;
+    private MemoryBuffer1D<byte, Stride1D.Dense>? _dV;
+    private MemoryBuffer1D<byte, Stride1D.Dense>? _dYRecon;
+    private MemoryBuffer1D<byte, Stride1D.Dense>? _dURecon;
+    private MemoryBuffer1D<byte, Stride1D.Dense>? _dVRecon;
+    private MemoryBuffer1D<short, Stride1D.Dense>? _dY4Coefs;
+    private MemoryBuffer1D<short, Stride1D.Dense>? _dY2Coefs;
+    private MemoryBuffer1D<short, Stride1D.Dense>? _dUCoefs;
+    private MemoryBuffer1D<short, Stride1D.Dense>? _dVCoefs;
+    private MemoryBuffer1D<int, Stride1D.Dense>? _dDequant;
+    private MemoryBuffer1D<int, Stride1D.Dense>? _dInitialP0State;
+    private MemoryBuffer1D<byte, Stride1D.Dense>? _dP0;
+    private MemoryBuffer1D<byte, Stride1D.Dense>? _dTp;
+    private MemoryBuffer1D<long, Stride1D.Dense>? _dPartLens;
+    private MemoryBuffer1D<byte, Stride1D.Dense>? _dAbove;
+    private MemoryBuffer1D<byte, Stride1D.Dense>? _dOutput;
+    private MemoryBuffer1D<int, Stride1D.Dense>? _dOutLen;
+    private int _p0Stride;
+    private int _tp0Stride;
+
     /// <summary>Compile + cache all kernels and constants onto <paramref name="accelerator"/>.</summary>
     public Vp8KeyframeEncoderGpu(Accelerator accelerator)
     {
@@ -109,77 +135,49 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         int uvWidth = width / 2;
         int uvHeight = height / 2;
 
-        // GPU buffers - allocated per call for v1; can be cached as
-        // members for repeated encodes at the same resolution.
-        using var dY = _accelerator.Allocate1D<byte>(width * height);
-        using var dU = _accelerator.Allocate1D<byte>(uvWidth * uvHeight);
-        using var dV = _accelerator.Allocate1D<byte>(uvWidth * uvHeight);
-        using var dYRecon = _accelerator.Allocate1D<byte>(width * height);
-        using var dURecon = _accelerator.Allocate1D<byte>(uvWidth * uvHeight);
-        using var dVRecon = _accelerator.Allocate1D<byte>(uvWidth * uvHeight);
-
-        using var dY4Coefs = _accelerator.Allocate1D<short>(mbCount * 256);
-        using var dY2Coefs = _accelerator.Allocate1D<short>(mbCount * 16);
-        using var dUCoefs = _accelerator.Allocate1D<short>(mbCount * 64);
-        using var dVCoefs = _accelerator.Allocate1D<short>(mbCount * 64);
-
-        using var dDequant = _accelerator.Allocate1D<int>(6);
-        using var dInitialP0State = _accelerator.Allocate1D<int>(5);
-
-        // Worst-case sized partition buffers. Header + per-MB modes
-        // is bounded; tokenP0 grows with mbCount.
-        int p0Stride = 64 * 1024 + mbCount * 32;
-        int tp0Stride = 64 * 1024 + mbCount * 256;
-        using var dP0 = _accelerator.Allocate1D<byte>(p0Stride);
-        using var dTp = _accelerator.Allocate1D<byte>(tp0Stride);
-        using var dPartLens = _accelerator.Allocate1D<long>(2);
-        using var dAbove = _accelerator.Allocate1D<byte>(mbCols * 9);
-
-        int outputCapacity = 16 + p0Stride + tp0Stride;
-        using var dOutput = _accelerator.Allocate1D<byte>(outputCapacity);
-        using var dOutLen = _accelerator.Allocate1D<int>(1);
+        EnsureBuffers(width, height, uvWidth, uvHeight, mbCols, mbCount);
 
         // === Host work: ONLY upload + dispatch ===
-        UploadPlane(ySrc, ySrcStride, width, height, dY);
-        UploadPlane(uSrc, uvSrcStride, uvWidth, uvHeight, dU);
-        UploadPlane(vSrc, uvSrcStride, uvWidth, uvHeight, dV);
-        dYRecon.View.MemSetToZero();
-        dURecon.View.MemSetToZero();
-        dVRecon.View.MemSetToZero();
-        dP0.View.MemSetToZero();
-        dTp.View.MemSetToZero();
-        dAbove.View.MemSetToZero();
+        UploadPlane(ySrc, ySrcStride, width, height, _dY!);
+        UploadPlane(uSrc, uvSrcStride, uvWidth, uvHeight, _dU!);
+        UploadPlane(vSrc, uvSrcStride, uvWidth, uvHeight, _dV!);
+        // Recon planes are fully overwritten per MB by the sequential
+        // encoder; pre-zero only the buffers the bool encoder reads as
+        // partial-write carry-back state (P0 / Tp / Above).
+        _dP0!.View.MemSetToZero();
+        _dTp!.View.MemSetToZero();
+        _dAbove!.View.MemSetToZero();
 
         // 1. Frame setup: dequantizers + frame header.
         _setup.Run(
             _dcQLookup.View, _acQLookup.View,
             _defaultCoefProbs.View, _updateCoefProbs.View,
-            dDequant.View, dP0.View, dInitialP0State.View,
+            _dDequant!.View, _dP0!.View, _dInitialP0State!.View,
             baseQIndex);
 
         // 2. Sequential encode: per-MB math + recon.
         _sequentialEncode.Run(
-            dY.View, dU.View, dV.View,
-            dYRecon.View, dURecon.View, dVRecon.View,
-            dY4Coefs.View, dY2Coefs.View, dUCoefs.View, dVCoefs.View,
-            dDequant.View,
+            _dY!.View, _dU!.View, _dV!.View,
+            _dYRecon!.View, _dURecon!.View, _dVRecon!.View,
+            _dY4Coefs!.View, _dY2Coefs!.View, _dUCoefs!.View, _dVCoefs!.View,
+            _dDequant!.View,
             mbCols, mbRows);
 
         // 3. Entropy: continues partition0 from setup state, writes
         // per-MB modes + coefs.
         _entropy.Run(
-            dY4Coefs.View, dY2Coefs.View, dUCoefs.View, dVCoefs.View,
+            _dY4Coefs!.View, _dY2Coefs!.View, _dUCoefs!.View, _dVCoefs!.View,
             _coefProbsByType.View, _constsExtended.View,
-            dP0.View, dTp.View, dPartLens.View,
-            dAbove.View, dInitialP0State.View,
+            _dP0!.View, _dTp!.View, _dPartLens!.View,
+            _dAbove!.View, _dInitialP0State!.View,
             mbCols, mbRows);
 
         // 4. Assemble: frame tag + start code + size code +
         // partition0 + tokenP0 -> single output buffer; writes final
         // length to outLen[0].
         _assemble.Run(
-            dP0.View, dTp.View, dPartLens.View,
-            dOutput.View, dOutLen.View,
+            _dP0!.View, _dTp!.View, _dPartLens!.View,
+            _dOutput!.View, _dOutLen!.View,
             width, height);
 
         _accelerator.Synchronize();
@@ -187,13 +185,167 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         // Single partial readback of the final encoded keyframe. SubView
         // -> CopyToCPU is a real per-backend partial readback
         // (SpawnDev.ILGPU 4.9.3+); only the actual finalLen bytes cross
-        // the boundary, not the worst-case-sized output buffer. Replaces
-        // the previous full GetAsArray1D + Array.Copy trim, which was a
-        // cardinal-rule violation (CPU-side Array.Copy on codec data).
-        int finalLen = dOutLen.GetAsArray1D()[0];
+        // the boundary, not the worst-case-sized output buffer.
+        int finalLen = _dOutLen!.GetAsArray1D()[0];
         var result = new byte[finalLen];
-        dOutput.View.SubView(0, finalLen).CopyToCPU(result);
+        _dOutput!.View.SubView(0, finalLen).CopyToCPU(result);
         return result;
+    }
+
+    /// <summary>
+    /// Batch-encode every frame in the supplied (yPlanes, uPlanes, vPlanes)
+    /// arrays in a single submitted kernel chain - one host sync at the end,
+    /// one bulk readback. Per-frame intermediate buffers are reused across
+    /// frames (the GPU stream serializes the per-frame chains so frame N+1
+    /// kernels see the buffers freshly written by frame N's chain), but
+    /// each frame's final encoded bytes go to its own slot in dAllOutputs
+    /// so the host can pull them all out in one round-trip.
+    ///
+    /// The benefit comes from eliminating the per-frame Synchronize +
+    /// GetAsArray1D + CopyToCPU host round-trips. With 60 frames per
+    /// 1-second BBB clip, that drops 60 host round-trips to 1.
+    /// </summary>
+    public byte[][] EncodeKeyFramesBatch(
+        ReadOnlyMemory<byte>[] yPlanes,
+        ReadOnlyMemory<byte>[] uPlanes,
+        ReadOnlyMemory<byte>[] vPlanes,
+        int width, int height,
+        int baseQIndex = 30)
+    {
+        if (yPlanes is null) throw new ArgumentNullException(nameof(yPlanes));
+        if (uPlanes is null) throw new ArgumentNullException(nameof(uPlanes));
+        if (vPlanes is null) throw new ArgumentNullException(nameof(vPlanes));
+        if (yPlanes.Length != uPlanes.Length || yPlanes.Length != vPlanes.Length)
+            throw new ArgumentException("Plane arrays must have equal length.");
+        int frameCount = yPlanes.Length;
+        if (frameCount == 0) return Array.Empty<byte[]>();
+
+        if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException();
+        if ((width & 15) != 0 || (height & 15) != 0)
+            throw new ArgumentException("Width and height must be multiples of 16 (v1)");
+
+        int mbCols = width / 16;
+        int mbRows = height / 16;
+        int mbCount = mbCols * mbRows;
+        int uvWidth = width / 2;
+        int uvHeight = height / 2;
+
+        EnsureBuffers(width, height, uvWidth, uvHeight, mbCols, mbCount);
+
+        int outputCapacity = 16 + _p0Stride + _tp0Stride;
+        using var dAllOutputs = _accelerator.Allocate1D<byte>((long)frameCount * outputCapacity);
+        using var dAllOutLens = _accelerator.Allocate1D<int>(frameCount);
+
+        for (int f = 0; f < frameCount; f++)
+        {
+            // Upload the f-th frame's planes - kernels in same stream
+            // serialize, so reusing _dY/_dU/_dV across frames is safe.
+            _dY!.View.CopyFromCPU(yPlanes[f].ToArray());
+            _dU!.View.CopyFromCPU(uPlanes[f].ToArray());
+            _dV!.View.CopyFromCPU(vPlanes[f].ToArray());
+            _dP0!.View.MemSetToZero();
+            _dTp!.View.MemSetToZero();
+            _dAbove!.View.MemSetToZero();
+
+            _setup.Run(
+                _dcQLookup.View, _acQLookup.View,
+                _defaultCoefProbs.View, _updateCoefProbs.View,
+                _dDequant!.View, _dP0!.View, _dInitialP0State!.View,
+                baseQIndex);
+
+            _sequentialEncode.Run(
+                _dY!.View, _dU!.View, _dV!.View,
+                _dYRecon!.View, _dURecon!.View, _dVRecon!.View,
+                _dY4Coefs!.View, _dY2Coefs!.View, _dUCoefs!.View, _dVCoefs!.View,
+                _dDequant!.View,
+                mbCols, mbRows);
+
+            _entropy.Run(
+                _dY4Coefs!.View, _dY2Coefs!.View, _dUCoefs!.View, _dVCoefs!.View,
+                _coefProbsByType.View, _constsExtended.View,
+                _dP0!.View, _dTp!.View, _dPartLens!.View,
+                _dAbove!.View, _dInitialP0State!.View,
+                mbCols, mbRows);
+
+            // Per-frame output slot via SubView - kernel sees a 0-based view.
+            var frameOutView = dAllOutputs.View.SubView((long)f * outputCapacity, outputCapacity);
+            var frameOutLenView = dAllOutLens.View.SubView(f, 1);
+            _assemble.Run(
+                _dP0!.View, _dTp!.View, _dPartLens!.View,
+                frameOutView, frameOutLenView,
+                width, height);
+        }
+
+        // Single sync + bulk readback for the entire batch.
+        _accelerator.Synchronize();
+        var allLens = dAllOutLens.GetAsArray1D();
+        var allBytes = dAllOutputs.GetAsArray1D();
+        var results = new byte[frameCount][];
+        for (int f = 0; f < frameCount; f++)
+        {
+            int len = allLens[f];
+            results[f] = new byte[len];
+            Array.Copy(allBytes, (long)f * outputCapacity, results[f], 0, len);
+        }
+        return results;
+    }
+
+    /// <summary>
+    /// Ensure per-frame GPU buffers are sized for (width,height). Reallocates
+    /// only when the resolution changes - steady-state encodes at the same
+    /// size pay no per-frame allocation cost.
+    /// </summary>
+    private void EnsureBuffers(int width, int height, int uvWidth, int uvHeight, int mbCols, int mbCount)
+    {
+        if (_cachedWidth == width && _cachedHeight == height) return;
+        DisposeFrameBuffers();
+        _cachedWidth = width;
+        _cachedHeight = height;
+        _dY = _accelerator.Allocate1D<byte>(width * height);
+        _dU = _accelerator.Allocate1D<byte>(uvWidth * uvHeight);
+        _dV = _accelerator.Allocate1D<byte>(uvWidth * uvHeight);
+        _dYRecon = _accelerator.Allocate1D<byte>(width * height);
+        _dURecon = _accelerator.Allocate1D<byte>(uvWidth * uvHeight);
+        _dVRecon = _accelerator.Allocate1D<byte>(uvWidth * uvHeight);
+        _dY4Coefs = _accelerator.Allocate1D<short>(mbCount * 256);
+        _dY2Coefs = _accelerator.Allocate1D<short>(mbCount * 16);
+        _dUCoefs = _accelerator.Allocate1D<short>(mbCount * 64);
+        _dVCoefs = _accelerator.Allocate1D<short>(mbCount * 64);
+        _dDequant = _accelerator.Allocate1D<int>(6);
+        _dInitialP0State = _accelerator.Allocate1D<int>(5);
+        _p0Stride = 64 * 1024 + mbCount * 32;
+        _tp0Stride = 64 * 1024 + mbCount * 256;
+        _dP0 = _accelerator.Allocate1D<byte>(_p0Stride);
+        _dTp = _accelerator.Allocate1D<byte>(_tp0Stride);
+        _dPartLens = _accelerator.Allocate1D<long>(2);
+        _dAbove = _accelerator.Allocate1D<byte>(mbCols * 9);
+        int outputCapacity = 16 + _p0Stride + _tp0Stride;
+        _dOutput = _accelerator.Allocate1D<byte>(outputCapacity);
+        _dOutLen = _accelerator.Allocate1D<int>(1);
+    }
+
+    private void DisposeFrameBuffers()
+    {
+        _dY?.Dispose(); _dY = null;
+        _dU?.Dispose(); _dU = null;
+        _dV?.Dispose(); _dV = null;
+        _dYRecon?.Dispose(); _dYRecon = null;
+        _dURecon?.Dispose(); _dURecon = null;
+        _dVRecon?.Dispose(); _dVRecon = null;
+        _dY4Coefs?.Dispose(); _dY4Coefs = null;
+        _dY2Coefs?.Dispose(); _dY2Coefs = null;
+        _dUCoefs?.Dispose(); _dUCoefs = null;
+        _dVCoefs?.Dispose(); _dVCoefs = null;
+        _dDequant?.Dispose(); _dDequant = null;
+        _dInitialP0State?.Dispose(); _dInitialP0State = null;
+        _dP0?.Dispose(); _dP0 = null;
+        _dTp?.Dispose(); _dTp = null;
+        _dPartLens?.Dispose(); _dPartLens = null;
+        _dAbove?.Dispose(); _dAbove = null;
+        _dOutput?.Dispose(); _dOutput = null;
+        _dOutLen?.Dispose(); _dOutLen = null;
+        _cachedWidth = -1;
+        _cachedHeight = -1;
     }
 
     /// <summary>
@@ -244,5 +396,6 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         _updateCoefProbs.Dispose();
         _coefProbsByType.Dispose();
         _constsExtended.Dispose();
+        DisposeFrameBuffers();
     }
 }

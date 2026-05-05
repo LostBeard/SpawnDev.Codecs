@@ -37,7 +37,7 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         Index1D,
         ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
         ArrayView<long>,
-        int, int, int> _kernel;
+        ArrayView<long>, ArrayView<long>, ArrayView<long>> _kernel;
 
     /// <summary>Compile.</summary>
     public Vp9FrameAssembleKernel(Accelerator accelerator)
@@ -48,12 +48,36 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
             Index1D,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<long>,
-            int, int, int>(AssembleKernel);
+            ArrayView<long>, ArrayView<long>, ArrayView<long>>(AssembleKernel);
     }
 
     /// <summary>
-    /// Concatenate the three byte streams into <paramref name="outBuf"/>.
-    /// <paramref name="outLen"/> receives the total byte count.
+    /// GPU-resident path: read the three lengths from their views (which
+    /// are the same buffers the upstream kernels wrote them to). The
+    /// host does not need to sync + read them back to launch this kernel.
+    /// </summary>
+    public void Run(
+        ArrayView<byte> uncompressedHeader,
+        ArrayView<byte> compressedHeader,
+        ArrayView<byte> tileBytes,
+        ArrayView<byte> outBuf,
+        ArrayView<long> outLen,
+        ArrayView<long> uncompressedLenView,
+        ArrayView<long> compressedLenView,
+        ArrayView<long> tileLenView)
+    {
+        if (outLen.Length < 1) throw new ArgumentException("outLen must hold 1 entry.", nameof(outLen));
+        if (uncompressedLenView.Length < 1) throw new ArgumentException("uncompressedLenView must hold 1 entry.", nameof(uncompressedLenView));
+        if (compressedLenView.Length < 1) throw new ArgumentException("compressedLenView must hold 1 entry.", nameof(compressedLenView));
+        if (tileLenView.Length < 1) throw new ArgumentException("tileLenView must hold 1 entry.", nameof(tileLenView));
+        _kernel(1, uncompressedHeader, compressedHeader, tileBytes, outBuf, outLen,
+                uncompressedLenView, compressedLenView, tileLenView);
+    }
+
+    /// <summary>
+    /// Convenience overload for tests / standalone callers that already have
+    /// the lengths on the host. Allocates 3 single-element scratch views,
+    /// uploads, dispatches.
     /// </summary>
     public void Run(
         ArrayView<byte> uncompressedHeader,
@@ -65,7 +89,6 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         int compressedLen,
         int tileLen)
     {
-        if (outLen.Length < 1) throw new ArgumentException("outLen must hold 1 entry.", nameof(outLen));
         if (uncompressedLen < 0) throw new ArgumentOutOfRangeException(nameof(uncompressedLen));
         if (compressedLen < 0) throw new ArgumentOutOfRangeException(nameof(compressedLen));
         if (tileLen < 0) throw new ArgumentOutOfRangeException(nameof(tileLen));
@@ -74,8 +97,15 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
             throw new ArgumentException(
                 $"outBuf too short ({outBuf.Length}) for total payload ({total}).",
                 nameof(outBuf));
-        _kernel(1, uncompressedHeader, compressedHeader, tileBytes, outBuf, outLen,
-                uncompressedLen, compressedLen, tileLen);
+        using var sU = _accelerator.Allocate1D<long>(1);
+        using var sC = _accelerator.Allocate1D<long>(1);
+        using var sT = _accelerator.Allocate1D<long>(1);
+        sU.View.CopyFromCPU(new[] { (long)uncompressedLen });
+        sC.View.CopyFromCPU(new[] { (long)compressedLen });
+        sT.View.CopyFromCPU(new[] { (long)tileLen });
+        Run(uncompressedHeader, compressedHeader, tileBytes, outBuf, outLen,
+            sU.View, sC.View, sT.View);
+        _accelerator.Synchronize();
     }
 
     private static void AssembleKernel(
@@ -85,10 +115,13 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         ArrayView<byte> tileBytes,
         ArrayView<byte> outBuf,
         ArrayView<long> outLenOut,
-        int uncompressedLen,
-        int compressedLen,
-        int tileLen)
+        ArrayView<long> uncompressedLenView,
+        ArrayView<long> compressedLenView,
+        ArrayView<long> tileLenView)
     {
+        int uncompressedLen = (int)uncompressedLenView[0];
+        int compressedLen = (int)compressedLenView[0];
+        int tileLen = (int)tileLenView[0];
         long pos = 0;
         for (int i = 0; i < uncompressedLen; i++) outBuf[pos++] = uncompressedHeader[i];
         for (int i = 0; i < compressedLen; i++)   outBuf[pos++] = compressedHeader[i];

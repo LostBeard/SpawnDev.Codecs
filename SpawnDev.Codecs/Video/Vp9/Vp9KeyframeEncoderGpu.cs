@@ -61,6 +61,30 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
     private readonly MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense> _dByteConsts;
     private readonly MemoryBuffer1D<ushort, global::ILGPU.Stride1D.Dense> _dUshortConsts;
 
+    // Per-resolution cached buffers - reallocated only when (width,height) changes.
+    // Steady-state encoding at the same size pays only kernel dispatch + plane
+    // upload + readback per frame.
+    private int _cachedWidth = -1;
+    private int _cachedHeight = -1;
+    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dY;
+    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dU;
+    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dV;
+    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dYRecon;
+    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dURecon;
+    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dVRecon;
+    private MemoryBuffer1D<short, global::ILGPU.Stride1D.Dense>? _dYCoefs;
+    private MemoryBuffer1D<short, global::ILGPU.Stride1D.Dense>? _dUCoefs;
+    private MemoryBuffer1D<short, global::ILGPU.Stride1D.Dense>? _dVCoefs;
+    private MemoryBuffer1D<int, global::ILGPU.Stride1D.Dense>? _dDequant;
+    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dCompressedHeader;
+    private MemoryBuffer1D<long, global::ILGPU.Stride1D.Dense>? _dCompressedHeaderLen;
+    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dTile;
+    private MemoryBuffer1D<long, global::ILGPU.Stride1D.Dense>? _dTileLen;
+    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dUncompressedHeader;
+    private MemoryBuffer1D<long, global::ILGPU.Stride1D.Dense>? _dUncompressedHeaderLen;
+    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dOutFrame;
+    private MemoryBuffer1D<long, global::ILGPU.Stride1D.Dense>? _dOutFrameLen;
+
     /// <summary>
     /// Compile every kernel + upload one-time-cached constant tables
     /// (DC/AC quantizer lookup + packed entropy / scan / neighbor
@@ -94,14 +118,15 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
     /// the complete VP9 frame bytes (uncompressed header + compressed
     /// header + tile data).
     /// </summary>
-    public async Task<byte[]> EncodeKeyFrameAsync(
+    public Task<byte[]> EncodeKeyFrameAsync(
         byte[] yPlane, byte[] uPlane, byte[] vPlane,
         int width, int height,
         int baseQIndex = 30)
     {
-        var (bytes, _, _, _) = await EncodeKeyFrameWithReconAsync(
-            yPlane, uPlane, vPlane, width, height, baseQIndex);
-        return bytes;
+        // Fast path: caller doesn't want recon planes. Skip the three
+        // extra device->host readbacks (yRecon/uRecon/vRecon) - those
+        // are pure overhead in the encode-only path.
+        return EncodeKeyFrameInternalAsync(yPlane, uPlane, vPlane, width, height, baseQIndex, returnRecon: false);
     }
 
     /// <summary>
@@ -116,6 +141,23 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         byte[] yPlane, byte[] uPlane, byte[] vPlane,
         int width, int height,
         int baseQIndex = 30)
+    {
+        // The recon path returns full Y/U/V; fall through to the unified internal.
+        var bytes = await EncodeKeyFrameInternalAsync(yPlane, uPlane, vPlane, width, height, baseQIndex, returnRecon: true);
+        // After EncodeKeyFrameInternalAsync(returnRecon:true) the recon planes
+        // are populated on the host; pull them from the helper-set fields.
+        return (bytes, _lastYRecon!, _lastURecon!, _lastVRecon!);
+    }
+
+    private byte[]? _lastYRecon;
+    private byte[]? _lastURecon;
+    private byte[]? _lastVRecon;
+
+    private async Task<byte[]> EncodeKeyFrameInternalAsync(
+        byte[] yPlane, byte[] uPlane, byte[] vPlane,
+        int width, int height,
+        int baseQIndex,
+        bool returnRecon)
     {
         if (yPlane is null) throw new ArgumentNullException(nameof(yPlane));
         if (uPlane is null) throw new ArgumentNullException(nameof(uPlane));
@@ -140,118 +182,135 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         if (uPlane.Length < uvLen) throw new ArgumentException("uPlane too short.", nameof(uPlane));
         if (vPlane.Length < uvLen) throw new ArgumentException("vPlane too short.", nameof(vPlane));
 
-        // ---- 1. Allocate per-frame GPU buffers + upload sources ----
-        using var dY = _accelerator.Allocate1D<byte>(yLen);
-        using var dU = _accelerator.Allocate1D<byte>(uvLen);
-        using var dV = _accelerator.Allocate1D<byte>(uvLen);
-        using var dYRecon = _accelerator.Allocate1D<byte>(yLen);
-        using var dURecon = _accelerator.Allocate1D<byte>(uvLen);
-        using var dVRecon = _accelerator.Allocate1D<byte>(uvLen);
-        using var dYCoefs = _accelerator.Allocate1D<short>((long)mbCount * 256);
-        using var dUCoefs = _accelerator.Allocate1D<short>((long)mbCount * 64);
-        using var dVCoefs = _accelerator.Allocate1D<short>((long)mbCount * 64);
-        using var dDequant = _accelerator.Allocate1D<int>(4);
+        // ---- 1. Ensure per-frame GPU buffers (cached across same-resolution calls) ----
+        EnsureBuffers(width, height, yLen, uvLen, mbCount);
 
-        // Worst-case output sizes. Compressed header is tiny (< 64
-        // bytes); uncompressed header < 32 bytes. Tile data scales
-        // with content entropy: random YUV bytes produce non-trivial
-        // residuals after DC_PRED that quantize to many Cat3..Cat6
-        // tokens. 1024 bytes per MB (~ 8192 bits, vs ~ 1500 worst-case
-        // bits per MB measured) is a safe overestimate that still
-        // bounds GPU buffer allocation reasonably.
-        long worstCaseTile = mbCount * 1024L + 256L;
-        long worstCaseFrame = worstCaseTile + 128L; // + header room
-        using var dCompressedHeader = _accelerator.Allocate1D<byte>(64);
-        using var dCompressedHeaderLen = _accelerator.Allocate1D<long>(1);
-        using var dTile = _accelerator.Allocate1D<byte>(worstCaseTile);
-        using var dTileLen = _accelerator.Allocate1D<long>(1);
-        using var dUncompressedHeader = _accelerator.Allocate1D<byte>(32);
-        using var dUncompressedHeaderLen = _accelerator.Allocate1D<long>(1);
-        using var dOutFrame = _accelerator.Allocate1D<byte>(worstCaseFrame);
-        using var dOutFrameLen = _accelerator.Allocate1D<long>(1);
+        // ---- Pre-zero output buffers so the bool encoder's carry-back pass
+        // reads stable bytes. Recon planes are fully overwritten by the
+        // sequential kernel; coefs are fully overwritten too. Headers /
+        // tile / outframe are bool-encoder carry-back targets and need
+        // pre-zero each frame.
+        _dCompressedHeader!.View.MemSetToZero();
+        _dCompressedHeaderLen!.View.MemSetToZero();
+        _dTile!.View.MemSetToZero();
+        _dTileLen!.View.MemSetToZero();
+        _dUncompressedHeader!.View.MemSetToZero();
+        _dUncompressedHeaderLen!.View.MemSetToZero();
+        _dOutFrame!.View.MemSetToZero();
+        _dOutFrameLen!.View.MemSetToZero();
 
-        // Pre-zero output buffers so the bool encoder's carry-back pass
-        // reads stable bytes. Use GPU-side memset rather than allocating
-        // large CPU zero-arrays and uploading them - this matches the
-        // Vp8 encoder's pattern and avoids ~1MB of CPU-side allocations
-        // and a host->device bus transfer per frame.
-        dCompressedHeader.View.MemSetToZero();
-        dCompressedHeaderLen.View.MemSetToZero();
-        dTile.View.MemSetToZero();
-        dTileLen.View.MemSetToZero();
-        dUncompressedHeader.View.MemSetToZero();
-        dUncompressedHeaderLen.View.MemSetToZero();
-        dOutFrame.View.MemSetToZero();
-        dOutFrameLen.View.MemSetToZero();
-
-        dY.View.CopyFromCPU(yPlane);
-        dU.View.CopyFromCPU(uPlane);
-        dV.View.CopyFromCPU(vPlane);
-        // Pre-fill recon to zero (sequential kernel overwrites every
-        // pixel with prediction + residual but the carry-back path
-        // for partial writes wants stable starting state).
-        dYRecon.View.MemSetToZero();
-        dURecon.View.MemSetToZero();
-        dVRecon.View.MemSetToZero();
+        _dY!.View.CopyFromCPU(yPlane);
+        _dU!.View.CopyFromCPU(uPlane);
+        _dV!.View.CopyFromCPU(vPlane);
 
         // ---- 2. Dispatch dequantizer compute kernel ----
         // y_dc_delta / uv_dc_delta / uv_ac_delta = 0 in v1.
-        _dequantKernel.Run(_dDcQLookup.View, _dAcQLookup.View, dDequant.View,
+        _dequantKernel.Run(_dDcQLookup.View, _dAcQLookup.View, _dDequant!.View,
             baseQIndex, 0, 0, 0, 0);
 
         // ---- 3. Compressed header ----
-        _compressedHeaderKernel.Run(dCompressedHeader.View, dCompressedHeaderLen.View);
+        _compressedHeaderKernel.Run(_dCompressedHeader!.View, _dCompressedHeaderLen!.View);
 
         // ---- 4. Sequential encode (forward + inverse pipeline) ----
         _sequentialKernel.Run(
-            dY.View, dU.View, dV.View,
-            dYRecon.View, dURecon.View, dVRecon.View,
-            dYCoefs.View, dUCoefs.View, dVCoefs.View,
-            dDequant.View,
+            _dY!.View, _dU!.View, _dV!.View,
+            _dYRecon!.View, _dURecon!.View, _dVRecon!.View,
+            _dYCoefs!.View, _dUCoefs!.View, _dVCoefs!.View,
+            _dDequant!.View,
             mbCols, mbRows);
 
         // ---- 5. Entropy ----
         _entropyKernel.Run(
-            dYCoefs.View, dUCoefs.View, dVCoefs.View,
-            dTile.View, dTileLen.View,
+            _dYCoefs!.View, _dUCoefs!.View, _dVCoefs!.View,
+            _dTile!.View, _dTileLen!.View,
             _dByteConsts.View, _dUshortConsts.View,
             mbCols, mbRows);
 
-        // We need compressedHeaderLen on the host to seed the
-        // uncompressed header's first_partition_size field.
-        await _accelerator.SynchronizeAsync();
-        long compressedLen = (await dCompressedHeaderLen.CopyToHostAsync())[0];
-
-        // ---- 6. Uncompressed header ----
+        // ---- 6. Uncompressed header (GPU-resident: reads compressedLen
+        // directly from the buffer the compressedHeaderKernel wrote to;
+        // no host sync) ----
         _uncompressedHeaderKernel.Run(
-            dUncompressedHeader.View, dUncompressedHeaderLen.View,
-            width, height, baseQIndex, (int)compressedLen);
+            _dUncompressedHeader!.View, _dUncompressedHeaderLen!.View,
+            _dCompressedHeaderLen!.View,
+            width, height, baseQIndex);
 
-        // ---- 7. Read back lengths needed by Assemble ----
-        await _accelerator.SynchronizeAsync();
-        long uncompressedLen = (await dUncompressedHeaderLen.CopyToHostAsync())[0];
-        long tileLen = (await dTileLen.CopyToHostAsync())[0];
-
-        // ---- 8. Assemble ----
+        // ---- 7. Assemble (GPU-resident: reads all 3 lens from views,
+        // no host sync between header emit and concat) ----
         _assembleKernel.Run(
-            dUncompressedHeader.View, dCompressedHeader.View, dTile.View,
-            dOutFrame.View, dOutFrameLen.View,
-            (int)uncompressedLen, (int)compressedLen, (int)tileLen);
+            _dUncompressedHeader!.View, _dCompressedHeader!.View, _dTile!.View,
+            _dOutFrame!.View, _dOutFrameLen!.View,
+            _dUncompressedHeaderLen!.View, _dCompressedHeaderLen!.View, _dTileLen!.View);
 
+        // ---- 8. Single end-of-frame sync + readback ----
         await _accelerator.SynchronizeAsync();
-        long outFrameLen = (await dOutFrameLen.CopyToHostAsync())[0];
+        long outFrameLen = (await _dOutFrameLen!.CopyToHostAsync())[0];
         // Real per-backend partial readback (SpawnDev.ILGPU 4.9.3+).
-        var result = await dOutFrame.View.SubView(0, outFrameLen).CopyToHostAsync();
+        var result = await _dOutFrame!.View.SubView(0, outFrameLen).CopyToHostAsync();
 
-        // Read back recon planes for self-consistency testing.
-        // CopyToHostAsync returns fresh byte[] arrays sized to dY/dU/dV
-        // (yLen / uvLen / uvLen). No host-side iteration over codec data
-        // needed - hand them straight to the result tuple.
-        var yReconBuf = await dYRecon.CopyToHostAsync();
-        var uReconBuf = await dURecon.CopyToHostAsync();
-        var vReconBuf = await dVRecon.CopyToHostAsync();
+        if (returnRecon)
+        {
+            _lastYRecon = await _dYRecon!.CopyToHostAsync();
+            _lastURecon = await _dURecon!.CopyToHostAsync();
+            _lastVRecon = await _dVRecon!.CopyToHostAsync();
+        }
 
-        return (result, yReconBuf, uReconBuf, vReconBuf);
+        return result;
+    }
+
+    /// <summary>
+    /// Ensure per-frame GPU buffers are sized for (width,height). Reallocates
+    /// only when the resolution changes.
+    /// </summary>
+    private void EnsureBuffers(int width, int height, int yLen, int uvLen, int mbCount)
+    {
+        if (_cachedWidth == width && _cachedHeight == height) return;
+        DisposeFrameBuffers();
+        _cachedWidth = width;
+        _cachedHeight = height;
+        _dY = _accelerator.Allocate1D<byte>(yLen);
+        _dU = _accelerator.Allocate1D<byte>(uvLen);
+        _dV = _accelerator.Allocate1D<byte>(uvLen);
+        _dYRecon = _accelerator.Allocate1D<byte>(yLen);
+        _dURecon = _accelerator.Allocate1D<byte>(uvLen);
+        _dVRecon = _accelerator.Allocate1D<byte>(uvLen);
+        _dYCoefs = _accelerator.Allocate1D<short>((long)mbCount * 256);
+        _dUCoefs = _accelerator.Allocate1D<short>((long)mbCount * 64);
+        _dVCoefs = _accelerator.Allocate1D<short>((long)mbCount * 64);
+        _dDequant = _accelerator.Allocate1D<int>(4);
+        long worstCaseTile = mbCount * 1024L + 256L;
+        long worstCaseFrame = worstCaseTile + 128L;
+        _dCompressedHeader = _accelerator.Allocate1D<byte>(64);
+        _dCompressedHeaderLen = _accelerator.Allocate1D<long>(1);
+        _dTile = _accelerator.Allocate1D<byte>(worstCaseTile);
+        _dTileLen = _accelerator.Allocate1D<long>(1);
+        _dUncompressedHeader = _accelerator.Allocate1D<byte>(32);
+        _dUncompressedHeaderLen = _accelerator.Allocate1D<long>(1);
+        _dOutFrame = _accelerator.Allocate1D<byte>(worstCaseFrame);
+        _dOutFrameLen = _accelerator.Allocate1D<long>(1);
+    }
+
+    private void DisposeFrameBuffers()
+    {
+        _dY?.Dispose(); _dY = null;
+        _dU?.Dispose(); _dU = null;
+        _dV?.Dispose(); _dV = null;
+        _dYRecon?.Dispose(); _dYRecon = null;
+        _dURecon?.Dispose(); _dURecon = null;
+        _dVRecon?.Dispose(); _dVRecon = null;
+        _dYCoefs?.Dispose(); _dYCoefs = null;
+        _dUCoefs?.Dispose(); _dUCoefs = null;
+        _dVCoefs?.Dispose(); _dVCoefs = null;
+        _dDequant?.Dispose(); _dDequant = null;
+        _dCompressedHeader?.Dispose(); _dCompressedHeader = null;
+        _dCompressedHeaderLen?.Dispose(); _dCompressedHeaderLen = null;
+        _dTile?.Dispose(); _dTile = null;
+        _dTileLen?.Dispose(); _dTileLen = null;
+        _dUncompressedHeader?.Dispose(); _dUncompressedHeader = null;
+        _dUncompressedHeaderLen?.Dispose(); _dUncompressedHeaderLen = null;
+        _dOutFrame?.Dispose(); _dOutFrame = null;
+        _dOutFrameLen?.Dispose(); _dOutFrameLen = null;
+        _cachedWidth = -1;
+        _cachedHeight = -1;
     }
 
     /// <summary>Release every resource the encoder owns.</summary>
@@ -268,5 +327,6 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         _dAcQLookup.Dispose();
         _dByteConsts.Dispose();
         _dUshortConsts.Dispose();
+        DisposeFrameBuffers();
     }
 }

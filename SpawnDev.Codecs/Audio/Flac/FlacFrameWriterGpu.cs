@@ -57,19 +57,13 @@ public static class FlacFrameWriterGpu
         ArrayView<byte> outBuf, long outBase)
     {
         // ---- 1. Build header bits + CRC-8 byte ----
+        // OutLen is buffer-start-relative; pre-seed it to outBase so the
+        // bit writer's first byte lands at outBuf[outBase]. The frame
+        // length returned at the bottom subtracts outBase. This is what
+        // makes batch/parallel encoding (multiple threads each writing to
+        // its own outBase slot) correct.
         var hdr = FlacBitWriterGpu.Init();
-        // We want OutLen relative to outBase; the bit writer's OutLen
-        // is the absolute byte count from buffer start. Slice via
-        // ArrayView SubView is simpler: we pass outBuf with an
-        // implicit base offset by writing a SubView. However, ILGPU
-        // SubView is not callable from kernels directly with mutable
-        // state, so we route by passing outBuf and tracking
-        // outBase ourselves. Simplest: use a helper offset-aware
-        // bit writer wrapper. For this v1, we require outBase = 0
-        // (caller pre-positions the slice).
-        // (When outBase != 0 the helper still works but the OutLen
-        // returned by the bit writer is the buffer-start-relative
-        // count; subtract outBase to get the frame-relative count.)
+        hdr.OutLen = outBase;
 
         // Frame header bits.
         FlacBitWriterGpu.Write(ref hdr, outBuf, (uint)FlacConstants.FrameSyncCode, 14);

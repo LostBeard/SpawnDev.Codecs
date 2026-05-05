@@ -112,46 +112,60 @@ public sealed class FlacEncoderGpu : IDisposable
         // ---- Audio frames (GPU) ----
         int frameCount = totalPerChannel / BlockSize;
 
-        // Single upload of the entire interleaved input (necessary I/O
-        // step - source data comes from outside the accelerator). All
-        // per-frame work after that is GPU dispatches: de-interleave,
-        // encode, partial readback.
+        // Frame-parallel batch path. FLAC frames are independent of each
+        // other (no inter-frame predictor state in this encoder), so we
+        // upload the whole interleaved stream once, dispatch ONE
+        // deinterleave kernel that writes channel-major samples for
+        // ALL frames into a per-frame strided buffer, then ONE batch
+        // frame-encode kernel with extent=frameCount, then read the
+        // output slabs back in a single host->device round-trip.
         int worstCasePerFrame = 32 + BlockSize * channels * 4;
         int perFrameSamples = BlockSize * channels;
         using var dAllInterleaved = _accelerator.Allocate1D<int>(totalSamples);
-        using var dSamples = _accelerator.Allocate1D<int>(perFrameSamples);
-        using var dOut = _accelerator.Allocate1D<byte>(worstCasePerFrame);
-        using var dOutLen = _accelerator.Allocate1D<long>(1);
-        var zeroOut = new byte[worstCasePerFrame];
+        using var dAllSamples = _accelerator.Allocate1D<int>((long)frameCount * perFrameSamples);
+        using var dOutAll = _accelerator.Allocate1D<byte>((long)frameCount * worstCasePerFrame);
+        using var dOutLensAll = _accelerator.Allocate1D<long>(frameCount);
 
-        // ReadOnlyMemory<int>.ToArray() copies once into the upload buffer.
-        // After this the entire interleaved stream lives on the GPU and
-        // every per-frame step is dispatched.
         dAllInterleaved.View.CopyFromCPU(interleavedSamples.ToArray());
+        dOutAll.View.MemSetToZero();
 
+        // Per-frame deinterleave dispatches (no syncs between - they queue
+        // on the accelerator stream). Each writes to its own slot in
+        // dAllSamples so the dispatches don't conflict.
         for (int frameIdx = 0; frameIdx < frameCount; frameIdx++)
         {
-            // De-interleave per frame: SubView the right slice of the
-            // pre-uploaded interleaved buffer + dispatch the kernel into
-            // dSamples (channel-major). No host-side copy of the slice.
             long frameSampleStart = (long)frameIdx * perFrameSamples;
             var frameInterleavedView =
                 dAllInterleaved.View.SubView(frameSampleStart, perFrameSamples);
-
+            var frameChannelMajorView =
+                dAllSamples.View.SubView(frameSampleStart, perFrameSamples);
             _deinterleaveKernel(new Index1D(perFrameSamples),
-                frameInterleavedView, dSamples.View, channels, BlockSize);
+                frameInterleavedView, frameChannelMajorView, channels, BlockSize);
+        }
 
-            dOut.View.CopyFromCPU(zeroOut);
+        // Batch frame encode: extent=frameCount, each thread reads its
+        // perFrameSamples-stride slice of dAllSamples and writes to its
+        // worstCasePerFrame-stride slot of dOutAll.
+        _frameKernel.RunBatch(
+            dAllSamples.View, dOutAll.View, dOutLensAll.View,
+            BlockSize, channels, BitsPerSample, startFrameNumber: 0,
+            frameCount: frameCount,
+            samplesStride: perFrameSamples,
+            outBufStride: worstCasePerFrame);
 
-            _frameKernel.Run(dSamples.View, dOut.View, dOutLen.View,
-                BlockSize, channels, BitsPerSample, (ulong)frameIdx);
-            await _accelerator.SynchronizeAsync();
+        await _accelerator.SynchronizeAsync();
 
-            long frameLen = (await dOutLen.CopyToHostAsync())[0];
-            // Partial readback of just the encoded frame bytes; AddRange
-            // appends the slice without a per-byte CPU loop at this layer.
-            var frameBytes = await dOut.CopyToHostAsync(0, frameLen);
-            output.AddRange(frameBytes);
+        // Single readback of all per-frame lengths + all per-frame output
+        // bytes. We then walk the slots host-side to assemble the final
+        // contiguous stream (this is metadata-level concatenation, not
+        // codec-data math - allowed under the cardinal rule).
+        var lensHost = await dOutLensAll.CopyToHostAsync();
+        var allBytes = await dOutAll.CopyToHostAsync();
+        for (int frameIdx = 0; frameIdx < frameCount; frameIdx++)
+        {
+            int slotOff = frameIdx * worstCasePerFrame;
+            int frameLen = (int)lensHost[frameIdx];
+            for (int b = 0; b < frameLen; b++) output.Add(allBytes[slotOff + b]);
         }
 
         return output.ToArray();
