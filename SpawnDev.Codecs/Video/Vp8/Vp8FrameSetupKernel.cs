@@ -42,6 +42,13 @@ public sealed class Vp8FrameSetupKernel : IDisposable
         ArrayView<int>, ArrayView<byte>, ArrayView<int>,
         int> _kernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<int>, ArrayView<int>,
+        ArrayView<byte>, ArrayView<byte>,
+        ArrayView<int>, ArrayView<byte>, ArrayView<int>,
+        int, int, int> _batchKernel;
+
     /// <summary>Compile.</summary>
     public Vp8FrameSetupKernel(Accelerator accelerator)
     {
@@ -53,6 +60,39 @@ public sealed class Vp8FrameSetupKernel : IDisposable
             ArrayView<byte>, ArrayView<byte>,
             ArrayView<int>, ArrayView<byte>, ArrayView<int>,
             int>(SetupFrameKernel);
+        _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<int>, ArrayView<int>,
+            ArrayView<byte>, ArrayView<byte>,
+            ArrayView<int>, ArrayView<byte>, ArrayView<int>,
+            int, int, int>(SetupFrameBatchKernel);
+    }
+
+    /// <summary>Batch setup: extent=N, each thread sets up one frame's slot.</summary>
+    public void RunBatch(
+        ArrayView<int> dcQLookup, ArrayView<int> acQLookup,
+        ArrayView<byte> defaultCoefProbs, ArrayView<byte> updateCoefProbs,
+        ArrayView<int> dequantOut, ArrayView<byte> partition0Out, ArrayView<int> initialP0StateOut,
+        int baseQIndex, int frameCount, int dequantStride, int p0Stride)
+    {
+        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        _batchKernel(frameCount, dcQLookup, acQLookup, defaultCoefProbs, updateCoefProbs,
+            dequantOut, partition0Out, initialP0StateOut, baseQIndex, dequantStride, p0Stride);
+    }
+
+    private static void SetupFrameBatchKernel(
+        Index1D idx,
+        ArrayView<int> dcQLookup, ArrayView<int> acQLookup,
+        ArrayView<byte> defaultCoefProbs, ArrayView<byte> updateCoefProbs,
+        ArrayView<int> dequantOut, ArrayView<byte> partition0Out, ArrayView<int> initialP0StateOut,
+        int baseQIndex, int dequantStride, int p0Stride)
+    {
+        int f = idx.X;
+        var fDQ = dequantOut.SubView((long)f * dequantStride, dequantStride);
+        var fP0 = partition0Out.SubView((long)f * p0Stride, p0Stride);
+        var fInit = initialP0StateOut.SubView((long)f * 5, 5);
+        SetupFrameBody(dcQLookup, acQLookup, defaultCoefProbs, updateCoefProbs,
+            fDQ, fP0, fInit, baseQIndex);
     }
 
     /// <summary>
@@ -121,6 +161,20 @@ public sealed class Vp8FrameSetupKernel : IDisposable
 
     private static void SetupFrameKernel(
         Index1D _,
+        ArrayView<int> dcQLookup,
+        ArrayView<int> acQLookup,
+        ArrayView<byte> defaultCoefProbs,
+        ArrayView<byte> updateCoefProbs,
+        ArrayView<int> dequantOut,
+        ArrayView<byte> partition0Out,
+        ArrayView<int> initialP0StateOut,
+        int baseQIndex)
+    {
+        SetupFrameBody(dcQLookup, acQLookup, defaultCoefProbs, updateCoefProbs,
+            dequantOut, partition0Out, initialP0StateOut, baseQIndex);
+    }
+
+    private static void SetupFrameBody(
         ArrayView<int> dcQLookup,
         ArrayView<int> acQLookup,
         ArrayView<byte> defaultCoefProbs,

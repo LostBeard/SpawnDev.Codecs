@@ -25,6 +25,19 @@ using ILGPU.Runtime;
 
 namespace SpawnDev.Codecs.Video.Vp9;
 
+/// <summary>Per-frame strides for Vp9FrameAssembleKernel batch dispatch.</summary>
+public struct Vp9AssembleBatchStrides
+{
+    /// <summary>Uncompressed-header bytes per frame.</summary>
+    public int UhStride;
+    /// <summary>Compressed-header bytes per frame.</summary>
+    public int ChStride;
+    /// <summary>Tile bytes per frame (worst case).</summary>
+    public int TileStride;
+    /// <summary>Output bytes per frame (worst case).</summary>
+    public int OutStride;
+}
+
 /// <summary>
 /// VP9 frame assembly kernel. Concatenates the uncompressed header,
 /// compressed header, and tile data byte streams into the final
@@ -39,6 +52,13 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         ArrayView<long>,
         ArrayView<long>, ArrayView<long>, ArrayView<long>> _kernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+        ArrayView<long>,
+        ArrayView<long>, ArrayView<long>, ArrayView<long>,
+        Vp9AssembleBatchStrides> _batchKernel;
+
     /// <summary>Compile.</summary>
     public Vp9FrameAssembleKernel(Accelerator accelerator)
     {
@@ -49,6 +69,44 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<long>,
             ArrayView<long>, ArrayView<long>, ArrayView<long>>(AssembleKernel);
+        _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+            ArrayView<long>,
+            ArrayView<long>, ArrayView<long>, ArrayView<long>,
+            Vp9AssembleBatchStrides>(AssembleBatchKernel);
+    }
+
+    /// <summary>Batch assemble: extent=N, one thread per frame.</summary>
+    public void RunBatch(
+        ArrayView<byte> uncompressedHeader, ArrayView<byte> compressedHeader,
+        ArrayView<byte> tileBytes, ArrayView<byte> outBuf, ArrayView<long> outLen,
+        ArrayView<long> uhLen, ArrayView<long> chLen, ArrayView<long> tileLen,
+        int frameCount, Vp9AssembleBatchStrides strides)
+    {
+        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        _batchKernel(frameCount,
+            uncompressedHeader, compressedHeader, tileBytes, outBuf, outLen,
+            uhLen, chLen, tileLen, strides);
+    }
+
+    private static void AssembleBatchKernel(
+        Index1D idx,
+        ArrayView<byte> uncompressedHeader, ArrayView<byte> compressedHeader,
+        ArrayView<byte> tileBytes, ArrayView<byte> outBuf, ArrayView<long> outLenOut,
+        ArrayView<long> uhLenView, ArrayView<long> chLenView, ArrayView<long> tileLenView,
+        Vp9AssembleBatchStrides s)
+    {
+        int f = idx.X;
+        var fUH = uncompressedHeader.SubView((long)f * s.UhStride, s.UhStride);
+        var fCH = compressedHeader.SubView((long)f * s.ChStride, s.ChStride);
+        var fTile = tileBytes.SubView((long)f * s.TileStride, s.TileStride);
+        var fOut = outBuf.SubView((long)f * s.OutStride, s.OutStride);
+        var fOutLen = outLenOut.SubView(f, 1);
+        var fUhLen = uhLenView.SubView(f, 1);
+        var fChLen = chLenView.SubView(f, 1);
+        var fTileLen = tileLenView.SubView(f, 1);
+        AssembleBody(fUH, fCH, fTile, fOut, fOutLen, fUhLen, fChLen, fTileLen);
     }
 
     /// <summary>
@@ -110,6 +168,21 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
 
     private static void AssembleKernel(
         Index1D _,
+        ArrayView<byte> uncompressedHeader,
+        ArrayView<byte> compressedHeader,
+        ArrayView<byte> tileBytes,
+        ArrayView<byte> outBuf,
+        ArrayView<long> outLenOut,
+        ArrayView<long> uncompressedLenView,
+        ArrayView<long> compressedLenView,
+        ArrayView<long> tileLenView)
+    {
+        AssembleBody(uncompressedHeader, compressedHeader, tileBytes,
+            outBuf, outLenOut,
+            uncompressedLenView, compressedLenView, tileLenView);
+    }
+
+    private static void AssembleBody(
         ArrayView<byte> uncompressedHeader,
         ArrayView<byte> compressedHeader,
         ArrayView<byte> tileBytes,

@@ -27,6 +27,11 @@ public sealed class Vp9DequantizerComputeKernel : IDisposable
         ArrayView<short>, ArrayView<short>, ArrayView<int>,
         int, int, int, int, int> _kernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<short>, ArrayView<short>, ArrayView<int>,
+        int, int, int, int, int, int> _batchKernel;
+
     /// <summary>Compile.</summary>
     public Vp9DequantizerComputeKernel(Accelerator accelerator)
     {
@@ -36,6 +41,37 @@ public sealed class Vp9DequantizerComputeKernel : IDisposable
             Index1D,
             ArrayView<short>, ArrayView<short>, ArrayView<int>,
             int, int, int, int, int>(ComputeKernel);
+        _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<short>, ArrayView<short>, ArrayView<int>,
+            int, int, int, int, int, int>(ComputeBatchKernel);
+    }
+
+    /// <summary>Batch dequantizer: extent=N, each thread fills one frame's slot.</summary>
+    public void RunBatch(
+        ArrayView<short> dcQLookup, ArrayView<short> acQLookup,
+        ArrayView<int> dequantOut,
+        int baseQIndex, int yDcDelta, int yAcDelta, int uvDcDelta, int uvAcDelta,
+        int frameCount, int dequantStride)
+    {
+        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        _batchKernel(frameCount, dcQLookup, acQLookup, dequantOut,
+            baseQIndex, yDcDelta, yAcDelta, uvDcDelta, uvAcDelta, dequantStride);
+    }
+
+    private static void ComputeBatchKernel(
+        Index1D idx,
+        ArrayView<short> dcQLookup, ArrayView<short> acQLookup,
+        ArrayView<int> dequantOut,
+        int baseQIndex, int yDcDelta, int yAcDelta, int uvDcDelta, int uvAcDelta,
+        int dequantStride)
+    {
+        int f = idx.X;
+        var fDQ = dequantOut.SubView((long)f * dequantStride, dequantStride);
+        fDQ[0] = LookupClamped(dcQLookup, baseQIndex + yDcDelta);
+        fDQ[1] = LookupClamped(acQLookup, baseQIndex + yAcDelta);
+        fDQ[2] = LookupClamped(dcQLookup, baseQIndex + uvDcDelta);
+        fDQ[3] = LookupClamped(acQLookup, baseQIndex + uvAcDelta);
     }
 
     /// <summary>

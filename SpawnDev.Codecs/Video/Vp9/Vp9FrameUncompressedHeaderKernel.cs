@@ -38,6 +38,7 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
 {
     private readonly Accelerator _accelerator;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int> _kernel;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int, int> _batchKernel;
 
     /// <summary>Compile.</summary>
     public Vp9FrameUncompressedHeaderKernel(Accelerator accelerator)
@@ -46,6 +47,33 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int>(EmitKernel);
+        _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int, int>(EmitBatchKernel);
+    }
+
+    /// <summary>Batch: extent=N, each thread emits one frame's uncompressed header.</summary>
+    public void RunBatch(
+        ArrayView<byte> outBuf, ArrayView<long> outLen,
+        ArrayView<long> firstPartitionSizeView,
+        int width, int height, int baseQIndex,
+        int frameCount, int outBufStride)
+    {
+        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        _batchKernel(frameCount, outBuf, outLen, firstPartitionSizeView,
+            width, height, baseQIndex, outBufStride);
+    }
+
+    private static void EmitBatchKernel(
+        Index1D idx,
+        ArrayView<byte> outBuf, ArrayView<long> outLen,
+        ArrayView<long> firstPartitionSizeView,
+        int width, int height, int baseQIndex, int outBufStride)
+    {
+        int f = idx.X;
+        var fOut = outBuf.SubView((long)f * outBufStride, outBufStride);
+        var fOutLen = outLen.SubView(f, 1);
+        var fFps = firstPartitionSizeView.SubView(f, 1);
+        EmitBody(fOut, fOutLen, fFps, width, height, baseQIndex);
     }
 
     /// <summary>
@@ -89,6 +117,16 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
 
     private static void EmitKernel(
         Index1D _,
+        ArrayView<byte> outBuf,
+        ArrayView<long> outLenOut,
+        ArrayView<long> firstPartitionSizeView,
+        int width, int height,
+        int baseQIndex)
+    {
+        EmitBody(outBuf, outLenOut, firstPartitionSizeView, width, height, baseQIndex);
+    }
+
+    private static void EmitBody(
         ArrayView<byte> outBuf,
         ArrayView<long> outLenOut,
         ArrayView<long> firstPartitionSizeView,

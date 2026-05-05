@@ -44,6 +44,7 @@ public sealed class Vp9FrameCompressedHeaderKernel : IDisposable
 {
     private readonly Accelerator _accelerator;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>> _kernel;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, int> _batchKernel;
 
     /// <summary>Compile.</summary>
     public Vp9FrameCompressedHeaderKernel(Accelerator accelerator)
@@ -52,6 +53,8 @@ public sealed class Vp9FrameCompressedHeaderKernel : IDisposable
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<long>>(EmitKernel);
+        _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<long>, int>(EmitBatchKernel);
     }
 
     /// <summary>
@@ -70,10 +73,33 @@ public sealed class Vp9FrameCompressedHeaderKernel : IDisposable
         _kernel(1, outBuf, outLen);
     }
 
+    /// <summary>Batch: extent=N, each thread emits one frame's compressed header.</summary>
+    public void RunBatch(ArrayView<byte> outBuf, ArrayView<long> outLen,
+        int frameCount, int outBufStride)
+    {
+        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        _batchKernel(frameCount, outBuf, outLen, outBufStride);
+    }
+
+    private static void EmitBatchKernel(
+        Index1D idx,
+        ArrayView<byte> outBuf, ArrayView<long> outLen, int outBufStride)
+    {
+        int f = idx.X;
+        var fOut = outBuf.SubView((long)f * outBufStride, outBufStride);
+        var fOutLen = outLen.SubView(f, 1);
+        EmitBody(fOut, fOutLen);
+    }
+
     private static void EmitKernel(
         Index1D _,
         ArrayView<byte> outBuf,
         ArrayView<long> outLenOut)
+    {
+        EmitBody(outBuf, outLenOut);
+    }
+
+    private static void EmitBody(ArrayView<byte> outBuf, ArrayView<long> outLenOut)
     {
         var state = Vp8BoolEncoderGpu.Init();
 

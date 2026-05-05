@@ -43,6 +43,12 @@ public sealed class Vp8FrameAssembleKernel : IDisposable
         ArrayView<byte>, ArrayView<int>,
         int, int> _kernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<byte>, ArrayView<byte>, ArrayView<long>,
+        ArrayView<byte>, ArrayView<int>,
+        int, int, int, int, int> _batchKernel;
+
     /// <summary>Compile.</summary>
     public Vp8FrameAssembleKernel(Accelerator accelerator)
     {
@@ -53,6 +59,11 @@ public sealed class Vp8FrameAssembleKernel : IDisposable
             ArrayView<byte>, ArrayView<byte>, ArrayView<long>,
             ArrayView<byte>, ArrayView<int>,
             int, int>(AssembleKernel);
+        _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<byte>, ArrayView<byte>, ArrayView<long>,
+            ArrayView<byte>, ArrayView<int>,
+            int, int, int, int, int>(AssembleBatchKernel);
     }
 
     /// <summary>Run the assembly. partLens = [partition0Len, tokenP0Len].</summary>
@@ -72,8 +83,53 @@ public sealed class Vp8FrameAssembleKernel : IDisposable
         _kernel(1, partition0, tokenP0, partLens, output, outLen, width, height);
     }
 
+    /// <summary>
+    /// Batch assemble: extent=N, each thread assembles one frame's slot.
+    /// outLens layout: 2 longs per frame (p0Len, tpLen). output layout:
+    /// outputStride bytes per frame.
+    /// </summary>
+    public void RunBatch(
+        ArrayView<byte> partition0,
+        ArrayView<byte> tokenP0,
+        ArrayView<long> partLens,
+        ArrayView<byte> output,
+        ArrayView<int> outLen,
+        int width, int height,
+        int frameCount, int p0Stride, int tp0Stride, int outputStride)
+    {
+        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        _batchKernel(frameCount, partition0, tokenP0, partLens, output, outLen,
+            width, height, p0Stride, tp0Stride, outputStride);
+    }
+
+    private static void AssembleBatchKernel(
+        Index1D idx,
+        ArrayView<byte> partition0, ArrayView<byte> tokenP0, ArrayView<long> partLens,
+        ArrayView<byte> output, ArrayView<int> outLen,
+        int width, int height, int p0Stride, int tp0Stride, int outputStride)
+    {
+        int f = idx.X;
+        var fP0 = partition0.SubView((long)f * p0Stride, p0Stride);
+        var fTp = tokenP0.SubView((long)f * tp0Stride, tp0Stride);
+        var fPartLens = partLens.SubView((long)f * 2, 2);
+        var fOut = output.SubView((long)f * outputStride, outputStride);
+        var fOutLen = outLen.SubView(f, 1);
+        AssembleBody(fP0, fTp, fPartLens, fOut, fOutLen, width, height);
+    }
+
     private static void AssembleKernel(
         Index1D _,
+        ArrayView<byte> partition0,
+        ArrayView<byte> tokenP0,
+        ArrayView<long> partLens,
+        ArrayView<byte> output,
+        ArrayView<int> outLen,
+        int width, int height)
+    {
+        AssembleBody(partition0, tokenP0, partLens, output, outLen, width, height);
+    }
+
+    private static void AssembleBody(
         ArrayView<byte> partition0,
         ArrayView<byte> tokenP0,
         ArrayView<long> partLens,

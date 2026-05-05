@@ -392,17 +392,13 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         dAllU.View.CopyFromCPU(hostU);
         dAllV.View.CopyFromCPU(hostV);
 
-        // Phase 1b: per-frame dequantizer + compressed header (tiny single-
-        // thread dispatches; loop is fine).
-        for (int f = 0; f < frameCount; f++)
-        {
-            var fDQ = dAllDQ.View.SubView((long)f * dequantStride, dequantStride);
-            var fCH = dAllCH.View.SubView((long)f * 64, 64);
-            var fCHLen = dAllCHLen.View.SubView(f, 1);
-            _dequantKernel.Run(_dDcQLookup.View, _dAcQLookup.View, fDQ,
-                baseQIndex, 0, 0, 0, 0);
-            _compressedHeaderKernel.Run(fCH, fCHLen);
-        }
+        // Phase 1b: BATCH dequantizer + compressed header.
+        _dequantKernel.RunBatch(_dDcQLookup.View, _dAcQLookup.View, dAllDQ.View,
+            baseQIndex, 0, 0, 0, 0,
+            frameCount, dequantStride);
+        _compressedHeaderKernel.RunBatch(
+            dAllCH.View, dAllCHLen.View,
+            frameCount, 64);
 
         // Phase 2: BATCH wave-front sequential encode.
         _sequentialKernel.RunBatch(
@@ -429,28 +425,23 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             _dByteConsts.View, _dUshortConsts.View,
             frameCount, entropyStrides);
 
-        // Phase 4: per-frame uncompressed header + assemble. We need
-        // compressedLen to seed the uncompressed header's first_partition_size.
-        // The kernel reads it from a view, GPU-resident; no host sync needed.
-        for (int f = 0; f < frameCount; f++)
-        {
-            var fUH = dAllUH.View.SubView((long)f * 32, 32);
-            var fUHLen = dAllUHLen.View.SubView(f, 1);
-            var fCHLen = dAllCHLen.View.SubView(f, 1);
-            _uncompressedHeaderKernel.Run(
-                fUH, fUHLen, fCHLen,
-                width, height, baseQIndex);
+        // Phase 4: BATCH uncompressed header + assemble.
+        _uncompressedHeaderKernel.RunBatch(
+            dAllUH.View, dAllUHLen.View, dAllCHLen.View,
+            width, height, baseQIndex,
+            frameCount, 32);
 
-            var fCH = dAllCH.View.SubView((long)f * 64, 64);
-            var fTile = dAllTile.View.SubView((long)f * worstCaseTile, worstCaseTile);
-            var fTileLen = dAllTileLen.View.SubView(f, 1);
-            var fOut = dAllOut.View.SubView((long)f * worstCaseFrame, worstCaseFrame);
-            var fOutLen = dAllOutLen.View.SubView(f, 1);
-            _assembleKernel.Run(
-                fUH, fCH, fTile,
-                fOut, fOutLen,
-                fUHLen, fCHLen, fTileLen);
-        }
+        var assembleStrides = new Vp9AssembleBatchStrides
+        {
+            UhStride = 32,
+            ChStride = 64,
+            TileStride = (int)worstCaseTile,
+            OutStride = (int)worstCaseFrame,
+        };
+        _assembleKernel.RunBatch(
+            dAllUH.View, dAllCH.View, dAllTile.View, dAllOut.View, dAllOutLen.View,
+            dAllUHLen.View, dAllCHLen.View, dAllTileLen.View,
+            frameCount, assembleStrides);
 
         await _accelerator.SynchronizeAsync();
         var outLensHost = await dAllOutLen.CopyToHostAsync();

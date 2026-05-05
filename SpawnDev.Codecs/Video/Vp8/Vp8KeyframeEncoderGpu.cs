@@ -279,19 +279,12 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         dAllU.View.CopyFromCPU(hostU);
         dAllV.View.CopyFromCPU(hostV);
 
-        // Setup remains per-frame (tiny single-thread dispatches; ~1us each
-        // on CUDA so 60 dispatches = ~60us total).
-        for (int f = 0; f < frameCount; f++)
-        {
-            var fP0 = dAllP0.View.SubView((long)f * _p0Stride, _p0Stride);
-            var fInitState = dAllInitState.View.SubView((long)f * 5, 5);
-            var fDQ = dAllDequant.View.SubView((long)f * dequantStride, dequantStride);
-            _setup.Run(
-                _dcQLookup.View, _acQLookup.View,
-                _defaultCoefProbs.View, _updateCoefProbs.View,
-                fDQ, fP0, fInitState,
-                baseQIndex);
-        }
+        // Batch setup: one dispatch with extent=N, each thread sets up its frame slot.
+        _setup.RunBatch(
+            _dcQLookup.View, _acQLookup.View,
+            _defaultCoefProbs.View, _updateCoefProbs.View,
+            dAllDequant.View, dAllP0.View, dAllInitState.View,
+            baseQIndex, frameCount, dequantStride, _p0Stride);
 
         // Phase 1b: BATCH wave-front sequential encode. 47 dispatches each
         // at extent = numFrames * diagCount; all N frames compute their
@@ -326,23 +319,12 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
             dAllAbove.View, dAllInitState.View,
             frameCount, batchStrides);
 
-        // Phase 3: per-frame assemble against per-frame entropy outputs.
-        // partLens for assemble: [outLens[F*2+0], outLens[F*2+1]] per frame.
-        // The existing assemble takes ArrayView<long> of length 2 with
-        // (partition0Len, tokenP0Len). We can SubView outLens by frame
-        // directly since it's already laid out as [F*2+0, F*2+1].
-        for (int f = 0; f < frameCount; f++)
-        {
-            var fP0 = dAllP0.View.SubView((long)f * _p0Stride, _p0Stride);
-            var fTp = dAllTp.View.SubView((long)f * _tp0Stride, _tp0Stride);
-            var fOutLens = dAllOutLens.View.SubView((long)f * 2, 2);
-            var fOutput = dAllOutputs.View.SubView((long)f * outputCapacity, outputCapacity);
-            var fOutLen = dAllOutputLens.View.SubView(f, 1);
-            _assemble.Run(
-                fP0, fTp, fOutLens,
-                fOutput, fOutLen,
-                width, height);
-        }
+        // Phase 3: BATCH assemble - one dispatch, each thread assembles its frame.
+        _assemble.RunBatch(
+            dAllP0.View, dAllTp.View, dAllOutLens.View,
+            dAllOutputs.View, dAllOutputLens.View,
+            width, height,
+            frameCount, _p0Stride, _tp0Stride, outputCapacity);
 
         _accelerator.Synchronize();
         var allLens = dAllOutputLens.GetAsArray1D();
