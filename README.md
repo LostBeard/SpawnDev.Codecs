@@ -61,12 +61,17 @@ ILGPU IR symmetry). Host is a pure coordinator: alloc + upload + dispatch
 
 | Codec  | GPU Encoder              | GPU Decoder              | Status                                |
 |--------|--------------------------|--------------------------|---------------------------------------|
-| VP8    | `Vp8KeyframeEncoderGpu`  | `Vp8KeyframeDecoderGpu`  | v1 keyframe (Y=128 round-trip 0.2)    |
-| VP9    | `Vp9KeyframeEncoderGpu`  | `Vp9KeyframeDecoderGpu`  | v1 keyframe + multi-block walker      |
-| FLAC   | `FlacEncoderGpu`         | `FlacDecoderGpu`         | v1 keyframe + 7 standalone subframe-decode primitives (FixedReconstruct + LpcReconstruct + ChannelDecorrelation + ResidualDecoder + SubframeHeader + Fixed/Lpc subframe composites) |
-| AV1    | `Av1KeyframeEncoderGpu`  | `Av1KeyframeDecoderGpu`  | v1 keyframe bit-exact vs CPU encoder  |
-| Vorbis | `VorbisAudioEncoderGpu`  | `VorbisAudioDecoderGpu`  | v1 mono encoder + decoder pair (silence-path round-trip bit-exact across CUDA + OpenCL + CPU; full .ogg stream output; 21 GPU primitives including OverlapAdd) |
+| VP8    | `Vp8KeyframeEncoderGpu`  | `Vp8KeyframeDecoderGpu`  | v1 keyframe + frame-batch (extent=N parallel encode); BBB 1920x1072 ffmpeg-pixel-perfect; 1/2/4/8 token partitions |
+| VP9    | `Vp9KeyframeEncoderGpu`  | `Vp9KeyframeDecoderGpu`  | v1 keyframe + multi-block walker + frame-batch; spec-compliant 1920x1080 boundary MB Tx8x8/Tx4x4 path |
+| FLAC   | `FlacEncoderGpu`         | `FlacDecoderGpu`         | v1 keyframe + 7 standalone subframe-decode primitives (FixedReconstruct + LpcReconstruct + ChannelDecorrelation + ResidualDecoder + SubframeHeader + Fixed/Lpc subframe composites); RunBatch shipped |
+| AV1    | `Av1KeyframeEncoderGpu`  | `Av1KeyframeDecoderGpu`  | v1 keyframe bit-exact vs CPU encoder; libdav1d-clean on real BBB content; frame-batch (`EncodeKeyFramesBatchAsync`); Tx4x4 forward + inverse + constants prep for boundary chroma |
+| Vorbis | `VorbisAudioEncoderGpu`  | `VorbisAudioDecoderGpu`  | v1 mono pair (silence-path round-trip bit-exact across CUDA + OpenCL + CPU; full .ogg stream output; 21 GPU primitives including OverlapAdd); `EncodeAudioPacketsBatchAsync` for batched encode (per-packet host-SubView dispatch, single end-of-batch sync) |
 | Opus   | -                        | -                        | 31 SILK GPU primitives + shared Daala range coder |
+
+Frame-batch architecture (VP8/VP9/AV1): every `Run`/`RunBatch` kernel
+takes per-frame-slot views; batch path SubViews per-frame buffers at the
+kernel head and dispatches at extent = `numFrames * perFrameWork`. One
+host upload + one readback per batch instead of N.
 
 Each pair has tests in `CodecsTestBase.<Codec>KeyframeEncoderGpuTests.cs`
 + `CodecsTestBase.<Codec>KeyframeDecoderGpuTests.cs` running across every
