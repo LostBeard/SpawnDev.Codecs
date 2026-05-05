@@ -31,6 +31,27 @@ using SpawnDev.ILGPU;
 
 namespace SpawnDev.Codecs.Video.Vp8;
 
+/// <summary>Per-frame slot strides for the batch entropy kernel.</summary>
+public struct Vp8FrameEntropyBatchStrides
+{
+    /// <summary>Y4 coefs per frame (mbCount * 256).</summary>
+    public int Y4Stride;
+    /// <summary>Y2 coefs per frame (mbCount * 16).</summary>
+    public int Y2Stride;
+    /// <summary>UV coefs per frame (mbCount * 64).</summary>
+    public int UvStride;
+    /// <summary>partition0Out bytes per frame.</summary>
+    public int P0Stride;
+    /// <summary>tokenP0Out bytes per frame.</summary>
+    public int TpStride;
+    /// <summary>aboveCtx bytes per frame (mbCols * 9).</summary>
+    public int AboveStride;
+    /// <summary>mbCols.</summary>
+    public int MbCols;
+    /// <summary>mbRows.</summary>
+    public int MbRows;
+}
+
 /// <summary>
 /// VP8 frame-level entropy coding kernel. v1: single thread per frame,
 /// all MBs DC_PRED, npart=1. Writes per-MB modes to partition0 and
@@ -54,6 +75,20 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
         ArrayView<byte>, ArrayView<int>,
         int, int> _kernel;
 
+    /// <summary>
+    /// Batch kernel: each thread encodes one frame's entropy. All N frames
+    /// run in parallel on independent CUDA cores. Per-frame buffer slots
+    /// are computed via SubView at the kernel head; the inner body is
+    /// unchanged from the single-frame path.
+    /// </summary>
+    private readonly Action<
+        Index1D,
+        ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
+        ArrayView<byte>, ArrayView<byte>,
+        ArrayView<byte>, ArrayView<byte>, ArrayView<long>,
+        ArrayView<byte>, ArrayView<int>,
+        Vp8FrameEntropyBatchStrides> _batchKernel;
+
     /// <summary>Compile.</summary>
     public Vp8FrameEntropyKernel(Accelerator accelerator)
     {
@@ -66,6 +101,13 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
             ArrayView<byte>, ArrayView<byte>, ArrayView<long>,
             ArrayView<byte>, ArrayView<int>,
             int, int>(EncodeFrameKernel);
+        _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
+            ArrayView<byte>, ArrayView<byte>,
+            ArrayView<byte>, ArrayView<byte>, ArrayView<long>,
+            ArrayView<byte>, ArrayView<int>,
+            Vp8FrameEntropyBatchStrides>(BatchEncodeFrameKernel);
     }
 
     /// <summary>
@@ -127,8 +169,95 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
             mbCols, mbRows);
     }
 
+    /// <summary>
+    /// Batch entropy: encode <paramref name="frameCount"/> frames in parallel
+    /// (extent = frameCount, one CUDA thread per frame). Each per-frame
+    /// buffer is laid out as N concatenated slots, sliced via SubView in
+    /// the kernel using the per-frame strides supplied in <paramref name="strides"/>.
+    /// outLens is layered as 2 longs per frame: [F*2+0]=p0Len, [F*2+1]=tpLen.
+    /// </summary>
+    public void RunBatch(
+        ArrayView<short> y4Coefs, ArrayView<short> y2Coefs,
+        ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<byte> coefProbsByType, ArrayView<byte> constsExtended,
+        ArrayView<byte> partition0Out, ArrayView<byte> tokenP0Out,
+        ArrayView<long> outLens,
+        ArrayView<byte> aboveCtx, ArrayView<int> initialP0State,
+        int frameCount, Vp8FrameEntropyBatchStrides strides)
+    {
+        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        _batchKernel(frameCount,
+            y4Coefs, y2Coefs, uCoefs, vCoefs,
+            coefProbsByType, constsExtended,
+            partition0Out, tokenP0Out, outLens,
+            aboveCtx, initialP0State, strides);
+    }
+
     private static void EncodeFrameKernel(
         Index1D _,
+        ArrayView<short> y4Coefs,
+        ArrayView<short> y2Coefs,
+        ArrayView<short> uCoefs,
+        ArrayView<short> vCoefs,
+        ArrayView<byte> coefProbsByType,
+        ArrayView<byte> constsExtended,
+        ArrayView<byte> partition0Out,
+        ArrayView<byte> tokenP0Out,
+        ArrayView<long> outLens,
+        ArrayView<byte> aboveCtx,
+        ArrayView<int> initialP0State,
+        int mbCols, int mbRows)
+    {
+        EncodeFrameBody(
+            y4Coefs, y2Coefs, uCoefs, vCoefs,
+            coefProbsByType, constsExtended,
+            partition0Out, tokenP0Out, outLens,
+            aboveCtx, initialP0State,
+            mbCols, mbRows);
+    }
+
+    /// <summary>
+    /// Batch entropy kernel: each thread picks its frame slot via SubView
+    /// and runs the same body. All frames execute concurrently.
+    /// </summary>
+    private static void BatchEncodeFrameKernel(
+        Index1D idx,
+        ArrayView<short> y4Coefs,
+        ArrayView<short> y2Coefs,
+        ArrayView<short> uCoefs,
+        ArrayView<short> vCoefs,
+        ArrayView<byte> coefProbsByType,
+        ArrayView<byte> constsExtended,
+        ArrayView<byte> partition0Out,
+        ArrayView<byte> tokenP0Out,
+        ArrayView<long> outLens,
+        ArrayView<byte> aboveCtx,
+        ArrayView<int> initialP0State,
+        Vp8FrameEntropyBatchStrides s)
+    {
+        int f = idx.X;
+        var fy4 = y4Coefs.SubView((long)f * s.Y4Stride, s.Y4Stride);
+        var fy2 = y2Coefs.SubView((long)f * s.Y2Stride, s.Y2Stride);
+        var fu = uCoefs.SubView((long)f * s.UvStride, s.UvStride);
+        var fv = vCoefs.SubView((long)f * s.UvStride, s.UvStride);
+        var fp0 = partition0Out.SubView((long)f * s.P0Stride, s.P0Stride);
+        var ftp = tokenP0Out.SubView((long)f * s.TpStride, s.TpStride);
+        var fOutLens = outLens.SubView((long)f * 2, 2);
+        var fAbove = aboveCtx.SubView((long)f * s.AboveStride, s.AboveStride);
+        var fInitState = initialP0State.SubView((long)f * 5, 5);
+        EncodeFrameBody(
+            fy4, fy2, fu, fv,
+            coefProbsByType, constsExtended,
+            fp0, ftp, fOutLens,
+            fAbove, fInitState,
+            s.MbCols, s.MbRows);
+    }
+
+    /// <summary>
+    /// Static body shared by single-frame and batch kernel paths. Takes
+    /// already-frame-scoped views (callers SubView for batch).
+    /// </summary>
+    private static void EncodeFrameBody(
         ArrayView<short> y4Coefs,
         ArrayView<short> y2Coefs,
         ArrayView<short> uCoefs,

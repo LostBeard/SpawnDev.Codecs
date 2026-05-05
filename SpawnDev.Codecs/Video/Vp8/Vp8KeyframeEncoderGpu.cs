@@ -193,17 +193,12 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
     }
 
     /// <summary>
-    /// Batch-encode every frame in the supplied (yPlanes, uPlanes, vPlanes)
-    /// arrays in a single submitted kernel chain - one host sync at the end,
-    /// one bulk readback. Per-frame intermediate buffers are reused across
-    /// frames (the GPU stream serializes the per-frame chains so frame N+1
-    /// kernels see the buffers freshly written by frame N's chain), but
-    /// each frame's final encoded bytes go to its own slot in dAllOutputs
-    /// so the host can pull them all out in one round-trip.
-    ///
-    /// The benefit comes from eliminating the per-frame Synchronize +
-    /// GetAsArray1D + CopyToCPU host round-trips. With 60 frames per
-    /// 1-second BBB clip, that drops 60 host round-trips to 1.
+    /// True frame-batch parallel encode: per-frame buffer slots through
+    /// every kernel + extent=N batch entropy. Setup + sequential-encode
+    /// + assemble run per-frame against per-frame slots (still serial on
+    /// the stream but with no buffer aliasing); the batch entropy kernel
+    /// dispatches at extent=numFrames so all frames run their entropy
+    /// walks concurrently on independent CUDA cores.
     /// </summary>
     public byte[][] EncodeKeyFramesBatch(
         ReadOnlyMemory<byte>[] yPlanes,
@@ -232,53 +227,125 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
 
         EnsureBuffers(width, height, uvWidth, uvHeight, mbCols, mbCount);
 
+        // Per-frame slot strides for batch entropy + sequential encode.
+        int yPlaneStride = width * height;
+        int uvPlaneStride = uvWidth * uvHeight;
+        int y4Stride = mbCount * 256;
+        int y2Stride = mbCount * 16;
+        int uvCoefStride = mbCount * 64;
+        int aboveStride = mbCols * 9;
+        int dequantStride = 6;
         int outputCapacity = 16 + _p0Stride + _tp0Stride;
-        using var dAllOutputs = _accelerator.Allocate1D<byte>((long)frameCount * outputCapacity);
-        using var dAllOutLens = _accelerator.Allocate1D<int>(frameCount);
 
+        // Per-frame slot buffers - sized for all N frames so each batch
+        // kernel can SubView per frame.
+        using var dAllY = _accelerator.Allocate1D<byte>((long)frameCount * yPlaneStride);
+        using var dAllU = _accelerator.Allocate1D<byte>((long)frameCount * uvPlaneStride);
+        using var dAllV = _accelerator.Allocate1D<byte>((long)frameCount * uvPlaneStride);
+        using var dAllYR = _accelerator.Allocate1D<byte>((long)frameCount * yPlaneStride);
+        using var dAllUR = _accelerator.Allocate1D<byte>((long)frameCount * uvPlaneStride);
+        using var dAllVR = _accelerator.Allocate1D<byte>((long)frameCount * uvPlaneStride);
+        using var dAllY4 = _accelerator.Allocate1D<short>((long)frameCount * y4Stride);
+        using var dAllY2 = _accelerator.Allocate1D<short>((long)frameCount * y2Stride);
+        using var dAllUC = _accelerator.Allocate1D<short>((long)frameCount * uvCoefStride);
+        using var dAllVC = _accelerator.Allocate1D<short>((long)frameCount * uvCoefStride);
+        using var dAllDequant = _accelerator.Allocate1D<int>((long)frameCount * dequantStride);
+        using var dAllP0 = _accelerator.Allocate1D<byte>((long)frameCount * _p0Stride);
+        using var dAllTp = _accelerator.Allocate1D<byte>((long)frameCount * _tp0Stride);
+        using var dAllAbove = _accelerator.Allocate1D<byte>((long)frameCount * aboveStride);
+        using var dAllInitState = _accelerator.Allocate1D<int>((long)frameCount * 5);
+        using var dAllOutLens = _accelerator.Allocate1D<long>((long)frameCount * 2);
+        using var dAllOutputs = _accelerator.Allocate1D<byte>((long)frameCount * outputCapacity);
+        using var dAllOutputLens = _accelerator.Allocate1D<int>(frameCount);
+
+        dAllP0.View.MemSetToZero();
+        dAllTp.View.MemSetToZero();
+        dAllAbove.View.MemSetToZero();
+
+        // Phase 1a: bulk upload all frames' planes in 3 host->device transfers
+        // (Y batch, U batch, V batch) instead of 3*frameCount small uploads.
+        // PCIe4 memcpy is memory-bound; minimizing the number of CopyFromCPU
+        // calls collapses driver overhead.
+        var hostY = new byte[(long)frameCount * yPlaneStride];
+        var hostU = new byte[(long)frameCount * uvPlaneStride];
+        var hostV = new byte[(long)frameCount * uvPlaneStride];
         for (int f = 0; f < frameCount; f++)
         {
-            // Upload the f-th frame's planes - kernels in same stream
-            // serialize, so reusing _dY/_dU/_dV across frames is safe.
-            _dY!.View.CopyFromCPU(yPlanes[f].ToArray());
-            _dU!.View.CopyFromCPU(uPlanes[f].ToArray());
-            _dV!.View.CopyFromCPU(vPlanes[f].ToArray());
-            _dP0!.View.MemSetToZero();
-            _dTp!.View.MemSetToZero();
-            _dAbove!.View.MemSetToZero();
+            yPlanes[f].Span.CopyTo(hostY.AsSpan((int)((long)f * yPlaneStride)));
+            uPlanes[f].Span.CopyTo(hostU.AsSpan((int)((long)f * uvPlaneStride)));
+            vPlanes[f].Span.CopyTo(hostV.AsSpan((int)((long)f * uvPlaneStride)));
+        }
+        dAllY.View.CopyFromCPU(hostY);
+        dAllU.View.CopyFromCPU(hostU);
+        dAllV.View.CopyFromCPU(hostV);
 
+        // Setup remains per-frame (tiny single-thread dispatches; ~1us each
+        // on CUDA so 60 dispatches = ~60us total).
+        for (int f = 0; f < frameCount; f++)
+        {
+            var fP0 = dAllP0.View.SubView((long)f * _p0Stride, _p0Stride);
+            var fInitState = dAllInitState.View.SubView((long)f * 5, 5);
+            var fDQ = dAllDequant.View.SubView((long)f * dequantStride, dequantStride);
             _setup.Run(
                 _dcQLookup.View, _acQLookup.View,
                 _defaultCoefProbs.View, _updateCoefProbs.View,
-                _dDequant!.View, _dP0!.View, _dInitialP0State!.View,
+                fDQ, fP0, fInitState,
                 baseQIndex);
+        }
 
-            _sequentialEncode.Run(
-                _dY!.View, _dU!.View, _dV!.View,
-                _dYRecon!.View, _dURecon!.View, _dVRecon!.View,
-                _dY4Coefs!.View, _dY2Coefs!.View, _dUCoefs!.View, _dVCoefs!.View,
-                _dDequant!.View,
-                mbCols, mbRows);
+        // Phase 1b: BATCH wave-front sequential encode. 47 dispatches each
+        // at extent = numFrames * diagCount; all N frames compute their
+        // diagonal-d MBs concurrently.
+        _sequentialEncode.RunBatch(
+            dAllY.View, dAllU.View, dAllV.View,
+            dAllYR.View, dAllUR.View, dAllVR.View,
+            dAllY4.View, dAllY2.View, dAllUC.View, dAllVC.View,
+            dAllDequant.View,
+            mbCols, mbRows, frameCount,
+            yPlaneStride, uvPlaneStride,
+            y4Stride, y2Stride, uvCoefStride,
+            dequantStride);
 
-            _entropy.Run(
-                _dY4Coefs!.View, _dY2Coefs!.View, _dUCoefs!.View, _dVCoefs!.View,
-                _coefProbsByType.View, _constsExtended.View,
-                _dP0!.View, _dTp!.View, _dPartLens!.View,
-                _dAbove!.View, _dInitialP0State!.View,
-                mbCols, mbRows);
+        // Phase 2: BATCH entropy kernel - all N frames run their entropy
+        // walks concurrently on independent CUDA cores.
+        var batchStrides = new Vp8FrameEntropyBatchStrides
+        {
+            Y4Stride = y4Stride,
+            Y2Stride = y2Stride,
+            UvStride = uvCoefStride,
+            P0Stride = _p0Stride,
+            TpStride = _tp0Stride,
+            AboveStride = aboveStride,
+            MbCols = mbCols,
+            MbRows = mbRows,
+        };
+        _entropy.RunBatch(
+            dAllY4.View, dAllY2.View, dAllUC.View, dAllVC.View,
+            _coefProbsByType.View, _constsExtended.View,
+            dAllP0.View, dAllTp.View, dAllOutLens.View,
+            dAllAbove.View, dAllInitState.View,
+            frameCount, batchStrides);
 
-            // Per-frame output slot via SubView - kernel sees a 0-based view.
-            var frameOutView = dAllOutputs.View.SubView((long)f * outputCapacity, outputCapacity);
-            var frameOutLenView = dAllOutLens.View.SubView(f, 1);
+        // Phase 3: per-frame assemble against per-frame entropy outputs.
+        // partLens for assemble: [outLens[F*2+0], outLens[F*2+1]] per frame.
+        // The existing assemble takes ArrayView<long> of length 2 with
+        // (partition0Len, tokenP0Len). We can SubView outLens by frame
+        // directly since it's already laid out as [F*2+0, F*2+1].
+        for (int f = 0; f < frameCount; f++)
+        {
+            var fP0 = dAllP0.View.SubView((long)f * _p0Stride, _p0Stride);
+            var fTp = dAllTp.View.SubView((long)f * _tp0Stride, _tp0Stride);
+            var fOutLens = dAllOutLens.View.SubView((long)f * 2, 2);
+            var fOutput = dAllOutputs.View.SubView((long)f * outputCapacity, outputCapacity);
+            var fOutLen = dAllOutputLens.View.SubView(f, 1);
             _assemble.Run(
-                _dP0!.View, _dTp!.View, _dPartLens!.View,
-                frameOutView, frameOutLenView,
+                fP0, fTp, fOutLens,
+                fOutput, fOutLen,
                 width, height);
         }
 
-        // Single sync + bulk readback for the entire batch.
         _accelerator.Synchronize();
-        var allLens = dAllOutLens.GetAsArray1D();
+        var allLens = dAllOutputLens.GetAsArray1D();
         var allBytes = dAllOutputs.GetAsArray1D();
         var results = new byte[frameCount][];
         for (int f = 0; f < frameCount; f++)
