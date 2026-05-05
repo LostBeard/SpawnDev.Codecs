@@ -841,20 +841,15 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
     /// (Both formulas assume bsize != BLOCK_128X128, which is true for
     /// every level the v1 walker emits at: SB64/SB32/SB16.)
     ///
-    /// The gathered cdf[0] (in AOM_ICDF format = sum of subtracted probs)
-    /// is then fed to <see cref="Av1RangeEncoderGpu.EncodeBinaryQ15"/>
-    /// which routes through <c>EncodeQ15</c> -&gt; <c>Normalize</c>.
-    ///
-    /// <see cref="MethodImplOptions.NoInlining"/> per Geordi's recommendation
-    /// after he closed the WGSL/Wasm fn-definition path bug at
-    /// SpawnDev.ILGPU master <c>a203e5e</c> (4.9.5-local.1) - the new
-    /// <c>EnumerateAllHelperMethods()</c> stream walks both inline AND
-    /// non-inline helpers when scanning for i64/f64 emulation requirements,
-    /// so the fn-def codegen path now correctly pulls in the i64_ge / i64_eq
-    /// emulation library when this helper's <c>long cdfBase</c> arithmetic
-    /// reaches WGSL emit. Compile time wins from the fn-def path.
+    /// No <c>MethodImpl</c> attribute - per Data's 2026-05-05 MatMul bisect
+    /// (4611ms -&gt; 1094ms first-compile on Wasm with helper extracted, no
+    /// attribute), the JIT elects fn-call form for medium-sized helpers on
+    /// the Wasm backend, which gives the structural compile-time win. Adding
+    /// <c>NoInlining</c> would force the fn-def codegen path that still has
+    /// open WGSL bugs Geordi is iterating on (sub-word LEA cross-block hoist
+    /// name collisions, address-space monomorphization) - the no-attribute
+    /// form is the safe shipping shape.
     /// </summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void EmitPartitionCdfBoundary(
         ref Av1RangeEncoderGpuState re, ArrayView<byte> outBuf,
         ArrayView<ushort> constsUshort,
