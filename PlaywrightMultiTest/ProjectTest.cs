@@ -93,8 +93,10 @@ public class ProjectTest
             {
                 await page.GotoAsync(TestPageUrl);
 
-                // wait for test to load
-                await page.WaitForSelectorAsync(rowSelector, new() { Timeout = 30000 });
+                // wait for test to load (5min - codec test pages enumerate
+                // hundreds of test rows; bootstrap can exceed 30s under V8
+                // tier-up while the kernel surface is still cold-compiling)
+                await page.WaitForSelectorAsync(rowSelector, new() { Timeout = 300_000 });
             }
 
             // Check if Blazor error UI is already visible before this test
