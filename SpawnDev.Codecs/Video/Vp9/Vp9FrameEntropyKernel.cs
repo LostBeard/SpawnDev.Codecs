@@ -100,13 +100,17 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
     public const int MaxMiColsAligned = 512;
 
     private readonly Accelerator _accelerator;
-    private readonly Action<
-        Index1D,
-        ArrayView<short>, ArrayView<short>, ArrayView<short>,
-        ArrayView<byte>, ArrayView<long>,
-        ArrayView<byte>, ArrayView<ushort>,
-        int, int, int> _kernel;
 
+    // Compile-time pressure note: the entropy walker (5K inlined call sites
+    // / 52K Wasm locals per kernel module pre-2026-05-06) is heavy enough
+    // on Wasm that emitting two near-identical modules (single + batch)
+    // doubled cold-compile cost. Collapsed to ONE batch kernel; single-frame
+    // dispatch goes through extent=1 + full-buffer strides. Saves one full
+    // Wasm module's compile pass per backend at no runtime cost (the per-
+    // dispatch SubView is a pointer-arithmetic no-op when stride == buffer
+    // length). Fix at the codegen level (helper extraction so the inlined
+    // body becomes a fn-def call) is Geordi's lane - tracked via DevComms
+    // tuvok-to-geordi-codecs-wasm-monolithic-inlining-2026-05-06.md.
     private readonly Action<
         Index1D,
         ArrayView<short>, ArrayView<short>, ArrayView<short>,
@@ -119,12 +123,6 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
-        _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D,
-            ArrayView<short>, ArrayView<short>, ArrayView<short>,
-            ArrayView<byte>, ArrayView<long>,
-            ArrayView<byte>, ArrayView<ushort>,
-            int, int, int>(EncodeFrameKernel);
         _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<short>, ArrayView<short>, ArrayView<short>,
@@ -182,13 +180,25 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         if (outLen.Length < 1)
             throw new ArgumentException("outLen must hold 1 long.", nameof(outLen));
 
-        // Pack display mi dims into one int: low 16 = miCols, high 16 = miRows.
-        int frameMi = (frameMiCols & 0xFFFF) | (frameMiRows << 16);
-        _kernel(1,
+        // Single-frame dispatch goes through the batch kernel at extent=1
+        // with full-buffer strides; the inner SubView(0, fullLength) is a
+        // no-op pointer reset. Avoids compiling a second near-identical
+        // entropy walker module per backend.
+        var strides = new Vp9FrameEntropyBatchStrides
+        {
+            YCoefStride = checked((int)yCoefs.Length),
+            UvCoefStride = checked((int)uCoefs.Length),
+            OutBufStride = checked((int)outBuf.Length),
+            MbCols = mbCols,
+            MbRows = mbRows,
+            FrameMiCols = frameMiCols,
+            FrameMiRows = frameMiRows,
+        };
+        _batchKernel(1,
             yCoefs, uCoefs, vCoefs,
             outBuf, outLen,
             byteConsts, ushortConsts,
-            mbCols, mbRows, frameMi);
+            strides);
     }
 
     /// <summary>Batch entropy: extent=N, each thread walks one frame's MBs.</summary>
@@ -222,17 +232,6 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         int frameMi = (s.FrameMiCols & 0xFFFF) | (s.FrameMiRows << 16);
         EncodeFrameBody(fY, fU, fV, fOut, fOutLen, byteConsts, ushortConsts,
             s.MbCols, s.MbRows, frameMi);
-    }
-
-    private static void EncodeFrameKernel(
-        Index1D _,
-        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
-        ArrayView<byte> outBuf, ArrayView<long> outLen,
-        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
-        int mbCols, int mbRows, int frameMi)
-    {
-        EncodeFrameBody(yCoefs, uCoefs, vCoefs, outBuf, outLen,
-            byteConsts, ushortConsts, mbCols, mbRows, frameMi);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

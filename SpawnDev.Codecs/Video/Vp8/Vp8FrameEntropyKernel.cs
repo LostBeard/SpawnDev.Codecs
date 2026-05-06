@@ -68,20 +68,13 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
     public const int KfUvModeProbsOffset = 59;
 
     private readonly Accelerator _accelerator;
-    private readonly Action<
-        Index1D,
-        ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
-        ArrayView<byte>, ArrayView<byte>,
-        ArrayView<byte>, ArrayView<byte>, ArrayView<long>,
-        ArrayView<byte>, ArrayView<int>,
-        int, int> _kernel;
 
-    /// <summary>
-    /// Batch kernel: each thread encodes one frame's entropy. All N frames
-    /// run in parallel on independent CUDA cores. Per-frame buffer slots
-    /// are computed via SubView at the kernel head; the inner body is
-    /// unchanged from the single-frame path.
-    /// </summary>
+    // Batch kernel handles both single-frame and N-frame dispatches; single-
+    // frame goes through extent=1 with full-buffer strides. See VP9 entropy
+    // kernel for the same pattern - collapsed 2026-05-06 to halve cold-
+    // compile cost on Wasm where the inlined entropy walker body is the
+    // dominant compile-time pressure (Wasm structural analysis: 5K inlined
+    // call sites + 52K locals per kernel module pre-collapse).
     private readonly Action<
         Index1D,
         ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
@@ -95,13 +88,6 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
-        _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D,
-            ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
-            ArrayView<byte>, ArrayView<byte>,
-            ArrayView<byte>, ArrayView<byte>, ArrayView<long>,
-            ArrayView<byte>, ArrayView<int>,
-            int, int>(EncodeFrameKernel);
         _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
@@ -163,11 +149,24 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
             throw new ArgumentException("constsExtended must be at least ConstsExtendedTotalBytes.", nameof(constsExtended));
         if (initialP0State.Length < 5)
             throw new ArgumentException("initialP0State must hold 5 ints.", nameof(initialP0State));
-        _kernel(1, y4Coefs, y2Coefs, uCoefs, vCoefs,
+        // Single-frame goes through batch kernel at extent=1 with full-buffer
+        // strides; SubView(0, fullLength) is a pointer-arithmetic no-op.
+        var strides = new Vp8FrameEntropyBatchStrides
+        {
+            Y4Stride = checked((int)y4Coefs.Length),
+            Y2Stride = checked((int)y2Coefs.Length),
+            UvStride = checked((int)uCoefs.Length),
+            P0Stride = checked((int)partition0Out.Length),
+            TpStride = checked((int)tokenP0Out.Length),
+            AboveStride = checked((int)aboveCtx.Length),
+            MbCols = mbCols,
+            MbRows = mbRows,
+        };
+        _batchKernel(1,
+            y4Coefs, y2Coefs, uCoefs, vCoefs,
             coefProbsByType, constsExtended,
             partition0Out, tokenP0Out, outLens,
-            aboveCtx, initialP0State,
-            mbCols, mbRows);
+            aboveCtx, initialP0State, strides);
     }
 
     /// <summary>
@@ -194,32 +193,10 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
             aboveCtx, initialP0State, strides);
     }
 
-    private static void EncodeFrameKernel(
-        Index1D _,
-        ArrayView<short> y4Coefs,
-        ArrayView<short> y2Coefs,
-        ArrayView<short> uCoefs,
-        ArrayView<short> vCoefs,
-        ArrayView<byte> coefProbsByType,
-        ArrayView<byte> constsExtended,
-        ArrayView<byte> partition0Out,
-        ArrayView<byte> tokenP0Out,
-        ArrayView<long> outLens,
-        ArrayView<byte> aboveCtx,
-        ArrayView<int> initialP0State,
-        int mbCols, int mbRows)
-    {
-        EncodeFrameBody(
-            y4Coefs, y2Coefs, uCoefs, vCoefs,
-            coefProbsByType, constsExtended,
-            partition0Out, tokenP0Out, outLens,
-            aboveCtx, initialP0State,
-            mbCols, mbRows);
-    }
-
     /// <summary>
     /// Batch entropy kernel: each thread picks its frame slot via SubView
-    /// and runs the same body. All frames execute concurrently.
+    /// and runs the same body. Single-frame dispatch goes through extent=1
+    /// with full-buffer strides (SubView(0, fullLen) is a no-op).
     /// </summary>
     private static void BatchEncodeFrameKernel(
         Index1D idx,

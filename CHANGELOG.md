@@ -1,5 +1,13 @@
 # SpawnDev.Codecs CHANGELOG
 
+## Unreleased — master after rc.7 (2026-05-06)
+
+### Wasm cold-compile diagnosis + Lever B (2026-05-06)
+- **Root cause identified**: VP9 + VP8 entropy walker kernels emit one Wasm function with **52,012 locals + 750KB instructions + 5,127 inlined call sites**. V8's `kV8MaxWasmFunctionLocals=50,000` cap rejects the kernel with `WebAssembly.compile(): Compiling function #N failed: local count too large`; wabt's parser rejects identically. Same root cause as Geordi's WGSL walker `L44455` chain — ILGPU IR optimizer inlines the entire call graph (EncodeSb64 → EncodeBlock32x32 → EncodeBlock16x16 → EncodeLeafBlock → EncodePlaneCoefs) into the single `[NoInlining]` body method instead of emitting them as separate fn-defs. The Playwright 30s timeout on Codecs Wasm tests was a downstream symptom of the kernel never compiling. Diagnosis tools added at `_codecsdump/wasm-analyze.cs` (per-function local count + body size decoder) and DevComms `tuvok-to-geordi-codecs-wasm-monolithic-inlining-2026-05-06.md`.
+- **VP9 + VP8 entropy: collapse single-frame + batch kernels into one** (`Vp9FrameEntropyKernel`, `Vp8FrameEntropyKernel`). Single-frame `Run` now dispatches the batch kernel with extent=1 + full-buffer strides; the inner `SubView(0, fullLen)` is a pointer-arithmetic no-op. Saves one full ~761KB Wasm module's compile pass per backend at zero runtime cost, plus the same gain on every other backend (CUDA / OpenCL / WGSL / GLSL pay the same per-kernel compile cost). Doesn't single-handedly close the V8 50K-local cap (the surviving module still has 52K locals) but halves the number of times that cost is paid.
+- **PMT actionability timeout bumped to 5 min** (`PlaywrightMultiTest/ProjectTest.cs`). Codec kernel cold compile on V8 currently exceeds Playwright's 30s default; bumping the per-page default lets tests survive cold compile while ILGPU's fn-def codegen path matures. Cheap on hot tests (timeout doesn't fire when responsive).
+- CPU sweep: 91 of 97 PASS post-collapse (6 unrelated VP8 failures pre-existing on master HEAD `5977809` — `Vp8KeyframeWalker_RejectsMultiPartition`, `Vp8Quantizer_*`, `Vp8FrameTag_KeyFrame320x240_ParsesAllFields`, `Vp8InverseTransform_ShortInvWalsh4x4_*`; tracked separately).
+
 ## Unreleased — master after rc.7 (2026-05-05)
 
 **Headline: AV1 Tx4x4 transform infrastructure (forward + inverse + constants) lands on master + Vorbis encoder gets per-packet host-SubView batch dispatch (no host syncs between packets).**

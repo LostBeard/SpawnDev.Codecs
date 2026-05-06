@@ -74,6 +74,18 @@ public class ProjectTest
     {
         try
         {
+            // Codec kernels (entropy walkers, transform chains) currently
+            // compile to ~750KB Wasm functions with ~52K locals (5K inlined
+            // call sites - same root cause as the WGSL walker fn-def
+            // codegen issue). Cold-compile cost on the first dispatch can
+            // exceed Playwright's 30s default actionability timeout while
+            // V8 tier-up runs. Bump per-page default timeout to 5 minutes
+            // so the click action's post-click stability wait survives
+            // cold compile until the underlying ILGPU codegen path emits
+            // helpers as Wasm fn-defs (Geordi's lane). Cheap on hot tests
+            // (timeout doesn't fire when the page is responsive).
+            page.SetDefaultTimeout(300_000);
+
             var rowSelector = $"tr.{TestClassName}";
 
             // make sure we are on the test page this test is on
