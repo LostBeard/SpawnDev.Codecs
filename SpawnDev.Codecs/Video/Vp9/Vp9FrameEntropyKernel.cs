@@ -317,11 +317,8 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         var fOut = outBuf.SubView((long)f * s.OutBufStride, s.OutBufStride);
         var fOutLen = outLen.SubView(f, 1);
         int frameMi = (s.FrameMiCols & 0xFFFF) | (s.FrameMiRows << 16);
-        // Single-tile: full-frame SB range.
         EncodeFrameBody(fY, fU, fV, fOut, fOutLen, byteConsts, ushortConsts,
-            sbRowStart: 0, sbRowEnd: s.MbRows >> 2,
-            sbColStart: 0, sbColEnd: s.MbCols >> 2,
-            mbCols: s.MbCols, frameMi: frameMi);
+            s.MbCols, s.MbRows, frameMi);
     }
 
     private static void EncodeFrameKernel(
@@ -331,12 +328,8 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
         int mbCols, int mbRows, int frameMi)
     {
-        // Single-tile: full-frame SB range.
         EncodeFrameBody(yCoefs, uCoefs, vCoefs, outBuf, outLen,
-            byteConsts, ushortConsts,
-            sbRowStart: 0, sbRowEnd: mbRows >> 2,
-            sbColStart: 0, sbColEnd: mbCols >> 2,
-            mbCols: mbCols, frameMi: frameMi);
+            byteConsts, ushortConsts, mbCols, mbRows, frameMi);
     }
 
     /// <summary>
@@ -382,7 +375,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         var tileOutLen = outLen.SubView(tileIdx, 1);
 
         int frameMi = (s.FrameMiCols & 0xFFFF) | (s.FrameMiRows << 16);
-        EncodeFrameBody(yCoefs, uCoefs, vCoefs, tileOut, tileOutLen,
+        EncodeTileBody(yCoefs, uCoefs, vCoefs, tileOut, tileOutLen,
             byteConsts, ushortConsts,
             sbRowStart, sbRowEnd,
             sbColStart, sbColEnd,
@@ -408,38 +401,22 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
     }
 
     /// <summary>
-    /// Encode one VP9 tile spanning SB-range [sbRowStart, sbRowEnd) ×
-    /// [sbColStart, sbColEnd): own bool encoder (init -&gt; encode -&gt; stop),
-    /// fresh above[] context arrays at the column boundary, fresh left[]
-    /// reset at every internal sb-row.
-    ///
-    /// Single-tile callers pass (0, sbRows, 0, sbCols) — full-frame range.
-    /// Multi-tile callers (next pass) compute per-tile ranges via
-    /// <see cref="Vp9TileInfoParser.GetTileColRange"/> +
-    /// <see cref="Vp9TileInfoParser.GetTileRowRange"/> and dispatch one
-    /// thread per tile, each writing to its own per-tile output slot.
-    ///
-    /// Per VP9 spec sec 6.5: every tile carries an independent bool encoder.
-    /// Above[] arrays reset at the column boundary (this function's entry);
-    /// left[] arrays reset at every sb-row boundary inside the tile (the
-    /// inner loop). Tile bytes get a 4-byte big-endian length prefix
-    /// concatenated by the assembler (except the last tile per VP9 spec) -
-    /// for single-tile mode no prefix is emitted.
+    /// Single-tile entropy walk: full frame from (0,0) to (sbRows, sbCols).
+    /// Used by `EncodeFrameKernel` and `BatchEncodeFrameKernel`.
+    /// 3-int signature (mbCols, mbRows, frameMi) preserved verbatim from
+    /// pre-multi-tile state; the DELTA from this signature was found to
+    /// trip Wasm's per-function local-count limit on `Kernel_EncodeFrameKernel`
+    /// when EncodeMultiTileKernel was added in the same compilation unit
+    /// (smoke test 2026-05-05). Multi-tile dispatch uses a parallel
+    /// <see cref="EncodeTileBody"/> with explicit tile-range params instead.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void EncodeFrameBody(
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<byte> outBuf, ArrayView<long> outLen,
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
-        int sbRowStart, int sbRowEnd,
-        int sbColStart, int sbColEnd,
-        int mbCols, int frameMi)
+        int mbCols, int mbRows, int frameMi)
     {
-        // Per-thread context arrays. Sizes matter: above arrays are
-        // capped at MaxMiColsAligned * 2 (= 128) for b4-cell granular
-        // ones (Y entropy + Y mode), MaxMiColsAligned (= 64) for
-        // mi-granular ones. Chroma above arrays are subsampled by
-        // 2 in the X dimension.
         var aboveYMode = LocalMemory.Allocate<byte>(MaxMiColsAligned * 2);
         var aboveSkip = LocalMemory.Allocate<byte>(MaxMiColsAligned);
         var abovePartCtx = LocalMemory.Allocate<byte>(MaxMiColsAligned);
@@ -458,25 +435,94 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
 
         var tokenCache = LocalMemory.Allocate<byte>(256);
 
-        // Init above arrays. Mode = DcPred (0). Everything else 0.
         for (int i = 0; i < MaxMiColsAligned * 2; i++) aboveYMode[i] = 0;
         for (int i = 0; i < MaxMiColsAligned; i++) { aboveSkip[i] = 0; abovePartCtx[i] = 0; aboveTxSize[i] = 0; }
         for (int i = 0; i < MaxMiColsAligned * 2; i++) aboveYEntropyCtx[i] = 0;
         for (int i = 0; i < MaxMiColsAligned; i++) { aboveUEntropyCtx[i] = 0; aboveVEntropyCtx[i] = 0; }
 
-        // Initialize bool encoder + emit VP9 marker bit. Per-tile -
-        // every tile (single-tile = the whole frame) has its own bool
-        // encoder state.
         var state = Vp8BoolEncoderGpu.Init();
         Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 0, 128);
 
-        // Walk SBs row-major within this tile's SB-range.
-        // mbCols/mbRows on the FRAME are multiples of 4 by contract so the
-        // SB grid is exact; per-tile sub-ranges inherit that property
-        // because tile boundaries fall on SB-multiples per VP9 spec sec 6.5.
+        int sbRows = mbRows >> 2;
+        int sbCols = mbCols >> 2;
+
+        for (int sbRow = 0; sbRow < sbRows; sbRow++)
+        {
+            for (int i = 0; i < 16; i++) { leftYMode[i] = 0; leftYEntropyCtx[i] = 0; }
+            for (int i = 0; i < 8; i++) { leftSkip[i] = 0; leftPartCtx[i] = 0; leftTxSize[i] = 0; leftUEntropyCtx[i] = 0; leftVEntropyCtx[i] = 0; }
+
+            for (int sbCol = 0; sbCol < sbCols; sbCol++)
+            {
+                EncodeSb64(
+                    ref state, outBuf,
+                    yCoefs, uCoefs, vCoefs,
+                    byteConsts, ushortConsts,
+                    aboveYMode, aboveSkip, abovePartCtx, aboveTxSize,
+                    aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
+                    leftYMode, leftSkip, leftPartCtx, leftTxSize,
+                    leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
+                    tokenCache,
+                    sbRow, sbCol, mbCols, frameMi);
+            }
+        }
+
+        Vp8BoolEncoderGpu.Stop(ref state, outBuf);
+        outLen[0] = state.OutLen;
+    }
+
+    /// <summary>
+    /// Multi-tile entropy walk: encode the SB-range
+    /// <c>[sbRowStart, sbRowEnd) × [sbColStart, sbColEnd)</c> as one VP9 tile.
+    /// Own bool encoder (init → encode → stop), fresh above[] arrays at
+    /// the tile column boundary, fresh left[] reset at every internal sb-row.
+    ///
+    /// Body code is duplicated from <see cref="EncodeFrameBody"/> deliberately:
+    /// the inline-refactor variant (one body, 6 ints in signature) tripped
+    /// Wasm's per-function local-count limit on `Kernel_EncodeFrameKernel`
+    /// when both code paths shared the same body. Two parallel functions
+    /// keep each Wasm-safe; the cost is ~50 lines of mirrored walk logic.
+    ///
+    /// Per VP9 spec sec 6.5: every tile carries an independent bool encoder.
+    /// Above[] arrays reset at the column boundary (this function's entry);
+    /// left[] arrays reset at every sb-row boundary inside the tile.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void EncodeTileBody(
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<byte> outBuf, ArrayView<long> outLen,
+        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
+        int sbRowStart, int sbRowEnd,
+        int sbColStart, int sbColEnd,
+        int mbCols, int frameMi)
+    {
+        var aboveYMode = LocalMemory.Allocate<byte>(MaxMiColsAligned * 2);
+        var aboveSkip = LocalMemory.Allocate<byte>(MaxMiColsAligned);
+        var abovePartCtx = LocalMemory.Allocate<byte>(MaxMiColsAligned);
+        var aboveTxSize = LocalMemory.Allocate<byte>(MaxMiColsAligned);
+        var aboveYEntropyCtx = LocalMemory.Allocate<byte>(MaxMiColsAligned * 2);
+        var aboveUEntropyCtx = LocalMemory.Allocate<byte>(MaxMiColsAligned);
+        var aboveVEntropyCtx = LocalMemory.Allocate<byte>(MaxMiColsAligned);
+
+        var leftYMode = LocalMemory.Allocate<byte>(16);
+        var leftSkip = LocalMemory.Allocate<byte>(8);
+        var leftPartCtx = LocalMemory.Allocate<byte>(8);
+        var leftTxSize = LocalMemory.Allocate<byte>(8);
+        var leftYEntropyCtx = LocalMemory.Allocate<byte>(16);
+        var leftUEntropyCtx = LocalMemory.Allocate<byte>(8);
+        var leftVEntropyCtx = LocalMemory.Allocate<byte>(8);
+
+        var tokenCache = LocalMemory.Allocate<byte>(256);
+
+        for (int i = 0; i < MaxMiColsAligned * 2; i++) aboveYMode[i] = 0;
+        for (int i = 0; i < MaxMiColsAligned; i++) { aboveSkip[i] = 0; abovePartCtx[i] = 0; aboveTxSize[i] = 0; }
+        for (int i = 0; i < MaxMiColsAligned * 2; i++) aboveYEntropyCtx[i] = 0;
+        for (int i = 0; i < MaxMiColsAligned; i++) { aboveUEntropyCtx[i] = 0; aboveVEntropyCtx[i] = 0; }
+
+        var state = Vp8BoolEncoderGpu.Init();
+        Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 0, 128);
+
         for (int sbRow = sbRowStart; sbRow < sbRowEnd; sbRow++)
         {
-            // Reset left arrays at the start of each SB row within the tile.
             for (int i = 0; i < 16; i++) { leftYMode[i] = 0; leftYEntropyCtx[i] = 0; }
             for (int i = 0; i < 8; i++) { leftSkip[i] = 0; leftPartCtx[i] = 0; leftTxSize[i] = 0; leftUEntropyCtx[i] = 0; leftVEntropyCtx[i] = 0; }
 
