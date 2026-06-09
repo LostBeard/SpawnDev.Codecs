@@ -23,8 +23,8 @@ public static class SilkResamplerIirFirInterpolGpu
 {
     /// <summary>
     /// Compute one output sample at position <paramref name="outIdx"/>:
-    /// indexQ16 = outIdx * indexIncrementQ16; bufStart = indexQ16 >> 16;
-    /// tableIdx = SMULWB(indexQ16 & 0xFFFF, 12). Reads 8 consecutive buf
+    /// indexQ16 = outIdx * indexIncrementQ16; bufStart = indexQ16 &gt;&gt; 16;
+    /// tableIdx = SMULWB(indexQ16 &amp; 0xFFFF, 12). Reads 8 consecutive buf
     /// shorts and 8 coefs from <paramref name="fracFir12"/> (rowLow + mirrored rowHigh).
     /// </summary>
     public static void ApplyAt(

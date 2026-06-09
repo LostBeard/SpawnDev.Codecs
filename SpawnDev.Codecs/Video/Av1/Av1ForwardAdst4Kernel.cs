@@ -117,7 +117,7 @@ public sealed class Av1ForwardAdst4Kernel : IDisposable
         output[outBase + 3] = RoundShift(t3, cosBit);
     }
 
-    /// <summary>libaom round_shift: (value + (1 << (bit-1))) >> bit.</summary>
+    /// <summary>libaom round_shift: <c>(value + (1 &lt;&lt; (bit-1))) &gt;&gt; bit</c>.</summary>
     private static int RoundShift(long value, int bit)
     {
         return (int)((value + (1L << (bit - 1))) >> bit);

@@ -600,7 +600,7 @@ public static class Av1KeyframeEncoder
 
     /// <summary>
     /// Mirrors libaom <c>partition_gather_vert_alike</c>: derive the 2-symbol
-    /// CDF used at the bottom edge (!hasRows && hasCols) where the only valid
+    /// CDF used at the bottom edge (!hasRows &amp;&amp; hasCols) where the only valid
     /// partitions are SPLIT and HORZ.
     /// </summary>
     private static ushort[] GatherVertAlike(ushort[] cdf, int bsize)
@@ -625,7 +625,7 @@ public static class Av1KeyframeEncoder
 
     /// <summary>
     /// Mirrors libaom <c>partition_gather_horz_alike</c>: derive the 2-symbol
-    /// CDF used at the right edge (hasRows && !hasCols) where the only valid
+    /// CDF used at the right edge (hasRows &amp;&amp; !hasCols) where the only valid
     /// partitions are SPLIT and VERT.
     /// </summary>
     private static ushort[] GatherHorzAlike(ushort[] cdf, int bsize)

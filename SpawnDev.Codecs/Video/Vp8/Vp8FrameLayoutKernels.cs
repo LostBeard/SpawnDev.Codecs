@@ -26,7 +26,7 @@ using SpawnDev.ILGPU;
 namespace SpawnDev.Codecs.Video.Vp8;
 
 /// <summary>
-/// VP8 frame-buffer <-> per-block-packed layout kernels. Holds the
+/// VP8 frame-buffer &lt;-&gt; per-block-packed layout kernels. Holds the
 /// pre-compiled gather/scatter kernels for Y (16x16 MB) and UV (8x8
 /// MB) planes. One thread per block.
 /// </summary>

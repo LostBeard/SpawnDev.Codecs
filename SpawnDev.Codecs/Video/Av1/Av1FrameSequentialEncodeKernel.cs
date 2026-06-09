@@ -113,7 +113,7 @@ public struct Av1FrameSeqEncodeParams
     /// <summary>Per-block libaom-layout levels[] scratch. Size: 1384 bytes.</summary>
     public int LevelsOff;
 
-    /// <summary>Frame mi-cols (== ((Width + 7) >> 3) << 1).</summary>
+    /// <summary>Frame mi-cols (<c>== ((Width + 7) &gt;&gt; 3) &lt;&lt; 1</c>).</summary>
     public int FrameMiCols;
     /// <summary>Frame mi-rows.</summary>
     public int FrameMiRows;
