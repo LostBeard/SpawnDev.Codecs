@@ -86,7 +86,7 @@ public abstract partial class CodecsTestBase
             }
 
             // 4. GPU decode via Vp8KeyframeDecoderGpu.
-            var gpuFrame = dec.DecodeKeyFrame(encoded, baseQIndex);
+            var gpuFrame = await dec.DecodeKeyFrameAsync(encoded, baseQIndex);
 
             // 5. Compare.
             Equal(width, gpuFrame.Width, "width");

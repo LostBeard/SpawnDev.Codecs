@@ -2,14 +2,14 @@
 @using System.Diagnostics
 @using global::ILGPU
 @using global::ILGPU.Runtime
-@using SpawnDev.BlazorJS
-@using SpawnDev.BlazorJS.JSObjects
+@using SpawnDev.SpawnJS
+@using SpawnDev.SpawnJS.JSObjects
 @using SpawnDev.Codecs.Video.Av1
 @using SpawnDev.Codecs.Video.Vp8
 @using SpawnDev.Codecs.Video.Vp9
 @using SpawnDev.ILGPU.WebGPU
 @using SpawnDev.ILGPU.Wasm
-@inject BlazorJSRuntime JS
+@inject SpawnJSRuntime JS
 
 <PageTitle>SpawnDev.Codecs GPU Pair Demo</PageTitle>
 
@@ -217,7 +217,7 @@
         try
         {
             using var enc = new Vp8KeyframeEncoderGpu(acc);
-            encoded = enc.EncodeKeyFrame(
+            encoded = await enc.EncodeKeyFrameAsync(
                 ySrc, ySrcStride: W,
                 uSrc, uvSrcStride: W / 2,
                 vSrc,
@@ -236,7 +236,7 @@
         try
         {
             using var dec = new Vp8KeyframeDecoderGpu(acc);
-            decoded = dec.DecodeKeyFrame(encoded, baseQIndex: Math.Clamp(Vp8Q, 1, 127));
+            decoded = await dec.DecodeKeyFrameAsync(encoded, baseQIndex: Math.Clamp(Vp8Q, 1, 127));
         }
         catch (Exception ex)
         {

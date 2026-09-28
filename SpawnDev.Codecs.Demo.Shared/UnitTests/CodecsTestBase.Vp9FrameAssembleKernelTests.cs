@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
             dT.View.CopyFromCPU(t);
             dOut.View.CopyFromCPU(new byte[expected.Length]);
 
-            kernel.Run(dU.View, dC.View, dT.View, dOut.View, dOutLen.View,
+            await kernel.RunAsync(dU.View, dC.View, dT.View, dOut.View, dOutLen.View,
                        u.Length, c.Length, t.Length);
             await acc.SynchronizeAsync();
 
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
             dT.View.CopyFromCPU(new byte[1]);
             dOut.View.CopyFromCPU(new byte[expected.Length]);
 
-            kernel.Run(dU.View, dC.View, dT.View, dOut.View, dOutLen.View,
+            await kernel.RunAsync(dU.View, dC.View, dT.View, dOut.View, dOutLen.View,
                        u.Length, c.Length, t.Length);
             await acc.SynchronizeAsync();
 

@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
                 width, height, baseQIndex);
 
             // GPU output.
-            byte[] gpuBytes = enc.EncodeKeyFrame(
+            byte[] gpuBytes = await enc.EncodeKeyFrameAsync(
                 ySrc, ySrcStride: width,
                 uSrc, uvSrcStride: width / 2,
                 vSrc,
@@ -143,7 +143,7 @@ public abstract partial class CodecsTestBase
 
             // GPU output (uses the new GPU stride-pack kernel because
             // ystride > width and uvstride > width/2).
-            byte[] gpuBytes = enc.EncodeKeyFrame(
+            byte[] gpuBytes = await enc.EncodeKeyFrameAsync(
                 ySrc, ySrcStride: ystride,
                 uSrc, uvSrcStride: uvstride,
                 vSrc,

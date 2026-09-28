@@ -137,7 +137,7 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
     /// the lengths on the host. Allocates 3 single-element scratch views,
     /// uploads, dispatches.
     /// </summary>
-    public void Run(
+    public async Task RunAsync(
         ArrayView<byte> uncompressedHeader,
         ArrayView<byte> compressedHeader,
         ArrayView<byte> tileBytes,
@@ -163,7 +163,7 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         sT.View.CopyFromCPU(new[] { (long)tileLen });
         Run(uncompressedHeader, compressedHeader, tileBytes, outBuf, outLen,
             sU.View, sC.View, sT.View);
-        _accelerator.Synchronize();
+        await _accelerator.SynchronizeAsync();
     }
 
     private static void AssembleKernel(

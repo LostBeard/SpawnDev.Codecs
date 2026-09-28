@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
         using var dOutBuf = acc.Allocate1D<byte>(32);
         using var dOutLen = acc.Allocate1D<long>(1);
         dOutBuf.View.CopyFromCPU(new byte[32]); // pre-zero
-        kernel.Run(dOutBuf.View, dOutLen.View, width, height, baseQIndex, firstPartitionSize);
+        await kernel.RunAsync(dOutBuf.View, dOutLen.View, width, height, baseQIndex, firstPartitionSize);
         await acc.SynchronizeAsync();
 
         long outLen = (await dOutLen.CopyToHostAsync())[0];

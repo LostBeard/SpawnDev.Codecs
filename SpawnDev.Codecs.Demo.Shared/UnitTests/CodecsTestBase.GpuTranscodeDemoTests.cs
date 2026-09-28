@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
             var (ySrc, uSrc, vSrc) = GenerateGradientYuv420(width, height);
 
             using var enc = new Vp8KeyframeEncoderGpu(acc);
-            byte[] encoded = enc.EncodeKeyFrame(
+            byte[] encoded = await enc.EncodeKeyFrameAsync(
                 ySrc, ySrcStride: width,
                 uSrc, uvSrcStride: width / 2,
                 vSrc,
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
             True(encoded.Length > 0, "VP8-GPU encoder must produce non-empty output");
 
             using var dec = new Vp8KeyframeDecoderGpu(acc);
-            var frame = dec.DecodeKeyFrame(encoded, baseQIndex: q);
+            var frame = await dec.DecodeKeyFrameAsync(encoded, baseQIndex: q);
             True(frame.YPlane.Length == width * height,
                 $"VP8-GPU decoder Y plane must be width*height bytes; got {frame.YPlane.Length}");
 

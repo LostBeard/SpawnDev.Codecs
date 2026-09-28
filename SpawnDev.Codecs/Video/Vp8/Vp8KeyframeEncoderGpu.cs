@@ -122,10 +122,10 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
     /// (width, height), so spec-compliant decoders crop the working-dim
     /// pixels back to the requested display size.
     /// </summary>
-    public byte[] EncodeKeyFrame(
-        ReadOnlySpan<byte> ySrc, int ySrcStride,
-        ReadOnlySpan<byte> uSrc, int uvSrcStride,
-        ReadOnlySpan<byte> vSrc,
+    public async Task<byte[]> EncodeKeyFrameAsync(
+        ReadOnlyMemory<byte> ySrc, int ySrcStride,
+        ReadOnlyMemory<byte> uSrc, int uvSrcStride,
+        ReadOnlyMemory<byte> vSrc,
         int width, int height,
         int baseQIndex = 30)
     {
@@ -156,9 +156,9 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         }
 
         // === Host work: ONLY upload + dispatch ===
-        UploadPaddedPlane(ySrc, ySrcStride, width, height, workWidth, _dY!);
-        UploadPaddedPlane(uSrc, uvSrcStride, width / 2, height / 2, uvWorkWidth, _dU!);
-        UploadPaddedPlane(vSrc, uvSrcStride, width / 2, height / 2, uvWorkWidth, _dV!);
+        UploadPaddedPlane(ySrc.Span, ySrcStride, width, height, workWidth, _dY!);
+        UploadPaddedPlane(uSrc.Span, uvSrcStride, width / 2, height / 2, uvWorkWidth, _dU!);
+        UploadPaddedPlane(vSrc.Span, uvSrcStride, width / 2, height / 2, uvWorkWidth, _dV!);
         // Recon planes are fully overwritten per MB by the sequential
         // encoder; pre-zero only the buffers the bool encoder reads as
         // partial-write carry-back state (P0 / Tp / Above).
@@ -198,16 +198,14 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
             _dOutput!.View, _dOutLen!.View,
             width, height);
 
-        _accelerator.Synchronize();
+        await _accelerator.SynchronizeAsync();
 
         // Single partial readback of the final encoded keyframe. SubView
-        // -> CopyToCPU is a real per-backend partial readback
-        // (SpawnDev.ILGPU 4.9.3+); only the actual finalLen bytes cross
-        // the boundary, not the worst-case-sized output buffer.
-        int finalLen = _dOutLen!.GetAsArray1D()[0];
-        var result = new byte[finalLen];
-        _dOutput!.View.SubView(0, finalLen).CopyToCPU(result);
-        return result;
+        // -> CopyToHostAsync is a real per-backend partial readback;
+        // only the actual finalLen bytes cross the boundary, not the
+        // worst-case-sized output buffer.
+        int finalLen = (await _dOutLen!.CopyToHostAsync())[0];
+        return await _dOutput!.View.SubView(0, finalLen).CopyToHostAsync();
     }
 
     /// <summary>
@@ -218,7 +216,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
     /// dispatches at extent=numFrames so all frames run their entropy
     /// walks concurrently on independent CUDA cores.
     /// </summary>
-    public byte[][] EncodeKeyFramesBatch(
+    public async Task<byte[][]> EncodeKeyFramesBatchAsync(
         ReadOnlyMemory<byte>[] yPlanes,
         ReadOnlyMemory<byte>[] uPlanes,
         ReadOnlyMemory<byte>[] vPlanes,
@@ -390,21 +388,24 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
             width, height,
             frameCount, _p0Stride, _tp0Stride, outputCapacity);
 
-        _accelerator.Synchronize();
+        await _accelerator.SynchronizeAsync();
         // Read lengths first; then fetch ONLY the actual encoded bytes
         // per frame via partial readback. Avoids transferring the full
         // worst-case-sized strided output buffer over PCIe.
-        var allLens = dAllOutputLens.GetAsArray1D();
+        var allLens = await dAllOutputLens.CopyToHostAsync();
         var results = new byte[frameCount][];
         for (int f = 0; f < frameCount; f++)
         {
             int len = allLens[f];
-            results[f] = new byte[len];
             if (len > 0)
             {
-                dAllOutputs.View
+                results[f] = await dAllOutputs.View
                     .SubView((long)f * outputCapacity, len)
-                    .CopyToCPU(results[f]);
+                    .CopyToHostAsync();
+            }
+            else
+            {
+                results[f] = Array.Empty<byte>();
             }
         }
         return results;
@@ -519,8 +520,8 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
     /// not capable of processing any data loads. It is simply the
     /// coordinator."
     /// </summary>
-    private void UploadPlane(
-        ReadOnlySpan<byte> src, int stride, int w, int h,
+    private async Task UploadPlaneAsync(
+        ReadOnlyMemory<byte> src, int stride, int w, int h,
         MemoryBuffer1D<byte, Stride1D.Dense> dest)
     {
         if (stride == w)
@@ -537,7 +538,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
             _stridePack.Run(dStrided.View, 0, stride, dest.View, 0, w, h);
             // Sync before dStrided's using-scope dispose so the kernel
             // has finished consuming it.
-            _accelerator.Synchronize();
+            await _accelerator.SynchronizeAsync();
         }
     }
 

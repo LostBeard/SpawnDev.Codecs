@@ -1,5 +1,14 @@
 # SpawnDev.Codecs CHANGELOG
 
+## Unreleased
+
+### Port BlazorJS to SpawnJS (2026-09-28)
+- **Replace `SpawnDev.BlazorJS` with `SpawnDev.SpawnJS.Blazor` 2.1.19** (brings `SpawnDev.SpawnJS` 2.1.19).
+- **Bump `SpawnDev.ILGPU` 4.9.5-local.17 → 5.2.17** - ILGPU 4.9.x still depended on BlazorJS; 5.2.x is the SpawnJS stack.
+- Demo/tests: `AddSpawnJSRuntime` / `SpawnJSRunAsync`; `UnitTesting.Blazor` → `UnitTesting.Browser` 2.7.0.
+- VP8 GPU encode/decode APIs made async (`EncodeKeyFrameAsync` / `DecodeKeyFrameAsync` / `EncodeKeyFramesBatchAsync`) so browser backends use `SynchronizeAsync` + `CopyToHostAsync` instead of desktop-only sync Synchronize/GetAsArray1D.
+- VP9 assemble/uncompressed-header convenience overloads: `Run` → `RunAsync` (same reason).
+
 ## Unreleased — master after rc.7 (2026-05-06)
 
 ### Wasm cold-compile diagnosis + Lever B (2026-05-06)

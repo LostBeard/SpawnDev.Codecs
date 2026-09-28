@@ -21,7 +21,7 @@ Fills the last gap in the SpawnDev media ecosystem:
 | SpawnDev.RTC | Signaling + transport | Shipped, nuget.org (1.1.2) |
 | SpawnDev.WebTorrent | Torrent infrastructure | Shipped, nuget.org (3.1.2) |
 | SpawnDev.ILGPU | GPU compute | Shipped, nuget.org (4.9.2-rc.8) |
-| SpawnDev.BlazorJS | Browser interop | Shipped, nuget.org (3.5.4) |
+| SpawnDev.SpawnJS | Browser interop | Shipped, nuget.org (2.1.19) |
 | SpawnDev.MultiMedia | Capture + platform encoders (P/Invoke to MF/VideoToolbox/VAAPI) | In progress (Riker) |
 | **SpawnDev.Codecs** | **Pure-.NET open-source codecs** | **PLANNING (this doc)** |
 

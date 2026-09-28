@@ -257,7 +257,7 @@ void TranscodeVideoGpu(string label, string outName, string fourCc,
 
         swEncode.Start();
         byte[][] encoded;
-        if (vp8 != null) encoded = vp8.EncodeKeyFramesBatch(yMem, uMem, vMem, width, height, baseQIndex: 4);
+        if (vp8 != null) encoded = vp8.EncodeKeyFramesBatchAsync(yMem, uMem, vMem, width, height, baseQIndex: 4).GetAwaiter().GetResult();
         else if (vp9 != null) encoded = vp9.EncodeKeyFramesBatchAsync(yMem, uMem, vMem, width, height, baseQIndex: 4).GetAwaiter().GetResult();
         else encoded = av1!.EncodeKeyFramesBatchAsync(yMem, uMem, vMem, width, height, baseQIndex: 4).GetAwaiter().GetResult();
         swEncode.Stop();

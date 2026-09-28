@@ -99,11 +99,12 @@ Console.WriteLine("Encoding VP8 GPU (per-frame)...");
         int yOff = f * frameSize;
         int uOff = yOff + W * H;
         int vOff = uOff + (W / 2) * (H / 2);
-        var ySpan = new ReadOnlySpan<byte>(allFrames, yOff, W * H);
-        var uSpan = new ReadOnlySpan<byte>(allFrames, uOff, (W / 2) * (H / 2));
-        var vSpan = new ReadOnlySpan<byte>(allFrames, vOff, (W / 2) * (H / 2));
         var swFrame = Stopwatch.StartNew();
-        var bytes = enc.EncodeKeyFrame(ySpan, W, uSpan, W / 2, vSpan, W, H, baseQIndex: 30);
+        var bytes = enc.EncodeKeyFrameAsync(
+            new ReadOnlyMemory<byte>(allFrames, yOff, W * H), W,
+            new ReadOnlyMemory<byte>(allFrames, uOff, (W / 2) * (H / 2)), W / 2,
+            new ReadOnlyMemory<byte>(allFrames, vOff, (W / 2) * (H / 2)),
+            W, H, baseQIndex: 30).GetAwaiter().GetResult();
         swFrame.Stop();
         if (f == 0) frame0Ms = swFrame.Elapsed.TotalMilliseconds;
         total += bytes.Length;
@@ -129,7 +130,7 @@ Console.WriteLine("Encoding VP8 GPU (batch)...");
         vPlanes[f] = new ReadOnlyMemory<byte>(allFrames, vOff, (W / 2) * (H / 2));
     }
     var swTotal = Stopwatch.StartNew();
-    var results = enc.EncodeKeyFramesBatch(yPlanes, uPlanes, vPlanes, W, H, baseQIndex: 30);
+    var results = enc.EncodeKeyFramesBatchAsync(yPlanes, uPlanes, vPlanes, W, H, baseQIndex: 30).GetAwaiter().GetResult();
     swTotal.Stop();
     long total = 0;
     foreach (var r in results) total += r.Length;

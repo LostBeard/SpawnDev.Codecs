@@ -295,7 +295,7 @@ The in-browser demo at `SpawnDev.Codecs.Demo/` ships several pages exercising th
 | [SpawnDev.RTC](https://github.com/LostBeard/SpawnDev.RTC) | WebRTC signaling + transport |
 | [SpawnDev.WebTorrent](https://github.com/LostBeard/SpawnDev.WebTorrent) | BitTorrent infrastructure |
 | [SpawnDev.ILGPU](https://github.com/LostBeard/SpawnDev.ILGPU) | GPU compute backbone |
-| [SpawnDev.BlazorJS](https://github.com/LostBeard/SpawnDev.BlazorJS) | Browser interop (WebAudio, MediaDevices) |
+| [SpawnDev.SpawnJS](https://github.com/LostBeard/SpawnDev.SpawnJS) | Browser interop (WebAudio, MediaDevices) |
 | [SpawnDev.MultiMedia](https://github.com/LostBeard/SpawnDev.MultiMedia) | Capture + platform-native encoders (H.264/H.265/AAC) |
 | **SpawnDev.Codecs** | **Pure-.NET open-source codecs** (this library) |
 

@@ -73,25 +73,27 @@ public sealed class Vp8KeyframeDecoderGpu : IDisposable
     }
 
     /// <summary>Decode an encoded VP8 keyframe back to YUV recon planes.</summary>
-    public DecodedFrame DecodeKeyFrame(ReadOnlySpan<byte> encoded, int baseQIndex)
+    public async Task<DecodedFrame> DecodeKeyFrameAsync(ReadOnlyMemory<byte> encoded, int baseQIndex)
     {
         if (encoded.Length < 10)
             throw new ArgumentException("VP8 keyframe must be at least 10 bytes (uncompressed tag).", nameof(encoded));
+
+        var encodedSpan = encoded.Span;
 
         // Parse the 10-byte uncompressed tag to extract width / height /
         // first_partition_size. Per RFC 6386 sec 9.1 these are plain
         // packed integer fields - metadata extraction, not codec-data
         // processing.
-        uint tag0 = encoded[0]; uint tag1 = encoded[1]; uint tag2 = encoded[2];
+        uint tag0 = encodedSpan[0]; uint tag1 = encodedSpan[1]; uint tag2 = encodedSpan[2];
         uint tagBits = tag0 | (tag1 << 8) | (tag2 << 16);
         bool isKeyFrame = (tagBits & 1u) == 0;
         if (!isKeyFrame) throw new InvalidDataException("Not a key frame.");
         int firstPartitionSize = (int)((tagBits >> 5) & 0x7FFFFu);
         // Bytes [3..6) are the start code; [6..8) horiz_size_code; [8..10) vert_size_code.
-        if (encoded[3] != 0x9D || encoded[4] != 0x01 || encoded[5] != 0x2A)
+        if (encodedSpan[3] != 0x9D || encodedSpan[4] != 0x01 || encodedSpan[5] != 0x2A)
             throw new InvalidDataException("Missing VP8 start code.");
-        int horizSize = encoded[6] | (encoded[7] << 8);
-        int vertSize = encoded[8] | (encoded[9] << 8);
+        int horizSize = encodedSpan[6] | (encodedSpan[7] << 8);
+        int vertSize = encodedSpan[8] | (encodedSpan[9] << 8);
         int width = horizSize & 0x3FFF;
         int height = vertSize & 0x3FFF;
         if ((width & 15) != 0 || (height & 15) != 0)
@@ -156,13 +158,13 @@ public sealed class Vp8KeyframeDecoderGpu : IDisposable
             dDequant.View, dAbove.View, dStreamRanges.View,
             mbCols, mbRows);
 
-        _accelerator.Synchronize();
+        await _accelerator.SynchronizeAsync();
 
         // Single readback per plane - the only host-side work besides
         // dispatch is moving the decoded recon back to host memory.
-        var yPlane = dYRecon.GetAsArray1D();
-        var uPlane = dURecon.GetAsArray1D();
-        var vPlane = dVRecon.GetAsArray1D();
+        var yPlane = await dYRecon.CopyToHostAsync();
+        var uPlane = await dURecon.CopyToHostAsync();
+        var vPlane = await dVRecon.CopyToHostAsync();
         return new DecodedFrame(yPlane, uPlane, vPlane, width, height);
     }
 

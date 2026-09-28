@@ -696,21 +696,21 @@
             using var enc = new Vp8KeyframeEncoderGpu(_acc);
             using var dec = new Vp8KeyframeDecoderGpu(_acc);
             // Warm.
-            var warm = enc.EncodeKeyFrame(ySrc, width, uSrc, width / 2, vSrc, width, height, q);
-            _ = dec.DecodeKeyFrame(warm, q);
+            var warm = enc.EncodeKeyFrameAsync(ySrc, width, uSrc, width / 2, vSrc, width, height, q).GetAwaiter().GetResult();
+            _ = dec.DecodeKeyFrameAsync(warm, q).GetAwaiter().GetResult();
 
             long encBytes = 0;
             var swEnc = Stopwatch.StartNew();
             byte[] encoded = warm;
             for (int i = 0; i < iterations; i++)
             {
-                encoded = enc.EncodeKeyFrame(ySrc, width, uSrc, width / 2, vSrc, width, height, q);
+                encoded = enc.EncodeKeyFrameAsync(ySrc, width, uSrc, width / 2, vSrc, width, height, q).GetAwaiter().GetResult();
                 encBytes += encoded.Length;
             }
             swEnc.Stop();
 
             var swDec = Stopwatch.StartNew();
-            for (int i = 0; i < iterations; i++) _ = dec.DecodeKeyFrame(encoded, q);
+            for (int i = 0; i < iterations; i++) _ = dec.DecodeKeyFrameAsync(encoded, q).GetAwaiter().GetResult();
             swDec.Stop();
 
             double encFps = iterations * 1000.0 / swEnc.Elapsed.TotalMilliseconds;

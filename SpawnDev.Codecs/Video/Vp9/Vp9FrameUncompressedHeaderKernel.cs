@@ -102,7 +102,7 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
     /// firstPartitionSize on the host - allocates a 1-element scratch view,
     /// uploads, dispatches.
     /// </summary>
-    public void Run(
+    public async Task RunAsync(
         ArrayView<byte> outBuf,
         ArrayView<long> outLen,
         int width, int height,
@@ -112,7 +112,7 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
         using var scratch = _accelerator.Allocate1D<long>(1);
         scratch.View.CopyFromCPU(new[] { (long)firstPartitionSize });
         Run(outBuf, outLen, scratch.View, width, height, baseQIndex);
-        _accelerator.Synchronize();
+        await _accelerator.SynchronizeAsync();
     }
 
     private static void EmitKernel(
