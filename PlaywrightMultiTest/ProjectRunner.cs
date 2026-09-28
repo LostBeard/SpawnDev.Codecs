@@ -27,6 +27,38 @@ namespace PlaywrightMultiTest
         /// </summary>
         private ProjectRunner() { }
 
+        /// <summary>
+        /// Chromium launch args. Do NOT put "Vulkan" in --enable-features: on Windows that
+        /// pushes Dawn off its native D3D12 path and the browser silently falls back to the
+        /// SwiftShader SOFTWARE WebGPU adapter (vendor=google arch=swiftshader
+        /// isFallbackAdapter=true). Fail loudly with --disable-software-rasterizer rather than
+        /// silently measuring CPU-rasterizer time. Matches SpawnDev.ILGPU / SpawnDev.ILGPU.ML.
+        /// </summary>
+        private static string[] BuildChromiumArgs()
+        {
+            var args = new System.Collections.Generic.List<string>
+            {
+                "--enable-unsafe-webgpu",
+                "--enable-features=WebGPUService,SkiaGraphite,FileSystemAccessPersistentPermission",
+                "--ignore-gpu-blocklist",
+                "--disable-software-rasterizer",
+                "--enable-webgpu-developer-features",
+                "--no-sandbox",
+                "--disable-features=FileSystemAccessPermissionPrompt",
+                "--allow-file-access-from-files"
+            };
+            // TCP CDP endpoint so an in-flight run can be inspected (pipe is exclusive to Playwright).
+            // Default 9224 - deliberately not 9222 (hand-debug) or 9223 (ILGPU PMT).
+            var cdpPort = Environment.GetEnvironmentVariable("PMT_CDP_PORT");
+            if (!string.Equals(cdpPort, "off", StringComparison.OrdinalIgnoreCase) && cdpPort != "0")
+            {
+                var port = int.TryParse(cdpPort, out var p) ? p : 9224;
+                args.Add($"--remote-debugging-port={port}");
+                LogStatus($"[PMT_CDP] DevTools endpoint on http://127.0.0.1:{port} (PMT_CDP_PORT=off to disable)");
+            }
+            return args.ToArray();
+        }
+
         private static async Task<int> RunDotnetAsync(string args, string workingDir, int timeoutMs = 300000)
         {
             LogStatus($"RunDotnetAsync: dotnet {args.Split(' ')[0]} (timeout={timeoutMs/1000}s)");
@@ -171,22 +203,25 @@ namespace PlaywrightMultiTest
                         // This enables ShaderDebugService's debug folder persistence.
                         var userDataDir = Path.Combine(Path.GetTempPath(), "SpawnDev.Codecs.PlaywrightProfile");
                         Directory.CreateDirectory(userDataDir);
-                        LogStatus($"Launching Chromium (persistent profile: {userDataDir})...");
+                        LogStatus($"Launching Chrome (persistent profile: {userDataDir})...");
                         testableProject.BrowserContext = await testableProject.Playwright.Chromium.LaunchPersistentContextAsync(
                             userDataDir,
                             new BrowserTypeLaunchPersistentContextOptions
                             {
                                 Headless = false,
-                                Args = new[]
+                                // Installed Chrome by DEFAULT, not Playwright's bundled Chromium: the
+                                // bundled build only ever exposes the SwiftShader SOFTWARE WebGPU
+                                // adapter on this machine (vendor=google arch=swiftshader
+                                // isFallbackAdapter=true). Real Chrome exposes the hardware adapter
+                                // (and is what users run anyway). PMT_BROWSER_CHANNEL overrides
+                                // (set "bundled" to deliberately run Playwright's Chromium).
+                                Channel = Environment.GetEnvironmentVariable("PMT_BROWSER_CHANNEL") switch
                                 {
-                                    "--enable-unsafe-webgpu",
-                                    "--enable-features=Vulkan,WebGPUService,SkiaGraphite,FileSystemAccessPersistentPermission",
-                                    "--ignore-gpu-blocklist",
-                                    "--no-sandbox",
-                                    // Auto-grant file system write permission (no prompt)
-                                    "--disable-features=FileSystemAccessPermissionPrompt",
-                                    "--allow-file-access-from-files"
-                                }
+                                    "bundled" => null,
+                                    string s => s,
+                                    null => "chrome",
+                                },
+                                Args = BuildChromiumArgs()
                             }).ConfigureAwait(false);
                         testableProject.Browser = testableProject.BrowserContext.Browser;
                         // Grant all available permissions to avoid prompts

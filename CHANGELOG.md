@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### PMT: system Chrome for real WebGPU (2026-09-28)
+- PlaywrightMultiTest now launches installed Chrome (`Channel = "chrome"`) with `SpawnDev.Codecs.PlaywrightProfile`, matching ILGPU/ML. Dropped `Vulkan` from `--enable-features` and added `--disable-software-rasterizer` so Windows Dawn stays on D3D12 instead of silently falling back to SwiftShader.
+
 ### Port BlazorJS to SpawnJS (2026-09-28)
 - **Replace `SpawnDev.BlazorJS` with `SpawnDev.SpawnJS.Blazor` 2.1.19** (brings `SpawnDev.SpawnJS` 2.1.19).
 - **Bump `SpawnDev.ILGPU` 4.9.5-local.17 → 5.2.17** - ILGPU 4.9.x still depended on BlazorJS; 5.2.x is the SpawnJS stack.
@@ -527,6 +530,9 @@ partial-range readback worker path, Wasm SAB slot view, CUDA / OpenCL
 and `*KeyframeDecoderGpu` partial-readback site.
 
 ## Unreleased
+
+### PMT: system Chrome for real WebGPU (2026-09-28)
+- PlaywrightMultiTest now launches installed Chrome (`Channel = "chrome"`) with `SpawnDev.Codecs.PlaywrightProfile`, matching ILGPU/ML. Dropped `Vulkan` from `--enable-features` and added `--disable-software-rasterizer` so Windows Dawn stays on D3D12 instead of silently falling back to SwiftShader.
 
 Initial development. Project still in pre-release. See README.md for the
 working feature matrix.
