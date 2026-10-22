@@ -333,7 +333,9 @@ public sealed class BmpKernels : IDisposable
         int y = 0;
         int err = 0;
         bool done = false;
-        while (!done && err == 0)
+        // Loop condition as a bool local built with non-short-circuit operators (WebGPU hangs on `a && b`).
+        bool go = true;
+        while (go)
         {
             if (pos >= end)
             {
@@ -439,6 +441,7 @@ public sealed class BmpKernels : IDisposable
                     }
                 }
             }
+            go = (!done) & (err == 0);
         }
         if (err != 0) meta[BmpMeta.Error] = err;
     }

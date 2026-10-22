@@ -126,7 +126,9 @@ internal sealed class ExactPaletteBuilder : IDisposable
             int slot = (int)(((uint)key * 2654435761u) >> 22);
             int step = 0;
             bool done = false;
-            while (!done && step < TableSlots)
+            // Loop condition as a bool local built with non-short-circuit operators (WebGPU hangs on `a && b`).
+            bool go = (!done) & (step < TableSlots);
+            while (go)
             {
                 int seen = Atomic.CompareExchange(ref table[slot], 0, key);
                 if (seen == 0)
@@ -145,6 +147,7 @@ internal sealed class ExactPaletteBuilder : IDisposable
                     // Once over the limit the verdict is "not exact"; stop probing.
                     if (state[ExactPaletteState.Distinct] > limit) done = true;
                 }
+                go = (!done) & (step < TableSlots);
             }
             if (!done) state[ExactPaletteState.Overflow] = 1;
         }
