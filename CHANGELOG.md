@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Image codecs foundation, GPU zlib, PNG (2026-10-22)
+- **New `SpawnDev.Codecs.Compression`**: `InflateGpu` / `InflateKernel` (a puff.c port; a DEFLATE / zlib decoder as a single GPU thread, every block type, Adler-32 verified, specific `InflateError` codes), `Crc32Gpu`, `DeflateGpu` + `ZlibCompressorGpu` (block-parallel compressor: independent blocks, LZ77 with hash chains (greedy or lazy), dynamic Huffman with length-limited codes, stored-block fallback, byte-aligned block joins; levels 0..3). Verified against .NET's `ZLibStream` in both directions.
+- **New `SpawnDev.Codecs.Images`**: `ImageFormat` / `ImageInfo` / `PixelFormat` / `DecodedImage` / `DecodedImageJS` / `ImageFormatDetector` / `ImageFrameInfo` (shared by every image codec) and the `ImageDecoderGpu` facade (format sniffing, lazy per-format decoders).
+- **`PngDecoderGpu`**: every colour type and bit depth (1/2/4/8/16), palette + tRNS, gray / RGB colour keys, Adam7, critical-chunk CRC and zlib Adler checks, RGBA8 and RGBA16 output; chunk scan, gather, inflate, unfilter and colour conversion all run on the accelerator. `ReadTextAsync` returns tEXt / zTXt / iTXt chunks (ComfyUI "prompt" / "workflow"). 64 generated fixtures (`scripts/images/make_png_fixtures.py`, truth = the source samples).
+- **`PngEncoderGpu`**: RGBA8 / RGBA16 input, automatic colour-type reduction (gray, gray+alpha, RGB, RGBA), adaptive or fixed scanline filters, block-parallel deflate with one IDAT chunk per block (per-chunk CRC on the accelerator), tEXt / iTXt output. Independent host-side reader in the tests plus `scripts/images/verify_png_encoder.py` (Pillow).
+- **`Av1ObuAssembleKernel`**: the AV1 temporal unit (TD + SH + Frame OBU, leb128 size) is now assembled on the accelerator; the host builds only a fixed blob of under 128 bytes. `Av1KeyframeEncoderGpu` got the three-overload shape. (Still multiples of 64 only: task #23.)
+- **Bug fix (VP9):** the single-frame sequential encode kernel had no boundary-superblock handling, so a picture whose height was not a multiple of 64 encoded differently alone than in a batch; the single path now runs the batch kernel at extent 1.
+- **Kernel dialect rule (WebGPU):** loop headers and branch conditions are single `bool` locals built with `&` / `|`. A `while (a && b)` in the first inflate hung the WebGPU device while CPU / CUDA / OpenCL passed.
+
 ### Three-overload boundary, VP8 first (2026-10-22)
 - **Reference bump:** `SpawnDev.ILGPU` 5.2.17 -> 5.4.2, `SpawnDev.SpawnJS.Blazor` 2.1.19 -> 3.0.4 (`SpawnDev.UnitTesting.Browser` 2.7.0 and `SpawnDev.EBML` 3.0.1 are already the newest).
 - **New `DeviceTransfer`** (public static): the one place codec entry points move bytes between managed memory / JS typed arrays and accelerator buffers (`Upload` from `ReadOnlySpan<byte>` with no staging copy, `Upload` from a `TypedArray` via `IBrowserMemoryBuffer.CopyFromJS`, `DownloadAsync`, `DownloadUint8ArrayAsync`).

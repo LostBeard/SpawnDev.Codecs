@@ -152,6 +152,35 @@ public static class Av1KeyframeEncoder
         return output;
     }
 
+    /// <summary>
+    /// The fixed part of a keyframe temporal unit for a <paramref name="width"/> x <paramref name="height"/> picture:
+    /// the Temporal Delimiter OBU and Sequence Header OBU (<paramref name="aLen"/> bytes) followed by the
+    /// uncompressed frame header (<paramref name="bLen"/> bytes). Small, depends only on (width, height, q), and is
+    /// uploaded to the accelerator where <see cref="Av1ObuAssembleKernel"/> adds the data-dependent Frame OBU size
+    /// and the GPU-produced tile bytes.
+    /// </summary>
+    internal static byte[] BuildFramingBlob(int width, int height, int baseQIndex, out int aLen, out int bLen)
+    {
+        if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
+        byte[] tdObu = Av1ObuWriter.EmitObu(
+            Av1ObuType.TemporalDelimiter, ReadOnlySpan<byte>.Empty, hasSizeField: true);
+        var shConfig = BuildSequenceHeaderConfig(width, height);
+        byte[] shPayload = Av1SequenceHeaderWriter.EmitPayload(shConfig);
+        byte[] shObu = Av1ObuWriter.EmitObu(
+            Av1ObuType.SequenceHeader, shPayload, hasSizeField: true);
+        var sh = SynthesizeSequenceHeader(shConfig);
+        byte[] uncompressedHeader = BuildUncompressedHeader(sh, width, height, baseQIndex);
+
+        aLen = tdObu.Length + shObu.Length;
+        bLen = uncompressedHeader.Length;
+        var blob = new byte[aLen + bLen];
+        Buffer.BlockCopy(tdObu, 0, blob, 0, tdObu.Length);
+        Buffer.BlockCopy(shObu, 0, blob, tdObu.Length, shObu.Length);
+        Buffer.BlockCopy(uncompressedHeader, 0, blob, aLen, bLen);
+        return blob;
+    }
+
     // ------------------------------------------------------------------
     // Sequence header
     // ------------------------------------------------------------------

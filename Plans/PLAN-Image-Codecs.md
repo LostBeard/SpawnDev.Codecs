@@ -75,6 +75,10 @@ Task<byte[]> EncodeAsync(ReadOnlyMemory<byte> rgba, int width, int height, <Form
   are built into `bool` locals with `&` / `|` first (WGSL has dropped threads on inline `a && b`); struct state passed
   `ref` into static helpers is fine (`InflateState`, `Vp8BoolDecoderGpuState`); keep kernel parameter counts small by
   packing scalars into the meta block.
+* **Loop and branch conditions are single `bool` locals.** A loop header with `&&` / `||` (`while (a && b)`) HUNG the WebGPU
+  device (DXGI_ERROR_DEVICE_HUNG, and the hang poisons every later test in that Chrome) while CPU/CUDA/OpenCL passed. Write
+  `bool go = (a) & (b); while (go) { ...; go = (a) & (b); }`. The same goes for compound `if` conditions (build a `bool` with
+  `&` / `|` first). A kernel that passes the CPU lane has NOT been proven for WebGPU/Wasm: the coordinator runs those lanes.
 * Use `DeviceTransfer` / `StageBuffer` / `PlanePadKernel`; do not write new host copy loops.
 
 ## Test conventions
