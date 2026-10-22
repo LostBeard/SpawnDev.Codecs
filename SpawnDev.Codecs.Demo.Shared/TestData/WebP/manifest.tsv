@@ -41,7 +41,7 @@ large_1024x768	still	1024	768	0	1	1	large_1024x768	xf[P5,C5] cache=6 meta=5 grou
 meta_icc_exif_xmp_32x24	still	32	24	0	1	6	meta_icc_exif_xmp_32x24	xf[P3,C3] cache=0 meta=0 groups=1/1 lit=768 cache_hits=0 copies=0 short=0 far=0 pred_modes=78a pal=0 bundle=0 codes=normal/simple1
 meta_exif_alpha_40x30	still	40	30	1	1	3	meta_exif_alpha_40x30	xf[P3,C3] cache=0 meta=0 groups=1/1 lit=1200 cache_hits=0 copies=0 short=0 far=0 pred_modes=267a pal=0 bundle=0 codes=normal/simple1
 meta_xmp_only_16x16	still	16	16	0	1	1	meta_xmp_only_16x16	xf[P9,C9] cache=0 meta=0 groups=1/1 lit=256 cache_hits=0 copies=0 short=0 far=0 pred_modes=1 pal=0 bundle=0 codes=normal/simple1
-lossy_32x32	lossy	32	32	1	1	1	-	-
+lossy_32x32	lossy	32	32	0	1	1	-	-
 lossy_rgb_32x32	lossy	32	32	0	1	1	-	-
 anim_blend_dispose_64x48	anim	64	48	1	6	1	anim_blend_dispose_64x48	frames=6
 anim_keyframe_blend_64x48	anim	64	48	1	6	1	anim_keyframe_blend_64x48	frames=6

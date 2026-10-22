@@ -307,16 +307,29 @@ add_still("meta_icc_exif_xmp_32x24", photo, kind="still", orientation=6, icc_pro
 add_still("meta_exif_alpha_40x30", mk_alpha(30, 40, 71), orientation=3, exif=b"Exif\0\0" + exif_tiff(3))
 add_still("meta_xmp_only_16x16", mk_photo(16, 16, 72, 5), xmp=xmp)
 
+
+def meta_sidecars(name):
+    """Expected metadata payloads as libwebp's mux stored them (<name>.icc / .exif / .xmp)."""
+    data = open(os.path.join(OUT, name + ".webp"), "rb").read()
+    for fcc, ext in ((b"ICCP", "icc"), (b"EXIF", "exif"), (b"XMP ", "xmp")):
+        for f, p in W.riff_chunks(data):
+            if f == fcc:
+                write("%s.%s" % (name, ext), p)
+
+
+for n in ("meta_icc_exif_xmp_32x24", "meta_exif_alpha_40x30", "meta_xmp_only_16x16"):
+    meta_sidecars(n)
+
 # a lossy file: the decoder must refuse it cleanly (not yet supported)
 lossy_src = np.array(Image.fromarray(mk_photo(32, 32, 80, 4), "RGBA"))
 bl = io.BytesIO()
 Image.fromarray(lossy_src, "RGBA").save(bl, format="WEBP", lossless=False, quality=80)
 write("lossy_32x32.webp", bl.getvalue())
-manifest.append(("lossy_32x32", "lossy", 32, 32, 1, 1, 1, "-", "-"))
+manifest.append(("lossy_32x32", "lossy", 32, 32, int(lib_decode(bl.getvalue())[1]), 1, 1, "-", "-"))
 bl = io.BytesIO()
 Image.fromarray(mk_photo(32, 32, 80, 4)[..., :3].copy(), "RGB").save(bl, format="WEBP", lossless=False, quality=80)
 write("lossy_rgb_32x32.webp", bl.getvalue())
-manifest.append(("lossy_rgb_32x32", "lossy", 32, 32, 0, 1, 1, "-", "-"))
+manifest.append(("lossy_rgb_32x32", "lossy", 32, 32, int(lib_decode(bl.getvalue())[1]), 1, 1, "-", "-"))
 
 # --------------------------------------------------------------------------------------------------
 # animations
@@ -457,7 +470,7 @@ b = io.BytesIO()
 sh = [Image.fromarray(mk_photo(32, 32, 140 + i, 4), "RGBA") for i in range(3)]
 sh[0].save(b, format="WEBP", save_all=True, append_images=sh[1:], duration=50, lossless=False, quality=70)
 write("anim_lossy_32x32.webp", b.getvalue())
-manifest.append(("anim_lossy_32x32", "anim_lossy", 32, 32, 1, 3, 1, "-", "-"))
+manifest.append(("anim_lossy_32x32", "anim_lossy", 32, 32, int(lib_decode(b.getvalue())[1]), lib_decode(b.getvalue())[2], 1, "-", "-"))
 
 # --------------------------------------------------------------------------------------------------
 # sources for the ENCODER tests (libwebp compresses the same image, for the size comparison)
