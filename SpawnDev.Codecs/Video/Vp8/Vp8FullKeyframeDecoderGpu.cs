@@ -256,7 +256,16 @@ public sealed class Vp8FullKeyframeDecoderGpu : IDisposable
         }
     }
 
-    /// <summary>The macroblock rows on wavefront diagonal <paramref name="d"/> (column = d - WaveRowWeight * row).</summary>
+    /// <summary>
+    /// The wavefront diagonal a macroblock is reconstructed and loop-filtered on. A macroblock needs its left, top, top-left
+    /// and top-right neighbours finished, so all of those must be on EARLIER diagonals, and two macroblocks on one diagonal
+    /// must not touch each other's pixels (public so the schedule can be property-tested; see the recon and loop filter kernels).
+    /// </summary>
+    public static int WaveDiagonal(int mbRow, int mbCol) => mbCol + Vp8FullMeta.WaveRowWeight * mbRow;
+
+    /// <summary>The macroblock rows on wavefront diagonal <paramref name="d"/> (column = d - WaveRowWeight * row): rows rowLo .. rowLo + count - 1.</summary>
+    public static void GetWaveRows(int d, int mbCols, int mbRows, out int rowLo, out int count) => WaveRange(d, mbCols, mbRows, out rowLo, out count);
+
     private static void WaveRange(int d, int mbCols, int mbRows, out int rowLo, out int count)
     {
         int lo = d - (mbCols - 1);
@@ -264,6 +273,9 @@ public sealed class Vp8FullKeyframeDecoderGpu : IDisposable
         int rowHi = Math.Min(mbRows - 1, d / Vp8FullMeta.WaveRowWeight);
         count = rowHi - rowLo + 1;
     }
+
+    /// <summary>Number of wavefront launches for a picture of the given macroblock size.</summary>
+    public static int GetWaveCount(int mbCols, int mbRows) => mbCols + Vp8FullMeta.WaveRowWeight * (mbRows - 1);
 
     // ------------------------------------------------------------------
     // Managed overload

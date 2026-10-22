@@ -220,6 +220,77 @@ public abstract partial class CodecsTestBase
     private static byte[] Vp8Prefix(byte[] frame, int length) => frame.AsSpan(0, length).ToArray();
 
     [TestMethod]
+    public async Task Vp8FullKeyframeDecoderGpu_TypedArrayOverload_MatchesFfmpeg()
+    {
+        if (!OperatingSystem.IsBrowser())
+            throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var dec = new Vp8FullKeyframeDecoderGpu(acc);
+            await RunVp8FullTypedArrayDecode(dec);
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("browser")]
+    private static async Task RunVp8FullTypedArrayDecode(Vp8FullKeyframeDecoderGpu dec)
+    {
+        var failures = new List<string>();
+        foreach (var name in new[] { "pil_text_17x33_q75_m4", "cw_strong_f80_s3_photo_100x75", "vpx_slices4_photo_255x129", "pil_photo_1x1_q1_m0" })
+        {
+            var data = ReadEmbedded(Vp8LossyPrefix + name + ".vp8");
+            using var js = new SpawnDev.SpawnJS.JSObjects.Uint8Array(data.Length);
+            js.Set(data);
+            using var frame = await dec.DecodeKeyFrameAsync(js);
+            // Reading back to .NET is the TEST's terminal compare, not the product path.
+            var diff = CompareVp8Truth(name, frame.YPlane.ReadBytes(), frame.UPlane.ReadBytes(), frame.VPlane.ReadBytes(), frame.Width, frame.Height);
+            if (diff != null) failures.Add($"{name}: {diff}");
+        }
+        True(failures.Count == 0, string.Join("\n", failures));
+    }
+
+    [TestMethod]
+    public void Vp8FullKeyframeDecoderGpu_WavefrontSchedule_RespectsEveryDependency()
+    {
+        // The CPU backend runs the threads of one launch in index order, which hides a wrong wavefront; the GPU backends do
+        // not. So the schedule itself is checked: for every macroblock, its left, top, top-left and top-right neighbours
+        // (the pixels reconstruction and the loop filter read or modify) are on EARLIER diagonals; macroblocks sharing a
+        // diagonal are at least two columns apart (disjoint footprints); and the launches cover every macroblock exactly once.
+        var failures = new List<string>();
+        foreach (var (cols, rows) in new[] { (1, 1), (1, 5), (2, 2), (3, 7), (7, 3), (16, 9), (40, 30) })
+        {
+            var seen = new int[rows, cols];
+            for (int d = 0; d < Vp8FullKeyframeDecoderGpu.GetWaveCount(cols, rows); d++)
+            {
+                Vp8FullKeyframeDecoderGpu.GetWaveRows(d, cols, rows, out int rowLo, out int count);
+                int prevCol = -10;
+                for (int k = 0; k < count; k++)
+                {
+                    int r = rowLo + k;
+                    int c = d - (Vp8FullKeyframeDecoderGpu.WaveDiagonal(r, 0));
+                    if (r < 0 || r >= rows || c < 0 || c >= cols) { failures.Add($"{cols}x{rows}: diagonal {d} lists ({r},{c}) outside the grid"); continue; }
+                    if (Vp8FullKeyframeDecoderGpu.WaveDiagonal(r, c) != d) failures.Add($"{cols}x{rows}: ({r},{c}) not on diagonal {d}");
+                    seen[r, c]++;
+                    if (k > 0 && Math.Abs(c - prevCol) < 2) failures.Add($"{cols}x{rows}: diagonal {d} has macroblocks {prevCol} and {c} within 2 columns");
+                    prevCol = c;
+                    foreach (var (dr, dc) in new[] { (0, -1), (-1, 0), (-1, -1), (-1, 1) })
+                    {
+                        int nr = r + dr, nc = c + dc;
+                        if (nr < 0 || nc < 0 || nc >= cols) continue;
+                        if (Vp8FullKeyframeDecoderGpu.WaveDiagonal(nr, nc) >= d)
+                            failures.Add($"{cols}x{rows}: ({r},{c}) on diagonal {d} depends on ({nr},{nc}) on diagonal {Vp8FullKeyframeDecoderGpu.WaveDiagonal(nr, nc)}");
+                    }
+                }
+            }
+            for (int r = 0; r < rows; r++)
+                for (int c = 0; c < cols; c++)
+                    if (seen[r, c] != 1) failures.Add($"{cols}x{rows}: macroblock ({r},{c}) scheduled {seen[r, c]} times");
+        }
+        True(failures.Count == 0, string.Join("\n", failures.Take(20)));
+    }
+
+    [TestMethod]
     public async Task Vp8FullKeyframeDecoderGpu_HostileInputs_ThrowTheSpecificReason()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
