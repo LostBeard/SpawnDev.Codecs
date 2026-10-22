@@ -25,10 +25,13 @@ public sealed record WebPMetadata(byte[]? IccProfile, byte[]? Exif, byte[]? Xmp)
 public sealed class WebPEncodeOptions
 {
     /// <summary>
-    /// Effort / compression quality 0..100 (default 75), the same meaning as libwebp's lossless quality: higher spends more
-    /// work for a smaller file. 0..24 uses one prefix group and no transforms beyond the palette, 25..49 adds subtract
-    /// green and the predictor, 50..74 adds the colour cache and LZ77 hash matching, 75..100 searches harder
-    /// (more predictor candidates, longer match chains, cache size search).
+    /// Effort 0..100 (default 75), the same meaning as libwebp's lossless quality: higher spends more work for a smaller file.
+    /// 0..24: palette when the image has at most 256 colours, otherwise subtract green + predictor (5 candidate modes),
+    /// LZ77 against the previous pixel / the row above / one hash candidate. 25..49: a longer hash chain, and an image with at
+    /// most 256 colours also tries the palette with a predictor. 50..74: the encoder tries several ways to transform the image
+    /// (none, green + predictor, + cross colour, palette, palette + predictor) and keeps the one that entropy-codes smallest, and
+    /// also tries a colour cache. 75..100: all 14 predictor modes, longer hash chains and
+    /// more colour cache sizes.
     /// </summary>
     public int Quality { get; set; } = 75;
 

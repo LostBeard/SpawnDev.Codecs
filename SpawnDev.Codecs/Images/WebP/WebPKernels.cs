@@ -665,7 +665,7 @@ public sealed class WebPKernels : IDisposable
         return r;
     }
 
-    private static uint Predict(int mode, uint left, uint top, uint topRight, uint topLeft)
+    internal static uint Predict(int mode, uint left, uint top, uint topRight, uint topLeft)
     {
         uint r = 0xff000000u;
         if (mode == 1) r = left;

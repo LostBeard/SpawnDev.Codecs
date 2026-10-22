@@ -82,8 +82,10 @@ public static class Vp8lTables
     public const int PlaneCodes = 0;
     /// <summary>Offset of the code-length-code order (19 ints).</summary>
     public const int CodeLengthOrder = 240;
+    /// <summary>Offset of the encoder's inverse map: <c>dy * 16 + 8 - dx</c> to short distance code - 1 (or -1), 128 ints.</summary>
+    public const int PlaneToCode = 264;
     /// <summary>Total ints.</summary>
-    public const int Size = 264;
+    public const int Size = 392;
 
     // RFC 9649 section 5.2.2: (xi, yi) of distance codes 1..120.
     private static readonly sbyte[] Planes =
@@ -108,6 +110,9 @@ public static class Vp8lTables
         var t = new int[Size];
         for (int i = 0; i < 240; i++) t[PlaneCodes + i] = Planes[i];
         for (int i = 0; i < 19; i++) t[CodeLengthOrder + i] = LengthOrder[i];
+        for (int i = 0; i < 128; i++) t[PlaneToCode + i] = -1;
+        for (int c = 0; c < 120; c++)
+            t[PlaneToCode + Planes[2 * c + 1] * 16 + 8 - Planes[2 * c]] = c;
         return t;
     }
 }
