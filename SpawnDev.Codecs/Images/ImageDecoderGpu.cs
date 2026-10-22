@@ -7,6 +7,7 @@
 using System.Runtime.Versioning;
 using ILGPU;
 using ILGPU.Runtime;
+using SpawnDev.Codecs.Images.Jpeg;
 using SpawnDev.Codecs.Images.Png;
 using SpawnDev.ILGPU;
 using SpawnDev.SpawnJS.JSObjects;
@@ -19,6 +20,7 @@ public sealed class ImageDecoderGpu : IDisposable
 {
     private readonly Accelerator _accelerator;
     private PngDecoderGpu? _png;
+    private JpegDecoderGpu? _jpeg;
     private readonly StageBuffer<byte> _stageIn;
 
     /// <summary>Create a decoder; format decoders are compiled on first use.</summary>
@@ -34,6 +36,9 @@ public sealed class ImageDecoderGpu : IDisposable
 
     /// <summary>The PNG decoder (compiled on first access) for PNG-specific calls such as text chunks.</summary>
     public PngDecoderGpu Png => _png ??= new PngDecoderGpu(_accelerator);
+
+    /// <summary>The JPEG decoder (compiled on first access) for JPEG-specific calls such as <see cref="JpegDecodeOptions"/>.</summary>
+    public JpegDecoderGpu Jpeg => _jpeg ??= new JpegDecoderGpu(_accelerator);
 
     private static Exception NotSupported(ImageFormat format) => format == ImageFormat.Unknown
         ? new ImageDecodeException(ImageFormat.Unknown, "unrecognised image format")
@@ -58,6 +63,7 @@ public sealed class ImageDecoderGpu : IDisposable
         switch (format)
         {
             case ImageFormat.Png: return await Png.ReadInfoAsync(file, fileLength);
+            case ImageFormat.Jpeg: return await Jpeg.ReadInfoAsync(file, fileLength);
             default: throw NotSupported(format);
         }
     }
@@ -71,6 +77,7 @@ public sealed class ImageDecoderGpu : IDisposable
         switch (detected)
         {
             case ImageFormat.Png: return await Png.DecodeAsync(file, fileLength, output, format);
+            case ImageFormat.Jpeg: return await Jpeg.DecodeAsync(file, fileLength, output, format);
             default: throw NotSupported(detected);
         }
     }
@@ -93,6 +100,7 @@ public sealed class ImageDecoderGpu : IDisposable
         switch (format)
         {
             case ImageFormat.Png: return await Png.ReadInfoAsync(file);
+            case ImageFormat.Jpeg: return await Jpeg.ReadInfoAsync(file);
             default: throw NotSupported(format);
         }
     }
@@ -104,6 +112,7 @@ public sealed class ImageDecoderGpu : IDisposable
         switch (detected)
         {
             case ImageFormat.Png: return await Png.DecodeAsync(file, format);
+            case ImageFormat.Jpeg: return await Jpeg.DecodeAsync(file, format);
             default: throw NotSupported(detected);
         }
     }
@@ -134,6 +143,7 @@ public sealed class ImageDecoderGpu : IDisposable
         switch (head)
         {
             case ImageFormat.Png: return await Png.DecodeAsync(file, format);
+            case ImageFormat.Jpeg: return await Jpeg.DecodeAsync(file, format);
             default: throw NotSupported(head);
         }
     }
@@ -152,6 +162,7 @@ public sealed class ImageDecoderGpu : IDisposable
     public void Dispose()
     {
         _png?.Dispose();
+        _jpeg?.Dispose();
         _stageIn.Dispose();
     }
 }
