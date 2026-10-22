@@ -58,6 +58,38 @@ public sealed record ImageInfo(
         (long)Width * Height * BytesPerPixel(format);
 }
 
+/// <summary>What happens to a frame's rectangle before the next animation frame is drawn.</summary>
+public enum FrameDispose
+{
+    /// <summary>Leave the canvas as it is.</summary>
+    None = 0,
+    /// <summary>Clear the frame's rectangle to transparent (GIF "restore to background", APNG / WebP "background").</summary>
+    Background = 1,
+    /// <summary>Restore the canvas to what it was before this frame was drawn.</summary>
+    Previous = 2,
+}
+
+/// <summary>How a frame is combined with the canvas.</summary>
+public enum FrameBlend
+{
+    /// <summary>Replace the rectangle's pixels (alpha included).</summary>
+    Source = 0,
+    /// <summary>Alpha-composite over the canvas ("over" operator, straight alpha).</summary>
+    Over = 1,
+}
+
+/// <summary>One frame of an animation: its rectangle on the canvas, timing and compositing rules.</summary>
+/// <param name="Index">0-based frame index.</param>
+/// <param name="X">Left edge of the frame on the canvas.</param>
+/// <param name="Y">Top edge of the frame on the canvas.</param>
+/// <param name="Width">Frame width in pixels.</param>
+/// <param name="Height">Frame height in pixels.</param>
+/// <param name="DurationMs">How long the frame is displayed, in milliseconds.</param>
+/// <param name="Dispose">Disposal applied after the frame is displayed.</param>
+/// <param name="Blend">How the frame is drawn onto the canvas.</param>
+public sealed record ImageFrameInfo(
+    int Index, int X, int Y, int Width, int Height, int DurationMs, FrameDispose Dispose, FrameBlend Blend);
+
 /// <summary>A decoded image in managed memory (a terminal CPU sink; in a browser prefer <see cref="DecodedImageJS"/>).</summary>
 /// <param name="Info">Facts about the file.</param>
 /// <param name="Pixels">Tightly packed pixels in <paramref name="PixelFormat"/>.</param>

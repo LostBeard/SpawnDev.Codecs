@@ -90,3 +90,20 @@ Task<byte[]> EncodeAsync(ReadOnlyMemory<byte> rgba, int width, int height, <Form
 * Run on the CPU backend while iterating: `scripts/dev/build-console.ps1` then `scripts/dev/run-desktop-tests.ps1 -Pattern X`.
   CUDA/OpenCL/WebGPU/WebGL/Wasm lanes (PlaywrightMultiTest) are run by the coordinator, one at a time, when the
   shared GPU is free.
+
+## Animation API (APNG / GIF / WebP share it)
+
+`ImageFrameInfo` (Images/ImageTypes.cs) describes a frame's rectangle, duration, disposal and blend. Every animated format
+adds, next to `ReadInfoAsync` / `DecodeAsync` (which return the first / default frame as before):
+
+```csharp
+Task<ImageFrameInfo[]> ReadFramesAsync(ArrayView1D<byte, Stride1D.Dense> file, int fileLength);      // small host metadata
+Task<ImageInfo> DecodeFrameAsync(ArrayView1D<byte, Stride1D.Dense> file, int fileLength, int frameIndex,
+                                 ArrayView1D<byte, Stride1D.Dense> output, PixelFormat format = PixelFormat.Rgba8);
+// + managed (ReadOnlyMemory<byte>) and [SupportedOSPlatform("browser")] TypedArray overloads of both
+```
+
+`DecodeFrameAsync` returns the FULL CANVAS (`ImageInfo.Width x Height`) as it looks while frame `frameIndex` is displayed:
+frames 0..frameIndex are decoded and composited on the accelerator honouring each frame's `Blend` and the previous frames'
+`Dispose` (compositing is a kernel; the canvas never visits the host). A decoder may keep the last canvas to make
+sequential access O(1) per frame; random access may re-composite from frame 0.
