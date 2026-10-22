@@ -287,14 +287,8 @@ public sealed class WebPDecoderGpu : IDisposable
         else
         {
             // Check every frame we are about to composite before dispatching anything.
-            int maxW = 1, maxH = 1;
-            long maxWork = 0;
             for (int k = 0; k <= frameIndex; k++)
-            {
                 if (layout.FrameField(k, WebPMeta.FrKind) != 1) throw Error(WebPError.LossyUnsupported);
-                maxW = Math.Max(maxW, layout.FrameField(k, WebPMeta.FrW));
-                maxH = Math.Max(maxH, layout.FrameField(k, WebPMeta.FrH));
-            }
             EnsureAnimationBuffers(layout, frameIndex);
             await CompositeFramesAsync(file, layout, frameIndex, output);
         }

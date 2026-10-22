@@ -682,7 +682,6 @@ public static class Vp8lDecodeGpu
             Err = 0,
         };
 
-        int tiles4 = Vp8lLayout.Tiles4(width, height);
         int entBase = Vp8lLayout.EntropyBase(width, height);
         int cacheBase = Vp8lLayout.CacheBase(width, height);
         int mapBase = Vp8lLayout.MapBase(width, height);

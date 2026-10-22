@@ -55,9 +55,14 @@ def main(d):
                     found = [p for f, p in chunks(data) if f == fcc]
                     if not found or found[0] != expected:
                         raise Exception("%s chunk missing or different" % ext)
+            ours = len(data)
+            if max(w, h) > 16383:
+                # libwebp's ENCODER refuses 16384 (its limit is 16383) although its decoder accepts the format maximum
+                print("OK %s %d 0 0.000" % (name, ours))
+                continue
             ref = io.BytesIO()
             Image.fromarray(want, "RGBA").save(ref, format="WEBP", lossless=True, method=4, quality=75, exact=True)
-            ours, theirs = len(data), len(ref.getvalue())
+            theirs = len(ref.getvalue())
             ratio = ours / theirs
             if ratio > 12 and ours > theirs + 512:
                 raise Exception("catastrophic size %d vs libwebp %d" % (ours, theirs))

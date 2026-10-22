@@ -280,6 +280,56 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task WebPLosslessEncoderGpu_ExtremeShapes_RoundTrip_AndOpenInLibwebp()
+    {
+        // The VP8L header has 14-bit sizes: 16384 is the largest. Also sizes around the transform block boundaries.
+        var shapes = new (int W, int H)[] { (16384, 1), (1, 16384), (16384, 2), (3, 16384), (257, 255), (16, 16), (17, 15), (15, 17), (64, 1), (1, 64) };
+        string dir = WebPEncoderOutputDir("extreme");
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        var failures = new List<string>();
+        try
+        {
+            using var enc = new WebPLosslessEncoderGpu(acc);
+            using var dec = new WebPDecoderGpu(acc);
+            var rng = new Random(77);
+            foreach (var (w, h) in shapes)
+            {
+                byte[] px = new byte[w * h * 4];
+                for (int y = 0; y < h; y++)
+                    for (int x = 0; x < w; x++)
+                    {
+                        int o = (y * w + x) * 4;
+                        px[o] = (byte)(x * 3 + rng.Next(4));
+                        px[o + 1] = (byte)(y * 5 + (x >> 4));
+                        px[o + 2] = (byte)((x ^ y) + rng.Next(3));
+                        px[o + 3] = 255;
+                    }
+                foreach (int q in new[] { 10, 30, 75 })
+                {
+                    string tag = $"extreme_{w}x{h}_q{q}";
+                    try
+                    {
+                        var file = await enc.EncodeAsync(px, w, h, new WebPEncodeOptions { Quality = q });
+                        var back = await dec.DecodeAsync(file);
+                        var diff = ComparePixels(px, back.Pixels, 4, w);
+                        if (diff != null) failures.Add($"{tag} [our decoder]: {diff}");
+                        await File.WriteAllBytesAsync(Path.Combine(dir, tag + ".webp"), file);
+                        await File.WriteAllBytesAsync(Path.Combine(dir, tag + ".rgba8"), px);
+                        await File.WriteAllTextAsync(Path.Combine(dir, tag + ".size"), $"{w} {h}");
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Add($"{tag}: {ex.GetType().Name}: {ex.Message}");
+                    }
+                }
+            }
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+        True(failures.Count == 0, $"{failures.Count} failures:\n" + string.Join("\n", failures));
+        await RunPillowVerifyAsync(dir);
+    }
+
+    [TestMethod]
     public async Task WebPLosslessEncoderGpu_BadArguments_AreRejected()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
