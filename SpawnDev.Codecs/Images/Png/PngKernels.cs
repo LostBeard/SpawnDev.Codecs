@@ -124,7 +124,8 @@ public sealed class PngKernels : IDisposable
         int idatCount = 0;
         int idatTotal = 0;
         int done = 0;
-        while (done == 0 && err == 0)
+        bool scanning = (done == 0) & (err == 0);
+        while (scanning)
         {
             if (pos + 12 > fileLen)
             {
@@ -157,7 +158,8 @@ public sealed class PngKernels : IDisposable
 
                     if (count == 1)
                     {
-                        if (type != TypeIhdr || len != 13)
+                        bool badIhdr = (type != TypeIhdr) | (len != 13);
+                        if (badIhdr)
                         {
                             err = (int)PngError.BadHeader;
                         }
@@ -210,9 +212,11 @@ public sealed class PngKernels : IDisposable
                     pos += 12 + (int)len;
                 }
             }
+            scanning = (done == 0) & (err == 0);
         }
 
-        if (err == 0 && idatCount == 0) err = (int)PngError.NoImageData;
+        bool missingData = (err == 0) & (idatCount == 0);
+        if (missingData) err = (int)PngError.NoImageData;
         meta[PngMeta.Error] = err;
         meta[PngMeta.ChunkCount] = count;
         meta[PngMeta.IdatTotal] = idatTotal;
@@ -291,7 +295,8 @@ public sealed class PngKernels : IDisposable
             int rows = meta[e + PngMeta.PassHeight];
             int width = meta[e + PngMeta.PassWidth];
             int rb = meta[e + PngMeta.PassRowBytes];
-            if (rows > 0 && width > 0)
+            bool hasPixels = (rows > 0) & (width > 0);
+            if (hasPixels)
             {
                 int stride = rb + 1;
                 for (int y = 0; y < rows; y++)
@@ -448,7 +453,8 @@ public sealed class PngKernels : IDisposable
         else
         {
             int sr, sg, sb;
-            if (colorType == 0 || colorType == 4)
+            bool grayish = (colorType == 0) | (colorType == 4);
+            if (grayish)
             {
                 sr = SampleAt(raw, rowData, px, 0, channels, depth);
                 sg = sr;
@@ -462,7 +468,8 @@ public sealed class PngKernels : IDisposable
                 sb = SampleAt(raw, rowData, px, 2, channels, depth);
                 if (colorType == 6) a = SampleAt(raw, rowData, px, 3, channels, depth);
             }
-            if (colorType == 0 || colorType == 2)
+            bool maybeKeyed = (colorType == 0) | (colorType == 2);
+            if (maybeKeyed)
             {
                 if (meta[PngMeta.HasColorKey] != 0)
                 {

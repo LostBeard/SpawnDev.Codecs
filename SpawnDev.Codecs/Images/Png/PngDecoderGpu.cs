@@ -289,6 +289,103 @@ public sealed class PngDecoderGpu : IDisposable
     }
 
     // ------------------------------------------------------------------
+    // Text chunks (metadata: small, so the chunk bytes may visit the host)
+    // ------------------------------------------------------------------
+
+    private const uint TypeTExt = 0x74455874;   // tEXt
+    private const uint TypeZTxt = 0x7A545874;   // zTXt
+    private const uint TypeITxt = 0x69545874;   // iTXt
+
+    /// <summary>
+    /// Read the tEXt / zTXt / iTXt chunks of a PNG that is on the accelerator (ComfyUI keeps its "prompt" and
+    /// "workflow" JSON there). The chunk walk happens on the accelerator; only the text chunks' bytes are read
+    /// back. When a keyword repeats the last chunk wins (as Pillow does).
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, string>> ReadTextAsync(ArrayView1D<byte, Stride1D.Dense> file, int fileLength)
+    {
+        var meta = await ScanAsync(file, fileLength);
+        var err = (PngError)meta[PngMeta.Error];
+        // A file without image data still has readable metadata chunks; structural damage does not.
+        if (err != PngError.None && err != PngError.NoImageData)
+            throw new ImageDecodeException(ImageFormat.Png, DescribeScanError(err));
+        int count = meta[PngMeta.ChunkCount];
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (count == 0) return result;
+        int[] table = await _chunkTable.View.SubView(0, (long)count * 4).CopyToHostAsync();
+        for (int i = 0; i < count; i++)
+        {
+            uint type = (uint)table[i * 4];
+            if (type != TypeTExt && type != TypeZTxt && type != TypeITxt) continue;
+            int offset = table[i * 4 + 1];
+            int length = table[i * 4 + 2];
+            byte[] data = length == 0 ? System.Array.Empty<byte>() : await DeviceTransfer.DownloadAsync(file.SubView(offset, length), length);
+            if (TryParseTextChunk(type, data, out var key, out var value)) result[key] = value;
+        }
+        return result;
+    }
+
+    /// <summary>Read the text chunks of a managed PNG file.</summary>
+    public async Task<IReadOnlyDictionary<string, string>> ReadTextAsync(ReadOnlyMemory<byte> file)
+    {
+        StageManaged(file);
+        return await ReadTextAsync(_stageIn.View, file.Length);
+    }
+
+    /// <summary>Read the text chunks of a PNG held in a JS typed array (browser accelerators only).</summary>
+    [SupportedOSPlatform("browser")]
+    public async Task<IReadOnlyDictionary<string, string>> ReadTextAsync(TypedArray file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        long length = file.ByteLength;
+        _stageIn.Ensure(length);
+        DeviceTransfer.Upload(_stageIn.View, file);
+        return await ReadTextAsync(_stageIn.View, checked((int)length));
+    }
+
+    private static bool TryParseTextChunk(uint type, byte[] data, out string key, out string value)
+    {
+        key = value = "";
+        int nul = System.Array.IndexOf(data, (byte)0);
+        if (nul <= 0 || nul > 79) return false;
+        key = System.Text.Encoding.Latin1.GetString(data, 0, nul);
+        int p = nul + 1;
+        if (type == TypeTExt)
+        {
+            value = System.Text.Encoding.Latin1.GetString(data, p, data.Length - p);
+            return true;
+        }
+        if (type == TypeZTxt)
+        {
+            if (p >= data.Length || data[p] != 0) return false;   // compression method must be 0 (zlib)
+            value = System.Text.Encoding.Latin1.GetString(InflateMetadata(data, p + 1));
+            return true;
+        }
+        // iTXt: flag, method, language tag \0, translated keyword \0, text (UTF-8, optionally zlib).
+        if (p + 2 > data.Length) return false;
+        bool compressed = data[p] == 1;
+        p += 2;
+        int langEnd = System.Array.IndexOf(data, (byte)0, p);
+        if (langEnd < 0) return false;
+        int transEnd = System.Array.IndexOf(data, (byte)0, langEnd + 1);
+        if (transEnd < 0) return false;
+        p = transEnd + 1;
+        value = compressed
+            ? System.Text.Encoding.UTF8.GetString(InflateMetadata(data, p))
+            : System.Text.Encoding.UTF8.GetString(data, p, data.Length - p);
+        return true;
+    }
+
+    /// <summary>Inflates a (small) zlib-compressed metadata payload.</summary>
+    private static byte[] InflateMetadata(byte[] data, int offset)
+    {
+        using var input = new MemoryStream(data, offset, data.Length - offset);
+        using var z = new System.IO.Compression.ZLibStream(input, System.IO.Compression.CompressionMode.Decompress);
+        using var output = new MemoryStream();
+        z.CopyTo(output);
+        return output.ToArray();
+    }
+
+    // ------------------------------------------------------------------
     // Managed overloads
     // ------------------------------------------------------------------
 

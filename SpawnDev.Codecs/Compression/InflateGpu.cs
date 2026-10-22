@@ -191,8 +191,11 @@ public static class InflateGpu
         ref InflateState st, ArrayView<byte> src, ArrayView<byte> dst,
         ArrayView<int> scratch, int sb)
     {
+        // Loop conditions are single bool locals built with non-short-circuit &: compound && / || in a
+        // loop header has hung the WebGPU device (the WGSL structurizer never leaves the loop).
         int last = 0;
-        while (last == 0 && st.Err == 0)
+        bool more = true;
+        while (more)
         {
             last = Bits(ref st, src, 1);
             int type = Bits(ref st, src, 2);
@@ -207,6 +210,7 @@ public static class InflateGpu
                 else
                     st.Err = (int)InflateError.BadBlockType;
             }
+            more = (last == 0) & (st.Err == 0);
         }
     }
 
@@ -268,7 +272,8 @@ public static class InflateGpu
         int ndist = Bits(ref st, src, 5) + 1;
         int ncode = Bits(ref st, src, 4) + 4;
         if (st.Err != 0) return;
-        if (nlen > 286 || ndist > 30)
+        bool tooMany = (nlen > 286) | (ndist > 30);
+        if (tooMany)
         {
             st.Err = (int)InflateError.BadCodeCounts;
             return;
@@ -290,7 +295,8 @@ public static class InflateGpu
 
         int index = 0;
         int total = nlen + ndist;
-        while (index < total && st.Err == 0)
+        bool reading = (index < total) & (st.Err == 0);
+        while (reading)
         {
             int sym = Decode(ref st, src, scratch, sb + LcCountOff, sb + LcSymOff);
             if (st.Err == 0)
@@ -342,6 +348,7 @@ public static class InflateGpu
                     }
                 }
             }
+            reading = (index < total) & (st.Err == 0);
         }
         if (st.Err != 0) return;
 
@@ -377,7 +384,8 @@ public static class InflateGpu
         ref InflateState st, ArrayView<byte> src, ArrayView<byte> dst, ArrayView<int> scratch, int sb)
     {
         bool done = false;
-        while (!done && st.Err == 0)
+        bool running = true;
+        while (running)
         {
             int sym = Decode(ref st, src, scratch, sb + LitCountOff, sb + LitSymOff);
             if (st.Err != 0)
@@ -467,6 +475,7 @@ public static class InflateGpu
                     }
                 }
             }
+            running = (!done) & (st.Err == 0);
         }
     }
 
@@ -478,7 +487,8 @@ public static class InflateGpu
     private static int Bits(ref InflateState st, ArrayView<byte> src, int need)
     {
         uint val = st.BitBuf;
-        while (st.BitCnt < need && st.Err == 0)
+        bool loading = (st.BitCnt < need) & (st.Err == 0);
+        while (loading)
         {
             if (st.InPos >= st.InEnd)
             {
@@ -490,6 +500,7 @@ public static class InflateGpu
                 st.InPos++;
                 st.BitCnt += 8;
             }
+            loading = (st.BitCnt < need) & (st.Err == 0);
         }
         if (st.Err != 0) return 0;
         st.BitBuf = val >> need;
@@ -511,7 +522,8 @@ public static class InflateGpu
         int found = 0;
         for (int len = 1; len <= MaxBits; len++)
         {
-            if (found == 0 && st.Err == 0)
+            bool active = (found == 0) & (st.Err == 0);
+            if (active)
             {
                 code |= Bits(ref st, src, 1);
                 int count = scratch[countAt + len];
@@ -529,7 +541,8 @@ public static class InflateGpu
                 }
             }
         }
-        if (found == 0 && st.Err == 0)
+        bool exhausted = (found == 0) & (st.Err == 0);
+        if (exhausted)
             st.Err = (int)InflateError.BadSymbol;
         return result;
     }
@@ -566,7 +579,8 @@ public static class InflateGpu
             }
         }
 
-        if (left >= 0 && scratch[countAt] != n)
+        bool build = (left >= 0) & (scratch[countAt] != n);
+        if (build)
         {
             scratch[offsAt + 1] = 0;
             for (int len = 1; len < MaxBits; len++)
@@ -586,7 +600,7 @@ public static class InflateGpu
     }
 
     /// <summary>RFC 1951 3.2.7: the order in which code-length code lengths are stored.</summary>
-    private static int CodeLengthOrder(int i)
+    internal static int CodeLengthOrder(int i)
     {
         int v;
         switch (i)

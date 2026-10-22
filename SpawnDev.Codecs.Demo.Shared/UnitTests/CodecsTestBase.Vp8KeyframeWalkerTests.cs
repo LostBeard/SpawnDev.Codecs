@@ -36,18 +36,37 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
-    public void Vp8KeyframeWalker_RejectsMultiPartition()
+    public void Vp8KeyframeWalker_MultiPartition_DecodesIdenticallyToSinglePartition()
     {
-        var tag = MakeMinimalKeyTag(64, 64);
-        var hdr = MakeMinimalKeyHeader() with
+        // The walker has supported 1/2/4/8 token partitions since 86c2209 (this test replaced
+        // a stale "RejectsMultiPartition" that expected NotImplementedException). The partition
+        // count only changes how token bytes are split across the frame, never the picture, so
+        // every count must reconstruct byte-identical planes. 64x128 = 4x8 MBs, so the 8
+        // partition case gives every partition exactly one MB row.
+        const int W = 64, H = 128;
+        var ySrc = new byte[W * H];
+        for (int r = 0; r < H; r++)
+            for (int c = 0; c < W; c++)
+                ySrc[r * W + c] = (byte)Math.Clamp(90 + 50 * Math.Sin(2.0 * Math.PI * c / W) + 40 * Math.Cos(2.0 * Math.PI * r / H) + ((r * 31 + c * 17) % 7), 0, 255);
+        var uSrc = new byte[(W / 2) * (H / 2)];
+        var vSrc = new byte[(W / 2) * (H / 2)];
+        for (int i = 0; i < uSrc.Length; i++) { uSrc[i] = (byte)(100 + i % 40); vSrc[i] = (byte)(150 - i % 30); }
+
+        Vp8FrameBuffer? reference = null;
+        for (int log2Parts = 0; log2Parts <= 3; log2Parts++)
         {
-            Log2NumPartitions = 1, // 2 partitions - out of scope for this slice
-        };
-        var bd = new Vp8BoolDecoder(new byte[] { 0x00, 0x00, 0x00, 0x00 });
-        var fb = new Vp8FrameBuffer(64, 64);
-        var ec = new Vp8EntropyContexts(fb.MbCols);
-        Throws<NotImplementedException>(() =>
-            Vp8KeyframeWalker.Decode(tag, hdr, bd, new byte[16], fb, ec));
+            var frame = Vp8KeyframeEncoder.EncodeKeyFrame(ySrc, W, uSrc, W / 2, vSrc, W, H, baseQIndex: 30, log2NumPartitions: log2Parts);
+            var tag = Vp8FrameTagParser.Parse(frame.AsSpan());
+            var firstPart = new byte[tag.FirstPartitionSize];
+            Buffer.BlockCopy(frame, 10, firstPart, 0, firstPart.Length);
+            Equal(log2Parts, Vp8FrameHeaderParser.ParseKeyFrameHeader(new Vp8BoolDecoder(firstPart)).Log2NumPartitions,
+                "header must carry the partition count the encoder wrote");
+            var (fb, _) = DecodeFrameViaWalker(frame, W, H);
+            if (reference == null) { reference = fb; continue; }
+            EqualBytes(reference.YPlane, fb.YPlane, $"Y plane with {1 << log2Parts} partitions");
+            EqualBytes(reference.UPlane, fb.UPlane, $"U plane with {1 << log2Parts} partitions");
+            EqualBytes(reference.VPlane, fb.VPlane, $"V plane with {1 << log2Parts} partitions");
+        }
     }
 
     [TestMethod]
