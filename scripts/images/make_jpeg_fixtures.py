@@ -690,6 +690,27 @@ def main():
     put_fixture("bad_only_soi_eoi", bytes([0xFF, 0xD8, 0xFF, 0xD9]), truth=False)
     put_fixture("bad_too_short", bytes([0xFF, 0xD8, 0xFF]), truth=False)
 
+    dcbad = bytearray(good)
+    dcbad[dht0 + 21 + 11] = 200                         # last symbol of DC table 0 (a DC category must be <= 15)
+    put_fixture("bad_huffman_dc_symbol", bytes(dcbad), truth=False)
+    ms = mini_encode(y3, [(1, 1)] * 3, 33, 17, quality=90, separate_scans=True)
+    sos_positions = [i for i in range(len(ms) - 1) if ms[i] == 0xFF and ms[i + 1] == 0xDA]
+    put_fixture("bad_missing_component_scan", ms[:sos_positions[2]] + bytes([0xFF, 0xD9]), truth=False)
+    one = mini_encode([gray_tiny], [(1, 1)], 8, 8, qsel=[0], jfif=False)
+    one_sos = [i for i in range(len(one) - 1) if one[i] == 0xFF and one[i + 1] == 0xDA][0]
+    put_fixture("bad_too_many_scans", one[:one_sos] + one[one_sos:-2] * 130 + bytes([0xFF, 0xD9]), truth=False)
+    big_dims = bytearray(good)
+    big_dims[sofpos + 5:sofpos + 9] = bytes([0xFF, 0xFF, 0xFF, 0xFF])
+    put_fixture("bad_too_large", bytes(big_dims), truth=False)
+    dup = bytearray(good)
+    dup[sos + 7] = dup[sos + 5]
+    put_fixture("bad_sos_duplicate_component", bytes(dup), truth=False)
+    tsel = bytearray(good)
+    tsel[sos + 6] = 0x40
+    put_fixture("bad_sos_table_selector", bytes(tsel), truth=False)
+    put_fixture("bad_mcu_too_many_blocks", mini_encode([np.zeros((16, 16), np.uint8)] * 4, [(2, 2)] * 4, 16, 16,
+                                                       qsel=[0, 0, 0, 0], jfif=False), truth=False)
+
     total = sum(os.path.getsize(os.path.join(OUT, f)) for f in os.listdir(OUT))
     print(f"\n{len(written)} fixtures, {total / 1024:.0f} KiB total")
 

@@ -303,6 +303,13 @@ public abstract partial class CodecsTestBase
             ("bad_no_scan", "no scan"),
             ("bad_only_soi_eoi", "no frame header"),
             ("bad_too_short", "truncated"),
+            ("bad_huffman_dc_symbol", "Huffman table"),
+            ("bad_missing_component_scan", "not completely covered"),
+            ("bad_too_many_scans", "more than 128 scans"),
+            ("bad_too_large", "too large"),
+            ("bad_sos_duplicate_component", "listed twice"),
+            ("bad_sos_table_selector", "Huffman table selector"),
+            ("bad_mcu_too_many_blocks", "more than 10 blocks"),
         };
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
