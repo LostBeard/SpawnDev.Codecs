@@ -185,7 +185,7 @@
             await StepAsync(6, "Loading BBB AV1 IVF from /testdata/", LoadBbbAv1IvfAsync);
             if (_bbbAv1Frames is not null)
             {
-                await Step(7, $"AV1 decode BBB IVF (real libaom-encoded)", BenchBbbAv1Decode);
+                await StepAsync(7, $"AV1 decode BBB IVF (real libaom-encoded)", BenchBbbAv1Decode);
             }
 
             // Audio encoders
@@ -199,7 +199,7 @@
 
             // Audio decoders
             await Step(25, "FLAC decode round-trip", () => BenchFlacDecode(44100, 2, 16, 44100));
-            await Step(30, "Opus decode round-trip", BenchOpusDecode);
+            await StepAsync(30, "Opus decode round-trip", BenchOpusDecode);
             await Step(35, "Vorbis decode round-trip", BenchVorbisDecode);
 
             // Containers
@@ -226,13 +226,13 @@
                 (y, u, v, w, h, q) => Av1KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: q)));
 
             // Video decoders (encode once, decode N times via public IVideoDecoder API)
-            await Step(85, "VP8Decoder API 32x32 x30", () => BenchVideoDecode("VP8", 32, 32, 30, 30,
+            await StepAsync(85, "VP8Decoder API 32x32 x30", () => BenchVideoDecode("VP8", 32, 32, 30, 30,
                 () => new Vp8Decoder(),
                 (y, u, v, w, h, q) => Vp8KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: q)));
-            await Step(90, "Vp9Decoder API 32x32 x30", () => BenchVideoDecode("VP9", 32, 32, 30, 30,
+            await StepAsync(90, "Vp9Decoder API 32x32 x30", () => BenchVideoDecode("VP9", 32, 32, 30, 30,
                 () => new Vp9Decoder(),
                 (y, u, v, w, h, q) => Vp9KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: q)));
-            await Step(95, "Av1Decoder API 32x32 x20", () => BenchVideoDecode("AV1", 32, 32, 20, 32,
+            await StepAsync(95, "Av1Decoder API 32x32 x20", () => BenchVideoDecode("AV1", 32, 32, 20, 32,
                 () => new Av1Decoder(),
                 (y, u, v, w, h, q) => Av1KeyframeEncoder.EncodeKeyFrame(y, w, u, w / 2, v, w, h, baseQIndex: q)));
 
@@ -251,11 +251,11 @@
                     $"{_acc.AcceleratorType}",
                     _acc.Name));
 
-                await Step(97, "VP8-GPU 64x64 Q=30 x10", () => BenchVp8Gpu(64, 64, 30, 10));
-                await Step(97, "VP9-GPU 64x64 Q=30 x5", () => BenchVp9Gpu(64, 64, 30, 5));
-                await Step(98, "AV1-GPU 64x64 Q=32 x3", () => BenchAv1Gpu(64, 64, 32, 3));
-                await Step(99, "FLAC-GPU 1ch 16b 44.1k 1s round-trip", BenchFlacGpu);
-                await Step(99, "Vorbis-GPU 1ch 44.1k 1s round-trip", BenchVorbisGpu);
+                await StepAsync(97, "VP8-GPU 64x64 Q=30 x10", () => BenchVp8Gpu(64, 64, 30, 10));
+                await StepAsync(97, "VP9-GPU 64x64 Q=30 x5", () => BenchVp9Gpu(64, 64, 30, 5));
+                await StepAsync(98, "AV1-GPU 64x64 Q=32 x3", () => BenchAv1Gpu(64, 64, 32, 3));
+                await StepAsync(99, "FLAC-GPU 1ch 16b 44.1k 1s round-trip", BenchFlacGpu);
+                await StepAsync(99, "Vorbis-GPU 1ch 44.1k 1s round-trip", BenchVorbisGpu);
             }
             else
             {
@@ -364,19 +364,19 @@
         catch { /* fixture missing */ }
     }
 
-    void BenchBbbAv1Decode()
+    async Task BenchBbbAv1Decode()
     {
         if (_bbbAv1Frames is null || _bbbAv1Frames.Length == 0) return;
         var sink = new CaptureSink();
         var dec = new Av1Decoder();
         // Warm up + decode one frame to learn dimensions.
-        dec.DecodeFrameAsync(_bbbAv1Frames[0], sink).GetAwaiter().GetResult();
+        await dec.DecodeFrameAsync(_bbbAv1Frames[0], sink);
         int totalFrames = Math.Min(_bbbAv1Frames.Length, 30); // first 30 frames
         var sw = Stopwatch.StartNew();
         for (int i = 0; i < totalFrames; i++)
-            dec.DecodeFrameAsync(_bbbAv1Frames[i], sink).GetAwaiter().GetResult();
+            await dec.DecodeFrameAsync(_bbbAv1Frames[i], sink);
         sw.Stop();
-        dec.DisposeAsync().GetAwaiter().GetResult();
+        await dec.DisposeAsync();
         double fps = totalFrames * 1000.0 / sw.Elapsed.TotalMilliseconds;
         _log.Add(new BenchEntry("video-decode",
             "AV1 BBB IVF decode (libaom-encoded real content)",
@@ -441,7 +441,7 @@
             $"{total:N0}B ({(double)total / (pcm.Length * 4):P1})"));
     }
 
-    void BenchOpusDecode()
+    async Task BenchOpusDecode()
     {
         const int sr = 48000, frameSize = 960;
         var pcm = new float[sr];
@@ -461,7 +461,7 @@
         long totalSamples = 0;
         var sw = Stopwatch.StartNew();
         foreach (var p in packets)
-            totalSamples += dec.DecodePacketAsync(p.AsMemory(), outBuf.AsMemory()).GetAwaiter().GetResult();
+            totalSamples += await dec.DecodePacketAsync(p.AsMemory(), outBuf.AsMemory());
         sw.Stop();
         double rt = (totalSamples * 1000.0 / sr) / sw.Elapsed.TotalMilliseconds;
         _log.Add(new BenchEntry("audio-decode",
@@ -596,7 +596,7 @@
             $"avg {avgB:F0}B/fr"));
     }
 
-    void BenchVideoDecode(string codec, int width, int height, int iterations, int q,
+    async Task BenchVideoDecode(string codec, int width, int height, int iterations, int q,
         Func<IVideoDecoder> newDecoder,
         Func<byte[], byte[], byte[], int, int, int, byte[]> encode)
     {
@@ -606,15 +606,15 @@
 
         // Warm up: one decode through a fresh decoder.
         var warm = newDecoder();
-        warm.DecodeFrameAsync(frame, sink).GetAwaiter().GetResult();
-        warm.DisposeAsync().GetAwaiter().GetResult();
+        await warm.DecodeFrameAsync(frame, sink);
+        await warm.DisposeAsync();
 
         var sw = Stopwatch.StartNew();
         for (int i = 0; i < iterations; i++)
         {
             var d = newDecoder();
-            d.DecodeFrameAsync(frame, sink).GetAwaiter().GetResult();
-            d.DisposeAsync().GetAwaiter().GetResult();
+            await d.DecodeFrameAsync(frame, sink);
+            await d.DisposeAsync();
         }
         sw.Stop();
         double fps = iterations * 1000.0 / sw.Elapsed.TotalMilliseconds;
@@ -687,7 +687,7 @@
         catch { _acc = null; _ctx = null; }
     }
 
-    void BenchVp8Gpu(int width, int height, int q, int iterations)
+    async Task BenchVp8Gpu(int width, int height, int q, int iterations)
     {
         if (_acc is null) return;
         var (ySrc, uSrc, vSrc) = GenerateVideoFrame(width, height);
@@ -696,21 +696,21 @@
             using var enc = new Vp8KeyframeEncoderGpu(_acc);
             using var dec = new Vp8KeyframeDecoderGpu(_acc);
             // Warm.
-            var warm = enc.EncodeKeyFrameAsync(ySrc, width, uSrc, width / 2, vSrc, width, height, q).GetAwaiter().GetResult();
-            _ = dec.DecodeKeyFrameAsync(warm, q).GetAwaiter().GetResult();
+            var warm = await enc.EncodeKeyFrameAsync(ySrc, width, uSrc, width / 2, vSrc, width, height, q);
+            _ = await dec.DecodeKeyFrameAsync(warm, q);
 
             long encBytes = 0;
             var swEnc = Stopwatch.StartNew();
             byte[] encoded = warm;
             for (int i = 0; i < iterations; i++)
             {
-                encoded = enc.EncodeKeyFrameAsync(ySrc, width, uSrc, width / 2, vSrc, width, height, q).GetAwaiter().GetResult();
+                encoded = await enc.EncodeKeyFrameAsync(ySrc, width, uSrc, width / 2, vSrc, width, height, q);
                 encBytes += encoded.Length;
             }
             swEnc.Stop();
 
             var swDec = Stopwatch.StartNew();
-            for (int i = 0; i < iterations; i++) _ = dec.DecodeKeyFrameAsync(encoded, q).GetAwaiter().GetResult();
+            for (int i = 0; i < iterations; i++) _ = await dec.DecodeKeyFrameAsync(encoded, q);
             swDec.Stop();
 
             double encFps = iterations * 1000.0 / swEnc.Elapsed.TotalMilliseconds;
@@ -735,7 +735,7 @@
         }
     }
 
-    void BenchVp9Gpu(int width, int height, int q, int iterations)
+    async Task BenchVp9Gpu(int width, int height, int q, int iterations)
     {
         if (_acc is null) return;
         var (ySrc, uSrc, vSrc) = GenerateVideoFrame(width, height);
@@ -743,21 +743,21 @@
         {
             using var enc = new Vp9KeyframeEncoderGpu(_acc);
             using var dec = new Vp9KeyframeDecoderGpu(_acc);
-            var warm = enc.EncodeKeyFrameAsync(ySrc, uSrc, vSrc, width, height, q).GetAwaiter().GetResult();
-            _ = dec.DecodeKeyFrameAsync(warm).GetAwaiter().GetResult();
+            var warm = await enc.EncodeKeyFrameAsync(ySrc, uSrc, vSrc, width, height, q);
+            _ = await dec.DecodeKeyFrameAsync(warm);
 
             long encBytes = 0;
             var swEnc = Stopwatch.StartNew();
             byte[] encoded = warm;
             for (int i = 0; i < iterations; i++)
             {
-                encoded = enc.EncodeKeyFrameAsync(ySrc, uSrc, vSrc, width, height, q).GetAwaiter().GetResult();
+                encoded = await enc.EncodeKeyFrameAsync(ySrc, uSrc, vSrc, width, height, q);
                 encBytes += encoded.Length;
             }
             swEnc.Stop();
 
             var swDec = Stopwatch.StartNew();
-            for (int i = 0; i < iterations; i++) _ = dec.DecodeKeyFrameAsync(encoded).GetAwaiter().GetResult();
+            for (int i = 0; i < iterations; i++) _ = await dec.DecodeKeyFrameAsync(encoded);
             swDec.Stop();
 
             double encFps = iterations * 1000.0 / swEnc.Elapsed.TotalMilliseconds;
@@ -782,7 +782,7 @@
         }
     }
 
-    void BenchAv1Gpu(int width, int height, int q, int iterations)
+    async Task BenchAv1Gpu(int width, int height, int q, int iterations)
     {
         if (_acc is null) return;
         var (ySrc, uSrc, vSrc) = GenerateVideoFrame(width, height);
@@ -791,22 +791,22 @@
             using var enc = new Av1KeyframeEncoderGpu(_acc);
             using var dec = new Av1KeyframeDecoderGpu(_acc);
             // Warm with the tile-bytes flow (matches /gpu-transcode demo).
-            var warmTile = enc.EncodeSingleTileAsync(ySrc, uSrc, vSrc, width, height, q).GetAwaiter().GetResult();
-            _ = dec.DecodeSingleTileAsync(warmTile, width, height, q).GetAwaiter().GetResult();
+            var warmTile = await enc.EncodeSingleTileAsync(ySrc, uSrc, vSrc, width, height, q);
+            _ = await dec.DecodeSingleTileAsync(warmTile, width, height, q);
 
             long encBytes = 0;
             var swEnc = Stopwatch.StartNew();
             byte[] tileBytes = warmTile;
             for (int i = 0; i < iterations; i++)
             {
-                tileBytes = enc.EncodeSingleTileAsync(ySrc, uSrc, vSrc, width, height, q).GetAwaiter().GetResult();
+                tileBytes = await enc.EncodeSingleTileAsync(ySrc, uSrc, vSrc, width, height, q);
                 encBytes += tileBytes.Length;
             }
             swEnc.Stop();
 
             var swDec = Stopwatch.StartNew();
             for (int i = 0; i < iterations; i++)
-                _ = dec.DecodeSingleTileAsync(tileBytes, width, height, q).GetAwaiter().GetResult();
+                _ = await dec.DecodeSingleTileAsync(tileBytes, width, height, q);
             swDec.Stop();
 
             double encFps = iterations * 1000.0 / swEnc.Elapsed.TotalMilliseconds;
@@ -831,7 +831,7 @@
         }
     }
 
-    void BenchFlacGpu()
+    async Task BenchFlacGpu()
     {
         if (_acc is null) return;
         const int sr = 44100, channels = 1, bps = 16;
@@ -846,15 +846,15 @@
             using var enc = new FlacEncoderGpu(_acc);
             using var dec = new FlacDecoderGpu(_acc);
             // Warm.
-            var warm = enc.EncodeStreamAsync(pcm, channels).GetAwaiter().GetResult();
-            _ = dec.DecodeStreamAsync(warm).GetAwaiter().GetResult();
+            var warm = await enc.EncodeStreamAsync(pcm, channels);
+            _ = await dec.DecodeStreamAsync(warm);
 
             var swEnc = Stopwatch.StartNew();
-            var encoded = enc.EncodeStreamAsync(pcm, channels).GetAwaiter().GetResult();
+            var encoded = await enc.EncodeStreamAsync(pcm, channels);
             swEnc.Stop();
 
             var swDec = Stopwatch.StartNew();
-            var result = dec.DecodeStreamAsync(encoded).GetAwaiter().GetResult();
+            var result = await dec.DecodeStreamAsync(encoded);
             swDec.Stop();
 
             double encRt = (pcm.Length * 1000.0 / sr) / swEnc.Elapsed.TotalMilliseconds;
@@ -879,7 +879,7 @@
         }
     }
 
-    void BenchVorbisGpu()
+    async Task BenchVorbisGpu()
     {
         if (_acc is null) return;
         const int sr = 44100;
@@ -891,10 +891,10 @@
             var opts = new VorbisAudioEncoderOptions { SampleRateHz = sr, Channels = 1, BlockSize = 1024 };
             using var enc = new VorbisAudioEncoderGpu(_acc, opts);
             // Warm.
-            var warm = enc.EncodeStreamAsync(pcm).GetAwaiter().GetResult();
+            var warm = await enc.EncodeStreamAsync(pcm);
 
             var swEnc = Stopwatch.StartNew();
-            var ogg = enc.EncodeStreamAsync(pcm).GetAwaiter().GetResult();
+            var ogg = await enc.EncodeStreamAsync(pcm);
             swEnc.Stop();
 
             // Decoder side via VorbisOggDecoder.Decode (same surface as the
