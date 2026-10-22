@@ -265,7 +265,8 @@ public abstract partial class CodecsTestBase
             using var enc = new WebPLosslessEncoderGpu(acc);
             using var dec = new WebPDecoderGpu(acc);
             var rng = new Random(1234);
-            int w = 61, h = 47;
+            // big enough that the fixed slack in GetMaxEncodedSize cannot hide a too-small per-pixel bound
+            int w = 301, h = 251;
             byte[] noise = new byte[w * h * 4];
             rng.NextBytes(noise);
             foreach (int q in new[] { 0, 50, 100 })
@@ -294,6 +295,10 @@ public abstract partial class CodecsTestBase
             ("enc_mosaic_96x72", 100, s => PredictorModeCount(s) >= 5, "at least five predictor modes"),
             ("enc_cache_heavy_80x60", 100, s => !s.Contains("cache=0 ") && !s.Contains("copies=0 "), "colour cache and LZ77 copies"),
             ("enc_large_320x240", 75, s => CopyCount(s) > 100, "LZ77 copies on a compressible image"),
+            // every tile of this image has red and blue following green: all tiles must carry NON-ZERO multipliers, else the
+            // sign of the forward transform is never exercised (an all-zero cross transform decodes the same either way)
+            ("enc_correlated_72x56", 75, s => s.Contains(",C") && CrossNonZeroTiles(s) == CrossTiles(s) && CrossTiles(s) > 0,
+                "cross colour with non-zero multipliers in every tile (red and blue follow green)"),
             ("enc_meta_groups_128x128", 100, s => GroupCount(s) >= 2, "several prefix groups (meta prefix codes)"),
         };
         string dir = WebPEncoderOutputDir("features");
@@ -330,6 +335,18 @@ public abstract partial class CodecsTestBase
     {
         var m = System.Text.RegularExpressions.Regex.Match(stats, "pred_modes=([0-9a-f]*)");
         return m.Success ? m.Groups[1].Value.Length : 0;
+    }
+
+    private static int CrossNonZeroTiles(string stats)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(stats, "cc_nz=([0-9]+)/([0-9]+)");
+        return m.Success ? int.Parse(m.Groups[1].Value) : -1;
+    }
+
+    private static int CrossTiles(string stats)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(stats, "cc_nz=([0-9]+)/([0-9]+)");
+        return m.Success ? int.Parse(m.Groups[2].Value) : -1;
     }
 
     private static int CopyCount(string stats)

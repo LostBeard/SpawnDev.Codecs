@@ -61,6 +61,7 @@ enc_noise_64x48	source	64	48	0	1	1	enc_noise_64x48	-
 enc_grad_h_128x32	source	128	32	0	1	1	enc_grad_h_128x32	-
 enc_mosaic_96x72	source	96	72	0	1	1	enc_mosaic_96x72	-
 enc_alpha_64x40	source	64	40	1	1	1	enc_alpha_64x40	-
+enc_correlated_72x56	source	72	56	0	1	1	enc_correlated_72x56	-
 enc_cache_heavy_80x60	source	80	60	0	1	1	enc_cache_heavy_80x60	-
 enc_one_pixel_1x1	source	1	1	0	1	1	enc_one_pixel_1x1	-
 enc_tall_1x37	source	1	37	0	1	1	enc_tall_1x37	-

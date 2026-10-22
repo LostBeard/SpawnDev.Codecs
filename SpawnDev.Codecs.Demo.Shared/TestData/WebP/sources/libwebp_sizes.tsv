@@ -9,6 +9,7 @@ enc_noise_64x48	9340	9344	9344
 enc_grad_h_128x32	176	44	44
 enc_mosaic_96x72	6064	5930	5690
 enc_alpha_64x40	7136	6498	6522
+enc_correlated_72x56	7876	5896	6084
 enc_cache_heavy_80x60	14386	5682	5682
 enc_one_pixel_1x1	38	38	38
 enc_tall_1x37	190	190	190

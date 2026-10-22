@@ -487,6 +487,21 @@ add_source("enc_noise_64x48", np.dstack([np.random.default_rng(231).integers(0, 
 add_source("enc_grad_h_128x32", np.dstack([np.tile(np.arange(128, dtype=np.uint8) * 2, (32, 1))] * 3 + [np.full((32, 128), 255, np.uint8)]))
 add_source("enc_mosaic_96x72", mk_mosaic(72, 96, 221))
 add_source("enc_alpha_64x40", mk_alpha(40, 64, 241))
+
+
+def mk_correlated(h, w, seed=270):
+    """Red and blue follow green, so a cross-colour transform with non-zero multipliers pays off."""
+    r = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:h, 0:w]
+    g = (xx * 3 + yy * 2 + r.integers(0, 40, (h, w))) & 255
+    a = rgba(h, w)
+    a[..., 1] = g
+    a[..., 0] = (g * 3 // 4 + r.integers(0, 3, (h, w))) & 255
+    a[..., 2] = (g // 2 + a[..., 0].astype(int) // 4 + r.integers(0, 3, (h, w))) & 255
+    return a
+
+
+add_source("enc_correlated_72x56", mk_correlated(56, 72))
 add_source("enc_cache_heavy_80x60", mk_cache_heavy(60, 80, 245))
 add_source("enc_one_pixel_1x1", mk_flat(1, 1, (12, 34, 56, 255)))
 add_source("enc_tall_1x37", mk_photo(37, 1, 250, 40))

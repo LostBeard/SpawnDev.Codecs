@@ -175,14 +175,15 @@ class Stats:
         self.bundle_bits = 0        # width_bits of colour indexing (0..3)
         self.alpha_is_used = 0
         self.has_overlap_copy = False
-
+        self.cross_tiles = 0        # cross-colour transform tiles
+        self.cross_nonzero = 0      # of those, tiles with at least one non-zero multiplier
     def summary(self):
         t = ",".join("%s%d" % (k, b) if b is not None else k for k, b in self.transforms) or "none"
         return ("xf[%s] cache=%d meta=%d groups=%d/%d lit=%d cache_hits=%d copies=%d short=%d far=%d "
-                "pred_modes=%s pal=%d bundle=%d codes=%s") % (
+                "pred_modes=%s pal=%d bundle=%d codes=%s cc_nz=%d/%d") % (
             t, self.cache_bits, self.meta_bits, self.groups_used, self.groups, self.literals, self.cache_hits,
             self.copies, len(self.plane_codes), self.far_dists, "".join("%x" % m for m in sorted(self.predictor_modes)),
-            self.palette_size, self.bundle_bits, "/".join(sorted(self.code_kinds)))
+            self.palette_size, self.bundle_bits, "/".join(sorted(self.code_kinds)), self.cross_nonzero, self.cross_tiles)
 
 
 def _decode_stream(br, xsize, ysize, level0, st):
@@ -390,6 +391,8 @@ def _inverse(tr, pix, xsize, ysize, st):
         return out
     if kind == 1:
         tw = ceil_div(xsize, 1 << bits)
+        st.cross_tiles += len(data)
+        st.cross_nonzero += sum(1 for m in data if (m & 0xFFFFFF) != 0)
         out = []
         for i, p in enumerate(pix):
             y, x = divmod(i, xsize)
