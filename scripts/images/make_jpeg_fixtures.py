@@ -18,6 +18,7 @@ Annex K Huffman and quantization tables are read back out of a Pillow-written fi
 
 Run:   <venv>/python -I scripts/images/make_jpeg_fixtures.py        (needs numpy + pillow)
 """
+import hashlib
 import io
 import os
 import struct
@@ -38,7 +39,7 @@ ZIGZAG = [0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33
 # Source pictures
 # ---------------------------------------------------------------------------------------------------------------
 
-def photo(w, h, seed):
+def photo(w, h, seed, noise=6.0):
     """Photographic-style synthetic RGB picture: smooth gradients, soft blobs, hard edges, fine texture, noise."""
     rng = np.random.default_rng(seed)
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float64)
@@ -52,7 +53,7 @@ def photo(w, h, seed):
     # hard edges and a fine stripe texture so high-frequency coefficients are exercised
     img[:, : max(1, w // 3), 0] += 40
     img[(yy.astype(int) // 5) % 2 == 0, 1] -= 25
-    img += rng.normal(0, 6, img.shape)
+    img += rng.normal(0, noise, img.shape)
     return np.clip(img, 0, 255).astype(np.uint8)
 
 
@@ -234,7 +235,8 @@ def seg(marker, payload):
 
 
 def mini_encode(planes, samp, width, height, quality=85, comp_ids=None, qsel=None, jfif=True, adobe=None,
-                restart=0, sof=0xC0, precision=8, raw_scan=None, omit=()):
+                restart=0, sof=0xC0, precision=8, raw_scan=None, omit=(), separate_scans=False, extra_app=b"",
+                qt16=False):
     """
     planes : list of 2-D uint8 arrays, one per component, ALREADY downsampled to their own size
              (ceil(width*h/maxh) x ceil(height*v/maxv)).
@@ -242,6 +244,9 @@ def mini_encode(planes, samp, width, height, quality=85, comp_ids=None, qsel=Non
     adobe  : None, or the Adobe transform byte (0 / 1 / 2).
     raw_scan : bytes to use verbatim as the entropy-coded data (for deliberately broken files).
     omit   : header pieces to leave out, from {'dqt', 'dht', 'sof'}.
+    separate_scans : one non-interleaved scan per component (real blocks only), instead of one interleaved scan.
+    extra_app : raw bytes (whole marker segments) written right after the JFIF / Adobe markers.
+    qt16   : write the DQT segments with 16-bit entries (Pq = 1).
     """
     nc = len(planes)
     maxh = max(h for h, _ in samp)
@@ -272,9 +277,13 @@ def mini_encode(planes, samp, width, height, quality=85, comp_ids=None, qsel=Non
         out += seg(0xE0, b"JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
     if adobe is not None:
         out += seg(0xEE, b"Adobe\x00\x64\x00\x00\x00\x00" + bytes([adobe]))
+    out += extra_app
     if 'dqt' not in omit:
         for t in sorted(set(qsel)):
-            out += seg(0xDB, bytes([t]) + bytes(qt[t]))
+            if qt16:
+                out += seg(0xDB, bytes([0x10 | t]) + b"".join(struct.pack(">H", v) for v in qt[t]))
+            else:
+                out += seg(0xDB, bytes([t]) + bytes(qt[t]))
     if 'sof' not in omit:
         sofp = bytes([precision]) + struct.pack(">HH", height, width) + bytes([nc])
         for ci in range(nc):
@@ -288,39 +297,46 @@ def mini_encode(planes, samp, width, height, quality=85, comp_ids=None, qsel=Non
                 out += seg(0xC4, bytes([(tc << 4) | th]) + bytes(bits) + bytes(vals))
     if restart:
         out += seg(0xDD, struct.pack(">H", restart))
-    sosp = bytes([nc])
-    for ci in range(nc):
-        sosp += bytes([comp_ids[ci], (qsel[ci] << 4) | qsel[ci]])
-    sosp += bytes([0, 63, 0])
-    out += seg(0xDA, sosp)
+    def sos_for(cis):
+        sosp = bytes([len(cis)])
+        for ci in cis:
+            sosp += bytes([comp_ids[ci], (qsel[ci] << 4) | qsel[ci]])
+        return seg(0xDA, sosp + bytes([0, 63, 0]))
 
-    if raw_scan is not None:
-        out += raw_scan
-    else:
-        dcs = {t: huff_codes(*STD_HUFF[(0, t)]) for t in use_tbl}
-        acs = {t: huff_codes(*STD_HUFF[(1, t)]) for t in use_tbl}
-        preds = [0] * nc
-        bw = BitWriter()
-        mcu = 0
-        rst = 0
-        total = mcus_x * mcus_y
+    def mcu_list(cis):
+        """MCUs of a scan: each a list of (component, block row, block column)."""
+        if len(cis) == 1:
+            ci = cis[0]
+            wib, hib = -(-planes[ci].shape[1] // 8), -(-planes[ci].shape[0] // 8)
+            return [[(ci, r, c)] for r in range(hib) for c in range(wib)]
+        res = []
         for my in range(mcus_y):
             for mx in range(mcus_x):
-                if restart and mcu and mcu % restart == 0:
-                    bw.flush()
-                    out += bw.out
-                    out += bytes([0xFF, 0xD0 + (rst & 7)])
-                    rst += 1
-                    bw = BitWriter()
-                    preds = [0] * nc
-                mcu += 1
-                for ci in range(nc):
-                    h, v = samp[ci]
-                    for by in range(v):
-                        for bx in range(h):
-                            blk = blocks[ci][my * v + by, mx * h + bx]
-                            preds[ci] = encode_block(bw, [int(x) for x in blk], preds[ci],
-                                                     dcs[qsel[ci]], acs[qsel[ci]])
+                res.append([(ci, my * samp[ci][1] + by, mx * samp[ci][0] + bx)
+                            for ci in cis for by in range(samp[ci][1]) for bx in range(samp[ci][0])])
+        return res
+
+    scans = [[ci] for ci in range(nc)] if separate_scans else [list(range(nc))]
+    dcs = {t: huff_codes(*STD_HUFF[(0, t)]) for t in use_tbl}
+    acs = {t: huff_codes(*STD_HUFF[(1, t)]) for t in use_tbl}
+    for si, cis in enumerate(scans):
+        out += sos_for(cis)
+        if raw_scan is not None:
+            out += raw_scan
+            continue
+        preds = {ci: 0 for ci in cis}
+        bw = BitWriter()
+        rst = 0
+        for mcu, blks in enumerate(mcu_list(cis)):
+            if restart and mcu and mcu % restart == 0:
+                bw.flush()
+                out += bw.out
+                out += bytes([0xFF, 0xD0 + (rst & 7)])
+                rst += 1
+                bw = BitWriter()
+                preds = {ci: 0 for ci in cis}
+            for ci, r, c in blks:
+                preds[ci] = encode_block(bw, [int(x) for x in blocks[ci][r, c]], preds[ci], dcs[qsel[ci]], acs[qsel[ci]])
         bw.flush()
         out += bw.out
     out += b"\xff\xd9"
@@ -389,7 +405,7 @@ def main():
     for nm, samp in layouts.items():
         maxh = max(h for h, _ in samp)
         maxv = max(v for _, v in samp)
-        for w, h in ((17, 33), (100, 75)) if nm in ("c440", "c411") else ((17, 33),):
+        for w, h in ((17, 33), (66, 50)) if nm in ("c440", "c411") else ((17, 33),):
             rgb = photo(w, h, 30)
             planes = [cropped(p, w, h, *samp[i], maxh, maxv) for i, p in enumerate(sampled_planes(rgb, samp))]
             put_fixture(f"{nm}_{w}x{h}", mini_encode(planes, samp, w, h, quality=90))
@@ -408,10 +424,10 @@ def main():
 
     # --- progressive (libjpeg default script: spectral selection + successive approximation) ------------------
     for sub, nm in ((0, "444"), (1, "422"), (2, "420")):
-        for w, h in ((17, 33), (100, 75)):
+        for w, h in ((17, 33), (66, 50)):
             put_fixture(f"prog_c{nm}_{w}x{h}", pillow_save(photo(w, h, 50 + sub), "RGB", quality=85,
                                                            subsampling=sub, progressive=True))
-    for w, h in ((1, 1), (7, 5), (100, 75)):
+    for w, h in ((1, 1), (7, 5), (66, 50)):
         put_fixture(f"prog_gray_{w}x{h}", pillow_save(gray_photo(w, h, 55), "L", quality=85, progressive=True))
     put_fixture("prog_c420_7x5", pillow_save(photo(7, 5, 56), "RGB", quality=85, subsampling=2, progressive=True))
     put_fixture("prog_c420_q100", pillow_save(base, "RGB", quality=100, subsampling=2, progressive=True))
@@ -419,28 +435,28 @@ def main():
 
     # --- optimized Huffman tables ----------------------------------------------------------------------------------
     for sub, nm in ((0, "444"), (2, "420")):
-        put_fixture(f"opt_c{nm}_100x75", pillow_save(photo(100, 75, 60 + sub), "RGB", quality=85, subsampling=sub,
+        put_fixture(f"opt_c{nm}_66x50", pillow_save(photo(66, 50, 60 + sub), "RGB", quality=85, subsampling=sub,
                                                      optimize=True))
-    put_fixture("opt_gray_100x75", pillow_save(gray_photo(100, 75, 63), "L", quality=85, optimize=True))
+    put_fixture("opt_gray_66x50", pillow_save(gray_photo(66, 50, 63), "L", quality=85, optimize=True))
 
     # --- restart intervals (baseline + progressive; Pillow: MCUs per interval via blocks / rows) -------------------
-    rbase = photo(100, 75, 70)
+    rbase = photo(66, 50, 70)
     for blocks_ in (1, 2, 5, 7):
         put_fixture(f"rst_b{blocks_}_c420", pillow_save(rbase, "RGB", quality=85, subsampling=2,
                                                         restart_marker_blocks=blocks_))
     put_fixture("rst_rows1_c444", pillow_save(rbase, "RGB", quality=85, subsampling=0, restart_marker_rows=1))
-    put_fixture("rst_b3_gray", pillow_save(gray_photo(100, 75, 71), "L", quality=85, restart_marker_blocks=3))
+    put_fixture("rst_b3_gray", pillow_save(gray_photo(66, 50, 71), "L", quality=85, restart_marker_blocks=3))
     put_fixture("prog_rst_b4_c420", pillow_save(rbase, "RGB", quality=85, subsampling=2, progressive=True,
                                                 restart_marker_blocks=4))
-    put_fixture("prog_rst_b1_gray", pillow_save(gray_photo(100, 75, 72), "L", quality=85, progressive=True,
+    put_fixture("prog_rst_b1_gray", pillow_save(gray_photo(66, 50, 72), "L", quality=85, progressive=True,
                                                 restart_marker_blocks=1))
     put_fixture("opt_rst_b6_c422", pillow_save(rbase, "RGB", quality=85, subsampling=1, optimize=True,
                                                restart_marker_blocks=6))
     # a restart interval written by the mini writer on a 4:1:1 picture
-    rgb = photo(100, 75, 73)
+    rgb = photo(66, 50, 73)
     samp = [(4, 1), (1, 1), (1, 1)]
-    planes = [cropped(p, 100, 75, *samp[i], 4, 1) for i, p in enumerate(sampled_planes(rgb, samp))]
-    put_fixture("rst_n3_c411", mini_encode(planes, samp, 100, 75, quality=88, restart=3))
+    planes = [cropped(p, 66, 50, *samp[i], 4, 1) for i, p in enumerate(sampled_planes(rgb, samp))]
+    put_fixture("rst_n3_c411", mini_encode(planes, samp, 66, 50, quality=88, restart=3))
 
     # --- EXIF orientation 1..8 (24x16 so the files stay tiny) ------------------------------------------------------
     obase = photo(24, 16, 80)
@@ -489,6 +505,26 @@ def main():
         [ycc3[0], downsample(ycc3[1], 2, 2)[:9, :17], downsample(ycc3[2], 2, 2)[:9, :17]],
         [(2, 2), (1, 1), (1, 1)], 33, 17, quality=90, sof=0xC1))
 
+    # --- structure variants the Pillow encoder cannot write ------------------------------------------------------------
+    put_fixture("cmyk_noadobe_33x17", mini_encode([cmyk[:, :, i] for i in range(4)], [(1, 1)] * 4, 33, 17, quality=90,
+                                                  qsel=[0, 0, 0, 0], jfif=False, adobe=None))
+    put_fixture("prog_cmyk_33x17", pillow_save(cmyk, "CMYK", quality=90, progressive=True))
+    g17 = gray_photo(17, 33, 95)
+    put_fixture("gray_sampling22_17x33", mini_encode([g17], [(2, 2)], 17, 33, quality=90))
+    rgb33 = photo(33, 17, 96)
+    y3 = rgb_to_ycc(rgb33)
+    s420 = [(2, 2), (1, 1), (1, 1)]
+    p420 = [y3[0], downsample(y3[1], 2, 2)[:9, :17], downsample(y3[2], 2, 2)[:9, :17]]
+    put_fixture("seq_multiscan_c420_33x17", mini_encode(p420, s420, 33, 17, quality=90, separate_scans=True))
+    put_fixture("seq_multiscan_c444_33x17", mini_encode(y3, [(1, 1)] * 3, 33, 17, quality=90, separate_scans=True))
+    put_fixture("seq_multiscan_rst_c420_33x17", mini_encode(p420, s420, 33, 17, quality=90, separate_scans=True, restart=3))
+    put_fixture("qt16_c420_33x17", mini_encode(p420, s420, 33, 17, quality=90, qt16=True))
+    exif_le = bytes.fromhex("457869660000" "49492a0008000000" "0100" "120103000100000006000000" "00000000")
+    xmp = b"http://ns.adobe.com/xap/1.0/" + bytes([0]) + b"<x:xmpmeta xmlns:x='adobe:ns:meta/'/>"
+    put_fixture("orient_le_6", mini_encode(p420, s420, 33, 17, quality=90, extra_app=seg(0xE1, exif_le)))
+    put_fixture("orient_xmp_first_6", mini_encode(p420, s420, 33, 17, quality=90,
+                                                  extra_app=seg(0xE1, xmp) + seg(0xE1, exif_le) + seg(0xFE, b"comment")))
+
     # --- larger photographic-style picture -------------------------------------------------------------------------
     big = photo(160, 120, 100)
     put_fixture("photo_c420_160x120", pillow_save(big, "RGB", quality=85, subsampling=2))
@@ -530,6 +566,33 @@ def main():
         e = Image.Exif()
         e[0x0112] = o
         write_raw(f"enc_orient{o}_c420_24x16", pillow_save(rgb, "RGB", quality=90, subsampling=2, exif=e.tobytes()))
+
+    # --- production-scale pictures (1024x768): the truth is a SHA-256 of Pillow's RGBA decode, so the folder stays small --
+    bigrgb = photo(1024, 768, 400, noise=2.0)
+
+    def put_big(name, data):
+        write_raw(name, data)
+        im = Image.open(io.BytesIO(data))
+        im.load()
+        digest = hashlib.sha256(np.asarray(im.convert("RGBA"), dtype=np.uint8).tobytes()).hexdigest()
+        with open(os.path.join(OUT, name + ".sha256"), "w") as f:
+            f.write(digest)
+        print(f"{name}: {len(data)} bytes, sha256 {digest[:16]}")
+
+    put_big("big_c420_1024x768", pillow_save(bigrgb, "RGB", quality=80, subsampling=2))
+    put_big("big_prog_c444_1024x768", pillow_save(bigrgb, "RGB", quality=75, subsampling=0, progressive=True, optimize=True))
+    put_big("big_rst_c422_1024x768", pillow_save(bigrgb, "RGB", quality=80, subsampling=1, restart_marker_blocks=64))
+    # The encoder gets the pixels Pillow decoded from big_c420 (our decoder reproduces them bit-exact) and must reproduce
+    # Pillow's encoding of those pixels byte for byte (SHA-256 of the file).
+    dec_big = Image.open(io.BytesIO(pillow_save(bigrgb, "RGB", quality=80, subsampling=2))).convert("RGB")
+    for nm, kw in (("bigenc_c420_q85", dict(quality=85, subsampling=2)),
+                   ("bigenc_c444_q95", dict(quality=95, subsampling=0)),
+                   ("bigenc_rst64_c420_q85", dict(quality=85, subsampling=2, restart_marker_blocks=64))):
+        b = io.BytesIO()
+        dec_big.save(b, "JPEG", **kw)
+        with open(os.path.join(OUT, nm + ".sha256"), "w") as f:
+            f.write(hashlib.sha256(b.getvalue()).hexdigest())
+        print(f"{nm}: {len(b.getvalue())} bytes")
 
     # --- broken files (error tests; no truth) ------------------------------------------------------------------------
     tiny = photo(16, 16, 110)

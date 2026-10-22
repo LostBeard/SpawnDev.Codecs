@@ -119,10 +119,10 @@ public abstract partial class CodecsTestBase
         try
         {
             using var dec = new JpegDecoderGpu(acc);
-            var info = await dec.ReadInfoAsync(ReadEmbedded(JpegFixturePrefix + "prog_c420_100x75.jpg"));
+            var info = await dec.ReadInfoAsync(ReadEmbedded(JpegFixturePrefix + "prog_c420_66x50.jpg"));
             Equal(ImageFormat.Jpeg, info.Format, "format");
-            Equal(100, info.Width, "width");
-            Equal(75, info.Height, "height");
+            Equal(66, info.Width, "width");
+            Equal(50, info.Height, "height");
             Equal(8, info.BitDepth, "bit depth");
             True(info.IsInterlaced, "progressive reports IsInterlaced");
             True(!info.HasAlpha, "JPEG has no alpha");
@@ -204,6 +204,52 @@ public abstract partial class CodecsTestBase
             var img = await dec.DecodeAsync(jpg.AsMemory(0, jpg.Length - 2));
             var diff = ComparePixels(expected, img.Pixels, 4, img.Info.Width);
             True(diff == null, $"baseline file without EOI: {diff}");
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    private static string Sha256Hex(byte[] data) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(data)).ToLowerInvariant();
+
+    private static string ReadEmbeddedText(string resourceName) =>
+        System.Text.Encoding.ASCII.GetString(ReadEmbedded(resourceName)).Trim();
+
+    [TestMethod]
+    public async Task JpegDecoderGpu_ProductionScale_1024x768_MatchesPillowSha256()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var dec = new JpegDecoderGpu(acc);
+            var failures = new List<string>();
+            // baseline 4:2:0, progressive 4:4:4 with optimized tables, baseline 4:2:2 with a restart marker every MCU row
+            foreach (var name in new[] { "big_c420_1024x768", "big_prog_c444_1024x768", "big_rst_c422_1024x768" })
+            {
+                var img = await dec.DecodeAsync(ReadEmbedded(JpegFixturePrefix + name + ".jpg"));
+                if (img.Info.Width != 1024 || img.Info.Height != 768) { failures.Add($"{name}: size {img.Info.Width}x{img.Info.Height}"); continue; }
+                string got = Sha256Hex(img.Pixels);
+                string want = ReadEmbeddedText(JpegFixturePrefix + name + ".sha256");
+                if (got != want) failures.Add($"{name}: RGBA sha256 {got} != Pillow's {want}");
+            }
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
+    public async Task JpegDecoderGpu_ExifOrientation_LittleEndianAndAfterOtherAppSegments()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var dec = new JpegDecoderGpu(acc);
+            var failures = new List<string>();
+            foreach (var name in new[] { "orient_le_6", "orient_xmp_first_6" })
+            {
+                var info = await dec.ReadInfoAsync(ReadEmbedded(JpegFixturePrefix + name + ".jpg"));
+                if (info.Orientation != 6) failures.Add($"{name}: orientation {info.Orientation}, expected 6");
+            }
+            True(failures.Count == 0, string.Join("\n", failures));
         }
         finally { acc.Dispose(); ctx.Dispose(); }
     }

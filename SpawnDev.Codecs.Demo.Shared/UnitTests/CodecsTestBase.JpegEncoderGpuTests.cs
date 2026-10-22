@@ -135,6 +135,35 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
+    [TestMethod]
+    public async Task JpegEncoderGpu_ProductionScale_1024x768_ByteIdenticalToPillowSha256()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var enc = new JpegEncoderGpu(acc);
+            using var dec = new JpegDecoderGpu(acc);
+            // Source pixels: Pillow's decode of big_c420, which our decoder reproduces bit-exact (tested above).
+            var src = await dec.DecodeAsync(ReadEmbedded(JpegFixturePrefix + "big_c420_1024x768.jpg"));
+            var failures = new List<string>();
+            var cases = new (string Name, JpegEncodeOptions Options)[]
+            {
+                ("bigenc_c420_q85", new JpegEncodeOptions { Quality = 85, Subsampling = JpegSubsampling.Yuv420 }),
+                ("bigenc_c444_q95", new JpegEncodeOptions { Quality = 95, Subsampling = JpegSubsampling.Yuv444 }),
+                ("bigenc_rst64_c420_q85", new JpegEncodeOptions { Quality = 85, Subsampling = JpegSubsampling.Yuv420, RestartInterval = 64 }),
+            };
+            foreach (var (name, options) in cases)
+            {
+                var file = await enc.EncodeAsync(src.Pixels, 1024, 768, options);
+                string got = Sha256Hex(file);
+                string want = ReadEmbeddedText(JpegFixturePrefix + name + ".sha256");
+                if (got != want) failures.Add($"{name}: {file.Length} bytes, sha256 {got} != Pillow's {want}");
+            }
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
     private static double Psnr(byte[] rgbaA, byte[] rgbaB)
     {
         double se = 0;
