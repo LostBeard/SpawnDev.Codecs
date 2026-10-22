@@ -317,15 +317,10 @@ public abstract partial class CodecsTestBase
             using var kernels = new JpegScanEncoderKernels(acc);
             using var hist = acc.Allocate1D<int>(4L * JpegEncMeta.HistStride);
             using var tabs = acc.Allocate1D<int>(4L * JpegEncMeta.TabStride);
-            // Four histograms: Fibonacci counts over 30 symbols (forces code lengths above 16 before limiting),
-            // a single symbol, two symbols, and a flat 256-symbol histogram.
+            // Four histograms: counts 1, 2, 4, ... 2^29 over 30 symbols (the Huffman tree is a chain 30 deep, so the
+            // code lengths must be limited to 16), a single symbol, two symbols, and a flat 256-symbol histogram.
             var h = new int[4 * JpegEncMeta.HistStride];
-            long a = 1, b = 1;
-            for (int i = 0; i < 30; i++)
-            {
-                h[i * 7 % 256] = (int)Math.Min(a, 1_000_000_000);
-                long t = a + b; a = b; b = t;
-            }
+            for (int i = 0; i < 30; i++) h[i * 7 % 256] = 1 << i;
             h[1 * JpegEncMeta.HistStride + 77] = 12345;
             h[2 * JpegEncMeta.HistStride + 3] = 5; h[2 * JpegEncMeta.HistStride + 200] = 9;
             for (int i = 0; i < 256; i++) h[3 * JpegEncMeta.HistStride + i] = 1000;
@@ -371,10 +366,10 @@ public abstract partial class CodecsTestBase
                             failures.Add($"table {slot}: symbol {x} (count {fx}) has a longer code than symbol {y} (count {fy})");
                     }
             }
-            // The Fibonacci table must actually need limiting: unlimited Huffman depth would be 30.
+            // The power-of-two table must actually need limiting: unlimited Huffman depth would be 30.
             int maxLen = 0;
             for (int sym = 0; sym < 256; sym++) maxLen = Math.Max(maxLen, t4[JpegEncMeta.TabCodes + sym] >> 16);
-            if (maxLen != 16) failures.Add($"Fibonacci table: longest code {maxLen}, expected the limit 16");
+            if (maxLen != 16) failures.Add($"power-of-two table: longest code {maxLen}, expected the limit 16");
             True(failures.Count == 0, string.Join("\n", failures.Take(20)));
         }
         finally { acc.Dispose(); ctx.Dispose(); }
