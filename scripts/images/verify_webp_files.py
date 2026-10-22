@@ -10,7 +10,8 @@ For every <dir>/<name>.webp:
     as a ratio (only a catastrophic ratio fails: this is a sanity check, not a tight bound).
 
 Other sidecars switch the check: <name>.alpha8 (an ALPH test: the lossy file's alpha plane must equal it in libwebp AND in the
-pure-Python ALPH decoder), Metadata sidecars are checked against libwebp's demuxer (Pillow info) and the
+pure-Python ALPH decoder), <name>.anim + <name>.canvases (an animation: every frame canvas, duration, loop count and background
+colour as libwebp's animation decoder shows them). Metadata sidecars are checked against libwebp's demuxer (Pillow info) and the
 VP8X flag bits.
 
 Prints one line per file ("OK name ours libwebp ratio" / "FAIL name reason") and exits 1 if any file failed.
@@ -75,6 +76,40 @@ def main(d):
             im = Image.open(io.BytesIO(data))
             if im.size != (w, h):
                 raise Exception("size %s != %dx%d" % (im.size, w, h))
+            if os.path.exists(path + ".anim"):
+                # an animation our encoder wrote. <name>.anim: "loop L", "bg R G B A", "dur d0 d1 ..."; <name>.canvases: the expected
+                # canvas of every frame, RGBA8, concatenated. libwebp's animation decoder (through Pillow) must show exactly those.
+                spec = {}
+                for line in open(path + ".anim").read().splitlines():
+                    key, _, rest = line.partition(" ")
+                    spec[key] = [int(v) for v in rest.split()]
+                durs = spec["dur"]
+                n = len(durs)
+                if getattr(im, "n_frames", 1) != n:
+                    raise Exception("libwebp sees %d frames, expected %d" % (getattr(im, "n_frames", 1), n))
+                want = np.frombuffer(open(path + ".canvases", "rb").read(), np.uint8).reshape(n, h, w, 4)
+                for k in range(n):
+                    im.seek(k)
+                    frame = np.array(im.convert("RGBA"))
+                    if not (frame == want[k]).all():
+                        ys, xs = np.nonzero((frame != want[k]).any(axis=2))
+                        raise Exception("frame %d canvas mismatch at x=%d y=%d: got %s expected %s (%d pixels differ)" % (
+                            k, xs[0], ys[0], frame[ys[0], xs[0]], want[k][ys[0], xs[0]], len(xs)))
+                    if im.info.get("duration") != durs[k]:
+                        raise Exception("frame %d duration %s != %d" % (k, im.info.get("duration"), durs[k]))
+                if im.info.get("loop") != spec["loop"][0]:
+                    raise Exception("loop count %s != %d" % (im.info.get("loop"), spec["loop"][0]))
+                if tuple(im.info.get("background", ())) != tuple(spec["bg"]):
+                    raise Exception("background %s != %s" % (im.info.get("background"), tuple(spec["bg"])))
+                check_metadata(path, data, im)
+                st_total = 0
+                for fcc, p in chunks(data):
+                    if fcc == b"ANMF":
+                        sub = [pp for f2, pp in W.riff_chunks(b"RIFF\0\0\0\0WEBP" + p[16:]) if f2 == b"VP8L"][0]
+                        W.decode_vp8l(sub)   # an independent bitstream parser must accept every frame's stream too
+                        st_total += 1
+                print("OK %s %d 0 0.000" % (name, len(data)))
+                continue
             got = np.array(im.convert("RGBA"))
             if os.path.exists(path + ".alpha8"):
                 # an ALPH test: <name>.webp is a lossy VP8X file whose ALPH chunk our encoder wrote. libwebp's alpha plane must

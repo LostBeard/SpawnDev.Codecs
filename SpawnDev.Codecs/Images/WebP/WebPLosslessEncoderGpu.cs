@@ -15,9 +15,10 @@
 // The output decodes to EXACTLY the input pixels in libwebp (and WebPDecoderGpu). With WebPEncodeOptions.Exact = false
 // the RGB of fully transparent pixels is not preserved (it is cleared, which compresses better).
 //
-// Also in this class (partial file): EncodeAlphaAsync (WebPLosslessEncoderGpu.Alpha.cs, the ALPH chunk of a lossy WebP). Both
-// build on EncodeStreamAsync: the pixel half (colour analysis, strategy trials, transforms, entropy coding, bitstream) that
-// writes one VP8L stream where the caller says; the container around it (RIFF, VP8X, ALPH header byte) is the caller's.
+// Also in this class (partial files): EncodeAlphaAsync (WebPLosslessEncoderGpu.Alpha.cs, the ALPH chunk of a lossy WebP) and
+// EncodeAnimationAsync (WebPLosslessEncoderGpu.Animation.cs). All three build on EncodeStreamAsync: the pixel half (colour
+// analysis, strategy trials, transforms, entropy coding, bitstream) that writes one VP8L stream where the caller says; the
+// container around it (RIFF, VP8X, ANMF, ALPH header byte) is the caller's.
 
 using System.Runtime.Versioning;
 using ILGPU;

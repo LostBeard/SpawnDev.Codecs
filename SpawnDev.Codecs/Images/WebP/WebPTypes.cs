@@ -48,7 +48,7 @@ public sealed class WebPAlphaPlaneJS : IDisposable
 public sealed record WebPMetadata(byte[]? IccProfile, byte[]? Exif, byte[]? Xmp);
 
 /// <summary>Options of <see cref="WebPLosslessEncoderGpu"/>.</summary>
-public sealed class WebPEncodeOptions
+public class WebPEncodeOptions
 {
     /// <summary>
     /// Effort 0..100 (default 75), the same meaning as libwebp's lossless quality: higher spends more work for a smaller file.
@@ -109,4 +109,17 @@ public sealed class WebPAlphaEncodeOptions
     /// larger). False always stores it raw (compression method 0).
     /// </summary>
     public bool Compress { get; set; } = true;
+}
+
+/// <summary>Options of the animated <see cref="WebPLosslessEncoderGpu"/> encode: <see cref="WebPEncodeOptions"/> apply to every frame.</summary>
+public sealed class WebPAnimationEncodeOptions : WebPEncodeOptions
+{
+    /// <summary>How many times the animation plays (0 = forever, the default).</summary>
+    public int LoopCount { get; set; }
+
+    /// <summary>
+    /// ANIM background colour, bytes B, G, R, A read as a little-endian uint (0xAARRGGBB; default 0). Advisory:
+    /// libwebp's animation decoder starts from a transparent canvas and ignores it.
+    /// </summary>
+    public uint BackgroundColor { get; set; }
 }

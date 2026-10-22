@@ -107,6 +107,10 @@ public static class WebPEncMeta
     public const int AlphaFilterRequest = 60;
     /// <summary><see cref="AlphaFilterRequest"/> value that asks the accelerator to pick the filter.</summary>
     public const int AlphaAuto = 4;
+    /// <summary>Animation frame: x offset, y offset, duration (ms), ANMF flag byte.</summary>
+    public const int FrameX = 61, FrameY = 62, FrameDuration = 63, FrameFlags = 64;
+    /// <summary>Animation file: canvas width, canvas height, loop count, background colour (as the uint B,G,R,A bytes), end of the last ANMF chunk, 1 when any frame has alpha.</summary>
+    public const int CanvasWidth = 65, CanvasHeight = 66, LoopCount = 67, Background = 68, AnimEnd = 69, AnimAlpha = 70;
 }
 
 /// <summary>Layout of the encoder's int work buffer: a pure function of the image size and transform block sizes.</summary>

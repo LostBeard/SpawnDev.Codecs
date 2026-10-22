@@ -15,6 +15,7 @@
 //  10. EmitKernel            (1 thread)             header, transforms (sub-images), prefix codes, tokens -> bits.
 //  11. FinalizeKernel + CopyBlobKernel              RIFF / VP8X / chunk headers, ICCP / EXIF / XMP payloads.
 //  12. AlphaCost / AlphaPick / AlphaToArgb / AlphaRaw / FinalizeAlpha   ALPH chunk: filter choice, filtered plane, header byte.
+//  13. FinalizeFrame / FinalizeAnim                 ANMF + VP8L chunk headers per frame; RIFF / VP8X / ICCP / ANIM / EXIF / XMP of an animation.
 //
 // The transforms read only ORIGINAL pixels, so they are parallel; the bitstream (variable-length codes in one
 // stream) is a sequential dependency chain, hence the single-thread kernels - still accelerator-resident.
@@ -50,6 +51,8 @@ public sealed class WebPEncodeKernels : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<uint>, ArrayView<int>> _alphaToArgb;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _alphaRaw;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, int> _finalizeAlpha;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _finalizeFrame;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _finalizeAnim;
 
     /// <summary>Compile the kernels.</summary>
     public WebPEncodeKernels(Accelerator accelerator)
@@ -90,6 +93,8 @@ public sealed class WebPEncodeKernels : IDisposable
         _alphaRaw = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(AlphaRawKernel);
         _finalizeAlpha = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, int>(FinalizeAlphaKernel);
+        _finalizeFrame = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(FinalizeFrameKernel);
+        _finalizeAnim = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(FinalizeAnimKernel);
     }
 
     // ------------------------------------------------------------------
@@ -169,6 +174,12 @@ public sealed class WebPEncodeKernels : IDisposable
 
     /// <summary>ALPH header byte at <c>output[0]</c> and the total length; <paramref name="raw"/> 1 = method 0.</summary>
     public void FinalizeAlpha(ArrayView<byte> output, ArrayView<int> meta, int raw) => _finalizeAlpha(1, output, meta, raw);
+
+    /// <summary>ANMF and VP8L chunk headers of the animation frame whose stream was just emitted.</summary>
+    public void FinalizeFrame(ArrayView<byte> output, ArrayView<int> meta) => _finalizeFrame(1, output, meta);
+
+    /// <summary>RIFF, VP8X, ICCP and ANIM headers, the EXIF / XMP chunk headers and the total length of an animation.</summary>
+    public void FinalizeAnimation(ArrayView<byte> output, ArrayView<int> meta) => _finalizeAnim(1, output, meta);
 
     /// <summary>Copy <paramref name="count"/> blob bytes from <c>blobs[srcOffset ..]</c> to <c>output[meta[dstSlot] ..]</c>.</summary>
     public void CopyBlob(ArrayView<byte> blobs, ArrayView<byte> output, ArrayView<int> meta, int srcOffset, int count, int dstSlot)
@@ -945,6 +956,114 @@ public sealed class WebPEncodeKernels : IDisposable
         {
             // Rsv:2 = 0 | P:2 = 0 (no pre-processing) | F:2 = filter | C:2 = 0 raw, 1 lossless
             o[0] = (byte)((meta[WebPEncMeta.AlphaFilter] << 2) | (raw == 1 ? 0 : 1));
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 13. Animation container
+    // ------------------------------------------------------------------
+
+    private static void PutLe24(ArrayView<byte> o, int p, int v)
+    {
+        o[p] = (byte)(v & 0xFF);
+        o[p + 1] = (byte)((v >> 8) & 0xFF);
+        o[p + 2] = (byte)((v >> 16) & 0xFF);
+    }
+
+    /// <summary>ANMF header (8) + ANMF parameters (16) + VP8L chunk header (8) in front of the stream at PayloadStart.</summary>
+    private static void FinalizeFrameKernel(Index1D _, ArrayView<byte> o, ArrayView<int> meta)
+    {
+        int start = meta[WebPEncMeta.PayloadStart];
+        int payload = meta[WebPEncMeta.PayloadLength];
+        int end = start + payload + (payload & 1);
+        meta[WebPEncMeta.Total] = end;
+        bool fits = (meta[WebPEncMeta.Error] == 0) & (end <= meta[WebPEncMeta.OutputCapacity]);
+        if (fits)
+        {
+            int b = start - 32;
+            PutFcc(o, b, 'A', 'N', 'M', 'F');
+            PutLe32(o, b + 4, 16 + 8 + payload + (payload & 1));
+            PutLe24(o, b + 8, meta[WebPEncMeta.FrameX] / 2);
+            PutLe24(o, b + 11, meta[WebPEncMeta.FrameY] / 2);
+            PutLe24(o, b + 14, meta[WebPEncMeta.Width] - 1);
+            PutLe24(o, b + 17, meta[WebPEncMeta.Height] - 1);
+            PutLe24(o, b + 20, meta[WebPEncMeta.FrameDuration]);
+            o[b + 23] = (byte)meta[WebPEncMeta.FrameFlags];
+            PutFcc(o, start - 8, 'V', 'P', '8', 'L');
+            PutLe32(o, start - 4, payload);
+            if ((payload & 1) == 1) o[start + payload] = 0;
+        }
+    }
+
+    private static void FinalizeAnimKernel(Index1D _, ArrayView<byte> o, ArrayView<int> meta)
+    {
+        int cap = meta[WebPEncMeta.OutputCapacity];
+        int icc = meta[WebPEncMeta.IccLength];
+        int exif = meta[WebPEncMeta.ExifLength];
+        int xmp = meta[WebPEncMeta.XmpLength];
+        int p = meta[WebPEncMeta.AnimEnd];
+        int exifHeader = 0;
+        int xmpHeader = 0;
+        if (exif > 0)
+        {
+            exifHeader = p;
+            meta[WebPEncMeta.ExifDst] = p + 8;
+            p += 8 + exif + (exif & 1);
+        }
+        if (xmp > 0)
+        {
+            xmpHeader = p;
+            meta[WebPEncMeta.XmpDst] = p + 8;
+            p += 8 + xmp + (xmp & 1);
+        }
+        meta[WebPEncMeta.Total] = p;
+        if ((meta[WebPEncMeta.Error] == 0) & (p <= cap))
+        {
+            PutFcc(o, 0, 'R', 'I', 'F', 'F');
+            PutLe32(o, 4, p - 8);
+            PutFcc(o, 8, 'W', 'E', 'B', 'P');
+            int flags = 0x02;
+            if (meta[WebPEncMeta.AnimAlpha] == 1) flags |= 0x10;
+            if (icc > 0) flags |= 0x20;
+            if (exif > 0) flags |= 0x08;
+            if (xmp > 0) flags |= 0x04;
+            int w1 = meta[WebPEncMeta.CanvasWidth] - 1;
+            int h1 = meta[WebPEncMeta.CanvasHeight] - 1;
+            int q = 12;
+            PutFcc(o, q, 'V', 'P', '8', 'X');
+            PutLe32(o, q + 4, 10);
+            o[q + 8] = (byte)flags;
+            o[q + 9] = 0;
+            o[q + 10] = 0;
+            o[q + 11] = 0;
+            PutLe24(o, q + 12, w1);
+            PutLe24(o, q + 15, h1);
+            q += 18;
+            if (icc > 0)
+            {
+                PutFcc(o, q, 'I', 'C', 'C', 'P');
+                PutLe32(o, q + 4, icc);
+                meta[WebPEncMeta.IccDst] = q + 8;
+                if ((icc & 1) == 1) o[q + 8 + icc] = 0;
+                q += 8 + icc + (icc & 1);
+            }
+            PutFcc(o, q, 'A', 'N', 'I', 'M');
+            PutLe32(o, q + 4, 6);
+            PutLe32(o, q + 8, meta[WebPEncMeta.Background]);
+            o[q + 12] = (byte)(meta[WebPEncMeta.LoopCount] & 0xFF);
+            o[q + 13] = (byte)((meta[WebPEncMeta.LoopCount] >> 8) & 0xFF);
+            if (exif > 0)
+            {
+                PutFcc(o, exifHeader, 'E', 'X', 'I', 'F');
+                PutLe32(o, exifHeader + 4, exif);
+                if ((exif & 1) == 1) o[exifHeader + 8 + exif] = 0;
+            }
+            if (xmp > 0)
+            {
+                PutFcc(o, xmpHeader, 'X', 'M', 'P', ' ');
+                PutLe32(o, xmpHeader + 4, xmp);
+                if ((xmp & 1) == 1) o[xmpHeader + 8 + xmp] = 0;
+            }
         }
     }
 
