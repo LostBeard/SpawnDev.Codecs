@@ -119,3 +119,7 @@ sequential access O(1) per frame; random access may re-composite from frame 0.
   Frames that extend past the logical screen are clipped in both (Pillow grows its canvas, so no Pillow truth exists for them).
 * Compositing is planned on the host as a few ints per frame and executed by one kernel (`OpFillRect / OpFillCanvas / OpSave /
   OpRestore / OpDraw`); LZW is one thread per frame, frames in parallel (batches of 64, 32 MB of palette indices).
+* Encoder: `GifEncoderGpu` (`EncodeAsync` for a picture, `EncodeAnimationAsync` for frames stored back to back, three overloads each). Exact palette via
+  `ExactPaletteBuilder`, else median cut + nearest colour on the accelerator, `GifDither.Ordered / FloydSteinberg` optional; LZW in 32768 pixel segments
+  (one thread each, a clear code between them, bits concatenated on the accelerator). The algorithms are documented in `GifEncoderKernels.cs` and
+  re-implemented independently in `scripts/images/make_gif_encoder_fixtures.py`, whose files the tests compare byte for byte.

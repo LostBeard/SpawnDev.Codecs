@@ -43,6 +43,7 @@ internal sealed class ExactPaletteBuilder : IDisposable
 
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, int> _scanAlpha;
     private readonly Action<Index1D, ArrayView<int>, int> _setLimit;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _setLimitFrom;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _insert;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>> _finish;
 
@@ -55,6 +56,7 @@ internal sealed class ExactPaletteBuilder : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _scanAlpha = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, int>(ScanAlphaKernel);
         _setLimit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, int>(SetLimitKernel);
+        _setLimitFrom = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int>(SetLimitFromKernel);
         _insert = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(InsertKernel);
         _finish = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(FinishKernel);
         _table = accelerator.Allocate1D<int>(TableSlots);
@@ -87,6 +89,16 @@ internal sealed class ExactPaletteBuilder : IDisposable
         _setLimit(1, _state.View, maxColors);
     }
 
+    /// <summary>
+    /// Like <see cref="SetLimit"/>, but the reserved transparent index is decided by a flag that lives on the
+    /// accelerator (<paramref name="flags"/>[<paramref name="flagIndex"/>] != 0), e.g. "some frame of the animation
+    /// has a transparent pixel". Lets a per-frame builder follow an animation-wide decision without a host readback.
+    /// </summary>
+    public void SetLimitFrom(ArrayView<int> flags, int flagIndex, int maxColors)
+    {
+        _setLimitFrom(1, _state.View, flags, flagIndex, maxColors);
+    }
+
     /// <summary>Add the opaque colours of <paramref name="pixelCount"/> RGBA pixels (alpha &gt;= threshold) to the set.</summary>
     public void Insert(ArrayView<byte> rgba, int pixelCount, int alphaThreshold)
     {
@@ -108,6 +120,13 @@ internal sealed class ExactPaletteBuilder : IDisposable
     private static void SetLimitKernel(Index1D _, ArrayView<int> state, int maxColors)
     {
         state[ExactPaletteState.Limit] = maxColors - state[ExactPaletteState.HasTransparent];
+    }
+
+    private static void SetLimitFromKernel(Index1D _, ArrayView<int> state, ArrayView<int> flags, int flagIndex, int maxColors)
+    {
+        int reserved = 0;
+        if (flags[flagIndex] != 0) reserved = 1;
+        state[ExactPaletteState.Limit] = maxColors - reserved;
     }
 
     private static void InsertKernel(
