@@ -36,10 +36,13 @@ OUT = os.path.join(HERE, "..", "..", "SpawnDev.Codecs.Demo.Shared", "TestData", 
 SRC = os.path.join(OUT, "sources")
 os.makedirs(OUT, exist_ok=True)
 os.makedirs(SRC, exist_ok=True)
+# regenerate only this script's files: make_webp_alpha_fixtures.py (alph_*), make_webp_meta_fixtures.py (meta2_*) and
+# make_webp_anim_encode_fixtures.py (animenc_*) own theirs in the same folder
+OTHER_SCRIPTS = ("alph_", "meta2_", "animenc_")
 for d in (OUT, SRC):
     for f in os.listdir(d):
         p = os.path.join(d, f)
-        if os.path.isfile(p):
+        if os.path.isfile(p) and not f.startswith(OTHER_SCRIPTS):
             os.remove(p)
 
 rng = np.random.default_rng(20261022)

@@ -19,7 +19,7 @@ namespace SpawnDev.Codecs.Images.WebP;
 public static class WebPEncMeta
 {
     /// <summary>Total ints.</summary>
-    public const int Size = 64;
+    public const int Size = 96;
 
     // ---- written by the encode kernels (slots below HostStart) ----
     /// <summary>Non-zero when the output buffer was too small.</summary>
@@ -48,6 +48,8 @@ public static class WebPEncMeta
     public const int IccDst = 15;
     /// <summary>Number of prefix-code groups (1 or 0 = a single group, no entropy image).</summary>
     public const int Groups = 16;
+    /// <summary>The ALPH prediction filter in effect (0..3), written by the alpha filter pick kernel.</summary>
+    public const int AlphaFilter = 17;
 
     // ---- written by the host (slots HostStart .. Size) ----
     /// <summary>First host-written slot.</summary>
@@ -99,6 +101,12 @@ public static class WebPEncMeta
         RegionGroupBuild = 56, RegionGroupMisc = 57;
     /// <summary>Meta prefix block size bits (tile = 2^bits pixels square); 0 = the meta prefix codes are not used.</summary>
     public const int MetaBits = 58;
+    /// <summary>1 = the stream has no 5-byte VP8L header (an ALPH chunk's stream).</summary>
+    public const int Headerless = 59;
+    /// <summary>Requested ALPH filter: 0..3, or <see cref="AlphaAuto"/> to let the accelerator pick.</summary>
+    public const int AlphaFilterRequest = 60;
+    /// <summary><see cref="AlphaFilterRequest"/> value that asks the accelerator to pick the filter.</summary>
+    public const int AlphaAuto = 4;
 }
 
 /// <summary>Layout of the encoder's int work buffer: a pure function of the image size and transform block sizes.</summary>

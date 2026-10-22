@@ -484,3 +484,49 @@ def make_chunk(fcc, payload):
 def make_riff(chunks):
     body = b"WEBP" + b"".join(chunks)
     return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
+# ---------------------------------------------------------------------------------------------------
+# ALPH chunk (alpha plane of a lossy image), RFC 9649 / the WebP container spec "Alpha" section
+# ---------------------------------------------------------------------------------------------------
+
+def alpha_decode(payload, w, h):
+    """
+    Decode an ALPH chunk payload into the alpha plane (list of h rows of w ints). Returns (plane, stats-or-None, header-dict).
+    Sequential, straight from the spec text (not libwebp's code): the stream is a VP8L stream without its 5-byte header, so
+    one is synthesised for decode_vp8l; the filters are undone in raster order.
+    """
+    if len(payload) < 2:
+        raise VP8LError("empty ALPH")
+    hdr = payload[0]
+    method, filt, pre, rsv = hdr & 3, (hdr >> 2) & 3, (hdr >> 4) & 3, hdr >> 6
+    if method > 1 or pre > 1 or rsv:
+        raise VP8LError("bad ALPH header")
+    st = None
+    if method == 0:
+        if len(payload) - 1 < w * h:
+            raise VP8LError("short raw ALPH")
+        res = list(payload[1:1 + w * h])
+    else:
+        head = (0x2F | ((w - 1) << 8) | ((h - 1) << 22)).to_bytes(5, "little")
+        _, _, pix, st = decode_vp8l(head + payload[1:])
+        res = [(p >> 8) & 255 for p in pix]
+    plane = [[0] * w for _ in range(h)]
+    for y in range(h):
+        for x in range(w):
+            r = res[y * w + x]
+            if filt == 0 or (x == 0 and y == 0):
+                pred = 0
+            elif y == 0:
+                pred = plane[y][x - 1]            # top row: from the left
+            elif x == 0:
+                pred = plane[y - 1][x]            # left column: from above
+            elif filt == 1:
+                pred = plane[y][x - 1]
+            elif filt == 2:
+                pred = plane[y - 1][x]
+            else:
+                g = plane[y][x - 1] + plane[y - 1][x] - plane[y - 1][x - 1]
+                pred = 0 if g < 0 else 255 if g > 255 else g
+            plane[y][x] = (r + pred) & 255
+    return plane, st, {"method": method, "filter": filt, "pre": pre}

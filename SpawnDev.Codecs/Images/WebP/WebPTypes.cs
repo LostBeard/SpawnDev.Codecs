@@ -18,6 +18,32 @@ public sealed record WebPFileInfo(
     ImageInfo Info, bool IsLossless, bool IsExtended, bool HasIccProfile, bool HasExif, bool HasXmp,
     int LoopCount, uint BackgroundColor);
 
+/// <summary>The alpha plane (ALPH chunk) of a lossy WebP in managed memory: one byte per pixel, rows top to bottom.</summary>
+/// <param name="Width">Plane width (the image or frame width).</param>
+/// <param name="Height">Plane height.</param>
+/// <param name="Alpha">Width x Height bytes.</param>
+public sealed record WebPAlphaPlane(int Width, int Height, byte[] Alpha);
+
+/// <summary>An alpha plane as a JS <see cref="Uint8Array"/> (browser). The caller disposes it; the bytes never entered the .NET heap.</summary>
+[System.Runtime.Versioning.SupportedOSPlatform("browser")]
+public sealed class WebPAlphaPlaneJS : IDisposable
+{
+    /// <summary>Plane width.</summary>
+    public int Width { get; }
+    /// <summary>Plane height.</summary>
+    public int Height { get; }
+    /// <summary>Width x Height bytes.</summary>
+    public SpawnDev.SpawnJS.JSObjects.Uint8Array Alpha { get; }
+
+    internal WebPAlphaPlaneJS(int width, int height, SpawnDev.SpawnJS.JSObjects.Uint8Array alpha)
+    {
+        Width = width; Height = height; Alpha = alpha;
+    }
+
+    /// <summary>Dispose the plane.</summary>
+    public void Dispose() => Alpha.Dispose();
+}
+
 /// <summary>The ICCP / EXIF / XMP chunk payloads of a WebP file (small host blobs; null when absent).</summary>
 public sealed record WebPMetadata(byte[]? IccProfile, byte[]? Exif, byte[]? Xmp);
 
@@ -49,4 +75,38 @@ public sealed class WebPEncodeOptions
 
     /// <summary>XMP packet written as an XMP chunk (null = none).</summary>
     public byte[]? Xmp { get; set; }
+}
+
+/// <summary>The ALPH chunk's prediction filter: what each alpha sample is predicted from before it is entropy coded.</summary>
+public enum WebPAlphaFilter
+{
+    /// <summary>No prediction.</summary>
+    None = 0,
+    /// <summary>The sample to the left (the first column from the sample above).</summary>
+    Horizontal = 1,
+    /// <summary>The sample above (the first row from the sample to the left).</summary>
+    Vertical = 2,
+    /// <summary>clip(left + above - aboveLeft).</summary>
+    Gradient = 3,
+    /// <summary>
+    /// The accelerator picks: at effort 50 and above it encodes the plane with each of the four filters and keeps the smallest
+    /// stream; below, a fast estimate of the residual cost chooses.
+    /// </summary>
+    Auto = 4,
+}
+
+/// <summary>Options of <see cref="WebPLosslessEncoderGpu.EncodeAlphaAsync(ILGPU.ArrayView1D{byte, ILGPU.Stride1D.Dense}, int, int, ILGPU.ArrayView1D{byte, ILGPU.Stride1D.Dense}, WebPAlphaEncodeOptions?)"/>.</summary>
+public sealed class WebPAlphaEncodeOptions
+{
+    /// <summary>Effort 0..100 of the VP8L coder (default 75); same meaning as <see cref="WebPEncodeOptions.Quality"/>.</summary>
+    public int Quality { get; set; } = 75;
+
+    /// <summary>The prediction filter (default <see cref="WebPAlphaFilter.Auto"/>).</summary>
+    public WebPAlphaFilter Filter { get; set; } = WebPAlphaFilter.Auto;
+
+    /// <summary>
+    /// Compress the filtered plane with the lossless coder (default true; the plane is stored raw instead when that is not
+    /// larger). False always stores it raw (compression method 0).
+    /// </summary>
+    public bool Compress { get; set; } = true;
 }

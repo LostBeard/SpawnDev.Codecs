@@ -46,6 +46,12 @@ public enum WebPError
     PoolTooSmall = 16,
     /// <summary>A code length repeat runs past the alphabet or max_symbol exceeds it.</summary>
     BadCodeLengths = 17,
+    /// <summary>A lossy image has no ALPH chunk (asked for its alpha plane).</summary>
+    NoAlphaChunk = 18,
+    /// <summary>The ALPH header byte is invalid (compression method, filter, pre-processing or reserved bits) or the chunk is empty.</summary>
+    BadAlphaHeader = 19,
+    /// <summary>An uncompressed ALPH chunk holds fewer bytes than the plane needs.</summary>
+    AlphaTruncated = 20,
 }
 
 /// <summary>Slot indices of the shared WebP metadata buffer.</summary>
@@ -107,6 +113,10 @@ public static class WebPMeta
     public const int ChunkCount = 24;
     /// <summary>Final HasAlpha fact (libwebp semantics: VP8L bit for lossless stills, VP8X flag / ALPH otherwise).</summary>
     public const int HasAlpha = 25;
+    /// <summary>File offset of the ALPH payload that precedes a still VP8 image (the last one wins, like libwebp); 0 when none.</summary>
+    public const int AlphOffset = 26;
+    /// <summary>Length of that ALPH payload (0 when none).</summary>
+    public const int AlphLength = 27;
 
     // ---- written by Vp8lDecodeKernel ----
     /// <summary><see cref="WebPError"/> raised by the VP8L decode (0 = none).</summary>
@@ -151,6 +161,7 @@ public static class WebPMeta
     // ---- frame table (written by the scan kernel), WebPFrameTable ints per ANMF frame ----
     /// <summary>Ints per frame record.</summary>
     public const int FrameStride = 12;
+    // fields 10 and 11: the ALPH payload of the frame (see FrAlphOffset / FrAlphLength below)
     /// <summary>Frame field: x offset on the canvas.</summary>
     public const int FrX = 0;
     /// <summary>Frame field: y offset.</summary>
@@ -171,4 +182,18 @@ public static class WebPMeta
     public const int FrLength = 8;
     /// <summary>Frame field: 1 when the frame has alpha (VP8L alpha_is_used or an ALPH chunk).</summary>
     public const int FrHasAlpha = 9;
+    /// <summary>Frame field: file offset of the ALPH payload of a lossy frame (0 when none).</summary>
+    public const int FrAlphOffset = 10;
+    /// <summary>Frame field: length of the ALPH payload (0 when none).</summary>
+    public const int FrAlphLength = 11;
+
+    // ---- ALPH chunk header byte fields (spec: Rsv:2 | P:2 | F:2 | C:2, most significant first) ----
+    /// <summary>ALPH header: compression method (0 raw, 1 lossless VP8L).</summary>
+    public const int AlphMethodMask = 3;
+    /// <summary>ALPH header: filter shift (0 none, 1 horizontal, 2 vertical, 3 gradient).</summary>
+    public const int AlphFilterShift = 2;
+    /// <summary>ALPH header: pre-processing shift (0 none, 1 level reduction; informative for the decoder).</summary>
+    public const int AlphPreprocessShift = 4;
+    /// <summary>ALPH header: reserved bits shift.</summary>
+    public const int AlphReservedShift = 6;
 }

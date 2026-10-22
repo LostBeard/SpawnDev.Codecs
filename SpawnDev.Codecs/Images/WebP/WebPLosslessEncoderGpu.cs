@@ -14,6 +14,10 @@
 //
 // The output decodes to EXACTLY the input pixels in libwebp (and WebPDecoderGpu). With WebPEncodeOptions.Exact = false
 // the RGB of fully transparent pixels is not preserved (it is cleared, which compresses better).
+//
+// Also in this class (partial file): EncodeAlphaAsync (WebPLosslessEncoderGpu.Alpha.cs, the ALPH chunk of a lossy WebP). Both
+// build on EncodeStreamAsync: the pixel half (colour analysis, strategy trials, transforms, entropy coding, bitstream) that
+// writes one VP8L stream where the caller says; the container around it (RIFF, VP8X, ALPH header byte) is the caller's.
 
 using System.Runtime.Versioning;
 using ILGPU;
@@ -25,7 +29,7 @@ namespace SpawnDev.Codecs.Images.WebP;
 
 /// <summary>WebP lossless encoder running on an ILGPU accelerator.</summary>
 /// <remarks>Not thread-safe: one in-flight call per instance (the working buffers are shared across calls).</remarks>
-public sealed class WebPLosslessEncoderGpu : IDisposable
+public sealed partial class WebPLosslessEncoderGpu : IDisposable
 {
     private const int MaxDimension = 16384;
 
@@ -42,6 +46,7 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
     private readonly StageBuffer<int> _work;
     private readonly StageBuffer<int> _tokens;
     private readonly StageBuffer<byte> _blobs;
+    private readonly StageBuffer<int> _rowCost;
 
     /// <summary>Compile the kernels and upload the constant tables.</summary>
     public WebPLosslessEncoderGpu(Accelerator accelerator)
@@ -59,6 +64,7 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
         _work = new StageBuffer<int>(accelerator);
         _tokens = new StageBuffer<int>(accelerator);
         _blobs = new StageBuffer<byte>(accelerator);
+        _rowCost = new StageBuffer<int>(accelerator);
     }
 
     // ------------------------------------------------------------------
@@ -144,10 +150,23 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
     }
 
     /// <summary>The strategies worth trying for this quality, given how many colours the image has (0 = more than 256).</summary>
-    private static List<Strategy> MakeStrategies(Plan plan, int paletteColors)
+    private static List<Strategy> MakeStrategies(Plan plan, int paletteColors, bool plane = false)
     {
         int q = plan.Quality;
         var list = new List<Strategy>();
+        if (plane)
+        {
+            // An alpha plane is green only (red and blue are 0): subtract green and cross colour cannot help. At most 256
+            // distinct values, so a palette (with pixel bundling for few levels) is always possible.
+            list.Add(new Strategy(true, false, false, false));
+            if (q >= 25) list.Add(new Strategy(true, false, true, false));
+            if (q >= 50)
+            {
+                list.Add(new Strategy(false, false, false, false));
+                list.Add(new Strategy(false, false, true, false));
+            }
+            return list;
+        }
         if ((paletteColors > 0) && (paletteColors <= 16 || q < 25))
         {
             list.Add(new Strategy(true, false, false, false));
@@ -180,38 +199,31 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
     // ------------------------------------------------------------------
 
     /// <summary>
-    /// Encode RGBA8 pixels that are already on the accelerator into a caller-owned view. Only scalars cross to the host.
+    /// What <see cref="EncodeStreamAsync"/> encodes: an image of the given size and effort whose ARGB form the callback writes
+    /// (called once per strategy trial, because the transforms work in place). <paramref name="Plane"/> marks an alpha plane
+    /// (green only: palette / predictor strategies, no 5-byte VP8L header). <paramref name="AfterMeta"/> runs once the
+    /// meta block is on the accelerator, before the first ARGB conversion.
     /// </summary>
-    /// <param name="rgba">Tightly packed RGBA8 pixels (straight alpha, rows top to bottom), at least width x height x 4 bytes.</param>
-    /// <param name="width">Width in pixels (1..16384).</param>
-    /// <param name="height">Height in pixels (1..16384).</param>
-    /// <param name="output">Receives the WebP file; at least <see cref="GetMaxEncodedSize"/> bytes.</param>
-    /// <param name="options">Encoder options (null = defaults).</param>
-    /// <returns>The length of the file in <paramref name="output"/>.</returns>
-    public async Task<int> EncodeAsync(
-        ArrayView1D<byte, Stride1D.Dense> rgba, int width, int height,
-        ArrayView1D<byte, Stride1D.Dense> output, WebPEncodeOptions? options = null)
-    {
-        ValidateSize(width, height);
-        options ??= new WebPEncodeOptions();
-        if (options.Quality < 0 || options.Quality > 100) throw new ArgumentOutOfRangeException(nameof(options), "Quality must be 0..100.");
-        long pixels = (long)width * height;
-        if (rgba.Length < pixels * 4)
-            throw new ArgumentException($"rgba must hold {pixels * 4} bytes for {width}x{height}.", nameof(rgba));
-        int maxSize = GetMaxEncodedSize(width, height, options);
-        if (output.Length < maxSize)
-            throw new ArgumentException($"output must hold {maxSize} bytes (GetMaxEncodedSize) for {width}x{height}.", nameof(output));
+    private sealed record StreamJob(
+        int Width, int Height, int Quality, Action<ArrayView<uint>> ToArgb, bool Plane, Action? AfterMeta = null);
 
-        var plan = MakePlan(options.Quality, width, height);
-        byte[]? icc = options.IccProfile is { Length: > 0 } ? options.IccProfile : null;
-        byte[]? exif = ExifPayload(options.Exif);
-        byte[]? xmp = options.Xmp is { Length: > 0 } ? options.Xmp : null;
-        bool extended = icc != null || exif != null || xmp != null;
+    /// <summary>
+    /// The pixel half of every encode: colour analysis, strategy trials, transforms, entropy coding and the bitstream. Writes
+    /// the VP8L stream at <c>hostMeta[PayloadStart]</c> of <paramref name="output"/> and leaves PayloadLength, Error and
+    /// HasAlpha in the device meta block; the caller finishes the container around it. The caller fills the file-level host
+    /// slots of <paramref name="hostMeta"/> (OutputCapacity, PayloadStart, ExtendedFile, blob lengths, frame fields, alpha
+    /// filter request); this method fills the stream-level ones and uploads the block.
+    /// </summary>
+    private async Task EncodeStreamAsync(StreamJob job, int[] hostMeta, ArrayView1D<byte, Stride1D.Dense> output)
+    {
+        int width = job.Width;
+        int height = job.Height;
+        long pixels = (long)width * height;
+        var plan = MakePlan(job.Quality, width, height);
 
         // ---- host-derived layout and choices go into the shared int block ----
-        var hostMeta = new int[WebPEncMeta.Size];
         long workInts = Vp8lEncLayout.Compute(width, height, plan.PredictorBits, plan.CrossBits, plan.MetaBits, hostMeta);
-        if (workInts > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(width), "Image is too large to encode.");
+        if (workInts > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(job), "Image is too large to encode.");
         hostMeta[WebPEncMeta.Width] = width;
         hostMeta[WebPEncMeta.Height] = height;
         hostMeta[WebPEncMeta.PackedWidth] = width;
@@ -221,38 +233,13 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
         hostMeta[WebPEncMeta.ChainDepth] = plan.ChainDepth;
         hostMeta[WebPEncMeta.ModeSet] = plan.ModeSet;
         hostMeta[WebPEncMeta.MetaBits] = plan.MetaBits;
-        hostMeta[WebPEncMeta.OutputCapacity] = (int)Math.Min(output.Length, int.MaxValue);
-        hostMeta[WebPEncMeta.ExtendedFile] = extended ? 1 : 0;
-        hostMeta[WebPEncMeta.IccLength] = icc?.Length ?? 0;
-        hostMeta[WebPEncMeta.ExifLength] = exif?.Length ?? 0;
-        hostMeta[WebPEncMeta.XmpLength] = xmp?.Length ?? 0;
-        int payloadStart = 12 + 8;
-        if (extended)
-        {
-            payloadStart = 12 + 18 + 8;
-            if (icc != null) payloadStart += 8 + icc.Length + (icc.Length & 1);
-        }
-        hostMeta[WebPEncMeta.PayloadStart] = payloadStart;
+        hostMeta[WebPEncMeta.Headerless] = job.Plane ? 1 : 0;
 
         // ---- buffers (grown at the start of the call) ----
         _argbA.Ensure(pixels);
         _argbB.Ensure(pixels);
         _work.Ensure(workInts);
         _tokens.Ensure(pixels * 2);
-        int blobTotal = (icc?.Length ?? 0) + (exif?.Length ?? 0) + (xmp?.Length ?? 0);
-        var blobs = _blobs.Ensure(Math.Max(1, blobTotal));
-        if (blobTotal > 0)
-        {
-            var all = new byte[blobTotal];
-            int at = 0;
-            foreach (var b in new[] { icc, exif, xmp })
-            {
-                if (b == null) continue;
-                b.CopyTo(all, at);
-                at += b.Length;
-            }
-            DeviceTransfer.Upload(blobs, all);
-        }
         _meta.View.CopyFromCPU(hostMeta);
 
         var a = _argbA.View;
@@ -261,9 +248,10 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
         var tok = _tokens.View;
         var meta = _meta.View;
         int n = (int)pixels;
+        job.AfterMeta?.Invoke();
 
         // ---- colour analysis, once, on the untouched pixels ----
-        _kernels.ToArgb(rgba, a, n, options.Exact ? 1 : 0);
+        job.ToArgb(a);
         _kernels.Analyze(a, work, meta);
         await _accelerator.SynchronizeAsync();
         var analysis = await meta.CopyToHostAsync();
@@ -290,7 +278,7 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
                 .CopyFromCPU(ref hostMeta[WebPEncMeta.HostStart], WebPEncMeta.Size - WebPEncMeta.HostStart);
 
             long packedPixels = (long)packed * height;
-            _kernels.ToArgb(rgba, a, n, options.Exact ? 1 : 0);
+            job.ToArgb(a);
             ArrayView<uint> cur;
             if (s.Palette)
             {
@@ -336,7 +324,7 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
         }
 
         // ---- choose the strategy by the estimated size of the entropy-coded result ----
-        var strategies = MakeStrategies(plan, paletteColors);
+        var strategies = MakeStrategies(plan, paletteColors, job.Plane);
         Strategy chosen = strategies[0];
         ArrayView<uint> main;
         if (strategies.Count == 1)
@@ -433,7 +421,32 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
             }
         }
         _kernels.Emit(output, work, tok, meta, _tables.View);
-        _kernels.FinalizeFile(output, meta);
+    }
+
+    /// <summary>The ICC / EXIF / XMP payloads uploaded to one device buffer (small host blobs), in that order.</summary>
+    private ArrayView1D<byte, Stride1D.Dense> UploadBlobs(byte[]? icc, byte[]? exif, byte[]? xmp)
+    {
+        int blobTotal = (icc?.Length ?? 0) + (exif?.Length ?? 0) + (xmp?.Length ?? 0);
+        var blobs = _blobs.Ensure(Math.Max(1, blobTotal));
+        if (blobTotal > 0)
+        {
+            var all = new byte[blobTotal];
+            int at = 0;
+            foreach (var b in new[] { icc, exif, xmp })
+            {
+                if (b == null) continue;
+                b.CopyTo(all, at);
+                at += b.Length;
+            }
+            DeviceTransfer.Upload(blobs, all);
+        }
+        return blobs;
+    }
+
+    /// <summary>Copies the metadata blobs to the offsets the container kernel recorded.</summary>
+    private void CopyBlobs(ArrayView1D<byte, Stride1D.Dense> blobs, ArrayView1D<byte, Stride1D.Dense> output, byte[]? icc, byte[]? exif, byte[]? xmp)
+    {
+        var meta = _meta.View;
         int offset = 0;
         if (icc != null)
         {
@@ -447,9 +460,62 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
         }
         if (xmp != null)
             _kernels.CopyBlob(blobs, output, meta, offset, xmp.Length, WebPEncMeta.XmpDst);
+    }
+
+    /// <summary>
+    /// Encode RGBA8 pixels that are already on the accelerator into a caller-owned view. Only scalars cross to the host.
+    /// </summary>
+    /// <param name="rgba">Tightly packed RGBA8 pixels (straight alpha, rows top to bottom), at least width x height x 4 bytes.</param>
+    /// <param name="width">Width in pixels (1..16384).</param>
+    /// <param name="height">Height in pixels (1..16384).</param>
+    /// <param name="output">Receives the WebP file; at least <see cref="GetMaxEncodedSize"/> bytes.</param>
+    /// <param name="options">Encoder options (null = defaults).</param>
+    /// <returns>The length of the file in <paramref name="output"/>.</returns>
+    public async Task<int> EncodeAsync(
+        ArrayView1D<byte, Stride1D.Dense> rgba, int width, int height,
+        ArrayView1D<byte, Stride1D.Dense> output, WebPEncodeOptions? options = null)
+    {
+        ValidateSize(width, height);
+        options ??= new WebPEncodeOptions();
+        if (options.Quality < 0 || options.Quality > 100) throw new ArgumentOutOfRangeException(nameof(options), "Quality must be 0..100.");
+        long pixels = (long)width * height;
+        if (rgba.Length < pixels * 4)
+            throw new ArgumentException($"rgba must hold {pixels * 4} bytes for {width}x{height}.", nameof(rgba));
+        int maxSize = GetMaxEncodedSize(width, height, options);
+        if (output.Length < maxSize)
+            throw new ArgumentException($"output must hold {maxSize} bytes (GetMaxEncodedSize) for {width}x{height}.", nameof(output));
+
+        byte[]? icc = options.IccProfile is { Length: > 0 } ? options.IccProfile : null;
+        byte[]? exif = ExifPayload(options.Exif);
+        byte[]? xmp = options.Xmp is { Length: > 0 } ? options.Xmp : null;
+        bool extended = icc != null || exif != null || xmp != null;
+        var blobs = UploadBlobs(icc, exif, xmp);
+
+        var hostMeta = new int[WebPEncMeta.Size];
+        hostMeta[WebPEncMeta.OutputCapacity] = (int)Math.Min(output.Length, int.MaxValue);
+        hostMeta[WebPEncMeta.ExtendedFile] = extended ? 1 : 0;
+        hostMeta[WebPEncMeta.IccLength] = icc?.Length ?? 0;
+        hostMeta[WebPEncMeta.ExifLength] = exif?.Length ?? 0;
+        hostMeta[WebPEncMeta.XmpLength] = xmp?.Length ?? 0;
+        int payloadStart = 12 + 8;
+        if (extended)
+        {
+            payloadStart = 12 + 18 + 8;
+            if (icc != null) payloadStart += 8 + icc.Length + (icc.Length & 1);
+        }
+        hostMeta[WebPEncMeta.PayloadStart] = payloadStart;
+
+        int n = (int)pixels;
+        int exact = options.Exact ? 1 : 0;
+        await EncodeStreamAsync(
+            new StreamJob(width, height, options.Quality, a => _kernels.ToArgb(rgba, a, n, exact), Plane: false),
+            hostMeta, output);
+
+        _kernels.FinalizeFile(output, _meta.View);
+        CopyBlobs(blobs, output, icc, exif, xmp);
         await _accelerator.SynchronizeAsync();
 
-        var result = await meta.CopyToHostAsync();
+        var result = await _meta.View.CopyToHostAsync();
         if (result[WebPEncMeta.Error] != 0 || result[WebPEncMeta.Total] > output.Length)
             throw new InvalidOperationException(
                 $"WebP encode overflowed the output buffer (needed {result[WebPEncMeta.Total]} bytes, GetMaxEncodedSize said {maxSize}).");
@@ -513,5 +579,6 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
         _work.Dispose();
         _tokens.Dispose();
         _blobs.Dispose();
+        _rowCost.Dispose();
     }
 }

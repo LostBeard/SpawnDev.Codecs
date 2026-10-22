@@ -9,6 +9,7 @@
 //   3. Inverse transforms           subtract green (parallel), cross colour (parallel), colour indexing with pixel
 //                                   unbundling (parallel), predictor (sequential in raster order, see below).
 //   4. ToRgbaKernel     (1 thread per pixel)  ARGB -> RGBA8 bytes.
+//   4b. ALPH            AlphaGreen / AlphaCopy / AlphaUnfilter / AlphaPack: the alpha plane of a lossy image (see DecodeAlphaAsync).
 //   5. Animation        ClearKernel / CompositeKernel (1 thread per pixel) dispose + blend a frame onto the canvas,
 //                                   bit-exact with libwebp's WebPAnimDecoder.
 //
@@ -42,6 +43,10 @@ public sealed class WebPKernels : IDisposable
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, int, int, int, int> _predictor;
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, int, int, int, int, int> _colorIndex;
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<byte>> _toRgba;
+    private readonly Action<Index1D, ArrayView<uint>> _alphaGreen;
+    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<uint>> _alphaCopy;
+    private readonly Action<Index1D, ArrayView<uint>, int, int, int, int> _alphaUnfilter;
+    private readonly Action<Index1D, ArrayView<uint>, ArrayView<byte>> _alphaPack;
     private readonly Action<Index1D, ArrayView<byte>, int, int, int, int, int> _clearRect;
     private readonly Action<Index1D, ArrayView<byte>> _clearAll;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, int, int, int, int, int> _composite;
@@ -63,6 +68,12 @@ public sealed class WebPKernels : IDisposable
         _colorIndex = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, int, int, int, int, int>(ColorIndexKernel);
         _toRgba = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<uint>, ArrayView<byte>>(ToRgbaKernel);
+        _alphaGreen = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<uint>>(AlphaGreenKernel);
+        _alphaCopy = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, int, ArrayView<uint>>(AlphaCopyKernel);
+        _alphaUnfilter = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<uint>, int, int, int, int>(AlphaUnfilterKernel);
+        _alphaPack = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<uint>, ArrayView<byte>>(AlphaPackKernel);
         _clearRect = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, int, int, int, int, int>(ClearRectKernel);
         _clearAll = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>>(ClearAllKernel);
@@ -107,6 +118,29 @@ public sealed class WebPKernels : IDisposable
 
     /// <summary>ARGB pixels to RGBA8 bytes.</summary>
     public void ToRgba(ArrayView<uint> pix, ArrayView<byte> rgba, int count) => _toRgba(count, pix, rgba);
+
+    /// <summary>The alpha plane of a decoded VP8L alpha stream is its green channel: keep only that byte, in place.</summary>
+    public void AlphaGreen(ArrayView<uint> pix, int count) => _alphaGreen(count, pix);
+
+    /// <summary>Uncompressed ALPH data: <paramref name="count"/> bytes from <c>file[offset ..]</c> into the plane.</summary>
+    public void AlphaCopy(ArrayView<byte> file, int offset, ArrayView<uint> plane, int count) => _alphaCopy(count, file, offset, plane);
+
+    /// <summary>
+    /// Undo the ALPH prediction filter (1 horizontal, 2 vertical, 3 gradient; 0 = nothing) of a <paramref name="width"/> x
+    /// <paramref name="height"/> plane held one sample per uint, in place. Two dispatches for the separable filters (a short
+    /// serial edge pass, then every row / column in parallel); the gradient filter depends on its three causal neighbours in
+    /// both directions, so it is one thread in raster order (an anti-diagonal wavefront can replace it later).
+    /// </summary>
+    public void AlphaUnfilter(ArrayView<uint> plane, int width, int height, int filter)
+    {
+        if (filter == 0) return;
+        _alphaUnfilter(1, plane, width, height, filter, 0);
+        if (filter == 1) _alphaUnfilter(height, plane, width, height, filter, 1);
+        else if (filter == 2) _alphaUnfilter(width, plane, width, height, filter, 1);
+    }
+
+    /// <summary>One sample per uint to bytes.</summary>
+    public void AlphaPack(ArrayView<uint> plane, ArrayView<byte> output, int count) => _alphaPack(count, plane, output);
 
     /// <summary>Clear a rectangle of an RGBA8 canvas to transparent black.</summary>
     public void ClearRect(ArrayView<byte> canvas, int canvasWidth, int x, int y, int w, int h)
@@ -308,7 +342,8 @@ public sealed class WebPKernels : IDisposable
                     }
                     else if (fcc == FccIccp)
                     {
-                        if (meta[WebPMeta.IccOffset] < 0)
+                        bool wanted = meta[WebPMeta.IccOffset] < 0;
+                        if (wanted)
                         {
                             meta[WebPMeta.IccOffset] = payload;
                             meta[WebPMeta.IccLength] = len;
@@ -316,7 +351,8 @@ public sealed class WebPKernels : IDisposable
                     }
                     else if (fcc == FccExif)
                     {
-                        if (meta[WebPMeta.ExifOffset] < 0)
+                        bool wanted = meta[WebPMeta.ExifOffset] < 0;
+                        if (wanted)
                         {
                             meta[WebPMeta.ExifOffset] = payload;
                             meta[WebPMeta.ExifLength] = len;
@@ -325,7 +361,8 @@ public sealed class WebPKernels : IDisposable
                     }
                     else if (fcc == FccXmp)
                     {
-                        if (meta[WebPMeta.XmpOffset] < 0)
+                        bool wanted = meta[WebPMeta.XmpOffset] < 0;
+                        if (wanted)
                         {
                             meta[WebPMeta.XmpOffset] = payload;
                             meta[WebPMeta.XmpLength] = len;
@@ -366,6 +403,8 @@ public sealed class WebPKernels : IDisposable
                                 frames[fb + WebPMeta.FrFlags] = file[payload + 15];
                                 frames[fb + WebPMeta.FrKind] = 0;
                                 frames[fb + WebPMeta.FrHasAlpha] = 0;
+                                frames[fb + WebPMeta.FrAlphOffset] = 0;
+                                frames[fb + WebPMeta.FrAlphLength] = 0;
                                 bool inside = (fx + fw <= canvasW) & (fy + fh <= canvasH);
                                 if (!inside) err = (int)WebPError.CanvasMismatch;
 
@@ -395,6 +434,8 @@ public sealed class WebPKernels : IDisposable
                                             if (sf == FccAlph)
                                             {
                                                 sawAlph = 1;
+                                                frames[fb + WebPMeta.FrAlphOffset] = sPayload;
+                                                frames[fb + WebPMeta.FrAlphLength] = (int)ss;
                                             }
                                             else if (sf == FccVp8L)
                                             {
@@ -444,7 +485,13 @@ public sealed class WebPKernels : IDisposable
                     }
                     else if (fcc == FccAlph)
                     {
-                        meta[WebPMeta.HasAlph] = 1;
+                        // only an ALPH chunk BEFORE the image chunk belongs to it; the last one wins (libwebp ParseOptionalChunks)
+                        if ((stillKind == 0) & (animated == 0))
+                        {
+                            meta[WebPMeta.HasAlph] = 1;
+                            meta[WebPMeta.AlphOffset] = payload;
+                            meta[WebPMeta.AlphLength] = len;
+                        }
                     }
                     else if (fcc == FccVp8L)
                     {
@@ -742,6 +789,80 @@ public sealed class WebPKernels : IDisposable
         rgba[o + 1] = (byte)((p >> 8) & 0xFFu);
         rgba[o + 2] = (byte)(p & 0xFFu);
         rgba[o + 3] = (byte)(p >> 24);
+    }
+
+    // ------------------------------------------------------------------
+    // 4b. ALPH alpha plane (VP8X lossy images): the plane is held one sample per uint while it is unfiltered, so that
+    //     no two threads ever write bytes of the same word
+    // ------------------------------------------------------------------
+
+    private static void AlphaGreenKernel(Index1D index, ArrayView<uint> pix)
+    {
+        pix[index.X] = (pix[index.X] >> 8) & 0xFFu;
+    }
+
+    private static void AlphaCopyKernel(Index1D index, ArrayView<byte> file, int offset, ArrayView<uint> plane)
+    {
+        plane[index.X] = file[offset + index.X];
+    }
+
+    private static void AlphaPackKernel(Index1D index, ArrayView<uint> plane, ArrayView<byte> output)
+    {
+        output[index.X] = (byte)plane[index.X];
+    }
+
+    /// <summary>
+    /// libwebp filters.c: the predictor of (x, y) is the left sample (horizontal), the sample above (vertical) or
+    /// clip(left + above - aboveLeft) (gradient); the top row is always predicted from the left, the left column from above,
+    /// and (0, 0) from 0. Phase 0 is the serial edge pass (column 0 for horizontal, row 0 for vertical, everything for
+    /// gradient), phase 1 runs one thread per row (horizontal) or per column (vertical).
+    /// </summary>
+    private static void AlphaUnfilterKernel(Index1D index, ArrayView<uint> p, int width, int height, int filter, int phase)
+    {
+        int t = index.X;
+        if (filter == 1)
+        {
+            if (phase == 0)
+            {
+                for (int y = 1; y < height; y++)
+                    p[y * width] = (p[y * width] + p[(y - 1) * width]) & 0xFFu;
+            }
+            else
+            {
+                int row = t * width;
+                for (int x = 1; x < width; x++)
+                    p[row + x] = (p[row + x] + p[row + x - 1]) & 0xFFu;
+            }
+        }
+        else if (filter == 2)
+        {
+            if (phase == 0)
+            {
+                for (int x = 1; x < width; x++)
+                    p[x] = (p[x] + p[x - 1]) & 0xFFu;
+            }
+            else
+            {
+                for (int y = 1; y < height; y++)
+                    p[y * width + t] = (p[y * width + t] + p[(y - 1) * width + t]) & 0xFFu;
+            }
+        }
+        else if (filter == 3)
+        {
+            for (int x = 1; x < width; x++)
+                p[x] = (p[x] + p[x - 1]) & 0xFFu;
+            for (int y = 1; y < height; y++)
+            {
+                int row = y * width;
+                p[row] = (p[row] + p[row - width]) & 0xFFu;
+                for (int x = 1; x < width; x++)
+                {
+                    int g = (int)p[row + x - 1] + (int)p[row - width + x] - (int)p[row - width + x - 1];
+                    int pred = g < 0 ? 0 : (g > 255 ? 255 : g);
+                    p[row + x] = (p[row + x] + (uint)pred) & 0xFFu;
+                }
+            }
+        }
     }
 
     // ------------------------------------------------------------------

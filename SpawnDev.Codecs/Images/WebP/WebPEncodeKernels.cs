@@ -14,6 +14,7 @@
 //   9. BuildCodesKernel      (1 thread per code)    length-limited Huffman codes of the five prefix codes.
 //  10. EmitKernel            (1 thread)             header, transforms (sub-images), prefix codes, tokens -> bits.
 //  11. FinalizeKernel + CopyBlobKernel              RIFF / VP8X / chunk headers, ICCP / EXIF / XMP payloads.
+//  12. AlphaCost / AlphaPick / AlphaToArgb / AlphaRaw / FinalizeAlpha   ALPH chunk: filter choice, filtered plane, header byte.
 //
 // The transforms read only ORIGINAL pixels, so they are parallel; the bitstream (variable-length codes in one
 // stream) is a sequential dependency chain, hence the single-thread kernels - still accelerator-resident.
@@ -44,6 +45,11 @@ public sealed class WebPEncodeKernels : IDisposable
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _tileHist;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _cluster;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _buildGroupCodes;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _alphaCost;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _alphaPick;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<uint>, ArrayView<int>> _alphaToArgb;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _alphaRaw;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, int> _finalizeAlpha;
 
     /// <summary>Compile the kernels.</summary>
     public WebPEncodeKernels(Accelerator accelerator)
@@ -76,6 +82,14 @@ public sealed class WebPEncodeKernels : IDisposable
             Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(TileHistKernel);
         _cluster = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(ClusterKernel);
         _buildGroupCodes = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(BuildGroupCodesKernel);
+        _alphaCost = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(AlphaCostKernel);
+        _alphaPick = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(AlphaPickKernel);
+        _alphaToArgb = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<uint>, ArrayView<int>>(AlphaToArgbKernel);
+        _alphaRaw = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(AlphaRawKernel);
+        _finalizeAlpha = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, int>(FinalizeAlphaKernel);
     }
 
     // ------------------------------------------------------------------
@@ -134,6 +148,27 @@ public sealed class WebPEncodeKernels : IDisposable
 
     /// <summary>RIFF / VP8X / chunk headers and the total length.</summary>
     public void FinalizeFile(ArrayView<byte> output, ArrayView<int> meta) => _finalize(1, output, meta);
+
+    /// <summary>
+    /// Cost estimate of every ALPH filter (one thread per filter and row, written to <paramref name="rowCost"/>, 4 x height ints),
+    /// then the pick: the cheapest filter, or the requested one, lands in <see cref="WebPEncMeta.AlphaFilter"/>.
+    /// </summary>
+    public void AlphaPickFilter(ArrayView<byte> plane, ArrayView<int> rowCost, ArrayView<int> meta, int height)
+    {
+        _alphaCost(4 * height, plane, rowCost, meta);
+        _alphaPick(1, rowCost, meta);
+    }
+
+    /// <summary>The filtered alpha plane as an ARGB working image (alpha 255, green = residual).</summary>
+    public void AlphaToArgb(ArrayView<byte> plane, ArrayView<uint> argb, ArrayView<int> meta, int pixels)
+        => _alphaToArgb(pixels, plane, argb, meta);
+
+    /// <summary>The filtered alpha plane as raw bytes at <c>output[1 ..]</c> (ALPH compression method 0).</summary>
+    public void AlphaRaw(ArrayView<byte> plane, ArrayView<byte> output, ArrayView<int> meta, int pixels)
+        => _alphaRaw(pixels, plane, output, meta);
+
+    /// <summary>ALPH header byte at <c>output[0]</c> and the total length; <paramref name="raw"/> 1 = method 0.</summary>
+    public void FinalizeAlpha(ArrayView<byte> output, ArrayView<int> meta, int raw) => _finalizeAlpha(1, output, meta, raw);
 
     /// <summary>Copy <paramref name="count"/> blob bytes from <c>blobs[srcOffset ..]</c> to <c>output[meta[dstSlot] ..]</c>.</summary>
     public void CopyBlob(ArrayView<byte> blobs, ArrayView<byte> output, ArrayView<int> meta, int srcOffset, int count, int dstSlot)
@@ -596,11 +631,15 @@ public sealed class WebPEncodeKernels : IDisposable
         int build = meta[WebPEncMeta.RegionBuild];
         int ws = meta[WebPEncMeta.RegionWriter];
 
-        Vp8lEncodeGpu.PutBits(ref bw, output, 0x2Fu, 8);
-        Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(width - 1), 14);
-        Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(height - 1), 14);
-        Vp8lEncodeGpu.PutBits(ref bw, output, (uint)meta[WebPEncMeta.HasAlpha], 1);
-        Vp8lEncodeGpu.PutBits(ref bw, output, 0, 3);
+        // The 5-byte VP8L header (40 bits: byte aligned) is omitted for an ALPH stream, whose size comes from the VP8 frame.
+        if (meta[WebPEncMeta.Headerless] == 0)
+        {
+            Vp8lEncodeGpu.PutBits(ref bw, output, 0x2Fu, 8);
+            Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(width - 1), 14);
+            Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(height - 1), 14);
+            Vp8lEncodeGpu.PutBits(ref bw, output, (uint)meta[WebPEncMeta.HasAlpha], 1);
+            Vp8lEncodeGpu.PutBits(ref bw, output, 0, 3);
+        }
 
         int packedWidth = meta[WebPEncMeta.PackedWidth];
         if (palette > 0)
@@ -774,6 +813,139 @@ public sealed class WebPEncodeKernels : IDisposable
     {
         bool ok = meta[WebPEncMeta.Error] == 0;
         if (ok) output[meta[dstSlot] + index.X] = blobs[srcOffset + index.X];
+    }
+
+    // ------------------------------------------------------------------
+    // 12. ALPH: the alpha plane of a lossy image
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// ALPH prediction of sample (x, y) from the ORIGINAL plane (so every sample is independent): filter 1 = left, 2 = above,
+    /// 3 = clip(left + above - aboveLeft); the top row is predicted from the left, the left column from above, (0, 0) from 0.
+    /// </summary>
+    private static int AlphaPrediction(ArrayView<byte> p, int x, int y, int w, int filter)
+    {
+        int i = y * w + x;
+        bool notFirst = (x != 0) | (y != 0);
+        bool filtered = (filter != 0) & notFirst;
+        int pred = 0;
+        if (filtered)
+        {
+            if (y == 0)
+            {
+                pred = p[i - 1];
+            }
+            else if (x == 0)
+            {
+                pred = p[i - w];
+            }
+            else if (filter == 1)
+            {
+                pred = p[i - 1];
+            }
+            else if (filter == 2)
+            {
+                pred = p[i - w];
+            }
+            else
+            {
+                int g = (int)p[i - 1] + (int)p[i - w] - (int)p[i - w - 1];
+                pred = g < 0 ? 0 : (g > 255 ? 255 : g);
+            }
+        }
+        return pred;
+    }
+
+    /// <summary>Elias-gamma-like code length of a residual's signed magnitude: the smoother the filtered plane, the cheaper.</summary>
+    private static int AlphaResidualCost(int residual)
+    {
+        int m = residual < 128 ? residual : 256 - residual;
+        int bits = 0;
+        int t = m;
+        while (t > 0)
+        {
+            bits++;
+            t >>= 1;
+        }
+        return 1 + 2 * bits;
+    }
+
+    private static void AlphaCostKernel(Index1D index, ArrayView<byte> plane, ArrayView<int> rowCost, ArrayView<int> meta)
+    {
+        int w = meta[WebPEncMeta.Width];
+        int h = meta[WebPEncMeta.Height];
+        int filter = index.X / h;
+        int y = index.X - filter * h;
+        // keep the sum of all rows inside an int for planes of up to 2^28 samples
+        int shift = w > (1 << 26) / h ? 3 : 0; // w * h > 2^26 without a 64-bit product
+        int cost = 0;
+        for (int x = 0; x < w; x++)
+        {
+            int r = (plane[y * w + x] - AlphaPrediction(plane, x, y, w, filter)) & 0xFF;
+            cost += AlphaResidualCost(r);
+        }
+        rowCost[index.X] = cost >> shift;
+    }
+
+    private static void AlphaPickKernel(Index1D _, ArrayView<int> rowCost, ArrayView<int> meta)
+    {
+        int h = meta[WebPEncMeta.Height];
+        int request = meta[WebPEncMeta.AlphaFilterRequest];
+        int chosen = request;
+        if (request >= WebPEncMeta.AlphaAuto)
+        {
+            int best = 0;
+            int bestCost = int.MaxValue;
+            for (int f = 0; f < 4; f++)
+            {
+                int sum = 0;
+                for (int y = 0; y < h; y++) sum += rowCost[f * h + y];
+                if (sum < bestCost)
+                {
+                    bestCost = sum;
+                    best = f;
+                }
+            }
+            chosen = best;
+        }
+        meta[WebPEncMeta.AlphaFilter] = chosen;
+    }
+
+    private static void AlphaToArgbKernel(Index1D index, ArrayView<byte> plane, ArrayView<uint> argb, ArrayView<int> meta)
+    {
+        int w = meta[WebPEncMeta.Width];
+        int filter = meta[WebPEncMeta.AlphaFilter];
+        int i = index.X;
+        int y = i / w;
+        int x = i - y * w;
+        int r = (plane[i] - AlphaPrediction(plane, x, y, w, filter)) & 0xFF;
+        argb[i] = 0xff000000u | ((uint)r << 8);
+    }
+
+    private static void AlphaRawKernel(Index1D index, ArrayView<byte> plane, ArrayView<byte> output, ArrayView<int> meta)
+    {
+        int w = meta[WebPEncMeta.Width];
+        int filter = meta[WebPEncMeta.AlphaFilter];
+        int i = index.X;
+        int y = i / w;
+        int x = i - y * w;
+        output[1 + i] = (byte)((plane[i] - AlphaPrediction(plane, x, y, w, filter)) & 0xFF);
+    }
+
+    private static void FinalizeAlphaKernel(Index1D _, ArrayView<byte> o, ArrayView<int> meta, int raw)
+    {
+        int n = meta[WebPEncMeta.Width] * meta[WebPEncMeta.Height];
+        // The compressed stream is only allowed 1 + n bytes (its capacity): when it did not fit, the plane is stored raw instead
+        // and the overflow the writer flagged is not an error.
+        if (raw == 1) meta[WebPEncMeta.Error] = 0;
+        int total = 1 + (raw == 1 ? n : meta[WebPEncMeta.PayloadLength]);
+        meta[WebPEncMeta.Total] = total;
+        bool fits = (meta[WebPEncMeta.Error] == 0) & (total <= meta[WebPEncMeta.OutputCapacity]);
+        if (fits)
+        {
+            // Rsv:2 = 0 | P:2 = 0 (no pre-processing) | F:2 = filter | C:2 = 0 raw, 1 lossless
+            o[0] = (byte)((meta[WebPEncMeta.AlphaFilter] << 2) | (raw == 1 ? 0 : 1));
+        }
     }
 
     /// <summary>No-op (kernels are owned by the accelerator).</summary>

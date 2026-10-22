@@ -9,6 +9,9 @@ For every <dir>/<name>.webp:
   * the size is compared with libwebp's own lossless encode of the same pixels (method 4, quality 75) and reported
     as a ratio (only a catastrophic ratio fails: this is a sanity check, not a tight bound).
 
+Other sidecars switch the check: <name>.alpha8 (an ALPH test: the lossy file's alpha plane must equal it in libwebp AND in the
+pure-Python ALPH decoder),
+
 Prints one line per file ("OK name ours libwebp ratio" / "FAIL name reason") and exits 1 if any file failed.
 
 Run:   <venv>/python -I scripts/images/verify_webp_files.py <dir>
@@ -46,6 +49,21 @@ def main(d):
             if im.size != (w, h):
                 raise Exception("size %s != %dx%d" % (im.size, w, h))
             got = np.array(im.convert("RGBA"))
+            if os.path.exists(path + ".alpha8"):
+                # an ALPH test: <name>.webp is a lossy VP8X file whose ALPH chunk our encoder wrote. libwebp's alpha plane must
+                # equal the truth plane, and so must an independent pure-Python decode of the ALPH chunk (webp_ref).
+                want_a = np.frombuffer(open(path + ".alpha8", "rb").read(), np.uint8).reshape(h, w)
+                if not (got[..., 3] == want_a).all():
+                    ys, xs = np.nonzero(got[..., 3] != want_a)
+                    raise Exception("libwebp alpha mismatch at x=%d y=%d: got %d expected %d (%d samples differ)" % (
+                        xs[0], ys[0], got[ys[0], xs[0], 3], want_a[ys[0], xs[0]], len(xs)))
+                alph = [p for f, p in chunks(data) if f == b"ALPH"][0]
+                plane, st, hd = W.alpha_decode(alph, w, h)
+                if not (np.array(plane, np.uint8) == want_a).all():
+                    raise Exception("webp_ref ALPH decode differs from the truth")
+                print("STATS %s method=%d filter=%d pre=%d %s" % (name, hd["method"], hd["filter"], hd["pre"], st.summary() if st else "raw"))
+                print("OK %s %d 0 0.000" % (name, len(data)))
+                continue
             want = np.frombuffer(open(path + ".rgba8", "rb").read(), np.uint8).reshape(h, w, 4)
             if not (got == want).all():
                 ys, xs = np.nonzero((got != want).any(axis=2))

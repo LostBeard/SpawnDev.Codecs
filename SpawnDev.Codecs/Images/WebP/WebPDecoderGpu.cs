@@ -14,9 +14,11 @@
 // Supported: the RIFF container (simple VP8L files, VP8X extended files with ICCP / EXIF / XMP, ANIM / ANMF
 // animations), the complete VP8L lossless bitstream (all four transforms, colour cache, meta prefix codes,
 // LZ77 with the 120 short distance codes), animation compositing (blend + dispose) bit-exact with libwebp's
-// WebPAnimDecoder. Lossy VP8 chunks (and ALPH) are recognised and rejected with ImageDecodeException
-// ("lossy WebP not yet supported"); ReadInfo / ReadFrames still describe such files. The structure keeps the
-// image decode behind one switch on the payload kind, so a VP8 decoder plugs in next to VP8L.
+// WebPAnimDecoder. Lossy VP8 chunks are recognised and rejected with ImageDecodeException ("lossy WebP not yet
+// supported"); ReadInfo / ReadFrames still describe such files. The alpha plane of a lossy image (the ALPH chunk:
+// raw or VP8L-compressed, with the none / horizontal / vertical / gradient filters) IS decoded, by DecodeAlphaAsync,
+// so a VP8 decoder only has to supply the colour half. The structure keeps the image decode behind one switch on the
+// payload kind, so a VP8 decoder plugs in next to VP8L.
 //
 // DecodeAsync of an animated file returns its first frame (the canvas as it looks while frame 0 is shown);
 // ReadFramesAsync / DecodeFrameAsync give every frame.
@@ -136,6 +138,9 @@ public sealed class WebPDecoderGpu : IDisposable
         WebPError.TruncatedBitstream => "VP8L image data is truncated",
         WebPError.BadCacheIndex => "invalid colour cache index",
         WebPError.BadCodeLengths => "invalid prefix code lengths",
+        WebPError.NoAlphaChunk => "the image has no ALPH chunk (only a lossy image in a VP8X file carries one)",
+        WebPError.BadAlphaHeader => "invalid ALPH chunk (empty, or the compression method, pre-processing or reserved bits are invalid)",
+        WebPError.AlphaTruncated => "the uncompressed ALPH chunk holds fewer bytes than the plane needs",
         _ => error.ToString(),
     };
 
@@ -382,6 +387,19 @@ public sealed class WebPDecoderGpu : IDisposable
         ArrayView1D<byte, Stride1D.Dense> file, int payloadOffset, int payloadLength, int w, int h,
         ArrayView1D<byte, Stride1D.Dense> rgba)
     {
+        var cur = await DecodeVp8lPixelsAsync(file, payloadOffset, payloadLength, w, h);
+        _kernels.ToRgba(cur, rgba, w * h);
+    }
+
+    /// <summary>
+    /// Decode one VP8L stream and undo its transforms; returns the ARGB pixels (a view of one of the two pixel buffers,
+    /// valid until the next decode). The stream's 5-byte header (signature, size, alpha bit, version) is skipped, not read:
+    /// the container scan validated it, and an ALPH stream (which has no header) is passed 4 bytes early so the same 5-byte
+    /// skip lands on its first bit.
+    /// </summary>
+    private async Task<ArrayView<uint>> DecodeVp8lPixelsAsync(
+        ArrayView1D<byte, Stride1D.Dense> file, int payloadOffset, int payloadLength, int w, int h)
+    {
         int[] m;
         int poolCap = (int)Math.Min(_pool.View.Length, int.MaxValue);
         while (true)
@@ -431,7 +449,88 @@ public sealed class WebPDecoderGpu : IDisposable
                     break;
             }
         }
-        _kernels.ToRgba(cur, rgba, w * h);
+        return cur;
+    }
+
+    // ------------------------------------------------------------------
+    // ALPH: the alpha plane of a lossy image
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Decode the alpha plane (the ALPH chunk) of a lossy WebP that is on the accelerator into a caller-owned view of
+    /// width x height bytes (one byte per pixel, rows top to bottom). Handles both ALPH compression methods (raw, and the
+    /// VP8L-compressed one with every transform) and the none / horizontal / vertical / gradient prediction filters; the
+    /// plane is produced entirely on the accelerator. The VP8 (colour) part of the file is not touched, so this works
+    /// before a lossy decoder exists and is the alpha half of one when it does.
+    /// </summary>
+    /// <param name="file">The WebP file bytes (may be longer than <paramref name="fileLength"/>).</param>
+    /// <param name="fileLength">Number of valid bytes in <paramref name="file"/>.</param>
+    /// <param name="alpha">Receives the plane; at least width x height bytes.</param>
+    /// <param name="frameIndex">The animation frame whose ALPH chunk is decoded (0 for a still image).</param>
+    /// <returns>The frame: its size is the size of the plane.</returns>
+    /// <exception cref="ImageDecodeException">There is no ALPH chunk for the image, or it is malformed.</exception>
+    public async Task<ImageFrameInfo> DecodeAlphaAsync(
+        ArrayView1D<byte, Stride1D.Dense> file, int fileLength, ArrayView1D<byte, Stride1D.Dense> alpha, int frameIndex = 0)
+    {
+        var layout = await ScanAsync(file, fileLength);
+        return await DecodeAlphaCoreAsync(file, layout, frameIndex, alpha);
+    }
+
+    private async Task<ImageFrameInfo> DecodeAlphaCoreAsync(
+        ArrayView1D<byte, Stride1D.Dense> file, Layout l, int frameIndex, ArrayView1D<byte, Stride1D.Dense> alpha)
+    {
+        if (frameIndex < 0 || frameIndex >= Math.Max(1, l.FrameCount))
+            throw new ArgumentOutOfRangeException(nameof(frameIndex), $"The file has {Math.Max(1, l.FrameCount)} frame(s).");
+        int w, h, kind, off, len;
+        if (l.Animated)
+        {
+            w = l.FrameField(frameIndex, WebPMeta.FrW);
+            h = l.FrameField(frameIndex, WebPMeta.FrH);
+            kind = l.FrameField(frameIndex, WebPMeta.FrKind);
+            off = l.FrameField(frameIndex, WebPMeta.FrAlphOffset);
+            len = l.FrameField(frameIndex, WebPMeta.FrAlphLength);
+        }
+        else
+        {
+            w = l.Width;
+            h = l.Height;
+            kind = l.StillKind;
+            off = l.Meta[WebPMeta.AlphOffset];
+            len = l.Meta[WebPMeta.AlphLength];
+        }
+        var frame = ToFrameInfos(l)[frameIndex];
+        if (kind != 3) throw Error(WebPError.NoAlphaChunk);
+        long n = (long)w * h;
+        if (alpha.Length < n)
+            throw new ArgumentException($"alpha must hold {n} bytes for {w}x{h}.", nameof(alpha));
+        if (len < 2) throw Error(WebPError.BadAlphaHeader);
+
+        int header = (await file.SubView(off, 1).CopyToHostAsync())[0];
+        int method = header & WebPMeta.AlphMethodMask;
+        int filter = (header >> WebPMeta.AlphFilterShift) & 3;
+        int preprocessing = (header >> WebPMeta.AlphPreprocessShift) & 3;
+        int reserved = header >> WebPMeta.AlphReservedShift;
+        // libwebp (alpha_dec.c ALPHInit) rejects exactly these; pre-processing 1 (level reduction) needs nothing from the decoder
+        if (method > 1 || preprocessing > 1 || reserved != 0) throw Error(WebPError.BadAlphaHeader);
+        if (method == 0 && len - 1 < n) throw Error(WebPError.AlphaTruncated);
+
+        EnsureDecodeBuffers(w, h, w, h);
+        ArrayView<uint> plane;
+        if (method == 0)
+        {
+            plane = _pixA.View;
+            _kernels.AlphaCopy(file, off + 1, plane, (int)n);
+        }
+        else
+        {
+            // The stream has no VP8L header: it starts right after the ALPH header byte (see DecodeVp8lPixelsAsync).
+            plane = await DecodeVp8lPixelsAsync(file, off - 4, len + 4, w, h);
+            _kernels.AlphaGreen(plane, (int)n);
+        }
+        _kernels.AlphaUnfilter(plane, w, h, filter);
+        _kernels.AlphaPack(plane, alpha, (int)n);
+        await _accelerator.SynchronizeAsync();
+        return frame;
     }
 
     // ------------------------------------------------------------------
@@ -500,6 +599,32 @@ public sealed class WebPDecoderGpu : IDisposable
         return new DecodedImage(info, pixels, PixelFormat.Rgba8);
     }
 
+    /// <summary>
+    /// Decode the alpha plane (ALPH chunk) of a managed lossy WebP file; see
+    /// <see cref="DecodeAlphaAsync(ArrayView1D{byte, Stride1D.Dense}, int, ArrayView1D{byte, Stride1D.Dense}, int)"/>.
+    /// Returns the plane as a managed array (a terminal CPU sink; in a browser prefer the <see cref="TypedArray"/> overload).
+    /// </summary>
+    public async Task<WebPAlphaPlane> DecodeAlphaAsync(ReadOnlyMemory<byte> file, int frameIndex = 0)
+    {
+        StageManaged(file);
+        var (frame, count) = await DecodeAlphaToStageAsync(file.Length, frameIndex);
+        var plane = await DeviceTransfer.DownloadAsync(_stageOut.View, count);
+        return new WebPAlphaPlane(frame.Width, frame.Height, plane);
+    }
+
+    private async Task<(ImageFrameInfo Frame, long Count)> DecodeAlphaToStageAsync(int fileLength, int frameIndex)
+    {
+        var layout = await ScanAsync(_stageIn.View, fileLength);
+        if (frameIndex < 0 || frameIndex >= Math.Max(1, layout.FrameCount))
+            throw new ArgumentOutOfRangeException(nameof(frameIndex), $"The file has {Math.Max(1, layout.FrameCount)} frame(s).");
+        long count = layout.Animated
+            ? (long)layout.FrameField(frameIndex, WebPMeta.FrW) * layout.FrameField(frameIndex, WebPMeta.FrH)
+            : (long)layout.Width * layout.Height;
+        _stageOut.Ensure(count);
+        var frame = await DecodeAlphaCoreAsync(_stageIn.View, layout, frameIndex, _stageOut.View);
+        return (frame, count);
+    }
+
     // ------------------------------------------------------------------
     // TypedArray overloads (browser: bulk bytes stay in JS)
     // ------------------------------------------------------------------
@@ -527,6 +652,20 @@ public sealed class WebPDecoderGpu : IDisposable
     {
         int length = StageTyped(file);
         return await ReadFramesAsync(_stageIn.View, length);
+    }
+
+    /// <summary>
+    /// Decode the alpha plane (ALPH chunk) of a lossy WebP held in a JS typed array (browser accelerators only). The bytes go
+    /// to the GPU with <c>CopyFromJS</c> and the plane comes back as a JS <see cref="Uint8Array"/>; none of it enters the .NET
+    /// heap. The caller disposes the result.
+    /// </summary>
+    [SupportedOSPlatform("browser")]
+    public async Task<WebPAlphaPlaneJS> DecodeAlphaAsync(TypedArray file, int frameIndex = 0)
+    {
+        int length = StageTyped(file);
+        var (frame, count) = await DecodeAlphaToStageAsync(length, frameIndex);
+        var plane = await DeviceTransfer.DownloadUint8ArrayAsync(_stageOut.View, count);
+        return new WebPAlphaPlaneJS(frame.Width, frame.Height, plane);
     }
 
     /// <summary>

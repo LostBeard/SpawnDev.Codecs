@@ -1,46 +1,46 @@
-flat_32x24	still	32	24	0	1	1	flat_32x24	xf[I3] cache=0 meta=0 groups=1/1 lit=96 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1
-flat_alpha_16x16	still	16	16	1	1	1	flat_alpha_16x16	xf[I3] cache=0 meta=0 groups=1/1 lit=32 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1
-flat_transparent_20x9	still	20	9	1	1	1	flat_transparent_20x9	xf[I3] cache=0 meta=0 groups=1/1 lit=27 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1
-two_color_70x45	still	70	45	0	1	1	two_color_70x45	xf[I3] cache=0 meta=0 groups=1/1 lit=405 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=2 bundle=3 codes=normal/simple1
-pal3_53x29	still	53	29	0	1	1	pal3_53x29	xf[I2] cache=0 meta=0 groups=1/1 lit=406 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=3 bundle=2 codes=normal/simple1
-pal4_64x40	still	64	40	0	1	1	pal4_64x40	xf[I2] cache=0 meta=0 groups=1/1 lit=640 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=4 bundle=2 codes=normal/simple1
-pal5_47x31	still	47	31	0	1	1	pal5_47x31	xf[I1] cache=0 meta=0 groups=1/1 lit=744 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=5 bundle=1 codes=normal/simple1
-pal16_61x33	still	61	33	0	1	1	pal16_61x33	xf[I1] cache=0 meta=0 groups=1/1 lit=1023 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=16 bundle=1 codes=normal/simple1
-pal16_smooth_100x30	still	100	30	0	1	1	pal16_smooth_100x30	xf[I1] cache=0 meta=0 groups=1/1 lit=68 cache_hits=0 copies=31 short=1 far=3 pred_modes= pal=16 bundle=1 codes=normal/simple1
-pal17_59x37	still	59	37	0	1	1	pal17_59x37	xf[I0] cache=0 meta=0 groups=1/1 lit=2183 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=17 bundle=0 codes=normal/simple1
-pal100_80x50	still	80	50	0	1	1	pal100_80x50	xf[I0] cache=0 meta=0 groups=1/1 lit=4000 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=100 bundle=0 codes=normal/simple1
-pal256_90x70	still	90	70	0	1	1	pal256_90x70	xf[I0] cache=0 meta=0 groups=1/1 lit=6300 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=256 bundle=0 codes=normal/simple1
-pal12_alpha_50x40	still	50	40	1	1	1	pal12_alpha_50x40	xf[I0] cache=0 meta=0 groups=1/1 lit=1890 cache_hits=0 copies=27 short=3 far=24 pred_modes= pal=48 bundle=0 codes=normal/simple1
-grad_h_128x32	still	128	32	0	1	1	grad_h_128x32	xf[G,P9] cache=0 meta=0 groups=1/1 lit=3 cache_hits=0 copies=2 short=1 far=0 pred_modes=2 pal=0 bundle=0 codes=normal/simple1
-grad_v_32x128	still	32	128	0	1	1	grad_v_32x128	xf[G,P9] cache=0 meta=0 groups=1/1 lit=2 cache_hits=0 copies=2 short=2 far=0 pred_modes=1 pal=0 bundle=0 codes=normal/simple1/simple2
-grad_diag_64x64	still	64	64	0	1	1	grad_diag_64x64	xf[G,P9,C3] cache=0 meta=0 groups=1/1 lit=12 cache_hits=0 copies=9 short=3 far=4 pred_modes=1 pal=0 bundle=0 codes=normal/simple1/simple2
-mosaic_96x72	still	96	72	0	1	1	mosaic_96x72	xf[G,P3,C3] cache=1 meta=3 groups=2/2 lit=2827 cache_hits=96 copies=267 short=23 far=44 pred_modes=012346789abc pal=0 bundle=0 codes=normal/simple1
-mosaic_200x150_m6	still	200	150	0	1	1	mosaic_200x150_m6	xf[G,P2,C2] cache=2 meta=2 groups=3/3 lit=10227 cache_hits=271 copies=685 short=34 far=278 pred_modes=0123456789abcd pal=0 bundle=0 codes=normal/simple1
-mosaic_200x150_m0	still	200	150	0	1	1	mosaic_200x150_m6	xf[G,P6] cache=0 meta=0 groups=1/1 lit=10282 cache_hits=0 copies=739 short=25 far=398 pred_modes=b pal=0 bundle=0 codes=normal/simple1
-photo_80x60_m0	still	80	60	0	1	1	photo_80x60	xf[G,P6] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=b pal=0 bundle=0 codes=normal/simple1
-photo_80x60_m1	still	80	60	0	1	1	photo_80x60	xf[P6,C9] cache=0 meta=6 groups=2/2 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=6a pal=0 bundle=0 codes=normal/simple1
-photo_80x60_m2	still	80	60	0	1	1	photo_80x60	xf[P5,C9] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=68a pal=0 bundle=0 codes=normal/simple1
-photo_80x60_m3	still	80	60	0	1	1	photo_80x60	xf[P4,C4] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=68a pal=0 bundle=0 codes=normal/simple1
-photo_80x60_m4	still	80	60	0	1	1	photo_80x60	xf[P3,C3] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=68a pal=0 bundle=0 codes=normal/simple1
-photo_80x60_m5	still	80	60	0	1	1	photo_80x60	xf[P2,C2] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=124678a pal=0 bundle=0 codes=normal/simple1
-photo_80x60_m6	still	80	60	0	1	1	photo_80x60	xf[P2,C2] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=124678a pal=0 bundle=0 codes=normal/simple1
-photo_q100_80x60	still	80	60	0	1	1	photo_80x60	xf[P2,C2] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=124678a pal=0 bundle=0 codes=normal/simple1
-photo_q0_80x60	still	80	60	0	1	1	photo_80x60	xf[G,P6] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=b pal=0 bundle=0 codes=normal/simple1
-alpha_random_64x40	still	64	40	1	1	1	alpha_random_64x40	xf[P3,C3] cache=0 meta=0 groups=1/1 lit=2560 cache_hits=0 copies=0 short=0 far=0 pred_modes=4678a pal=0 bundle=0 codes=normal/simple1
-alpha_random_m6_64x40	still	64	40	1	1	1	alpha_random_m6_64x40	xf[P2,C2] cache=0 meta=0 groups=1/1 lit=2560 cache_hits=0 copies=0 short=0 far=0 pred_modes=1246789a pal=0 bundle=0 codes=normal/simple1
-cache_heavy_80x60	still	80	60	0	1	1	cache_heavy_80x60	xf[G] cache=10 meta=0 groups=1/1 lit=543 cache_hits=2461 copies=465 short=33 far=380 pred_modes= pal=0 bundle=0 codes=normal/simple1
-one_pixel_1x1	still	1	1	0	1	1	one_pixel_1x1	xf[I3] cache=0 meta=0 groups=1/1 lit=1 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1
-one_pixel_alpha_1x1	still	1	1	1	1	1	one_pixel_alpha_1x1	xf[I3] cache=0 meta=0 groups=1/1 lit=1 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1
-tall_1x37	still	1	37	0	1	1	tall_1x37	xf[I0] cache=0 meta=0 groups=1/1 lit=37 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=37 bundle=0 codes=normal/simple1
-wide_41x1	still	41	1	0	1	1	wide_41x1	xf[I0] cache=0 meta=0 groups=1/1 lit=41 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=41 bundle=0 codes=normal/simple1
-odd_13x7	still	13	7	0	1	1	odd_13x7	xf[I0] cache=0 meta=0 groups=1/1 lit=91 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=91 bundle=0 codes=normal/simple1
-odd_255x3	still	255	3	0	1	1	odd_255x3	xf[P3,C3] cache=0 meta=0 groups=1/1 lit=765 cache_hits=0 copies=0 short=0 far=0 pred_modes=236789abcd pal=0 bundle=0 codes=normal/simple1
-odd_3x255	still	3	255	0	1	1	odd_3x255	xf[P3,C3] cache=0 meta=0 groups=1/1 lit=765 cache_hits=0 copies=0 short=0 far=0 pred_modes=13469 pal=0 bundle=0 codes=normal/simple1
-odd_17x19_m6	still	17	19	0	1	1	odd_17x19_m6	xf[I0] cache=1 meta=0 groups=1/1 lit=193 cache_hits=17 copies=26 short=4 far=0 pred_modes= pal=184 bundle=0 codes=normal/simple1
-large_1024x768	still	1024	768	0	1	1	large_1024x768	xf[P5,C5] cache=6 meta=5 groups=3/3 lit=2836 cache_hits=3010 copies=3686 short=71 far=633 pred_modes=1234bc pal=0 bundle=0 codes=normal/simple1
-meta_icc_exif_xmp_32x24	still	32	24	0	1	6	meta_icc_exif_xmp_32x24	xf[P3,C3] cache=0 meta=0 groups=1/1 lit=768 cache_hits=0 copies=0 short=0 far=0 pred_modes=78a pal=0 bundle=0 codes=normal/simple1
-meta_exif_alpha_40x30	still	40	30	1	1	3	meta_exif_alpha_40x30	xf[P3,C3] cache=0 meta=0 groups=1/1 lit=1200 cache_hits=0 copies=0 short=0 far=0 pred_modes=267a pal=0 bundle=0 codes=normal/simple1
-meta_xmp_only_16x16	still	16	16	0	1	1	meta_xmp_only_16x16	xf[P9,C9] cache=0 meta=0 groups=1/1 lit=256 cache_hits=0 copies=0 short=0 far=0 pred_modes=1 pal=0 bundle=0 codes=normal/simple1
+flat_32x24	still	32	24	0	1	1	flat_32x24	xf[I3] cache=0 meta=0 groups=1/1 lit=96 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1 cc_nz=0/0
+flat_alpha_16x16	still	16	16	1	1	1	flat_alpha_16x16	xf[I3] cache=0 meta=0 groups=1/1 lit=32 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1 cc_nz=0/0
+flat_transparent_20x9	still	20	9	1	1	1	flat_transparent_20x9	xf[I3] cache=0 meta=0 groups=1/1 lit=27 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1 cc_nz=0/0
+two_color_70x45	still	70	45	0	1	1	two_color_70x45	xf[I3] cache=0 meta=0 groups=1/1 lit=405 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=2 bundle=3 codes=normal/simple1 cc_nz=0/0
+pal3_53x29	still	53	29	0	1	1	pal3_53x29	xf[I2] cache=0 meta=0 groups=1/1 lit=406 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=3 bundle=2 codes=normal/simple1 cc_nz=0/0
+pal4_64x40	still	64	40	0	1	1	pal4_64x40	xf[I2] cache=0 meta=0 groups=1/1 lit=640 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=4 bundle=2 codes=normal/simple1 cc_nz=0/0
+pal5_47x31	still	47	31	0	1	1	pal5_47x31	xf[I1] cache=0 meta=0 groups=1/1 lit=744 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=5 bundle=1 codes=normal/simple1 cc_nz=0/0
+pal16_61x33	still	61	33	0	1	1	pal16_61x33	xf[I1] cache=0 meta=0 groups=1/1 lit=1023 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=16 bundle=1 codes=normal/simple1 cc_nz=0/0
+pal16_smooth_100x30	still	100	30	0	1	1	pal16_smooth_100x30	xf[I1] cache=0 meta=0 groups=1/1 lit=68 cache_hits=0 copies=31 short=1 far=3 pred_modes= pal=16 bundle=1 codes=normal/simple1 cc_nz=0/0
+pal17_59x37	still	59	37	0	1	1	pal17_59x37	xf[I0] cache=0 meta=0 groups=1/1 lit=2183 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=17 bundle=0 codes=normal/simple1 cc_nz=0/0
+pal100_80x50	still	80	50	0	1	1	pal100_80x50	xf[I0] cache=0 meta=0 groups=1/1 lit=4000 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=100 bundle=0 codes=normal/simple1 cc_nz=0/0
+pal256_90x70	still	90	70	0	1	1	pal256_90x70	xf[I0] cache=0 meta=0 groups=1/1 lit=6300 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=256 bundle=0 codes=normal/simple1 cc_nz=0/0
+pal12_alpha_50x40	still	50	40	1	1	1	pal12_alpha_50x40	xf[I0] cache=0 meta=0 groups=1/1 lit=1890 cache_hits=0 copies=27 short=3 far=24 pred_modes= pal=48 bundle=0 codes=normal/simple1 cc_nz=0/0
+grad_h_128x32	still	128	32	0	1	1	grad_h_128x32	xf[G,P9] cache=0 meta=0 groups=1/1 lit=3 cache_hits=0 copies=2 short=1 far=0 pred_modes=2 pal=0 bundle=0 codes=normal/simple1 cc_nz=0/0
+grad_v_32x128	still	32	128	0	1	1	grad_v_32x128	xf[G,P9] cache=0 meta=0 groups=1/1 lit=2 cache_hits=0 copies=2 short=2 far=0 pred_modes=1 pal=0 bundle=0 codes=normal/simple1/simple2 cc_nz=0/0
+grad_diag_64x64	still	64	64	0	1	1	grad_diag_64x64	xf[G,P9,C3] cache=0 meta=0 groups=1/1 lit=12 cache_hits=0 copies=9 short=3 far=4 pred_modes=1 pal=0 bundle=0 codes=normal/simple1/simple2 cc_nz=64/64
+mosaic_96x72	still	96	72	0	1	1	mosaic_96x72	xf[G,P3,C3] cache=1 meta=3 groups=2/2 lit=2827 cache_hits=96 copies=267 short=23 far=44 pred_modes=012346789abc pal=0 bundle=0 codes=normal/simple1 cc_nz=81/108
+mosaic_200x150_m6	still	200	150	0	1	1	mosaic_200x150_m6	xf[G,P2,C2] cache=2 meta=2 groups=3/3 lit=10227 cache_hits=271 copies=685 short=34 far=278 pred_modes=0123456789abcd pal=0 bundle=0 codes=normal/simple1 cc_nz=943/1900
+mosaic_200x150_m0	still	200	150	0	1	1	mosaic_200x150_m6	xf[G,P6] cache=0 meta=0 groups=1/1 lit=10282 cache_hits=0 copies=739 short=25 far=398 pred_modes=b pal=0 bundle=0 codes=normal/simple1 cc_nz=0/0
+photo_80x60_m0	still	80	60	0	1	1	photo_80x60	xf[G,P6] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=b pal=0 bundle=0 codes=normal/simple1 cc_nz=0/0
+photo_80x60_m1	still	80	60	0	1	1	photo_80x60	xf[P6,C9] cache=0 meta=6 groups=2/2 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=6a pal=0 bundle=0 codes=normal/simple1 cc_nz=0/1
+photo_80x60_m2	still	80	60	0	1	1	photo_80x60	xf[P5,C9] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=68a pal=0 bundle=0 codes=normal/simple1 cc_nz=0/1
+photo_80x60_m3	still	80	60	0	1	1	photo_80x60	xf[P4,C4] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=68a pal=0 bundle=0 codes=normal/simple1 cc_nz=4/20
+photo_80x60_m4	still	80	60	0	1	1	photo_80x60	xf[P3,C3] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=68a pal=0 bundle=0 codes=normal/simple1 cc_nz=11/80
+photo_80x60_m5	still	80	60	0	1	1	photo_80x60	xf[P2,C2] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=124678a pal=0 bundle=0 codes=normal/simple1 cc_nz=40/300
+photo_80x60_m6	still	80	60	0	1	1	photo_80x60	xf[P2,C2] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=124678a pal=0 bundle=0 codes=normal/simple1 cc_nz=40/300
+photo_q100_80x60	still	80	60	0	1	1	photo_80x60	xf[P2,C2] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=124678a pal=0 bundle=0 codes=normal/simple1 cc_nz=40/300
+photo_q0_80x60	still	80	60	0	1	1	photo_80x60	xf[G,P6] cache=0 meta=0 groups=1/1 lit=4800 cache_hits=0 copies=0 short=0 far=0 pred_modes=b pal=0 bundle=0 codes=normal/simple1 cc_nz=0/0
+alpha_random_64x40	still	64	40	1	1	1	alpha_random_64x40	xf[P3,C3] cache=0 meta=0 groups=1/1 lit=2560 cache_hits=0 copies=0 short=0 far=0 pred_modes=4678a pal=0 bundle=0 codes=normal/simple1 cc_nz=31/40
+alpha_random_m6_64x40	still	64	40	1	1	1	alpha_random_m6_64x40	xf[P2,C2] cache=0 meta=0 groups=1/1 lit=2560 cache_hits=0 copies=0 short=0 far=0 pred_modes=1246789a pal=0 bundle=0 codes=normal/simple1 cc_nz=38/160
+cache_heavy_80x60	still	80	60	0	1	1	cache_heavy_80x60	xf[G] cache=10 meta=0 groups=1/1 lit=543 cache_hits=2461 copies=465 short=33 far=380 pred_modes= pal=0 bundle=0 codes=normal/simple1 cc_nz=0/0
+one_pixel_1x1	still	1	1	0	1	1	one_pixel_1x1	xf[I3] cache=0 meta=0 groups=1/1 lit=1 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1 cc_nz=0/0
+one_pixel_alpha_1x1	still	1	1	1	1	1	one_pixel_alpha_1x1	xf[I3] cache=0 meta=0 groups=1/1 lit=1 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1 cc_nz=0/0
+tall_1x37	still	1	37	0	1	1	tall_1x37	xf[I0] cache=0 meta=0 groups=1/1 lit=37 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=37 bundle=0 codes=normal/simple1 cc_nz=0/0
+wide_41x1	still	41	1	0	1	1	wide_41x1	xf[I0] cache=0 meta=0 groups=1/1 lit=41 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=41 bundle=0 codes=normal/simple1 cc_nz=0/0
+odd_13x7	still	13	7	0	1	1	odd_13x7	xf[I0] cache=0 meta=0 groups=1/1 lit=91 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=91 bundle=0 codes=normal/simple1 cc_nz=0/0
+odd_255x3	still	255	3	0	1	1	odd_255x3	xf[P3,C3] cache=0 meta=0 groups=1/1 lit=765 cache_hits=0 copies=0 short=0 far=0 pred_modes=236789abcd pal=0 bundle=0 codes=normal/simple1 cc_nz=21/32
+odd_3x255	still	3	255	0	1	1	odd_3x255	xf[P3,C3] cache=0 meta=0 groups=1/1 lit=765 cache_hits=0 copies=0 short=0 far=0 pred_modes=13469 pal=0 bundle=0 codes=normal/simple1 cc_nz=26/32
+odd_17x19_m6	still	17	19	0	1	1	odd_17x19_m6	xf[I0] cache=1 meta=0 groups=1/1 lit=193 cache_hits=17 copies=26 short=4 far=0 pred_modes= pal=184 bundle=0 codes=normal/simple1 cc_nz=0/0
+large_1024x768	still	1024	768	0	1	1	large_1024x768	xf[P5,C5] cache=6 meta=5 groups=3/3 lit=2836 cache_hits=3010 copies=3686 short=71 far=633 pred_modes=1234bc pal=0 bundle=0 codes=normal/simple1 cc_nz=252/768
+meta_icc_exif_xmp_32x24	still	32	24	0	1	6	meta_icc_exif_xmp_32x24	xf[P3,C3] cache=0 meta=0 groups=1/1 lit=768 cache_hits=0 copies=0 short=0 far=0 pred_modes=78a pal=0 bundle=0 codes=normal/simple1 cc_nz=12/12
+meta_exif_alpha_40x30	still	40	30	1	1	3	meta_exif_alpha_40x30	xf[P3,C3] cache=0 meta=0 groups=1/1 lit=1200 cache_hits=0 copies=0 short=0 far=0 pred_modes=267a pal=0 bundle=0 codes=normal/simple1 cc_nz=7/20
+meta_xmp_only_16x16	still	16	16	0	1	1	meta_xmp_only_16x16	xf[P9,C9] cache=0 meta=0 groups=1/1 lit=256 cache_hits=0 copies=0 short=0 far=0 pred_modes=1 pal=0 bundle=0 codes=normal/simple1 cc_nz=0/1
 lossy_32x32	lossy	32	32	0	1	1	-	-
 lossy_rgb_32x32	lossy	32	32	0	1	1	-	-
 anim_blend_dispose_64x48	anim	64	48	1	6	1	anim_blend_dispose_64x48	frames=6
