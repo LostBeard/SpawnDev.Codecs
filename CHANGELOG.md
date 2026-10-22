@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Image codecs: BMP and GIF (2026-10-22)
+- **`BmpDecoderGpu` / `BmpEncoderGpu`** (`SpawnDev.Codecs.Images.Bmp`): 1/4/8/16/24/32 bpp, RLE4/RLE8, bitfields, V2..V5 headers; encode Bgra32 / Bgr24 / Indexed8 (exact palette found on the accelerator). Three overloads each; tests against generated fixtures and, for the encoder, Pillow as the independent oracle.
+- **`GifDecoderGpu`** (`SpawnDev.Codecs.Images.Gif`): variable-width LZW (min code size 2..8, clear / end codes, deferred clear, KwKwK) with one GPU thread per frame and frames in parallel, interlace, local / global / identity-gray palettes, transparency, disposal 0..7, partial / clipped frames, NETSCAPE loop count (`ReadLoopCountAsync`), comment / application / plain-text extensions skipped, 87a and 89a. Animation API: `ReadFramesAsync`, `DecodeFrameAsync(k)` (full canvas while frame k is shown; compositing is a kernel). Three overloads each. `Compositing` property: `GifCompositing.Pillow` (default, bit-exact with Pillow 13 `Image.seek(k)` + `convert("RGBA")` incl. its quirks) or `GifCompositing.Web` (browser rules). Specific `ImageDecodeException` reasons for truncation, bad blocks, bad LZW codes, early end, a frame larger than its data can describe.
+- Tests: ~165 fixtures from `scripts/images/make_gif_fixtures.py` (hostile streams, Pillow-written files, 64 random animations) with a per-frame Pillow truth and a spec truth; the bulk test `GifDecoderGpu_FuzzDirectory_MatchesPillow` compared 2500 random animations (11247 frames) with Pillow exactly. Browser TypedArray overloads are not run on the desktop lane.
+
 ### Three-overload boundary, VP8 first (2026-10-22)
 - **Reference bump:** `SpawnDev.ILGPU` 5.2.17 -> 5.4.2, `SpawnDev.SpawnJS.Blazor` 2.1.19 -> 3.0.4 (`SpawnDev.UnitTesting.Browser` 2.7.0 and `SpawnDev.EBML` 3.0.1 are already the newest).
 - **New `DeviceTransfer`** (public static): the one place codec entry points move bytes between managed memory / JS typed arrays and accelerator buffers (`Upload` from `ReadOnlySpan<byte>` with no staging copy, `Upload` from a `TypedArray` via `IBrowserMemoryBuffer.CopyFromJS`, `DownloadAsync`, `DownloadUint8ArrayAsync`).
