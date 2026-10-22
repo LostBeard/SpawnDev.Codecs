@@ -1,0 +1,1 @@
+{"width": 11, "height": 7, "loop": null, "exactFrames": true, "pillow": "ok", "web": true, "hasTransparentIndex": true, "hasAlphaWeb": true, "frames": [{"x": 6, "y": 0, "w": 5, "h": 4, "delayMs": 110, "dispose": "None", "blend": "Source", "interlaced": true}, {"x": 2, "y": 1, "w": 8, "h": 3, "delayMs": 280, "dispose": "None", "blend": "Over", "interlaced": false}]}

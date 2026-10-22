@@ -111,3 +111,19 @@ Task<ImageInfo> DecodeFrameAsync(ArrayView1D<byte, Stride1D.Dense> file, int fil
 frames 0..frameIndex are decoded and composited on the accelerator honouring each frame's `Blend` and the previous frames'
 `Dispose` (compositing is a kernel; the canvas never visits the host). A decoder may keep the last canvas to make
 sequential access O(1) per frame; random access may re-composite from frame 0.
+
+### GIF (first animated format; APNG / WebP follow the same shape)
+
+* `GifDecoderGpu.ReadFramesAsync` / `DecodeFrameAsync` exactly as above; the loop count has no shared type yet, so
+  `ReadLoopCountAsync` (three overloads) returns the NETSCAPE value (0 = forever, -1 = no extension before the first image).
+  When APNG / WebP land, `num_plays` / loop count should join `ImageInfo` and `ReadLoopCountAsync` can forward to it.
+* `GifDecoderGpu.Compositing` (`GifCompositing.Pillow` default, `.Web`): the decoder is bit-exact with Pillow 13
+  (`Image.seek(k)` + `convert("RGBA")`) in `Pillow` mode, including Pillow's own quirks (sticky disposal, palette colour kept
+  under alpha 0, background-colour disposal fill, identity-ramp palettes read as gray); `Web` is what browsers show.
+  Frames that extend past the logical screen are clipped in both (Pillow grows its canvas, so no Pillow truth exists for them).
+* Compositing is planned on the host as a few ints per frame and executed by one kernel (`OpFillRect / OpFillCanvas / OpSave /
+  OpRestore / OpDraw`); LZW is one thread per frame, frames in parallel (batches of 64, 32 MB of palette indices).
+* Encoder: `GifEncoderGpu` (`EncodeAsync` for a picture, `EncodeAnimationAsync` for frames stored back to back, three overloads each). Exact palette via
+  `ExactPaletteBuilder`, else median cut + nearest colour on the accelerator, `GifDither.Ordered / FloydSteinberg` optional; LZW in 32768 pixel segments
+  (one thread each, a clear code between them, bits concatenated on the accelerator). The algorithms are documented in `GifEncoderKernels.cs` and
+  re-implemented independently in `scripts/images/make_gif_encoder_fixtures.py`, whose files the tests compare byte for byte.

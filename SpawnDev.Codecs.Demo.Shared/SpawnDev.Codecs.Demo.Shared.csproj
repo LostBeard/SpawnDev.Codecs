@@ -50,6 +50,9 @@
 		<EmbeddedResource Include="TestData\Png\*" />
 		<EmbeddedResource Include="TestData\Jpeg\*" />
 		<EmbeddedResource Include="TestData\WebPYuv\*" />
+		<EmbeddedResource Include="TestData\Gif\*" />
+		<EmbeddedResource Include="TestData\GifEnc\*" />
+		<EmbeddedResource Include="TestData\Bmp\*" />
 	</ItemGroup>
 
 </Project>

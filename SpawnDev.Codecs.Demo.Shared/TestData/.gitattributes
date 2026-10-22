@@ -1,0 +1,4 @@
+# Fixture data is binary: never normalise line endings (a .rgba8 can contain 0x0D 0x0A).
+Gif/* binary
+Bmp/* binary
+GifEnc/* binary
