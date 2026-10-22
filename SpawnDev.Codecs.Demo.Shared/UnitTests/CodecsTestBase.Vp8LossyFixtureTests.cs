@@ -119,6 +119,245 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task Vp8FullKeyframeDecoderGpu_AllFixtures_MatchFfmpeg_ManagedOverload()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var dec = new Vp8FullKeyframeDecoderGpu(acc);
+            var failures = new List<string>();
+            int count = 0;
+            foreach (var name in Vp8LossyFixtureNames())
+            {
+                try
+                {
+                    var frame = ReadEmbedded(Vp8LossyPrefix + name + ".vp8");
+                    var got = await dec.DecodeKeyFrameAsync(frame);
+                    var diff = CompareVp8Truth(name, got.YPlane, got.UPlane, got.VPlane, got.Width, got.Height);
+                    if (diff != null) failures.Add($"{name}: {diff}");
+                    count++;
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"{name}: {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+            True(count >= 150, $"only {count} fixtures were exercised");
+            True(failures.Count == 0, $"{failures.Count} of {Vp8LossyFixtureNames().Length} VP8 fixtures failed on the accelerator:\n" + string.Join("\n", failures));
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
+    public async Task Vp8FullKeyframeDecoderGpu_AllFixtures_MatchFfmpeg_ArrayViewOverload_IntoPoisonedBuffers()
+    {
+        // The accelerator-resident overload: frame already on the device (the buffer longer than the frame, garbage after it),
+        // planes written into caller views pre-filled with 0xAB and longer than needed. A decoder that wrote short, past the
+        // picture, or into the wrong plane leaves / disturbs 0xAB.
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var dec = new Vp8FullKeyframeDecoderGpu(acc);
+            var failures = new List<string>();
+            int count = 0;
+            foreach (var name in Vp8LossyFixtureNames())
+            {
+                try
+                {
+                    var frame = ReadEmbedded(Vp8LossyPrefix + name + ".vp8");
+                    using var dFile = acc.Allocate1D<byte>(frame.Length + 13);
+                    var padded = new byte[dFile.Length];
+                    System.Array.Fill(padded, (byte)0xEE);
+                    System.Array.Copy(frame, padded, frame.Length);
+                    DeviceTransfer.Upload(dFile.View, padded);
+
+                    var tag = await dec.ReadFrameTagAsync(dFile.View);
+                    int w = tag.Width!.Value, h = tag.Height!.Value;
+                    long yLen = Vp8FullKeyframeDecoderGpu.GetLumaPlaneSize(w, h);
+                    long cLen = Vp8FullKeyframeDecoderGpu.GetChromaPlaneSize(w, h);
+                    using var dY = acc.Allocate1D<byte>(yLen + 9);
+                    using var dU = acc.Allocate1D<byte>(cLen + 9);
+                    using var dV = acc.Allocate1D<byte>(cLen + 9);
+                    foreach (var b in new[] { dY, dU, dV })
+                    {
+                        var fill = new byte[b.Length];
+                        System.Array.Fill(fill, (byte)0xAB);
+                        DeviceTransfer.Upload(b.View, fill);
+                    }
+                    await dec.DecodeKeyFrameAsync(dFile.View, frame.Length, dY.View, dU.View, dV.View);
+                    var y = await DeviceTransfer.DownloadAsync(dY.View, dY.Length);
+                    var u = await DeviceTransfer.DownloadAsync(dU.View, dU.Length);
+                    var v = await DeviceTransfer.DownloadAsync(dV.View, dV.Length);
+                    bool tailOk = true;
+                    for (int i = 0; i < 9; i++) tailOk &= y[yLen + i] == 0xAB && u[cLen + i] == 0xAB && v[cLen + i] == 0xAB;
+                    if (!tailOk) failures.Add($"{name}: wrote past the end of a plane");
+                    var diff = CompareVp8Truth(name, y.AsSpan(0, (int)yLen).ToArray(), u.AsSpan(0, (int)cLen).ToArray(),
+                        v.AsSpan(0, (int)cLen).ToArray(), w, h);
+                    if (diff != null) failures.Add($"{name}: {diff}");
+                    count++;
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"{name}: {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+            True(count >= 150, $"only {count} fixtures were exercised");
+            True(failures.Count == 0, $"{failures.Count} of {Vp8LossyFixtureNames().Length} VP8 fixtures failed (ArrayView1D overload):\n" + string.Join("\n", failures));
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    private static int Vp8FirstPartSize(byte[] frame) => (frame[0] | (frame[1] << 8) | (frame[2] << 16)) >> 5;
+
+    private static byte[] Vp8WithFirstPartSize(byte[] frame, int size)
+    {
+        var f = (byte[])frame.Clone();
+        int tag = (f[0] | (f[1] << 8) | (f[2] << 16)) & 0x1F | (size << 5);
+        f[0] = (byte)tag; f[1] = (byte)(tag >> 8); f[2] = (byte)(tag >> 16);
+        return f;
+    }
+
+    private static byte[] Vp8Prefix(byte[] frame, int length) => frame.AsSpan(0, length).ToArray();
+
+    [TestMethod]
+    public async Task Vp8FullKeyframeDecoderGpu_HostileInputs_ThrowTheSpecificReason()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var dec = new Vp8FullKeyframeDecoderGpu(acc);
+            var single = ReadEmbedded(Vp8LossyPrefix + "cw_strong_f80_s3_photo_100x75.vp8");     // 1 token partition
+            var quad = ReadEmbedded(Vp8LossyPrefix + "vpx_slices4_photo_255x129.vp8");            // 4 token partitions
+            var octo = ReadEmbedded(Vp8LossyPrefix + "vpx_slices8_text_255x129.vp8");             // 8 token partitions
+            int p0 = Vp8FirstPartSize(single);
+            int q0 = Vp8FirstPartSize(quad);
+            int o0 = Vp8FirstPartSize(octo);
+
+            // sizes of the first (n - 1) partitions of a multi-partition frame
+            static int[] PartSizes(byte[] f, int firstPart, int n)
+            {
+                var s = new int[n - 1];
+                for (int i = 0; i < n - 1; i++)
+                {
+                    int t = 10 + firstPart + 3 * i;
+                    s[i] = f[t] | (f[t + 1] << 8) | (f[t + 2] << 16);
+                }
+                return s;
+            }
+            int quadBeforeLast = 3 * 3 + PartSizes(quad, q0, 4).Sum();      // bytes of table + partitions 0..2
+            int octoBeforeLast = 3 * 7 + PartSizes(octo, o0, 8).Sum();
+
+            var cases = new List<(string label, byte[] data, Vp8DecodeError expected)>();
+            cases.Add(("empty", System.Array.Empty<byte>(), Vp8DecodeError.TooShort));
+            cases.Add(("9 bytes", Vp8Prefix(single, 9), Vp8DecodeError.TooShort));
+            var inter = (byte[])single.Clone(); inter[0] |= 1;
+            cases.Add(("inter frame", inter, Vp8DecodeError.NotKeyFrame));
+            var badSc = (byte[])single.Clone(); badSc[4] ^= 0xFF;
+            cases.Add(("bad start code", badSc, Vp8DecodeError.BadStartCode));
+            var zw = (byte[])single.Clone(); zw[6] = 0; zw[7] = 0;
+            cases.Add(("zero width", zw, Vp8DecodeError.ZeroSize));
+            var zh = (byte[])single.Clone(); zh[8] = 0; zh[9] = 0;
+            cases.Add(("zero height", zh, Vp8DecodeError.ZeroSize));
+            var v4 = (byte[])single.Clone(); v4[0] = (byte)((v4[0] & ~0x0E) | (4 << 1));
+            cases.Add(("version 4", v4, Vp8DecodeError.UnsupportedVersion));
+            cases.Add(("first partition cut", Vp8Prefix(single, 10 + p0 - 1), Vp8DecodeError.FirstPartitionExceedsFrame));
+            cases.Add(("first partition declared too small", Vp8WithFirstPartSize(single, 12), Vp8DecodeError.FirstPartitionTruncated));
+            cases.Add(("first partition declared too small (modes)", Vp8WithFirstPartSize(single, p0 / 2), Vp8DecodeError.FirstPartitionTruncated));
+            cases.Add(("no token bytes at all", Vp8Prefix(single, 10 + p0), Vp8DecodeError.TokenPartitionTruncated));
+            cases.Add(("half of the tokens", Vp8Prefix(single, 10 + p0 + (single.Length - 10 - p0) / 2), Vp8DecodeError.TokenPartitionTruncated));
+            cases.Add(("4 partitions: cut inside the size table", Vp8Prefix(quad, 10 + q0 + 4), Vp8DecodeError.PartitionTableTruncated));
+            var bigSize = (byte[])quad.Clone(); bigSize[10 + q0] = 0xFF; bigSize[10 + q0 + 1] = 0xFF; bigSize[10 + q0 + 2] = 0x7F;
+            cases.Add(("4 partitions: partition 0 declares 8 MB", bigSize, Vp8DecodeError.TokenPartitionExceedsFrame));
+            cases.Add(("4 partitions: last partition cut in half",
+                Vp8Prefix(quad, 10 + q0 + quadBeforeLast + (quad.Length - 10 - q0 - quadBeforeLast) / 2), Vp8DecodeError.TokenPartitionTruncated));
+            cases.Add(("8 partitions: cut inside the size table", Vp8Prefix(octo, 10 + o0 + 20), Vp8DecodeError.PartitionTableTruncated));
+            cases.Add(("8 partitions: last partition cut in half",
+                Vp8Prefix(octo, 10 + o0 + octoBeforeLast + (octo.Length - 10 - o0 - octoBeforeLast) / 2), Vp8DecodeError.TokenPartitionTruncated));
+            cases.Add(("8 partitions: last partition empty", Vp8Prefix(octo, 10 + o0 + octoBeforeLast), Vp8DecodeError.TokenPartitionTruncated));
+
+            var failures = new List<string>();
+            foreach (var (label, data, expected) in cases)
+            {
+                try
+                {
+                    await dec.DecodeKeyFrameAsync(data);
+                    failures.Add($"{label}: decoded without error, expected {expected}");
+                }
+                catch (Vp8DecodeException ex)
+                {
+                    if (ex.Error != expected) failures.Add($"{label}: got {ex.Error} ({ex.Message}), expected {expected}");
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"{label}: {ex.GetType().Name}: {ex.Message} (expected Vp8DecodeException {expected})");
+                }
+            }
+
+            // The same decoder instance still works after every error.
+            var good = await dec.DecodeKeyFrameAsync(single);
+            var diff = CompareVp8Truth("cw_strong_f80_s3_photo_100x75", good.YPlane, good.UPlane, good.VPlane, good.Width, good.Height);
+            if (diff != null) failures.Add($"decode after the errors: {diff}");
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
+    public async Task Vp8FullKeyframeDecoderGpu_RandomCorruption_NeverHangsOrThrowsAnythingElse()
+    {
+        // Flip bytes, truncate, and splice random data into real frames: every outcome must be a normal decode (garbage
+        // pixels are fine for a corrupt stream) or a Vp8DecodeException, never another exception type, never a hang.
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var dec = new Vp8FullKeyframeDecoderGpu(acc);
+            var rng = new Random(20261022);
+            var names = new[] { "cw_strong_f80_s3_photo_100x75", "vpx_slices4_photo_255x129", "rnd_10_128x96_simple_L63_S4_P2_delta_seg",
+                                "pil_noise_17x33_q50_m3", "vpx_p1_simple_photo_100x75" };
+            int ok = 0, errors = 0;
+            var failures = new List<string>();
+            foreach (var name in names)
+            {
+                var original = ReadEmbedded(Vp8LossyPrefix + name + ".vp8");
+                for (int trial = 0; trial < 24; trial++)
+                {
+                    var data = (byte[])original.Clone();
+                    int mode = trial % 4;
+                    if (mode == 0)
+                    {
+                        for (int k = 0; k < 1 + trial; k++) data[10 + rng.Next(data.Length - 10)] ^= (byte)(1 << rng.Next(8));
+                    }
+                    else if (mode == 1)
+                    {
+                        data = Vp8Prefix(data, 10 + rng.Next(data.Length - 10));
+                    }
+                    else if (mode == 2)
+                    {
+                        int from = 10 + rng.Next(data.Length - 10);
+                        for (int i = from; i < Math.Min(data.Length, from + 64); i++) data[i] = (byte)rng.Next(256);
+                    }
+                    else
+                    {
+                        for (int i = 10; i < data.Length; i++) data[i] = (byte)rng.Next(256);          // all random after the tag
+                    }
+                    try
+                    {
+                        var got = await dec.DecodeKeyFrameAsync(data);
+                        if (got.YPlane.Length != Vp8FullKeyframeDecoderGpu.GetLumaPlaneSize(got.Width, got.Height))
+                            failures.Add($"{name} trial {trial}: wrong plane size");
+                        ok++;
+                    }
+                    catch (Vp8DecodeException) { errors++; }
+                    catch (Exception ex) { failures.Add($"{name} trial {trial} (mode {mode}): {ex.GetType().Name}: {ex.Message}"); }
+                }
+            }
+            True(ok > 0 && errors > 0, $"the corruption set should produce both outcomes (ok {ok}, errors {errors})");
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
     public void Vp8LossyFixtures_CpuReference_MatchesFfmpeg_AllFixtures()
     {
         // The reference walker + Vp8LoopFilter against ffmpeg's decode of the SAME bytes.
