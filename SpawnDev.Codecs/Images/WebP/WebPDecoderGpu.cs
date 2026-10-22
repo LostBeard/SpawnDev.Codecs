@@ -646,6 +646,22 @@ public sealed class WebPDecoderGpu : IDisposable
         return await ReadInfoAsync(_stageIn.View, length);
     }
 
+    /// <summary>Everything the container says about a WebP held in a JS typed array (browser accelerators only).</summary>
+    [SupportedOSPlatform("browser")]
+    public async Task<WebPFileInfo> ReadFileInfoAsync(TypedArray file)
+    {
+        int length = StageTyped(file);
+        return await ReadFileInfoAsync(_stageIn.View, length);
+    }
+
+    /// <summary>The ICCP / EXIF / XMP payloads of a WebP held in a JS typed array (browser accelerators only; the blobs are small host arrays).</summary>
+    [SupportedOSPlatform("browser")]
+    public async Task<WebPMetadata> ReadMetadataAsync(TypedArray file)
+    {
+        int length = StageTyped(file);
+        return await ReadMetadataAsync(_stageIn.View, length);
+    }
+
     /// <summary>The frames of a WebP held in a JS typed array (browser accelerators only).</summary>
     [SupportedOSPlatform("browser")]
     public async Task<ImageFrameInfo[]> ReadFramesAsync(TypedArray file)

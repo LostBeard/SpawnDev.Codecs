@@ -342,7 +342,8 @@ public sealed class WebPKernels : IDisposable
                     }
                     else if (fcc == FccIccp)
                     {
-                        bool wanted = meta[WebPMeta.IccOffset] < 0;
+                        // libwebp (demux.c) only keeps a metadata chunk whose VP8X flag is set, and the first one of a kind
+                        bool wanted = (meta[WebPMeta.IccOffset] < 0) & ((flags & 0x20) != 0);
                         if (wanted)
                         {
                             meta[WebPMeta.IccOffset] = payload;
@@ -351,7 +352,7 @@ public sealed class WebPKernels : IDisposable
                     }
                     else if (fcc == FccExif)
                     {
-                        bool wanted = meta[WebPMeta.ExifOffset] < 0;
+                        bool wanted = (meta[WebPMeta.ExifOffset] < 0) & ((flags & 0x08) != 0);
                         if (wanted)
                         {
                             meta[WebPMeta.ExifOffset] = payload;
@@ -361,7 +362,7 @@ public sealed class WebPKernels : IDisposable
                     }
                     else if (fcc == FccXmp)
                     {
-                        bool wanted = meta[WebPMeta.XmpOffset] < 0;
+                        bool wanted = (meta[WebPMeta.XmpOffset] < 0) & ((flags & 0x04) != 0);
                         if (wanted)
                         {
                             meta[WebPMeta.XmpOffset] = payload;

@@ -10,7 +10,8 @@ For every <dir>/<name>.webp:
     as a ratio (only a catastrophic ratio fails: this is a sanity check, not a tight bound).
 
 Other sidecars switch the check: <name>.alpha8 (an ALPH test: the lossy file's alpha plane must equal it in libwebp AND in the
-pure-Python ALPH decoder),
+pure-Python ALPH decoder), Metadata sidecars are checked against libwebp's demuxer (Pillow info) and the
+VP8X flag bits.
 
 Prints one line per file ("OK name ours libwebp ratio" / "FAIL name reason") and exits 1 if any file failed.
 
@@ -35,6 +36,32 @@ def chunks(data):
         size = struct.unpack("<I", data[pos + 4:pos + 8])[0]
         yield fcc, data[pos + 8:pos + 8 + size]
         pos += 8 + size + (size & 1)
+
+
+def check_metadata(path, data, im):
+    """
+    Metadata sidecars <name>.icc / .exif / .xmp, when present, must equal what libwebp's demuxer reports (Pillow info), and the
+    RIFF must hold exactly one such chunk with exactly that payload; the VP8X flag bits must say so. Without a sidecar the
+    file must carry no such chunk (a stray chunk would be wrong too).
+    """
+    want_flags = 0
+    for ext, fcc, key, bit in (("icc", b"ICCP", "icc_profile", 0x20), ("exif", b"EXIF", "exif", 0x08), ("xmp", b"XMP ", "xmp", 0x04)):
+        side = path + "." + ext
+        found = [p for f, p in chunks(data) if f == fcc]
+        if os.path.exists(side):
+            expected = open(side, "rb").read()
+            if len(found) != 1 or found[0] != expected:
+                raise Exception("%s chunk missing, duplicated or different" % ext)
+            if im.info.get(key) != expected:
+                raise Exception("libwebp (demux) reports a different %s payload" % ext)
+            want_flags |= bit
+        elif found:
+            raise Exception("unexpected %s chunk" % ext)
+    vp8x = [p for f, p in chunks(data) if f == b"VP8X"]
+    if vp8x and (vp8x[0][0] & 0x2C) != want_flags:
+        raise Exception("VP8X flags 0x%02x do not match the metadata present (0x%02x)" % (vp8x[0][0] & 0x2C, want_flags))
+    if not vp8x and want_flags:
+        raise Exception("metadata present but no VP8X chunk")
 
 
 def main(d):
@@ -69,13 +96,7 @@ def main(d):
                 ys, xs = np.nonzero((got != want).any(axis=2))
                 raise Exception("pixel mismatch at x=%d y=%d: got %s expected %s (%d pixels differ)" % (
                     xs[0], ys[0], got[ys[0], xs[0]], want[ys[0], xs[0]], len(xs)))
-            for ext, fcc in (("icc", b"ICCP"), ("exif", b"EXIF"), ("xmp", b"XMP ")):
-                side = path + "." + ext
-                if os.path.exists(side):
-                    expected = open(side, "rb").read()
-                    found = [p for f, p in chunks(data) if f == fcc]
-                    if not found or found[0] != expected:
-                        raise Exception("%s chunk missing or different" % ext)
+            check_metadata(path, data, im)
             if os.path.exists(path + ".stats"):
                 # second, independent decoder + which bitstream features the encoder actually used
                 payload = [p for f, p in chunks(data) if f == b"VP8L"][0]
@@ -84,7 +105,8 @@ def main(d):
                 if not (ref_rgba == want).all():
                     raise Exception("webp_ref decode differs from the source")
                 print("STATS %s %s" % (name, st.summary()))
-            ours = len(data)
+            # the size comparison is about the image: leave the metadata chunks (header + payload + pad) out
+            ours = len(data) - sum(8 + len(p) + (len(p) & 1) for f, p in chunks(data) if f in (b"ICCP", b"EXIF", b"XMP "))
             if max(w, h) > 16383:
                 # libwebp's ENCODER refuses 16384 (its limit is 16383) although its decoder accepts the format maximum
                 print("OK %s %d 0 0.000" % (name, ours))
