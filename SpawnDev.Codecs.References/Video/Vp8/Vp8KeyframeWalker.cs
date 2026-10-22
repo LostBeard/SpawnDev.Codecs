@@ -24,9 +24,8 @@
 // The "left" array is the current row's per-plane left context (same layout).
 //
 // Out of scope for this slice:
-//   - Loop filter (skipped; output will be slightly blocky vs ffmpeg)
-//   - Multiple token partitions (Log2NumPartitions != 0 throws)
 //   - Inter frames (non-key throws)
+// The loop filter (Vp8LoopFilter) runs over the whole frame after the last macroblock is reconstructed.
 
 namespace SpawnDev.Codecs.Video.Vp8;
 
@@ -150,6 +149,9 @@ public static class Vp8KeyframeWalker
         var b4AboveExtBuf = new byte[12];
         var b4LeftBuf = new byte[4];
         var bModeProbsBuf = new byte[9];
+        var mbSegment = new int[mbRows * mbCols];
+        var mbBPred = new bool[mbRows * mbCols];
+        var mbInner = new bool[mbRows * mbCols];
 
         for (int mbRow = 0; mbRow < mbRows; mbRow++)
         {
@@ -213,15 +215,30 @@ public static class Vp8KeyframeWalker
                     // for slots we don't otherwise touch in this MB.
                     qcoeff.Clear();
                     eobs.Clear();
-                    // Reset per-plane above/left for this MB (libvpx vp8_reset_mb_tokens_context).
-                    // Y2 + Y4 + UV slots all clear to 0.
+                    // Reset per-plane above/left for this MB (libvpx vp8_reset_mb_tokens_context): the Y4 and UV
+                    // slots always clear; the Y2 slot clears ONLY when this MB has a Y2 block (not B_PRED). A skipped
+                    // B_PRED MB leaves the Y2 context of its neighbours untouched (ffmpeg vp8.c decode_mb_row_no_filter).
+                    byte keepAboveY2 = mbAbove[Vp8EntropyContexts.Plane.Y2Slot];
+                    byte keepLeftY2 = mbLeft[Vp8EntropyContexts.Plane.Y2Slot];
                     mbAbove.Clear();
                     mbLeft.Clear();
+                    if (modeInfo.YMode == Vp8YMode.BPred)
+                    {
+                        mbAbove[Vp8EntropyContexts.Plane.Y2Slot] = keepAboveY2;
+                        mbLeft[Vp8EntropyContexts.Plane.Y2Slot] = keepLeftY2;
+                    }
                 }
                 else
                 {
                     DecodeMbCoefficients(tokenReader, frameHeader.CoefProbs, modeInfo.YMode != Vp8YMode.BPred, mbAbove, mbLeft, qcoeff, eobs);
                 }
+
+                // Loop filter inputs: segment, B_PRED, and whether inner edges are filtered (B_PRED, or any block has coefficients).
+                bool anyCoef = false;
+                for (int e = 0; e < 25; e++) if (eobs[e] > 0) { anyCoef = true; break; }
+                mbSegment[mbRow * mbCols + mbCol] = modeInfo.SegmentId;
+                mbBPred[mbRow * mbCols + mbCol] = modeInfo.YMode == Vp8YMode.BPred;
+                mbInner[mbRow * mbCols + mbCol] = modeInfo.YMode == Vp8YMode.BPred || anyCoef;
 
                 // ---------- 4. Reconstruction ----------
                 ReconstructMb(modeInfo, dq, qcoeff, eobs, frameBuffer, mbCol, mbRow, haveAbove, haveLeft,
@@ -254,6 +271,9 @@ public static class Vp8KeyframeWalker
                 leftMbYMode = modeInfo.YMode;
             }
         }
+
+        // The loop filter runs after the WHOLE frame is reconstructed (intra prediction above used unfiltered pixels).
+        Vp8LoopFilter.Apply(frameBuffer, frameHeader, mbSegment, mbBPred, mbInner);
     }
 
     /// <summary>

@@ -182,7 +182,7 @@ public sealed class Vp8IntraPredict4x4Kernel : IDisposable
                 p11 = p30 = Avg3(B, C, D);
                 p12 = p31 = Avg3(C, D, E);
                 p13 = p32 = Avg3(D, E, F);
-                p33      = Avg3(E, F, G);
+                p33      = Avg3(F, G, H);   // RFC 6386: (2,3) = avg3(A4..A6) but (3,3) = avg3(A5..A7)
                 break;
             }
             case 8: // BHdPred: D153 horizontal-down

@@ -199,7 +199,7 @@ public static class Vp8IntraPredictor4x4
     {
         // D63e: vertical-left, VP8 variant.
         int A = ab[o + 0], B = ab[o + 1], C = ab[o + 2], D = ab[o + 3];
-        int E = ab[o + 4], F = ab[o + 5], G = ab[o + 6];
+        int E = ab[o + 4], F = ab[o + 5], G = ab[o + 6], H = ab[o + 7];
         dst[0 * stride + 0] = (byte)Avg2(A, B);
         dst[0 * stride + 1] = dst[2 * stride + 0] = (byte)Avg2(B, C);
         dst[0 * stride + 2] = dst[2 * stride + 1] = (byte)Avg2(C, D);
@@ -209,7 +209,8 @@ public static class Vp8IntraPredictor4x4
         dst[1 * stride + 1] = dst[3 * stride + 0] = (byte)Avg3(B, C, D);
         dst[1 * stride + 2] = dst[3 * stride + 1] = (byte)Avg3(C, D, E);
         dst[1 * stride + 3] = dst[3 * stride + 2] = (byte)Avg3(D, E, F);
-        dst[3 * stride + 3] = (byte)Avg3(E, F, G);
+        // RFC 6386 B_VL_PRED: "the last two values do not strictly follow the pattern": (2,3) = avg3(A4..A6), (3,3) = avg3(A5..A7).
+        dst[3 * stride + 3] = (byte)Avg3(F, G, H);
     }
 
     private static void PredictHd(ReadOnlySpan<byte> ab, int o, ReadOnlySpan<byte> left, Span<byte> dst, int stride)

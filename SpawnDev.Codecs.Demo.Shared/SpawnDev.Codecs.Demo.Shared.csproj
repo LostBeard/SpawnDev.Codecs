@@ -49,6 +49,8 @@
 		     sample data each file is built FROM, cross-checked against Pillow / libjpeg / libwebp). -->
 		<EmbeddedResource Include="TestData\Png\*" />
 		<EmbeddedResource Include="TestData\Jpeg\*" />
+		<!-- VP8 lossy keyframes (libwebp / libvpx made), truth = ffmpeg's native VP8 decode: scripts/images/make_vp8_lossy_fixtures.py -->
+		<EmbeddedResource Include="TestData\Vp8Lossy\*" />
 	</ItemGroup>
 
 </Project>

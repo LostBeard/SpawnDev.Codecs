@@ -100,8 +100,8 @@ public abstract partial class CodecsTestBase
         // (the "DC of the DC plane"). Specifically: [0] = (sum*+sum* + 3) >> 3
         // For a 4x4 of all 16, the column-pass produces a row of all-32 in
         // the first row and all-0 elsewhere. The row-pass on row 0 gives
-        // [0]=64, others 0; with +3>>3 normalize gives [0] = (64+3)>>3 = 8.
-        Equal((short)8, output[0]);
+        // [0]=(128+128+3)>>3 = 32 (a1 = 64+64, b1 = 64+64, a2 = a1+b1 = 256), others 0.
+        Equal((short)32, output[0]);
         for (int i = 1; i < 16; i++)
             Equal((short)0, output[i]);
     }
