@@ -49,6 +49,7 @@
 		     sample data each file is built FROM, cross-checked against Pillow / libjpeg / libwebp). -->
 		<EmbeddedResource Include="TestData\Png\*" />
 		<EmbeddedResource Include="TestData\Jpeg\*" />
+		<EmbeddedResource Include="TestData\WebPYuv\*" />
 	</ItemGroup>
 
 </Project>
