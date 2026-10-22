@@ -294,6 +294,15 @@ public abstract partial class CodecsTestBase
             ("bad_huffman_code", "not a Huffman code"),
             ("bad_run_overflow", "coefficient run"),
             ("bad_fractional_sampling", "fractional ratio"),
+            ("bad_huffman_oversubscribed", "Huffman table"),
+            ("bad_sos_unknown_component", "component selector not in the frame"),
+            ("bad_dqt_short", "quantization table segment"),
+            ("bad_marker_junk", "does not start with 0xFF"),
+            ("bad_sof_twice", "more than one frame header"),
+            ("bad_progressive_params", "spectral selection"),
+            ("bad_no_scan", "no scan"),
+            ("bad_only_soi_eoi", "no frame header"),
+            ("bad_too_short", "truncated"),
         };
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try

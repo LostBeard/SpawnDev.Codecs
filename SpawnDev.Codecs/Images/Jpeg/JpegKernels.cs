@@ -580,7 +580,7 @@ public sealed class JpegKernels : IDisposable
 
         int err = 0;
         bool soi = false;
-        if (fileLen >= 4) soi = (file[0] == 0xFF) & (file[1] == 0xD8);
+        if (fileLen >= 2) soi = (file[0] == 0xFF) & (file[1] == 0xD8);
         if (!soi) err = (int)JpegError.NotJpeg;
 
         int pos = 2;

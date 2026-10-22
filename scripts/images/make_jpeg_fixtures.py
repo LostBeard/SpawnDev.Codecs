@@ -667,6 +667,29 @@ def main():
                        samp, 24, 8, quality=50)
     put_fixture("bad_fractional_sampling", frac, truth=False)
 
+    # more structural breakage, each a one-field change of a good file
+    dht0 = find_marker(good, 0xC4)                      # first DHT: DC table 0, counts at +5 .. +21
+    cnt = bytearray(good)
+    cnt[dht0 + 5:dht0 + 21] = bytes([4, 4, 4] + [0] * 13)   # 12 codes: 4 of length 1 is impossible
+    put_fixture("bad_huffman_oversubscribed", bytes(cnt), truth=False)
+    sos = find_marker(good, 0xDA)
+    put_fixture("bad_sos_unknown_component", good[:sos + 5] + bytes([9]) + good[sos + 6:], truth=False)
+    dqt = find_marker(good, 0xDB)
+    put_fixture("bad_dqt_short", good[:dqt + 2] + bytes([0, 60]) + good[dqt + 4:], truth=False)
+    put_fixture("bad_marker_junk", good[:dqt] + bytes([0x41]) + good[dqt:], truth=False)
+    sofpos = find_marker(good, 0xC0)
+    sof_len = (good[sofpos + 2] << 8) | good[sofpos + 3]
+    put_fixture("bad_sof_twice", good[:sofpos] + good[sofpos:sofpos + 2 + sof_len] * 2 + good[sofpos + 2 + sof_len:], truth=False)
+    psos = find_marker(goodp, 0xDA)
+    ns = goodp[psos + 4]
+    se_at = psos + 4 + 1 + 2 * ns + 1                   # Ss at +1+2ns, Se right after
+    bad_prog = bytearray(goodp)
+    bad_prog[se_at] = 5                                  # a DC scan (Ss = 0) must have Se = 0
+    put_fixture("bad_progressive_params", bytes(bad_prog), truth=False)
+    put_fixture("bad_no_scan", good[:find_marker(good, 0xDA)] + bytes([0xFF, 0xD9]), truth=False)
+    put_fixture("bad_only_soi_eoi", bytes([0xFF, 0xD8, 0xFF, 0xD9]), truth=False)
+    put_fixture("bad_too_short", bytes([0xFF, 0xD8, 0xFF]), truth=False)
+
     total = sum(os.path.getsize(os.path.join(OUT, f)) for f in os.listdir(OUT))
     print(f"\n{len(written)} fixtures, {total / 1024:.0f} KiB total")
 
