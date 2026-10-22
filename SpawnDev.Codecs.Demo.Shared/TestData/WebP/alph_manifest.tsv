@@ -1,0 +1,89 @@
+alph_smooth_64x48_f0_raw	still	64	48	1	0	0	0	raw
+alph_smooth_64x48_f0_vp8l	still	64	48	1	1	0	0	xf[I0] cache=0 meta=0 groups=1/1 lit=2342 cache_hits=0 copies=176 short=10 far=108 pred_modes= pal=251 bundle=0 codes=normal/simple1 cc_nz=0/0
+alph_smooth_64x48_f1_raw	still	64	48	1	0	1	0	raw
+alph_smooth_64x48_f1_vp8l	still	64	48	1	1	1	0	xf[I1] cache=0 meta=0 groups=1/1 lit=1536 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=6 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_smooth_64x48_f2_raw	still	64	48	1	0	2	0	raw
+alph_smooth_64x48_f2_vp8l	still	64	48	1	1	2	0	xf[I1] cache=0 meta=0 groups=1/1 lit=1536 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=6 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_smooth_64x48_f3_raw	still	64	48	1	0	3	0	raw
+alph_smooth_64x48_f3_vp8l	still	64	48	1	1	3	0	xf[I1] cache=0 meta=0 groups=1/1 lit=1536 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=11 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_mask_61x45_f0_raw	still	61	45	1	0	0	0	raw
+alph_mask_61x45_f0_vp8l	still	61	45	1	1	0	0	xf[none] cache=0 meta=0 groups=1/1 lit=191 cache_hits=0 copies=61 short=12 far=20 pred_modes= pal=0 bundle=0 codes=normal/simple1 cc_nz=0/0
+alph_mask_61x45_f1_raw	still	61	45	1	0	1	0	raw
+alph_mask_61x45_f1_vp8l	still	61	45	1	1	1	0	xf[P3] cache=0 meta=0 groups=1/1 lit=458 cache_hits=0 copies=85 short=2 far=0 pred_modes=012347b pal=0 bundle=0 codes=normal/simple1/simple2 cc_nz=0/0
+alph_mask_61x45_f2_raw	still	61	45	1	0	2	0	raw
+alph_mask_61x45_f2_vp8l	still	61	45	1	1	2	0	xf[P3] cache=0 meta=0 groups=1/1 lit=467 cache_hits=0 copies=79 short=2 far=0 pred_modes=0123457b pal=0 bundle=0 codes=normal/simple1/simple2 cc_nz=0/0
+alph_mask_61x45_f3_raw	still	61	45	1	0	3	0	raw
+alph_mask_61x45_f3_vp8l	still	61	45	1	1	3	0	xf[I0] cache=0 meta=0 groups=1/1 lit=519 cache_hits=0 copies=104 short=25 far=43 pred_modes= pal=55 bundle=0 codes=normal/simple1 cc_nz=0/0
+alph_noise_33x29_f0_raw	still	33	29	1	0	0	0	raw
+alph_noise_33x29_f0_vp8l	still	33	29	1	1	0	0	xf[P9] cache=0 meta=0 groups=1/1 lit=957 cache_hits=0 copies=0 short=0 far=0 pred_modes=7 pal=0 bundle=0 codes=normal/simple1 cc_nz=0/0
+alph_noise_33x29_f1_raw	still	33	29	1	0	1	0	raw
+alph_noise_33x29_f1_vp8l	still	33	29	1	1	1	0	xf[P9] cache=0 meta=0 groups=1/1 lit=957 cache_hits=0 copies=0 short=0 far=0 pred_modes=6 pal=0 bundle=0 codes=normal/simple1 cc_nz=0/0
+alph_noise_33x29_f2_raw	still	33	29	1	0	2	0	raw
+alph_noise_33x29_f2_vp8l	still	33	29	1	1	2	0	xf[none] cache=0 meta=0 groups=1/1 lit=957 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=0 bundle=0 codes=normal/simple1 cc_nz=0/0
+alph_noise_33x29_f3_raw	still	33	29	1	0	3	0	raw
+alph_noise_33x29_f3_vp8l	still	33	29	1	1	3	0	xf[none] cache=0 meta=0 groups=1/1 lit=957 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=0 bundle=0 codes=normal/simple1 cc_nz=0/0
+alph_steps_50x40_f0_raw	still	50	40	1	0	0	0	raw
+alph_steps_50x40_f0_vp8l	still	50	40	1	1	0	0	xf[I1,P9] cache=0 meta=0 groups=1/1 lit=35 cache_hits=0 copies=6 short=1 far=0 pred_modes=c pal=8 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_steps_50x40_f1_raw	still	50	40	1	0	1	0	raw
+alph_steps_50x40_f1_vp8l	still	50	40	1	1	1	0	xf[I1] cache=0 meta=0 groups=1/1 lit=20 cache_hits=0 copies=4 short=2 far=2 pred_modes= pal=5 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_steps_50x40_f2_raw	still	50	40	1	0	2	0	raw
+alph_steps_50x40_f2_vp8l	still	50	40	1	1	2	0	xf[I1] cache=0 meta=0 groups=1/1 lit=202 cache_hits=0 copies=6 short=3 far=3 pred_modes= pal=5 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_steps_50x40_f3_raw	still	50	40	1	0	3	0	raw
+alph_steps_50x40_f3_vp8l	still	50	40	1	1	3	0	xf[I1] cache=0 meta=0 groups=1/1 lit=34 cache_hits=0 copies=6 short=1 far=0 pred_modes= pal=5 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_flat255_32x24_f0_raw	still	32	24	1	0	0	0	raw
+alph_flat255_32x24_f0_vp8l	still	32	24	1	1	0	0	xf[I3] cache=0 meta=0 groups=1/1 lit=96 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1 cc_nz=0/0
+alph_flat255_32x24_f1_raw	still	32	24	1	0	1	0	raw
+alph_flat255_32x24_f1_vp8l	still	32	24	1	1	1	0	xf[I3] cache=0 meta=0 groups=1/1 lit=2 cache_hits=0 copies=1 short=1 far=0 pred_modes= pal=2 bundle=3 codes=normal/simple1 cc_nz=0/0
+alph_flat255_32x24_f2_raw	still	32	24	1	0	2	0	raw
+alph_flat255_32x24_f2_vp8l	still	32	24	1	1	2	0	xf[I3] cache=0 meta=0 groups=1/1 lit=2 cache_hits=0 copies=1 short=1 far=0 pred_modes= pal=2 bundle=3 codes=normal/simple1 cc_nz=0/0
+alph_flat255_32x24_f3_raw	still	32	24	1	0	3	0	raw
+alph_flat255_32x24_f3_vp8l	still	32	24	1	1	3	0	xf[I3] cache=0 meta=0 groups=1/1 lit=2 cache_hits=0 copies=1 short=1 far=0 pred_modes= pal=2 bundle=3 codes=normal/simple1 cc_nz=0/0
+alph_flat0_17x11_f0_raw	still	17	11	1	0	0	0	raw
+alph_flat0_17x11_f0_vp8l	still	17	11	1	1	0	0	xf[I3] cache=0 meta=0 groups=1/1 lit=33 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1 cc_nz=0/0
+alph_flat0_17x11_f1_raw	still	17	11	1	0	1	0	raw
+alph_flat0_17x11_f1_vp8l	still	17	11	1	1	1	0	xf[I3] cache=0 meta=0 groups=1/1 lit=33 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1 cc_nz=0/0
+alph_flat0_17x11_f2_raw	still	17	11	1	0	2	0	raw
+alph_flat0_17x11_f2_vp8l	still	17	11	1	1	2	0	xf[I3] cache=0 meta=0 groups=1/1 lit=33 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1 cc_nz=0/0
+alph_flat0_17x11_f3_raw	still	17	11	1	0	3	0	raw
+alph_flat0_17x11_f3_vp8l	still	17	11	1	1	3	0	xf[I3] cache=0 meta=0 groups=1/1 lit=33 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1 cc_nz=0/0
+alph_tall_1x37_f0_raw	still	1	37	1	0	0	0	raw
+alph_tall_1x37_f0_vp8l	still	1	37	1	1	0	0	xf[P9] cache=0 meta=0 groups=1/1 lit=37 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=0 bundle=0 codes=normal/simple1 cc_nz=0/0
+alph_tall_1x37_f1_raw	still	1	37	1	0	1	0	raw
+alph_tall_1x37_f1_vp8l	still	1	37	1	1	1	0	xf[I1] cache=0 meta=0 groups=1/1 lit=37 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=5 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_tall_1x37_f2_raw	still	1	37	1	0	2	0	raw
+alph_tall_1x37_f2_vp8l	still	1	37	1	1	2	0	xf[I1] cache=0 meta=0 groups=1/1 lit=37 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=5 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_tall_1x37_f3_raw	still	1	37	1	0	3	0	raw
+alph_tall_1x37_f3_vp8l	still	1	37	1	1	3	0	xf[I1] cache=0 meta=0 groups=1/1 lit=37 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=5 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_wide_41x1_f0_raw	still	41	1	1	0	0	0	raw
+alph_wide_41x1_f0_vp8l	still	41	1	1	1	0	0	xf[I0] cache=0 meta=0 groups=1/1 lit=41 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=41 bundle=0 codes=normal/simple1 cc_nz=0/0
+alph_wide_41x1_f1_raw	still	41	1	1	0	1	0	raw
+alph_wide_41x1_f1_vp8l	still	41	1	1	1	1	0	xf[I1] cache=0 meta=0 groups=1/1 lit=21 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=6 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_wide_41x1_f2_raw	still	41	1	1	0	2	0	raw
+alph_wide_41x1_f2_vp8l	still	41	1	1	1	2	0	xf[I1] cache=0 meta=0 groups=1/1 lit=21 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=6 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_wide_41x1_f3_raw	still	41	1	1	0	3	0	raw
+alph_wide_41x1_f3_vp8l	still	41	1	1	1	3	0	xf[I1] cache=0 meta=0 groups=1/1 lit=21 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=6 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_one_1x1_f0_raw	still	1	1	1	0	0	0	raw
+alph_one_1x1_f0_vp8l	still	1	1	1	1	0	0	xf[I3] cache=0 meta=0 groups=1/1 lit=1 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1 cc_nz=0/0
+alph_one_1x1_f1_raw	still	1	1	1	0	1	0	raw
+alph_one_1x1_f1_vp8l	still	1	1	1	1	1	0	xf[I3] cache=0 meta=0 groups=1/1 lit=1 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1 cc_nz=0/0
+alph_one_1x1_f2_raw	still	1	1	1	0	2	0	raw
+alph_one_1x1_f2_vp8l	still	1	1	1	1	2	0	xf[I3] cache=0 meta=0 groups=1/1 lit=1 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1 cc_nz=0/0
+alph_one_1x1_f3_raw	still	1	1	1	0	3	0	raw
+alph_one_1x1_f3_vp8l	still	1	1	1	1	3	0	xf[I3] cache=0 meta=0 groups=1/1 lit=1 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=1 bundle=3 codes=simple1 cc_nz=0/0
+alph_big_300x200_f1_vp8l	still	300	200	1	1	1	0	xf[I1] cache=0 meta=0 groups=1/1 lit=30000 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=6 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_big_300x200_f3_vp8l	still	300	200	1	1	3	0	xf[I1] cache=0 meta=0 groups=1/1 lit=30000 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=11 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_rich_smooth_64x48_f0_m4	still	64	48	1	1	0	0	xf[G,P3,C3] cache=0 meta=0 groups=1/1 lit=3072 cache_hits=0 copies=0 short=0 far=0 pred_modes=57a pal=0 bundle=0 codes=normal/simple1 cc_nz=48/48
+alph_rich_smooth_64x48_f3_m6	still	64	48	1	1	3	0	xf[I0] cache=0 meta=0 groups=1/1 lit=3072 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=85 bundle=0 codes=normal/simple1 cc_nz=0/0
+alph_rich_mask_61x45_f0_m4	still	61	45	1	1	0	0	xf[I0] cache=0 meta=0 groups=1/1 lit=2741 cache_hits=0 copies=1 short=1 far=0 pred_modes= pal=230 bundle=0 codes=normal/simple1 cc_nz=0/0
+alph_rich_mask_61x45_f3_m6	still	61	45	1	1	3	0	xf[I0] cache=0 meta=0 groups=1/1 lit=2741 cache_hits=0 copies=1 short=1 far=0 pred_modes= pal=229 bundle=0 codes=normal/simple1 cc_nz=0/0
+alph_rich_noise_33x29_f0_m4	still	33	29	1	1	0	0	xf[G] cache=10 meta=0 groups=1/1 lit=816 cache_hits=141 copies=0 short=0 far=0 pred_modes= pal=0 bundle=0 codes=normal/simple1 cc_nz=0/0
+alph_rich_noise_33x29_f3_m6	still	33	29	1	1	3	0	xf[G,P2,C2] cache=0 meta=0 groups=1/1 lit=957 cache_hits=0 copies=0 short=0 far=0 pred_modes=01234789acd pal=0 bundle=0 codes=normal/simple1 cc_nz=72/72
+alph_smooth_64x48_f3_raw_pre1	still	64	48	1	0	3	1	raw
+alph_smooth_64x48_f0_raw_trailing	still	64	48	1	0	0	0	raw+trailing
+alph_libwebp_smooth_64x48_q100	still	64	48	1	1	1	0	xf[I1] cache=0 meta=0 groups=1/1 lit=1536 cache_hits=0 copies=0 short=0 far=0 pred_modes= pal=6 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_libwebp_smooth_64x48_q30	still	64	48	1	1	0	1	xf[I1] cache=0 meta=0 groups=1/1 lit=46 cache_hits=0 copies=104 short=11 far=9 pred_modes= pal=8 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_libwebp_mask_61x45_q100	still	61	45	1	1	0	0	xf[none] cache=1 meta=0 groups=1/1 lit=166 cache_hits=25 copies=61 short=12 far=20 pred_modes= pal=0 bundle=0 codes=normal/simple1 cc_nz=0/0
+alph_libwebp_mask_61x45_q30	still	61	45	1	1	0	1	xf[I1] cache=1 meta=0 groups=1/1 lit=56 cache_hits=9 copies=57 short=16 far=18 pred_modes= pal=8 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_libwebp_steps_50x40_q100	still	50	40	1	1	0	0	xf[I1] cache=1 meta=0 groups=1/1 lit=12 cache_hits=25 copies=5 short=2 far=1 pred_modes= pal=8 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_libwebp_steps_50x40_q30	still	50	40	1	1	0	1	xf[I1] cache=1 meta=0 groups=1/1 lit=12 cache_hits=25 copies=5 short=2 far=1 pred_modes= pal=8 bundle=1 codes=normal/simple1 cc_nz=0/0
+alph_anim_48x40	anim	48	40	3	1	0	0	frames=3

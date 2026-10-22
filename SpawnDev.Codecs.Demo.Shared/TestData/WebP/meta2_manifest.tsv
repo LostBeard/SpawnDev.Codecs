@@ -1,0 +1,40 @@
+canonical_all	8	8	1	6	1	1	1	1	-
+icc_only	8	8	1	1	1	1	0	0	-
+exif_only	8	8	1	6	1	0	1	0	-
+xmp_only	8	8	1	1	1	0	0	1	-
+exif_xmp	8	8	1	6	1	0	1	1	-
+icc_xmp	8	8	1	1	1	1	0	1	-
+flags_zero_chunks_present	8	8	1	1	1	0	0	0	libwebp ignores a chunk whose VP8X flag is clear
+icc_flag_only_all_chunks	8	8	1	1	1	1	0	0	only the ICCP flag is set
+exif_flag_only_all_chunks	8	8	1	6	1	0	1	0	only the EXIF flag is set
+flags_set_chunks_missing	8	8	1	1	1	0	0	0	-
+all_after_image	8	8	1	6	1	1	1	1	-
+exif_xmp_before_icc	8	8	1	6	1	1	1	1	-
+unknown_chunk_between	8	8	1	6	1	1	1	1	-
+duplicate_chunks_first_wins	8	8	1	6	1	1	1	1	a second chunk of a kind is ignored
+odd_lengths_padded	8	8	1	6	1	1	1	1	ICC 129, EXIF 27 and XMP odd: RIFF pad bytes
+lossy_alpha_all_libwebp	32	24	1	8	0	1	1	1	VP8X + ICCP + ALPH + VP8 + EXIF + XMP
+anim_all_libwebp	16	16	3	2	1	1	1	1	animation written by libwebp's muxer
+orientation_1_le	8	8	1	1	1	0	1	0	-
+orientation_2_le	8	8	1	2	1	0	1	0	-
+orientation_3_le	8	8	1	3	1	0	1	0	-
+orientation_4_le	8	8	1	4	1	0	1	0	-
+orientation_5_le	8	8	1	5	1	0	1	0	-
+orientation_6_le	8	8	1	6	1	0	1	0	-
+orientation_7_le	8	8	1	7	1	0	1	0	-
+orientation_8_le	8	8	1	8	1	0	1	0	-
+orientation_2_be_prefix	8	8	1	2	1	0	1	0	-
+orientation_5_be_prefix	8	8	1	5	1	0	1	0	-
+orientation_8_be_prefix	8	8	1	8	1	0	1	0	-
+orientation_7_le_prefix	8	8	1	7	1	0	1	0	-
+orientation_in_multi_entry_ifd	8	8	1	4	1	0	1	0	-
+orientation_malformed_value_0	8	8	1	1	1	0	1	0	malformed orientation entry
+orientation_malformed_value_9	8	8	1	1	1	0	1	0	malformed orientation entry
+orientation_malformed_value_65535	8	8	1	1	1	0	1	0	malformed orientation entry
+orientation_malformed_type_long	8	8	1	1	1	0	1	0	malformed orientation entry
+orientation_malformed_count_2	8	8	1	1	1	0	1	0	malformed orientation entry
+orientation_malformed_bad_magic	8	8	1	1	1	0	1	0	malformed orientation entry
+orientation_malformed_bad_byte_order	8	8	1	1	1	0	1	0	malformed orientation entry
+orientation_malformed_truncated_ifd	8	8	1	1	1	0	1	0	malformed orientation entry
+orientation_malformed_ifd_offset_past_end	8	8	1	1	1	0	1	0	malformed orientation entry
+orientation_malformed_no_orientation_tag	8	8	1	1	1	0	1	0	malformed orientation entry
