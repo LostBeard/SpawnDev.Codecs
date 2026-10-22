@@ -18,6 +18,7 @@ using ILGPU.Runtime;
 using SpawnDev.Codecs.Images;
 using SpawnDev.Codecs.Images.Jpeg;
 using SpawnDev.ILGPU;
+using SpawnDev.SpawnJS.JSObjects;
 using SpawnDev.UnitTesting;
 using static SpawnDev.Codecs.Demo.Shared.UnitTests.TestHelpers;
 
@@ -252,6 +253,37 @@ public abstract partial class CodecsTestBase
             True(failures.Count == 0, string.Join("\n", failures));
         }
         finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
+    public async Task JpegDecoderGpu_TypedArrayOverload_MatchesPillow()
+    {
+        if (!OperatingSystem.IsBrowser())
+            throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var dec = new JpegDecoderGpu(acc);
+            await RunJpegTypedArrayDecode(dec);
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("browser")]
+    private static async Task RunJpegTypedArrayDecode(JpegDecoderGpu dec)
+    {
+        foreach (var name in new[] { "c420_100x75", "prog_c444_66x50", "rst_b3_gray" })
+        {
+            byte[] jpg = ReadEmbedded(JpegFixturePrefix + name + ".jpg");
+            byte[] expected = ReadEmbedded(JpegFixturePrefix + name + ".rgba8");
+            using var jsFile = new Uint8Array(jpg.Length); jsFile.Set(jpg);
+            var info = await dec.ReadInfoAsync(jsFile);
+            using var img = await dec.DecodeAsync(jsFile);
+            Equal(info.Width, img.Info.Width, $"{name} width");
+            // Reading back to .NET is the TEST's terminal compare, not the product path.
+            var diff = ComparePixels(expected, img.Pixels.ReadBytes(), 4, img.Info.Width);
+            True(diff == null, $"{name} [TypedArray]: {diff}");
+        }
     }
 
     private async Task AssertJpegRejectedAsync(string fixture, string expectedMessagePart)

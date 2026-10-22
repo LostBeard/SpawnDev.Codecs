@@ -13,6 +13,7 @@ using ILGPU.Runtime;
 using SpawnDev.Codecs.Images;
 using SpawnDev.Codecs.Images.Jpeg;
 using SpawnDev.ILGPU;
+using SpawnDev.SpawnJS.JSObjects;
 using SpawnDev.UnitTesting;
 using static SpawnDev.Codecs.Demo.Shared.UnitTests.TestHelpers;
 
@@ -162,6 +163,36 @@ public abstract partial class CodecsTestBase
             True(failures.Count == 0, string.Join("\n", failures));
         }
         finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
+    public async Task JpegEncoderGpu_TypedArrayOverload_ByteIdenticalToPillow()
+    {
+        if (!OperatingSystem.IsBrowser())
+            throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var enc = new JpegEncoderGpu(acc);
+            await RunJpegTypedArrayEncode(enc);
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("browser")]
+    private static async Task RunJpegTypedArrayEncode(JpegEncoderGpu enc)
+    {
+        foreach (var name in new[] { "enc_c420_q090_100x75", "enc_rst_n3_c420_100x75", "enc_gray_q075_17x33" })
+        {
+            var (source, w, h, options) = ParseJpegEncodeFixture(name);
+            byte[] rgba = ReadEmbedded(JpegFixturePrefix + "encsrc_" + source + ".rgba8");
+            byte[] expected = ReadEmbedded(JpegFixturePrefix + name + ".jpg");
+            using var jsRgba = new Uint8Array(rgba.Length); jsRgba.Set(rgba);
+            using var result = await enc.EncodeAsync(jsRgba, w, h, options);
+            // Reading back to .NET is the TEST's terminal compare, not the product path.
+            var diff = CompareBytes(expected, result.ReadBytes());
+            True(diff == null, $"{name} [TypedArray]: {diff}");
+        }
     }
 
     private static double Psnr(byte[] rgbaA, byte[] rgbaB)
