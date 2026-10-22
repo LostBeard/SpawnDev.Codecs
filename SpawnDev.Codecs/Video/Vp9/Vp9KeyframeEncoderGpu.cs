@@ -6,7 +6,17 @@
 // the final frame bytes. Zero CPU math, zero CPU iteration over
 // codec data, zero CPU bool encoding, zero CPU bitstream assembly.
 //
+// API shape (same as Vp8KeyframeEncoderGpu): three overloads per entry point, all funnelling
+// into the ArrayView1D one.
+//   - ArrayView1D : planes already on the accelerator in, encoded bytes assembled straight into a
+//                   caller-owned output view, returns only the length (a scalar).
+//   - TypedArray  : browser. JS planes -> GPU via IBrowserMemoryBuffer.CopyFromJS, result back as a
+//                   JS Uint8Array. The bytes never enter the .NET heap.
+//   - ReadOnlyMemory<byte> : managed. Desktop and small inputs; a terminal CPU sink/source.
+//
 // Kernel chain:
+//   0. PlanePadKernel                    - tight source plane -> 64-aligned working plane, zero
+//                                          pad, on the accelerator (no host row loops).
 //   1. Vp9DequantizerComputeKernel       - compute Y/UV dequantizers
 //                                          from baseQIndex.
 //   2. Vp9FrameCompressedHeaderKernel    - emit tx_mode + no-update
@@ -25,30 +35,38 @@
 //                                          (compressed header byte count).
 //   6. Vp9FrameAssembleKernel            - concat uncompressed +
 //                                          compressed + tile bytes
-//                                          into final output buffer.
+//                                          into the caller's output buffer.
 //
 // V1 simplifications (mirror Vp9KeyframeEncoder.EncodeKeyFrame):
 //   - Profile 0, YUV 4:2:0
-//   - Width + height multiples of 64 (single tile, integer-SB grid).
+//   - Any positive width + height (padded to the 64-pixel superblock grid on the accelerator).
 //     v1 entropy kernel caps at 512-pixel width.
 //   - All Y blocks DC_PRED + Tx16x16; all UV blocks DC_PRED + Tx8x8.
 //   - tx_mode = Allow32x32, single tile, LF off, segmentation off,
 //     default coef probs.
 //   - Skip flag hardcoded 0.
 
+using System.Runtime.Versioning;
+using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.ILGPU;
+using SpawnDev.SpawnJS.JSObjects;
 
 namespace SpawnDev.Codecs.Video.Vp9;
 
 /// <summary>
 /// VP9 v1 keyframe encoder integration class. Runs the 6-kernel
-/// chain on the supplied accelerator and returns the final encoded
+/// chain on the supplied accelerator and produces the final encoded
 /// frame bytes. Host is a pure coordinator.
 /// </summary>
+/// <remarks>
+/// Not thread-safe: one in-flight encode per instance (the per-resolution working buffers and the
+/// staging buffers are shared across calls).
+/// </remarks>
 public sealed class Vp9KeyframeEncoderGpu : IDisposable
 {
     private readonly Accelerator _accelerator;
+    private readonly PlanePadKernel _pad;
     private readonly Vp9DequantizerComputeKernel _dequantKernel;
     private readonly Vp9FrameCompressedHeaderKernel _compressedHeaderKernel;
     private readonly Vp9FrameSequentialEncodeKernel _sequentialKernel;
@@ -82,8 +100,14 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
     private MemoryBuffer1D<long, global::ILGPU.Stride1D.Dense>? _dTileLen;
     private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dUncompressedHeader;
     private MemoryBuffer1D<long, global::ILGPU.Stride1D.Dense>? _dUncompressedHeaderLen;
-    private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dOutFrame;
     private MemoryBuffer1D<long, global::ILGPU.Stride1D.Dense>? _dOutFrameLen;
+
+    // Grow-only staging for the managed and TypedArray overloads.
+    private readonly StageBuffer<byte> _stageY;
+    private readonly StageBuffer<byte> _stageU;
+    private readonly StageBuffer<byte> _stageV;
+    private readonly StageBuffer<byte> _stageOut;
+    private readonly StageBuffer<long> _stageLens;
 
     /// <summary>
     /// Compile every kernel + upload one-time-cached constant tables
@@ -95,12 +119,19 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
 
+        _pad = new PlanePadKernel(accelerator);
         _dequantKernel = new Vp9DequantizerComputeKernel(accelerator);
         _compressedHeaderKernel = new Vp9FrameCompressedHeaderKernel(accelerator);
         _sequentialKernel = new Vp9FrameSequentialEncodeKernel(accelerator);
         _entropyKernel = new Vp9FrameEntropyKernel(accelerator);
         _uncompressedHeaderKernel = new Vp9FrameUncompressedHeaderKernel(accelerator);
         _assembleKernel = new Vp9FrameAssembleKernel(accelerator);
+
+        _stageY = new StageBuffer<byte>(accelerator);
+        _stageU = new StageBuffer<byte>(accelerator);
+        _stageV = new StageBuffer<byte>(accelerator);
+        _stageOut = new StageBuffer<byte>(accelerator);
+        _stageLens = new StageBuffer<long>(accelerator);
 
         _dDcQLookup = accelerator.Allocate1D<short>(256);
         _dAcQLookup = accelerator.Allocate1D<short>(256);
@@ -113,125 +144,126 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         _dUshortConsts.View.CopyFromCPU(Vp9KeyframeConstantsGpu.BuildUshortConstsBuffer());
     }
 
-    /// <summary>
-    /// Encode a single VP9 v1 keyframe from YUV420 source. Returns
-    /// the complete VP9 frame bytes (uncompressed header + compressed
-    /// header + tile data).
-    /// </summary>
-    public Task<byte[]> EncodeKeyFrameAsync(
-        byte[] yPlane, byte[] uPlane, byte[] vPlane,
-        int width, int height,
-        int baseQIndex = 30)
+    // ------------------------------------------------------------------
+    // Geometry shared by every overload
+    // ------------------------------------------------------------------
+
+    /// <summary>Chroma plane dimension for a luma dimension (4:2:0, rounds up).</summary>
+    private static int ChromaDim(int lumaDim) => (lumaDim + 1) / 2;
+
+    private static void WorkingDims(int width, int height, out int workWidth, out int workHeight)
     {
-        // Fast path: caller doesn't want recon planes. Skip the three
-        // extra device->host readbacks (yRecon/uRecon/vRecon) - those
-        // are pure overhead in the encode-only path.
-        return EncodeKeyFrameInternalAsync(yPlane, uPlane, vPlane, width, height, baseQIndex, returnRecon: false);
+        // Round up to the next 64-multiple (superblock grid). The bitstream's frame_width_minus_1 /
+        // frame_height_minus_1 fields signal the original (width, height) so decoders crop the pad.
+        workWidth = (width + 63) & ~63;
+        workHeight = (height + 63) & ~63;
     }
 
+    private static long WorstCaseTile(int mbCount) => mbCount * 1024L + 256L;
+
     /// <summary>
-    /// Encode + return both the encoded bytes AND the encoder's
-    /// internal recon planes. The recon is the same data the
-    /// downstream decoder must reconstruct from the encoded bytes -
-    /// useful for self-consistency tests of the encoder/decoder
-    /// kernel chain.
+    /// Size in bytes of the output buffer one encoded keyframe needs for a
+    /// <paramref name="width"/> x <paramref name="height"/> picture. The ArrayView1D overloads
+    /// require an output view at least this long (and the batch overload strides its slots by it).
     /// </summary>
-    public async Task<(byte[] bytes, byte[] yRecon, byte[] uRecon, byte[] vRecon)>
-        EncodeKeyFrameWithReconAsync(
-        byte[] yPlane, byte[] uPlane, byte[] vPlane,
-        int width, int height,
-        int baseQIndex = 30)
+    public static int GetMaxEncodedSize(int width, int height)
     {
-        // The recon path returns full Y/U/V; fall through to the unified internal.
-        var bytes = await EncodeKeyFrameInternalAsync(yPlane, uPlane, vPlane, width, height, baseQIndex, returnRecon: true);
-        // After EncodeKeyFrameInternalAsync(returnRecon:true) the recon planes
-        // are populated on the host; pull them from the helper-set fields.
-        return (bytes, _lastYRecon!, _lastURecon!, _lastVRecon!);
+        if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
+        WorkingDims(width, height, out int workWidth, out int workHeight);
+        int mbCount = (workWidth >> 4) * (workHeight >> 4);
+        return checked((int)(WorstCaseTile(mbCount) + 128L));
     }
 
-    private byte[]? _lastYRecon;
-    private byte[]? _lastURecon;
-    private byte[]? _lastVRecon;
-
-    private async Task<byte[]> EncodeKeyFrameInternalAsync(
-        byte[] yPlane, byte[] uPlane, byte[] vPlane,
-        int width, int height,
-        int baseQIndex,
-        bool returnRecon)
+    private static void ValidateArgs(int width, int height, int baseQIndex)
     {
-        if (yPlane is null) throw new ArgumentNullException(nameof(yPlane));
-        if (uPlane is null) throw new ArgumentNullException(nameof(uPlane));
-        if (vPlane is null) throw new ArgumentNullException(nameof(vPlane));
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
         if (baseQIndex <= 0 || baseQIndex > 255)
             throw new ArgumentOutOfRangeException(nameof(baseQIndex),
                 "baseQIndex must be in [1, 255].");
+    }
 
-        // Round up to next 64-multiple working dims; bitstream's
-        // frame_width_minus_1 / frame_height_minus_1 fields signal the
-        // original (width, height) so decoders crop the pad.
-        int workWidth = (width + 63) & ~63;
-        int workHeight = (height + 63) & ~63;
+    // ------------------------------------------------------------------
+    // ArrayView1D overloads: the implementation
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Encode a single VP9 v1 keyframe from tightly packed YUV420 planes that are already on the
+    /// accelerator. Accepts any positive (width, height); internally pads to the 64-pixel
+    /// superblock grid. Nothing but the length scalar crosses to the host.
+    /// </summary>
+    /// <param name="yPlane">Luma plane, <c>width * height</c> bytes.</param>
+    /// <param name="uPlane">Cb plane, <c>((width+1)/2) * ((height+1)/2)</c> bytes.</param>
+    /// <param name="vPlane">Cr plane, same layout as <paramref name="uPlane"/>.</param>
+    /// <param name="width">Picture width in pixels.</param>
+    /// <param name="height">Picture height in pixels.</param>
+    /// <param name="output">Receives the encoded frame; at least <see cref="GetMaxEncodedSize"/> bytes.</param>
+    /// <param name="baseQIndex">VP9 base quantizer index, 1..255.</param>
+    /// <returns>The number of bytes written to <paramref name="output"/>.</returns>
+    public async Task<int> EncodeKeyFrameAsync(
+        ArrayView1D<byte, Stride1D.Dense> yPlane,
+        ArrayView1D<byte, Stride1D.Dense> uPlane,
+        ArrayView1D<byte, Stride1D.Dense> vPlane,
+        int width, int height,
+        ArrayView1D<byte, Stride1D.Dense> output,
+        int baseQIndex = 30)
+    {
+        await EncodeCoreAsync(yPlane, uPlane, vPlane, width, height, output, baseQIndex);
+        return (int)(await _dOutFrameLen!.CopyToHostAsync())[0];
+    }
+
+    /// <summary>
+    /// Runs the kernel chain and drains it. Leaves the encoded length in <c>_dOutFrameLen</c> and
+    /// the recon planes in <c>_d*Recon</c> (read by <see cref="EncodeKeyFrameWithReconAsync"/>).
+    /// </summary>
+    private async Task EncodeCoreAsync(
+        ArrayView1D<byte, Stride1D.Dense> yPlane,
+        ArrayView1D<byte, Stride1D.Dense> uPlane,
+        ArrayView1D<byte, Stride1D.Dense> vPlane,
+        int width, int height,
+        ArrayView1D<byte, Stride1D.Dense> output,
+        int baseQIndex)
+    {
+        ValidateArgs(width, height, baseQIndex);
+
+        WorkingDims(width, height, out int workWidth, out int workHeight);
         int mbCols = workWidth >> 4;
         int mbRows = workHeight >> 4;
         int yLen = workWidth * workHeight;
         int uvLen = yLen / 4;
         int mbCount = mbCols * mbRows;
-        int origYLen = width * height;
-        int origUvLen = origYLen / 4;
+        int uvWidth = ChromaDim(width);
+        int uvHeight = ChromaDim(height);
+        int uvWorkWidth = workWidth / 2;
+        int uvWorkHeight = workHeight / 2;
 
-        if (yPlane.Length < origYLen) throw new ArgumentException("yPlane too short.", nameof(yPlane));
-        if (uPlane.Length < origUvLen) throw new ArgumentException("uPlane too short.", nameof(uPlane));
-        if (vPlane.Length < origUvLen) throw new ArgumentException("vPlane too short.", nameof(vPlane));
+        if (yPlane.Length < (long)width * height) throw new ArgumentException("yPlane too short.", nameof(yPlane));
+        if (uPlane.Length < (long)uvWidth * uvHeight) throw new ArgumentException("uPlane too short.", nameof(uPlane));
+        if (vPlane.Length < (long)uvWidth * uvHeight) throw new ArgumentException("vPlane too short.", nameof(vPlane));
+        if (output.Length < GetMaxEncodedSize(width, height))
+            throw new ArgumentException(
+                $"output must be at least GetMaxEncodedSize({width}, {height}) = {GetMaxEncodedSize(width, height)} bytes.",
+                nameof(output));
 
         // ---- 1. Ensure per-frame GPU buffers (cached across same-resolution calls) ----
         EnsureBuffers(workWidth, workHeight, yLen, uvLen, mbCount);
 
-        // ---- Pre-zero output buffers so the bool encoder's carry-back pass
-        // reads stable bytes. Recon planes are fully overwritten by the
-        // sequential kernel; coefs are fully overwritten too. Headers /
-        // tile / outframe are bool-encoder carry-back targets and need
-        // pre-zero each frame.
+        // ---- Pre-zero the bool-encoder carry-back targets. Recon planes and coefs are fully
+        // overwritten by the sequential kernel; the assembled output is written by assignment.
         _dCompressedHeader!.View.MemSetToZero();
         _dCompressedHeaderLen!.View.MemSetToZero();
         _dTile!.View.MemSetToZero();
         _dTileLen!.View.MemSetToZero();
         _dUncompressedHeader!.View.MemSetToZero();
         _dUncompressedHeaderLen!.View.MemSetToZero();
-        _dOutFrame!.View.MemSetToZero();
         _dOutFrameLen!.View.MemSetToZero();
 
-        if (workWidth == width && workHeight == height)
-        {
-            _dY!.View.CopyFromCPU(yPlane);
-            _dU!.View.CopyFromCPU(uPlane);
-            _dV!.View.CopyFromCPU(vPlane);
-        }
-        else
-        {
-            // Non-aligned source: pad-justify each row into the working-dim
-            // buffer. Right-edge cols and bottom rows stay zero.
-            _dY!.View.MemSetToZero();
-            _dU!.View.MemSetToZero();
-            _dV!.View.MemSetToZero();
-            int uvWorkWidth = workWidth / 2;
-            int origUvWidth = width / 2;
-            int origUvHeight = height / 2;
-            var hostY = new byte[yLen];
-            var hostU = new byte[uvLen];
-            var hostV = new byte[uvLen];
-            for (int r = 0; r < height; r++)
-                Array.Copy(yPlane, r * width, hostY, r * workWidth, width);
-            for (int r = 0; r < origUvHeight; r++)
-            {
-                Array.Copy(uPlane, r * origUvWidth, hostU, r * uvWorkWidth, origUvWidth);
-                Array.Copy(vPlane, r * origUvWidth, hostV, r * uvWorkWidth, origUvWidth);
-            }
-            _dY!.View.CopyFromCPU(hostY);
-            _dU!.View.CopyFromCPU(hostU);
-            _dV!.View.CopyFromCPU(hostV);
-        }
+        // Tight source plane -> 64-aligned working plane with zero pad, on the accelerator. Every
+        // working byte is written, so there is no pre-clear and no host row loop.
+        _pad.Run(yPlane, 0, width, width, height, _dY!.View, workWidth, workHeight);
+        _pad.Run(uPlane, 0, uvWidth, uvWidth, uvHeight, _dU!.View, uvWorkWidth, uvWorkHeight);
+        _pad.Run(vPlane, 0, uvWidth, uvWidth, uvHeight, _dV!.View, uvWorkWidth, uvWorkHeight);
 
         // ---- 2. Dispatch dequantizer compute kernel ----
         // y_dc_delta / uv_dc_delta / uv_ac_delta = 0 in v1.
@@ -241,20 +273,22 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         // ---- 3. Compressed header ----
         _compressedHeaderKernel.Run(_dCompressedHeader!.View, _dCompressedHeaderLen!.View);
 
+        // Display mi dims: the sequential encoder and the entropy walker both need them to handle SBs
+        // that straddle the frame boundary spec-correctly (e.g. 1920x1080: bottom-edge SB16 at
+        // miRow=134 emits PARTITION_HORZ + top BLOCK_16X8 leaf).
+        int displayMiCols = (width + 7) >> 3;
+        int displayMiRows = (height + 7) >> 3;
+
         // ---- 4. Sequential encode (forward + inverse pipeline) ----
         _sequentialKernel.Run(
             _dY!.View, _dU!.View, _dV!.View,
             _dYRecon!.View, _dURecon!.View, _dVRecon!.View,
             _dYCoefs!.View, _dUCoefs!.View, _dVCoefs!.View,
             _dDequant!.View,
-            mbCols, mbRows);
+            mbCols, mbRows,
+            frameMiRows: displayMiRows);
 
         // ---- 5. Entropy ----
-        // Pass display mi dims so the walker can spec-correctly handle SBs
-        // that straddle the frame boundary (e.g. 1920x1080: bottom-edge SB16
-        // at miRow=134 emits PARTITION_HORZ + top BLOCK_16X8 leaf).
-        int displayMiCols = (width + 7) >> 3;
-        int displayMiRows = (height + 7) >> 3;
         _entropyKernel.Run(
             _dYCoefs!.View, _dUCoefs!.View, _dVCoefs!.View,
             _dTile!.View, _dTileLen!.View,
@@ -273,126 +307,74 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             width, height, baseQIndex);
 
         // ---- 7. Assemble (GPU-resident: reads all 3 lens from views,
-        // no host sync between header emit and concat) ----
+        // no host sync between header emit and concat) straight into the caller's output ----
         _assembleKernel.Run(
             _dUncompressedHeader!.View, _dCompressedHeader!.View, _dTile!.View,
-            _dOutFrame!.View, _dOutFrameLen!.View,
+            output, _dOutFrameLen!.View,
             _dUncompressedHeaderLen!.View, _dCompressedHeaderLen!.View, _dTileLen!.View);
 
-        // ---- 8. Single end-of-frame sync + readback ----
+        // ---- 8. Single end-of-frame sync ----
         await _accelerator.SynchronizeAsync();
-        long outFrameLen = (await _dOutFrameLen!.CopyToHostAsync())[0];
-        // Real per-backend partial readback (SpawnDev.ILGPU 4.9.3+).
-        var result = await _dOutFrame!.View.SubView(0, outFrameLen).CopyToHostAsync();
-
-        if (returnRecon)
-        {
-            _lastYRecon = await _dYRecon!.CopyToHostAsync();
-            _lastURecon = await _dURecon!.CopyToHostAsync();
-            _lastVRecon = await _dVRecon!.CopyToHostAsync();
-        }
-
-        return result;
     }
 
     /// <summary>
-    /// Ensure per-frame GPU buffers are sized for (width,height). Reallocates
-    /// only when the resolution changes.
+    /// Frame-batch parallel VP9 encoder for frames already on the accelerator. Same architecture
+    /// as VP8 batch: per-frame buffer slots through every kernel, batch wave-front + batch entropy
+    /// run all N frames concurrently. Only the per-frame lengths (written to
+    /// <paramref name="lengths"/>) are produced; the host reads nothing here.
     /// </summary>
-    private void EnsureBuffers(int width, int height, int yLen, int uvLen, int mbCount)
-    {
-        if (_cachedWidth == width && _cachedHeight == height) return;
-        DisposeFrameBuffers();
-        _cachedWidth = width;
-        _cachedHeight = height;
-        _dY = _accelerator.Allocate1D<byte>(yLen);
-        _dU = _accelerator.Allocate1D<byte>(uvLen);
-        _dV = _accelerator.Allocate1D<byte>(uvLen);
-        _dYRecon = _accelerator.Allocate1D<byte>(yLen);
-        _dURecon = _accelerator.Allocate1D<byte>(uvLen);
-        _dVRecon = _accelerator.Allocate1D<byte>(uvLen);
-        _dYCoefs = _accelerator.Allocate1D<short>((long)mbCount * 256);
-        _dUCoefs = _accelerator.Allocate1D<short>((long)mbCount * 64);
-        _dVCoefs = _accelerator.Allocate1D<short>((long)mbCount * 64);
-        _dDequant = _accelerator.Allocate1D<int>(4);
-        long worstCaseTile = mbCount * 1024L + 256L;
-        long worstCaseFrame = worstCaseTile + 128L;
-        _dCompressedHeader = _accelerator.Allocate1D<byte>(64);
-        _dCompressedHeaderLen = _accelerator.Allocate1D<long>(1);
-        _dTile = _accelerator.Allocate1D<byte>(worstCaseTile);
-        _dTileLen = _accelerator.Allocate1D<long>(1);
-        _dUncompressedHeader = _accelerator.Allocate1D<byte>(32);
-        _dUncompressedHeaderLen = _accelerator.Allocate1D<long>(1);
-        _dOutFrame = _accelerator.Allocate1D<byte>(worstCaseFrame);
-        _dOutFrameLen = _accelerator.Allocate1D<long>(1);
-    }
-
-    private void DisposeFrameBuffers()
-    {
-        _dY?.Dispose(); _dY = null;
-        _dU?.Dispose(); _dU = null;
-        _dV?.Dispose(); _dV = null;
-        _dYRecon?.Dispose(); _dYRecon = null;
-        _dURecon?.Dispose(); _dURecon = null;
-        _dVRecon?.Dispose(); _dVRecon = null;
-        _dYCoefs?.Dispose(); _dYCoefs = null;
-        _dUCoefs?.Dispose(); _dUCoefs = null;
-        _dVCoefs?.Dispose(); _dVCoefs = null;
-        _dDequant?.Dispose(); _dDequant = null;
-        _dCompressedHeader?.Dispose(); _dCompressedHeader = null;
-        _dCompressedHeaderLen?.Dispose(); _dCompressedHeaderLen = null;
-        _dTile?.Dispose(); _dTile = null;
-        _dTileLen?.Dispose(); _dTileLen = null;
-        _dUncompressedHeader?.Dispose(); _dUncompressedHeader = null;
-        _dUncompressedHeaderLen?.Dispose(); _dUncompressedHeaderLen = null;
-        _dOutFrame?.Dispose(); _dOutFrame = null;
-        _dOutFrameLen?.Dispose(); _dOutFrameLen = null;
-        _cachedWidth = -1;
-        _cachedHeight = -1;
-    }
-
-    /// <summary>
-    /// Frame-batch parallel VP9 encoder. Same architecture as VP8 batch:
-    /// per-frame buffer slots through every kernel, batch wave-front +
-    /// batch entropy run all N frames concurrently.
-    /// </summary>
-    public async Task<byte[][]> EncodeKeyFramesBatchAsync(
-        ReadOnlyMemory<byte>[] yPlanes,
-        ReadOnlyMemory<byte>[] uPlanes,
-        ReadOnlyMemory<byte>[] vPlanes,
-        int width, int height,
+    /// <param name="yPlanes">Frame-major tightly packed luma planes: frame f at <c>f * width * height</c>.</param>
+    /// <param name="uPlanes">Frame-major tightly packed Cb planes: frame f at <c>f * uvWidth * uvHeight</c>
+    /// with uvWidth = (width+1)/2, uvHeight = (height+1)/2.</param>
+    /// <param name="vPlanes">Frame-major tightly packed Cr planes, same layout as <paramref name="uPlanes"/>.</param>
+    /// <param name="frameCount">Number of frames.</param>
+    /// <param name="width">Picture width in pixels.</param>
+    /// <param name="height">Picture height in pixels.</param>
+    /// <param name="outputs">Frame f is assembled at <c>f * GetMaxEncodedSize(width, height)</c>; at least
+    /// <c>frameCount * GetMaxEncodedSize</c> bytes.</param>
+    /// <param name="lengths">Receives each frame's encoded length; at least <paramref name="frameCount"/> longs.</param>
+    /// <param name="baseQIndex">VP9 base quantizer index, 1..255.</param>
+    public async Task EncodeKeyFramesBatchAsync(
+        ArrayView1D<byte, Stride1D.Dense> yPlanes,
+        ArrayView1D<byte, Stride1D.Dense> uPlanes,
+        ArrayView1D<byte, Stride1D.Dense> vPlanes,
+        int frameCount, int width, int height,
+        ArrayView1D<byte, Stride1D.Dense> outputs,
+        ArrayView1D<long, Stride1D.Dense> lengths,
         int baseQIndex = 30)
     {
-        if (yPlanes is null) throw new ArgumentNullException(nameof(yPlanes));
-        if (uPlanes is null) throw new ArgumentNullException(nameof(uPlanes));
-        if (vPlanes is null) throw new ArgumentNullException(nameof(vPlanes));
-        if (yPlanes.Length != uPlanes.Length || yPlanes.Length != vPlanes.Length)
-            throw new ArgumentException("Plane arrays must have equal length.");
-        int frameCount = yPlanes.Length;
-        if (frameCount == 0) return Array.Empty<byte[]>();
-        if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
-        if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
+        if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        ValidateArgs(width, height, baseQIndex);
 
-        // Round up to next 64-multiple working dims. Bitstream signals
-        // original dims via frame_width_minus_1 / frame_height_minus_1.
-        int workWidth = (width + 63) & ~63;
-        int workHeight = (height + 63) & ~63;
-        int origYLen = width * height;
-        int origUvLen = origYLen / 4;
-        int origUvWidth = width / 2;
-        int origUvHeight = height / 2;
+        WorkingDims(width, height, out int workWidth, out int workHeight);
+        int uvWidth = ChromaDim(width);
+        int uvHeight = ChromaDim(height);
         int uvWorkWidth = workWidth / 2;
+        int uvWorkHeight = workHeight / 2;
         int mbCols = workWidth >> 4;
         int mbRows = workHeight >> 4;
         int yLen = workWidth * workHeight;
         int uvLen = yLen / 4;
         int mbCount = mbCols * mbRows;
 
+        long ySrcPlane = (long)width * height;
+        long uvSrcPlane = (long)uvWidth * uvHeight;
+        int frameCapacity = GetMaxEncodedSize(width, height);
+        if (yPlanes.Length < frameCount * ySrcPlane)
+            throw new ArgumentException("yPlanes must hold frameCount tightly packed luma planes.", nameof(yPlanes));
+        if (uPlanes.Length < frameCount * uvSrcPlane)
+            throw new ArgumentException("uPlanes must hold frameCount tightly packed Cb planes.", nameof(uPlanes));
+        if (vPlanes.Length < frameCount * uvSrcPlane)
+            throw new ArgumentException("vPlanes must hold frameCount tightly packed Cr planes.", nameof(vPlanes));
+        if (outputs.Length < (long)frameCount * frameCapacity)
+            throw new ArgumentException("outputs must hold frameCount * GetMaxEncodedSize bytes.", nameof(outputs));
+        if (lengths.Length < frameCount)
+            throw new ArgumentException("lengths must hold frameCount longs.", nameof(lengths));
+
         int yCoefStride = mbCount * 256;
         int uvCoefStride = mbCount * 64;
         int dequantStride = 4;
-        long worstCaseTile = mbCount * 1024L + 256L;
-        long worstCaseFrame = worstCaseTile + 128L;
+        long worstCaseTile = WorstCaseTile(mbCount);
 
         // Per-frame slot buffers.
         using var dAllY = _accelerator.Allocate1D<byte>((long)frameCount * yLen);
@@ -411,8 +393,6 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         using var dAllTileLen = _accelerator.Allocate1D<long>(frameCount);
         using var dAllUH = _accelerator.Allocate1D<byte>((long)frameCount * 32);
         using var dAllUHLen = _accelerator.Allocate1D<long>(frameCount);
-        using var dAllOut = _accelerator.Allocate1D<byte>((long)frameCount * worstCaseFrame);
-        using var dAllOutLen = _accelerator.Allocate1D<long>(frameCount);
 
         dAllCH.View.MemSetToZero();
         dAllCHLen.View.MemSetToZero();
@@ -420,45 +400,19 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         dAllTileLen.View.MemSetToZero();
         dAllUH.View.MemSetToZero();
         dAllUHLen.View.MemSetToZero();
-        dAllOut.View.MemSetToZero();
-        dAllOutLen.View.MemSetToZero();
 
-        // Phase 1a: bulk upload all source planes (3 host->device transfers).
-        // Non-aligned source dims pad-justify rows into the working-dim slot.
-        bool needsPad = workWidth != width || workHeight != height;
-        var hostY = new byte[(long)frameCount * yLen];
-        var hostU = new byte[(long)frameCount * uvLen];
-        var hostV = new byte[(long)frameCount * uvLen];
-        if (!needsPad)
+        // Phase 1a: pad every frame's planes into its working-dim slot on the accelerator. Every
+        // working byte of every slot is written (zero pad included): no host staging array, no host
+        // row loop.
+        for (int f = 0; f < frameCount; f++)
         {
-            for (int f = 0; f < frameCount; f++)
-            {
-                yPlanes[f].Span.CopyTo(hostY.AsSpan((int)((long)f * yLen)));
-                uPlanes[f].Span.CopyTo(hostU.AsSpan((int)((long)f * uvLen)));
-                vPlanes[f].Span.CopyTo(hostV.AsSpan((int)((long)f * uvLen)));
-            }
+            _pad.Run(yPlanes, f * ySrcPlane, width, width, height,
+                dAllY.View.SubView((long)f * yLen, yLen), workWidth, workHeight);
+            _pad.Run(uPlanes, f * uvSrcPlane, uvWidth, uvWidth, uvHeight,
+                dAllU.View.SubView((long)f * uvLen, uvLen), uvWorkWidth, uvWorkHeight);
+            _pad.Run(vPlanes, f * uvSrcPlane, uvWidth, uvWidth, uvHeight,
+                dAllV.View.SubView((long)f * uvLen, uvLen), uvWorkWidth, uvWorkHeight);
         }
-        else
-        {
-            for (int f = 0; f < frameCount; f++)
-            {
-                long ySlotBase = (long)f * yLen;
-                long uvSlotBase = (long)f * uvLen;
-                var ySrc = yPlanes[f].Span;
-                var uSrc = uPlanes[f].Span;
-                var vSrc = vPlanes[f].Span;
-                for (int r = 0; r < height; r++)
-                    ySrc.Slice(r * width, width).CopyTo(hostY.AsSpan((int)(ySlotBase + r * workWidth), width));
-                for (int r = 0; r < origUvHeight; r++)
-                {
-                    uSrc.Slice(r * origUvWidth, origUvWidth).CopyTo(hostU.AsSpan((int)(uvSlotBase + r * uvWorkWidth), origUvWidth));
-                    vSrc.Slice(r * origUvWidth, origUvWidth).CopyTo(hostV.AsSpan((int)(uvSlotBase + r * uvWorkWidth), origUvWidth));
-                }
-            }
-        }
-        dAllY.View.CopyFromCPU(hostY);
-        dAllU.View.CopyFromCPU(hostU);
-        dAllV.View.CopyFromCPU(hostV);
 
         // Phase 1b: BATCH dequantizer + compressed header.
         _dequantKernel.RunBatch(_dDcQLookup.View, _dAcQLookup.View, dAllDQ.View,
@@ -524,33 +478,274 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             UhStride = 32,
             ChStride = 64,
             TileStride = (int)worstCaseTile,
-            OutStride = (int)worstCaseFrame,
+            OutStride = frameCapacity,
         };
         _assembleKernel.RunBatch(
-            dAllUH.View, dAllCH.View, dAllTile.View, dAllOut.View, dAllOutLen.View,
+            dAllUH.View, dAllCH.View, dAllTile.View, outputs, lengths,
             dAllUHLen.View, dAllCHLen.View, dAllTileLen.View,
             frameCount, assembleStrides);
 
+        // Drain before the using-scoped slot buffers dispose: on the browser backends a dispatch
+        // that still references a freed buffer reads freed memory.
         await _accelerator.SynchronizeAsync();
-        // Read lengths first; partial-readback only the actual encoded
-        // bytes per frame to avoid transferring the worst-case-sized
-        // strided output buffer over PCIe.
-        var outLensHost = await dAllOutLen.CopyToHostAsync();
+    }
+
+    // ------------------------------------------------------------------
+    // Managed overloads
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Encode a single VP9 v1 keyframe from managed, tightly packed YUV420 planes. Returns the
+    /// complete VP9 frame bytes (uncompressed header + compressed header + tile data) as a managed
+    /// array (a terminal CPU sink; in a browser prefer the <see cref="TypedArray"/> overload).
+    /// </summary>
+    public async Task<byte[]> EncodeKeyFrameAsync(
+        ReadOnlyMemory<byte> yPlane, ReadOnlyMemory<byte> uPlane, ReadOnlyMemory<byte> vPlane,
+        int width, int height,
+        int baseQIndex = 30)
+    {
+        ValidateArgs(width, height, baseQIndex);
+        int uvWidth = ChromaDim(width), uvHeight = ChromaDim(height);
+        DeviceTransfer.UploadPlane(_stageY, yPlane, width, width, height, nameof(yPlane));
+        DeviceTransfer.UploadPlane(_stageU, uPlane, uvWidth, uvWidth, uvHeight, nameof(uPlane));
+        DeviceTransfer.UploadPlane(_stageV, vPlane, uvWidth, uvWidth, uvHeight, nameof(vPlane));
+        _stageOut.Ensure(GetMaxEncodedSize(width, height));
+
+        int len = await EncodeKeyFrameAsync(
+            _stageY.View, _stageU.View, _stageV.View, width, height, _stageOut.View, baseQIndex);
+        return await DeviceTransfer.DownloadAsync(_stageOut.View, len);
+    }
+
+    /// <summary>
+    /// Encode + return both the encoded bytes AND the encoder's
+    /// internal recon planes. The recon is the same data the
+    /// downstream decoder must reconstruct from the encoded bytes -
+    /// useful for self-consistency tests of the encoder/decoder
+    /// kernel chain. The recon planes are the encoder's working planes (padded to the 64-pixel
+    /// grid); this is a diagnostic/test API and reads them back to managed memory.
+    /// </summary>
+    public async Task<(byte[] bytes, byte[] yRecon, byte[] uRecon, byte[] vRecon)>
+        EncodeKeyFrameWithReconAsync(
+        ReadOnlyMemory<byte> yPlane, ReadOnlyMemory<byte> uPlane, ReadOnlyMemory<byte> vPlane,
+        int width, int height,
+        int baseQIndex = 30)
+    {
+        ValidateArgs(width, height, baseQIndex);
+        int uvWidth = ChromaDim(width), uvHeight = ChromaDim(height);
+        DeviceTransfer.UploadPlane(_stageY, yPlane, width, width, height, nameof(yPlane));
+        DeviceTransfer.UploadPlane(_stageU, uPlane, uvWidth, uvWidth, uvHeight, nameof(uPlane));
+        DeviceTransfer.UploadPlane(_stageV, vPlane, uvWidth, uvWidth, uvHeight, nameof(vPlane));
+        _stageOut.Ensure(GetMaxEncodedSize(width, height));
+
+        await EncodeCoreAsync(_stageY.View, _stageU.View, _stageV.View, width, height, _stageOut.View, baseQIndex);
+        int len = (int)(await _dOutFrameLen!.CopyToHostAsync())[0];
+        var bytes = await DeviceTransfer.DownloadAsync(_stageOut.View, len);
+        var yRecon = await _dYRecon!.CopyToHostAsync();
+        var uRecon = await _dURecon!.CopyToHostAsync();
+        var vRecon = await _dVRecon!.CopyToHostAsync();
+        return (bytes, yRecon, uRecon, vRecon);
+    }
+
+    /// <summary>
+    /// Batch-encode managed keyframes. Every plane is tightly packed (no stride): luma
+    /// <c>width * height</c>, chroma <c>((width+1)/2) * ((height+1)/2)</c>. Each plane is uploaded
+    /// straight into the device staging buffer (no host-side concatenation).
+    /// </summary>
+    public async Task<byte[][]> EncodeKeyFramesBatchAsync(
+        ReadOnlyMemory<byte>[] yPlanes,
+        ReadOnlyMemory<byte>[] uPlanes,
+        ReadOnlyMemory<byte>[] vPlanes,
+        int width, int height,
+        int baseQIndex = 30)
+    {
+        if (yPlanes is null) throw new ArgumentNullException(nameof(yPlanes));
+        if (uPlanes is null) throw new ArgumentNullException(nameof(uPlanes));
+        if (vPlanes is null) throw new ArgumentNullException(nameof(vPlanes));
+        if (yPlanes.Length != uPlanes.Length || yPlanes.Length != vPlanes.Length)
+            throw new ArgumentException("Plane arrays must have equal length.");
+        int frameCount = yPlanes.Length;
+        if (frameCount == 0) return System.Array.Empty<byte[]>();
+        ValidateArgs(width, height, baseQIndex);
+
+        long yPlane = (long)width * height;
+        long uvPlane = (long)ChromaDim(width) * ChromaDim(height);
+        int cap = GetMaxEncodedSize(width, height);
+        _stageY.Ensure(frameCount * yPlane);
+        _stageU.Ensure(frameCount * uvPlane);
+        _stageV.Ensure(frameCount * uvPlane);
+        _stageOut.Ensure((long)frameCount * cap);
+        _stageLens.Ensure(frameCount);
+
+        for (int f = 0; f < frameCount; f++)
+        {
+            DeviceTransfer.UploadPlaneSlot(_stageY, f * yPlane, yPlane, yPlanes[f], nameof(yPlanes));
+            DeviceTransfer.UploadPlaneSlot(_stageU, f * uvPlane, uvPlane, uPlanes[f], nameof(uPlanes));
+            DeviceTransfer.UploadPlaneSlot(_stageV, f * uvPlane, uvPlane, vPlanes[f], nameof(vPlanes));
+        }
+
+        await EncodeKeyFramesBatchAsync(
+            _stageY.View, _stageU.View, _stageV.View,
+            frameCount, width, height, _stageOut.View, _stageLens.View, baseQIndex);
+
+        // Lengths first (8 bytes each); then ONLY the actual encoded bytes per frame via partial
+        // readback, never the worst-case-sized slot.
+        var lens = await _stageLens.View.SubView(0, frameCount).CopyToHostAsync();
         var results = new byte[frameCount][];
         for (int f = 0; f < frameCount; f++)
         {
-            int len = (int)outLensHost[f];
-            if (len <= 0) { results[f] = Array.Empty<byte>(); continue; }
-            results[f] = await dAllOut.View
-                .SubView((long)f * worstCaseFrame, len)
-                .CopyToHostAsync();
+            int len = (int)lens[f];
+            results[f] = len > 0
+                ? await DeviceTransfer.DownloadAsync(_stageOut.View.SubView((long)f * cap, len), len)
+                : System.Array.Empty<byte>();
         }
         return results;
+    }
+
+    // ------------------------------------------------------------------
+    // TypedArray overloads (browser: bulk bytes stay in JS)
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Encode a single VP9 keyframe from JS typed arrays (browser accelerators only), tightly
+    /// packed planes. The planes go to the GPU with <c>CopyFromJS</c> and the frame comes back as
+    /// a JS <see cref="Uint8Array"/> (the caller disposes it); no bulk byte enters the .NET heap.
+    /// </summary>
+    /// <exception cref="NotSupportedException">The accelerator is not a browser accelerator.</exception>
+    [SupportedOSPlatform("browser")]
+    public async Task<Uint8Array> EncodeKeyFrameAsync(
+        TypedArray yPlane, TypedArray uPlane, TypedArray vPlane,
+        int width, int height,
+        int baseQIndex = 30)
+    {
+        ArgumentNullException.ThrowIfNull(yPlane);
+        ArgumentNullException.ThrowIfNull(uPlane);
+        ArgumentNullException.ThrowIfNull(vPlane);
+        ValidateArgs(width, height, baseQIndex);
+
+        _stageY.Ensure(yPlane.ByteLength);
+        _stageU.Ensure(uPlane.ByteLength);
+        _stageV.Ensure(vPlane.ByteLength);
+        _stageOut.Ensure(GetMaxEncodedSize(width, height));
+        DeviceTransfer.Upload(_stageY.View, yPlane);
+        DeviceTransfer.Upload(_stageU.View, uPlane);
+        DeviceTransfer.Upload(_stageV.View, vPlane);
+
+        int len = await EncodeKeyFrameAsync(
+            _stageY.View, _stageU.View, _stageV.View, width, height, _stageOut.View, baseQIndex);
+        return await DeviceTransfer.DownloadUint8ArrayAsync(_stageOut.View, len);
+    }
+
+    /// <summary>
+    /// Batch-encode keyframes from JS typed arrays (browser accelerators only), one tightly packed
+    /// plane per frame per component. Each returned <see cref="Uint8Array"/> is owned (and
+    /// disposed) by the caller.
+    /// </summary>
+    /// <exception cref="NotSupportedException">The accelerator is not a browser accelerator.</exception>
+    [SupportedOSPlatform("browser")]
+    public async Task<Uint8Array[]> EncodeKeyFramesBatchAsync(
+        TypedArray[] yPlanes,
+        TypedArray[] uPlanes,
+        TypedArray[] vPlanes,
+        int width, int height,
+        int baseQIndex = 30)
+    {
+        if (yPlanes is null) throw new ArgumentNullException(nameof(yPlanes));
+        if (uPlanes is null) throw new ArgumentNullException(nameof(uPlanes));
+        if (vPlanes is null) throw new ArgumentNullException(nameof(vPlanes));
+        if (yPlanes.Length != uPlanes.Length || yPlanes.Length != vPlanes.Length)
+            throw new ArgumentException("Plane arrays must have equal length.");
+        int frameCount = yPlanes.Length;
+        if (frameCount == 0) return System.Array.Empty<Uint8Array>();
+        ValidateArgs(width, height, baseQIndex);
+
+        long yPlane = (long)width * height;
+        long uvPlane = (long)ChromaDim(width) * ChromaDim(height);
+        int cap = GetMaxEncodedSize(width, height);
+        _stageY.Ensure(frameCount * yPlane);
+        _stageU.Ensure(frameCount * uvPlane);
+        _stageV.Ensure(frameCount * uvPlane);
+        _stageOut.Ensure((long)frameCount * cap);
+        _stageLens.Ensure(frameCount);
+
+        for (int f = 0; f < frameCount; f++)
+        {
+            DeviceTransfer.Upload(_stageY.View.SubView(f * yPlane, yPlane), yPlanes[f]);
+            DeviceTransfer.Upload(_stageU.View.SubView(f * uvPlane, uvPlane), uPlanes[f]);
+            DeviceTransfer.Upload(_stageV.View.SubView(f * uvPlane, uvPlane), vPlanes[f]);
+        }
+
+        await EncodeKeyFramesBatchAsync(
+            _stageY.View, _stageU.View, _stageV.View,
+            frameCount, width, height, _stageOut.View, _stageLens.View, baseQIndex);
+
+        var lens = await _stageLens.View.SubView(0, frameCount).CopyToHostAsync();
+        var results = new Uint8Array[frameCount];
+        for (int f = 0; f < frameCount; f++)
+            results[f] = await DeviceTransfer.DownloadUint8ArrayAsync(
+                _stageOut.View.SubView((long)f * cap, lens[f]), lens[f]);
+        return results;
+    }
+
+    // ------------------------------------------------------------------
+    // Working buffers
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Ensure per-frame GPU buffers are sized for (width,height). Reallocates
+    /// only when the resolution changes.
+    /// </summary>
+    private void EnsureBuffers(int width, int height, int yLen, int uvLen, int mbCount)
+    {
+        if (_cachedWidth == width && _cachedHeight == height) return;
+        DisposeFrameBuffers();
+        _cachedWidth = width;
+        _cachedHeight = height;
+        _dY = _accelerator.Allocate1D<byte>(yLen);
+        _dU = _accelerator.Allocate1D<byte>(uvLen);
+        _dV = _accelerator.Allocate1D<byte>(uvLen);
+        _dYRecon = _accelerator.Allocate1D<byte>(yLen);
+        _dURecon = _accelerator.Allocate1D<byte>(uvLen);
+        _dVRecon = _accelerator.Allocate1D<byte>(uvLen);
+        _dYCoefs = _accelerator.Allocate1D<short>((long)mbCount * 256);
+        _dUCoefs = _accelerator.Allocate1D<short>((long)mbCount * 64);
+        _dVCoefs = _accelerator.Allocate1D<short>((long)mbCount * 64);
+        _dDequant = _accelerator.Allocate1D<int>(4);
+        _dCompressedHeader = _accelerator.Allocate1D<byte>(64);
+        _dCompressedHeaderLen = _accelerator.Allocate1D<long>(1);
+        _dTile = _accelerator.Allocate1D<byte>(WorstCaseTile(mbCount));
+        _dTileLen = _accelerator.Allocate1D<long>(1);
+        _dUncompressedHeader = _accelerator.Allocate1D<byte>(32);
+        _dUncompressedHeaderLen = _accelerator.Allocate1D<long>(1);
+        _dOutFrameLen = _accelerator.Allocate1D<long>(1);
+    }
+
+    private void DisposeFrameBuffers()
+    {
+        _dY?.Dispose(); _dY = null;
+        _dU?.Dispose(); _dU = null;
+        _dV?.Dispose(); _dV = null;
+        _dYRecon?.Dispose(); _dYRecon = null;
+        _dURecon?.Dispose(); _dURecon = null;
+        _dVRecon?.Dispose(); _dVRecon = null;
+        _dYCoefs?.Dispose(); _dYCoefs = null;
+        _dUCoefs?.Dispose(); _dUCoefs = null;
+        _dVCoefs?.Dispose(); _dVCoefs = null;
+        _dDequant?.Dispose(); _dDequant = null;
+        _dCompressedHeader?.Dispose(); _dCompressedHeader = null;
+        _dCompressedHeaderLen?.Dispose(); _dCompressedHeaderLen = null;
+        _dTile?.Dispose(); _dTile = null;
+        _dTileLen?.Dispose(); _dTileLen = null;
+        _dUncompressedHeader?.Dispose(); _dUncompressedHeader = null;
+        _dUncompressedHeaderLen?.Dispose(); _dUncompressedHeaderLen = null;
+        _dOutFrameLen?.Dispose(); _dOutFrameLen = null;
+        _cachedWidth = -1;
+        _cachedHeight = -1;
     }
 
     /// <summary>Release every resource the encoder owns.</summary>
     public void Dispose()
     {
+        _pad.Dispose();
         _dequantKernel.Dispose();
         _compressedHeaderKernel.Dispose();
         _sequentialKernel.Dispose();
@@ -563,5 +758,10 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         _dByteConsts.Dispose();
         _dUshortConsts.Dispose();
         DisposeFrameBuffers();
+        _stageY.Dispose();
+        _stageU.Dispose();
+        _stageV.Dispose();
+        _stageOut.Dispose();
+        _stageLens.Dispose();
     }
 }

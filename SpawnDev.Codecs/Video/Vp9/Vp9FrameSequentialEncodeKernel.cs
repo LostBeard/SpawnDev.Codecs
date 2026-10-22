@@ -90,14 +90,6 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
         ArrayView<short>, ArrayView<short>, ArrayView<short>,
         ArrayView<int>,
-        int, int, int> _kernel;
-
-    private readonly Action<
-        Index1D,
-        ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
-        ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
-        ArrayView<short>, ArrayView<short>, ArrayView<short>,
-        ArrayView<int>,
         Vp9FrameSeqEncodeBatchParams> _batchKernel;
 
     /// <summary>
@@ -119,13 +111,6 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
-        _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D,
-            ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
-            ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
-            ArrayView<short>, ArrayView<short>, ArrayView<short>,
-            ArrayView<int>,
-            int, int, int>(EncodeWavefrontKernel);
         _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
@@ -161,7 +146,8 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<int> dequant,
-        int mbCols, int mbRows)
+        int mbCols, int mbRows,
+        int frameMiRows = 0)
     {
         if (mbCols <= 0) throw new ArgumentOutOfRangeException(nameof(mbCols));
         if (mbRows <= 0) throw new ArgumentOutOfRangeException(nameof(mbRows));
@@ -172,19 +158,19 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         if (uCoefs.Length < mbCount * 64) throw new ArgumentException("uCoefs too short.", nameof(uCoefs));
         if (vCoefs.Length < mbCount * 64) throw new ArgumentException("vCoefs too short.", nameof(vCoefs));
 
-        int totalDiagonals = mbCols + mbRows - 1;
-        for (int d = 0; d < totalDiagonals; d++)
-        {
-            int rMin = d - (mbCols - 1); if (rMin < 0) rMin = 0;
-            int rMax = d; if (rMax > mbRows - 1) rMax = mbRows - 1;
-            int diagCount = rMax - rMin + 1;
-            int diagAndRMin = (d << 16) | (rMin & 0xFFFF);
-            _kernel(diagCount,
-                yPlane, uPlane, vPlane,
-                yRecon, uRecon, vRecon,
-                yCoefs, uCoefs, vCoefs,
-                dequant, mbCols, mbRows, diagAndRMin);
-        }
+        // A single frame is the batch kernel at extent 1 with full-buffer strides. There used to be a
+        // separate single-frame kernel; it lacked the boundary-superblock handling (frameMiRows), so a
+        // picture whose height is not a multiple of 64 encoded differently from the same picture in a
+        // batch. One kernel, one behaviour (same collapse the VP8 entropy kernels got).
+        RunBatch(
+            yPlane, uPlane, vPlane,
+            yRecon, uRecon, vRecon,
+            yCoefs, uCoefs, vCoefs,
+            dequant,
+            mbCols, mbRows, 1,
+            mbCols * 16 * mbRows * 16, mbCols * 8 * mbRows * 8,
+            (int)(mbCount * 256), (int)(mbCount * 64), 4,
+            frameMiRows);
     }
 
     /// <summary>
@@ -230,55 +216,6 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
                 yCoefs, uCoefs, vCoefs,
                 dequant, p);
         }
-    }
-
-    /// <summary>
-    /// Wave-front kernel: each thread encodes one MB on the supplied
-    /// diagonal. Per-thread LocalMemory scratch is reused only by that
-    /// thread for that one MB; no cross-thread sharing on the diagonal.
-    /// </summary>
-    private static void EncodeWavefrontKernel(
-        Index1D idx,
-        ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
-        ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
-        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
-        ArrayView<int> dequant,
-        int mbCols, int mbRows, int diagAndRMin)
-    {
-        int diagD = diagAndRMin >> 16;
-        int rMin = diagAndRMin & 0xFFFF;
-        int yStride = mbCols * 16;
-        int uvStride = mbCols * 8;
-
-        int yDcQ = dequant[0];
-        int yAcQ = dequant[1];
-        int uvDcQ = dequant[2];
-        int uvAcQ = dequant[3];
-
-        int mbRow = rMin + idx.X;
-        int mbCol = diagD - mbRow;
-        if (mbRow < 0 || mbRow >= mbRows || mbCol < 0 || mbCol >= mbCols) return;
-
-        // Per-thread scratch (each thread on the diagonal gets its own copy).
-        var residual = LocalMemory.Allocate<short>(256);
-        var coefsInt = LocalMemory.Allocate<int>(256);
-        var coefsShort = LocalMemory.Allocate<short>(256);
-        var fdctScratch = LocalMemory.Allocate<int>(256);
-        var idctScratch = LocalMemory.Allocate<int>(256);
-        var aboveLuma = LocalMemory.Allocate<byte>(16);
-        var leftLuma = LocalMemory.Allocate<byte>(16);
-        var aboveChroma = LocalMemory.Allocate<byte>(8);
-        var leftChroma = LocalMemory.Allocate<byte>(8);
-
-        EncodeMacroblock(
-            mbRow, mbCol, mbCols, yStride, uvStride,
-            yPlane, uPlane, vPlane,
-            yRecon, uRecon, vRecon,
-            yCoefs, uCoefs, vCoefs,
-            yDcQ, yAcQ, uvDcQ, uvAcQ,
-            residual, coefsInt, coefsShort,
-            fdctScratch, idctScratch,
-            aboveLuma, leftLuma, aboveChroma, leftChroma);
     }
 
     /// <summary>

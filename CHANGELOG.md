@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Three-overload boundary, VP8 first (2026-10-22)
+- **Reference bump:** `SpawnDev.ILGPU` 5.2.17 -> 5.4.2, `SpawnDev.SpawnJS.Blazor` 2.1.19 -> 3.0.4 (`SpawnDev.UnitTesting.Browser` 2.7.0 and `SpawnDev.EBML` 3.0.1 are already the newest).
+- **New `DeviceTransfer`** (public static): the one place codec entry points move bytes between managed memory / JS typed arrays and accelerator buffers (`Upload` from `ReadOnlySpan<byte>` with no staging copy, `Upload` from a `TypedArray` via `IBrowserMemoryBuffer.CopyFromJS`, `DownloadAsync`, `DownloadUint8ArrayAsync`).
+- **`Vp8KeyframeEncoderGpu`**: every entry point now has managed, `TypedArray` (browser, `[SupportedOSPlatform("browser")]`) and `ArrayView1D` overloads, all funnelling into the `ArrayView1D` one. The `ArrayView1D` overload takes planes already on the accelerator, assembles straight into a caller-owned output view and returns only the length. New `GetMaxEncodedSize(width, height)`. The batch path is frame-major with caller-owned `outputs` + `lengths`.
+- **Host row loops removed from VP8 encode.** `UploadPaddedPlane`, the batch `hostY/hostU/hostV` builders (which put whole batches on the host heap) and the `.ToArray()` staging copies are gone; the new `Vp8PlanePadKernel` strips the source stride and zero-pads to the macroblock grid on the accelerator.
+- **Bug fix: odd picture sizes.** Chroma size is `ceil(dim/2)`, not `dim/2`; the encoder used to drop the last chroma column/row of odd-sized pictures.
+- **`Vp8KeyframeDecoderGpu`**: same three overloads (`DecodedFrameJS` for the browser). **Bug fix:** it threw `NotSupportedException` for any size that is not a multiple of 16 even though the encoder emits such frames; it now decodes the macroblock grid and crops on the accelerator. `ReadFrameTagAsync` reads only the 10-byte header from a device-resident frame.
+- New tests: `*BoundaryTests` (ArrayView1D into a poisoned caller buffer, odd sizes vs an explicitly zero-padded picture and vs the cropped CPU walker, batch vs single frames, TypedArray in the browser lanes). Not yet run: waiting on the GPU (peer release gate).
+
 ### PMT: system Chrome for real WebGPU (2026-09-28)
 - PlaywrightMultiTest now launches installed Chrome (`Channel = "chrome"`) with `SpawnDev.Codecs.PlaywrightProfile`, matching ILGPU/ML. Dropped `Vulkan` from `--enable-features` and added `--disable-software-rasterizer` so Windows Dawn stays on D3D12 instead of silently falling back to SwiftShader.
 
