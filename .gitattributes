@@ -61,3 +61,7 @@
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
+
+# VP8 lossy fixtures: raw frames and planes must never be line-ending converted.
+SpawnDev.Codecs.Demo.Shared/TestData/Vp8Lossy/*.vp8 -text
+SpawnDev.Codecs.Demo.Shared/TestData/Vp8Lossy/*.yuv -text

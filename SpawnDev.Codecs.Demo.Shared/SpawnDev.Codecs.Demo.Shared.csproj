@@ -55,6 +55,8 @@
 		<EmbeddedResource Include="TestData\Bmp\*" />
 		<EmbeddedResource Include="TestData\WebP\*" />
 		<EmbeddedResource Include="TestData\WebP\sources\*" />
+		<!-- VP8 lossy keyframes (libwebp / libvpx made), truth = ffmpeg's native VP8 decode: scripts/images/make_vp8_lossy_fixtures.py -->
+		<EmbeddedResource Include="TestData\Vp8Lossy\*" />
 	</ItemGroup>
 
 </Project>

@@ -68,14 +68,16 @@ public sealed class Vp8BoolDecoder
     }
 
     /// <summary>
-    /// Decode one bit given <paramref name="probability"/> in [1, 255]. The
+    /// Decode one bit given <paramref name="probability"/> in [0, 255]. The
     /// probability is the encoder's estimate of the bit being 0, scaled by
     /// 256. Mirrors libvpx <c>vp8dx_decode_bool</c>.
     /// </summary>
     public int DecodeBool(int probability)
     {
-        if (probability < 1 || probability > 255)
-            throw new ArgumentOutOfRangeException(nameof(probability), "must be in [1, 255]");
+        // 0 is legal on the wire: libwebp writes coefficient probabilities of 0 (255 - nb*255/total with nb == total),
+        // and split = 1 + ((range-1)*0 >> 8) = 1 is well defined (libvpx and ffmpeg accept it).
+        if (probability < 0 || probability > 255)
+            throw new ArgumentOutOfRangeException(nameof(probability), "must be in [0, 255]");
 
         uint split = 1u + (((_range - 1u) * (uint)probability) >> 8);
 

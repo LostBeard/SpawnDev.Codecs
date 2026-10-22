@@ -17,11 +17,11 @@ public abstract partial class CodecsTestBase
         //   bits 1..3 = 0 (Bicubic version)
         //   bit 4 = 1 (show_frame)
         //   bits 5..23 = 100 (first_partition_size)
-        // tag value: (100 << 5) | (1 << 4) | (0 << 1) | 0 = 0xC10
-        // Little-endian bytes: 0x10 0x0C 0x00
+        // tag value: (100 << 5) | (1 << 4) | (0 << 1) | 0 = 0xC90
+        // Little-endian bytes: 0x90 0x0C 0x00
         var frame = new byte[]
         {
-            0x10, 0x0C, 0x00,             // frame tag
+            0x90, 0x0C, 0x00,             // frame tag
             0x9D, 0x01, 0x2A,             // start code
             0x40, 0x01,                   // horiz size: width=320 (0x140), scale=0
             0xF0, 0x00,                   // vert size: height=240 (0xF0), scale=0

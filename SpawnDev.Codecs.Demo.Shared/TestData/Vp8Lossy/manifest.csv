@@ -1,0 +1,183 @@
+name,source,width,height,version,filter_type,filter_level,sharpness,lf_delta,ref_delta;mode_delta,seg,seg_map,seg_data,seg_abs,seg_lf,seg_q,log2_parts,q,qdeltas,bytes
+cw_autofilter_noise_66x50,cwebp -q 90 -af -f 50,66,50,0,0,3,0,0,0/0/0/0;0/0/0/0,1,1,1,1,0/0/0/0,12/8/6/5,0,12,0/0/0/-2/6,3422
+cw_autofilter_photo_100x75,cwebp -q 60 -af -f 50,100,75,0,0,11,0,0,0/0/0/0;0/0/0/0,1,1,1,1,22/5/7/3,45/38/29/19,0,45,0/0/0/-2/3,770
+cw_m6q100f100_noise_66x50,cwebp -q 90 -m 6 -f 100,66,50,0,0,7,0,0,0/0/0/0;0/0/0/0,1,1,1,1,7/4/2/0,12/8/6/5,0,12,0/0/0/-2/6,3382
+cw_m6q100f100_photo_100x75,cwebp -q 60 -m 6 -f 100,100,75,0,0,24,0,0,0/0/0/0;0/0/0/0,1,1,1,1,23/24/9/5,45/38/30/21,0,45,0/0/0/-2/3,650
+cw_nofilter_photo_100x75,cwebp -q 60 -f 0,100,75,2,0,0,0,0,0/0/0/0;0/0/0/0,1,1,1,1,0/0/0/0,45/43/33/25,0,45,0/0/0/-2/2,604
+cw_nofilter_photo_255x129,cwebp -q 60 -f 0,255,129,2,0,0,0,0,0/0/0/0;0/0/0/0,1,1,1,1,0/0/0/0,44/35/28/19,0,44,0/0/0/-2/2,2654
+cw_seg1_photo_100x75,cwebp -q 60 -segments 1 -f 70,100,75,0,0,12,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,33,0/0/0/-2/-4,694
+cw_seg1_text_100x75,cwebp -q 60 -segments 1 -f 70,100,75,0,0,12,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,33,0/0/0/-2/-4,554
+cw_seg2_photo_100x75,cwebp -q 60 -segments 2 -f 70,100,75,0,0,15,0,0,0/0/0/0;0/0/0/0,1,1,1,1,15/3/15/15,43/19/43/43,0,43,0/0/0/-2/4,838
+cw_seg2_photo_255x129,cwebp -q 60 -segments 2 -f 70,255,129,0,0,36,0,0,0/0/0/0;0/0/0/0,1,1,1,1,36/3/15/15,43/19/43/43,0,43,0/0/0/-2/2,3200
+cw_seg3_noise_66x50,cwebp -q 90 -segments 3 -f 70 -sharpness 2,66,50,0,0,5,2,0,0/0/0/0;0/0/0/0,1,1,1,1,5/0/0/5,12/7/5/12,0,12,0/0/0/-2/6,3412
+cw_seg3_photo_100x75,cwebp -q 60 -segments 3 -f 70 -sharpness 2,100,75,0,0,49,2,0,0/0/0/0;0/0/0/0,1,1,1,1,16/49/9/16,44/33/19/44,0,44,0/0/0/-2/4,706
+cw_simple_f100_s7_photo_100x75,cwebp -q 60 -nostrong -f 100 -sharpness 7,100,75,1,1,23,7,0,0/0/0/0;0/0/0/0,1,1,1,1,23/15/9/4,44/38/30/19,0,44,0/0/0/-2/4,778
+cw_simple_f100_s7_photo_255x129,cwebp -q 60 -nostrong -f 100 -sharpness 7,255,129,1,1,63,7,0,0/0/0/0;0/0/0/0,1,1,1,1,63/45/17/26,45/37/29/20,0,45,0/0/0/-2/2,2450
+cw_simple_f20_s3_noise_66x50,cwebp -q 90 -nostrong -f 20 -sharpness 3,66,50,1,1,0,3,0,0/0/0/0;0/0/0/0,1,1,1,1,0/0/0/0,11/8/5/5,0,11,0/0/0/-2/6,3452
+cw_simple_f20_s3_photo_100x75,cwebp -q 60 -nostrong -f 20 -sharpness 3,100,75,1,1,4,3,0,0/0/0/0;0/0/0/0,1,1,1,1,4/2/0/0,44/36/28/19,0,44,0/0/0/-2/3,726
+cw_simple_f60_s0_photo_100x75,cwebp -q 60 -nostrong -f 60 -sharpness 0,100,75,1,1,14,0,0,0/0/0/0;0/0/0/0,1,1,1,1,14/7/5/2,45/35/29/19,0,45,0/0/0/-2/4,746
+cw_simple_f60_s0_text_100x75,cwebp -q 60 -nostrong -f 60 -sharpness 0,100,75,1,1,14,0,0,0/0/0/0;0/0/0/0,1,1,1,1,14/9/7/2,44/38/34/19,0,44,0/0/0/-2/0,940
+cw_sns0_photo_100x75,cwebp -q 60 -sns 0 -f 60,100,75,0,0,10,0,0,0/0/0/0;0/0/0/0,1,1,1,1,10/8/6/7,33/33/33/33,0,33,0/0/0/0/0,760
+cw_sns0_text_100x75,cwebp -q 60 -sns 0 -f 60,100,75,0,0,10,0,0,0/0/0/0;0/0/0/0,1,1,1,1,10/8/7/5,33/33/33/33,0,33,0/0/0/0/0,694
+cw_sns100_photo_100x75,cwebp -q 60 -sns 100 -f 60 -segments 4,100,75,0,0,23,0,0,0/0/0/0;0/0/0/0,1,1,1,1,23/9/5/0,55/42/27/4,0,55,0/0/0/-4/6,1106
+cw_sns100_photo_255x129,cwebp -q 60 -sns 100 -f 60 -segments 4,255,129,0,0,63,0,0,0/0/0/0;0/0/0/0,1,1,1,1,63/51/4/0,54/40/23/4,0,54,0/0/0/-4/5,3426
+cw_strong_f100_s1_photo_100x75,cwebp -q 60 -strong -f 100 -sharpness 1,100,75,0,0,23,1,0,0/0/0/0;0/0/0/0,1,1,1,1,23/14/9/4,44/36/28/19,0,44,0/0/0/-2/4,776
+cw_strong_f100_s1_photo_255x129,cwebp -q 60 -strong -f 100 -sharpness 1,255,129,0,0,36,1,0,0/0/0/0;0/0/0/0,1,1,1,1,36/14/32/4,43/36/28/19,0,43,0/0/0/-2/2,2780
+cw_strong_f100_s5_noise_66x50,cwebp -q 90 -strong -f 100 -sharpness 5,66,50,0,0,7,5,0,0/0/0/0;0/0/0/0,1,1,1,1,7/4/2/0,12/8/6/5,0,12,0/0/0/-2/6,3378
+cw_strong_f100_s5_photo_100x75,cwebp -q 60 -strong -f 100 -sharpness 5,100,75,0,0,23,5,0,0/0/0/0;0/0/0/0,1,1,1,1,23/14/9/5,45/38/31/21,0,45,0/0/0/-2/4,792
+cw_strong_f100_s7_photo_100x75,cwebp -q 60 -strong -f 100 -sharpness 7,100,75,0,0,23,7,0,0/0/0/0;0/0/0/0,1,1,1,1,23/14/7/4,44/36/26/19,0,44,0/0/0/-2/4,820
+cw_strong_f100_s7_text_100x75,cwebp -q 60 -strong -f 100 -sharpness 7,100,75,0,0,23,7,0,0/0/0/0;0/0/0/0,1,1,1,1,23/15/10/6,45/40/34/24,0,45,0/0/0/-2/2,1056
+cw_strong_f80_s3_photo_100x75,cwebp -q 60 -strong -f 80 -sharpness 3,100,75,0,0,18,3,0,0/0/0/0;0/0/0/0,1,1,1,1,18/11/7/16,45/38/29/20,0,45,0/0/0/-2/4,718
+cw_strong_f80_s3_text_100x75,cwebp -q 60 -strong -f 80 -sharpness 3,100,75,0,0,17,3,0,0/0/0/0;0/0/0/0,1,1,1,1,17/12/8/3,43/36/30/19,0,43,0/0/0/-2/0,994
+pil_flat_100x75_q75_m2,pillow q=75 m=2,100,75,0,0,11,0,0,0/0/0/0;0/0/0/0,1,1,1,1,11/8/5/2,36/33/27/17,0,36,0/0/0/-2/0,398
+pil_flat_16x16_q20_m4,pillow q=20 m=4,16,16,0,0,21,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,62,0/0/0/-2/6,50
+pil_flat_17x33_q100_m5,pillow q=100 m=5,17,33,0,0,0,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,0,0/0/0/-2/3,206
+pil_flat_17x33_q1_m1,pillow q=1 m=1,17,33,0,0,63,0,0,0/0/0/0;0/0/0/0,1,1,1,1,63/38/31/17,115/107/102/83,0,115,0/0/0/-2/2,72
+pil_flat_1x1_q75_m3,pillow q=75 m=3,1,1,0,0,8,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,26,0/0/0/-2/1,36
+pil_flat_255x129_q50_m6,pillow q=50 m=6,255,129,0,0,16,0,0,0/0/0/0;0/0/0/0,1,1,1,1,16/12/8/5,52/52/45/35,0,52,0/0/0/-2/-2,298
+pil_flat_7x5_q50_m0,pillow q=50 m=0,7,5,0,0,11,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,38,0/0/0/-2/6,98
+pil_methods_photo_100x75_m0,pillow q=75 m=0,100,75,0,0,10,0,0,0/0/0/0;0/0/0/0,1,1,1,1,10/7/5/2,35/29/24/15,0,35,0/0/0/-2/3,970
+pil_methods_photo_100x75_m1,pillow q=75 m=1,100,75,0,0,10,0,0,0/0/0/0;0/0/0/0,1,1,1,1,10/7/5/2,35/29/24/15,0,35,0/0/0/-2/3,962
+pil_methods_photo_100x75_m2,pillow q=75 m=2,100,75,0,0,11,0,0,0/0/0/0;0/0/0/0,1,1,1,1,11/6/4/2,36/31/23/17,0,36,0/0/0/-2/3,912
+pil_methods_photo_100x75_m3,pillow q=75 m=3,100,75,0,0,15,0,0,0/0/0/0;0/0/0/0,1,1,1,1,11/6/15/12,36/31/23/17,0,36,0/0/0/-2/3,848
+pil_methods_photo_100x75_m4,pillow q=75 m=4,100,75,0,0,15,0,0,0/0/0/0;0/0/0/0,1,1,1,1,11/6/15/12,36/31/23/17,0,36,0/0/0/-2/3,850
+pil_methods_photo_100x75_m5,pillow q=75 m=5,100,75,0,0,15,0,0,0/0/0/0;0/0/0/0,1,1,1,1,11/6/15/12,36/31/23/17,0,36,0/0/0/-2/3,758
+pil_methods_photo_100x75_m6,pillow q=75 m=6,100,75,0,0,15,0,0,0/0/0/0;0/0/0/0,1,1,1,1,11/6/15/12,36/31/23/17,0,36,0/0/0/-2/3,722
+pil_noise_100x75_q20_m0,pillow q=20 m=0,100,75,0,0,29,0,0,0/0/0/0;0/0/0/0,1,1,1,1,29/19/11/5,76/67/55/39,0,76,0/0/0/-2/6,3394
+pil_noise_16x16_q75_m6,pillow q=75 m=6,16,16,0,0,8,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,26,0/0/0/-2/6,230
+pil_noise_17x33_q50_m3,pillow q=50 m=3,17,33,0,0,16,0,0,0/0/0/0;0/0/0/0,1,1,1,1,16/10/7/4,52/46/39/28,0,52,0/0/0/-2/6,498
+pil_noise_1x1_q20_m1,pillow q=20 m=1,1,1,0,0,21,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,62,0/0/0/-2/2,32
+pil_noise_255x129_q100_m1,pillow q=100 m=1,255,129,0,0,0,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,0,0/0/0/-2/6,87064
+pil_noise_255x129_q100_m6_big,pillow q=100 m=6,255,129,0,0,0,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,0,0/0/0/-2/6,37916
+pil_noise_255x129_q1_m4,pillow q=1 m=4,255,129,0,0,55,0,0,0/0/0/0;0/0/0/0,1,1,1,1,55/28/17/14,106/90/76/76,0,106,0/0/0/-2/6,5214
+pil_noise_7x5_q100_m2,pillow q=100 m=2,7,5,0,0,0,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,0,0/0/0/-2/6,214
+pil_noise_7x5_q1_m5,pillow q=1 m=5,7,5,0,0,51,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,103,0/0/0/-2/6,54
+pil_photo_100x75_q100_m3,pillow q=100 m=3,100,75,0,0,0,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,0,0/0/0/-2/3,4718
+pil_photo_100x75_q1_m6,pillow q=1 m=6,100,75,0,0,63,0,0,0/0/0/0;0/0/0/0,1,1,1,1,63/46/62/20,115/110/98/77,0,115,0/0/0/-2/3,202
+pil_photo_16x16_q50_m5,pillow q=50 m=5,16,16,0,0,11,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,38,0/0/0/-2/6,60
+pil_photo_17x33_q20_m2,pillow q=20 m=2,17,33,0,0,30,0,0,0/0/0/0;0/0/0/0,1,1,1,1,30/19/11/6,78/69/57/42,0,78,0/0/0/-2/1,118
+pil_photo_1x1_q100_m4,pillow q=100 m=4,1,1,0,0,0,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,0,0/0/0/-2/1,42
+pil_photo_1x1_q1_m0,pillow q=1 m=0,1,1,0,0,51,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,103,0/0/0/-2/4,28
+pil_photo_255x129_q75_m0,pillow q=75 m=0,255,129,0,0,10,0,0,0/0/0/0;0/0/0/0,1,1,1,1,10/6/4/2,35/29/21/15,0,35,0/0/0/-2/2,4496
+pil_photo_640x480_q30_m6,pillow q=30 m=6,640,480,0,0,63,0,0,0/0/0/0;0/0/0/0,1,1,1,1,63/63/49/34,68/58/47/32,0,68,0/0/0/-2/2,11168
+pil_photo_640x480_q75_m4,pillow q=75 m=4,640,480,0,0,30,0,0,0/0/0/0;0/0/0/0,1,1,1,1,30/18/4/14,35/28/22/15,0,35,0/0/0/-2/2,31690
+pil_photo_640x480_q95_m2,pillow q=95 m=2,640,480,0,0,2,0,0,0/0/0/0;0/0/0/0,1,1,1,1,2/0/0/0,6/4/3/2,0,6,0/0/0/-2/2,125964
+pil_photo_7x5_q75_m1,pillow q=75 m=1,7,5,0,0,8,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,26,0/0/0/-2/4,68
+pil_text_100x75_q50_m1,pillow q=50 m=1,100,75,0,0,16,0,0,0/0/0/0;0/0/0/0,1,1,1,1,16/9/7/5,52/46/41/32,0,52,0/0/0/-2/0,1232
+pil_text_15x17_q60_m4,pillow q=60 m=4,15,17,0,0,14,0,0,0/0/0/0;0/0/0/0,1,1,1,1,14/8/5/2,45/36/30/19,0,45,0/0/0/-2/-3,100
+pil_text_160x16_q60_m4,pillow q=60 m=4,160,16,0,0,14,0,0,0/0/0/0;0/0/0/0,1,1,1,1,14/9/6/4,45/40/34/24,0,45,0/0/0/-2/-1,254
+pil_text_16x160_q60_m4,pillow q=60 m=4,16,160,0,0,14,0,0,0/0/0/0;0/0/0/0,1,1,1,1,14/10/6/3,45/40/32/21,0,45,0/0/0/-2/-3,262
+pil_text_16x16_q100_m0,pillow q=100 m=0,16,16,0,0,0,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,0,0/0/0/-2/2,510
+pil_text_16x16_q1_m3,pillow q=1 m=3,16,16,0,0,51,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,103,0/0/0/-2/0,60
+pil_text_17x33_q75_m4,pillow q=75 m=4,17,33,0,0,11,0,0,0/0/0/0;0/0/0/0,1,1,1,1,11/6/5/2,36/31/26/18,0,36,0/0/0/-2/1,274
+pil_text_1x1_q50_m2,pillow q=50 m=2,1,1,0,0,11,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,38,0/0/0/-2/-1,30
+pil_text_1x33_q60_m4,pillow q=60 m=4,1,33,0,0,12,0,0,0/0/0/0;0/0/0/0,1,1,1,1,12/8/5/2,41/34/26/19,0,41,0/0/0/-2/1,108
+pil_text_255x129_q20_m5,pillow q=20 m=5,255,129,0,0,30,0,0,0/0/0/0;0/0/0/0,1,1,1,1,30/20/13/7,78/71/61/44,0,78,0/0/0/-2/1,1870
+pil_text_2x2_q60_m4,pillow q=60 m=4,2,2,0,0,10,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,33,0/0/0/-2/4,40
+pil_text_31x47_q60_m4,pillow q=60 m=4,31,47,0,0,14,0,0,0/0/0/0;0/0/0/0,1,1,1,1,14/7/6/4,45/38/34/27,0,45,0/0/0/-2/3,486
+pil_text_33x1_q60_m4,pillow q=60 m=4,33,1,0,0,12,0,0,0/0/0/0;0/0/0/0,1,1,1,1,12/8/5/2,43/36/28/19,0,43,0/0/0/-2/-2,70
+pil_text_48x32_q60_m4,pillow q=60 m=4,48,32,0,0,14,0,0,0/0/0/0;0/0/0/0,1,1,1,1,14/7/7/2,45/35/33/19,0,45,0/0/0/-2/-1,180
+pil_text_7x5_q20_m6,pillow q=20 m=6,7,5,0,0,21,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,62,0/0/0/-2/3,50
+rnd_00_16x16_normal_L12_S0_P4_delta_seg,random syntax (python header writer + random partitions),16,16,0,0,12,0,1,-1/6/-11/-5;-6/12/6/4,1,1,0,0,0/0/0/0,0/0/0/0,2,9,15/0/15/0/0,503
+rnd_01_17x33_simple_L33_S5_P1_delta_seg,random syntax (python header writer + random partitions),17,33,2,1,33,5,1,-8/-4/1/-1;12/-3/9/-1,1,0,1,1,47/39/11/30,76/21/2/42,0,59,0/0/0/0/0,1360
+rnd_02_31x47_normal_L45_S1_P4_delta,random syntax (python header writer + random partitions),31,47,2,0,45,1,1,-8/4/-6/2;7/-12/-9/-2,0,0,0,0,0/0/0/0,0/0/0/0,2,6,0/0/0/0/0,1539
+rnd_03_48x32_normal_L1_S2_P8_seg_noskip,random syntax (python header writer + random partitions),48,32,0,0,1,2,0,0/0/0/0;0/0/0/0,1,1,0,0,0/0/0/0,0/0/0/0,3,4,0/0/0/0/0,1818
+rnd_04_64x64_simple_L45_S0_P4_delta_noskip,random syntax (python header writer + random partitions),64,64,1,1,45,0,1,-9/12/11/9;-4/-12/-8/3,0,0,0,0,0/0/0/0,0/0/0/0,2,23,-7/5/-7/5/-7,3621
+rnd_05_100x75_simple_L12_S4_P4_seg,random syntax (python header writer + random partitions),100,75,2,1,12,4,0,0/0/0/0;0/0/0/0,1,0,0,0,0/0/0/0,0/0/0/0,2,18,0/0/15/0/-7,7564
+rnd_06_33x100_normal_L20_S7_P2_seg_noskip,random syntax (python header writer + random partitions),33,100,2,0,20,7,0,0/0/0/0;0/0/0/0,1,1,1,0,9/-14/23/-15,19/12/-3/-3,1,5,0/0/0/0/0,4528
+rnd_07_1x1_normal_L5_S1_P1_delta_seg,random syntax (python header writer + random partitions),1,1,1,0,5,1,1,0/0/0/0;0/0/0/0,1,1,1,0,6/26/19/40,-3/18/3/18,0,11,0/0/0/0/0,527
+rnd_08_7x5_simple_L63_S7_P2_delta,random syntax (python header writer + random partitions),7,5,0,1,63,7,1,12/9/-12/2;-9/7/6/6,0,0,0,0,0/0/0/0,0/0/0/0,1,55,0/-7/-7/0/0,366
+rnd_09_80x48_simple_L5_S6_P1_delta_seg_noskip,random syntax (python header writer + random partitions),80,48,3,1,5,6,1,8/-2/-8/5;12/9/10/-8,1,1,1,1,16/8/54/4,14/79/31/23,0,31,15/0/15/0/-7,3249
+rnd_10_128x96_simple_L63_S4_P2_delta_seg,random syntax (python header writer + random partitions),128,96,1,1,63,4,1,0/0/0/0;0/0/0/0,1,1,1,0,-6/-45/-49/-17,3/17/0/-4,1,31,0/0/0/-15/15,10164
+rnd_11_65x17_simple_L12_S4_P2_seg_noskip,random syntax (python header writer + random partitions),65,17,0,1,12,4,0,0/0/0/0;0/0/0/0,1,0,0,0,0/0/0/0,0/0/0/0,1,45,15/5/5/0/15,2231
+rnd_12_16x16_normal_L20_S2_P2_delta_noskip,random syntax (python header writer + random partitions),16,16,1,0,20,2,1,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,1,21,-7/-15/5/0/-7,551
+rnd_13_17x33_simple_L33_S3_P8_delta_seg_noskip,random syntax (python header writer + random partitions),17,33,0,1,33,3,1,-5/-1/-8/-12;-12/-8/2/12,1,1,1,1,3/2/45/50,14/24/53/23,3,13,0/-7/15/0/0,1819
+rnd_14_31x47_normal_L0_S2_P8_delta,random syntax (python header writer + random partitions),31,47,3,0,0,2,1,-10/-6/3/3;9/12/-8/-6,0,0,0,0,0/0/0/0,0/0/0/0,3,27,-15/-15/-7/-15/0,1810
+rnd_15_48x32_simple_L63_S1_P8_delta_seg,random syntax (python header writer + random partitions),48,32,1,1,63,1,1,-1/-9/-11/-3;1/-9/3/8,1,0,1,0,-47/-7/-14/-8,2/15/10/-1,3,1,0/0/0/0/0,1839
+rnd_16_64x64_simple_L0_S1_P8_delta_noskip,random syntax (python header writer + random partitions),64,64,2,1,0,1,1,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,3,52,-15/0/5/15/5,3881
+rnd_17_100x75_simple_L1_S3_P8_delta_seg,random syntax (python header writer + random partitions),100,75,0,1,1,3,1,-1/-12/8/0;4/12/-10/0,1,1,1,1,14/30/32/32,62/35/26/64,3,23,0/15/5/5/-15,8052
+rnd_18_33x100_simple_L5_S0_P1_delta_seg,random syntax (python header writer + random partitions),33,100,1,1,5,0,1,0/0/0/0;0/0/0/0,1,1,1,1,62/55/40/11,45/20/28/78,0,7,-7/15/15/0/-7,4463
+rnd_19_1x1_normal_L63_S1_P1_seg,random syntax (python header writer + random partitions),1,1,3,0,63,1,0,0/0/0/0;0/0/0/0,1,1,1,0,-48/-39/-30/-40,-6/6/-2/-23,0,49,15/5/-15/15/-7,524
+rnd_20_7x5_normal_L63_S7_P2_delta,random syntax (python header writer + random partitions),7,5,3,0,63,7,1,1/-4/11/-2;-6/6/10/1,0,0,0,0,0/0/0/0,0/0/0/0,1,15,5/15/15/0/-15,368
+rnd_21_80x48_normal_L33_S0_P1_delta_seg,random syntax (python header writer + random partitions),80,48,0,0,33,0,1,11/12/-6/-3;6/6/-10/-11,1,0,1,1,21/13/46/52,78/49/42/21,0,28,-7/-15/0/-15/-15,3240
+rnd_22_128x96_normal_L5_S3_P4_seg_noskip,random syntax (python header writer + random partitions),128,96,2,0,5,3,0,0/0/0/0;0/0/0/0,1,1,1,1,53/31/15/27,56/33/39/6,2,39,15/0/0/0/0,10295
+rnd_23_65x17_simple_L63_S0_P2_seg,random syntax (python header writer + random partitions),65,17,1,1,63,0,0,0/0/0/0;0/0/0/0,1,1,1,1,6/57/60/46,39/56/53/63,1,58,-7/5/-7/15/-15,2254
+rnd_24_16x16_normal_L63_S7_P1,random syntax (python header writer + random partitions),16,16,3,0,63,7,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,0,36,15/0/0/0/0,291
+rnd_25_17x33_simple_L5_S5_P1_delta_seg_noskip,random syntax (python header writer + random partitions),17,33,2,1,5,5,1,5/-7/-10/1;-9/-5/12/11,1,1,1,1,26/45/27/22,41/48/24/72,0,2,0/-7/-15/0/-15,1357
+rnd_26_31x47_normal_L0_S2_P4_delta,random syntax (python header writer + random partitions),31,47,3,0,0,2,1,-7/-1/-11/2;9/4/1/7,0,0,0,0,0/0/0/0,0/0/0/0,2,9,15/15/15/0/15,1582
+rnd_27_48x32_normal_L33_S2_P4_noskip,random syntax (python header writer + random partitions),48,32,3,0,33,2,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,2,23,0/5/0/5/-7,1532
+rnd_28_64x64_normal_L12_S0_P8,random syntax (python header writer + random partitions),64,64,1,0,12,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,3,10,-7/0/0/5/-7,4119
+rnd_29_100x75_normal_L33_S5_P8_delta_seg_noskip,random syntax (python header writer + random partitions),100,75,1,0,33,5,1,-5/0/11/-4;-2/-11/-1/-12,1,1,1,1,62/32/55/55,77/40/40/71,3,41,-15/-15/-7/0/0,7849
+rnd_30_33x100_simple_L0_S4_P1_delta_seg,random syntax (python header writer + random partitions),33,100,0,1,0,4,1,7/6/11/6;6/-12/-6/-6,1,1,1,1,51/26/51/5,46/71/77/28,0,29,0/-7/0/-7/0,4682
+rnd_31_1x1_normal_L45_S5_P1_seg,random syntax (python header writer + random partitions),1,1,2,0,45,5,0,0/0/0/0;0/0/0/0,1,1,1,1,31/48/32/56,63/49/13/10,0,19,0/0/0/0/0,505
+rnd_32_7x5_simple_L1_S0_P1_delta_seg,random syntax (python header writer + random partitions),7,5,1,1,1,0,1,0/0/0/0;0/0/0/0,1,1,1,0,58/34/23/12,2/-4/10/-9,0,29,-7/5/0/0/0,526
+rnd_33_80x48_normal_L1_S0_P4_delta_noskip,random syntax (python header writer + random partitions),80,48,1,0,1,0,1,2/11/6/10;-2/-8/9/5,0,0,0,0,0/0/0/0,0/0/0/0,2,40,0/-15/0/15/-15,3412
+rnd_34_128x96_normal_L20_S1_P1_delta_seg_noskip,random syntax (python header writer + random partitions),128,96,3,0,20,1,1,-6/-8/-7/9;9/-5/-10/5,1,1,0,0,0/0/0/0,0/0/0/0,0,33,15/-7/0/5/-7,10094
+rnd_35_65x17_normal_L5_S3_P2_delta_seg,random syntax (python header writer + random partitions),65,17,3,0,5,3,1,11/7/10/3;9/-9/2/-11,1,1,1,0,52/22/0/-5,-2/2/15/4,1,45,0/-15/-7/5/5,2428
+rnd_36_16x16_normal_L63_S5_P2_noskip,random syntax (python header writer + random partitions),16,16,2,0,63,5,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,1,55,-7/15/15/-15/15,359
+rnd_37_17x33_normal_L45_S6_P2,random syntax (python header writer + random partitions),17,33,3,0,45,6,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,1,53,-15/5/5/-7/5,1400
+rnd_38_31x47_simple_L45_S5_P8_seg,random syntax (python header writer + random partitions),31,47,1,1,45,5,0,0/0/0/0;0/0/0/0,1,1,1,1,37/8/37/20,27/23/54/43,3,0,0/-7/-7/0/5,1831
+rnd_39_48x32_normal_L20_S5_P4_delta_noskip,random syntax (python header writer + random partitions),48,32,0,0,20,5,1,1/8/-2/3;9/-4/2/-11,0,0,0,0,0/0/0/0,0/0/0/0,2,41,-7/15/0/0/0,1539
+rnd_40_64x64_simple_L33_S6_P2_seg,random syntax (python header writer + random partitions),64,64,0,1,33,6,0,0/0/0/0;0/0/0/0,1,1,1,0,11/7/-27/-28,13/-19/-1/-14,1,44,-7/-15/-7/-7/0,3504
+rnd_41_100x75_normal_L12_S5_P8_delta,random syntax (python header writer + random partitions),100,75,1,0,12,5,1,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,3,9,15/0/0/0/15,8028
+rnd_42_33x100_normal_L63_S2_P2_delta_seg,random syntax (python header writer + random partitions),33,100,3,0,63,2,1,1/-5/-8/-12;9/-8/6/8,1,1,0,0,0/0/0/0,0/0/0/0,1,10,5/5/15/15/0,4530
+rnd_43_1x1_normal_L33_S0_P8,random syntax (python header writer + random partitions),1,1,1,0,33,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,3,43,-15/-15/-15/0/5,987
+rnd_44_7x5_simple_L45_S3_P1_delta_seg_noskip,random syntax (python header writer + random partitions),7,5,1,1,45,3,1,-8/0/8/2;-8/12/-8/3,1,1,1,0,-21/-36/-6/-3,13/16/-18/3,0,42,5/-15/15/-15/-7,539
+rnd_45_80x48_normal_L33_S3_P1_delta_seg,random syntax (python header writer + random partitions),80,48,1,0,33,3,1,-9/-12/-7/-5;-4/-7/10/11,1,1,1,1,3/1/9/43,75/15/3/5,0,55,0/0/0/0/0,3242
+rnd_46_128x96_simple_L33_S4_P8_seg_noskip,random syntax (python header writer + random partitions),128,96,2,1,33,4,0,0/0/0/0;0/0/0/0,1,1,0,0,0/0/0/0,0/0/0/0,3,53,15/-15/5/15/-15,10754
+rnd_47_65x17_normal_L20_S6_P1_delta,random syntax (python header writer + random partitions),65,17,1,0,20,6,1,0/2/-4/-8;12/-10/10/-8,0,0,0,0,0/0/0/0,0/0/0/0,0,30,5/5/-7/0/-7,2378
+rnd_48_112x112_normal_L63_S6_P8_seg,random syntax (python header writer + random partitions),112,112,2,0,63,6,0,0/0/0/0;0/0/0/0,1,0,1,0,-60/-27/-26/-36,14/0/-10/2,3,26,-15/0/0/15/0,10752
+rnd_49_128x96_simple_L63_S0_P8,random syntax (python header writer + random partitions),128,96,0,1,63,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,3,14,0/0/0/0/0,10554
+rnd_50_96x128_simple_L63_S5_P2_delta_seg,random syntax (python header writer + random partitions),96,128,2,1,63,5,1,-2/7/0/-2;3/-9/-5/8,1,1,1,0,-8/-14/-35/-47,10/-4/-9/-3,1,20,0/0/0/0/0,10151
+rnd_51_80x80_normal_L8_S7_P8_delta_seg,random syntax (python header writer + random partitions),80,80,2,0,8,7,1,-9/12/-11/9;12/8/-1/2,1,1,0,0,0/0/0/0,0/0/0/0,3,41,15/15/0/5/-15,5781
+rnd_52_112x112_normal_L20_S5_P1_seg,random syntax (python header writer + random partitions),112,112,3,0,20,5,0,0/0/0/0;0/0/0/0,1,1,1,0,23/24/-11/-19,-8/14/-1/14,0,30,0/0/0/0/0,10302
+rnd_53_128x96_simple_L20_S3_P2_delta,random syntax (python header writer + random partitions),128,96,2,1,20,3,1,1/-11/6/7;1/-9/-4/-5,0,0,0,0,0/0/0/0,0/0/0/0,1,28,-7/-7/15/0/-15,10171
+rnd_54_96x128_normal_L63_S2_P8_delta_seg,random syntax (python header writer + random partitions),96,128,3,0,63,2,1,0/0/0/0;0/0/0/0,1,1,1,0,-2/-62/-63/-43,19/-7/-28/2,3,58,-15/0/0/-7/15,10772
+rnd_55_80x80_simple_L40_S1_P8_delta_seg,random syntax (python header writer + random partitions),80,80,1,1,40,1,1,0/0/0/0;0/0/0/0,1,1,1,0,2/12/12/-1,8/13/16/14,3,8,-7/0/-15/-15/-15,5770
+rnd_56_112x112_simple_L63_S1_P4_delta,random syntax (python header writer + random partitions),112,112,1,1,63,1,1,5/2/-8/-5;5/-11/11/-9,0,0,0,0,0/0/0/0,0/0/0/0,2,44,-15/15/15/0/-15,10486
+rnd_57_128x96_simple_L8_S1_P1_delta,random syntax (python header writer + random partitions),128,96,2,1,8,1,1,-7/7/-5/11;-3/5/-6/-2,0,0,0,0,0/0/0/0,0/0/0/0,0,32,15/-15/-15/5/-7,10093
+rnd_58_96x128_simple_L40_S7_P8_delta_seg,random syntax (python header writer + random partitions),96,128,0,1,40,7,1,7/0/1/-7;8/1/-7/-2,1,0,1,0,-14/-29/-24/-26,1/-7/15/9,3,15,0/0/0/0/0,10576
+rnd_59_80x80_simple_L8_S2_P8_delta,random syntax (python header writer + random partitions),80,80,1,1,8,2,1,5/9/4/-7;1/-12/-2/9,0,0,0,0,0/0/0/0,0/0/0/0,3,54,5/0/0/0/-15,5760
+rnd_60_112x112_simple_L40_S4_P4_delta,random syntax (python header writer + random partitions),112,112,2,1,40,4,1,0/11/12/11;9/9/11/4,0,0,0,0,0/0/0/0,0/0/0/0,2,8,0/0/0/0/0,10506
+rnd_61_128x96_normal_L40_S4_P8,random syntax (python header writer + random partitions),128,96,2,0,40,4,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,3,50,15/-7/15/-7/0,10553
+rnd_62_96x128_simple_L20_S4_P4_delta,random syntax (python header writer + random partitions),96,128,0,1,20,4,1,-1/-5/4/-5;-1/4/-8/-6,0,0,0,0,0/0/0/0,0/0/0/0,2,50,-15/0/5/0/-7,10504
+rnd_63_80x80_normal_L40_S5_P2_seg,random syntax (python header writer + random partitions),80,80,2,0,40,5,0,0/0/0/0;0/0/0/0,1,1,1,1,52/46/59/59,41/45/43/27,1,46,0/-15/5/15/5,5562
+rnd_64_112x112_simple_L8_S7_P4_seg,random syntax (python header writer + random partitions),112,112,1,1,8,7,0,0/0/0/0;0/0/0/0,1,1,1,1,35/22/5/27,2/71/3/79,2,40,0/0/0/0/0,10486
+rnd_65_128x96_normal_L63_S3_P8_delta,random syntax (python header writer + random partitions),128,96,1,0,63,3,1,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,3,1,0/0/0/0/0,10535
+rnd_66_96x128_simple_L40_S7_P4_delta_seg,random syntax (python header writer + random partitions),96,128,1,1,40,7,1,0/0/0/0;0/0/0/0,1,0,1,1,56/19/7/36,13/50/62/51,2,43,0/0/0/0/0,10500
+rnd_67_80x80_simple_L63_S5_P2_delta,random syntax (python header writer + random partitions),80,80,1,1,63,5,1,7/3/-4/-6;9/3/7/-4,0,0,0,0,0/0/0/0,0/0/0/0,1,59,5/-7/-15/0/-7,5360
+rnd_68_112x112_normal_L40_S6_P2_delta,random syntax (python header writer + random partitions),112,112,0,0,40,6,1,6/-10/7/-5;-1/-10/1/-6,0,0,0,0,0/0/0/0,0/0/0/0,1,7,5/0/0/0/15,10369
+rnd_69_128x96_simple_L8_S3_P8_delta_seg,random syntax (python header writer + random partitions),128,96,2,1,8,3,1,-11/0/12/-12;2/-10/11/9,1,1,1,1,38/32/54/41,51/63/12/30,3,37,-7/15/15/-7/0,10766
+rnd_70_96x128_normal_L63_S4_P2_delta_seg,random syntax (python header writer + random partitions),96,128,1,0,63,4,1,-5/6/-4/-2;3/9/9/-11,1,1,1,0,-61/-23/-19/-59,-9/0/-18/-11,1,56,0/5/0/0/0,10176
+rnd_71_80x80_normal_L40_S3_P8_delta_seg,random syntax (python header writer + random partitions),80,80,2,0,40,3,1,12/12/-12/-1;-6/-7/-12/-3,1,1,1,0,-18/-9/-32/18,11/15/0/14,3,5,0/5/5/0/5,5781
+rnd_72_112x112_simple_L40_S0_P4_delta_seg,random syntax (python header writer + random partitions),112,112,0,1,40,0,1,12/-3/2/2;-5/-7/1/11,1,1,1,1,61/13/0/35,44/77/76/44,2,38,0/0/15/5/5,10494
+rnd_73_128x96_normal_L63_S0_P1_delta_seg,random syntax (python header writer + random partitions),128,96,0,0,63,0,1,-3/-3/5/0;10/-7/-9/4,1,1,1,1,63/60/24/26,8/77/57/78,0,28,0/0/0/0/0,10082
+rnd_74_96x128_simple_L63_S3_P4_seg,random syntax (python header writer + random partitions),96,128,0,1,63,3,0,0/0/0/0;0/0/0/0,1,1,1,0,-12/-39/-31/-3,-8/-15/-1/-15,2,29,0/0/0/0/0,10278
+rnd_75_80x80_normal_L63_S7_P4,random syntax (python header writer + random partitions),80,80,3,0,63,7,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,2,14,15/0/0/5/-7,5497
+rnd_76_112x112_simple_L20_S2_P8_delta_seg,random syntax (python header writer + random partitions),112,112,0,1,20,2,1,-10/-2/1/4;7/0/-2/4,1,1,1,0,2/31/-16/14,-3/11/9/4,3,5,0/0/0/0/0,10993
+rnd_77_128x96_simple_L63_S0_P4,random syntax (python header writer + random partitions),128,96,2,1,63,0,0,0/0/0/0;0/0/0/0,0,0,0,0,0/0/0/0,0/0/0/0,2,51,-7/0/0/5/-15,10300
+rnd_78_96x128_simple_L20_S0_P4_delta_seg,random syntax (python header writer + random partitions),96,128,3,1,20,0,1,0/0/0/0;0/0/0/0,1,1,1,1,49/27/45/62,50/9/66/18,2,39,0/0/0/0/0,10302
+rnd_79_80x80_normal_L40_S4_P8_delta_seg,random syntax (python header writer + random partitions),80,80,3,0,40,4,1,-5/12/0/1;-10/-5/3/1,1,1,1,0,-17/23/15/-9,6/4/11/-11,3,25,0/0/-7/5/-7,5988
+vpx_big_640x480_photo_640x480,ffmpeg libvpx -crf 20 -qmin 20 -qmax 20,640,480,0,0,3,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,25,0/0/0/0/0,25026
+vpx_big_noise_noise_320x240,ffmpeg libvpx -crf 15 -qmin 15 -qmax 15,320,240,0,0,7,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,19,0/0/0/0/0,52460
+vpx_flat_flat_100x75,ffmpeg libvpx -crf 35 -qmin 35 -qmax 35,100,75,0,0,16,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,49,0/0/0/0/0,276
+vpx_odd_17x33_photo_17x33,ffmpeg libvpx -crf 25 -qmin 25 -qmax 25,17,33,0,0,4,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,30,0/0/0/0/0,131
+vpx_p0_q10_photo_100x75,ffmpeg libvpx -crf 10 -qmin 10 -qmax 10,100,75,0,0,1,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,12,0/0/0/0/0,1650
+vpx_p0_q30_photo_255x129,ffmpeg libvpx -crf 30 -qmin 30 -qmax 30,255,129,0,0,4,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,39,0/0/0/0/0,2104
+vpx_p0_q50_text_100x75,ffmpeg libvpx -crf 50 -qmin 50 -qmax 50,100,75,0,0,57,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,88,0/0/0/0/0,449
+vpx_p0_q63_photo_100x75,ffmpeg libvpx -crf 63 -qmin 63 -qmax 63,100,75,0,0,36,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,127,0/0/0/0/0,172
+vpx_p0_s4_photo_100x75,ffmpeg libvpx -crf 25 -sharpness 4 -qmin 25 -qmax 25,100,75,0,0,3,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,30,0/0/0/0/0,693
+vpx_p0_s7_text_100x75,ffmpeg libvpx -crf 25 -sharpness 7 -qmin 25 -qmax 25,100,75,0,0,13,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,30,0/0/0/0/0,1285
+vpx_p1_simple_photo_100x75,ffmpeg libvpx -crf 25 -profile:v 1 -qmin 25 -qmax 25,100,75,1,1,3,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,30,0/0/0/0/0,648
+vpx_p1_simple_text_text_255x129,ffmpeg libvpx -crf 40 -profile:v 1 -qmin 40 -qmax 40,255,129,1,1,12,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,59,0/0/0/0/0,2859
+vpx_p2_photo_100x75,ffmpeg libvpx -crf 25 -profile:v 2 -qmin 25 -qmax 25,100,75,2,0,0,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,30,0/0/0/0/0,642
+vpx_p3_photo_100x75,ffmpeg libvpx -crf 25 -profile:v 3 -qmin 25 -qmax 25,100,75,3,1,0,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,30,0/0/0/0/0,684
+vpx_rt_photo_255x129,ffmpeg libvpx -crf 30 -deadline realtime -cpu-used 8 -qmin 30 -qmax 30,255,129,0,0,4,0,1,2/0/-2/-2;4/-12/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,39,0/0/0/0/0,2463
+vpx_slices2_odd_text_17x33,ffmpeg libvpx -crf 30 -slices 2 -qmin 30 -qmax 30,17,33,0,0,18,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,1,39,0/0/0/0/0,239
+vpx_slices2_photo_255x129,ffmpeg libvpx -crf 25 -slices 2 -qmin 25 -qmax 25,255,129,0,0,4,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,1,30,0/0/0/0/0,2727
+vpx_slices4_photo_255x129,ffmpeg libvpx -crf 25 -slices 4 -qmin 25 -qmax 25,255,129,0,0,3,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,2,30,0/0/0/0/0,2693
+vpx_slices4_s5_p1_photo_160x120,ffmpeg libvpx -crf 30 -slices 4 -sharpness 5 -profile:v 1 -qmin 30 -qmax 30,160,120,1,1,6,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,2,39,0/0/0/0/0,1234
+vpx_slices4_tiny_photo_33x20,ffmpeg libvpx -crf 30 -slices 4 -qmin 30 -qmax 30,33,20,0,0,14,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,2,39,0/0/0/0/0,123
+vpx_slices8_big_photo_640x480,ffmpeg libvpx -crf 35 -slices 8 -qmin 35 -qmax 35,640,480,0,0,6,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,3,49,0/0/0/0/0,13131
+vpx_slices8_text_255x129,ffmpeg libvpx -crf 25 -slices 8 -qmin 25 -qmax 25,255,129,0,0,10,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,3,30,0/0/0/0/0,3226
+vpx_tiny_1x1_photo_1x1,ffmpeg libvpx -crf 25 -qmin 25 -qmax 25,1,1,0,0,11,0,1,2/0/-2/-2;4/-2/2/4,0,0,0,0,0/0/0/0,0/0/0/0,0,30,0/0/0/0/0,50
