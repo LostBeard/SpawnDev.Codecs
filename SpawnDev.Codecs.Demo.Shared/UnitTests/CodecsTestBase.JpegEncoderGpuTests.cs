@@ -227,6 +227,159 @@ public abstract partial class CodecsTestBase
         }
     }
 
+    [TestMethod]
+    public async Task JpegEncoderGpu_WorstCaseNoise_FitsGetMaxEncodedSize_AndEveryModeDecodesToTheSamePixels()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var enc = new JpegEncoderGpu(acc);
+            using var dec = new JpegDecoderGpu(acc);
+            var failures = new List<string>();
+            // White noise has the maximum entropy: every coefficient is large and nonzero, the worst case for the
+            // output bound and for the capacity guards of the entropy coders.
+            var rng = new Random(0x4A50);
+            foreach (var (w, h) in new[] { (64, 64), (33, 17), (8, 8) })
+            {
+                var rgba = new byte[w * h * 4];
+                rng.NextBytes(rgba);
+                foreach (var (q, sub, ri) in new[] { (100, JpegSubsampling.Yuv444, 0), (100, JpegSubsampling.Yuv420, 3), (50, JpegSubsampling.Yuv422, 0), (100, JpegSubsampling.Gray, 5) })
+                {
+                    byte[]? reference = null;
+                    foreach (var mode in new[] { "baseline", "optimized", "progressive" })
+                    {
+                        var options = new JpegEncodeOptions
+                        {
+                            Quality = q, Subsampling = sub, RestartInterval = ri,
+                            OptimizeHuffman = mode == "optimized", Progressive = mode == "progressive",
+                        };
+                        string what = $"{w}x{h} q{q} {sub} ri{ri} {mode}";
+                        try
+                        {
+                            int max = JpegEncoderGpu.GetMaxEncodedSize(w, h, options);
+                            var file = await enc.EncodeAsync(rgba, w, h, options);
+                            if (file.Length > max) failures.Add($"{what}: {file.Length} bytes exceeds GetMaxEncodedSize {max}");
+                            var img = await dec.DecodeAsync(file);
+                            if (reference == null) reference = img.Pixels;
+                            else
+                            {
+                                var diff = ComparePixels(reference, img.Pixels, 4, w);
+                                if (diff != null) failures.Add($"{what}: pixels differ from the baseline encode of the same coefficients: {diff}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            failures.Add($"{what}: {ex.GetType().Name}: {ex.Message}");
+                        }
+                    }
+                }
+            }
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
+    public async Task JpegEncoderGpu_FlatPicture_LongEobRuns_ByteIdenticalToPillowSha256()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var enc = new JpegEncoderGpu(acc);
+            const int n = 2048;
+            var rgba = new byte[n * n * 4];
+            for (int i = 0; i < rgba.Length; i += 4) { rgba[i] = 200; rgba[i + 1] = 100; rgba[i + 2] = 50; rgba[i + 3] = 255; }
+            var failures = new List<string>();
+            var cases = new (string Name, JpegEncodeOptions Options)[]
+            {
+                ("bigenc_flat_prog_c420", new JpegEncodeOptions { Quality = 85, Subsampling = JpegSubsampling.Yuv420, Progressive = true }),
+                ("bigenc_flat_prog_c444_rst", new JpegEncodeOptions { Quality = 85, Subsampling = JpegSubsampling.Yuv444, Progressive = true, RestartInterval = 40000 }),
+                ("bigenc_flat_opt_c420", new JpegEncodeOptions { Quality = 85, Subsampling = JpegSubsampling.Yuv420, OptimizeHuffman = true }),
+            };
+            foreach (var (name, options) in cases)
+            {
+                var file = await enc.EncodeAsync(rgba, n, n, options);
+                string got = Sha256Hex(file);
+                string want = ReadEmbeddedText(JpegFixturePrefix + name + ".sha256");
+                if (got != want) failures.Add($"{name}: {file.Length} bytes, sha256 {got} != Pillow's {want}");
+            }
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
+    public async Task JpegEncoderGpu_OptimalHuffmanTables_AreValidAndLengthLimited()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var kernels = new JpegScanEncoderKernels(acc);
+            using var hist = acc.Allocate1D<int>(4L * JpegEncMeta.HistStride);
+            using var tabs = acc.Allocate1D<int>(4L * JpegEncMeta.TabStride);
+            // Four histograms: Fibonacci counts over 30 symbols (forces code lengths above 16 before limiting),
+            // a single symbol, two symbols, and a flat 256-symbol histogram.
+            var h = new int[4 * JpegEncMeta.HistStride];
+            long a = 1, b = 1;
+            for (int i = 0; i < 30; i++)
+            {
+                h[i * 7 % 256] = (int)Math.Min(a, 1_000_000_000);
+                long t = a + b; a = b; b = t;
+            }
+            h[1 * JpegEncMeta.HistStride + 77] = 12345;
+            h[2 * JpegEncMeta.HistStride + 3] = 5; h[2 * JpegEncMeta.HistStride + 200] = 9;
+            for (int i = 0; i < 256; i++) h[3 * JpegEncMeta.HistStride + i] = 1000;
+            hist.View.CopyFromCPU(h);
+            kernels.GenTables(hist.View, tabs.View);
+            await acc.SynchronizeAsync();
+            var t4 = await tabs.View.CopyToHostAsync();
+            var failures = new List<string>();
+            for (int slot = 0; slot < 4; slot++)
+            {
+                int baseIdx = slot * JpegEncMeta.TabStride;
+                int used = 0;
+                for (int i = 0; i < 256; i++) if (h[slot * JpegEncMeta.HistStride + i] != 0) used++;
+                int total = 0;
+                double kraft = 0;
+                for (int len = 1; len <= 16; len++)
+                {
+                    int cnt = t4[baseIdx + JpegEncMeta.TabBits + len];
+                    total += cnt;
+                    kraft += cnt * Math.Pow(2, -len);
+                }
+                if (total != used) failures.Add($"table {slot}: {total} codes for {used} symbols");
+                if (t4[baseIdx + JpegEncMeta.TabCount] != used) failures.Add($"table {slot}: symbol count {t4[baseIdx + JpegEncMeta.TabCount]} != {used}");
+                if (kraft >= 1.0) failures.Add($"table {slot}: Kraft sum {kraft} leaves no unused code (the all-ones code must stay free)");
+                // Every used symbol has a code of length 1..16 and canonical codes are prefix-free (strictly increasing per length).
+                var seen = new HashSet<string>();
+                for (int sym = 0; sym < 256; sym++)
+                {
+                    int e = t4[baseIdx + JpegEncMeta.TabCodes + sym];
+                    bool isUsed = h[slot * JpegEncMeta.HistStride + sym] != 0;
+                    int len = e >> 16;
+                    if (isUsed != (len != 0)) { failures.Add($"table {slot}: symbol {sym} used={isUsed} code length {len}"); continue; }
+                    if (len > 16) failures.Add($"table {slot}: symbol {sym} has a {len}-bit code");
+                    if (len != 0 && !seen.Add(Convert.ToString(e & 0xFFFF, 2).PadLeft(len, '0')))
+                        failures.Add($"table {slot}: duplicate code for symbol {sym}");
+                }
+                // More frequent symbols never get longer codes than less frequent ones.
+                for (int x = 0; x < 256; x++)
+                    for (int y = 0; y < 256; y++)
+                    {
+                        int fx = h[slot * JpegEncMeta.HistStride + x], fy = h[slot * JpegEncMeta.HistStride + y];
+                        if (fx > fy && fy > 0 && (t4[baseIdx + JpegEncMeta.TabCodes + x] >> 16) > (t4[baseIdx + JpegEncMeta.TabCodes + y] >> 16))
+                            failures.Add($"table {slot}: symbol {x} (count {fx}) has a longer code than symbol {y} (count {fy})");
+                    }
+            }
+            // The Fibonacci table must actually need limiting: unlimited Huffman depth would be 30.
+            int maxLen = 0;
+            for (int sym = 0; sym < 256; sym++) maxLen = Math.Max(maxLen, t4[JpegEncMeta.TabCodes + sym] >> 16);
+            if (maxLen != 16) failures.Add($"Fibonacci table: longest code {maxLen}, expected the limit 16");
+            True(failures.Count == 0, string.Join("\n", failures.Take(20)));
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
     private static double Psnr(byte[] rgbaA, byte[] rgbaB)
     {
         double se = 0;

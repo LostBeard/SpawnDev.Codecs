@@ -613,6 +613,18 @@ def main():
             f.write(hashlib.sha256(b.getvalue()).hexdigest())
         print(f"{nm}: {len(b.getvalue())} bytes")
 
+    # --- long runs of empty blocks: a flat 2048x2048 picture drives the progressive EOB run counter to its 0x7FFF limit ---
+    flat = np.zeros((2048, 2048, 3), dtype=np.uint8)
+    flat[:, :] = (200, 100, 50)
+    for nm, kw in (("bigenc_flat_prog_c420", dict(quality=85, subsampling=2, progressive=True)),
+                   ("bigenc_flat_prog_c444_rst", dict(quality=85, subsampling=0, progressive=True, restart_marker_blocks=40000)),
+                   ("bigenc_flat_opt_c420", dict(quality=85, subsampling=2, optimize=True))):
+        b = io.BytesIO()
+        Image.fromarray(flat, "RGB").save(b, "JPEG", **kw)
+        with open(os.path.join(OUT, nm + ".sha256"), "w") as f:
+            f.write(hashlib.sha256(b.getvalue()).hexdigest())
+        print(f"{nm}: {len(b.getvalue())} bytes")
+
     # --- broken files (error tests; no truth) ------------------------------------------------------------------------
     tiny = photo(16, 16, 110)
     good = pillow_save(tiny, "RGB", quality=85, subsampling=2)
