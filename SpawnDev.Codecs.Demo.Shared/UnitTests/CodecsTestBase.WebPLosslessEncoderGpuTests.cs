@@ -280,6 +280,71 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task WebPLosslessEncoderGpu_FeaturesAreActuallyUsed_AsSeenByAnIndependentBitstreamParser()
+    {
+        // A degenerate encoder that wrote only literals would pass every round-trip test. scripts/images/webp_ref.py, an
+        // independent pure-Python VP8L decoder, reports what each file really contains.
+        var cases = new (string Source, int Quality, Func<string, bool> Check, string Expect)[]
+        {
+            ("enc_two_color_70x45", 75, s => s.Contains("xf[I3]"), "palette with 8 pixels per word"),
+            ("enc_pal4_64x40", 75, s => s.Contains("xf[I2]"), "palette with 4 pixels per word"),
+            ("enc_pal16_61x33", 75, s => s.Contains("xf[I1]"), "palette with 2 pixels per word"),
+            ("enc_pal256_90x70", 75, s => s.Contains("xf[I0]") && s.Contains("pal=256"), "256-colour palette"),
+            ("enc_photo_80x60", 75, s => s.Contains("G,P") && s.Contains(",C"), "subtract green + predictor + cross colour"),
+            ("enc_mosaic_96x72", 100, s => PredictorModeCount(s) >= 5, "at least five predictor modes"),
+            ("enc_cache_heavy_80x60", 100, s => !s.Contains("cache=0 ") && !s.Contains("copies=0 "), "colour cache and LZ77 copies"),
+            ("enc_large_320x240", 75, s => CopyCount(s) > 100, "LZ77 copies on a compressible image"),
+            ("enc_meta_groups_128x128", 100, s => GroupCount(s) >= 2, "several prefix groups (meta prefix codes)"),
+        };
+        string dir = WebPEncoderOutputDir("features");
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var enc = new WebPLosslessEncoderGpu(acc);
+            foreach (var (source, quality, _, _) in cases)
+            {
+                var row = WebPSources().Single(r => r.Name == source);
+                byte[] px = WebPSource(source);
+                var file = await enc.EncodeAsync(px, row.Width, row.Height, new WebPEncodeOptions { Quality = quality });
+                string stem = Path.Combine(dir, source);
+                await File.WriteAllBytesAsync(stem + ".webp", file);
+                await File.WriteAllBytesAsync(stem + ".rgba8", px);
+                await File.WriteAllTextAsync(stem + ".size", $"{row.Width} {row.Height}");
+                await File.WriteAllTextAsync(stem + ".stats", "");
+            }
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+
+        var report = await RunPillowVerifyAsync(dir);
+        var stats = report.Split('\n').Where(l => l.StartsWith("STATS ")).ToDictionary(l => l.Split(' ')[1], l => l);
+        var failures = new List<string>();
+        foreach (var (source, quality, check, expect) in cases)
+        {
+            if (!stats.TryGetValue(source, out var line)) { failures.Add($"{source}: no feature report"); continue; }
+            if (!check(line)) failures.Add($"{source} (q{quality}) should use {expect}, the parser saw: {line}");
+        }
+        True(failures.Count == 0, string.Join("\n", failures));
+    }
+
+    private static int PredictorModeCount(string stats)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(stats, "pred_modes=([0-9a-f]*)");
+        return m.Success ? m.Groups[1].Value.Length : 0;
+    }
+
+    private static int CopyCount(string stats)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(stats, "copies=([0-9]+)");
+        return m.Success ? int.Parse(m.Groups[1].Value) : 0;
+    }
+
+    private static int GroupCount(string stats)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(stats, "groups=([0-9]+)/");
+        return m.Success ? int.Parse(m.Groups[1].Value) : 0;
+    }
+
+    [TestMethod]
     public async Task WebPLosslessEncoderGpu_ExtremeShapes_RoundTrip_AndOpenInLibwebp()
     {
         // The VP8L header has 14-bit sizes: 16384 is the largest. Also sizes around the transform block boundaries.

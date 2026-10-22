@@ -101,6 +101,7 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
         public int Quality;
         public int PredictorBits, CrossBits, ModeSet, ChainDepth;
         public int TrialCache;
+        public int MetaBits;
         public int[] CacheCandidates = { 0 };
     }
 
@@ -133,6 +134,11 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
             p.ChainDepth = quality >= 90 ? 128 : 32;
             p.TrialCache = 8;
             p.CacheCandidates = quality >= 90 ? new[] { 0, 5, 7, 9, 10 } : new[] { 0, 6, 9 };
+        }
+        if (quality >= 50)
+        {
+            int mb = Vp8lEncodeGroups.TileBitsFor(width, height);
+            if (Vp8lEncLayout.Tiles(width, height, mb) >= 4) p.MetaBits = mb;
         }
         return p;
     }
@@ -204,7 +210,7 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
 
         // ---- host-derived layout and choices go into the shared int block ----
         var hostMeta = new int[WebPEncMeta.Size];
-        long workInts = Vp8lEncLayout.Compute(width, height, plan.PredictorBits, plan.CrossBits, hostMeta);
+        long workInts = Vp8lEncLayout.Compute(width, height, plan.PredictorBits, plan.CrossBits, plan.MetaBits, hostMeta);
         if (workInts > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(width), "Image is too large to encode.");
         hostMeta[WebPEncMeta.Width] = width;
         hostMeta[WebPEncMeta.Height] = height;
@@ -214,6 +220,7 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
         hostMeta[WebPEncMeta.AllowPalette] = 1;
         hostMeta[WebPEncMeta.ChainDepth] = plan.ChainDepth;
         hostMeta[WebPEncMeta.ModeSet] = plan.ModeSet;
+        hostMeta[WebPEncMeta.MetaBits] = plan.MetaBits;
         hostMeta[WebPEncMeta.OutputCapacity] = (int)Math.Min(output.Length, int.MaxValue);
         hostMeta[WebPEncMeta.ExtendedFile] = extended ? 1 : 0;
         hostMeta[WebPEncMeta.IccLength] = icc?.Length ?? 0;
@@ -378,6 +385,53 @@ public sealed class WebPLosslessEncoderGpu : IDisposable
             }
         }
         await CostAsync(main, bestCache, false);
+
+        // ---- several prefix groups (meta prefix codes), when the tiles of the image differ enough to pay for them ----
+        if (plan.MetaBits > 0)
+        {
+            await _accelerator.SynchronizeAsync();
+            var single = await meta.CopyToHostAsync();
+            long singleCost = single[WebPEncMeta.ExtraBits];
+            for (int k = 0; k < 5; k++) singleCost += single[WebPEncMeta.CodeCost + k];
+
+            int tileCount = Vp8lEncLayout.Tiles(hostMeta[WebPEncMeta.PackedWidth], height, plan.MetaBits);
+            int costBase = hostMeta[WebPEncMeta.RegionGroupMisc] + Vp8lEncodeGroups.CostTableOffset;
+            _kernels.TileHistograms(work, tok, meta, _tables.View);
+            long bestGroupsCost = long.MaxValue;
+            int bestGroups = 0;
+            int lastTried = 0;
+            foreach (int k in new[] { 2, 4, 8 })
+            {
+                if (k > tileCount * 2) break;
+                _kernels.Cluster(work, meta, k);
+                _kernels.BuildGroupCodes(work, meta);
+                await _accelerator.SynchronizeAsync();
+                var m = await meta.CopyToHostAsync();
+                int groups = m[WebPEncMeta.Groups];
+                var costs = await work.SubView(costBase, Vp8lEncodeGroups.MaxGroups * 5).CopyToHostAsync();
+                long cost = m[WebPEncMeta.ExtraBits] + tileCount * 4L + 400;
+                for (int i = 0; i < groups * 5; i++) cost += costs[i];
+                lastTried = k;
+                if (groups > 1 && cost < bestGroupsCost)
+                {
+                    bestGroupsCost = cost;
+                    bestGroups = k;
+                }
+                if (groups < k) break; // fewer clusters than asked for: more would not help
+            }
+            if (bestGroups != 0 && bestGroupsCost + 64 < singleCost)
+            {
+                if (lastTried != bestGroups)
+                {
+                    _kernels.Cluster(work, meta, bestGroups);
+                    _kernels.BuildGroupCodes(work, meta);
+                }
+            }
+            else
+            {
+                meta.SubView(WebPEncMeta.Groups, 1).CopyFromCPU(new[] { 1 });
+            }
+        }
         _kernels.Emit(output, work, tok, meta, _tables.View);
         _kernels.FinalizeFile(output, meta);
         int offset = 0;

@@ -46,6 +46,8 @@ public static class WebPEncMeta
     public const int XmpDst = 14;
     /// <summary>File offset the ICCP payload is copied to.</summary>
     public const int IccDst = 15;
+    /// <summary>Number of prefix-code groups (1 or 0 = a single group, no entropy image).</summary>
+    public const int Groups = 16;
 
     // ---- written by the host (slots HostStart .. Size) ----
     /// <summary>First host-written slot.</summary>
@@ -91,6 +93,12 @@ public static class WebPEncMeta
     /// <summary>Work-buffer region offsets (see <see cref="Vp8lEncLayout"/>).</summary>
     public const int RegionPredictor = 43, RegionCross = 44, RegionMain = 45, RegionBuild = 46, RegionSub = 47,
         RegionWriter = 48, RegionHead = 49, RegionPrev = 50, RegionCache = 51;
+    /// <summary>Meta prefix code regions: per-tile histograms, tile to group assignment, entropy image, group code sets,
+    /// scratch for building the group codes, clustering scratch + costs.</summary>
+    public const int RegionTileHist = 52, RegionAssign = 53, RegionEntropy = 54, RegionGroupSets = 55,
+        RegionGroupBuild = 56, RegionGroupMisc = 57;
+    /// <summary>Meta prefix block size bits (tile = 2^bits pixels square); 0 = the meta prefix codes are not used.</summary>
+    public const int MetaBits = 58;
 }
 
 /// <summary>Layout of the encoder's int work buffer: a pure function of the image size and transform block sizes.</summary>
@@ -126,7 +134,7 @@ public static class Vp8lEncLayout
     public static int Tiles(int width, int height, int bits) => ((width + (1 << bits) - 1) >> bits) * ((height + (1 << bits) - 1) >> bits);
 
     /// <summary>Fill the region offsets for an image; returns the total ints needed.</summary>
-    public static long Compute(int width, int height, int predBits, int crossBits, int[] meta)
+    public static long Compute(int width, int height, int predBits, int crossBits, int metaBits, int[] meta)
     {
         long n = (long)width * height;
         long p = FirstDynamic;
@@ -139,6 +147,17 @@ public static class Vp8lEncLayout
         meta[WebPEncMeta.RegionWriter] = (int)p; p += WriterScratch;
         meta[WebPEncMeta.RegionHead] = (int)p; p += 1 << HashBits;
         meta[WebPEncMeta.RegionPrev] = (int)p; p += n;
+        if (metaBits > 0)
+        {
+            int tiles = Tiles(width, height, metaBits);
+            meta[WebPEncMeta.RegionTileHist] = (int)p; p += (long)tiles * SetAlphaMax;
+            meta[WebPEncMeta.RegionAssign] = (int)p; p += tiles;
+            meta[WebPEncMeta.RegionEntropy] = (int)p; p += tiles;
+            meta[WebPEncMeta.RegionGroupSets] = (int)p; p += (long)Vp8lEncodeGroups.MaxGroups * SetInts;
+            meta[WebPEncMeta.RegionGroupBuild] = (int)p; p += (long)Vp8lEncodeGroups.MaxGroups * 5 * BuildScratch;
+            meta[WebPEncMeta.RegionGroupMisc] = (int)p;
+            p += (long)Vp8lEncodeGroups.MaxGroups * SetAlphaMax + 64 + tiles;
+        }
         return p;
     }
 }
@@ -930,24 +949,38 @@ public static class Vp8lEncodeGpu
         meta[WebPEncMeta.CacheBits] = cacheBits;
     }
 
-    /// <summary>Writes the tokens of the main image with the built main code set.</summary>
+    /// <summary>
+    /// Writes the tokens of the main image. With one prefix group every token uses the main code set; with several, each
+    /// token uses the group of the tile its first pixel lies in (the same rule the decoder applies).
+    /// </summary>
     public static void WriteTokens(
         ref Vp8lBitWriter bw, ArrayView<byte> output, ArrayView<int> w, ArrayView<int> tok, ArrayView<int> meta,
         ArrayView<int> tables, int xsize, int cacheBits)
     {
         int cacheSize = cacheBits > 0 ? 1 << cacheBits : 0;
-        int set = meta[WebPEncMeta.RegionMain];
         int setAlpha = SetAlpha(cacheSize);
-        int cg = set + 2 * setAlpha + AlphaOff(0, cacheSize);
-        int cr = set + 2 * setAlpha + AlphaOff(1, cacheSize);
-        int cb = set + 2 * setAlpha + AlphaOff(2, cacheSize);
-        int ca = set + 2 * setAlpha + AlphaOff(3, cacheSize);
-        int cd = set + 2 * setAlpha + AlphaOff(4, cacheSize);
+        int groups = meta[WebPEncMeta.Groups];
+        int metaBits = meta[WebPEncMeta.MetaBits];
+        int tilesPerRow = (xsize + (1 << metaBits) - 1) >> metaBits;
+        int assign = meta[WebPEncMeta.RegionAssign];
+        int groupSets = meta[WebPEncMeta.RegionGroupSets];
+        int mainSet = meta[WebPEncMeta.RegionMain];
         int count = meta[WebPEncMeta.TokenCount];
+        int x = 0;
+        int y = 0;
         for (int t = 0; t < count; t++)
         {
+            int set = mainSet;
+            if (groups > 1) set = groupSets + w[assign + (y >> metaBits) * tilesPerRow + (x >> metaBits)] * Vp8lEncLayout.SetInts;
+            int cg = set + 2 * setAlpha + AlphaOff(0, cacheSize);
+            int cr = set + 2 * setAlpha + AlphaOff(1, cacheSize);
+            int cb = set + 2 * setAlpha + AlphaOff(2, cacheSize);
+            int ca = set + 2 * setAlpha + AlphaOff(3, cacheSize);
+            int cd = set + 2 * setAlpha + AlphaOff(4, cacheSize);
+
             int t0 = tok[t * 2];
             int type = t0 & 3;
+            int advance = 1;
             if (type == 0)
             {
                 uint px = (uint)tok[t * 2 + 1];
@@ -971,7 +1004,12 @@ public static class Vp8lEncodeGpu
                 int dp = PrefixEncode(plane);
                 WriteSymbol(ref bw, output, w, cd, dp & 0xFF);
                 PutBits(ref bw, output, (uint)(dp >> 13), (dp >> 8) & 0x1F);
+                advance = len;
             }
+            int nx = x + advance;
+            int rows = nx / xsize;
+            y += rows;
+            x = nx - rows * xsize;
         }
     }
 }

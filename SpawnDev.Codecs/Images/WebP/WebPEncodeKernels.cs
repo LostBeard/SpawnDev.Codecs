@@ -41,6 +41,9 @@ public sealed class WebPEncodeKernels : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _emit;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _finalize;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int> _copyBlob;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _tileHist;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _cluster;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _buildGroupCodes;
 
     /// <summary>Compile the kernels.</summary>
     public WebPEncodeKernels(Accelerator accelerator)
@@ -69,6 +72,10 @@ public sealed class WebPEncodeKernels : IDisposable
         _finalize = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(FinalizeKernel);
         _copyBlob = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int>(CopyBlobKernel);
+        _tileHist = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(TileHistKernel);
+        _cluster = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(ClusterKernel);
+        _buildGroupCodes = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(BuildGroupCodesKernel);
     }
 
     // ------------------------------------------------------------------
@@ -110,6 +117,16 @@ public sealed class WebPEncodeKernels : IDisposable
 
     /// <summary>Huffman codes of the five main prefix codes (one thread each).</summary>
     public void BuildCodes(ArrayView<int> work, ArrayView<int> meta) => _buildCodes(5, work, meta);
+
+    /// <summary>Per-tile histograms of the main token stream (for the meta prefix codes).</summary>
+    public void TileHistograms(ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables)
+        => _tileHist(1, work, tok, meta, tables);
+
+    /// <summary>Clusters the tiles into at most <paramref name="groups"/> prefix groups.</summary>
+    public void Cluster(ArrayView<int> work, ArrayView<int> meta, int groups) => _cluster(1, work, meta, groups);
+
+    /// <summary>Huffman codes of every code of every group (one thread each).</summary>
+    public void BuildGroupCodes(ArrayView<int> work, ArrayView<int> meta) => _buildGroupCodes(Vp8lEncodeGroups.MaxGroups * 5, work, meta);
 
     /// <summary>Bitstream: header, transforms, codes, tokens.</summary>
     public void Emit(ArrayView<byte> output, ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables)
@@ -541,6 +558,21 @@ public sealed class WebPEncodeKernels : IDisposable
         Vp8lEncodeGpu.Tokenize(main, xsize, height, w, tok, meta, tables, cacheBits);
     }
 
+    private static void TileHistKernel(Index1D _, ArrayView<int> w, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables)
+    {
+        Vp8lEncodeGroups.TileHistograms(w, tok, meta, tables);
+    }
+
+    private static void ClusterKernel(Index1D _, ArrayView<int> w, ArrayView<int> meta, int groups)
+    {
+        Vp8lEncodeGroups.Cluster(w, meta, groups);
+    }
+
+    private static void BuildGroupCodesKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta)
+    {
+        Vp8lEncodeGroups.BuildGroupCode(w, meta, index.X);
+    }
+
     private static void BuildCodesKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta)
     {
         int k = index.X;
@@ -613,9 +645,24 @@ public sealed class WebPEncodeKernels : IDisposable
         {
             Vp8lEncodeGpu.PutBits(ref bw, output, 0, 1);
         }
-        Vp8lEncodeGpu.PutBits(ref bw, output, 0, 1); // no meta prefix codes: one group
         int cacheSize = cacheBits > 0 ? 1 << cacheBits : 0;
-        Vp8lEncodeGpu.WriteCodeSet(ref bw, output, w, meta[WebPEncMeta.RegionMain], cacheSize, ws);
+        int groups = meta[WebPEncMeta.Groups];
+        if (groups > 1)
+        {
+            // meta prefix codes: tile size, the entropy image (group per tile), then every group's five codes
+            int metaBits = meta[WebPEncMeta.MetaBits];
+            Vp8lEncodeGpu.PutBits(ref bw, output, 1, 1);
+            Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(metaBits - 2), 3);
+            Vp8lEncodeGpu.WriteSubImage(ref bw, output, w, meta[WebPEncMeta.RegionEntropy],
+                Vp8lEncLayout.Tiles(packedWidth, height, metaBits), sub, build, ws);
+            for (int g = 0; g < groups; g++)
+                Vp8lEncodeGpu.WriteCodeSet(ref bw, output, w, meta[WebPEncMeta.RegionGroupSets] + g * Vp8lEncLayout.SetInts, cacheSize, ws);
+        }
+        else
+        {
+            Vp8lEncodeGpu.PutBits(ref bw, output, 0, 1); // no meta prefix codes: one group
+            Vp8lEncodeGpu.WriteCodeSet(ref bw, output, w, meta[WebPEncMeta.RegionMain], cacheSize, ws);
+        }
         Vp8lEncodeGpu.WriteTokens(ref bw, output, w, tok, meta, tables, meta[WebPEncMeta.PackedWidth], cacheBits);
         Vp8lEncodeGpu.Flush(ref bw, output);
         meta[WebPEncMeta.PayloadLength] = bw.Pos - start;

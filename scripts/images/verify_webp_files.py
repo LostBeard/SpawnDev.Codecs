@@ -21,6 +21,9 @@ import sys
 import numpy as np
 from PIL import Image
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import webp_ref as W  # noqa: E402  (independent pure-Python VP8L decoder, used for the feature report)
+
 
 def chunks(data):
     pos = 12
@@ -55,6 +58,14 @@ def main(d):
                     found = [p for f, p in chunks(data) if f == fcc]
                     if not found or found[0] != expected:
                         raise Exception("%s chunk missing or different" % ext)
+            if os.path.exists(path + ".stats"):
+                # second, independent decoder + which bitstream features the encoder actually used
+                payload = [p for f, p in chunks(data) if f == b"VP8L"][0]
+                w2, h2, pix, st = W.decode_vp8l(payload)
+                ref_rgba = np.array([[(q >> 16) & 255, (q >> 8) & 255, q & 255, q >> 24] for q in pix], np.uint8).reshape(h, w, 4)
+                if not (ref_rgba == want).all():
+                    raise Exception("webp_ref decode differs from the source")
+                print("STATS %s %s" % (name, st.summary()))
             ours = len(data)
             if max(w, h) > 16383:
                 # libwebp's ENCODER refuses 16384 (its limit is 16383) although its decoder accepts the format maximum
