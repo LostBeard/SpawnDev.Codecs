@@ -490,10 +490,46 @@ def main():
         [(2, 2), (1, 1), (1, 1)], 33, 17, quality=90, sof=0xC1))
 
     # --- larger photographic-style picture -------------------------------------------------------------------------
-    big = photo(200, 150, 100)
-    put_fixture("photo_c420_200x150", pillow_save(big, "RGB", quality=85, subsampling=2))
-    put_fixture("photo_prog_c420_200x150", pillow_save(big, "RGB", quality=85, subsampling=2, progressive=True,
+    big = photo(160, 120, 100)
+    put_fixture("photo_c420_160x120", pillow_save(big, "RGB", quality=85, subsampling=2))
+    put_fixture("photo_prog_c420_160x120", pillow_save(big, "RGB", quality=85, subsampling=2, progressive=True,
                                                        optimize=True))
+
+    # --- encoder fixtures: the SAME source pixels encoded by Pillow (libjpeg-turbo); the GPU encoder must produce
+    #     the identical bytes. Sources are RGBA with a noisy alpha channel (alpha must be ignored). ---------------
+    def enc_source(name, rgb):
+        h, w = rgb.shape[:2]
+        alpha = np.random.default_rng(w * 1000 + h).integers(0, 256, (h, w, 1), dtype=np.uint8)
+        with open(os.path.join(OUT, f"encsrc_{name}.rgba8"), "wb") as f:
+            f.write(np.concatenate([rgb, alpha], axis=2).tobytes())
+
+    esizes = [(1, 1), (7, 5), (17, 33), (100, 75), (64, 48)]
+    for w, h in esizes:
+        rgb = photo(w, h, 200 + w)
+        enc_source(f"{w}x{h}", rgb)
+        for sub, nm in ((0, "444"), (1, "422"), (2, "420")):
+            for q in ((50, 90) if (w, h) != (64, 48) else (1, 25, 75, 100)):
+                write_raw(f"enc_c{nm}_q{q:03d}_{w}x{h}", pillow_save(rgb, "RGB", quality=q, subsampling=sub))
+    for w, h in ((17, 33), (100, 75), (1, 1)):
+        g = gray_photo(w, h, 210 + w)
+        rgb = np.stack([g, g, g], axis=2)
+        enc_source(f"gray_{w}x{h}", rgb)
+        write_raw(f"enc_gray_q075_{w}x{h}", pillow_save(g, "L", quality=75))
+    rgb = photo(100, 75, 300)
+    enc_source("rst100x75", rgb)
+    for n in (1, 3, 7):
+        write_raw(f"enc_rst_n{n}_c420_100x75", pillow_save(rgb, "RGB", quality=85, subsampling=2, restart_marker_blocks=n))
+    write_raw("enc_rst_n5_c444_100x75", pillow_save(rgb, "RGB", quality=85, subsampling=0, restart_marker_blocks=5))
+    write_raw("enc_rst_n2_c422_100x75", pillow_save(rgb, "RGB", quality=85, subsampling=1, restart_marker_blocks=2))
+    g = gray_photo(100, 75, 301)
+    enc_source("rstgray100x75", np.stack([g, g, g], axis=2))
+    write_raw("enc_rst_n4_gray_100x75", pillow_save(g, "L", quality=85, restart_marker_blocks=4))
+    rgb = photo(24, 16, 302)
+    enc_source("orient24x16", rgb)
+    for o in (3, 6, 8):
+        e = Image.Exif()
+        e[0x0112] = o
+        write_raw(f"enc_orient{o}_c420_24x16", pillow_save(rgb, "RGB", quality=90, subsampling=2, exif=e.tobytes()))
 
     # --- broken files (error tests; no truth) ------------------------------------------------------------------------
     tiny = photo(16, 16, 110)
