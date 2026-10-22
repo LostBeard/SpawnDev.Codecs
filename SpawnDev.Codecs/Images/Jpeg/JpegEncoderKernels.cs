@@ -26,7 +26,7 @@ namespace SpawnDev.Codecs.Images.Jpeg;
 /// <summary>Slot indices of the encoder metadata block (host-written, read by the encode kernels).</summary>
 internal static class JpegEncMeta
 {
-    public const int Size = 128;
+    public const int Size = 1024;
     public const int Width = 0;
     public const int Height = 1;
     public const int NumComps = 2;
@@ -43,6 +43,47 @@ internal static class JpegEncMeta
     public const int Error = 13;
     public const int DstBase = 14;
     public const int BlocksPerMcu = 15;
+
+    // ---- optimized / progressive path (JpegProgressiveKernels) ----
+    /// <summary>Write position in the output file (device-side running offset).</summary>
+    public const int OutPos = 16;
+    /// <summary>Size of the output buffer the caller provided.</summary>
+    public const int OutBound = 17;
+    /// <summary>Output offset of the current scan's entropy-coded data.</summary>
+    public const int ScanDataStart = 18;
+    /// <summary>First slot of the scan table (<see cref="ScanStride"/> ints per scan, at most <see cref="MaxScans"/>).</summary>
+    public const int Scans = 256;
+    public const int ScanStride = 32;
+    public const int MaxScans = 16;
+    public const int SKind = 0;          // 0 sequential (optimized baseline), 1 DC first, 2 DC refine, 3 AC first, 4 AC refine
+    public const int SNs = 1;
+    public const int SComp = 2;          // 3 slots: frame component indices
+    public const int SSs = 5;
+    public const int SSe = 6;
+    public const int SAh = 7;
+    public const int SAl = 8;
+    public const int STotalMcus = 10;
+    public const int SSegCount = 11;
+    public const int SSlot = 12;         // per-segment scratch slot (multi-segment scans)
+    public const int SMcusX = 13;
+    public const int SSosOff = 14;
+    public const int SSosLen = 15;
+    public const int SDhtCount = 16;
+    public const int SDht = 17;          // 4 slots: Huffman table slot indices (0 DC0, 1 DC1, 2 AC0, 3 AC1) in DHT order
+    public const int SBlocksPerMcu = 21;
+    public const int SBand = 22;         // Se - Ss + 1
+
+    /// <summary>Ints per Huffman table in the optimized-table buffer.</summary>
+    public const int TabStride = 2048;
+    public const int TabCodes = 0;       // 256: code | length &lt;&lt; 16 per symbol
+    public const int TabBits = 256;      // 17: number of codes of each length 1..16
+    public const int TabCount = 273;     // number of symbols
+    public const int TabVals = 280;      // 256 symbols in code order
+    public const int TabFreq = 600;      // 257 working frequencies
+    public const int TabCodeSize = 900;  // 257
+    public const int TabOthers = 1200;   // 257
+    public const int TabBits32 = 1500;   // 34
+    public const int HistStride = 257;
 
     public const int Comp = 32;
     public const int CompStride = 16;

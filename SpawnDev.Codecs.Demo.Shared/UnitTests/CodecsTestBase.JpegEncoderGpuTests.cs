@@ -45,13 +45,13 @@ public abstract partial class CodecsTestBase
                 new JpegEncodeOptions { Quality = int.Parse(m.Groups["q"].Value), Subsampling = JpegSubsampling.Gray });
         m = Regex.Match(name, @"^enc_rst_n(?<n>\d+)_c(?<sub>444|422|420)_100x75$");
         if (m.Success)
-            return ("rst100x75", 100, 75, new JpegEncodeOptions
+            return ("100x75", 100, 75, new JpegEncodeOptions
             {
                 Quality = 85, Subsampling = SubsamplingOf(m.Groups["sub"].Value), RestartInterval = int.Parse(m.Groups["n"].Value),
             });
         m = Regex.Match(name, @"^enc_rst_n(?<n>\d+)_gray_100x75$");
         if (m.Success)
-            return ("rstgray100x75", 100, 75, new JpegEncodeOptions
+            return ("gray_100x75", 100, 75, new JpegEncodeOptions
             {
                 Quality = 85, Subsampling = JpegSubsampling.Gray, RestartInterval = int.Parse(m.Groups["n"].Value),
             });
@@ -60,6 +60,36 @@ public abstract partial class CodecsTestBase
             return ("orient24x16", 24, 16, new JpegEncodeOptions
             {
                 Quality = 90, Subsampling = JpegSubsampling.Yuv420, ExifOrientation = int.Parse(m.Groups["o"].Value),
+            });
+        m = Regex.Match(name, @"^enc_(?<mode>opt|prog)_c(?<sub>444|422|420)_q(?<q>\d+)_(?<w>\d+)x(?<h>\d+)$");
+        if (m.Success)
+            return ($"{m.Groups["w"].Value}x{m.Groups["h"].Value}", int.Parse(m.Groups["w"].Value), int.Parse(m.Groups["h"].Value),
+                new JpegEncodeOptions
+                {
+                    Quality = int.Parse(m.Groups["q"].Value), Subsampling = SubsamplingOf(m.Groups["sub"].Value),
+                    Progressive = m.Groups["mode"].Value == "prog", OptimizeHuffman = m.Groups["mode"].Value == "opt",
+                });
+        m = Regex.Match(name, @"^enc_(?<mode>opt|prog)_gray_q(?<q>\d+)_(?<w>\d+)x(?<h>\d+)$");
+        if (m.Success)
+            return ($"gray_{m.Groups["w"].Value}x{m.Groups["h"].Value}", int.Parse(m.Groups["w"].Value), int.Parse(m.Groups["h"].Value),
+                new JpegEncodeOptions
+                {
+                    Quality = int.Parse(m.Groups["q"].Value), Subsampling = JpegSubsampling.Gray,
+                    Progressive = m.Groups["mode"].Value == "prog", OptimizeHuffman = m.Groups["mode"].Value == "opt",
+                });
+        m = Regex.Match(name, @"^enc_(?<mode>opt|prog)_rst_n(?<n>\d+)_c(?<sub>444|422|420)_100x75$");
+        if (m.Success)
+            return ("100x75", 100, 75, new JpegEncodeOptions
+            {
+                Quality = 85, Subsampling = SubsamplingOf(m.Groups["sub"].Value), RestartInterval = int.Parse(m.Groups["n"].Value),
+                Progressive = m.Groups["mode"].Value == "prog", OptimizeHuffman = m.Groups["mode"].Value == "opt",
+            });
+        m = Regex.Match(name, @"^enc_(?<mode>opt|prog)_rst_n(?<n>\d+)_gray_100x75$");
+        if (m.Success)
+            return ("gray_100x75", 100, 75, new JpegEncodeOptions
+            {
+                Quality = 85, Subsampling = JpegSubsampling.Gray, RestartInterval = int.Parse(m.Groups["n"].Value),
+                Progressive = m.Groups["mode"].Value == "prog", OptimizeHuffman = m.Groups["mode"].Value == "opt",
             });
         throw new InvalidOperationException($"Unrecognised encoder fixture name {name}");
     }
@@ -129,7 +159,7 @@ public abstract partial class CodecsTestBase
                     failures.Add($"{name}: {ex.GetType().Name}: {ex.Message}");
                 }
             }
-            True(checkedCount > 40, $"only {checkedCount} fixtures were exercised");
+            True(checkedCount > 70, $"only {checkedCount} fixtures were exercised");
             True(failures.Count == 0,
                 $"{failures.Count} of {checkedCount + failures.Count} encoder fixtures differ from Pillow:\n" + string.Join("\n", failures));
         }
@@ -149,6 +179,8 @@ public abstract partial class CodecsTestBase
             var failures = new List<string>();
             var cases = new (string Name, JpegEncodeOptions Options)[]
             {
+                ("bigenc_prog_c420_q85", new JpegEncodeOptions { Quality = 85, Subsampling = JpegSubsampling.Yuv420, Progressive = true }),
+                ("bigenc_opt_c444_q90", new JpegEncodeOptions { Quality = 90, Subsampling = JpegSubsampling.Yuv444, OptimizeHuffman = true }),
                 ("bigenc_c420_q85", new JpegEncodeOptions { Quality = 85, Subsampling = JpegSubsampling.Yuv420 }),
                 ("bigenc_c444_q95", new JpegEncodeOptions { Quality = 95, Subsampling = JpegSubsampling.Yuv444 }),
                 ("bigenc_rst64_c420_q85", new JpegEncodeOptions { Quality = 85, Subsampling = JpegSubsampling.Yuv420, RestartInterval = 64 }),
@@ -298,7 +330,6 @@ public abstract partial class CodecsTestBase
             await Expect<ArgumentOutOfRangeException>("width 0", () => enc.EncodeAsync(rgba, 0, 16));
             await Expect<ArgumentOutOfRangeException>("exif 9", () => enc.EncodeAsync(rgba, 16, 16, new JpegEncodeOptions { ExifOrientation = 9 }));
             await Expect<ArgumentException>("short input", () => enc.EncodeAsync(new byte[10], 16, 16));
-            await Expect<NotSupportedException>("progressive", () => enc.EncodeAsync(rgba, 16, 16, new JpegEncodeOptions { Progressive = true }));
             using var tiny = acc.Allocate1D<byte>(10);
             using var dIn = acc.Allocate1D<byte>(rgba.Length);
             await Expect<ArgumentException>("output too small", () => enc.EncodeAsync(dIn.View, 16, 16, tiny.View));

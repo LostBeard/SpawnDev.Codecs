@@ -528,8 +528,6 @@ def main():
     # --- larger photographic-style picture -------------------------------------------------------------------------
     big = photo(160, 120, 100)
     put_fixture("photo_c420_160x120", pillow_save(big, "RGB", quality=85, subsampling=2))
-    put_fixture("photo_prog_c420_160x120", pillow_save(big, "RGB", quality=85, subsampling=2, progressive=True,
-                                                       optimize=True))
 
     # --- encoder fixtures: the SAME source pixels encoded by Pillow (libjpeg-turbo); the GPU encoder must produce
     #     the identical bytes. Sources are RGBA with a noisy alpha channel (alpha must be ignored). ---------------
@@ -552,14 +550,33 @@ def main():
         enc_source(f"gray_{w}x{h}", rgb)
         write_raw(f"enc_gray_q075_{w}x{h}", pillow_save(g, "L", quality=75))
     rgb = photo(100, 75, 300)
-    enc_source("rst100x75", rgb)
     for n in (1, 3, 7):
         write_raw(f"enc_rst_n{n}_c420_100x75", pillow_save(rgb, "RGB", quality=85, subsampling=2, restart_marker_blocks=n))
     write_raw("enc_rst_n5_c444_100x75", pillow_save(rgb, "RGB", quality=85, subsampling=0, restart_marker_blocks=5))
     write_raw("enc_rst_n2_c422_100x75", pillow_save(rgb, "RGB", quality=85, subsampling=1, restart_marker_blocks=2))
-    g = gray_photo(100, 75, 301)
-    enc_source("rstgray100x75", np.stack([g, g, g], axis=2))
+    g = gray_photo(100, 75, 310)         # same picture as the gray_100x75 encoder source
     write_raw("enc_rst_n4_gray_100x75", pillow_save(g, "L", quality=85, restart_marker_blocks=4))
+    # optimized-table and progressive encodes of the same sources (libjpeg two-pass: statistics, then output)
+    for w, h in ((1, 1), (7, 5), (17, 33), (100, 75)):
+        rgb_src = photo(w, h, 200 + w)
+        for sub, nm in ((0, "444"), (1, "422"), (2, "420")):
+            if (w, h) in ((1, 1), (7, 5)) and sub != 2:
+                continue
+            write_raw(f"enc_opt_c{nm}_q085_{w}x{h}", pillow_save(rgb_src, "RGB", quality=85, subsampling=sub, optimize=True))
+            write_raw(f"enc_prog_c{nm}_q085_{w}x{h}", pillow_save(rgb_src, "RGB", quality=85, subsampling=sub, progressive=True))
+    for w, h in ((17, 33), (100, 75), (1, 1)):
+        g2 = gray_photo(w, h, 210 + w)
+        write_raw(f"enc_opt_gray_q075_{w}x{h}", pillow_save(g2, "L", quality=75, optimize=True))
+        write_raw(f"enc_prog_gray_q075_{w}x{h}", pillow_save(g2, "L", quality=75, progressive=True))
+    rgb_src = photo(64, 48, 200 + 64)
+    for q in (1, 100):
+        write_raw(f"enc_prog_c420_q{q:03d}_64x48", pillow_save(rgb_src, "RGB", quality=q, subsampling=2, progressive=True))
+    rgb_r = photo(100, 75, 300)
+    write_raw("enc_prog_rst_n4_c420_100x75", pillow_save(rgb_r, "RGB", quality=85, subsampling=2, progressive=True, restart_marker_blocks=4))
+    write_raw("enc_prog_rst_n1_c444_100x75", pillow_save(rgb_r, "RGB", quality=85, subsampling=0, progressive=True, restart_marker_blocks=1))
+    write_raw("enc_opt_rst_n6_c422_100x75", pillow_save(rgb_r, "RGB", quality=85, subsampling=1, optimize=True, restart_marker_blocks=6))
+    g_r = gray_photo(100, 75, 310)
+    write_raw("enc_prog_rst_n3_gray_100x75", pillow_save(g_r, "L", quality=85, progressive=True, restart_marker_blocks=3))
     rgb = photo(24, 16, 302)
     enc_source("orient24x16", rgb)
     for o in (3, 6, 8):
@@ -579,13 +596,15 @@ def main():
             f.write(digest)
         print(f"{name}: {len(data)} bytes, sha256 {digest[:16]}")
 
-    put_big("big_c420_1024x768", pillow_save(bigrgb, "RGB", quality=80, subsampling=2))
-    put_big("big_prog_c444_1024x768", pillow_save(bigrgb, "RGB", quality=75, subsampling=0, progressive=True, optimize=True))
-    put_big("big_rst_c422_1024x768", pillow_save(bigrgb, "RGB", quality=80, subsampling=1, restart_marker_blocks=64))
+    put_big("big_c420_1024x768", pillow_save(bigrgb, "RGB", quality=60, subsampling=2))
+    put_big("big_prog_c444_1024x768", pillow_save(bigrgb, "RGB", quality=60, subsampling=0, progressive=True, optimize=True))
+    put_big("big_rst_c422_1024x768", pillow_save(bigrgb, "RGB", quality=60, subsampling=1, restart_marker_blocks=64))
     # The encoder gets the pixels Pillow decoded from big_c420 (our decoder reproduces them bit-exact) and must reproduce
     # Pillow's encoding of those pixels byte for byte (SHA-256 of the file).
-    dec_big = Image.open(io.BytesIO(pillow_save(bigrgb, "RGB", quality=80, subsampling=2))).convert("RGB")
-    for nm, kw in (("bigenc_c420_q85", dict(quality=85, subsampling=2)),
+    dec_big = Image.open(io.BytesIO(pillow_save(bigrgb, "RGB", quality=60, subsampling=2))).convert("RGB")
+    for nm, kw in (("bigenc_prog_c420_q85", dict(quality=85, subsampling=2, progressive=True)),
+                   ("bigenc_opt_c444_q90", dict(quality=90, subsampling=0, optimize=True)),
+                   ("bigenc_c420_q85", dict(quality=85, subsampling=2)),
                    ("bigenc_c444_q95", dict(quality=95, subsampling=0)),
                    ("bigenc_rst64_c420_q85", dict(quality=85, subsampling=2, restart_marker_blocks=64))):
         b = io.BytesIO()

@@ -47,8 +47,17 @@ public sealed class JpegEncodeOptions
     /// <summary>Chroma subsampling. Default <see cref="JpegSubsampling.Yuv420"/>.</summary>
     public JpegSubsampling Subsampling { get; init; } = JpegSubsampling.Yuv420;
 
-    /// <summary>Write a progressive file. Not implemented yet: must be false.</summary>
+    /// <summary>
+    /// Write a progressive file (libjpeg's default scan script: spectral selection and successive approximation, with
+    /// per-scan optimized Huffman tables). Needs atomics on the accelerator, so it does not run on the WebGL backend.
+    /// </summary>
     public bool Progressive { get; init; }
+
+    /// <summary>
+    /// Baseline only: compute optimal Huffman tables for the image (a statistics pass, like Pillow's optimize=True)
+    /// instead of the standard Annex K tables. Implied by <see cref="Progressive"/>. Needs atomics (no WebGL).
+    /// </summary>
+    public bool OptimizeHuffman { get; init; }
 
     /// <summary>MCUs between restart markers (0 = no restart markers). Independent segments are encoded by parallel GPU threads.</summary>
     public int RestartInterval { get; init; }
@@ -69,8 +78,16 @@ public sealed class JpegEncoderGpu : IDisposable
 
     private const int HeaderReserve = 1024;
 
+    /// <summary>Worst-case bytes per 8x8 block over ALL scans of an optimized / progressive file (incl. 0xFF stuffing).</summary>
+    internal const int OptimizedBytesPerBlock = 560;
+
     private readonly Accelerator _accelerator;
     private readonly JpegEncoderKernels _kernels;
+    private readonly JpegScanEncoderKernels _scanKernels;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _hist;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _tabs;
+    private readonly StageBuffer<byte> _bitbuf;
+    private readonly StageBuffer<byte> _sos;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _meta;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _consts;
     private readonly StageBuffer<byte> _planes;
@@ -86,6 +103,11 @@ public sealed class JpegEncoderGpu : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernels = new JpegEncoderKernels(accelerator);
+        _scanKernels = new JpegScanEncoderKernels(accelerator);
+        _hist = accelerator.Allocate1D<int>(4L * JpegEncMeta.HistStride);
+        _tabs = accelerator.Allocate1D<int>(4L * JpegEncMeta.TabStride);
+        _bitbuf = new StageBuffer<byte>(accelerator);
+        _sos = new StageBuffer<byte>(accelerator);
         _meta = accelerator.Allocate1D<int>(JpegEncMeta.Size);
         _consts = accelerator.Allocate1D<int>(JpegEncMeta.KSize);
         _planes = new StageBuffer<byte>(accelerator);
@@ -109,6 +131,25 @@ public sealed class JpegEncoderGpu : IDisposable
         public int[] BlockPrefix = new int[3];
         public int SlotSize;
         public byte[] Header = System.Array.Empty<byte>();
+        public bool Optimized, Progressive;
+        public List<ScanSpec> Scans = new();
+    }
+
+    /// <summary>One scan of an optimized / progressive file.</summary>
+    private sealed class ScanSpec
+    {
+        public int Kind;                 // 0 sequential, 1 DC first, 2 DC refine, 3 AC first, 4 AC refine
+        public int Ns;
+        public int[] Comps = new int[3];
+        public int Ss, Se, Ah, Al;
+        public long TotalMcus;
+        public int McusX, SegmentCount, BlocksPerMcu, Band;
+        public long PerSegmentMcus;
+        public int Slot;
+        public int[] Dht = new int[4];
+        public int DhtCount;
+        public byte[] Sos = System.Array.Empty<byte>();
+        public int SosOffset;
     }
 
     private static int CeilDiv(int a, int b) => (a + b - 1) / b;
@@ -123,8 +164,6 @@ public sealed class JpegEncoderGpu : IDisposable
             throw new ArgumentOutOfRangeException(nameof(options), "RestartInterval must be 0..65535.");
         if (options.ExifOrientation < 1 || options.ExifOrientation > 8)
             throw new ArgumentOutOfRangeException(nameof(options), "ExifOrientation must be 1..8.");
-        if (options.Progressive)
-            throw new NotSupportedException("Progressive JPEG encoding is not implemented; set Progressive = false.");
         if (!Enum.IsDefined(options.Subsampling))
             throw new ArgumentOutOfRangeException(nameof(options), "Unknown subsampling.");
         if ((long)width * height * 4 > int.MaxValue)
@@ -184,8 +223,133 @@ public sealed class JpegEncoderGpu : IDisposable
         if (slot * g.SegmentCount > int.MaxValue)
             throw new ArgumentOutOfRangeException(nameof(width), "Image is too large for the encoder buffers.");
         g.SlotSize = (int)slot;
+        g.Progressive = options.Progressive;
+        g.Optimized = options.Progressive || options.OptimizeHuffman;
+        if (g.Optimized) BuildScans(g, options);
         g.Header = BuildHeader(g, options);
         return g;
+    }
+
+    // ------------------------------------------------------------------
+    // Scan script (libjpeg jcparam.c jpeg_simple_progression) and per-scan headers
+    // ------------------------------------------------------------------
+
+    private static ScanSpec MakeScan(Geometry g, int[] comps, int ss, int se, int ah, int al, bool progressive)
+    {
+        var sc = new ScanSpec { Ns = comps.Length, Ss = ss, Se = se, Ah = ah, Al = al };
+        for (int i = 0; i < comps.Length; i++) sc.Comps[i] = comps[i];
+        if (!progressive) sc.Kind = 0;
+        else if (ss == 0) sc.Kind = ah == 0 ? 1 : 2;
+        else sc.Kind = ah == 0 ? 3 : 4;
+        sc.Band = se - ss + 1;
+        if (sc.Ns == 1)
+        {
+            sc.McusX = g.Wib[comps[0]];
+            sc.TotalMcus = (long)g.Wib[comps[0]] * g.Hib[comps[0]];
+            sc.BlocksPerMcu = 1;
+        }
+        else
+        {
+            sc.McusX = g.McusX;
+            sc.TotalMcus = (long)g.McusX * g.McusY;
+            sc.BlocksPerMcu = g.BlocksPerMcu;
+        }
+        sc.SegmentCount = g.RestartInterval > 0 ? (int)((sc.TotalMcus + g.RestartInterval - 1) / g.RestartInterval) : 1;
+        sc.PerSegmentMcus = g.RestartInterval > 0 ? Math.Min(g.RestartInterval, sc.TotalMcus) : sc.TotalMcus;
+        long slot = sc.PerSegmentMcus * sc.BlocksPerMcu * (sc.Band * 7 + 48) + 16;
+        if (slot * sc.SegmentCount > int.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(g), "Image is too large for the encoder buffers.");
+        sc.Slot = (int)slot;
+        // DHT segments written before the scan, in libjpeg's order (slots: 0 DC0, 1 DC1, 2 AC0, 3 AC1).
+        var dht = new List<int>();
+        void AddDht(int t) { if (!dht.Contains(t)) dht.Add(t); }
+        if (sc.Kind == 0)
+        {
+            foreach (int c in comps) { AddDht(c == 0 ? 0 : 1); AddDht(c == 0 ? 2 : 3); }
+        }
+        else if (sc.Kind == 1)
+        {
+            foreach (int c in comps) AddDht(c == 0 ? 0 : 1);
+        }
+        else if (sc.Kind == 3 || sc.Kind == 4)
+        {
+            AddDht(comps[0] == 0 ? 2 : 3);
+        }
+        sc.DhtCount = dht.Count;
+        for (int i = 0; i < dht.Count; i++) sc.Dht[i] = dht[i];
+        return sc;
+    }
+
+    private static void BuildScans(Geometry g, JpegEncodeOptions options)
+    {
+        bool prog = options.Progressive;
+        var all = new int[g.NumComps];
+        for (int c = 0; c < g.NumComps; c++) all[c] = c;
+        if (!prog)
+        {
+            g.Scans.Add(MakeScan(g, all, 0, 63, 0, 0, false));
+        }
+        else if (g.NumComps == 3)
+        {
+            // YCbCr: luminance AC first and refined sooner than chroma.
+            g.Scans.Add(MakeScan(g, all, 0, 0, 0, 1, true));
+            g.Scans.Add(MakeScan(g, new[] { 0 }, 1, 5, 0, 2, true));
+            g.Scans.Add(MakeScan(g, new[] { 2 }, 1, 63, 0, 1, true));
+            g.Scans.Add(MakeScan(g, new[] { 1 }, 1, 63, 0, 1, true));
+            g.Scans.Add(MakeScan(g, new[] { 0 }, 6, 63, 0, 2, true));
+            g.Scans.Add(MakeScan(g, new[] { 0 }, 1, 63, 2, 1, true));
+            g.Scans.Add(MakeScan(g, all, 0, 0, 1, 0, true));
+            g.Scans.Add(MakeScan(g, new[] { 2 }, 1, 63, 1, 0, true));
+            g.Scans.Add(MakeScan(g, new[] { 1 }, 1, 63, 1, 0, true));
+            g.Scans.Add(MakeScan(g, new[] { 0 }, 1, 63, 1, 0, true));
+        }
+        else
+        {
+            // Gray: libjpeg's all-purpose script for one component.
+            g.Scans.Add(MakeScan(g, all, 0, 0, 0, 1, true));
+            g.Scans.Add(MakeScan(g, all, 1, 5, 0, 2, true));
+            g.Scans.Add(MakeScan(g, all, 6, 63, 0, 2, true));
+            g.Scans.Add(MakeScan(g, all, 1, 63, 2, 1, true));
+            g.Scans.Add(MakeScan(g, all, 0, 0, 1, 0, true));
+            g.Scans.Add(MakeScan(g, all, 1, 63, 1, 0, true));
+        }
+        // SOS blobs: (first scan: DRI) + SOS, with libjpeg's convention of 0 in unused table fields of progressive scans.
+        int offset = 0;
+        for (int s = 0; s < g.Scans.Count; s++)
+        {
+            var sc = g.Scans[s];
+            var o = new List<byte>();
+            if (s == 0 && g.RestartInterval > 0)
+                Segment(o, 0xDD, new byte[] { (byte)(g.RestartInterval >> 8), (byte)g.RestartInterval });
+            var p = new List<byte> { (byte)sc.Ns };
+            for (int i = 0; i < sc.Ns; i++)
+            {
+                int c = sc.Comps[i];
+                int td = c == 0 ? 0 : 1;
+                int ta = c == 0 ? 0 : 1;
+                if (prog)
+                {
+                    if (sc.Ss == 0)
+                    {
+                        ta = 0;
+                        if (sc.Ah != 0) td = 0;
+                    }
+                    else
+                    {
+                        td = 0;
+                    }
+                }
+                p.Add((byte)(c + 1));
+                p.Add((byte)((td << 4) | ta));
+            }
+            p.Add((byte)sc.Ss);
+            p.Add((byte)sc.Se);
+            p.Add((byte)((sc.Ah << 4) | sc.Al));
+            Segment(o, 0xDA, p.ToArray());
+            sc.Sos = o.ToArray();
+            sc.SosOffset = offset;
+            offset += sc.Sos.Length;
+        }
     }
 
     /// <summary>
@@ -201,6 +365,12 @@ public sealed class JpegEncoderGpu : IDisposable
         long total = (long)g.SegmentCount * g.SlotSize + g.Header.Length + 2L * g.SegmentCount + 2;
         if (g.SegmentCount == 1)
             total = g.Header.Length + g.SlotSize + 2;
+        if (g.Optimized)
+        {
+            // Headers of every scan (DHT tables up to 4 x 277 bytes + SOS) + a per-block bound that covers all scans together.
+            // The MCU grid (dummy blocks included) is what the coder walks, plus one MCU of slack for its capacity guard.
+            total = g.Header.Length + g.Scans.Count * 1300L + (g.TotalMcus + 1) * g.BlocksPerMcu * OptimizedBytesPerBlock + 4096;
+        }
         if (total > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(width), "Image is too large.");
         return (int)total;
     }
@@ -269,7 +439,8 @@ public sealed class JpegEncoderGpu : IDisposable
             sof.Add((byte)((g.H[c] << 4) | g.V[c]));
             sof.Add((byte)(c == 0 ? 0 : 1));
         }
-        Segment(o, 0xC0, sof.ToArray());
+        Segment(o, g.Progressive ? 0xC2 : 0xC0, sof.ToArray());
+        if (g.Optimized) return o.ToArray();                  // tables, DRI and SOS are written per scan on the accelerator
         AddHuffman(o, 0x00, JpegTables.DcLumBits, JpegTables.DcLumVals);
         AddHuffman(o, 0x10, JpegTables.AcLumBits, JpegTables.AcLumVals);
         if (g.NumComps > 1)
@@ -337,9 +508,34 @@ public sealed class JpegEncoderGpu : IDisposable
         return c;
     }
 
-    private static int[] BuildMeta(Geometry g)
+    private static int[] BuildMeta(Geometry g, long outputLength)
     {
         var m = new int[JpegEncMeta.Size];
+        m[JpegEncMeta.OutPos] = g.Header.Length;
+        m[JpegEncMeta.OutBound] = (int)Math.Min(outputLength, int.MaxValue);
+        m[JpegEncMeta.ScanDataStart] = g.Header.Length;
+        for (int s = 0; s < g.Scans.Count; s++)
+        {
+            var sc = g.Scans[s];
+            int b = JpegEncMeta.Scans + s * JpegEncMeta.ScanStride;
+            m[b + JpegEncMeta.SKind] = sc.Kind;
+            m[b + JpegEncMeta.SNs] = sc.Ns;
+            for (int i = 0; i < sc.Ns; i++) m[b + JpegEncMeta.SComp + i] = sc.Comps[i];
+            m[b + JpegEncMeta.SSs] = sc.Ss;
+            m[b + JpegEncMeta.SSe] = sc.Se;
+            m[b + JpegEncMeta.SAh] = sc.Ah;
+            m[b + JpegEncMeta.SAl] = sc.Al;
+            m[b + JpegEncMeta.STotalMcus] = (int)sc.TotalMcus;
+            m[b + JpegEncMeta.SSegCount] = sc.SegmentCount;
+            m[b + JpegEncMeta.SSlot] = sc.Slot;
+            m[b + JpegEncMeta.SMcusX] = sc.McusX;
+            m[b + JpegEncMeta.SSosOff] = sc.SosOffset;
+            m[b + JpegEncMeta.SSosLen] = sc.Sos.Length;
+            m[b + JpegEncMeta.SDhtCount] = sc.DhtCount;
+            for (int i = 0; i < 4; i++) m[b + JpegEncMeta.SDht + i] = sc.Dht[i];
+            m[b + JpegEncMeta.SBlocksPerMcu] = sc.BlocksPerMcu;
+            m[b + JpegEncMeta.SBand] = sc.Band;
+        }
         m[JpegEncMeta.Width] = g.Width;
         m[JpegEncMeta.Height] = g.Height;
         m[JpegEncMeta.NumComps] = g.NumComps;
@@ -405,14 +601,17 @@ public sealed class JpegEncoderGpu : IDisposable
         _planes.Ensure(g.TotalSamples);
         _coefs.Ensure(g.TotalCoefs);
         _state.Ensure((long)g.SegmentCount * JpegEncMeta.StateStride);
-        if (g.SegmentCount > 1) _scratch.Ensure((long)g.SegmentCount * g.SlotSize);
+        if (g.SegmentCount > 1 && !g.Optimized) _scratch.Ensure((long)g.SegmentCount * g.SlotSize);
 
-        _meta.View.CopyFromCPU(BuildMeta(g));
+        _meta.View.CopyFromCPU(BuildMeta(g, output.Length));
         _consts.View.CopyFromCPU(BuildConstants(options));
         DeviceTransfer.Upload(output, g.Header);
 
         _kernels.Prep(rgba, _planes.View, _meta.View, (int)g.TotalSamples);
         _kernels.FdctQuant(_planes.View, _coefs.View, _meta.View, _consts.View, (int)g.TotalBlocks);
+
+        if (g.Optimized)
+            return await EncodeScansAsync(g, output);
 
         long perSegment = g.RestartInterval > 0 ? Math.Min(g.RestartInterval, g.TotalMcus) : g.TotalMcus;
         int budget = Math.Max(1, BlocksPerDispatch / g.BlocksPerMcu);
@@ -428,6 +627,53 @@ public sealed class JpegEncoderGpu : IDisposable
         var status = await _meta.View.SubView(JpegEncMeta.TotalLen, 2).CopyToHostAsync();     // TotalLen, Error
         if (status[1] != 0)
             throw new InvalidOperationException("JPEG encoder output slot overflow (internal error: GetMaxEncodedSize bound violated).");
+        return status[0];
+    }
+
+    /// <summary>Optimized-table / progressive pipeline: per scan statistics pass, table generation, header, output pass.</summary>
+    private async Task<int> EncodeScansAsync(Geometry g, ArrayView1D<byte, Stride1D.Dense> output)
+    {
+        int maxSeg = 1;
+        long maxScratch = 0;
+        int sosBytes = 0;
+        foreach (var sc in g.Scans)
+        {
+            maxSeg = Math.Max(maxSeg, sc.SegmentCount);
+            if (sc.SegmentCount > 1) maxScratch = Math.Max(maxScratch, (long)sc.SegmentCount * sc.Slot);
+            sosBytes += sc.Sos.Length;
+        }
+        _state.Ensure((long)maxSeg * JpegEncMeta.StateStride);
+        _bitbuf.Ensure((long)maxSeg * 1024);
+        if (maxScratch > 0) _scratch.Ensure(maxScratch);
+        var sosBlob = new byte[sosBytes];
+        foreach (var sc in g.Scans) System.Array.Copy(sc.Sos, 0, sosBlob, sc.SosOffset, sc.Sos.Length);
+        DeviceTransfer.Upload(_sos.Ensure(sosBytes), sosBlob);
+
+        for (int s = 0; s < g.Scans.Count; s++)
+        {
+            var sc = g.Scans[s];
+            int budget = Math.Max(1, BlocksPerDispatch / Math.Max(1, sc.BlocksPerMcu));
+            int rounds = Math.Max(1, (int)((sc.PerSegmentMcus + budget - 1) / budget));
+            _scanKernels.ClearHist(_hist.View);
+            for (int r = 0; r < rounds; r++)
+                _scanKernels.Scan(_coefs.View, output, _meta.View, _tabs.View, _hist.View, _state.View, _bitbuf.View,
+                    sc.SegmentCount, s, true, budget, r);
+            _scanKernels.GenTables(_hist.View, _tabs.View);
+            _scanKernels.Place(output, _sos.View, _meta.View, _tabs.View, s);
+            var dst = sc.SegmentCount == 1 ? output : _scratch.View;
+            for (int r = 0; r < rounds; r++)
+                _scanKernels.Scan(_coefs.View, dst, _meta.View, _tabs.View, _hist.View, _state.View, _bitbuf.View,
+                    sc.SegmentCount, s, false, budget, r);
+            _scanKernels.Finish(_meta.View, _state.View, s);
+            if (sc.SegmentCount > 1)
+                _kernels.Assemble(_scratch.View, output, _meta.View, _state.View, (long)sc.SegmentCount * sc.Slot);
+        }
+        _scanKernels.Eoi(output, _meta.View);
+        await _accelerator.SynchronizeAsync();
+
+        var status = await _meta.View.SubView(JpegEncMeta.TotalLen, 2).CopyToHostAsync();     // TotalLen, Error
+        if (status[1] != 0)
+            throw new InvalidOperationException($"JPEG encoder internal error {status[1]} (output slot overflow or invalid coefficient).");
         return status[0];
     }
 
@@ -483,6 +729,11 @@ public sealed class JpegEncoderGpu : IDisposable
     public void Dispose()
     {
         _kernels.Dispose();
+        _scanKernels.Dispose();
+        _hist.Dispose();
+        _tabs.Dispose();
+        _bitbuf.Dispose();
+        _sos.Dispose();
         _meta.Dispose();
         _consts.Dispose();
         _planes.Dispose();
