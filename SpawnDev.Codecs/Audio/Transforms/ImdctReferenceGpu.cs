@@ -27,13 +27,23 @@ public static class ImdctReferenceGpu
     public static float Sample(
         ArrayView<float> frequency, long inBase, int n, int idx)
     {
-        float factor = (float)(Math.PI / n);
-        float halfN = 0.5f * n;
+        // theta = pi / (4N) * (2 idx + 1 + N) * (2k + 1). The phase is kept as the exact integer
+        // p = (2 idx + 1 + N)(2k + 1) mod 8N (one period), so the cosine's argument stays in [-pi, pi]:
+        // a float theta grows to ~2.5 pi N (~8000 rad for N = 1024), where one float ulp is ~1e-3 rad
+        // and every term of the sum carries that phase error (measured 4.5e-5 vs libvorbis on 2048
+        // blocks, against 3.6e-7 for the double CPU reference), and fast GPU cosines lose more there.
+        int period = 8 * n;
+        int a = (2 * idx + 1 + n) % period;
+        int stride = (2 * a) % period;
+        float factor = (float)(Math.PI / (4.0 * n));
+        int p = a;
         float acc = 0;
         for (int k = 0; k < n; k++)
         {
-            float theta = factor * (idx + 0.5f + halfN) * (k + 0.5f);
-            acc += frequency[inBase + k] * XMath.Cos(theta);
+            int q = p >= 4 * n ? p - period : p;
+            acc += frequency[inBase + k] * XMath.Cos(q * factor);
+            p += stride;
+            if (p >= period) p -= period;
         }
         return acc;
     }
