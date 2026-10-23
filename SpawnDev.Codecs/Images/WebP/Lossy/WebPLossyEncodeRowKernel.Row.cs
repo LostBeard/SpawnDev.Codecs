@@ -12,13 +12,19 @@ namespace SpawnDev.Codecs.Images.WebP.Lossy;
 
 internal static partial class WebPLossyEncodeRowKernel
 {
+    /// <summary>Macroblocks per launch of the RD loop (one thread; a macroblock is ~1.5 ms of mode decisions on a desktop GPU).</summary>
+    public const int MbsPerLaunch = 4;
+
     /// <summary>
-    /// One macroblock row. Buffers: yuv (Y | U | V, tightly packed), mbRecs, work (preds | yTop | byte scratch), state
-    /// (nz | topDerr | coeffs | stats | levelCost | int scratch), meta, constant tables, token buffer.
+    /// Macroblocks <paramref name="xStart"/> .. <paramref name="xEnd"/> - 1 of macroblock row <paramref name="row"/> (the RD
+    /// loop is serial, so the host launches a row in chunks of <see cref="MbsPerLaunch"/>; the iterator state between
+    /// chunks lives in the device buffers and meta[RowOutBuf / RowOut2Buf]). Buffers: yuv (Y | U | V, tightly packed),
+    /// mbRecs, work (preds | yTop | byte scratch), state (nz | topDerr | coeffs | stats | levelCost | int scratch), meta,
+    /// constant tables, token buffer.
     /// </summary>
-    public static void Kernel(
+    public static void EncodeRowKernel(
         Index1D _, ArrayView<byte> yuv, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state,
-        ArrayView<int> meta, ArrayView<int> t, ArrayView<int> tokens, int row)
+        ArrayView<int> meta, ArrayView<int> t, ArrayView<int> tokens, int row, int xStart, int xEnd)
     {
         if (meta[M.Error] != 0) return;
         int mbW = meta[M.MbW], mbH = meta[M.MbH];
@@ -37,30 +43,36 @@ internal static partial class WebPLossyEncodeRowKernel
         int uOff = meta[M.YuvUOff], vOff = meta[M.YuvVOff];
         bool errDiff = meta[M.ErrorDiffusion] != 0;
 
-        if (row == 0)
+        if (xStart == 0)
         {
-            // InitTop
-            for (int i = 0; i < 2 * mbW * 16; ++i) yTop[i] = 127;
-            for (int i = 0; i < mbW + 1; ++i) nzRow[i] = 0;
-            for (int i = 0; i < mbW * 4; ++i) topDerr[i] = 0;
+            if (row == 0)
+            {
+                // InitTop
+                for (int i = 0; i < 2 * mbW * 16; ++i) yTop[i] = 127;
+                for (int i = 0; i < mbW + 1; ++i) nzRow[i] = 0;
+                for (int i = 0; i < mbW * 4; ++i) topDerr[i] = 0;
+            }
+            // VP8IteratorSetRow -> InitLeft
+            byte corner = (byte)(row > 0 ? 129 : 127);
+            sb[BLeft + YLeft - 1] = corner; sb[BLeft + ULeft - 1] = corner; sb[BLeft + VLeft - 1] = corner;
+            for (int i = 0; i < 16; ++i) sb[BLeft + YLeft + i] = 129;
+            for (int i = 0; i < 8; ++i) { sb[BLeft + ULeft + i] = 129; sb[BLeft + VLeft + i] = 129; }
+            si[ILeftNz + 8] = 0;
+            for (int i = 0; i < 4; ++i) si[ILeftDerr + i] = 0;
+            meta[M.RowOutBuf] = BOutA;
+            meta[M.RowOut2Buf] = BOutB;
         }
-        // VP8IteratorSetRow -> InitLeft
-        byte corner = (byte)(row > 0 ? 129 : 127);
-        sb[BLeft + YLeft - 1] = corner; sb[BLeft + ULeft - 1] = corner; sb[BLeft + VLeft - 1] = corner;
-        for (int i = 0; i < 16; ++i) sb[BLeft + YLeft + i] = 129;
-        for (int i = 0; i < 8; ++i) { sb[BLeft + ULeft + i] = 129; sb[BLeft + VLeft + i] = 129; }
-        si[ILeftNz + 8] = 0;
-        for (int i = 0; i < 4; ++i) si[ILeftDerr + i] = 0;
 
         var c = new RowCtx
         {
             Y = row, MbW = mbW, MbH = mbH, Width = width, Height = height, PredsW = predsW,
-            OutBuf = BOutA, Out2Buf = BOutB, ErrDiff = errDiff,
+            OutBuf = meta[M.RowOutBuf], Out2Buf = meta[M.RowOut2Buf], ErrDiff = errDiff,
         };
         int maxCount = meta[M.MaxCount];
         long sizeP0 = ((long)meta[M.SizeP0Hi] << 32) | (uint)meta[M.SizeP0Lo];
+        int xLast = xEnd < mbW ? xEnd : mbW;
 
-        for (int x = 0; x < mbW; ++x)
+        for (int x = xStart; x < xLast; ++x)
         {
             c.X = x;
             c.PredsIdx = 1 + predsW + row * 4 * predsW + x * 4;
@@ -145,6 +157,8 @@ internal static partial class WebPLossyEncodeRowKernel
         }
         meta[M.SizeP0Lo] = (int)sizeP0;
         meta[M.SizeP0Hi] = (int)(sizeP0 >> 32);
+        meta[M.RowOutBuf] = c.OutBuf;
+        meta[M.RowOut2Buf] = c.Out2Buf;
     }
 
     // ================================================================== tokens (token_enc.c) + statistics

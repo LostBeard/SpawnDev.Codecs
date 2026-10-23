@@ -14,7 +14,7 @@ namespace SpawnDev.Codecs.Video.Vp8;
 
 internal static class Vp8FullHeaderKernel
 {
-    public static void Kernel(
+    public static void HeaderKernel(
         Index1D _,
         ArrayView<byte> enc, ArrayView<int> meta, ArrayView<int> bdStates,
         ArrayView<byte> coefProbs, ArrayView<byte> defaultProbs, ArrayView<byte> updateProbs,

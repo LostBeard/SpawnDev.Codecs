@@ -39,7 +39,7 @@ public sealed class Vp8FullKeyframeDecoderGpu : IDisposable
         ArrayView<int>, ArrayView<int>> _header;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, int> _modes;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<short>,
-        ArrayView<byte>, ArrayView<byte>, int> _tokens;
+        ArrayView<byte>, ArrayView<byte>, int, int, int> _tokens;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<short>, ArrayView<int>,
         int, int> _recon;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>,
@@ -62,15 +62,15 @@ public sealed class Vp8FullKeyframeDecoderGpu : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _header = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>,
-            ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(Vp8FullHeaderKernel.Kernel);
+            ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(Vp8FullHeaderKernel.HeaderKernel);
         _modes = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>,
-            ArrayView<byte>, int>(Vp8FullModeKernel.Kernel);
+            ArrayView<byte>, int>(Vp8FullModeKernel.ModeKernel);
         _tokens = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>,
-            ArrayView<byte>, ArrayView<short>, ArrayView<byte>, ArrayView<byte>, int>(Vp8FullTokenKernel.Kernel);
+            ArrayView<byte>, ArrayView<short>, ArrayView<byte>, ArrayView<byte>, int, int, int>(Vp8FullTokenKernel.TokenKernel);
         _recon = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
-            ArrayView<short>, ArrayView<int>, int, int>(Vp8FullReconKernel.Kernel);
+            ArrayView<short>, ArrayView<int>, int, int>(Vp8FullReconKernel.ReconKernel);
         _loopFilter = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
-            ArrayView<int>, int, int>(Vp8FullLoopFilterKernel.Kernel);
+            ArrayView<int>, int, int>(Vp8FullLoopFilterKernel.LoopFilterKernel);
         _crop = new Vp8StridedPlanePackKernel(accelerator);
         _stageIn = new StageBuffer<byte>(accelerator);
 
@@ -183,7 +183,7 @@ public sealed class Vp8FullKeyframeDecoderGpu : IDisposable
         using var dProbs = _accelerator.Allocate1D<byte>(4 * 264);
         using var dRecs = _accelerator.Allocate1D<byte>(mbCount * Vp8MbRecord.Size);
         using var dCoeffs = _accelerator.Allocate1D<short>(mbCount * Vp8FullTokenKernel.CoeffsPerMb);
-        using var dAbove = _accelerator.Allocate1D<byte>((long)mbCols * 9);
+        using var dAbove = _accelerator.Allocate1D<byte>((long)mbCols * 9 + 9);   // above context + the left context of the token kernel
         dMeta.View.CopyFromCPU(hostMeta);
         dBd.View.MemSetToZero();
         dRecs.View.MemSetToZero();
@@ -219,7 +219,8 @@ public sealed class Vp8FullKeyframeDecoderGpu : IDisposable
             for (int row = 0; row < mbRows; row++)
                 _modes(1, enc, dMeta.View, dBd.View, dRecs.View, _tables.View, row);
             for (int row = 0; row < mbRows; row++)
-                _tokens(1, enc, dMeta.View, dBd.View, dRecs.View, dProbs.View, dCoeffs.View, dAbove.View, _tables.View, row);
+                for (int col = 0; col < mbCols; col += Vp8FullTokenKernel.MbsPerLaunch)
+                    _tokens(1, enc, dMeta.View, dBd.View, dRecs.View, dProbs.View, dCoeffs.View, dAbove.View, _tables.View, row, col, col + Vp8FullTokenKernel.MbsPerLaunch);
 
             int diagonals = mbCols + Vp8FullMeta.WaveRowWeight * (mbRows - 1);
             for (int d = 0; d < diagonals; d++)

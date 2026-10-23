@@ -20,7 +20,7 @@ namespace SpawnDev.Codecs.Video.Vp8;
 
 internal static class Vp8FullLoopFilterKernel
 {
-    public static void Kernel(
+    public static void LoopFilterKernel(
         Index1D idx,
         ArrayView<byte> yP, ArrayView<byte> uP, ArrayView<byte> vP,
         ArrayView<byte> recs, ArrayView<int> meta,

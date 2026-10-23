@@ -91,7 +91,7 @@ internal static class WebPLossyAnalysisKernel
     /// Analyse macroblock `index` (raster order). Writes mbRecs[mb * MbStride + MbAlpha / MbUVAlphaRaw / MbUVMode / MbType]
     /// and the 4x4 prediction map entries (I16 mode) at preds[predsBase + 4 * (y * predsW + x) ...].
     /// </summary>
-    public static void Kernel(
+    public static void AnalysisKernel(
         Index1D index, ArrayView<byte> yP, ArrayView<byte> uP, ArrayView<byte> vP, ArrayView<byte> aP,
         ArrayView<int> mbRecs, ArrayView<byte> preds, ArrayView<int> meta)
     {

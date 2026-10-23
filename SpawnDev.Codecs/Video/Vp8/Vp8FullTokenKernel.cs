@@ -20,21 +20,32 @@ internal static class Vp8FullTokenKernel
 {
     public const int CoeffsPerMb = 25 * 16;
 
-    public static void Kernel(
+    /// <summary>Macroblocks per launch of the token decode (one thread; ~0.2 ms per busy macroblock on a desktop GPU).</summary>
+    public const int MbsPerLaunch = 32;
+
+    /// <summary>
+    /// Macroblocks <paramref name="colStart"/> .. <paramref name="colEnd"/> - 1 of macroblock row <paramref name="mbRow"/>. The
+    /// host launches a row in chunks of <see cref="MbsPerLaunch"/> so no launch grows with the picture width; the left
+    /// non-zero context carries over in <c>aboveCtx[mbCols * 9 ..]</c> (9 bytes after the above context), the bool decoder
+    /// state in its slot.
+    /// </summary>
+    public static void TokenKernel(
         Index1D _,
         ArrayView<byte> enc, ArrayView<int> meta, ArrayView<int> bdStates,
         ArrayView<byte> recs, ArrayView<byte> probs, ArrayView<short> coeffs,
-        ArrayView<byte> aboveCtx, ArrayView<byte> tables, int mbRow)
+        ArrayView<byte> aboveCtx, ArrayView<byte> tables, int mbRow, int colStart, int colEnd)
     {
         if (meta[Vp8FullMeta.Error] != 0) return;
         int mbCols = meta[Vp8FullMeta.MbCols];
         int nparts = meta[Vp8FullMeta.NumParts];
         int slot = 1 + (mbRow & (nparts - 1));
         var bd = Vp8BdOps.Load(bdStates, slot);
+        long leftBase = (long)mbCols * 9;
         var left = LocalMemory.Allocate<int>(9);
-        for (int k = 0; k < 9; k++) left[k] = 0;
+        for (int k = 0; k < 9; k++) left[k] = colStart == 0 ? 0 : aboveCtx[leftBase + k];
+        int colLast = colEnd < mbCols ? colEnd : mbCols;
 
-        for (int mbCol = 0; mbCol < mbCols; mbCol++)
+        for (int mbCol = colStart; mbCol < colLast; mbCol++)
         {
             long mb = (long)mbRow * mbCols + mbCol;
             long rec = mb * Vp8MbRecord.Size;
@@ -94,6 +105,7 @@ internal static class Vp8FullTokenKernel
             }
         }
 
+        for (int k = 0; k < 9; k++) aboveCtx[leftBase + k] = (byte)left[k];
         Vp8BdOps.Save(bdStates, slot, bd);
         if (bd.Err != 0) meta[Vp8FullMeta.Error] = (int)Vp8DecodeError.TokenPartitionTruncated;
     }

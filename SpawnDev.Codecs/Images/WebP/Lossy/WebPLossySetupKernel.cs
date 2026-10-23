@@ -63,7 +63,7 @@ internal static class WebPLossySetupKernel
         for (int f = 0; f < M.SegStride; ++f) meta[M.Seg + dst * M.SegStride + f] = meta[M.Seg + src * M.SegStride + f];
     }
 
-    public static void Kernel(
+    public static void SetupKernel(
         Index1D _, ArrayView<int> mbRecs, ArrayView<int> meta, ArrayView<int> t, ArrayView<int> qTable,
         ArrayView<int> coeffs, ArrayView<int> stats, ArrayView<int> levelCost)
     {

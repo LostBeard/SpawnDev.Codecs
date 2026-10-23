@@ -1,6 +1,6 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
-// Lossy WebP encoder, kernel 4 (ONE thread): the end of libwebp's VP8EncTokenLoop and VP8EncWrite -
+// Lossy WebP encoder, kernel 4 (one thread, a chain of bounded launches - see below): the end of libwebp's VP8EncTokenLoop and VP8EncWrite -
 // FinalizeTokenProbas, VP8EmitTokens into the token partition, VP8BitWriterFinish, VP8AdjustFilterStrength (no autofilter),
 // GeneratePartition0 (frame header bits, segment / filter headers, quantizers, token probabilities, VP8CodeIntraModes) and
 // the RIFF / VP8 chunk / frame tag assembly into the caller's output. The bool encoder is libwebp's VP8BitWriter
@@ -135,35 +135,80 @@ internal static class WebPLossyFinishKernel
         return mode;
     }
 
-    /// <summary>
-    /// Buffers: mbRecs, work (preds at 0), state (coeffs / stats via meta offsets), meta, tables, tokens, scratch (partition 0
-    /// at 0, token partition after it), output (the WebP file).
-    /// </summary>
-    public static void Kernel(
+    /// <summary>Tokens per launch of the token partition (one thread; a token is one bool-coder step).</summary>
+    public const int TokensPerLaunch = 65536;
+    /// <summary>Macroblocks per launch of VP8CodeIntraModes in partition 0.</summary>
+    public const int MbsPerLaunch = 2048;
+
+    private static void SaveWriter(ArrayView<int> meta, int at, ref WebPBoolWriter w)
+    {
+        meta[at + 0] = w.Range; meta[at + 1] = w.Value; meta[at + 2] = w.Run; meta[at + 3] = w.NbBits;
+        meta[at + 4] = w.Pos; meta[at + 5] = w.Base; meta[at + 6] = w.Cap; meta[at + 7] = w.Overflow;
+    }
+
+    private static WebPBoolWriter LoadWriter(ArrayView<int> meta, int at) => new WebPBoolWriter
+    {
+        Range = meta[at + 0], Value = meta[at + 1], Run = meta[at + 2], NbBits = meta[at + 3],
+        Pos = meta[at + 4], Base = meta[at + 5], Cap = meta[at + 6], Overflow = meta[at + 7],
+    };
+
+    // The end of VP8EncTokenLoop and VP8EncWrite runs as a chain of launches (each one thread, each bounded):
+    //   FinishProbasKernel (FinalizeTokenProbas, the token writer) -> FinishTokensKernel x ceil(tokens / TokensPerLaunch)
+    //   -> FinishHeaderKernel (end of the token partition, VP8AdjustFilterStrength, partition 0 up to the intra modes)
+    //   -> FinishModesKernel x ceil(macroblocks / MbsPerLaunch) -> FinishEndKernel (end of partition 0, sizes).
+    // The two bool writers and the cursors live in meta[Step ..] between launches. All buffers are the same for every
+    // launch: mbRecs, work (preds at 0), state (coeffs / stats via meta offsets), meta, tables, tokens, scratch (partition 0
+    // at 0, token partition after it).
+
+    /// <summary>FinalizeTokenProbas and the token partition writer.</summary>
+    public static void FinishProbasKernel(
         Index1D _, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state, ArrayView<int> meta,
         ArrayView<int> t, ArrayView<int> tokens, ArrayView<byte> scratch)
     {
         if (meta[M.Error] != 0) return;
-        int mbW = meta[M.MbW], mbH = meta[M.MbH];
-        int predsW = 4 * mbW + 1;
         var coeffs = state.SubView(meta[M.StCoeffsOff], WebPLossySetupKernel.ProbaCount);
         var stats = state.SubView(meta[M.StStatsOff], WebPLossySetupKernel.ProbaCount);
-        int p0Cap = meta[M.Partition0Capacity];
-        int t1Cap = meta[M.Token1Capacity];
-
-        // ---- FinalizeTokenProbas + VP8EmitTokens(parts[0]) + VP8BitWriterFinish
         WebPLossyEncodeRowKernel.FinalizeTokenProbas(coeffs, stats, t, meta);
         var tw = new WebPBoolWriter();
-        tw.Init(p0Cap, t1Cap);
+        tw.Init(meta[M.Partition0Capacity], meta[M.Token1Capacity]);
+        SaveWriter(meta, M.TokWriter, ref tw);
+        meta[M.TokNext] = 0;
+    }
+
+    /// <summary>VP8EmitTokens(parts[0]): the next <see cref="TokensPerLaunch"/> tokens.</summary>
+    public static void FinishTokensKernel(
+        Index1D _, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state, ArrayView<int> meta,
+        ArrayView<int> t, ArrayView<int> tokens, ArrayView<byte> scratch)
+    {
+        if (meta[M.Error] != 0) return;
+        int start = meta[M.TokNext];
         int tokenCount = meta[M.TokenCount];
-        for (int i = 0; i < tokenCount; ++i)
+        if (start >= tokenCount) return;
+        var coeffs = state.SubView(meta[M.StCoeffsOff], WebPLossySetupKernel.ProbaCount);
+        var tw = LoadWriter(meta, M.TokWriter);
+        int end = start + TokensPerLaunch;
+        if (end > tokenCount) end = tokenCount;
+        for (int i = start; i < end; ++i)
         {
             int token = tokens[i];
             int bit = (token >> 15) & 1;
             int prob = (token & (1 << 14)) != 0 ? token & 0xff : coeffs[token & 0x3fff];
             PutBit(scratch, ref tw, t, bit, prob);
         }
+        SaveWriter(meta, M.TokWriter, ref tw);
+        meta[M.TokNext] = end;
+    }
+
+    /// <summary>VP8BitWriterFinish of the token partition, VP8AdjustFilterStrength, partition 0 up to the intra modes.</summary>
+    public static void FinishHeaderKernel(
+        Index1D _, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state, ArrayView<int> meta,
+        ArrayView<int> t, ArrayView<int> tokens, ArrayView<byte> scratch)
+    {
+        if (meta[M.Error] != 0) return;
+        var coeffs = state.SubView(meta[M.StCoeffsOff], WebPLossySetupKernel.ProbaCount);
+        var tw = LoadWriter(meta, M.TokWriter);
         Finish(scratch, ref tw, t);
+        SaveWriter(meta, M.TokWriter, ref tw);
 
         // ---- VP8AdjustFilterStrength (filter_strength > 0, no autofilter)
         if (meta[M.FilterStrength] > 0)
@@ -181,9 +226,9 @@ internal static class WebPLossyFinishKernel
             meta[M.FilterLevel] = maxLevel;
         }
 
-        // ---- GeneratePartition0
+        // ---- GeneratePartition0 up to VP8CodeIntraModes
         var bw = new WebPBoolWriter();
-        bw.Init(0, p0Cap);
+        bw.Init(0, meta[M.Partition0Capacity]);
         PutBitUniform(scratch, ref bw, t, 0);   // colorspace
         PutBitUniform(scratch, ref bw, t, 0);   // clamp type
         int numSegments = meta[M.NumSegments];
@@ -223,49 +268,82 @@ internal static class WebPLossyFinishKernel
             if (PutBit(scratch, ref bw, t, update, t[T.CoeffsUpdateProba + i]) != 0) PutBits(scratch, ref bw, t, p0, 8);
         }
         PutBitUniform(scratch, ref bw, t, 0);    // use_skip_proba is 0 in the token loop
-        // VP8CodeIntraModes
-        for (int my = 0; my < mbH; ++my)
-            for (int mx = 0; mx < mbW; ++mx)
+        SaveWriter(meta, M.P0Writer, ref bw);
+        meta[M.MbNext] = 0;
+    }
+
+    /// <summary>VP8CodeIntraModes: the next <see cref="MbsPerLaunch"/> macroblocks (raster order) of partition 0.</summary>
+    public static void FinishModesKernel(
+        Index1D _, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state, ArrayView<int> meta,
+        ArrayView<int> t, ArrayView<int> tokens, ArrayView<byte> scratch)
+    {
+        if (meta[M.Error] != 0) return;
+        int mbW = meta[M.MbW], mbH = meta[M.MbH];
+        int start = meta[M.MbNext];
+        int total = mbW * mbH;
+        if (start >= total) return;
+        int predsW = 4 * mbW + 1;
+        bool updateMap = meta[M.UpdateMap] != 0;
+        var bw = LoadWriter(meta, M.P0Writer);
+        int end = start + MbsPerLaunch;
+        if (end > total) end = total;
+        for (int m = start; m < end; ++m)
+        {
+            int my = m / mbW;
+            int mx = m - my * mbW;
+            int rec = (my * mbW + mx) * M.MbStride;
+            int pIdx = 1 + predsW + my * 4 * predsW + mx * 4;
+            if (updateMap)
             {
-                int rec = (my * mbW + mx) * M.MbStride;
-                int pIdx = 1 + predsW + my * 4 * predsW + mx * 4;
-                if (updateMap)
-                {
-                    int sgm = mbRecs[rec + M.MbSegment];
-                    int bitHi = sgm >= 2 ? 1 : 0;
-                    int o = PutBit(scratch, ref bw, t, bitHi, meta[M.SegProba0]) != 0 ? 1 : 0;
-                    PutBit(scratch, ref bw, t, sgm & 1, meta[M.SegProba0 + o + 1]);
-                }
-                if (PutBit(scratch, ref bw, t, mbRecs[rec + M.MbType] != 0 ? 1 : 0, 145) != 0)
-                {
-                    int mode = work[pIdx];
-                    // DC_PRED 0, TM_PRED 1, V_PRED 2, H_PRED 3
-                    bool tmOrH = (mode == 1) | (mode == 3);
-                    if (PutBit(scratch, ref bw, t, tmOrH ? 1 : 0, 156) != 0) PutBit(scratch, ref bw, t, mode == 1 ? 1 : 0, 128);
-                    else PutBit(scratch, ref bw, t, mode == 2 ? 1 : 0, 163);
-                }
-                else
-                {
-                    int topPred = pIdx - predsW;
-                    int cur = pIdx;
-                    for (int y = 0; y < 4; ++y)
-                    {
-                        int left = work[cur - 1];
-                        for (int x = 0; x < 4; ++x)
-                        {
-                            int probIdx = T.BModesProba + (work[topPred + x] * 10 + left) * 9;
-                            left = PutI4Mode(scratch, ref bw, t, work[cur + x], probIdx);
-                        }
-                        topPred = cur;
-                        cur += predsW;
-                    }
-                }
-                int uvMode = mbRecs[rec + M.MbUVMode];
-                if (PutBit(scratch, ref bw, t, uvMode != 0 ? 1 : 0, 142) != 0)
-                    if (PutBit(scratch, ref bw, t, uvMode != 2 ? 1 : 0, 114) != 0)
-                        PutBit(scratch, ref bw, t, uvMode != 3 ? 1 : 0, 183);
+                int sgm = mbRecs[rec + M.MbSegment];
+                int bitHi = sgm >= 2 ? 1 : 0;
+                int o = PutBit(scratch, ref bw, t, bitHi, meta[M.SegProba0]) != 0 ? 1 : 0;
+                PutBit(scratch, ref bw, t, sgm & 1, meta[M.SegProba0 + o + 1]);
             }
+            if (PutBit(scratch, ref bw, t, mbRecs[rec + M.MbType] != 0 ? 1 : 0, 145) != 0)
+            {
+                int mode = work[pIdx];
+                // DC_PRED 0, TM_PRED 1, V_PRED 2, H_PRED 3
+                bool tmOrH = (mode == 1) | (mode == 3);
+                if (PutBit(scratch, ref bw, t, tmOrH ? 1 : 0, 156) != 0) PutBit(scratch, ref bw, t, mode == 1 ? 1 : 0, 128);
+                else PutBit(scratch, ref bw, t, mode == 2 ? 1 : 0, 163);
+            }
+            else
+            {
+                int topPred = pIdx - predsW;
+                int cur = pIdx;
+                for (int y = 0; y < 4; ++y)
+                {
+                    int left = work[cur - 1];
+                    for (int x = 0; x < 4; ++x)
+                    {
+                        int probIdx = T.BModesProba + (work[topPred + x] * 10 + left) * 9;
+                        left = PutI4Mode(scratch, ref bw, t, work[cur + x], probIdx);
+                    }
+                    topPred = cur;
+                    cur += predsW;
+                }
+            }
+            int uvMode = mbRecs[rec + M.MbUVMode];
+            if (PutBit(scratch, ref bw, t, uvMode != 0 ? 1 : 0, 142) != 0)
+                if (PutBit(scratch, ref bw, t, uvMode != 2 ? 1 : 0, 114) != 0)
+                    PutBit(scratch, ref bw, t, uvMode != 3 ? 1 : 0, 183);
+        }
+        SaveWriter(meta, M.P0Writer, ref bw);
+        meta[M.MbNext] = end;
+    }
+
+    /// <summary>VP8BitWriterFinish of partition 0, the size checks and the file length.</summary>
+    public static void FinishEndKernel(
+        Index1D _, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state, ArrayView<int> meta,
+        ArrayView<int> t, ArrayView<int> tokens, ArrayView<byte> scratch)
+    {
+        if (meta[M.Error] != 0) return;
+        int p0Cap = meta[M.Partition0Capacity];
+        int t1Cap = meta[M.Token1Capacity];
+        var bw = LoadWriter(meta, M.P0Writer);
         Finish(scratch, ref bw, t);
+        var tw = LoadWriter(meta, M.TokWriter);
 
         if ((bw.Overflow != 0) | (bw.Pos > p0Cap)) { meta[M.Error] = (int)WebPLossyEncError.Partition0ScratchTooSmall; return; }
         if ((tw.Overflow != 0) | (tw.Pos > t1Cap)) { meta[M.Error] = (int)WebPLossyEncError.TokenScratchTooSmall; return; }

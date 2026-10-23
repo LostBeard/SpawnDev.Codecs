@@ -78,7 +78,15 @@ internal static class WebPLossyEncMeta
     public const int SZtY1 = 34, SZtY2 = 36, SZtUV = 38;         // zthresh[0], zthresh[1]
     public const int SSharpY1 = 40;                              // sharpen[16] of y1 (the others are 0)
 
-    public const int Size = Seg + 4 * SegStride;   // 464
+    // ---- resumable state of the bounded launches (the RD row in macroblock chunks, the final kernel in phases) ----
+    public const int Step = Seg + 4 * SegStride;   // 464
+    public const int RowOutBuf = Step + 0, RowOut2Buf = Step + 1;   // the iterator's yuv_out / yuv_out2 (swapped per macroblock)
+    public const int TokWriter = Step + 2;         // token partition VP8BitWriter (8 ints)
+    public const int P0Writer = Step + 10;         // partition 0 VP8BitWriter (8 ints)
+    public const int TokNext = Step + 18;          // next token to emit
+    public const int MbNext = Step + 19;           // next macroblock of VP8CodeIntraModes
+
+    public const int Size = Step + 32;             // 496
 
     /// <summary>Per-macroblock record (ints): type, uv mode, skip, segment, alpha.</summary>
     public const int MbType = 0, MbUVMode = 1, MbSkip = 2, MbSegment = 3, MbAlpha = 4, MbUVAlphaRaw = 5, MbTransparent = 6;

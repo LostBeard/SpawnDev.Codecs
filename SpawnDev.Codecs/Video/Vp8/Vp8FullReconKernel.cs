@@ -34,7 +34,7 @@ internal static class Vp8FullReconKernel
     private const int ScLeft = 41;     // 41..44 = left I..L
     private const int ScPred = 48;     // 16 predicted 4x4 pixels
 
-    public static void Kernel(
+    public static void ReconKernel(
         Index1D idx,
         ArrayView<byte> yP, ArrayView<byte> uP, ArrayView<byte> vP,
         ArrayView<byte> recs, ArrayView<short> coeffs, ArrayView<int> meta,

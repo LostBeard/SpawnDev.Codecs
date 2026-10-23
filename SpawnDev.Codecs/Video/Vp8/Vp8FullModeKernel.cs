@@ -52,7 +52,7 @@ internal static class Vp8FullTables
 
 internal static class Vp8FullModeKernel
 {
-    public static void Kernel(
+    public static void ModeKernel(
         Index1D _,
         ArrayView<byte> enc, ArrayView<int> meta, ArrayView<int> bdStates,
         ArrayView<byte> recs, ArrayView<byte> tables, int mbRow)
