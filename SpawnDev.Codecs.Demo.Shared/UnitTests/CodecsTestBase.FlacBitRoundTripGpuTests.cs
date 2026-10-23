@@ -125,8 +125,7 @@ public abstract partial class CodecsTestBase
         dScratch.View.CopyFromCPU(new byte[scratchLen]);
 
         using var kernel = new FlacBitRoundTripKernel(acc);
-        kernel.Run(dValues.View, dBits.View, dDecoded.View, dScratch.View, dOutLen.View, values.Length);
-        await acc.SynchronizeAsync();
+        await kernel.RunAsync(dValues.View, dBits.View, dDecoded.View, dScratch.View, dOutLen.View, values.Length);
 
         long outLen = (await dOutLen.CopyToHostAsync())[0];
         var fullBytes = await dScratch.CopyToHostAsync();

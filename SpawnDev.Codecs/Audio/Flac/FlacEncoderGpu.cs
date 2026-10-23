@@ -48,6 +48,9 @@ public sealed class FlacEncoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int>
         _deinterleaveKernel;
 
+    /// <summary>Samples per de-interleave launch (one thread each, a copy).</summary>
+    private const int DeinterleaveLaunchSamples = 1 << 24;
+
     /// <summary>Construct an encoder bound to <paramref name="accelerator"/>.</summary>
     public FlacEncoderGpu(Accelerator accelerator)
     {
@@ -55,20 +58,25 @@ public sealed class FlacEncoderGpu : IDisposable
         _accelerator = accelerator;
         _frameKernel = new FlacFrameWriterGpuKernel(accelerator);
         _deinterleaveKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, int, int>(DeinterleaveKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, int, int>(FlacEncodeDeinterleaveKernel);
     }
 
     /// <summary>
-    /// Per-element de-interleave kernel. One thread per (channel, sample).
-    /// Reads from dInterleaved, writes to channel-major dSamples.
+    /// Per-element de-interleave kernel. One thread per (channel, sample) of the
+    /// <paramref name="first"/>.. range of the stream: sample t of frame t / (BlockSize * channels)
+    /// goes from the interleaved frame slice to the frame's channel-major slot of the same size.
     /// </summary>
-    private static void DeinterleaveKernel(
+    private static void FlacEncodeDeinterleaveKernel(
         Index1D index,
         ArrayView<int> interleaved, ArrayView<int> channelMajor,
-        int channels, int numFrames)
+        int channels, int first)
     {
+        int t = first + index.X;
+        int perFrame = BlockSize * channels;
+        int frame = t / perFrame;
+        long frameBase = (long)frame * perFrame;
         FlacDeinterleaveInputGpu.DeinterleaveAt(
-            interleaved, 0, channelMajor, 0, channels, numFrames, index.X);
+            interleaved, frameBase, channelMajor, frameBase, channels, BlockSize, t - frame * perFrame);
     }
 
     /// <summary>
@@ -114,10 +122,10 @@ public sealed class FlacEncoderGpu : IDisposable
 
         // Frame-parallel batch path. FLAC frames are independent of each
         // other (no inter-frame predictor state in this encoder), so we
-        // upload the whole interleaved stream once, dispatch ONE
-        // deinterleave kernel that writes channel-major samples for
-        // ALL frames into a per-frame strided buffer, then ONE batch
-        // frame-encode kernel with extent=frameCount, then read the
+        // upload the whole interleaved stream once, de-interleave it into
+        // channel-major per-frame slots (one thread per sample), then run
+        // the bounded batch frame-encode launches (FlacFrameWriterGpuKernel:
+        // parallel header / byte-pack / CRC pieces), then read the
         // output slabs back in a single host->device round-trip.
         int worstCasePerFrame = 32 + BlockSize * channels * 4;
         int perFrameSamples = BlockSize * channels;
@@ -129,31 +137,25 @@ public sealed class FlacEncoderGpu : IDisposable
         dAllInterleaved.View.CopyFromCPU(interleavedSamples.ToArray());
         dOutAll.View.MemSetToZero();
 
-        // Per-frame deinterleave dispatches (no syncs between - they queue
-        // on the accelerator stream). Each writes to its own slot in
-        // dAllSamples so the dispatches don't conflict.
-        for (int frameIdx = 0; frameIdx < frameCount; frameIdx++)
+        // De-interleave every frame into its channel-major slot of dAllSamples
+        // (a frame's slot covers the same sample range as its interleaved slice).
+        var pacer = new LaunchPacer(_accelerator);
+        for (int first = 0; first < totalSamples; first += DeinterleaveLaunchSamples)
         {
-            long frameSampleStart = (long)frameIdx * perFrameSamples;
-            var frameInterleavedView =
-                dAllInterleaved.View.SubView(frameSampleStart, perFrameSamples);
-            var frameChannelMajorView =
-                dAllSamples.View.SubView(frameSampleStart, perFrameSamples);
-            _deinterleaveKernel(new Index1D(perFrameSamples),
-                frameInterleavedView, frameChannelMajorView, channels, BlockSize);
+            _deinterleaveKernel(new Index1D(Math.Min(DeinterleaveLaunchSamples, totalSamples - first)),
+                dAllInterleaved.View, dAllSamples.View, channels, first);
+            await pacer.LaunchedAsync();
         }
 
-        // Batch frame encode: extent=frameCount, each thread reads its
-        // perFrameSamples-stride slice of dAllSamples and writes to its
-        // worstCasePerFrame-stride slot of dOutAll.
-        _frameKernel.RunBatch(
+        // Batch frame encode: frame i reads its perFrameSamples-stride slice
+        // of dAllSamples and writes to its worstCasePerFrame-stride slot of
+        // dOutAll (completes when every frame is written).
+        await _frameKernel.RunBatchAsync(
             dAllSamples.View, dOutAll.View, dOutLensAll.View,
             BlockSize, channels, BitsPerSample, startFrameNumber: 0,
             frameCount: frameCount,
             samplesStride: perFrameSamples,
             outBufStride: worstCasePerFrame);
-
-        await _accelerator.SynchronizeAsync();
 
         // Single readback of all per-frame lengths + all per-frame output
         // bytes. We then walk the slots host-side to assemble the final

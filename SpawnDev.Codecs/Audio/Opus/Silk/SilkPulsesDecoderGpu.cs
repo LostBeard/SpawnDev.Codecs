@@ -28,20 +28,47 @@ namespace SpawnDev.Codecs.Audio.Opus.Silk;
 /// </summary>
 public struct SilkPulsesInputs
 {
-    /// <summary>silk_rate_levels_iCDF (27 bytes flat: 3 rows × 9 entries).</summary>
-    public ArrayView<byte> RateLevelsIcdf;
-    /// <summary>silk_pulses_per_block_iCDF (180 bytes flat: 10 rows × 18 entries).</summary>
-    public ArrayView<byte> PulsesPerBlockIcdf;
-    /// <summary>silk_lsb_iCDF (2 entries).</summary>
-    public ArrayView<byte> LsbIcdf;
-    /// <summary>silk_sign_iCDF (42 bytes flat: 6 rows × 7 entries).</summary>
-    public ArrayView<byte> SignIcdf;
-    /// <summary>Shell coder tables (5 sub-ArrayViews bundled).</summary>
+    /// <summary>The four iCDF tables, packed (offsets below; <see cref="PackedDeviceBuffer{T}"/>).</summary>
+    public ArrayView<byte> Bytes;
+    /// <summary>silk_rate_levels_iCDF offset in <see cref="Bytes"/>.</summary>
+    public int RateLevelsIcdfAt;
+    /// <summary>silk_pulses_per_block_iCDF offset.</summary>
+    public int PulsesPerBlockIcdfAt;
+    /// <summary>silk_lsb_iCDF offset.</summary>
+    public int LsbIcdfAt;
+    /// <summary>silk_sign_iCDF offset.</summary>
+    public int SignIcdfAt;
+    /// <summary>The shell code tables (may share <see cref="Bytes"/>'s buffer).</summary>
     public SilkShellCoderTables ShellTables;
-    /// <summary>Scratch for per-block pulse sums (length >= MaxNbShellBlocks).</summary>
-    public ArrayView<int> SumPulsesScratch;
-    /// <summary>Scratch for per-block lshift counts (length >= MaxNbShellBlocks).</summary>
-    public ArrayView<int> NLshiftsScratch;
+    /// <summary>Int scratch: sumPulses[MaxNbShellBlocks] and nLshifts[MaxNbShellBlocks] regions.</summary>
+    public ArrayView<int> Scratch;
+    /// <summary>sumPulses region offset in <see cref="Scratch"/>.</summary>
+    public int SumPulsesScratchAt;
+    /// <summary>nLshifts region offset in <see cref="Scratch"/>.</summary>
+    public int NLshiftsScratchAt;
+
+    /// <summary>
+    /// Appends the standard libopus pulse iCDFs + shell code tables to <paramref name="bytes"/> and reserves the two
+    /// scratch regions in <paramref name="ints"/>; then <see cref="Bind"/> the uploaded buffers.
+    /// </summary>
+    public static SilkPulsesInputs AddStandard(PackedDeviceBuffer<byte> bytes, PackedDeviceBuffer<int> ints) => new SilkPulsesInputs
+    {
+        RateLevelsIcdfAt = bytes.Add(SilkIcdfTables.RateLevels),
+        PulsesPerBlockIcdfAt = bytes.Add(SilkIcdfTables.PulsesPerBlock),
+        LsbIcdfAt = bytes.Add(SilkIcdfTables.Lsb),
+        SignIcdfAt = bytes.Add(SilkIcdfTables.Sign),
+        ShellTables = SilkShellCoderTables.AddStandard(bytes),
+        SumPulsesScratchAt = ints.Reserve(SilkPulsesDecoderGpu.MaxNbShellBlocks),
+        NLshiftsScratchAt = ints.Reserve(SilkPulsesDecoderGpu.MaxNbShellBlocks),
+    };
+
+    /// <summary>Points the struct (and its shell tables) at the uploaded byte buffer and int scratch.</summary>
+    public void Bind(ArrayView<byte> bytes, ArrayView<int> scratch)
+    {
+        Bytes = bytes;
+        ShellTables.Bytes = bytes;
+        Scratch = scratch;
+    }
 }
 
 /// <summary>
@@ -95,7 +122,7 @@ public static class SilkPulsesDecoderGpu
         int rateLevelOffset = (signalType >> 1) * RateLevelsEntriesPerType;
         int rateLevelIndex = OpusRangeDecoderGpu.DecodeIcdf(
             ref state, buf, bufStart, storage,
-            inputs.RateLevelsIcdf, rateLevelOffset, 8);
+            inputs.Bytes, inputs.RateLevelsIcdfAt + rateLevelOffset, 8);
 
         // 2. Per-block pulse counts with LSB-extension escape.
         int iter = frameLength >> Log2ShellCodecFrameLength;
@@ -108,27 +135,27 @@ public static class SilkPulsesDecoderGpu
 
         for (int i = 0; i < iter; i++)
         {
-            inputs.NLshiftsScratch[i] = 0;
+            inputs.Scratch[inputs.NLshiftsScratchAt + i] = 0;
             int sum = OpusRangeDecoderGpu.DecodeIcdf(
                 ref state, buf, bufStart, storage,
-                inputs.PulsesPerBlockIcdf, cdfOffset, 8);
+                inputs.Bytes, inputs.PulsesPerBlockIcdfAt + cdfOffset, 8);
             while (sum == SilkMaxPulses + 1)
             {
-                inputs.NLshiftsScratch[i]++;
-                int adjust = inputs.NLshiftsScratch[i] == 10 ? 1 : 0;
+                inputs.Scratch[inputs.NLshiftsScratchAt + i]++;
+                int adjust = inputs.Scratch[inputs.NLshiftsScratchAt + i] == 10 ? 1 : 0;
                 long escOffset = escapeRowStart + adjust;
                 sum = OpusRangeDecoderGpu.DecodeIcdf(
                     ref state, buf, bufStart, storage,
-                    inputs.PulsesPerBlockIcdf, escOffset, 8);
+                    inputs.Bytes, inputs.PulsesPerBlockIcdfAt + escOffset, 8);
             }
-            inputs.SumPulsesScratch[i] = sum;
+            inputs.Scratch[inputs.SumPulsesScratchAt + i] = sum;
         }
 
         // 3. Shell-decode magnitudes per block (or zero for empty blocks).
         for (int i = 0; i < iter; i++)
         {
             long blockBase = pulsesOutBase + (long)i * shellLen;
-            int sum = inputs.SumPulsesScratch[i];
+            int sum = inputs.Scratch[inputs.SumPulsesScratchAt + i];
             if (sum > 0)
             {
                 SilkShellCoderGpu.Decode(
@@ -146,7 +173,7 @@ public static class SilkPulsesDecoderGpu
         // 4. LSB-bit extension.
         for (int i = 0; i < iter; i++)
         {
-            int nLs = inputs.NLshiftsScratch[i];
+            int nLs = inputs.Scratch[inputs.NLshiftsScratchAt + i];
             if (nLs > 0)
             {
                 long blockBase = pulsesOutBase + (long)i * shellLen;
@@ -158,12 +185,12 @@ public static class SilkPulsesDecoderGpu
                         absQ <<= 1;
                         absQ += OpusRangeDecoderGpu.DecodeIcdf(
                             ref state, buf, bufStart, storage,
-                            inputs.LsbIcdf, 0, 8);
+                            inputs.Bytes, inputs.LsbIcdfAt, 8);
                     }
                     pulsesOut[blockBase + k] = (short)absQ;
                 }
                 // Pack nLshifts into bits 5..9 of sumPulses for the sign decoder.
-                inputs.SumPulsesScratch[i] |= nLs << 5;
+                inputs.Scratch[inputs.SumPulsesScratchAt + i] |= nLs << 5;
             }
         }
 
@@ -172,7 +199,7 @@ public static class SilkPulsesDecoderGpu
         int signLength = (frameLength + shellLen / 2) >> Log2ShellCodecFrameLength;
         for (int i = 0; i < signLength; i++)
         {
-            int p = inputs.SumPulsesScratch[i];
+            int p = inputs.Scratch[inputs.SumPulsesScratchAt + i];
             if (p > 0)
             {
                 int col = (p & 0x1F) < 6 ? (p & 0x1F) : 6;
@@ -186,7 +213,7 @@ public static class SilkPulsesDecoderGpu
                         // Read decoded bit -> 0 means sign = -1, 1 means sign = +1.
                         int decoded = DecodeSignBit(
                             ref state, buf, bufStart, storage,
-                            inputs.SignIcdf, signRowStart + col);
+                            inputs.Bytes, inputs.SignIcdfAt + signRowStart + col);
                         int sign = (decoded << 1) - 1;
                         pulsesOut[blockBase + j] = (short)((int)pulsesOut[blockBase + j] * sign);
                     }

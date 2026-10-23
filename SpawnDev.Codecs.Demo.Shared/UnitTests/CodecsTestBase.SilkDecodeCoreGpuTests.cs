@@ -101,53 +101,44 @@ public abstract partial class CodecsTestBase
         const int MaxSubfrLength = 80;
         const int MaxLtpMemLength = 320;
 
-        using var dPredCoefQ12 = acc.Allocate1D<short>(2 * MaxLpcOrder);
-        using var dGainsQ16 = acc.Allocate1D<int>(4);
-        using var dPitchL = acc.Allocate1D<int>(4);
-        using var dLtpCoefQ14 = acc.Allocate1D<short>(20);
         using var dPulses = acc.Allocate1D<short>(pulses.Length);
 
-        using var dOutBuf = acc.Allocate1D<short>(MaxLtpMemLength + MaxFrameLength);
-        using var dSLpcQ14Buf = acc.Allocate1D<int>(MaxLpcOrder);
-        using var dExcQ14 = acc.Allocate1D<int>(MaxFrameLength);
-        using var dPrevGain = acc.Allocate1D<int>(1);
 
-        using var dSLpcScratch = acc.Allocate1D<int>(MaxLpcOrder + MaxSubfrLength);
-        using var dSLtpQ15Scratch = acc.Allocate1D<int>(MaxLtpMemLength + MaxFrameLength);
-        using var dSLtpScratch = acc.Allocate1D<short>(MaxLtpMemLength);
-        using var dPresQ14Scratch = acc.Allocate1D<int>(MaxSubfrLength);
-        using var dGainAdjScratch = acc.Allocate1D<int>(1);
 
-        using var dXqOut = acc.Allocate1D<short>(MaxFrameLength);
 
-        dPredCoefQ12.View.CopyFromCPU(parameters.PredCoefQ12);
-        dGainsQ16.View.CopyFromCPU(parameters.GainsQ16);
-        dPitchL.View.CopyFromCPU(parameters.PitchL);
-        dLtpCoefQ14.View.CopyFromCPU(parameters.LtpCoefQ14);
         dPulses.View.CopyFromCPU(pulses);
 
-        dOutBuf.View.CopyFromCPU(state.OutBuf);
-        dSLpcQ14Buf.View.CopyFromCPU(state.SLpcQ14Buf);
-        dPrevGain.View.CopyFromCPU(new int[] { state.PrevGainQ16 });
 
+        var inputsParamsShort = new PackedDeviceBuffer<short>();
+        var inputsParamsInt = new PackedDeviceBuffer<int>();
+        var inputsShorts = new PackedDeviceBuffer<short>();
+        var inputsInts = new PackedDeviceBuffer<int>();
         var inputs = new SilkDecodeCoreInputs
         {
-            PredCoefQ12 = dPredCoefQ12.View,
-            GainsQ16 = dGainsQ16.View,
-            PitchL = dPitchL.View,
-            LtpCoefQ14 = dLtpCoefQ14.View,
+            PredCoefQ12At = inputsParamsShort.Add(parameters.PredCoefQ12, 2 * MaxLpcOrder),
+            GainsQ16At = inputsParamsInt.Add(parameters.GainsQ16, 4),
+            PitchLAt = inputsParamsInt.Add(parameters.PitchL, 4),
+            LtpCoefQ14At = inputsParamsShort.Add(parameters.LtpCoefQ14, 20),
             Pulses = dPulses.View,
-            OutBufInOut = dOutBuf.View,
-            SLpcQ14BufInOut = dSLpcQ14Buf.View,
-            ExcQ14Out = dExcQ14.View,
-            PrevGainQ16InOut = dPrevGain.View,
-            SLpcScratch = dSLpcScratch.View,
-            SLtpQ15Scratch = dSLtpQ15Scratch.View,
-            SLtpScratch = dSLtpScratch.View,
-            PresQ14Scratch = dPresQ14Scratch.View,
-            GainAdjScratch = dGainAdjScratch.View,
-            XqOut = dXqOut.View,
+            OutBufInOutAt = inputsShorts.Add(state.OutBuf, MaxLtpMemLength + MaxFrameLength),
+            SLpcQ14BufInOutAt = inputsInts.Add(state.SLpcQ14Buf, MaxLpcOrder),
+            ExcQ14OutAt = inputsInts.Reserve(MaxFrameLength),
+            PrevGainQ16InOutAt = inputsInts.Add(new int[] { state.PrevGainQ16 }, 1),
+            SLpcScratchAt = inputsInts.Reserve(MaxLpcOrder + MaxSubfrLength),
+            SLtpQ15ScratchAt = inputsInts.Reserve(MaxLtpMemLength + MaxFrameLength),
+            SLtpScratchAt = inputsShorts.Reserve(MaxLtpMemLength),
+            PresQ14ScratchAt = inputsInts.Reserve(MaxSubfrLength),
+            GainAdjScratchAt = inputsInts.Reserve(1),
+            XqOutAt = inputsShorts.Reserve(MaxFrameLength),
         };
+        using var dInputsParamsShort = inputsParamsShort.Upload(acc);
+        inputs.ParamsShort = dInputsParamsShort.View;
+        using var dInputsParamsInt = inputsParamsInt.Upload(acc);
+        inputs.ParamsInt = dInputsParamsInt.View;
+        using var dInputsShorts = inputsShorts.Upload(acc);
+        inputs.Shorts = dInputsShorts.View;
+        using var dInputsInts = inputsInts.Upload(acc);
+        inputs.Ints = dInputsInts.View;
 
         var scalars = new SilkDecodeCoreScalars
         {
@@ -167,9 +158,9 @@ public abstract partial class CodecsTestBase
         kernel.Run(inputs, scalars);
         await acc.SynchronizeAsync();
 
-        var xq = await dXqOut.CopyToHostAsync();
-        var sLpcOut = await dSLpcQ14Buf.CopyToHostAsync();
-        var prevGainOut = await dPrevGain.CopyToHostAsync();
+        var xq = await dInputsShorts.View.SubView(inputs.XqOutAt, MaxFrameLength).CopyToHostAsync();
+        var sLpcOut = await dInputsInts.View.SubView(inputs.SLpcQ14BufInOutAt, MaxLpcOrder).CopyToHostAsync();
+        var prevGainOut = await dInputsInts.View.SubView(inputs.PrevGainQ16InOutAt, 1).CopyToHostAsync();
 
         var xqSlice = new short[frameLength];
         Array.Copy(xq, xqSlice, frameLength);

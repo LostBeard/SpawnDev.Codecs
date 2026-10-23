@@ -15,6 +15,10 @@
 // no Rice coding - just raw samples wrapped in subframe headers. The
 // resulting stream is valid FLAC but uncompressed (~bps bits per
 // sample plus 8 bits per subframe header).
+//
+// Every bit of a run of VERBATIM subframes sits at a position known up front (8 + sampleCount * bps bits per
+// subframe), so the subframes are packed and unpacked IN PARALLEL: one thread per output byte (PackByteAt) or per
+// sample (UnpackSampleAt). No thread walks a whole subframe, so no launch grows with the block size.
 
 using ILGPU;
 
@@ -26,57 +30,96 @@ namespace SpawnDev.Codecs.Audio.Flac;
 /// </summary>
 public static class FlacVerbatimSubframeGpu
 {
-    /// <summary>
-    /// Encode a VERBATIM subframe of <paramref name="sampleCount"/>
-    /// samples at <paramref name="bps"/> bits per sample. Reads
-    /// samples from <paramref name="samples"/> starting at
-    /// <paramref name="samplesBase"/>; writes via the FLAC bit writer
-    /// state.
-    /// </summary>
-    public static void Encode(
-        ref FlacBitWriterGpuState w, ArrayView<byte> outBuf,
-        ArrayView<int> samples, long samplesBase, int sampleCount,
-        int bps)
-    {
-        // Subframe header: 0 (1 bit) + 0b000001 (6 bits) + 0 (1 bit, no wasted bits) = 8 bits.
-        FlacBitWriterGpu.Write(ref w, outBuf, 0u, 1);
-        FlacBitWriterGpu.Write(ref w, outBuf, 0b000001u, 6);
-        FlacBitWriterGpu.Write(ref w, outBuf, 0u, 1);
+    /// <summary>The 8-bit VERBATIM subframe header: 0, type 000001, no wasted bits.</summary>
+    public const int HeaderByte = 0x02;
 
-        // Samples as signed (bps)-bit values.
-        for (int i = 0; i < sampleCount; i++)
+    /// <summary>Bits of one VERBATIM subframe of <paramref name="sampleCount"/> samples at <paramref name="bps"/> bits.</summary>
+    public static long SubframeBits(int sampleCount, int bps) => 8 + (long)sampleCount * bps;
+
+    /// <summary>Bytes of <paramref name="channels"/> consecutive VERBATIM subframes, zero-padded to a byte.</summary>
+    public static long SubframesBytes(int sampleCount, int channels, int bps)
+        => (SubframeBits(sampleCount, bps) * channels + 7) >> 3;
+
+    /// <summary>
+    /// Byte <paramref name="j"/> of <paramref name="channels"/> consecutive VERBATIM subframes packed MSB-first from
+    /// bit 0 and zero-padded to a byte (the bytes FlacBitWriter writes for them). Channel c's sample i is
+    /// <c>samples[samplesBase + c * channelStride + i]</c>; each is written as a signed <paramref name="bps"/>-bit value.
+    /// </summary>
+    public static byte PackByteAt(
+        ArrayView<int> samples, long samplesBase, long channelStride,
+        int sampleCount, int channels, int bps, long j)
+    {
+        long subBits = SubframeBits(sampleCount, bps);
+        long total = subBits * channels;
+        int acc = 0;
+        for (int k = 0; k < 8; k++)
         {
-            FlacBitWriterGpu.WriteSigned(ref w, outBuf, samples[samplesBase + i], bps);
+            long p = j * 8 + k;
+            int bit = 0;
+            if (p < total)
+            {
+                long c = p / subBits;
+                long r = p - c * subBits;
+                if (r < 8)
+                {
+                    bit = (HeaderByte >> (7 - (int)r)) & 1;
+                }
+                else
+                {
+                    long q = r - 8;
+                    long i = q / bps;
+                    int b = (int)(q - i * bps);
+                    uint raw = (uint)samples[samplesBase + c * channelStride + i];
+                    bit = (int)((raw >> (bps - 1 - b)) & 1u);
+                }
+            }
+            acc = (acc << 1) | bit;
         }
+        return (byte)acc;
     }
 
     /// <summary>
-    /// Decode a VERBATIM subframe: parse the 8-bit subframe header
-    /// (must indicate type=VERBATIM with no wasted bits) then read
-    /// <paramref name="sampleCount"/> samples at <paramref name="bps"/>
-    /// bits each. Writes decoded samples to <paramref name="samples"/>
-    /// starting at <paramref name="samplesBase"/>.
-    /// <para>
-    /// Returns 1 on success, 0 if the subframe header indicates a
-    /// non-VERBATIM type or wasted bits (which the v1 GPU decoder
-    /// doesn't handle yet).
-    /// </para>
+    /// Reads <paramref name="nBits"/> (1..32) bits MSB-first starting <paramref name="bitPos"/> bits after byte
+    /// <paramref name="byteBase"/> of <paramref name="data"/>.
     /// </summary>
-    public static int Decode(
-        ref FlacBitReaderGpuState r, ArrayView<byte> data,
-        ArrayView<int> samples, long samplesBase, int sampleCount,
-        int bps)
+    public static uint ReadBitsAt(ArrayView<byte> data, long byteBase, long bitPos, int nBits)
     {
-        // Subframe header.
-        uint zero = FlacBitReaderGpu.ReadBits(ref r, data, 1);
-        uint type = FlacBitReaderGpu.ReadBits(ref r, data, 6);
-        uint wasted = FlacBitReaderGpu.ReadBits(ref r, data, 1);
-        if (zero != 0 || type != 0b000001 || wasted != 0) return 0;
-
-        for (int i = 0; i < sampleCount; i++)
+        uint v = 0;
+        for (int k = 0; k < nBits; k++)
         {
-            samples[samplesBase + i] = FlacBitReaderGpu.ReadBitsSigned(ref r, data, bps);
+            long q = bitPos + k;
+            int bv = data[byteBase + (q >> 3)];
+            uint bit = (uint)((bv >> (7 - (int)(q & 7))) & 1);
+            v = (v << 1) | bit;
         }
-        return 1;
+        return v;
+    }
+
+    /// <summary>
+    /// 1 when the 8-bit header of VERBATIM subframe <paramref name="channel"/> (of a run starting at byte
+    /// <paramref name="byteBase"/>) declares VERBATIM with no wasted bits, else 0 (a non-VERBATIM type the v1 GPU
+    /// decoder does not handle).
+    /// </summary>
+    public static int HeaderOkAt(ArrayView<byte> data, long byteBase, int sampleCount, int bps, int channel)
+    {
+        uint h = ReadBitsAt(data, byteBase, channel * SubframeBits(sampleCount, bps), 8);
+        return h == HeaderByte ? 1 : 0;
+    }
+
+    /// <summary>
+    /// Sample <paramref name="i"/> of VERBATIM subframe <paramref name="channel"/> of a run starting at byte
+    /// <paramref name="byteBase"/>: <paramref name="bps"/> bits, sign-extended.
+    /// </summary>
+    public static int UnpackSampleAt(
+        ArrayView<byte> data, long byteBase, int sampleCount, int bps, int channel, long i)
+    {
+        long p = channel * SubframeBits(sampleCount, bps) + 8 + i * bps;
+        uint u = ReadBitsAt(data, byteBase, p, bps);
+        if (bps < 32)
+        {
+            uint signMask = 1u << (bps - 1);
+            if ((u & signMask) != 0) u |= ~((1u << bps) - 1);
+        }
+        return unchecked((int)u);
     }
 }

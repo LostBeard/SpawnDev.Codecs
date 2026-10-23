@@ -4,6 +4,10 @@
 // pair. Encodes one subframe of N samples at given bps then decodes
 // it back. Verifies the GPU pair produces decode == encode for any
 // signed sample range.
+//
+// Runs the production (parallel) forms: one thread per encoded byte (FlacVerbatimSubframeGpu.PackByteAt), one
+// thread for the header check + length, one thread per decoded sample (UnpackSampleAt). Three launches whatever
+// the sample count, each thread O(bps) work.
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -11,28 +15,27 @@ using ILGPU.Runtime;
 namespace SpawnDev.Codecs.Audio.Flac;
 
 /// <summary>
-/// Drives an end-to-end FlacVerbatimSubframeGpu.Encode -&gt; .Decode
+/// Drives an end-to-end FlacVerbatimSubframeGpu pack -&gt; unpack
 /// round-trip on the accelerator.
 /// </summary>
 public sealed class FlacVerbatimSubframeRoundTripKernel : IDisposable
 {
     private readonly Accelerator _accelerator;
-    private readonly Action<
-        Index1D,
-        ArrayView<int>, ArrayView<int>,
-        ArrayView<byte>, ArrayView<long>, ArrayView<int>,
-        int, int> _kernel;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, int, int> _packKernel;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<int>, int, int> _headerKernel;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _unpackKernel;
 
     /// <summary>Compile.</summary>
     public FlacVerbatimSubframeRoundTripKernel(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
-        _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D,
-            ArrayView<int>, ArrayView<int>,
-            ArrayView<byte>, ArrayView<long>, ArrayView<int>,
-            int, int>(RoundTripKernel);
+        _packKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<int>, ArrayView<byte>, int, int>(FlacVerbatimPackKernel);
+        _headerKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<int>, int, int>(FlacVerbatimHeaderKernel);
+        _unpackKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(FlacVerbatimUnpackKernel);
     }
 
     /// <summary>
@@ -45,22 +48,34 @@ public sealed class FlacVerbatimSubframeRoundTripKernel : IDisposable
         ArrayView<byte> scratch, ArrayView<long> outLen, ArrayView<int> statusOut,
         int sampleCount, int bps)
     {
-        _kernel(1, samples, decodedSamples, scratch, outLen, statusOut, sampleCount, bps);
+        int bytes = checked((int)FlacVerbatimSubframeGpu.SubframesBytes(sampleCount, 1, bps));
+        _packKernel(bytes, samples, scratch, sampleCount, bps);
+        _headerKernel(1, scratch, outLen, statusOut, sampleCount, bps);
+        if (sampleCount > 0) _unpackKernel(sampleCount, scratch, decodedSamples, statusOut, sampleCount, bps);
     }
 
-    private static void RoundTripKernel(
-        Index1D _,
-        ArrayView<int> samples, ArrayView<int> decodedSamples,
-        ArrayView<byte> scratch, ArrayView<long> outLen, ArrayView<int> statusOut,
+    /// <summary>Encoded byte <c>j</c> of the subframe.</summary>
+    private static void FlacVerbatimPackKernel(
+        Index1D j, ArrayView<int> samples, ArrayView<byte> scratch, int sampleCount, int bps)
+    {
+        scratch[j.X] = FlacVerbatimSubframeGpu.PackByteAt(samples, 0, sampleCount, sampleCount, 1, bps, j.X);
+    }
+
+    /// <summary>Encoded length and the decoder's header check (1 = VERBATIM, no wasted bits).</summary>
+    private static void FlacVerbatimHeaderKernel(
+        Index1D _, ArrayView<byte> scratch, ArrayView<long> outLen, ArrayView<int> statusOut, int sampleCount, int bps)
+    {
+        outLen[0] = FlacVerbatimSubframeGpu.SubframesBytes(sampleCount, 1, bps);
+        statusOut[0] = FlacVerbatimSubframeGpu.HeaderOkAt(scratch, 0, sampleCount, bps, 0);
+    }
+
+    /// <summary>Decoded sample <c>i</c> (only after a good header, as the serial decoder).</summary>
+    private static void FlacVerbatimUnpackKernel(
+        Index1D i, ArrayView<byte> scratch, ArrayView<int> decodedSamples, ArrayView<int> statusOut,
         int sampleCount, int bps)
     {
-        var w = FlacBitWriterGpu.Init();
-        FlacVerbatimSubframeGpu.Encode(ref w, scratch, samples, 0, sampleCount, bps);
-        FlacBitWriterGpu.AlignToByte(ref w, scratch);
-        outLen[0] = w.OutLen;
-
-        var r = FlacBitReaderGpu.Init((int)w.OutLen);
-        statusOut[0] = FlacVerbatimSubframeGpu.Decode(ref r, scratch, decodedSamples, 0, sampleCount, bps);
+        if (statusOut[0] == 0) return;
+        decodedSamples[i.X] = FlacVerbatimSubframeGpu.UnpackSampleAt(scratch, 0, sampleCount, bps, 0, i.X);
     }
 
     /// <summary>Release kernel resources.</summary>

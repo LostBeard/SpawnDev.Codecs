@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         dPacket.View.CopyFromCPU(packetBytes);
         dFtPerSymbol.View.CopyFromCPU(ftPerSymbol);
         using var kernel = new OpusRangeDecoderGpuTestKernel(acc);
-        kernel.RunDecodeUint(
+        await kernel.RunDecodeUintAsync(
             dPacket.View, 0, packetBytes.Length,
             dFtPerSymbol.View, dDecoded.View, symbolCount);
         await acc.SynchronizeAsync();
@@ -125,7 +125,7 @@ public abstract partial class CodecsTestBase
         using var dDecoded = acc.Allocate1D<int>(bitCount);
         dPacket.View.CopyFromCPU(packetBytes);
         using var kernel = new OpusRangeDecoderGpuTestKernel(acc);
-        kernel.RunDecodeBitLogP(
+        await kernel.RunDecodeBitLogPAsync(
             dPacket.View, 0, packetBytes.Length, logp,
             dDecoded.View, bitCount);
         await acc.SynchronizeAsync();
@@ -199,7 +199,7 @@ public abstract partial class CodecsTestBase
         dIcdf.View.CopyFromCPU(icdf);
 
         using var kernel = new OpusRangeDecoderGpuTestKernel(acc);
-        kernel.Run(
+        await kernel.RunAsync(
             dPacket.View, 0, packetBytes.Length,
             dIcdf.View, 0, ftb,
             dDecoded.View, symbolCount);

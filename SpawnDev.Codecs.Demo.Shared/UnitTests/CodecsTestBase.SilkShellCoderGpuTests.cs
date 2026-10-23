@@ -27,28 +27,19 @@ public abstract partial class CodecsTestBase
         Accelerator acc, byte[] packet, int pulsesTotal)
     {
         using var dPacket = acc.Allocate1D<byte>(packet.Length);
-        using var dOffsets = acc.Allocate1D<byte>(SilkShellCodeTables.Offsets.Length);
-        using var dTable0 = acc.Allocate1D<byte>(SilkShellCodeTables.Table0.Length);
-        using var dTable1 = acc.Allocate1D<byte>(SilkShellCodeTables.Table1.Length);
-        using var dTable2 = acc.Allocate1D<byte>(SilkShellCodeTables.Table2.Length);
-        using var dTable3 = acc.Allocate1D<byte>(SilkShellCodeTables.Table3.Length);
         using var dPulses = acc.Allocate1D<short>(16);
-
-        dPacket.View.CopyFromCPU(packet);
-        dOffsets.View.CopyFromCPU(SilkShellCodeTables.Offsets);
-        dTable0.View.CopyFromCPU(SilkShellCodeTables.Table0);
-        dTable1.View.CopyFromCPU(SilkShellCodeTables.Table1);
-        dTable2.View.CopyFromCPU(SilkShellCodeTables.Table2);
-        dTable3.View.CopyFromCPU(SilkShellCodeTables.Table3);
-
+        var pack = new PackedDeviceBuffer<byte>();
         var tables = new SilkShellCoderTables
         {
-            Offsets = dOffsets.View,
-            Table0 = dTable0.View,
-            Table1 = dTable1.View,
-            Table2 = dTable2.View,
-            Table3 = dTable3.View,
+            OffsetsAt = pack.Add(SilkShellCodeTables.Offsets),
+            Table0At = pack.Add(SilkShellCodeTables.Table0),
+            Table1At = pack.Add(SilkShellCodeTables.Table1),
+            Table2At = pack.Add(SilkShellCodeTables.Table2),
+            Table3At = pack.Add(SilkShellCodeTables.Table3),
         };
+        using var dTables = pack.Upload(acc);
+        tables.Bytes = dTables.View;
+        dPacket.View.CopyFromCPU(packet);
 
         using var kernel = new SilkShellCoderGpuTestKernel(acc);
         kernel.Run(dPacket.View, 0, packet.Length, tables, pulsesTotal, dPulses.View);

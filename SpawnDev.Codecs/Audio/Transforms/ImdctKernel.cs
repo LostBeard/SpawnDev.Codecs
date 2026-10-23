@@ -14,8 +14,10 @@
 //   * Vorbis short blocks at N=128 (256 samples), long at N=1024 (2048).
 //   * Opus CELT 20ms-48k frames at N=480 (960 samples).
 //   * AAC long blocks at N=1024.
-// At Vorbis-long N=1024, 1000 blocks/frame produces ~2.05M output
-// threads in one dispatch - GPU regime.
+// At Vorbis-long N=1024 a block is 2N output threads of N cosine terms
+// each (2N^2 terms); a launch covers at most BlocksPerLaunch(N) blocks
+// (TermsPerLaunch = 2^26 terms, 32 blocks at N=1024), so no single launch
+// grows with the block count.
 //
 // Math (matches ImdctReference exactly, modulo float vs double accum):
 //   factor = pi / N
@@ -59,7 +61,16 @@ namespace SpawnDev.Codecs.Audio.Transforms;
 public sealed class ImdctKernel : IDisposable
 {
     private readonly Accelerator _accelerator;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, int, int> _kernel;
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, int, int, int> _kernel;
+
+    /// <summary>
+    /// Cosine terms of one launch: a block costs N * 2N terms, so blocks go in groups of
+    /// max(1, TermsPerLaunch / (2 N^2)) per launch and no launch grows with the block count.
+    /// </summary>
+    public const long TermsPerLaunch = 1L << 26;
+
+    /// <summary>Blocks of one launch for block size <paramref name="n"/>.</summary>
+    public static int BlocksPerLaunch(int n) => (int)Math.Max(1, TermsPerLaunch / (2L * n * n));
 
     /// <summary>Compile the kernel onto <paramref name="accelerator"/>.</summary>
     public ImdctKernel(Accelerator accelerator)
@@ -67,7 +78,7 @@ public sealed class ImdctKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<float>, ArrayView<float>, int, int>(ImdctKernelBody);
+            Index1D, ArrayView<float>, ArrayView<float>, int, int, int>(ImdctKernelBody);
     }
 
     /// <summary>
@@ -75,7 +86,7 @@ public sealed class ImdctKernel : IDisposable
     /// <paramref name="input"/> holds <c>blockCount * N</c> floats (block-major);
     /// <paramref name="output"/> receives <c>blockCount * 2N</c> floats.
     /// </summary>
-    public void Run(ArrayView<float> input, ArrayView<float> output, int blockCount, int n)
+    public async Task RunAsync(ArrayView<float> input, ArrayView<float> output, int blockCount, int n)
     {
         if (blockCount < 0) throw new ArgumentOutOfRangeException(nameof(blockCount));
         if (n <= 0) throw new ArgumentOutOfRangeException(nameof(n), "Block size N must be positive.");
@@ -91,8 +102,15 @@ public sealed class ImdctKernel : IDisposable
                 $"output must hold at least blockCount*2N floats (got {output.Length}, need {outLen}).",
                 nameof(output));
         // One thread per output sample. Total = blockCount * 2N.
-        int totalThreads = checked(blockCount * 2 * n);
-        _kernel(totalThreads, input, output, blockCount, n);
+        // Groups of BlocksPerLaunch(n) blocks, one thread per output value, paced.
+        int group = BlocksPerLaunch(n);
+        var pacer = new LaunchPacer(_accelerator);
+        for (int first = 0; first < blockCount; first += group)
+        {
+            int blocks = Math.Min(group, blockCount - first);
+            _kernel(checked(blocks * 2 * n), input, output, blocks, n, first);
+            await pacer.LaunchedAsync();
+        }
     }
 
     /// <summary>
@@ -109,7 +127,7 @@ public sealed class ImdctKernel : IDisposable
         using var dIn = _accelerator.Allocate1D<float>(inLen);
         using var dOut = _accelerator.Allocate1D<float>(outLen);
         dIn.View.CopyFromCPU(input.Span.ToArray());
-        Run(dIn.View, dOut.View, blockCount, n);
+        await RunAsync(dIn.View, dOut.View, blockCount, n);
         await _accelerator.SynchronizeAsync();
         var readBack = await dOut.CopyToHostAsync();
         readBack.AsSpan(0, output.Length).CopyTo(output.Span);
@@ -125,15 +143,17 @@ public sealed class ImdctKernel : IDisposable
         ArrayView<float> input,
         ArrayView<float> output,
         int blockCount,
-        int n)
+        int n,
+        int firstBlock)
     {
         int t = threadIdx;
         int twoN = 2 * n;
         int total = blockCount * twoN;
         if (t >= total) return;
 
-        int blockIdx = t / twoN;
-        int idx = t - blockIdx * twoN;
+        int local = t / twoN;
+        int idx = t - local * twoN;
+        int blockIdx = firstBlock + local;
 
         long inBase = (long)blockIdx * n;
         long outBase = (long)blockIdx * twoN;

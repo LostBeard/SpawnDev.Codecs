@@ -23,7 +23,7 @@ public sealed class VorbisCanonicalWindowGpuKernel : IDisposable
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
-        _kernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, int>(WindowKernel);
+        _kernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, int>(VorbisCanonicalWindowKernel);
     }
 
     /// <summary>Generate window of length n into <paramref name="output"/>.</summary>
@@ -35,7 +35,7 @@ public sealed class VorbisCanonicalWindowGpuKernel : IDisposable
         _kernel(n, output, n);
     }
 
-    private static void WindowKernel(Index1D threadIdx, ArrayView<float> output, int n)
+    private static void VorbisCanonicalWindowKernel(Index1D threadIdx, ArrayView<float> output, int n)
     {
         int i = threadIdx;
         if (i >= n) return;

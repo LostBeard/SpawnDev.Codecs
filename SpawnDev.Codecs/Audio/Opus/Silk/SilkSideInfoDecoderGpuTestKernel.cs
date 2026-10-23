@@ -37,7 +37,7 @@ public sealed class SilkSideInfoDecoderGpuTestKernel : IDisposable
             ArrayView<byte>, int, int,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             int,
-            ArrayView<int>>(SideInfoKernel);
+            ArrayView<int>>(SilkSideInfoTestKernel);
     }
 
     /// <summary>
@@ -69,7 +69,7 @@ public sealed class SilkSideInfoDecoderGpuTestKernel : IDisposable
             output);
     }
 
-    private static void SideInfoKernel(
+    private static void SilkSideInfoTestKernel(
         Index1D _,
         ArrayView<byte> packet, int packetStart, int packetStorage,
         ArrayView<byte> typeOffsetVadIcdf,

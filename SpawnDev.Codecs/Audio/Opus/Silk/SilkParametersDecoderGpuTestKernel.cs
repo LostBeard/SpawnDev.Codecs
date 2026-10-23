@@ -1,9 +1,10 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
 // Test/integration kernel that drives `SilkParametersDecoderGpu.Decode`.
-// Body-struct kernel parameter packs all per-stream codebook tables +
-// scratches into one logical kernel parameter; another body struct
-// holds the in/out state buffers; scalars bundle into another struct.
+// The per-stream codebook tables AND the in/out state + scratch regions live in
+// one buffer per element type (byte, short, sbyte, int) held by
+// SilkParametersInputs; SilkParametersState holds the state offsets into those
+// buffers. The kernel binds 7 storage buffers (one view per table needed 20).
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -17,47 +18,56 @@ namespace SpawnDev.Codecs.Audio.Opus.Silk;
 /// </summary>
 public struct SilkParametersInputs
 {
-    /// <summary>NLSF codebook Cb1NlsfQ8.</summary>
-    public ArrayView<byte> Cb1NlsfQ8;
-    /// <summary>NLSF codebook Cb1WghtQ9.</summary>
-    public ArrayView<short> Cb1WghtQ9;
-    /// <summary>NLSF codebook EcSel.</summary>
-    public ArrayView<byte> EcSel;
-    /// <summary>NLSF codebook PredQ8 source.</summary>
-    public ArrayView<byte> PredQ8Source;
-    /// <summary>NLSF codebook DeltaMinQ15 array.</summary>
-    public ArrayView<short> DeltaMinQ15;
-    /// <summary>SilkLsfCosTab.Q12 (length 129).</summary>
-    public ArrayView<short> LsfCosTabQ12;
-    /// <summary>(fs_kHz, nbSubfr)-resolved pitch contour codebook.</summary>
-    public ArrayView<sbyte> ContourCb;
-    /// <summary>Flat-packed LTP gain Q7 codebooks (LtpGain0+1+2 ×5 taps each = 280 sbytes).</summary>
-    public ArrayView<sbyte> LtpGainTablesFlat;
-    /// <summary>[0, 40, 120] - sbyte offsets into LtpGainTablesFlat per perIndex.</summary>
-    public ArrayView<int> LtpGainOffsets;
-    /// <summary>LtpScalesQ14 lookup [15565, 12288, 8192].</summary>
-    public ArrayView<short> LtpScaleQ14Table;
+    /// <summary>Byte tables + byte state (<see cref="PackedDeviceBuffer{T}"/>).</summary>
+    public ArrayView<byte> Bytes;
+    /// <summary>Short tables + short state.</summary>
+    public ArrayView<short> Shorts;
+    /// <summary>Sbyte tables + sbyte scratch.</summary>
+    public ArrayView<sbyte> SBytes;
+    /// <summary>Int tables + int state.</summary>
+    public ArrayView<int> Ints;
+    /// <summary>NLSF codebook CB1_NLSF_Q8 (in <see cref="Bytes"/>).</summary>
+    public int Cb1NlsfQ8At;
+    /// <summary>NLSF codebook CB1_Wght_Q9 (in <see cref="Shorts"/>).</summary>
+    public int Cb1WghtQ9At;
+    /// <summary>NLSF codebook ec_sel (in <see cref="Bytes"/>).</summary>
+    public int EcSelAt;
+    /// <summary>NLSF codebook pred_Q8 (in <see cref="Bytes"/>).</summary>
+    public int PredQ8SourceAt;
+    /// <summary>NLSF codebook deltaMin_Q15 (in <see cref="Shorts"/>).</summary>
+    public int DeltaMinQ15At;
+    /// <summary>silk_LSFCosTab_FIX_Q12 (in <see cref="Shorts"/>).</summary>
+    public int LsfCosTabQ12At;
+    /// <summary>Pitch contour codebook (in <see cref="SBytes"/>).</summary>
+    public int ContourCbAt;
+    /// <summary>Flat LTP gain tables (in <see cref="SBytes"/>).</summary>
+    public int LtpGainTablesFlatAt;
+    /// <summary>LTP gain table offsets per perIndex (in <see cref="Ints"/>).</summary>
+    public int LtpGainOffsetsAt;
+    /// <summary>silk_LTPScales_table_Q14 (in <see cref="Shorts"/>).</summary>
+    public int LtpScaleQ14TableAt;
 }
 
 /// <summary>
-/// In/out state body struct.
+/// In/out state + scratch regions of one stream: element offsets into the buffers of
+/// <see cref="SilkParametersInputs"/>.
 /// </summary>
 public struct SilkParametersState
 {
-    /// <summary>Previous frame's NLSFs Q15 (length order). In/out.</summary>
-    public ArrayView<short> PrevNlsfQ15;
-    /// <summary>Last gain index buffer (length 1). In/out.</summary>
-    public ArrayView<int> LastGainIndex;
-    /// <summary>Scratch for SilkNlsfDecodeGpu shorts (length >= 3*16).</summary>
-    public ArrayView<short> NlsfDecodeScratch;
-    /// <summary>Scratch for SilkNlsfDecodeGpu predQ8 (length >= 16).</summary>
-    public ArrayView<byte> NlsfDecodePredScratch;
-    /// <summary>Scratch for SilkNlsf2AGpu (length >= 65 ints).</summary>
-    public ArrayView<int> Nlsf2aScratch;
-    /// <summary>Scratch holding (order+1) sbyte NLSF indices.</summary>
-    public ArrayView<sbyte> NlsfIndicesScratch;
-    /// <summary>Scratch holding nbSubfr sbyte gain indices.</summary>
-    public ArrayView<sbyte> GainIndicesScratch;
+    /// <summary>Previous frame NLSF Q15 [order] (in Shorts, in/out).</summary>
+    public int PrevNlsfQ15At;
+    /// <summary>Previous gain index [1] (in Ints, in/out).</summary>
+    public int LastGainIndexAt;
+    /// <summary>NLSF decode scratch (in Shorts).</summary>
+    public int NlsfDecodeScratchAt;
+    /// <summary>NLSF decode pred scratch (in Bytes).</summary>
+    public int NlsfDecodePredScratchAt;
+    /// <summary>NLSF2A scratch (in Ints).</summary>
+    public int Nlsf2aScratchAt;
+    /// <summary>NLSF indices scratch [order + 1] (in SBytes).</summary>
+    public int NlsfIndicesScratchAt;
+    /// <summary>Gain indices scratch [nbSubfr] (in SBytes).</summary>
+    public int GainIndicesScratchAt;
 }
 
 /// <summary>
@@ -104,7 +114,7 @@ public sealed class SilkParametersDecoderGpuTestKernel : IDisposable
             SilkParametersState,
             SilkParametersScalars,
             ArrayView<int>,
-            ArrayView<short>>(ParametersKernel);
+            ArrayView<short>>(SilkParametersTestKernel);
     }
 
     /// <summary>
@@ -131,7 +141,7 @@ public sealed class SilkParametersDecoderGpuTestKernel : IDisposable
         _kernel(1, indicesIn, inputs, state, scalars, intOut, shortOut);
     }
 
-    private static void ParametersKernel(
+    private static void SilkParametersTestKernel(
         Index1D _,
         ArrayView<int> indicesIn,
         SilkParametersInputs inputs,
@@ -142,23 +152,8 @@ public sealed class SilkParametersDecoderGpuTestKernel : IDisposable
     {
         SilkParametersDecoderGpu.Decode(
             indicesIn, 0,
-            inputs.Cb1NlsfQ8,
-            inputs.Cb1WghtQ9,
-            inputs.EcSel,
-            inputs.PredQ8Source,
-            inputs.DeltaMinQ15,
-            inputs.LsfCosTabQ12,
-            inputs.ContourCb, scalars.ContourCbSize,
-            inputs.LtpGainTablesFlat,
-            inputs.LtpGainOffsets,
-            inputs.LtpScaleQ14Table,
-            state.PrevNlsfQ15, 0,
-            state.LastGainIndex, 0,
-            state.NlsfDecodeScratch, 0,
-            state.NlsfDecodePredScratch, 0,
-            state.Nlsf2aScratch, 0,
-            state.NlsfIndicesScratch, 0,
-            state.GainIndicesScratch, 0,
+            inputs, scalars.ContourCbSize,
+            state,
             scalars.QuantStepSizeQ16,
             scalars.Order, scalars.NbSubfr, scalars.FsKHz, scalars.Conditional,
             intOut, 0,

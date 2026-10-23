@@ -75,34 +75,9 @@ public static class SilkParametersDecoderGpu
     /// <param name="indicesIn">Output of SilkIndicesDecoderGpu.Decode (flat int buffer
     /// laid out per <see cref="SilkDecodedIndicesLayout"/>).</param>
     /// <param name="indicesInBase">Offset into indicesIn.</param>
-    /// <param name="cb1NlsfQ8">NLSF codebook first-stage Q8 NLSFs (length nVec*order).</param>
-    /// <param name="cb1WghtQ9">NLSF codebook first-stage inverse weights Q9.</param>
-    /// <param name="ecSel">NLSF codebook EcSel bytes.</param>
-    /// <param name="predQ8Source">NLSF codebook PredQ8 source.</param>
-    /// <param name="deltaMinQ15">NLSF codebook DeltaMinQ15 array (length order+1).</param>
-    /// <param name="lsfCosTabQ12">SilkLsfCosTab.Q12 (length 129).</param>
-    /// <param name="contourCb">Caller-resolved (fs_kHz, nbSubfr) pitch contour codebook.</param>
+    /// <param name="inputs">Tables + state buffers, packed (see <see cref="SilkParametersInputs"/>).</param>
     /// <param name="contourCbSize">Codebook size for the resolved contour.</param>
-    /// <param name="ltpGainTablesFlat">Flat-packed LTP gain Q7 codebooks
-    /// (LtpGain0[8*5] + LtpGain1[16*5] + LtpGain2[32*5] = 280 sbytes total).</param>
-    /// <param name="ltpGainOffsets">[0, 40, 120] - sbyte offsets into ltpGainTablesFlat per perIndex.</param>
-    /// <param name="ltpScaleQ14Table">LtpScalesQ14 lookup [15565, 12288, 8192].</param>
-    /// <param name="prevNlsfQ15InOut">In/out: previous frame's NLSFs Q15 (length order).</param>
-    /// <param name="prevNlsfQ15Base">Offset.</param>
-    /// <param name="lastGainIndexInOut">In/out: 1-int buffer holding last gain index.</param>
-    /// <param name="lastGainIndexBase">Offset.</param>
-    /// <param name="nlsfDecodeScratch">Scratch for SilkNlsfDecodeGpu (length >= 3*MaxLpcOrder shorts).</param>
-    /// <param name="nlsfDecodeScratchBase">Offset.</param>
-    /// <param name="nlsfDecodePredScratch">Scratch for SilkNlsfDecodeGpu predQ8 (length >= MaxLpcOrder bytes).</param>
-    /// <param name="nlsfDecodePredBase">Offset.</param>
-    /// <param name="nlsf2aScratch">Scratch for SilkNlsf2AGpu (length >= 65 ints).</param>
-    /// <param name="nlsf2aBase">Offset.</param>
-    /// <param name="nlsfIndicesScratch">Scratch holding (order+1) sbyte NLSF indices, copied
-    /// from indicesIn.</param>
-    /// <param name="nlsfIndicesScratchBase">Offset.</param>
-    /// <param name="gainIndicesScratch">Scratch holding nbSubfr sbyte gain indices, copied
-    /// from indicesIn.</param>
-    /// <param name="gainIndicesScratchBase">Offset.</param>
+    /// <param name="state">State + scratch offsets into the buffers of <paramref name="inputs"/>.</param>
     /// <param name="quantStepSizeQ16">codebook.QuantStepSizeQ16.</param>
     /// <param name="order">codebook.Order (10 or 16).</param>
     /// <param name="nbSubfr">Subframe count (2 or 4).</param>
@@ -116,23 +91,8 @@ public static class SilkParametersDecoderGpu
     /// <param name="shortOutBase">Offset.</param>
     public static void Decode(
         ArrayView<int> indicesIn, long indicesInBase,
-        ArrayView<byte> cb1NlsfQ8,
-        ArrayView<short> cb1WghtQ9,
-        ArrayView<byte> ecSel,
-        ArrayView<byte> predQ8Source,
-        ArrayView<short> deltaMinQ15,
-        ArrayView<short> lsfCosTabQ12,
-        ArrayView<sbyte> contourCb, int contourCbSize,
-        ArrayView<sbyte> ltpGainTablesFlat,
-        ArrayView<int> ltpGainOffsets,
-        ArrayView<short> ltpScaleQ14Table,
-        ArrayView<short> prevNlsfQ15InOut, long prevNlsfQ15Base,
-        ArrayView<int> lastGainIndexInOut, long lastGainIndexBase,
-        ArrayView<short> nlsfDecodeScratch, long nlsfDecodeScratchBase,
-        ArrayView<byte> nlsfDecodePredScratch, long nlsfDecodePredBase,
-        ArrayView<int> nlsf2aScratch, long nlsf2aBase,
-        ArrayView<sbyte> nlsfIndicesScratch, long nlsfIndicesScratchBase,
-        ArrayView<sbyte> gainIndicesScratch, long gainIndicesScratchBase,
+        SilkParametersInputs inputs, int contourCbSize,
+        SilkParametersState state,
         int quantStepSizeQ16, int order, int nbSubfr, int fsKHz, int conditional,
         ArrayView<int> intOut, long intOutBase,
         ArrayView<short> shortOut, long shortOutBase)
@@ -149,12 +109,12 @@ public static class SilkParametersDecoderGpu
         // SilkNlsfDecodeGpu primitives take ArrayView<sbyte>).
         for (int k = 0; k < nbSubfr; k++)
         {
-            gainIndicesScratch[gainIndicesScratchBase + k] =
+            inputs.SBytes[state.GainIndicesScratchAt + k] =
                 (sbyte)indicesIn[indicesInBase + SilkDecodedIndicesLayout.GainsIndicesOffset + k];
         }
         for (int i = 0; i <= order; i++)
         {
-            nlsfIndicesScratch[nlsfIndicesScratchBase + i] =
+            inputs.SBytes[state.NlsfIndicesScratchAt + i] =
                 (sbyte)indicesIn[indicesInBase + SilkDecodedIndicesLayout.NlsfIndicesOffset + i];
         }
 
@@ -163,31 +123,31 @@ public static class SilkParametersDecoderGpu
         int condForGain = conditional == 0 ? 0 : 1;
         SilkGainDecoderGpu.DequantizeAt(
             intOut, intOutBase + SilkDecodedParametersLayout.IntGainsQ16Offset,
-            gainIndicesScratch, gainIndicesScratchBase,
-            lastGainIndexInOut, lastGainIndexBase,
+            inputs.SBytes, state.GainIndicesScratchAt,
+            inputs.Ints, state.LastGainIndexAt,
             condForGain, nbSubfr);
 
         // 2. Decode NLSF vector.
         long nlsfOutBase = shortOutBase + SilkDecodedParametersLayout.ShortNlsfQ15Offset;
         SilkNlsfDecodeGpu.DecodeAt(
             shortOut, nlsfOutBase,
-            nlsfIndicesScratch, nlsfIndicesScratchBase,
-            cb1NlsfQ8, 0,
-            cb1WghtQ9, 0,
-            ecSel, 0,
-            predQ8Source, 0,
-            deltaMinQ15, 0,
+            inputs.SBytes, state.NlsfIndicesScratchAt,
+            inputs.Bytes, inputs.Cb1NlsfQ8At,
+            inputs.Shorts, inputs.Cb1WghtQ9At,
+            inputs.Bytes, inputs.EcSelAt,
+            inputs.Bytes, inputs.PredQ8SourceAt,
+            inputs.Shorts, inputs.DeltaMinQ15At,
             quantStepSizeQ16, order,
-            nlsfDecodeScratch, nlsfDecodeScratchBase,
-            nlsfDecodePredScratch, nlsfDecodePredBase);
+            inputs.Shorts, state.NlsfDecodeScratchAt,
+            inputs.Bytes, state.NlsfDecodePredScratchAt);
 
         // 3. NLSF -> LPC second half.
         long lpcHalf2Base = shortOutBase + SilkDecodedParametersLayout.ShortPredCoefQ12Half2Offset;
         SilkNlsf2AGpu.ComputeAt(
             shortOut, lpcHalf2Base,
             shortOut, nlsfOutBase,
-            lsfCosTabQ12, 0,
-            nlsf2aScratch, nlsf2aBase,
+            inputs.Shorts, inputs.LsfCosTabQ12At,
+            inputs.Ints, state.Nlsf2aScratchAt,
             order);
 
         // 4. NLSF -> LPC first half: interpolate from prev and current NLSF if
@@ -199,17 +159,17 @@ public static class SilkParametersDecoderGpu
             // (we've consumed it for SilkNlsfDecodeGpu but it's free now).
             for (int i = 0; i < order; i++)
             {
-                int prev = prevNlsfQ15InOut[prevNlsfQ15Base + i];
+                int prev = inputs.Shorts[state.PrevNlsfQ15At + i];
                 int cur = shortOut[nlsfOutBase + i];
                 int delta = cur - prev;
                 int interp = prev + ((nlsfInterpCoefQ2 * delta) >> 2);
-                nlsfDecodeScratch[nlsfDecodeScratchBase + i] = (short)interp;
+                inputs.Shorts[state.NlsfDecodeScratchAt + i] = (short)interp;
             }
             SilkNlsf2AGpu.ComputeAt(
                 shortOut, lpcHalf1Base,
-                nlsfDecodeScratch, nlsfDecodeScratchBase,
-                lsfCosTabQ12, 0,
-                nlsf2aScratch, nlsf2aBase,
+                inputs.Shorts, state.NlsfDecodeScratchAt,
+                inputs.Shorts, inputs.LsfCosTabQ12At,
+                inputs.Ints, state.Nlsf2aScratchAt,
                 order);
         }
         else
@@ -220,20 +180,20 @@ public static class SilkParametersDecoderGpu
 
         // 5. Update prev NLSFs for next frame.
         for (int i = 0; i < order; i++)
-            prevNlsfQ15InOut[prevNlsfQ15Base + i] = shortOut[nlsfOutBase + i];
+            inputs.Shorts[state.PrevNlsfQ15At + i] = shortOut[nlsfOutBase + i];
 
         // 6. Voiced-only: pitch + LTP.
         if (signalType == TypeVoiced)
         {
             // Pitch lag expansion.
             SilkPitchComputeLagsGpu.ComputeLags(
-                contourCb, 0, contourCbSize,
+                inputs.SBytes, inputs.ContourCbAt, contourCbSize,
                 lagIndex, contourIndex,
                 fsKHz, nbSubfr,
                 intOut, intOutBase + SilkDecodedParametersLayout.IntPitchLOffset);
 
             // LTP filter taps Q14 (sbyte << 7).
-            int ltpGainCbOffset = ltpGainOffsets[perIndex];
+            int ltpGainCbOffset = inputs.Ints[inputs.LtpGainOffsetsAt + perIndex];
             for (int k = 0; k < nbSubfr; k++)
             {
                 int ltpIdx = indicesIn[indicesInBase + SilkDecodedIndicesLayout.LtpIndicesOffset + k];
@@ -241,14 +201,14 @@ public static class SilkParametersDecoderGpu
                 long dst = shortOutBase + SilkDecodedParametersLayout.ShortLtpCoefQ14Offset + (long)k * 5;
                 for (int i = 0; i < 5; i++)
                 {
-                    sbyte tap = ltpGainTablesFlat[src + i];
+                    sbyte tap = inputs.SBytes[inputs.LtpGainTablesFlatAt + src + i];
                     shortOut[dst + i] = (short)((int)tap << 7);
                 }
             }
 
             // LTP scale Q14 lookup.
             shortOut[shortOutBase + SilkDecodedParametersLayout.ShortLtpScaleQ14Offset] =
-                ltpScaleQ14Table[ltpScaleIndex];
+                inputs.Shorts[inputs.LtpScaleQ14TableAt + ltpScaleIndex];
         }
         else
         {

@@ -19,7 +19,12 @@
 // Multi-kernel host orchestration matches the SpawnDev codec pattern
 // (Vorbis v2, etc.). Each kernel runs as a single thread (sequential
 // per-stream entropy decode); cross-stream parallelism happens across
-// channels in higher-level orchestration.
+// channels in higher-level orchestration. Every launch covers ONE SILK
+// frame (at most 20 ms at 16 kHz: 320 samples, 20 shell blocks, LPC order
+// <= 16), so its serial work is bounded by the format, never by the
+// stream. The tables + scratch reach the kernels as one buffer per element
+// type plus offsets (SilkIndicesInputs, SilkPulsesInputs, ...): at most 7
+// storage bindings per kernel.
 //
 // Upstream Copyright (c) 2006-2011 Skype Limited. BSD 3-Clause.
 
@@ -64,8 +69,6 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
 
     private readonly Action<
         Index1D,
-        ArrayView<int>,
-        ArrayView<short>,
         ArrayView<short>,
         SilkDecodeCoreInputs,
         SilkDecodeCoreScalars> _decodeCoreKernel;
@@ -73,7 +76,7 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
     private readonly Action<
         Index1D,
         ArrayView<short>,
-        ArrayView<short>,
+        int, int,
         int, int> _finalizeKernel;
 
     /// <summary>Compile all 3 phase kernels for the supplied accelerator.</summary>
@@ -87,7 +90,7 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             SilkIndicesInputs,
             SilkIndicesScalars,
             ArrayView<OpusRangeDecoderGpuState>,
-            ArrayView<int>>(IndicesAdapterKernel);
+            ArrayView<int>>(SilkFrameIndicesKernel);
 
         _pulsesKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
@@ -96,7 +99,7 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             ArrayView<int>,
             int,
             ArrayView<OpusRangeDecoderGpuState>,
-            ArrayView<short>>(PulsesAdapterKernel);
+            ArrayView<short>>(SilkFramePulsesKernel);
 
         _parametersKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
@@ -105,21 +108,19 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             SilkParametersState,
             SilkParametersScalars,
             ArrayView<int>,
-            ArrayView<short>>(ParametersAdapterKernel);
+            ArrayView<short>>(SilkFrameParametersKernel);
 
         _decodeCoreKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
-            ArrayView<int>,
-            ArrayView<short>,
             ArrayView<short>,
             SilkDecodeCoreInputs,
-            SilkDecodeCoreScalars>(DecodeCoreAdapterKernel);
+            SilkDecodeCoreScalars>(SilkFrameDecodeCoreKernel);
 
         _finalizeKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<short>,
-            ArrayView<short>,
-            int, int>(FinalizeFrameKernel);
+            int, int,
+            int, int>(SilkFrameFinalizeKernel);
     }
 
     /// <summary>
@@ -232,9 +233,7 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             LtpScaleQ14 = 0,
             NlsfInterpEnabled = nlsfInterpEnabled,
         };
-        _decodeCoreKernel(1,
-            paramsIntOut, paramsShortOut, pulsesOut,
-            decodeCoreInputs, decodeCoreScalars);
+        _decodeCoreKernel(1, paramsShortOut, decodeCoreInputs, decodeCoreScalars);
     }
 
     /// <summary>
@@ -276,7 +275,7 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             nlsfInterpEnabled,
             stateBuf, indicesOut, pulsesOut, paramsIntOut, paramsShortOut);
         _finalizeKernel(1,
-            decodeCoreInputs.OutBufInOut, decodeCoreInputs.XqOut,
+            decodeCoreInputs.Shorts, decodeCoreInputs.OutBufInOutAt, decodeCoreInputs.XqOutAt,
             ltpMemLength, frameLength);
     }
 
@@ -290,7 +289,7 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
     /// to <paramref name="stateBuf"/>[0]. Init is folded in here (vs a
     /// separate InitStateKernel dispatch) to keep the orchestrator's kernel
     /// count down on backends with cold-start compile pressure.</summary>
-    private static void IndicesAdapterKernel(
+    private static void SilkFrameIndicesKernel(
         Index1D _,
         ArrayView<byte> packet, int packetStart, int packetStorage,
         SilkIndicesInputs inputs,
@@ -301,28 +300,7 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
         var state = OpusRangeDecoderGpu.Init(packet, packetStart, (uint)packetStorage);
         SilkIndicesDecoderGpu.Decode(
             ref state, packet, packetStart, (uint)packetStorage,
-            inputs.TypeOffsetVadIcdf,
-            inputs.TypeOffsetNoVadIcdf,
-            inputs.Uniform4Icdf,
-            inputs.GainIcdf,
-            inputs.DeltaGainIcdf,
-            inputs.Uniform8Icdf,
-            inputs.Cb1Icdf,
-            inputs.EcIcdf,
-            inputs.EcSel,
-            inputs.PredQ8Source,
-            inputs.NlsfExtIcdf,
-            inputs.NlsfInterpolationFactorIcdf,
-            inputs.PitchDeltaIcdf,
-            inputs.PitchLagIcdf,
-            inputs.LagLowBitsIcdf,
-            inputs.ContourIcdf,
-            inputs.LtpPerIndexIcdf,
-            inputs.LtpGainIcdfFlat,
-            inputs.LtpGainOffsets,
-            inputs.LtpScaleIcdf,
-            inputs.EcIxScratch,
-            inputs.PredQ8Scratch,
+            inputs,
             scalars.NVectors, scalars.Order, scalars.NbSubfr, scalars.FsKHz,
             scalars.VadFlag, scalars.DecodeLbrr, scalars.Conditional,
             scalars.PrevLagIndex, scalars.PrevSignalTypeWasVoiced,
@@ -336,19 +314,19 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
     ///   outBuf[frameLength..ltpMemLength) -> outBuf[0..mvLen)
     ///   xq[0..frameLength)               -> outBuf[mvLen..ltpMemLength)
     /// where mvLen = ltpMemLength - frameLength. Single-thread kernel.</summary>
-    private static void FinalizeFrameKernel(
+    private static void SilkFrameFinalizeKernel(
         Index1D _,
-        ArrayView<short> outBuf,
-        ArrayView<short> xqOut,
+        ArrayView<short> shorts,
+        int outBufAt, int xqAt,
         int ltpMemLength, int frameLength)
     {
         int mvLen = ltpMemLength - frameLength;
         // Slide history left.
         for (int i = 0; i < mvLen; i++)
-            outBuf[i] = outBuf[frameLength + i];
+            shorts[outBufAt + i] = shorts[outBufAt + frameLength + i];
         // Stamp freshly-decoded xq into the tail.
         for (int i = 0; i < frameLength; i++)
-            outBuf[mvLen + i] = xqOut[i];
+            shorts[outBufAt + mvLen + i] = shorts[xqAt + i];
     }
 
     /// <summary>Phase C: read per-frame parameters from the
@@ -358,11 +336,9 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
     /// inputs struct), and call <see cref="SilkDecodeCoreGpu.Decode"/>.
     /// LtpScaleQ14 is read from the short parameter output and pushed into
     /// the local scalars copy used by the synthesis chain.</summary>
-    private static void DecodeCoreAdapterKernel(
+    private static void SilkFrameDecodeCoreKernel(
         Index1D _,
-        ArrayView<int> paramsIntIn,
         ArrayView<short> paramsShortIn,
-        ArrayView<short> pulsesIn,
         SilkDecodeCoreInputs inputs,
         SilkDecodeCoreScalars scalars)
     {
@@ -376,7 +352,7 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
     /// <summary>Phase P: dequantize per-frame parameters from the
     /// <paramref name="indicesIn"/> buffer. No range-decoder state crosses;
     /// pure data-flow kernel that reads indices and writes parameters.</summary>
-    private static void ParametersAdapterKernel(
+    private static void SilkFrameParametersKernel(
         Index1D _,
         ArrayView<int> indicesIn,
         SilkParametersInputs inputs,
@@ -387,23 +363,8 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
     {
         SilkParametersDecoderGpu.Decode(
             indicesIn, 0,
-            inputs.Cb1NlsfQ8,
-            inputs.Cb1WghtQ9,
-            inputs.EcSel,
-            inputs.PredQ8Source,
-            inputs.DeltaMinQ15,
-            inputs.LsfCosTabQ12,
-            inputs.ContourCb, scalars.ContourCbSize,
-            inputs.LtpGainTablesFlat,
-            inputs.LtpGainOffsets,
-            inputs.LtpScaleQ14Table,
-            state.PrevNlsfQ15, 0,
-            state.LastGainIndex, 0,
-            state.NlsfDecodeScratch, 0,
-            state.NlsfDecodePredScratch, 0,
-            state.Nlsf2aScratch, 0,
-            state.NlsfIndicesScratch, 0,
-            state.GainIndicesScratch, 0,
+            inputs, scalars.ContourCbSize,
+            state,
             scalars.QuantStepSizeQ16,
             scalars.Order, scalars.NbSubfr, scalars.FsKHz, scalars.Conditional,
             intOut, 0,
@@ -413,7 +374,7 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
     /// <summary>Phase A.2: load state from buffer, read SignalType +
     /// QuantOffsetType from the indices buffer, call
     /// <see cref="SilkPulsesDecoderGpu.Decode"/>, save state back.</summary>
-    private static void PulsesAdapterKernel(
+    private static void SilkFramePulsesKernel(
         Index1D _,
         ArrayView<byte> packet, int packetStart, int packetStorage,
         SilkPulsesInputs inputs,

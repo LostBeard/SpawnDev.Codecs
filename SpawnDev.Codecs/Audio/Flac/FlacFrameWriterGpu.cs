@@ -21,45 +21,52 @@
 //   [...]    VERBATIM subframes (one per channel, byte-aligned at end)
 //   [-2..-1] CRC-16 over all preceding bytes (big-endian)
 //
-// GPU note: this is a single-thread kernel-compatible helper. The
-// CRC + bit-writer state are sequential by construction; for
-// throughput, multiple frames could be emitted in parallel by
-// dispatching one thread per frame with disjoint output regions.
+// GPU form: the frame is written by FlacFrameWriterGpuKernel in parallel pieces (no thread walks a whole
+// frame): WriteHeader (one thread per frame: header + CRC-8, at most 12 bytes), the VERBATIM subframe bytes
+// (one thread per byte, FlacVerbatimSubframeGpu.PackByteAt), the CRC-16 over the frame (FlacCrcGpu pieces,
+// combined per frame). Every offset is known from the frame number and the block shape (FrameBytes).
 
 using ILGPU;
 
 namespace SpawnDev.Codecs.Audio.Flac;
 
 /// <summary>
-/// GPU-callable FLAC v1 frame writer. Single-frame helper - assembles
-/// the frame header + CRC-8 + VERBATIM subframes + CRC-16 into the
-/// caller's output byte buffer.
+/// GPU-callable FLAC v1 frame writer pieces: the frame layout (header length from the frame number, VERBATIM
+/// subframes, CRC-16 footer) and the header writer. FlacFrameWriterGpuKernel assembles frames from them.
 /// </summary>
 public static class FlacFrameWriterGpu
 {
+    /// <summary>Bytes of the UTF-8-style frame number <see cref="WriteUtf8Number"/> writes for <paramref name="value"/>.</summary>
+    public static int Utf8Bytes(ulong value)
+        => value < 0x80 ? 1
+         : value < 0x800 ? 2
+         : value < 0x10000 ? 3
+         : value < 0x200000 ? 4
+         : value < 0x4000000 ? 5
+         : 6;
+
+    /// <summary>Frame header bytes before the CRC-8: 32 fixed bits plus the UTF-8 frame number.</summary>
+    public static int HeaderBytes(ulong frameNumber) => 4 + Utf8Bytes(frameNumber);
+
+    /// <summary>Frame-relative offset of the first subframe byte (header + CRC-8).</summary>
+    public static int SubframesStart(ulong frameNumber) => HeaderBytes(frameNumber) + 1;
+
+    /// <summary>Frame bytes before the CRC-16 footer.</summary>
+    public static long PreFooterBytes(int blockSize, int channels, int bps, ulong frameNumber)
+        => SubframesStart(frameNumber) + FlacVerbatimSubframeGpu.SubframesBytes(blockSize, channels, bps);
+
+    /// <summary>Total frame bytes (CRC-16 footer included).</summary>
+    public static long FrameBytes(int blockSize, int channels, int bps, ulong frameNumber)
+        => PreFooterBytes(blockSize, channels, bps, frameNumber) + 2;
+
     /// <summary>
-    /// Encode one FLAC frame. Returns the number of bytes written to
-    /// <paramref name="outBuf"/> starting at <paramref name="outBase"/>.
+    /// Writes the frame header bits and the CRC-8 byte at <paramref name="outBase"/> (v1 codes: block size 4096,
+    /// 44.1 kHz, independent channels, 16-bit, fixed blocking). Returns <see cref="SubframesStart"/>.
     /// </summary>
-    /// <param name="samples">Per-channel sample buffers concatenated:
-    /// channel 0 samples, then channel 1, etc.</param>
-    /// <param name="samplesBase">Starting offset for channel 0's samples.</param>
-    /// <param name="blockSize">Samples per channel (must equal 4096 for v1).</param>
-    /// <param name="channels">Channel count (1..8).</param>
-    /// <param name="bps">Bits per sample (must be 16 for v1).</param>
-    /// <param name="frameNumber">Sequential frame number.</param>
-    /// <param name="outBuf">Output byte buffer.</param>
-    /// <param name="outBase">Starting offset in <paramref name="outBuf"/>.</param>
-    public static long EncodeFrame(
-        ArrayView<int> samples, long samplesBase,
-        int blockSize, int channels, int bps,
-        ulong frameNumber,
-        ArrayView<byte> outBuf, long outBase)
+    public static int WriteHeader(ArrayView<byte> outBuf, long outBase, int channels, ulong frameNumber)
     {
-        // ---- 1. Build header bits + CRC-8 byte ----
         // OutLen is buffer-start-relative; pre-seed it to outBase so the
-        // bit writer's first byte lands at outBuf[outBase]. The frame
-        // length returned at the bottom subtracts outBase. This is what
+        // bit writer's first byte lands at outBuf[outBase]. This is what
         // makes batch/parallel encoding (multiple threads each writing to
         // its own outBase slot) correct.
         var hdr = FlacBitWriterGpu.Init();
@@ -84,41 +91,18 @@ public static class FlacFrameWriterGpu
         // 4096 size); sample rate code 9 means no side bytes (44.1 kHz
         // is in the standard table).
         FlacBitWriterGpu.AlignToByte(ref hdr, outBuf);
-        long headerBytes = hdr.OutLen - outBase;
+        int headerBytes = (int)(hdr.OutLen - outBase);
 
         // CRC-8 over the header bytes.
-        byte crc8 = FlacCrcGpu.Compute8(outBuf, outBase, (int)headerBytes);
-        outBuf[outBase + headerBytes] = crc8;
-        long postHeader = headerBytes + 1; // frame-relative offset after CRC-8
-
-        // ---- 2. Per-channel VERBATIM subframes ----
-        var sub = FlacBitWriterGpu.Init();
-        // Re-init the writer to point past the header. The OutLen
-        // counter accumulates from buffer start; we want it to start
-        // at outBase + postHeader.
-        sub.OutLen = outBase + postHeader;
-        for (int ch = 0; ch < channels; ch++)
-        {
-            FlacVerbatimSubframeGpu.Encode(ref sub, outBuf,
-                samples, samplesBase + (long)ch * blockSize,
-                blockSize, bps);
-        }
-        FlacBitWriterGpu.AlignToByte(ref sub, outBuf);
-        long preFooterLen = sub.OutLen - outBase; // bytes written so far (frame-relative)
-
-        // ---- 3. CRC-16 over all preceding frame bytes ----
-        ushort crc16 = FlacCrcGpu.Compute16(outBuf, outBase, (int)preFooterLen);
-        outBuf[outBase + preFooterLen] = (byte)(crc16 >> 8);
-        outBuf[outBase + preFooterLen + 1] = (byte)(crc16 & 0xFF);
-
-        return preFooterLen + 2;
+        outBuf[outBase + headerBytes] = FlacCrcGpu.Compute8(outBuf, outBase, headerBytes);
+        return headerBytes + 1;
     }
 
     /// <summary>
     /// Encode a value as UTF-8-style variable-length integer (FLAC
     /// convention). Mirrors FlacEncoder.WriteUtf8Number bit-for-bit.
     /// </summary>
-    private static void WriteUtf8Number(
+    public static void WriteUtf8Number(
         ref FlacBitWriterGpuState w, ArrayView<byte> outBuf, ulong value)
     {
         if (value < 0x80)

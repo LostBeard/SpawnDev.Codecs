@@ -27,9 +27,9 @@ public sealed class SilkBwexpanderGpuKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel16 = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, int, int>(Expand16Kernel);
+            Index1D, ArrayView<short>, int, int>(SilkBwexpand16Kernel);
         _kernel32 = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, int, int>(Expand32Kernel);
+            Index1D, ArrayView<int>, int, int>(SilkBwexpand32Kernel);
     }
 
     /// <summary>Expand a 16-bit AR filter in place.</summary>
@@ -48,10 +48,10 @@ public sealed class SilkBwexpanderGpuKernel : IDisposable
         _kernel32(1, ar, d, chirpQ16);
     }
 
-    private static void Expand16Kernel(Index1D _, ArrayView<short> ar, int d, int chirpQ16)
+    private static void SilkBwexpand16Kernel(Index1D _, ArrayView<short> ar, int d, int chirpQ16)
         => SilkBwexpanderGpu.Expand16(ar, 0, d, chirpQ16);
 
-    private static void Expand32Kernel(Index1D _, ArrayView<int> ar, int d, int chirpQ16)
+    private static void SilkBwexpand32Kernel(Index1D _, ArrayView<int> ar, int d, int chirpQ16)
         => SilkBwexpanderGpu.Expand32(ar, 0, d, chirpQ16);
 
     /// <summary>Release kernel resources.</summary>

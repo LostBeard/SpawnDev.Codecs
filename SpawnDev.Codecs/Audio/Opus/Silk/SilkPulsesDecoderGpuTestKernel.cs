@@ -27,7 +27,7 @@ public sealed class SilkPulsesDecoderGpuTestKernel : IDisposable
             ArrayView<byte>, int, int,
             SilkPulsesInputs,
             int, int, int,
-            ArrayView<short>>(PulsesKernel);
+            ArrayView<short>>(SilkPulsesTestKernel);
     }
 
     /// <summary>Decode the signed excitation pulses for one SILK frame.</summary>
@@ -41,7 +41,7 @@ public sealed class SilkPulsesDecoderGpuTestKernel : IDisposable
             signalType, quantOffsetType, frameLength, pulsesOut);
     }
 
-    private static void PulsesKernel(
+    private static void SilkPulsesTestKernel(
         Index1D _,
         ArrayView<byte> packet, int packetStart, int packetStorage,
         SilkPulsesInputs inputs,

@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
             dOut.View.CopyFromCPU(new byte[worstCase]);
 
             using var kernel = new FlacFrameWriterGpuKernel(acc);
-            kernel.Run(dSamples.View, dOut.View, dOutLen.View, blockSize, channels, bps, frameNumber);
+            await kernel.RunAsync(dSamples.View, dOut.View, dOutLen.View, blockSize, channels, bps, frameNumber);
             await acc.SynchronizeAsync();
 
             long gpuLen = (await dOutLen.CopyToHostAsync())[0];
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
             dOut.View.CopyFromCPU(new byte[worstCase]);
 
             using var kernel = new FlacFrameWriterGpuKernel(acc);
-            kernel.Run(dSamples.View, dOut.View, dOutLen.View, blockSize, channels, bps, frameNumber);
+            await kernel.RunAsync(dSamples.View, dOut.View, dOutLen.View, blockSize, channels, bps, frameNumber);
             await acc.SynchronizeAsync();
 
             long gpuLen = (await dOutLen.CopyToHostAsync())[0];

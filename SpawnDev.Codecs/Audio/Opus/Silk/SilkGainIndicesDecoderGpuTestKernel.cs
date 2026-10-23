@@ -33,7 +33,7 @@ public sealed class SilkGainIndicesDecoderGpuTestKernel : IDisposable
             ArrayView<byte>, int, int,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             int, int, int,
-            ArrayView<int>>(GainIndicesKernel);
+            ArrayView<int>>(SilkGainIndicesTestKernel);
     }
 
     /// <summary>Decode <paramref name="nbSubfr"/> gain indices from <paramref name="packet"/>.</summary>
@@ -54,7 +54,7 @@ public sealed class SilkGainIndicesDecoderGpuTestKernel : IDisposable
             output);
     }
 
-    private static void GainIndicesKernel(
+    private static void SilkGainIndicesTestKernel(
         Index1D _,
         ArrayView<byte> packet, int packetStart, int packetStorage,
         ArrayView<byte> gainIcdf,

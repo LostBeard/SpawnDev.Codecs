@@ -57,7 +57,10 @@ public static class VorbisBitReaderGpu
         {
             int available = 8 - state.BitPos;
             int take = available < nBits ? available : nBits;
-            int b = data[state.BytePos];
+            // Past the end of the packet the reader yields zero bits instead of reading past the buffer
+            // (a truncated packet must not read out of bounds; the decoders' EOP checks see IsEnd).
+            int b = 0;
+            if (state.BytePos < state.Length) b = data[state.BytePos];
             uint chunk = (uint)((b >> state.BitPos) & ((1 << take) - 1));
             result |= chunk << outBit;
             state.BitPos += take;

@@ -45,7 +45,7 @@ public sealed class SilkPitchIndicesDecoderGpuTestKernel : IDisposable
             ArrayView<byte>, int, int,
             SilkPitchIndicesInputs,
             int, int, int, int,
-            ArrayView<int>>(PitchIndicesKernel);
+            ArrayView<int>>(SilkPitchIndicesTestKernel);
     }
 
     /// <summary>
@@ -66,7 +66,7 @@ public sealed class SilkPitchIndicesDecoderGpuTestKernel : IDisposable
             output);
     }
 
-    private static void PitchIndicesKernel(
+    private static void SilkPitchIndicesTestKernel(
         Index1D _,
         ArrayView<byte> packet, int packetStart, int packetStorage,
         SilkPitchIndicesInputs inputs,

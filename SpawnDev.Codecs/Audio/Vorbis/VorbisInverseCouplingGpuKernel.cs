@@ -24,7 +24,7 @@ public sealed class VorbisInverseCouplingGpuKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<float>, ArrayView<float>, int>(CouplingKernel);
+            Index1D, ArrayView<float>, ArrayView<float>, int>(VorbisInverseCouplingKernel);
     }
 
     /// <summary>
@@ -41,7 +41,7 @@ public sealed class VorbisInverseCouplingGpuKernel : IDisposable
         _kernel(coefCount, magBuf, angBuf, coefCount);
     }
 
-    private static void CouplingKernel(
+    private static void VorbisInverseCouplingKernel(
         Index1D threadIdx,
         ArrayView<float> magBuf,
         ArrayView<float> angBuf,

@@ -20,7 +20,7 @@ public sealed class SilkSigmoidGpuKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, int>(SigmoidKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, int>(SilkSigmoidKernel);
     }
 
     /// <summary>Compute sigmoid(in[i]) for i in [0, count).</summary>
@@ -31,7 +31,7 @@ public sealed class SilkSigmoidGpuKernel : IDisposable
         _kernel(count, input, output, count);
     }
 
-    private static void SigmoidKernel(
+    private static void SilkSigmoidKernel(
         Index1D threadIdx,
         ArrayView<int> input,
         ArrayView<int> output,
