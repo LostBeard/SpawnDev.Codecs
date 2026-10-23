@@ -1,6 +1,8 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt). Port of libwebp 1.6.0 src/utils/bit_writer_utils.c (VP8BitWriter),
 // BSD licence, see NOTICE.md. Statement for statement: range is kept as "range - 1", 0xff bytes are delayed in `run` for carry.
 
+using SpawnDev.Codecs.Images.WebP.Lossy;
+
 namespace SpawnDev.Codecs.References.Images.WebP.Lossy;
 
 /// <summary>libwebp's VP8 boolean encoder.</summary>

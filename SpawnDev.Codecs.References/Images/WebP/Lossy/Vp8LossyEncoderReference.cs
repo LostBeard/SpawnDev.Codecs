@@ -6,6 +6,8 @@
 // the order of every state update and every integer quirk follow the C source (comments name the C function). This is the
 // oracle for the accelerator encoder, not the shipping path.
 
+using SpawnDev.Codecs.Images.WebP.Lossy;
+
 namespace SpawnDev.Codecs.References.Images.WebP.Lossy;
 
 /// <summary>The libwebp WebPConfig fields the lossy encoder uses (defaults = WebPConfigInit, i.e. what Pillow sets).</summary>

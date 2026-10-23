@@ -67,12 +67,12 @@ public sealed class SilkDecoder
         _internalFrameLength = _state.FrameLength;
         _outputFrameLength = outputSampleRateHz / 1000 * frameLengthMs;
 
-        if (outputSampleRateHz != internalSampleRateHz)
-        {
-            _resamplerState = new SilkResamplerState();
-            SilkResampler.Init(_resamplerState, internalSampleRateHz, outputSampleRateHz, forEncode: false);
-            _internalPcmBuf = new short[_internalFrameLength];
-        }
+        // ALWAYS through the resampler, like libopus silk_Decode: with equal rates it is the copy resampler, which still
+        // applies delay_matrix_dec's input delay (4 samples at 8 kHz, 9 at 12, 12 at 16). Skipping it made every SILK
+        // output start that many samples early (CrossValidate_Silk* vs Concentus failed since they were written).
+        _resamplerState = new SilkResamplerState();
+        SilkResampler.Init(_resamplerState, internalSampleRateHz, outputSampleRateHz, forEncode: false);
+        _internalPcmBuf = new short[_internalFrameLength];
 
         InternalSampleRateHz = internalSampleRateHz;
         OutputSampleRateHz = outputSampleRateHz;
@@ -145,15 +145,9 @@ public sealed class SilkDecoder
             throw new ArgumentException(
                 $"pcmOut too small (need {_outputFrameLength}).", nameof(pcmOut));
 
-        if (_resamplerState is null)
-        {
-            SilkDecodeFrame.Decode(_state, rangeDec, pcmOut, vadFlag, conditional ? 1 : 0);
-            return _internalFrameLength;
-        }
-
         SilkDecodeFrame.Decode(_state, rangeDec, _internalPcmBuf!.AsSpan(0, _internalFrameLength),
             vadFlag, conditional ? 1 : 0);
-        SilkResampler.Apply(_resamplerState, pcmOut, _internalPcmBuf.AsSpan(0, _internalFrameLength),
+        SilkResampler.Apply(_resamplerState!, pcmOut, _internalPcmBuf.AsSpan(0, _internalFrameLength),
             _internalFrameLength);
         return _outputFrameLength;
     }

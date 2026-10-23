@@ -320,15 +320,11 @@ public sealed class OpusDecoder : IAudioDecoder
 
         int outputRateKHz = _config.SampleRateHz / 1000;
         int outputFrameLen = outputRateKHz * silkFrameLengthMs;
-        bool needResample = _config.SampleRateHz != internalKHz * 1000;
-
-        if (needResample)
+        // Always resample (libopus silk_Decode): equal rates use the copy resampler, which still applies the input delay.
+        if (_silkResampleLOut is null || _silkResampleLOut.Length < outputFrameLen)
         {
-            if (_silkResampleLOut is null || _silkResampleLOut.Length < outputFrameLen)
-            {
-                _silkResampleLOut = new short[outputFrameLen];
-                _silkResampleROut = new short[outputFrameLen];
-            }
+            _silkResampleLOut = new short[outputFrameLen];
+            _silkResampleROut = new short[outputFrameLen];
         }
 
         for (int f = 0; f < silkFrameCount; f++)
@@ -367,33 +363,21 @@ public sealed class OpusDecoder : IAudioDecoder
             SilkStereoMsToLr.Apply(_silkStereoState!, _silkMidScratch, _silkSideScratch,
                 predQ13, internalKHz, internalFrameLen);
 
-            if (needResample)
-            {
-                // Resample L and R independently from internal to output rate.
-                SilkResampler.Apply(_silkResamplerL!,
-                    _silkResampleLOut!.AsSpan(0, outputFrameLen),
-                    _silkMidScratch.AsSpan(1, internalFrameLen),
-                    internalFrameLen);
-                SilkResampler.Apply(_silkResamplerR!,
-                    _silkResampleROut!.AsSpan(0, outputFrameLen),
-                    _silkSideScratch.AsSpan(1, internalFrameLen),
-                    internalFrameLen);
+            // Resample L and R independently from internal to output rate.
+            SilkResampler.Apply(_silkResamplerL!,
+                _silkResampleLOut!.AsSpan(0, outputFrameLen),
+                _silkMidScratch.AsSpan(1, internalFrameLen),
+                internalFrameLen);
+            SilkResampler.Apply(_silkResamplerR!,
+                _silkResampleROut!.AsSpan(0, outputFrameLen),
+                _silkSideScratch.AsSpan(1, internalFrameLen),
+                internalFrameLen);
 
-                int baseOffset = f * outputFrameLen * 2;
-                for (int i = 0; i < outputFrameLen; i++)
-                {
-                    pcmOut[baseOffset + 2 * i] = _silkResampleLOut![i] / 32768.0f;
-                    pcmOut[baseOffset + 2 * i + 1] = _silkResampleROut![i] / 32768.0f;
-                }
-            }
-            else
+            int baseOffset = f * outputFrameLen * 2;
+            for (int i = 0; i < outputFrameLen; i++)
             {
-                int baseOffset = f * internalFrameLen * 2;
-                for (int i = 0; i < internalFrameLen; i++)
-                {
-                    pcmOut[baseOffset + 2 * i] = _silkMidScratch[i + 1] / 32768.0f;
-                    pcmOut[baseOffset + 2 * i + 1] = _silkSideScratch[i + 1] / 32768.0f;
-                }
+                pcmOut[baseOffset + 2 * i] = _silkResampleLOut![i] / 32768.0f;
+                pcmOut[baseOffset + 2 * i + 1] = _silkResampleROut![i] / 32768.0f;
             }
         }
     }
@@ -434,23 +418,15 @@ public sealed class OpusDecoder : IAudioDecoder
             }
             _silkStereoState ??= new SilkStereoState();
 
-            // If output rate differs from internal, allocate a per-channel resampler pair.
-            if (_config.SampleRateHz != internalKHz * 1000)
+            // A per-channel resampler pair, also for equal rates (copy resampler + input delay, as libopus).
+            if (_silkResamplerL is null || configChanged)
             {
-                if (_silkResamplerL is null || configChanged)
-                {
-                    _silkResamplerL = new SilkResamplerState();
-                    SilkResampler.Init(_silkResamplerL, internalKHz * 1000, _config.SampleRateHz, forEncode: false);
-                    _silkResamplerR = new SilkResamplerState();
-                    SilkResampler.Init(_silkResamplerR, internalKHz * 1000, _config.SampleRateHz, forEncode: false);
-                    _silkResampleLOut = null;
-                    _silkResampleROut = null;
-                }
-            }
-            else
-            {
-                _silkResamplerL = null;
-                _silkResamplerR = null;
+                _silkResamplerL = new SilkResamplerState();
+                SilkResampler.Init(_silkResamplerL, internalKHz * 1000, _config.SampleRateHz, forEncode: false);
+                _silkResamplerR = new SilkResamplerState();
+                SilkResampler.Init(_silkResamplerR, internalKHz * 1000, _config.SampleRateHz, forEncode: false);
+                _silkResampleLOut = null;
+                _silkResampleROut = null;
             }
         }
     }

@@ -2,6 +2,8 @@
 // src/dsp/enc.c and src/dsp/dec.c (TransformWHT), BSD licence, see NOTICE.md. libwebp's SIMD versions are bit-exact with
 // these. Pointers become (array, offset); every block lives in a BPS = 32 stride cache exactly like libwebp's yuv_mem.
 
+using SpawnDev.Codecs.Images.WebP.Lossy;
+
 namespace SpawnDev.Codecs.References.Images.WebP.Lossy;
 
 /// <summary>A libwebp VP8Matrix (quantizer of one coefficient class).</summary>

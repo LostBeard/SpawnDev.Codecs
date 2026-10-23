@@ -117,6 +117,9 @@ loses to every generator, so the encoder is upgraded first. Parity target: libwe
   reconstructions are evaluated by separate threads and reduced to libwebp's choice (first index of the minimum score; the
   I4 early-out never changes that result; the I16 flatness flag is a prefix-AND over the modes); (d) token emission, header and
   RIFF assembly are single threads.
+- [x] E2..E6 (opaque pictures, methods 3 / 4, one partition): `WebPLossyEncoderGpu` byte-identical with libwebp on CPU,
+      CUDA, OpenCL (222 fixtures). Open: browser lanes; ALPH (transparency); methods 0..2, 5..6 (trellis); 2/4/8 partitions;
+      parallel candidate evaluation inside a macroblock (performance).
 - [ ] E2 intra mode decision: I16 (DC/V/H/TM), I4 (10 modes) and UV (4 modes) chosen by distortion + lambda * rate like
       libwebp method 4 (`VP8Decimate`: score = SSE * RD_DISTO_MULT + lambda * bits, with the spectral-distortion term
       `tlambda` for I4/I16); per-macroblock recon stays on the accelerator (wavefront, like the decoder).
