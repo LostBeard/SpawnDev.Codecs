@@ -306,20 +306,12 @@ public abstract partial class CodecsTestBase
         return (indices, pulsesSlice, paramsInt, paramsShort);
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeFrameGpu_PhaseAP_Voiced_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            if (acc.AcceleratorType == AcceleratorType.Cuda
-                || acc.AcceleratorType == AcceleratorType.WebGPU)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P inherits SilkDecodeCoreGpu's CUDA + WebGPU gates. "
-                    + "See _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-silkdecodecoregpu-cuda-webgpu-2026-05-04.md.");
-            if (acc.AcceleratorType == AcceleratorType.Wasm)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P on Wasm exceeds PMT's 30s per-test cold-start timeout.");
 
             const int fsKHz = 8, nbSubfr = 4;
             int frameLength = nbSubfr * 5 * fsKHz;
@@ -636,19 +628,12 @@ public abstract partial class CodecsTestBase
         return (pcm, sLpcOut, prevGainOut[0], outBufFull);
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeFrameGpu_PhaseAPC_Voiced_MB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            if (acc.AcceleratorType == AcceleratorType.Cuda
-                || acc.AcceleratorType == AcceleratorType.WebGPU)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P+C inherits SilkDecodeCoreGpu's CUDA + WebGPU gates.");
-            if (acc.AcceleratorType == AcceleratorType.Wasm)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P+C on Wasm exceeds PMT's 30s per-test cold-start timeout.");
 
             // MB voiced: 12 kHz × 4 subframes × 60 samples = 240 samples/frame.
             // Distinct subfrLength path between NB (40) and WB (80).
@@ -712,19 +697,12 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeFrameGpu_PhaseAPC_Voiced_WB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            if (acc.AcceleratorType == AcceleratorType.Cuda
-                || acc.AcceleratorType == AcceleratorType.WebGPU)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P+C inherits SilkDecodeCoreGpu's CUDA + WebGPU gates.");
-            if (acc.AcceleratorType == AcceleratorType.Wasm)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P+C on Wasm exceeds PMT's 30s per-test cold-start timeout.");
 
             // WB voiced: 16 kHz × 4 subframes × 80 samples = 320 samples/frame.
             // lpcOrder=16 exercises the WB NLSF codebook + the full 16-tap LPC
@@ -789,19 +767,12 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeFrameGpu_TwoFrameStateRolling_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            if (acc.AcceleratorType == AcceleratorType.Cuda
-                || acc.AcceleratorType == AcceleratorType.WebGPU)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P+C+F inherits SilkDecodeCoreGpu's CUDA + WebGPU gates.");
-            if (acc.AcceleratorType == AcceleratorType.Wasm)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P+C+F on Wasm exceeds PMT's 30s per-test timeout (×2 frames doubles the cold-start cost).");
 
             // Two consecutive voiced NB frames threaded through state. Verifies
             // the orchestrator is multi-frame-ready end-to-end: frame 2's
@@ -910,19 +881,12 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeFrameGpu_PhaseAPC_Unvoiced_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            if (acc.AcceleratorType == AcceleratorType.Cuda
-                || acc.AcceleratorType == AcceleratorType.WebGPU)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P+C inherits SilkDecodeCoreGpu's CUDA + WebGPU gates.");
-            if (acc.AcceleratorType == AcceleratorType.Wasm)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P+C on Wasm exceeds PMT's 30s per-test cold-start timeout.");
 
             // Unvoiced signal type (TYPE_UNVOICED = 1). Exercises the VAD iCDF
             // path in the indices decoder + the unvoiced branch in decode_core
@@ -982,19 +946,12 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeFrameGpu_PhaseAPC_Inactive_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            if (acc.AcceleratorType == AcceleratorType.Cuda
-                || acc.AcceleratorType == AcceleratorType.WebGPU)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P+C inherits SilkDecodeCoreGpu's CUDA + WebGPU gates.");
-            if (acc.AcceleratorType == AcceleratorType.Wasm)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P+C on Wasm exceeds PMT's 30s per-test cold-start timeout.");
 
             // Inactive signal type (TYPE_NO_VOICE_ACTIVITY = 0). Exercises the
             // non-VAD iCDF in the indices decoder + the unvoiced / inactive
@@ -1054,20 +1011,12 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeFrameGpu_PhaseAPCF_Voiced_NB_OutBufShiftBitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            if (acc.AcceleratorType == AcceleratorType.Cuda
-                || acc.AcceleratorType == AcceleratorType.WebGPU)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P+C+F inherits SilkDecodeCoreGpu's CUDA + WebGPU gates. "
-                    + "See _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-silkdecodecoregpu-cuda-webgpu-2026-05-04.md.");
-            if (acc.AcceleratorType == AcceleratorType.Wasm)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P+C+F on Wasm exceeds PMT's 30s per-test cold-start timeout.");
 
             const int fsKHz = 8, nbSubfr = 4, lpcOrder = 10;
             int frameLength = nbSubfr * 5 * fsKHz;
@@ -1139,20 +1088,12 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeFrameGpu_PhaseAPC_Voiced_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            if (acc.AcceleratorType == AcceleratorType.Cuda
-                || acc.AcceleratorType == AcceleratorType.WebGPU)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P+C inherits SilkDecodeCoreGpu's CUDA + WebGPU gates. "
-                    + "See _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-silkdecodecoregpu-cuda-webgpu-2026-05-04.md.");
-            if (acc.AcceleratorType == AcceleratorType.Wasm)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A+P+C on Wasm exceeds PMT's 30s per-test cold-start timeout.");
 
             const int fsKHz = 8, nbSubfr = 4, lpcOrder = 10;
             int frameLength = nbSubfr * 5 * fsKHz;
@@ -1219,28 +1160,12 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeFrameGpu_PhaseA_Unvoiced_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            // Phase A folds InitStateKernel into IndicesAdapterKernel (5 kernels
-            // total instead of 6). Tested 2026-05-04 with gate lifted on
-            // WebGPU + Wasm + CUDA:
-            //   WebGPU: NEW failure - 'Argument_InvalidTypeWithPointersNotSupported,
-            //     ILGPU.ArrayView<byte>' on kernel arg marshaling. ILGPU bug.
-            //   Wasm: 33s timeout still (5-kernel orchestrator still over PMT 30s).
-            // Re-gating until both close. Math correct (CPU + OpenCL bit-exact).
-            if (acc.AcceleratorType == AcceleratorType.Cuda
-                || acc.AcceleratorType == AcceleratorType.WebGPU)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A gated on backends with ILGPU codegen issues. "
-                    + "WebGPU: Argument_InvalidTypeWithPointersNotSupported on ArrayView<byte> kernel arg.");
-            if (acc.AcceleratorType == AcceleratorType.Wasm)
-                throw new UnsupportedTestException(
-                    "SilkDecodeFrameGpu Phase A on Wasm exceeds PMT's 30s per-test cold-start timeout "
-                    + "even with InitState folded in (5-kernel orchestrator constructor still exceeds budget).");
 
             const int fsKHz = 8, nbSubfr = 4;
             int frameLength = nbSubfr * 5 * fsKHz;

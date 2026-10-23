@@ -167,43 +167,12 @@ public abstract partial class CodecsTestBase
         return (xqSlice, sLpcOut, prevGainOut[0]);
     }
 
-    /// <summary>
-    /// 2026-05-04 SilkDecodeCoreGpu hits two ILGPU backend bugs documented at
-    /// _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-silkdecodecoregpu-cuda-webgpu-2026-05-04.md.
-    /// CUDA: "too many resources requested for launch" (auto-grouped picks block
-    /// size whose register × thread footprint exceeds SM register file).
-    /// WebGPU: "Invalid BindGroupLayout" (15-view body struct exceeds default
-    /// device storage-buffer binding count). Both are ILGPU codegen / launch
-    /// config issues, not codec logic - bit-exact passes on CPU + OpenCL + Wasm.
-    /// </summary>
-    private static void SilkDecodeCoreTest_GateBackend(Accelerator acc)
-    {
-        if (acc.AcceleratorType == AcceleratorType.Cuda)
-            throw new UnsupportedTestException(
-                "TEMPORARY: SilkDecodeCoreGpu auto-grouped launch hits CUDA 'too many resources requested for "
-                + "launch'. ILGPU auto-grouper picks block size whose register × thread footprint exceeds SM "
-                + "limits for this kernel's 15-ArrayView body struct + LPC-synthesis-unroll. Verified 2026-05-04: "
-                + "shrinking kernel-side caching didn't help; body struct dominates. Tracked at "
-                + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-silkdecodecoregpu-cuda-webgpu-2026-05-04.md "
-                + "(Geordi task #32). RETRY when ILGPU rc ships auto-grouper retry-on-launch-OOR or "
-                + "[KernelLaunchHint(MaxThreadsPerBlock=1)] support.");
-        if (acc.AcceleratorType == AcceleratorType.WebGPU)
-            throw new UnsupportedTestException(
-                "TEMPORARY: SilkDecodeCoreGpu hits WebGPU 'Invalid BindGroupLayout' - 15 ArrayView fields "
-                + "(6 short + 9 int) exceed default maxStorageBuffersPerShaderStage=8 after rc.5 same-element-type "
-                + "coalesce (rc.5 only handles i32/u32/f32 - sub-word short/byte stay as separate bindings). "
-                + "Tracked at _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-silkdecodecoregpu-cuda-webgpu-2026-05-04.md "
-                + "(Geordi task #33). RETRY when ILGPU rc extends WebGPU coalesce to sub-word fields "
-                + "(pack N shorts into u32 buffer) OR raises adapter maxStorageBuffersPerShaderStage limit.");
-    }
-
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeCoreGpu_Unvoiced_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            SilkDecodeCoreTest_GateBackend(acc);
             // NB unvoiced: 8 kHz, 4 subframes, lpcOrder=10, frameLength=160.
             var (state, parameters) = SilkDecodeCoreTest_BuildNbState(signalType: 1);
             int frameLength = state.FrameLength;
@@ -236,13 +205,12 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeCoreGpu_Voiced_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            SilkDecodeCoreTest_GateBackend(acc);
             // NB voiced: same 8 kHz / 4 sub, but signalType=2 - exercises the
             // LTP rewhitening path (k==0) and 5-tap LTP loop.
             var (state, parameters) = SilkDecodeCoreTest_BuildNbState(signalType: 2);
@@ -376,13 +344,12 @@ public abstract partial class CodecsTestBase
         return (state, parameters);
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeCoreGpu_Voiced_MB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            SilkDecodeCoreTest_GateBackend(acc);
             // MB voiced: 12 kHz × 4 subframes × 60 = 240 samples/frame.
             // Different subfrLength than NB (40) or WB (80), exercising the
             // synthesis loop's per-sample stride math at a third length.
@@ -415,13 +382,12 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeCoreGpu_Voiced_WB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            SilkDecodeCoreTest_GateBackend(acc);
             // WB voiced: 16 kHz × 4 subframes × 80 samples = 320 samples/frame.
             // Exercises the lpcOrder=16 full-unroll LPC synthesis path.
             var (state, parameters) = SilkDecodeCoreTest_BuildWbState(signalType: 2);
@@ -453,13 +419,12 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeCoreGpu_Voiced_NB_NlsfInterpEnabled_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            SilkDecodeCoreTest_GateBackend(acc);
             // Voiced NB with NLSF interpolation enabled. This is the ONLY config
             // that takes the second-half rewhitening path inside the per-subframe
             // loop (k==2 rewhitens because nlsfInterpolationEnabled is true and
@@ -495,13 +460,12 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task SilkDecodeCoreGpu_VoicedNB_3FramesStateRolling_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            SilkDecodeCoreTest_GateBackend(acc);
             // Decode 3 consecutive voiced NB frames, threading the persistent
             // state buffers (SLpcQ14Buf, OutBuf, PrevGainQ16) across calls.
             // Catches state-rolling bugs that single-frame tests miss: e.g.
