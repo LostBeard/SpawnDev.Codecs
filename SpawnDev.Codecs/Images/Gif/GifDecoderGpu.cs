@@ -17,6 +17,10 @@
 // LZW-decoded (in parallel, in batches that bound memory) and composited on the accelerator; random access
 // therefore costs O(k) per call. ReadLoopCountAsync returns the NETSCAPE loop count.
 //
+// No GPU launch grows with the input: the block scan and the LZW decode are chains of bounded, resumable launches
+// (GifKernels.ScanChunk steps / GifKernels.LzwBudget work units each); the host launches an upper bound of steps
+// computed from the file length / the frame table (the scan checks a done flag every ScanBatch launches).
+//
 // Compositing: GifDecoderGpu.Compositing selects the rules (default GifCompositing.Pillow = bit-exact with
 // Pillow 13, GifCompositing.Web = what browsers show). The host turns the frame table into a short list of
 // compositing STEPS (fill, save, restore, draw: a few ints each) and dispatches them; the rules themselves are in
@@ -63,6 +67,8 @@ public sealed class GifDecoderGpu : IDisposable
     private const long IndexBudgetBytes = 32L << 20;
     /// <summary>Steps one frame can add: dispose of the previous frame, save, draw (+ the initial canvas fill for frame 0).</summary>
     private const int MaxStepsPerBatch = MaxBatchFrames * 3 + 2;
+    /// <summary>Scan launches between two checks of the walk's done flag (a small file needs one batch: no extra readback).</summary>
+    private const int ScanBatch = 16;
 
     private readonly Accelerator _accelerator;
     private readonly GifKernels _kernels;
@@ -71,6 +77,7 @@ public sealed class GifDecoderGpu : IDisposable
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _plan;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _steps;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _lzwScratch;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _lzwState;
     private readonly StageBuffer<byte> _stageIn;
     private readonly StageBuffer<byte> _stageOut;
     private readonly StageBuffer<byte> _indices;
@@ -94,6 +101,7 @@ public sealed class GifDecoderGpu : IDisposable
         _plan = accelerator.Allocate1D<int>(MaxBatchFrames * GifKernels.PlanStride);
         _steps = accelerator.Allocate1D<int>(MaxStepsPerBatch * GifKernels.StepStride);
         _lzwScratch = accelerator.Allocate1D<int>(MaxBatchFrames * GifKernels.LzwScratchInts);
+        _lzwState = accelerator.Allocate1D<int>(MaxBatchFrames * GifKernels.LzwStateInts);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
         _indices = new StageBuffer<byte>(accelerator);
@@ -145,9 +153,23 @@ public sealed class GifDecoderGpu : IDisposable
     private async Task<Layout> ScanAsync(ArrayView1D<byte, Stride1D.Dense> file, int fileLength)
     {
         if (fileLength <= 0 || fileLength > file.Length) throw new ArgumentOutOfRangeException(nameof(fileLength));
-        _kernels.Scan(file, fileLength, _meta.View);
-        await _accelerator.SynchronizeAsync();
-        var head = await _meta.View.SubView(0, GifMeta.Size).CopyToHostAsync();
+        // The walk is a chain of bounded launches (ScanStepBound always finishes it); the done flag is checked
+        // after every ScanBatch launches, so a file that needs fewer costs no readback beyond the header's.
+        _kernels.ScanInit(file, fileLength, _meta.View);
+        long bound = GifKernels.ScanStepBound(fileLength);
+        long launched = 0;
+        int[] head;
+        while (true)
+        {
+            long batch = Math.Min(ScanBatch, bound - launched);
+            for (long i = 0; i < batch; i++) _kernels.ScanStep(file, fileLength, _meta.View);
+            launched += batch;
+            await _accelerator.SynchronizeAsync();
+            head = await _meta.View.SubView(0, GifMeta.Size).CopyToHostAsync();
+            if (head[GifMeta.ScanDone] != 0) break;
+            if (launched >= bound)
+                throw new InvalidOperationException($"GIF block scan did not finish within {bound} launches (decoder bug).");
+        }
         if ((GifError)head[GifMeta.Error] != GifError.None)
             throw new ImageDecodeException(ImageFormat.Gif, DescribeScanError(head));
 
@@ -167,6 +189,8 @@ public sealed class GifDecoderGpu : IDisposable
         if (count == 0)
             throw new ImageDecodeException(ImageFormat.Gif, "no image data (the file has no frames)");
 
+        _kernels.Identity(file, _meta.View, count);
+        await _accelerator.SynchronizeAsync();
         l.Table = await _meta.View.SubView(GifMeta.FrameTable, (long)count * GifMeta.FrameStride).CopyToHostAsync();
         l.Frames = new ImageFrameInfo[count];
         for (int f = 0; f < count; f++)
@@ -473,14 +497,21 @@ public sealed class GifDecoderGpu : IDisposable
         {
             var plan = new int[count * GifKernels.PlanStride];
             long offset = 0;
+            long lzwSteps = 1;
             for (int j = 0; j < count; j++)
             {
-                plan[j * GifKernels.PlanStride] = first + j;
+                int frame = first + j;
+                long px = (long)layout.Frames[frame].Width * layout.Frames[frame].Height;
+                plan[j * GifKernels.PlanStride] = frame;
                 plan[j * GifKernels.PlanStride + 1] = (int)offset;
-                offset += (long)layout.Frames[first + j].Width * layout.Frames[first + j].Height;
+                offset += px;
+                lzwSteps = Math.Max(lzwSteps, GifKernels.LzwStepBound(px, layout.Field(frame, GifMeta.FrameDataBytes), layout.Field(frame, GifMeta.FrameMinCodeSize)));
             }
             _plan.View.SubView(0, plan.Length).CopyFromCPU(ref plan[0], plan.Length);
-            _kernels.Lzw(file, _meta.View, _plan.View, indices, _lzwScratch.View, count);
+            // LZW is resumable: bounded launches continue from the state the previous one left (the bound always finishes every frame).
+            _kernels.LzwInit(_meta.View, _plan.View, _lzwState.View, count);
+            for (long s = 0; s < lzwSteps; s++)
+                _kernels.LzwStep(file, _meta.View, _plan.View, indices, _lzwScratch.View, _lzwState.View, count);
             await _accelerator.SynchronizeAsync();
 
             var status = await _plan.View.SubView(0, plan.Length).CopyToHostAsync();
@@ -645,6 +676,7 @@ public sealed class GifDecoderGpu : IDisposable
         _plan.Dispose();
         _steps.Dispose();
         _lzwScratch.Dispose();
+        _lzwState.Dispose();
         _stageIn.Dispose();
         _stageOut.Dispose();
         _indices.Dispose();

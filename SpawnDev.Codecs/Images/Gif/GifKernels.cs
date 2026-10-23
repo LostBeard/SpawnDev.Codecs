@@ -3,13 +3,24 @@
 // The GIF decode kernels. Every stage that touches the file bytes or the pixels runs on the accelerator; the
 // host only dispatches and reads back the metadata block, the frame table and per-frame status ints.
 //
-//   1. ScanKernel      (1 thread)            header, logical screen, global colour table, then every block:
-//                                            Graphic Control Extension, Netscape loop extension, image
-//                                            descriptors (frame table); other extensions are skipped safely.
-//   2. LzwKernel       (1 thread per frame)  variable-width LZW (2..12 bits, clear / end codes, deferred clear,
-//                                            full 4096-entry table) reading the data sub-blocks in place into a
+//   1. ScanInitKernel  (1 thread)            header, logical screen, global colour table; resets the walk state.
+//      ScanStepKernel  (1 thread, resumable) the block walk: Graphic Control Extension, Netscape loop extension,
+//                                            image descriptors (frame table); other extensions are skipped safely.
+//                                            One launch does at most ScanChunk steps (a step = one block
+//                                            introducer or one data sub-block hop) and continues from the walk
+//                                            state kept in the meta header (ScanPhase..ScanDone).
+//      IdentityKernel  (1 thread per frame)  whether the frame's colour table is the identity gray ramp.
+//   2. LzwInitKernel   (1 thread per frame)  resets the frame's decoder state.
+//      LzwStepKernel   (1 thread per frame,  variable-width LZW (2..12 bits, clear / end codes, deferred clear,
+//                       resumable)           full 4096-entry table) reading the data sub-blocks in place into a
 //                                            palette-index buffer. LZW is a sequential dependency chain, so a
-//                                            frame is one thread; frames of a batch decode in parallel.
+//                                            frame is one thread; frames of a batch decode in parallel. One launch
+//                                            decodes codes until LzwBudget work units (1 per code + 1 per pixel
+//                                            written) are spent and stops at a code boundary; the bit reader and
+//                                            dictionary state stay in device memory (the code table in the scratch,
+//                                            the rest in the state block) for the next launch.
+//      No launch does serial work that grows with the input: a long launch stalls the desktop compositor and trips
+//      the OS GPU watchdog. The host knows an upper bound of the launches each stage needs (see the launchers).
 //   3. CompositeKernel (1 thread per pixel)  one STEP of the compositing plan the host built from the frame table:
 //                                            fill a rectangle (or the whole canvas) with a colour, save / restore a
 //                                            frame rectangle (disposal), or draw a frame (de-interlace, palette
@@ -71,6 +82,28 @@ public sealed class GifKernels : IDisposable
     public const int LzwScratchInts = 4096;
     /// <summary>Ints per LZW plan entry: frame, index offset, status, pixels produced.</summary>
     public const int PlanStride = 4;
+    /// <summary>Ints of resumable decoder state one LZW thread keeps between launches (see <c>Ls*</c>).</summary>
+    public const int LzwStateInts = 12;
+
+    /// <summary>
+    /// Work units one LZW launch may spend per frame: 1 per code plus 1 per pixel written. A launch stops at the first
+    /// code boundary past the budget, so it does at most LzwBudget + 4096 units (a code stands for at most 4096 pixels).
+    /// One unit is a dependent load and a byte store on one GPU thread: 12k units are a few ms on a desktop GPU.
+    /// </summary>
+    public const int LzwBudget = 8192;
+
+    /// <summary>
+    /// Steps one scan launch may walk (a step reads one block introducer or one data sub-block length byte and
+    /// consumes at least one file byte, so the walk of a file takes at most fileLength + 1 steps).
+    /// </summary>
+    public const int ScanChunk = 4096;
+
+    // ---- LZW state fields (relative to thread * LzwStateInts) ----
+    private const int LsWidth = 0, LsNext = 1, LsPrev = 2, LsFirstChar = 3, LsProduced = 4, LsStatus = 5,
+        LsPos = 6, LsBlockLeft = 7, LsBuf = 8, LsCnt = 9, LsErr = 10;
+
+    // ---- scan walk phases ----
+    private const int PhaseBlock = 0, PhaseExtension = 1, PhaseImage = 2;
 
     /// <summary>LZW status: decoded all pixels.</summary>
     public const int LzwOk = 0;
@@ -124,36 +157,80 @@ public sealed class GifKernels : IDisposable
     /// <summary>Fill rule: transparent black (0, 0, 0, 0).</summary>
     public const int FillTransparent = 2;
 
-    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _scan;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>> _lzw;
+    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _scanInit;
+    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _scanStep;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _identity;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>> _lzwInit;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _lzwStep;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int> _composite;
 
     /// <summary>Compile the kernels.</summary>
     public GifKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
-        _scan = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, ArrayView<int>>(ScanKernel);
-        _lzw = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>>(LzwKernel);
+        _scanInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, ArrayView<int>>(ScanInitKernel);
+        _scanStep = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, ArrayView<int>>(ScanStepKernel);
+        _identity = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(IdentityKernel);
+        _lzwInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(LzwInitKernel);
+        _lzwStep = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(LzwStepKernel);
         _composite = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int>(CompositeKernel);
     }
 
-    /// <summary>Scan the whole block structure into <paramref name="meta"/> (header block + frame table).</summary>
-    public void Scan(ArrayView<byte> file, int fileLength, ArrayView<int> meta)
+    /// <summary>Launches of <see cref="ScanStep"/> that always finish the walk of a <paramref name="fileLength"/> byte file.</summary>
+    public static long ScanStepBound(int fileLength) => ((long)fileLength + 1 + ScanChunk - 1) / ScanChunk;
+
+    /// <summary>
+    /// Start the block-structure scan: header, logical screen, global colour table, and the walk state in the meta
+    /// header. Then <see cref="ScanStep"/> until <c>meta[GifMeta.ScanDone]</c> is 1 (at most <see cref="ScanStepBound"/>
+    /// launches), then <see cref="Identity"/> over the frames found.
+    /// </summary>
+    public void ScanInit(ArrayView<byte> file, int fileLength, ArrayView<int> meta)
     {
-        _scan(1, file, fileLength, meta);
+        _scanInit(1, file, fileLength, meta);
+    }
+
+    /// <summary>Walk at most <see cref="ScanChunk"/> more steps of the block structure (nothing once the walk is done).</summary>
+    public void ScanStep(ArrayView<byte> file, int fileLength, ArrayView<int> meta)
+    {
+        _scanStep(1, file, fileLength, meta);
+    }
+
+    /// <summary>Fill <see cref="GifMeta.FramePaletteIdentity"/> of the first <paramref name="frameCount"/> frames.</summary>
+    public void Identity(ArrayView<byte> file, ArrayView<int> meta, int frameCount)
+    {
+        if (frameCount > 0) _identity(frameCount, file, meta);
     }
 
     /// <summary>
-    /// Decode <paramref name="frameCount"/> frames' LZW data in parallel. <paramref name="plan"/> holds
-    /// <see cref="PlanStride"/> ints per frame: frame index, offset of the frame's first index byte in
-    /// <paramref name="indices"/>; the kernel writes the status and the pixels produced.
+    /// Launches of <see cref="LzwStep"/> that always finish a frame of <paramref name="pixels"/> pixels whose LZW data
+    /// has <paramref name="dataBytes"/> payload bytes and minimum code size <paramref name="minCodeSize"/>: every code
+    /// is at least minCodeSize + 1 bits, every launch but the last spends the whole <see cref="LzwBudget"/>.
     /// </summary>
-    public void Lzw(ArrayView<byte> file, ArrayView<int> meta, ArrayView<int> plan, ArrayView<byte> indices,
-        ArrayView<int> scratch, int frameCount)
+    public static long LzwStepBound(long pixels, long dataBytes, int minCodeSize)
     {
-        _lzw(frameCount, file, meta, plan, indices, scratch);
+        long codes = dataBytes * 8 / (minCodeSize + 1) + 1;
+        return (codes + pixels + 4096) / LzwBudget + 1;
+    }
+
+    /// <summary>
+    /// Start decoding <paramref name="frameCount"/> frames' LZW data in parallel. <paramref name="plan"/> holds
+    /// <see cref="PlanStride"/> ints per frame: frame index, offset of the frame's first index byte in the index
+    /// buffer; <paramref name="state"/> holds <see cref="LzwStateInts"/> ints per frame. Then <see cref="LzwStep"/>
+    /// the number of times <see cref="LzwStepBound"/> gives for the largest frame; the steps write the status and the
+    /// pixels produced into the plan.
+    /// </summary>
+    public void LzwInit(ArrayView<int> meta, ArrayView<int> plan, ArrayView<int> state, int frameCount)
+    {
+        _lzwInit(frameCount, meta, plan, state);
+    }
+
+    /// <summary>Decode the next codes (about <see cref="LzwBudget"/> work units) of each of <paramref name="frameCount"/> frames.</summary>
+    public void LzwStep(ArrayView<byte> file, ArrayView<int> meta, ArrayView<int> plan, ArrayView<byte> indices,
+        ArrayView<int> scratch, ArrayView<int> state, int frameCount)
+    {
+        _lzwStep(frameCount, file, meta, plan, indices, scratch, state);
     }
 
     /// <summary>
@@ -172,55 +249,6 @@ public sealed class GifKernels : IDisposable
     // ------------------------------------------------------------------
 
     private static int Le16(ArrayView<byte> f, int p) => f[p] | (f[p + 1] << 8);
-
-    /// <summary>
-    /// Position just after the data sub-block chain that starts at <paramref name="pos"/> (the length byte of
-    /// the first sub-block), or -1 when the chain runs past the file.
-    /// </summary>
-    private static int SkipSubBlocks(ArrayView<byte> file, int fileLen, int pos)
-    {
-        int p = pos;
-        int result = -1;
-        bool go = true;
-        while (go)
-        {
-            if (p >= fileLen)
-            {
-                go = false;
-            }
-            else
-            {
-                int len = file[p];
-                p += 1 + len;
-                if (p > fileLen)
-                {
-                    go = false;
-                }
-                else if (len == 0)
-                {
-                    result = p;
-                    go = false;
-                }
-            }
-        }
-        return result;
-    }
-
-    /// <summary>Total payload bytes of the (already validated) sub-block chain starting at <paramref name="pos"/>.</summary>
-    private static int PayloadBytes(ArrayView<byte> file, int fileLen, int pos)
-    {
-        int p = pos;
-        int total = 0;
-        bool go = true;
-        while (go)
-        {
-            int len = file[p];
-            total += len;
-            p += 1 + len;
-            go = (len != 0) & (p < fileLen);
-        }
-        return total;
-    }
 
     /// <summary>1 when entry i of the <paramref name="count"/>-entry table at <paramref name="off"/> is (i, i, i) for every i.</summary>
     private static int IsIdentityPalette(ArrayView<byte> file, int off, int count)
@@ -245,7 +273,58 @@ public sealed class GifKernels : IDisposable
     // 1. Scan
     // ------------------------------------------------------------------
 
-    private static void ScanKernel(Index1D _, ArrayView<byte> file, int fileLen, ArrayView<int> meta)
+    /// <summary>The block walk state carried between scan launches (kept in the meta header).</summary>
+    private struct ScanState
+    {
+        public int Phase, Pos, ChainPos, Payload, HasGce, GceDisposal, GceTransFlag, GceTransIndex, GceDelay, Frames, Err, Done;
+    }
+
+    private static ScanState LoadScan(ArrayView<int> meta)
+    {
+        return new ScanState
+        {
+            Phase = meta[GifMeta.ScanPhase],
+            Pos = meta[GifMeta.ScanPos],
+            ChainPos = meta[GifMeta.ScanChainPos],
+            Payload = meta[GifMeta.ScanPayload],
+            HasGce = meta[GifMeta.ScanHasGce],
+            GceDisposal = meta[GifMeta.ScanGceDisposal],
+            GceTransFlag = meta[GifMeta.ScanGceTransFlag],
+            GceTransIndex = meta[GifMeta.ScanGceTransIndex],
+            GceDelay = meta[GifMeta.ScanGceDelay],
+            Frames = meta[GifMeta.ScanFrames],
+            Err = meta[GifMeta.ScanErr],
+            Done = meta[GifMeta.ScanDone],
+        };
+    }
+
+    private static void StoreScan(ArrayView<int> meta, ref ScanState s)
+    {
+        meta[GifMeta.ScanPhase] = s.Phase;
+        meta[GifMeta.ScanPos] = s.Pos;
+        meta[GifMeta.ScanChainPos] = s.ChainPos;
+        meta[GifMeta.ScanPayload] = s.Payload;
+        meta[GifMeta.ScanHasGce] = s.HasGce;
+        meta[GifMeta.ScanGceDisposal] = s.GceDisposal;
+        meta[GifMeta.ScanGceTransFlag] = s.GceTransFlag;
+        meta[GifMeta.ScanGceTransIndex] = s.GceTransIndex;
+        meta[GifMeta.ScanGceDelay] = s.GceDelay;
+        meta[GifMeta.ScanFrames] = s.Frames;
+        meta[GifMeta.ScanErr] = s.Err;
+        meta[GifMeta.ScanDone] = s.Done;
+        // The published results follow the walk (final once Done is 1).
+        meta[GifMeta.FrameCount] = s.Frames;
+        meta[GifMeta.Error] = s.Err;
+    }
+
+    private static void ScanFail(ArrayView<int> meta, ref ScanState s, GifError error)
+    {
+        s.Err = (int)error;
+        meta[GifMeta.ErrorOffset] = s.Pos;
+        s.Done = 1;
+    }
+
+    private static void ScanInitKernel(Index1D _, ArrayView<byte> file, int fileLen, ArrayView<int> meta)
     {
         for (int i = 0; i < GifMeta.Size; i++) meta[i] = 0;
         meta[GifMeta.GlobalPaletteOffset] = -1;
@@ -292,191 +371,228 @@ public sealed class GifKernels : IDisposable
                 }
             }
         }
+        var s = new ScanState { Phase = PhaseBlock, Pos = pos, Err = err, Done = err != 0 ? 1 : 0 };
+        StoreScan(meta, ref s);
+    }
 
-        // Graphic Control Extension state waiting for the next image.
-        bool hasGce = false;
-        int gceDisposal = 0;
-        int gceTransFlag = 0;
-        int gceTransIndex = 0;
-        int gceDelay = 0;
-        int frames = 0;
-        bool go = err == 0;
-        while (go)
+    /// <summary>The extension at s.Pos is complete (its sub-blocks are inside the file): apply what it says.</summary>
+    private static void FinishExtension(ArrayView<byte> file, int fileLen, ArrayView<int> meta, ref ScanState s)
+    {
+        int label = file[s.Pos + 1];
+        int first = s.Pos + 2;     // first sub-block length byte
+        int len0 = file[first];
+        if (label == 0xF9)
         {
-            if (pos >= fileLen)
+            // GCE: packed, delay (LE16), transparent index. Two GCEs before one image (never written by an encoder)
+            // merge the way Pillow merges them: a later "unspecified" disposal never overrides a specified one, and a
+            // later GCE cannot clear the transparent index an earlier one set.
+            if (len0 >= 4)
             {
-                // A missing trailer is tolerated once at least one frame is complete.
-                if (frames == 0)
+                int gp = file[first + 1];
+                s.HasGce = 1;
+                int dbits = (gp >> 2) & 7;
+                if (dbits != 0) s.GceDisposal = dbits;
+                if ((gp & 1) != 0)
                 {
-                    err = (int)GifError.Truncated;
-                    meta[GifMeta.ErrorOffset] = pos;
+                    s.GceTransFlag = 1;
+                    s.GceTransIndex = file[first + 4];
                 }
-                go = false;
+                s.GceDelay = Le16(file, first + 2);
             }
-            else
+        }
+        else if (label == 0xFF)
+        {
+            // Application extension "NETSCAPE2.0" (or "ANIMEXTS1.0") before the first image carries the loop count
+            // in the next sub-block: [3, 1, count LE16].
+            if ((len0 >= 11) & (s.Frames == 0))
             {
-                int b = file[pos];
-                if (b == 0x3B)
+                bool netscape = (file[first + 1] == 0x4E) & (file[first + 2] == 0x45) & (file[first + 3] == 0x54)
+                              & (file[first + 4] == 0x53) & (file[first + 5] == 0x43) & (file[first + 6] == 0x41)
+                              & (file[first + 7] == 0x50) & (file[first + 8] == 0x45) & (file[first + 9] == 0x32)
+                              & (file[first + 10] == 0x2E) & (file[first + 11] == 0x30);
+                bool animexts = (file[first + 1] == 0x41) & (file[first + 2] == 0x4E) & (file[first + 3] == 0x49)
+                              & (file[first + 4] == 0x4D) & (file[first + 5] == 0x45) & (file[first + 6] == 0x58)
+                              & (file[first + 7] == 0x54) & (file[first + 8] == 0x53) & (file[first + 9] == 0x31)
+                              & (file[first + 10] == 0x2E) & (file[first + 11] == 0x30);
+                int second = first + 1 + len0;
+                bool room = second + 4 <= fileLen;
+                if ((netscape | animexts) & room)
                 {
-                    go = false;
-                }
-                else if (b == 0x21)
-                {
-                    if (pos + 2 > fileLen)
-                    {
-                        err = (int)GifError.Truncated;
-                        meta[GifMeta.ErrorOffset] = pos;
-                        go = false;
-                    }
-                    else
-                    {
-                        int label = file[pos + 1];
-                        int first = pos + 2;     // first sub-block length byte
-                        int end = SkipSubBlocks(file, fileLen, first);
-                        if (end < 0)
-                        {
-                            err = (int)GifError.Truncated;
-                            meta[GifMeta.ErrorOffset] = pos;
-                            go = false;
-                        }
-                        else
-                        {
-                            int len0 = file[first];
-                            if (label == 0xF9)
-                            {
-                                // GCE: packed, delay (LE16), transparent index. Two GCEs before one image (never
-                                // written by an encoder) merge the way Pillow merges them: a later "unspecified"
-                                // disposal never overrides a specified one, and a later GCE cannot clear the
-                                // transparent index an earlier one set.
-                                if (len0 >= 4)
-                                {
-                                    int gp = file[first + 1];
-                                    hasGce = true;
-                                    int dbits = (gp >> 2) & 7;
-                                    if (dbits != 0) gceDisposal = dbits;
-                                    if ((gp & 1) != 0)
-                                    {
-                                        gceTransFlag = 1;
-                                        gceTransIndex = file[first + 4];
-                                    }
-                                    gceDelay = Le16(file, first + 2);
-                                }
-                            }
-                            else if (label == 0xFF)
-                            {
-                                // Application extension "NETSCAPE2.0" (or "ANIMEXTS1.0") before the first image
-                                // carries the loop count in the next sub-block: [3, 1, count LE16].
-                                if ((len0 >= 11) & (frames == 0))
-                                {
-                                    bool netscape = (file[first + 1] == 0x4E) & (file[first + 2] == 0x45) & (file[first + 3] == 0x54)
-                                                  & (file[first + 4] == 0x53) & (file[first + 5] == 0x43) & (file[first + 6] == 0x41)
-                                                  & (file[first + 7] == 0x50) & (file[first + 8] == 0x45) & (file[first + 9] == 0x32)
-                                                  & (file[first + 10] == 0x2E) & (file[first + 11] == 0x30);
-                                    bool animexts = (file[first + 1] == 0x41) & (file[first + 2] == 0x4E) & (file[first + 3] == 0x49)
-                                                  & (file[first + 4] == 0x4D) & (file[first + 5] == 0x45) & (file[first + 6] == 0x58)
-                                                  & (file[first + 7] == 0x54) & (file[first + 8] == 0x53) & (file[first + 9] == 0x31)
-                                                  & (file[first + 10] == 0x2E) & (file[first + 11] == 0x30);
-                                    int second = first + 1 + len0;
-                                    bool room = second + 4 <= fileLen;
-                                    if ((netscape | animexts) & room)
-                                    {
-                                        bool isLoop = (file[second] >= 3) & (file[second + 1] == 1);
-                                        if (isLoop) meta[GifMeta.LoopCount] = Le16(file, second + 2);
-                                    }
-                                }
-                            }
-                            pos = end;
-                        }
-                    }
-                }
-                else if (b == 0x2C)
-                {
-                    if (pos + 10 > fileLen)
-                    {
-                        err = (int)GifError.Truncated;
-                        meta[GifMeta.ErrorOffset] = pos;
-                        go = false;
-                    }
-                    else
-                    {
-                        int fx = Le16(file, pos + 1);
-                        int fy = Le16(file, pos + 3);
-                        int fw = Le16(file, pos + 5);
-                        int fh = Le16(file, pos + 7);
-                        int fpacked = file[pos + 9];
-                        int p = pos + 10;
-                        int palOff = meta[GifMeta.GlobalPaletteOffset];
-                        int palCount = meta[GifMeta.GlobalPaletteCount];
-                        bool ok = true;
-                        if ((fpacked & 0x80) != 0)
-                        {
-                            int count = 2 << (fpacked & 7);
-                            if (p + 3 * count > fileLen)
-                            {
-                                ok = false;
-                            }
-                            else
-                            {
-                                palOff = p;
-                                palCount = count;
-                                p += 3 * count;
-                            }
-                        }
-                        // LZW minimum code size byte, then the data sub-blocks.
-                        int dataEnd = -1;
-                        if (ok & (p < fileLen)) dataEnd = SkipSubBlocks(file, fileLen, p + 1);
-                        if (dataEnd < 0)
-                        {
-                            err = (int)GifError.Truncated;
-                            meta[GifMeta.ErrorOffset] = pos;
-                            go = false;
-                        }
-                        else if (frames >= GifMeta.MaxFrames)
-                        {
-                            err = (int)GifError.TooManyFrames;
-                            meta[GifMeta.ErrorOffset] = pos;
-                            go = false;
-                        }
-                        else
-                        {
-                            int fe = GifMeta.FrameTable + frames * GifMeta.FrameStride;
-                            meta[fe + GifMeta.FrameX] = fx;
-                            meta[fe + GifMeta.FrameY] = fy;
-                            meta[fe + GifMeta.FrameW] = fw;
-                            meta[fe + GifMeta.FrameH] = fh;
-                            meta[fe + GifMeta.FrameFlags] = 0;
-                            if ((fpacked & 0x40) != 0) SetFrameFlag(meta, fe, 1);
-                            if (hasGce & (gceTransFlag != 0)) SetFrameFlag(meta, fe, 2);
-                            meta[fe + GifMeta.FrameTransparentIndex] = gceTransIndex;
-                            meta[fe + GifMeta.FrameDelayCs] = gceDelay;
-                            meta[fe + GifMeta.FrameDisposal] = gceDisposal;
-                            meta[fe + GifMeta.FramePaletteOffset] = palOff;
-                            meta[fe + GifMeta.FramePaletteCount] = palCount;
-                            meta[fe + GifMeta.FrameMinCodeSize] = file[p];
-                            meta[fe + GifMeta.FrameDataOffset] = p + 1;
-                            meta[fe + GifMeta.FramePaletteIdentity] = 0;
-                            if (palOff >= 0) meta[fe + GifMeta.FramePaletteIdentity] = IsIdentityPalette(file, palOff, palCount);
-                            meta[fe + GifMeta.FrameDataBytes] = PayloadBytes(file, fileLen, p + 1);
-                            frames++;
-                            hasGce = false;
-                            gceDisposal = 0;
-                            gceTransFlag = 0;
-                            gceTransIndex = 0;
-                            gceDelay = 0;
-                            pos = dataEnd;
-                        }
-                    }
-                }
-                else
-                {
-                    err = (int)GifError.BadBlock;
-                    meta[GifMeta.ErrorOffset] = pos;
-                    go = false;
+                    bool isLoop = (file[second] >= 3) & (file[second + 1] == 1);
+                    if (isLoop) meta[GifMeta.LoopCount] = Le16(file, second + 2);
                 }
             }
         }
-        meta[GifMeta.FrameCount] = frames;
-        meta[GifMeta.Error] = err;
+        s.Pos = s.ChainPos;
+        s.Phase = PhaseBlock;
+    }
+
+    /// <summary>The image at s.Pos is complete (its data sub-blocks are inside the file): record it in the frame table.</summary>
+    private static void FinishImage(ArrayView<byte> file, ArrayView<int> meta, ref ScanState s)
+    {
+        if (s.Frames >= GifMeta.MaxFrames)
+        {
+            ScanFail(meta, ref s, GifError.TooManyFrames);
+        }
+        else
+        {
+            int pos = s.Pos;
+            int fpacked = file[pos + 9];
+            int p = pos + 10;
+            int palOff = meta[GifMeta.GlobalPaletteOffset];
+            int palCount = meta[GifMeta.GlobalPaletteCount];
+            if ((fpacked & 0x80) != 0)
+            {
+                palOff = p;
+                palCount = 2 << (fpacked & 7);
+                p += 3 * palCount;
+            }
+            int fe = GifMeta.FrameTable + s.Frames * GifMeta.FrameStride;
+            meta[fe + GifMeta.FrameX] = Le16(file, pos + 1);
+            meta[fe + GifMeta.FrameY] = Le16(file, pos + 3);
+            meta[fe + GifMeta.FrameW] = Le16(file, pos + 5);
+            meta[fe + GifMeta.FrameH] = Le16(file, pos + 7);
+            meta[fe + GifMeta.FrameFlags] = 0;
+            if ((fpacked & 0x40) != 0) SetFrameFlag(meta, fe, 1);
+            if ((s.HasGce != 0) & (s.GceTransFlag != 0)) SetFrameFlag(meta, fe, 2);
+            meta[fe + GifMeta.FrameTransparentIndex] = s.GceTransIndex;
+            meta[fe + GifMeta.FrameDelayCs] = s.GceDelay;
+            meta[fe + GifMeta.FrameDisposal] = s.GceDisposal;
+            meta[fe + GifMeta.FramePaletteOffset] = palOff;
+            meta[fe + GifMeta.FramePaletteCount] = palCount;
+            meta[fe + GifMeta.FrameMinCodeSize] = file[p];
+            meta[fe + GifMeta.FrameDataOffset] = p + 1;
+            meta[fe + GifMeta.FramePaletteIdentity] = 0;     // IdentityKernel fills it once the walk is done
+            meta[fe + GifMeta.FrameDataBytes] = s.Payload;
+            s.Frames++;
+            s.HasGce = 0;
+            s.GceDisposal = 0;
+            s.GceTransFlag = 0;
+            s.GceTransIndex = 0;
+            s.GceDelay = 0;
+            s.Pos = s.ChainPos;
+            s.Phase = PhaseBlock;
+        }
+    }
+
+    /// <summary>
+    /// At most <see cref="ScanChunk"/> steps of the block walk. A step is either a block introducer (the trailer, an
+    /// extension or an image descriptor + its colour table) or one data sub-block hop of the block being walked; a
+    /// block's effect is applied when its terminating sub-block is reached, so a truncated chain records nothing.
+    /// </summary>
+    private static void ScanStepKernel(Index1D _, ArrayView<byte> file, int fileLen, ArrayView<int> meta)
+    {
+        var s = LoadScan(meta);
+        int steps = 0;
+        bool go = s.Done == 0;
+        while (go)
+        {
+            if (s.Phase == PhaseBlock)
+            {
+                if (s.Pos >= fileLen)
+                {
+                    // A missing trailer is tolerated once at least one frame is complete.
+                    if (s.Frames == 0) ScanFail(meta, ref s, GifError.Truncated);
+                    s.Done = 1;
+                }
+                else
+                {
+                    int b = file[s.Pos];
+                    if (b == 0x3B)
+                    {
+                        s.Done = 1;
+                    }
+                    else if (b == 0x21)
+                    {
+                        if (s.Pos + 2 > fileLen)
+                        {
+                            ScanFail(meta, ref s, GifError.Truncated);
+                        }
+                        else
+                        {
+                            s.ChainPos = s.Pos + 2;
+                            s.Phase = PhaseExtension;
+                        }
+                    }
+                    else if (b == 0x2C)
+                    {
+                        if (s.Pos + 10 > fileLen)
+                        {
+                            ScanFail(meta, ref s, GifError.Truncated);
+                        }
+                        else
+                        {
+                            int fpacked = file[s.Pos + 9];
+                            int p = s.Pos + 10;
+                            bool ok = true;
+                            if ((fpacked & 0x80) != 0)
+                            {
+                                int count = 2 << (fpacked & 7);
+                                if (p + 3 * count > fileLen) ok = false;
+                                else p += 3 * count;
+                            }
+                            // LZW minimum code size byte, then the data sub-blocks.
+                            if (ok & (p < fileLen))
+                            {
+                                s.ChainPos = p + 1;
+                                s.Payload = 0;
+                                s.Phase = PhaseImage;
+                            }
+                            else
+                            {
+                                ScanFail(meta, ref s, GifError.Truncated);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        ScanFail(meta, ref s, GifError.BadBlock);
+                    }
+                }
+            }
+            else
+            {
+                // One sub-block of the extension / image data at s.Pos.
+                if (s.ChainPos >= fileLen)
+                {
+                    ScanFail(meta, ref s, GifError.Truncated);
+                }
+                else
+                {
+                    int len = file[s.ChainPos];
+                    s.ChainPos += 1 + len;
+                    if (s.ChainPos > fileLen)
+                    {
+                        ScanFail(meta, ref s, GifError.Truncated);
+                    }
+                    else if (len != 0)
+                    {
+                        s.Payload += len;
+                    }
+                    else if (s.Phase == PhaseExtension)
+                    {
+                        FinishExtension(file, fileLen, meta, ref s);
+                    }
+                    else
+                    {
+                        FinishImage(file, meta, ref s);
+                    }
+                }
+            }
+            steps++;
+            go = (s.Done == 0) & (steps < ScanChunk);
+        }
+        StoreScan(meta, ref s);
+    }
+
+    /// <summary>Frame <c>index</c>: is its colour table the identity gray ramp (at most 256 entries).</summary>
+    private static void IdentityKernel(Index1D index, ArrayView<byte> file, ArrayView<int> meta)
+    {
+        int fe = GifMeta.FrameTable + index.X * GifMeta.FrameStride;
+        int palOff = meta[fe + GifMeta.FramePaletteOffset];
+        int identity = 0;
+        if (palOff >= 0) identity = IsIdentityPalette(file, palOff, meta[fe + GifMeta.FramePaletteCount]);
+        meta[fe + GifMeta.FramePaletteIdentity] = identity;
     }
 
     // ------------------------------------------------------------------
@@ -515,9 +631,36 @@ public sealed class GifKernels : IDisposable
         return code;
     }
 
-    private static void LzwKernel(
+    private static void LzwInitKernel(Index1D index, ArrayView<int> meta, ArrayView<int> plan, ArrayView<int> state)
+    {
+        int t = index.X;
+        int frame = plan[t * PlanStride];
+        int fe = GifMeta.FrameTable + frame * GifMeta.FrameStride;
+        int minCode = meta[fe + GifMeta.FrameMinCodeSize];
+        int clear = 1 << minCode;
+        int sb = t * LzwStateInts;
+        state[sb + LsWidth] = minCode + 1;
+        state[sb + LsNext] = clear + 2;
+        state[sb + LsPrev] = -1;
+        state[sb + LsFirstChar] = 0;
+        state[sb + LsProduced] = 0;
+        state[sb + LsStatus] = LzwOk;
+        state[sb + LsPos] = meta[fe + GifMeta.FrameDataOffset];
+        state[sb + LsBlockLeft] = 0;
+        state[sb + LsBuf] = 0;
+        state[sb + LsCnt] = 0;
+        state[sb + LsErr] = 0;
+        plan[t * PlanStride + 2] = LzwOk;
+        plan[t * PlanStride + 3] = 0;
+    }
+
+    /// <summary>
+    /// The next codes of frame <c>plan[index]</c>: decodes until <see cref="LzwBudget"/> work units are spent (or the
+    /// frame is complete / failed), then stores the state for the next launch. A launch after the end does nothing.
+    /// </summary>
+    private static void LzwStepKernel(
         Index1D index, ArrayView<byte> file, ArrayView<int> meta, ArrayView<int> plan,
-        ArrayView<byte> indices, ArrayView<int> scratch)
+        ArrayView<byte> indices, ArrayView<int> scratch, ArrayView<int> state)
     {
         int t = index.X;
         int frame = plan[t * PlanStride];
@@ -526,20 +669,30 @@ public sealed class GifKernels : IDisposable
         int total = meta[fe + GifMeta.FrameW] * meta[fe + GifMeta.FrameH];
         int minCode = meta[fe + GifMeta.FrameMinCodeSize];
         int sb = t * LzwScratchInts;
+        int ss = t * LzwStateInts;
 
         int clear = 1 << minCode;
         int eoi = clear + 1;
-        int width = minCode + 1;
-        int next = clear + 2;
-        int prev = -1;
-        int firstChar = 0;
-        int produced = 0;
-        int status = LzwOk;
-        var st = new LzwBits { Pos = meta[fe + GifMeta.FrameDataOffset], BlockLeft = 0, Buf = 0, Cnt = 0, Err = 0 };
+        int width = state[ss + LsWidth];
+        int next = state[ss + LsNext];
+        int prev = state[ss + LsPrev];
+        int firstChar = state[ss + LsFirstChar];
+        int produced = state[ss + LsProduced];
+        int status = state[ss + LsStatus];
+        var st = new LzwBits
+        {
+            Pos = state[ss + LsPos],
+            BlockLeft = state[ss + LsBlockLeft],
+            Buf = (uint)state[ss + LsBuf],
+            Cnt = state[ss + LsCnt],
+            Err = state[ss + LsErr],
+        };
 
-        bool go = total > 0;
+        int units = 0;
+        bool go = (status == LzwOk) & (produced < total);
         while (go)
         {
+            units++;
             int code = NextCode(ref st, file, width);
             if (code < 0)
             {
@@ -575,6 +728,7 @@ public sealed class GifKernels : IDisposable
                     // First code after a clear: a literal.
                     indices[outBase + produced] = (byte)code;
                     produced++;
+                    units++;
                     firstChar = code;
                     prev = code;
                 }
@@ -589,6 +743,7 @@ public sealed class GifKernels : IDisposable
                     // Write string(code), last character first, walking the prefix chain.
                     int len = 1;
                     if (code >= clear) len = (int)((uint)scratch[sb + code] >> 20);
+                    units += len;
                     int c = code;
                     int k = len - 1;
                     int ch = 0;
@@ -624,8 +779,19 @@ public sealed class GifKernels : IDisposable
                     prev = code;
                 }
             }
-            go = (status == LzwOk) & (produced < total);
+            go = (status == LzwOk) & (produced < total) & (units < LzwBudget);
         }
+        state[ss + LsWidth] = width;
+        state[ss + LsNext] = next;
+        state[ss + LsPrev] = prev;
+        state[ss + LsFirstChar] = firstChar;
+        state[ss + LsProduced] = produced;
+        state[ss + LsStatus] = status;
+        state[ss + LsPos] = st.Pos;
+        state[ss + LsBlockLeft] = st.BlockLeft;
+        state[ss + LsBuf] = (int)st.Buf;
+        state[ss + LsCnt] = st.Cnt;
+        state[ss + LsErr] = st.Err;
         plan[t * PlanStride + 2] = status;
         plan[t * PlanStride + 3] = produced;
     }
