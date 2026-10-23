@@ -47,6 +47,17 @@ namespace PlaywrightMultiTest
                 "--disable-features=FileSystemAccessPermissionPrompt",
                 "--allow-file-access-from-files"
             };
+            // PMT_WEBGPU_ADAPTER=swiftshader runs WebGPU on Chrome's CPU adapter on purpose: a kernel that never ends then
+            // spins CPU cores in the test browser's GPU process instead of hanging the real GPU (no watchdog reset, the desktop
+            // stays responsive). For screening kernels suspected of hanging; slow, and not a performance lane.
+            var adapter = Environment.GetEnvironmentVariable("PMT_WEBGPU_ADAPTER");
+            if (!string.IsNullOrEmpty(adapter))
+            {
+                args.Remove("--disable-software-rasterizer");
+                args.Add($"--use-webgpu-adapter={adapter}");
+                if (string.Equals(adapter, "swiftshader", StringComparison.OrdinalIgnoreCase)) args.Add("--enable-unsafe-swiftshader");
+                LogStatus($"[PMT_WEBGPU_ADAPTER] WebGPU adapter forced to '{adapter}'");
+            }
             // TCP CDP endpoint so an in-flight run can be inspected (pipe is exclusive to Playwright).
             // Default 9224 - deliberately not 9222 (hand-debug) or 9223 (ILGPU PMT).
             var cdpPort = Environment.GetEnvironmentVariable("PMT_CDP_PORT");
