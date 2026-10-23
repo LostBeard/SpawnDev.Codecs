@@ -30,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefDecoder_DecodeOne_EobBranchReturnsEobZeroValue()
     {
+        CpuOnlyTest();
         // First bit = 0 -> EOB.
         var read = ScriptedBitReader(new int[] { 0 });
         var r = Vp9CoefDecoder.DecodeOneCoefficient(read, DummyFullProbs());
@@ -40,6 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefDecoder_DecodeOne_ZeroBranchReturnsZeroToken()
     {
+        CpuOnlyTest();
         // EOB? = 1 (not EOB), ZERO? = 0 -> Zero token, value 0.
         var read = ScriptedBitReader(new int[] { 1, 0 });
         var r = Vp9CoefDecoder.DecodeOneCoefficient(read, DummyFullProbs());
@@ -50,6 +52,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefDecoder_DecodeOne_OneBranchPositive_ReturnsPlusOne()
     {
+        CpuOnlyTest();
         // EOB?=1, ZERO?=1, ONE?=0 (->One), sign=0 (positive).
         var read = ScriptedBitReader(new int[] { 1, 1, 0, 0 });
         var r = Vp9CoefDecoder.DecodeOneCoefficient(read, DummyFullProbs());
@@ -60,6 +63,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefDecoder_DecodeOne_OneBranchNegative_ReturnsMinusOne()
     {
+        CpuOnlyTest();
         // ...ONE?=0, sign=1 -> -1.
         var read = ScriptedBitReader(new int[] { 1, 1, 0, 1 });
         var r = Vp9CoefDecoder.DecodeOneCoefficient(read, DummyFullProbs());
@@ -70,6 +74,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefDecoder_DecodeOne_TwoBranch_PositiveAndNegative()
     {
+        CpuOnlyTest();
         // ...ONE?=1 (constrained tree), tree i=0 bit 0 -> i=2 (TWO),
         //    tree i=2 bit 0 -> -Two leaf, sign 0 -> +2.
         var readPos = ScriptedBitReader(new int[] { 1, 1, 1, 0, 0, 0 });
@@ -86,6 +91,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefDecoder_DecodeOne_ThreeAndFourBranches()
     {
+        CpuOnlyTest();
         // ONE=1 -> tree i=0 bit 0 -> i=2 -> bit 1 -> i=4 (THREE) -> bit 0 -> -Three.
         var readThree = ScriptedBitReader(new int[] { 1, 1, 1, 0, 1, 0, 0 });
         var rt = Vp9CoefDecoder.DecodeOneCoefficient(readThree, DummyFullProbs());
@@ -102,6 +108,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefDecoder_DecodeOne_Category1_BothMagnitudes()
     {
+        CpuOnlyTest();
         // ONE=1 -> tree bit 1 -> i=6 -> bit 0 -> i=8 (CAT_ONE) -> bit 0 -> -Cat1.
         // Cat1 reads 1 residual bit. Cat1 magnitudes are 5 (residual 0) or 6 (residual 1).
         // Then sign bit.
@@ -121,6 +128,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefDecoder_DecodeOne_Category6_LargeMagnitudeProducesExpectedValue()
     {
+        CpuOnlyTest();
         // Path: ONE=1 -> tree 1 (HIGH_LOW) -> 1 (CAT_THREEFOUR) ->
         //               1 (CAT_FIVE) -> 1 -> -Cat6 leaf.
         // 5 prefix bits to navigate the tree:  [ONE?=1, tree:1, 1, 1, 1] = 5 bits + sign.
@@ -146,6 +154,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefDecoder_DecodeOne_RejectsUndersizedProbsVector()
     {
+        CpuOnlyTest();
         var read = ScriptedBitReader(new int[] { 0 });
         Throws<ArgumentException>(() =>
             Vp9CoefDecoder.DecodeOneCoefficient(read, new byte[10]));

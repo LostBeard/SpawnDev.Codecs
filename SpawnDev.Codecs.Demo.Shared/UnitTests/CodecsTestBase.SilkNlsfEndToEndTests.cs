@@ -25,6 +25,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfPipeline_NbMb_AllFirstStageIndices_ProduceStableLpc()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.NbMb;
         int order = cb.Order;
         Span<short> nlsfQ15 = stackalloc short[order];
@@ -54,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfPipeline_Wb_AllFirstStageIndices_ProduceStableLpc()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.Wb;
         int order = cb.Order;
         Span<short> nlsfQ15 = stackalloc short[order];
@@ -84,6 +86,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfPipeline_NbMb_WithSmallResiduals_ProducesStableLpc()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.NbMb;
         int order = cb.Order;
         Span<short> nlsfQ15 = stackalloc short[order];
@@ -122,6 +125,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfPipeline_Wb_WithSmallResiduals_ProducesStableLpc()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.Wb;
         int order = cb.Order;
         Span<short> nlsfQ15 = stackalloc short[order];

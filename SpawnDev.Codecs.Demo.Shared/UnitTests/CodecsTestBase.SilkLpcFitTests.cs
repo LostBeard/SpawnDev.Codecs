@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Abs_ReturnsAbsoluteValue()
     {
+        CpuOnlyTest();
         Equal(0, silk_abs(0));
         Equal(5, silk_abs(5));
         Equal(5, silk_abs(-5));
@@ -29,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Min_ReturnsSmaller()
     {
+        CpuOnlyTest();
         Equal(1, silk_min(1, 2));
         Equal(1, silk_min(2, 1));
         Equal(-5, silk_min(-5, 5));
@@ -38,6 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Div32_IntegerDivide()
     {
+        CpuOnlyTest();
         Equal(5, silk_DIV32(10, 2));
         Equal(3, silk_DIV32(10, 3));         // truncates
         Equal(-3, silk_DIV32(-10, 3));       // C-style truncation
@@ -47,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Rshift32_SignedArithmeticShift()
     {
+        CpuOnlyTest();
         Equal(5, silk_RSHIFT32(10, 1));
         Equal(-5, silk_RSHIFT32(-10, 1));    // signed arithmetic shift; -10 >> 1 = -5 per C
         Equal(-1, silk_RSHIFT32(-1, 4));
@@ -55,6 +59,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Sat16_ClampsToInt16Range()
     {
+        CpuOnlyTest();
         Equal((short)5, silk_SAT16(5));
         Equal(short.MaxValue, silk_SAT16(int.MaxValue));
         Equal(short.MaxValue, silk_SAT16(short.MaxValue + 1));
@@ -67,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkConstants_Int16Max_Is32767()
     {
+        CpuOnlyTest();
         Equal((short)32767, silk_int16_MAX);
     }
 
@@ -75,6 +81,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcFit_SmallCoefficients_DirectConvert()
     {
+        CpuOnlyTest();
         // All coefficients well within int16 range at target Q; no iteration needed.
         int qIn = 24;
         int qOut = 12;
@@ -94,6 +101,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcFit_LargeCoefficient_TriggersIteration()
     {
+        CpuOnlyTest();
         // Put one coefficient just above the overflow threshold in Q12 so iteration fires.
         // Q12 int16 threshold: silk_int16_MAX = 32767. To overflow after RSHIFT_ROUND(x, qIn-qOut),
         // need x > 32767 << 12 = 134_213_632 roughly.
@@ -121,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcFit_ZeroCoefficients_ProducesZeros()
     {
+        CpuOnlyTest();
         int[] aQIn = { 0, 0, 0, 0 };
         Span<short> aQOut = stackalloc short[4];
         SilkLpcFit.Fit(aQOut, aQIn, qOut: 12, qIn: 24, d: 4);
@@ -130,6 +139,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcFit_InputBufferTooSmall_Throws()
     {
+        CpuOnlyTest();
         short[] aQOut = new short[10];
         int[] aQIn = new int[3];
         Throws<ArgumentException>(() => SilkLpcFit.Fit(aQOut, aQIn, 12, 24, 10));
@@ -138,6 +148,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcFit_OutputBufferTooSmall_Throws()
     {
+        CpuOnlyTest();
         short[] aQOut = new short[3];
         int[] aQIn = new int[10];
         Throws<ArgumentException>(() => SilkLpcFit.Fit(aQOut, aQIn, 12, 24, 10));
@@ -146,6 +157,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcFit_QIn_EqualsQOut_NoShift()
     {
+        CpuOnlyTest();
         // When qIn == qOut, silk_RSHIFT_ROUND(x, 0) is... x + 0 >> 0? Actually silk_RSHIFT_ROUND
         // with shift=0 is technically undefined in libopus (macro requires shift >= 1). We avoid
         // shift=0 scenarios. This test confirms qIn-qOut=1 case works cleanly.

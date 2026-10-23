@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionProbs_BothTablesAre48Bytes()
     {
+        CpuOnlyTest();
         Equal(48, Vp9PartitionProbs.KfPartitionProbs.Length);
         Equal(48, Vp9PartitionProbs.DefaultPartitionProbs.Length);
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionProbs_KfFirstContextMatchesLibvpx()
     {
+        CpuOnlyTest();
         // 8x8->4x4 a/l both not split: { 158, 97, 94 }.
         Equal((byte)158, Vp9PartitionProbs.KfPartitionProbs[0]);
         Equal((byte)97,  Vp9PartitionProbs.KfPartitionProbs[1]);
@@ -27,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionProbs_KfLastContextMatchesLibvpx()
     {
+        CpuOnlyTest();
         // 64x64->32x32 a/l both split: { 12, 3, 3 }.
         Equal((byte)12, Vp9PartitionProbs.KfPartitionProbs[45]);
         Equal((byte)3,  Vp9PartitionProbs.KfPartitionProbs[46]);
@@ -36,6 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionProbs_DefaultFirstAndLastContextMatchLibvpx()
     {
+        CpuOnlyTest();
         // First: 8x8->4x4 a/l both not split = { 199, 122, 141 }.
         Equal((byte)199, Vp9PartitionProbs.DefaultPartitionProbs[0]);
         Equal((byte)122, Vp9PartitionProbs.DefaultPartitionProbs[1]);
@@ -49,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionProbs_Index_ProducesCorrectFlatOffset()
     {
+        CpuOnlyTest();
         // Hand-verify a few index values.
         Equal(0,  Vp9PartitionProbs.Index(0, 0, 0));
         Equal(2,  Vp9PartitionProbs.Index(0, 0, 2));
@@ -61,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionProbs_Index_RejectsOutOfRangeArgs()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() => Vp9PartitionProbs.Index(4, 0, 0));
         Throws<ArgumentOutOfRangeException>(() => Vp9PartitionProbs.Index(0, 4, 0));
         Throws<ArgumentOutOfRangeException>(() => Vp9PartitionProbs.Index(0, 0, 3));
@@ -70,6 +76,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionProbs_KeyframeProbsHelper_ReturnsExpectedSlice()
     {
+        CpuOnlyTest();
         // 32x32->16x16 a unsplit + l split (sizeIdx=2, splitState=2)
         // = { 67, 33, 11 } per libvpx.
         var probs = Vp9PartitionProbs.KeyframeProbs(2, 2);
@@ -82,6 +89,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionProbs_DefaultProbsHelper_ReturnsExpectedSlice()
     {
+        CpuOnlyTest();
         // 16x16->8x8 a/l both not split (sizeIdx=1, splitState=0)
         // = { 174, 73, 87 } per libvpx.
         var probs = Vp9PartitionProbs.DefaultProbs(1, 0);
@@ -94,6 +102,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionProbs_DriveProbabilityIntoPartitionTree_DecodesNoneAtFirstZeroBit()
     {
+        CpuOnlyTest();
         // End-to-end: pull a real probability slice and run it through
         // slice 151's Vp9PartitionTree.Decode. With first bit = 0,
         // result must be None regardless of which slice we picked.

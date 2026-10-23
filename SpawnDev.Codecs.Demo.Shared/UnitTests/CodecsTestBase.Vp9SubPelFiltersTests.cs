@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelFilters_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(4, Vp9SubPelFilters.SubPelBits);
         Equal(16, Vp9SubPelFilters.SubPelShifts);
         Equal(8, Vp9SubPelFilters.SubPelTaps);
@@ -20,6 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelFilters_TableLengths_AreUniform()
     {
+        CpuOnlyTest();
         Equal(128, Vp9SubPelFilters.EightTap.Length);
         Equal(128, Vp9SubPelFilters.EightTapSmooth.Length);
         Equal(128, Vp9SubPelFilters.EightTapSharp.Length);
@@ -29,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelFilters_AllFilters_AtSubPel0_AreIdentity()
     {
+        CpuOnlyTest();
         // Position 0 of every kernel is { 0, 0, 0, 128, 0, 0, 0, 0 }
         // (the pure integer-pel sample passes through).
         VerifyIdentity(Vp9SubPelFilters.EightTap);
@@ -52,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelFilters_AllFilters_AllRowsSumToFilterScale()
     {
+        CpuOnlyTest();
         // Every 8-tap row sums to 128 (FILTER_BITS = 7 -> 2^7 = 128).
         VerifySumsTo128(Vp9SubPelFilters.EightTap);
         VerifySumsTo128(Vp9SubPelFilters.EightTapSmooth);
@@ -73,6 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelFilters_EightTap_SubPel8_IsCenterSymmetric()
     {
+        CpuOnlyTest();
         // Sub-pel 8 is exactly halfway between integer samples; the
         // libvpx 8-tap regular filter is symmetric there.
         // Row: { -1,  6, -19,  78,  78, -19,  6, -1 }
@@ -87,6 +92,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelFilters_Bilinear_SubPel8_IsHalfHalf()
     {
+        CpuOnlyTest();
         // Bilinear at half-pel: { 0, 0, -12, 76, 76, -12, 0, 0 }
         var row = Vp9SubPelFilters.GetRow(Vp9InterpFilter.Bilinear, 8);
         Equal((short)0, row[0]); Equal((short)0, row[1]);
@@ -98,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelFilters_GetFilter_RejectsSwitchable()
     {
+        CpuOnlyTest();
         // Switchable is a per-block selector at the frame level;
         // there is no tap table for it.
         Throws<ArgumentOutOfRangeException>(() =>
@@ -107,6 +114,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelFilters_GetRow_RejectsOutOfRangeSubPel()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9SubPelFilters.GetRow(Vp9InterpFilter.EightTap, 16));
         Throws<ArgumentOutOfRangeException>(() =>

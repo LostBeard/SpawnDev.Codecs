@@ -14,6 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoder_Nb20Ms_ExposesCorrectDimensions()
     {
+        CpuOnlyTest();
         var dec = new SilkDecoder(internalSampleRateHz: 8000, frameLengthMs: 20);
         Equal(8000, dec.InternalSampleRateHz);
         Equal(10, dec.LpcOrder);
@@ -24,6 +25,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoder_Wb20Ms_ExposesCorrectDimensions()
     {
+        CpuOnlyTest();
         var dec = new SilkDecoder(internalSampleRateHz: 16000, frameLengthMs: 20);
         Equal(16000, dec.InternalSampleRateHz);
         Equal(16, dec.LpcOrder);
@@ -34,6 +36,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoder_Mb10Ms_ExposesCorrectDimensions()
     {
+        CpuOnlyTest();
         var dec = new SilkDecoder(internalSampleRateHz: 12000, frameLengthMs: 10);
         Equal(12000, dec.InternalSampleRateHz);
         Equal(10, dec.LpcOrder);
@@ -44,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoder_InvalidSampleRate_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => new SilkDecoder(internalSampleRateHz: 24000));
         Throws<ArgumentException>(() => new SilkDecoder(internalSampleRateHz: 48000));
     }
@@ -51,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoder_InvalidFrameLength_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => new SilkDecoder(internalSampleRateHz: 16000, frameLengthMs: 5));
         Throws<ArgumentException>(() => new SilkDecoder(internalSampleRateHz: 16000, frameLengthMs: 40));
     }
@@ -58,6 +63,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoder_DecodeInactiveFrame_ProducesValidPcm()
     {
+        CpuOnlyTest();
         var dec = new SilkDecoder(internalSampleRateHz: 8000, frameLengthMs: 20);
         var indices = new SilkDecodedIndices
         {
@@ -87,6 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoder_ResetRestoresFirstFrameBehavior()
     {
+        CpuOnlyTest();
         var dec = new SilkDecoder(internalSampleRateHz: 16000, frameLengthMs: 20);
         var indices = new SilkDecodedIndices
         {
@@ -119,6 +126,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoder_EmptyPayload_Throws()
     {
+        CpuOnlyTest();
         var dec = new SilkDecoder(internalSampleRateHz: 8000);
         short[] pcm = new short[dec.FrameLength];
         Throws<ArgumentException>(() =>
@@ -128,6 +136,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoder_SmallOutputBuffer_Throws()
     {
+        CpuOnlyTest();
         var dec = new SilkDecoder(internalSampleRateHz: 8000);
         short[] tooSmall = new short[dec.FrameLength - 1];
         byte[] payload = new byte[32]; // any non-empty payload
@@ -138,6 +147,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoder_DecodeFromRange_MatchesDecodeFrame()
     {
+        CpuOnlyTest();
         // DecodeFromRange with a freshly-constructed range decoder must produce
         // identical output to DecodeFrame with the same payload (the former is
         // the Opus-layer primitive; the latter is a convenience wrapper around it).
@@ -174,6 +184,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoder_DecodeFromRange_NullDecoder_Throws()
     {
+        CpuOnlyTest();
         var dec = new SilkDecoder(8000);
         short[] pcm = new short[dec.FrameLength];
         Throws<ArgumentNullException>(() =>

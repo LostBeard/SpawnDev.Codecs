@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefCandidatesByRef_AllRefs_StartEmpty()
     {
+        CpuOnlyTest();
         var store = new Vp9MvRefCandidatesByRef();
         Equal(0, store.ForRef(Vp9MvReferenceFrame.Intra).Count);
         Equal(0, store.ForRef(Vp9MvReferenceFrame.Last).Count);
@@ -21,6 +22,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefCandidatesByRef_PerRefIsolation()
     {
+        CpuOnlyTest();
         var store = new Vp9MvRefCandidatesByRef();
         store.ForRef(Vp9MvReferenceFrame.Last).TryAdd(new Vp9Mv(1, 2));
         Equal(1, store.ForRef(Vp9MvReferenceFrame.Last).Count);
@@ -32,6 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefCandidatesByRef_Clear_ResetsAll()
     {
+        CpuOnlyTest();
         var store = new Vp9MvRefCandidatesByRef();
         store.ForRef(Vp9MvReferenceFrame.Last).TryAdd(new Vp9Mv(1, 2));
         store.ForRef(Vp9MvReferenceFrame.Golden).TryAdd(new Vp9Mv(3, 4));
@@ -45,6 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefCandidatesByRef_FillToCapacity()
     {
+        CpuOnlyTest();
         var store = new Vp9MvRefCandidatesByRef();
         var list = store.ForRef(Vp9MvReferenceFrame.Last);
         Equal(true, list.TryAdd(new Vp9Mv(1, 2)));

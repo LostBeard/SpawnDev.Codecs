@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggCrc32_SingleByte_0x01_EqualsPolynomial()
     {
+        CpuOnlyTest();
         // A single byte 0x01 of input should shift the polynomial to its
         // left-aligned representation. With poly 0x04C11DB7 this produces
         // exactly 0x04C11DB7 (the polynomial value itself).
@@ -27,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggCrc32_AllZero_IsZero()
     {
+        CpuOnlyTest();
         // With init = 0 and zero input, CRC stays 0 across any number of zero bytes.
         byte[] input = new byte[16];
         Equal(0u, OggCrc32.Compute(input));
@@ -35,12 +37,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggCrc32_Empty_IsZero()
     {
+        CpuOnlyTest();
         Equal(0u, OggCrc32.Compute(Array.Empty<byte>()));
     }
 
     [TestMethod]
     public void OggCrc32_Deterministic()
     {
+        CpuOnlyTest();
         byte[] input = { 0xDE, 0xAD, 0xBE, 0xEF };
         Equal(OggCrc32.Compute(input), OggCrc32.Compute(input));
     }
@@ -75,6 +79,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggPageReader_ParsesValidSinglePage()
     {
+        CpuOnlyTest();
         byte[] payload = { 0x01, 0x02, 0x03, 0x04, 0x05 };
         var pageBytes = BuildOggPage(
             headerType: OggConstants.HeaderTypeBeginningOfStream,
@@ -96,6 +101,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggPageReader_BadCapturePattern_Throws()
     {
+        CpuOnlyTest();
         var data = new byte[30];
         data[0] = (byte)'X'; data[1] = (byte)'Y'; data[2] = (byte)'Z'; data[3] = (byte)'Q';
         bool threw = false;
@@ -107,6 +113,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggPageReader_BadCrc_Throws()
     {
+        CpuOnlyTest();
         byte[] payload = { 0xAA, 0xBB };
         var pageBytes = BuildOggPage(0, 0, 42, 0, new byte[] { 2 }, payload);
         // Corrupt CRC byte.
@@ -120,6 +127,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggPageReader_BadVersion_Throws()
     {
+        CpuOnlyTest();
         byte[] payload = { 0x00 };
         var pageBytes = BuildOggPage(0, 0, 1, 0, new byte[] { 1 }, payload);
         pageBytes[4] = 1; // version
@@ -139,6 +147,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggPageReader_EnumerateMultiplePages()
     {
+        CpuOnlyTest();
         byte[] page1 = BuildOggPage(OggConstants.HeaderTypeBeginningOfStream,
             0, 1, 0, new byte[] { 3 }, new byte[] { 1, 2, 3 });
         byte[] page2 = BuildOggPage(0, 48, 1, 1, new byte[] { 2 }, new byte[] { 4, 5 });
@@ -164,6 +173,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggPacketReader_SinglePagePacket()
     {
+        CpuOnlyTest();
         byte[] pageBytes = BuildOggPage(
             OggConstants.HeaderTypeBeginningOfStream, 0, 1, 0,
             segmentLengths: new byte[] { 4 },
@@ -178,6 +188,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggPacketReader_MultiSegmentSinglePagePacket()
     {
+        CpuOnlyTest();
         // Two 255-byte segments + one 100-byte terminator = one packet of 610 bytes.
         byte[] payload = new byte[255 + 255 + 100];
         for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i & 0xFF);
@@ -195,6 +206,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggPacketReader_PacketAcrossTwoPages()
     {
+        CpuOnlyTest();
         // Page 1 has a single 255-byte segment (packet continues).
         // Page 2 has a 50-byte segment (packet terminator).
         byte[] part1 = new byte[255];
@@ -221,6 +233,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggPacketReader_MultiplePacketsInOnePage()
     {
+        CpuOnlyTest();
         // 3 segments: 2, 3, 4 bytes. Each < 255 so each is a full packet.
         byte[] pageBytes = BuildOggPage(
             OggConstants.HeaderTypeBeginningOfStream, 0, 7, 0,
@@ -237,6 +250,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggPacketReader_IndependentBitstreams()
     {
+        CpuOnlyTest();
         // Two logical streams interleaved. Packets for each serial should assemble independently.
         byte[] streamA_page = BuildOggPage(
             OggConstants.HeaderTypeBeginningOfStream, 0, 100, 0,

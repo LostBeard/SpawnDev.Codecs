@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterModeProbsTable_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(7, Vp9InterModeProbsTable.InterModeContexts);
         Equal(4, Vp9InterModeProbsTable.InterModes);
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterModeProbsTable_TableShape()
     {
+        CpuOnlyTest();
         var t = new Vp9InterModeProbsTable();
         Equal(7, t.Probs.GetLength(0));
         Equal(3, t.Probs.GetLength(1));
@@ -26,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterModeProbsParser_Parse_NoUpdates_LeavesTableUntouched()
     {
+        CpuOnlyTest();
         var data = new byte[16];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
 
@@ -44,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterModeProbsParser_Parse_RejectsNullArgs()
     {
+        CpuOnlyTest();
         var data = new byte[16];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
         Throws<ArgumentNullException>(() =>

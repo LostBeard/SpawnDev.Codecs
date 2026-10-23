@@ -19,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst8x8_ZeroCoefficients_LeavesPredictorUnchanged()
     {
+        CpuOnlyTest();
         var coeffs = new short[64];
         var dest = MakeIadstPredictor8x8(128);
         Vp9Iadst8x8Reference.IadstAdst8x8_64_Add(coeffs, dest, 8);
@@ -28,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst8x8_IsDeterministic_ForRandomInputs()
     {
+        CpuOnlyTest();
         var rng = new Random(0xA8);
         var coeffs = new short[64];
         for (int trial = 0; trial < 15; trial++)
@@ -45,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst8x8_SingleCoefficient_ProducesNonZeroResidual()
     {
+        CpuOnlyTest();
         // iADST scatters energy non-uniformly across the block. Any single
         // non-zero coefficient should change at least one pixel.
         var coeffs = new short[64];
@@ -59,6 +62,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst8x8_HighPositive_OutputsClippedPixels()
     {
+        CpuOnlyTest();
         var coeffs = new short[64];
         for (int i = 0; i < 64; i++) coeffs[i] = 2048;
         var dest = MakeIadstPredictor8x8(250);
@@ -70,6 +74,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst8x8_LargeNegatives_ClipToZeroSomewhere()
     {
+        CpuOnlyTest();
         var coeffs = new short[64];
         for (int i = 0; i < 64; i++) coeffs[i] = -2048;
         var dest = MakeIadstPredictor8x8(10);
@@ -84,6 +89,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst8x8_StridedDest_OnlyTouches8x8Block()
     {
+        CpuOnlyTest();
         var canvas = new byte[8 * 32];
         for (int i = 0; i < canvas.Length; i++) canvas[i] = 77;
         var coeffs = new short[64];
@@ -97,6 +103,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst8x8_Throws_OnShortInput()
     {
+        CpuOnlyTest();
         var dest = MakeIadstPredictor8x8(0);
         bool threw = false;
         try { Vp9Iadst8x8Reference.IadstAdst8x8_64_Add(new short[32], dest, 8); }
@@ -107,6 +114,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst8x8_Throws_OnBadStride()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9Iadst8x8Reference.IadstAdst8x8_64_Add(new short[64], new byte[64], 4); }
         catch (ArgumentException) { threw = true; }

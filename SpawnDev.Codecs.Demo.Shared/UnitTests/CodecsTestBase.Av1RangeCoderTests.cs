@@ -14,6 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1RangeCoder_BoolsAtVariedProbabilities_RoundTrip()
     {
+        CpuOnlyTest();
         var enc = new Av1RangeEncoder();
         uint[] probs = { 16384, 8192, 24576, 4096, 28672, 2048, 30720 };
         var rng = new Random(42);
@@ -32,6 +33,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1RangeCoder_FourSymbolCdf_RoundTrip()
     {
+        CpuOnlyTest();
         // 4 equal-probability symbols: cumprob = [8192, 16384, 24576, 32768]
         // icdf = [32768 - cumprob[i]] = [24576, 16384, 8192, 0]
         ushort[] icdf = { 24576, 16384, 8192, 0 };
@@ -51,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1RangeCoder_RawBits_RoundTrip()
     {
+        CpuOnlyTest();
         uint[] values = { 0xA5, 0x12, 0xFF, 0x00, 0x7F };
         var enc = new Av1RangeEncoder();
         foreach (var v in values) enc.EncodeBits(v, 8);
@@ -64,6 +67,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1RangeCoder_MixedOps_RoundTripStress()
     {
+        CpuOnlyTest();
         // 200 mixed ops covering all three decode primitives - exercises the
         // state machine across more than a single 64-bit normalization window.
         ushort[] icdf4 = { 24576, 16384, 8192, 0 };
@@ -113,6 +117,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1RangeDecoder_InitialState_MatchesLibaom()
     {
+        CpuOnlyTest();
         // libaom od_ec_dec_init: rng=0x8000, cnt starts at -15 then refill
         // brings count up to (8 - 9 - bits_in_first_byte) initial position.
         // We can't introspect those directly but we CAN verify Tell starts

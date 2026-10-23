@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusOggEncoder_MonoThreeFrames_RoundtripsStructurally()
     {
+        CpuOnlyTest();
         int frameLen = 960; // 20 ms at 48 kHz
         var pcm = ReferenceOracle.GenerateSineWave(440, 48000, 1, frameLen * 3);
         var opusPackets = new List<byte[]>();
@@ -60,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusOggEncoder_UserComments_RoundtripViaDecoder()
     {
+        CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSineWave(440, 48000, 1, 960);
         byte[] enc = ReferenceOracle.EncodeFrame(pcm, 48000, 1, 960, OpusApplication.OPUS_APPLICATION_VOIP);
         var toc = new OpusTocByte(enc[0]);
@@ -92,6 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusOggEncoder_TooManyChannels_Throws()
     {
+        CpuOnlyTest();
         var opts = new OpusOggEncoderOptions { OutputChannels = 6 };
         bool threw = false;
         try { _ = OpusOggEncoder.Encode(Array.Empty<byte[]>(), opts); }
@@ -102,6 +105,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusOggEncoder_EmptyPacketsList_Throws()
     {
+        CpuOnlyTest();
         // OggPageWriter.WriteStream throws when given zero packets even after
         // prepending head + tags. Wait - we prepend head + tags so there are
         // always >= 2 outgoing packets. Let's verify the BOS/EOS logic still

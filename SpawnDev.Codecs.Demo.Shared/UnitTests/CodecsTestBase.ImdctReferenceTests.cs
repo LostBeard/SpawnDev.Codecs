@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Imdct_ZeroInput_ZeroOutput()
     {
+        CpuOnlyTest();
         const int n = 16;
         var input = new float[n];
         var output = new float[2 * n];
@@ -28,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Imdct_OutputLength_IsTwoN()
     {
+        CpuOnlyTest();
         var input = new float[32];
         var output = ImdctReference.Transform(input);
         Equal(64, output.Length);
@@ -36,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Imdct_Linearity_SumOfTransformsEqualsTransformOfSum()
     {
+        CpuOnlyTest();
         const int n = 8;
         var a = new float[n];
         var b = new float[n];
@@ -62,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Imdct_SingleCoefficient_ProducesCosinePattern()
     {
+        CpuOnlyTest();
         // For a single coefficient X[0] = 1 with N=4:
         //   theta = (pi/4) * (n + 0.5 + 2) * 0.5 = (pi/8) * (n + 2.5)
         //   y[n] = cos(theta)
@@ -80,18 +84,21 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Imdct_InputTooShort_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => ImdctReference.Transform(new float[0], new float[0]));
     }
 
     [TestMethod]
     public void Imdct_WrongOutputLength_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => ImdctReference.Transform(new float[8], new float[10]));
     }
 
     [TestMethod]
     public void Imdct_ScalingSanity_AllOnesInputProducesNonzeroOutput()
     {
+        CpuOnlyTest();
         // An all-ones frequency input produces a sum-of-cosines output that's
         // not identically zero. Verify average magnitude is finite + non-zero.
         const int n = 32;
@@ -110,6 +117,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Imdct_SmallSizes_2_4_8_16_AllRun()
     {
+        CpuOnlyTest();
         foreach (int n in new[] { 2, 4, 8, 16 })
         {
             var input = new float[n];

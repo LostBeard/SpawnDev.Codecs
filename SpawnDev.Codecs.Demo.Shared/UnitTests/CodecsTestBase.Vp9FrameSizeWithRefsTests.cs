@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameSizeWithRefs_LastRefSelected_FirstBitOne()
     {
+        CpuOnlyTest();
         // bit 0 = 1 -> use LAST (1280x720). render_override = 0.
         var data = BitsToBytes((1, 1), (0, 1));
 
@@ -32,6 +33,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameSizeWithRefs_GoldenRefSelected_FirstBitZero_SecondOne()
     {
+        CpuOnlyTest();
         // ref bits: 0, 1 -> GOLDEN (1920x1080). Third bit not read.
         var data = BitsToBytes((0, 1), (1, 1), (0, 1));
 
@@ -45,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameSizeWithRefs_AltRefSelected_TwoZerosThenOne()
     {
+        CpuOnlyTest();
         // ref bits: 0, 0, 1 -> ALTREF (640x480).
         var data = BitsToBytes((0, 1), (0, 1), (1, 1), (0, 1));
 
@@ -58,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameSizeWithRefs_NoRefSelected_ReadsExplicitSize()
     {
+        CpuOnlyTest();
         // ref bits: 0, 0, 0 -> read explicit 16+16 width/height.
         // Then render_override = 0.
         // frame_width = (1024-1) + 1 = 1024, frame_height = (768-1) + 1 = 768
@@ -77,6 +81,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameSizeWithRefs_RenderOverride_ReadsRenderSize()
     {
+        CpuOnlyTest();
         // LAST selected, render_override = 1, render = 800x600.
         var data = BitsToBytes(
             (1, 1),                  // LAST selected
@@ -94,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameSizeWithRefs_RejectsTooFewRefs()
     {
+        CpuOnlyTest();
         var data = new byte[8];
         Throws<ArgumentException>(() =>
             Vp9FrameSizeWithRefsParser.Parse(data, new (int, int)[] { (1, 1) }));
@@ -102,6 +108,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameSizeWithRefs_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(3, Vp9FrameSizeWithRefsParser.RefsPerFrame);
     }
 }

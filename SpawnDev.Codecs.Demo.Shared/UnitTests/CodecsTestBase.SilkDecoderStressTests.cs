@@ -82,6 +82,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoder_Stress_Nb20Ms_100RandomFrames_NoCrashesOrRangeViolations()
     {
+        CpuOnlyTest();
         var rng = new Random(0xABCDE);
         var dec = new SilkDecoder(internalSampleRateHz: 8000, frameLengthMs: 20);
         var cb = SilkNlsfCodebookTables.NbMb;
@@ -129,6 +130,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoder_Stress_Wb20Ms_100RandomFrames_NoCrashesOrRangeViolations()
     {
+        CpuOnlyTest();
         var rng = new Random(0x12345);
         var dec = new SilkDecoder(internalSampleRateHz: 16000, frameLengthMs: 20);
         var cb = SilkNlsfCodebookTables.Wb;
@@ -172,6 +174,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoder_Stress_MultiFrameStreaming_StateDoesNotCorrupt()
     {
+        CpuOnlyTest();
         // 50 consecutive frames on the same decoder state. Verifies the state-carrying
         // fields (LastGainIndex, PrevNlsfQ15, PrevGainQ16, SLpcQ14Buf, OutBuf, etc.)
         // don't corrupt across many frames.

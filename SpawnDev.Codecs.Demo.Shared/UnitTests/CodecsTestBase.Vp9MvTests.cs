@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Mv_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(14, Vp9Mv.InUseBits);
         Equal(-16384, Vp9Mv.Low);
         Equal(16384, Vp9Mv.Upp);
@@ -19,6 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Mv_Zero_HasZeroComponents()
     {
+        CpuOnlyTest();
         Equal(0, Vp9Mv.Zero.Row);
         Equal(0, Vp9Mv.Zero.Col);
         Equal(true, Vp9Mv.Zero.IsZero);
@@ -27,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Mv_Construction_StoresComponents()
     {
+        CpuOnlyTest();
         var mv = new Vp9Mv(Row: 5, Col: -7);
         Equal(5, mv.Row);
         Equal(-7, mv.Col);
@@ -36,6 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Mv_Add_ComponentWise()
     {
+        CpuOnlyTest();
         var sum = new Vp9Mv(1, 2) + new Vp9Mv(3, 4);
         Equal(4, sum.Row);
         Equal(6, sum.Col);
@@ -44,6 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Mv_Subtract_ComponentWise()
     {
+        CpuOnlyTest();
         var diff = new Vp9Mv(10, 20) - new Vp9Mv(3, 7);
         Equal(7, diff.Row);
         Equal(13, diff.Col);
@@ -52,6 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Mv_Negate_ComponentWise()
     {
+        CpuOnlyTest();
         var neg = -new Vp9Mv(5, -8);
         Equal(-5, neg.Row);
         Equal(8, neg.Col);
@@ -60,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Mv_Equality_StructEquality()
     {
+        CpuOnlyTest();
         var a = new Vp9Mv(7, 11);
         var b = new Vp9Mv(7, 11);
         var c = new Vp9Mv(7, 12);
@@ -71,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Mv_Clamp_InRange_Unchanged()
     {
+        CpuOnlyTest();
         var mv = new Vp9Mv(100, -200);
         Equal(mv, mv.Clamp());
     }
@@ -78,6 +86,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Mv_Clamp_OutOfRange_Clamped()
     {
+        CpuOnlyTest();
         var mv = new Vp9Mv(50_000, -50_000);
         var clamped = mv.Clamp();
         Equal(16383, clamped.Row);
@@ -87,6 +96,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Mv_ClampCustom_InRange_NoChange()
     {
+        CpuOnlyTest();
         var mv = new Vp9Mv(5, -10);
         var clamped = mv.Clamp(-100, 100, -100, 100);
         Equal(mv, clamped);
@@ -95,6 +105,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Mv_ClampCustom_OutOfRange_BoundsApplied()
     {
+        CpuOnlyTest();
         var mv = new Vp9Mv(200, -300);
         var clamped = mv.Clamp(-50, 50, -50, 50);
         Equal(50, clamped.Row);
@@ -104,6 +115,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Mv_ClampCustom_AsymmetricBounds()
     {
+        CpuOnlyTest();
         var mv = new Vp9Mv(100, 100);
         var clamped = mv.Clamp(-10, 50, -200, 80);
         Equal(50, clamped.Row);
@@ -113,6 +125,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Mv_ClampCustom_RejectsInvertedRange()
     {
+        CpuOnlyTest();
         var mv = new Vp9Mv(0, 0);
         Throws<ArgumentException>(() => mv.Clamp(10, 5, -10, 10));
         Throws<ArgumentException>(() => mv.Clamp(-10, 10, 10, 5));

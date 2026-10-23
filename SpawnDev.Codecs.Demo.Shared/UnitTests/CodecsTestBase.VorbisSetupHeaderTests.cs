@@ -78,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisSetupHeader_Minimal_ParsesEverySection()
     {
+        CpuOnlyTest();
         byte[] data = BuildMinimalSetupPacket(audioChannels: 1);
         var setup = VorbisSetupHeaderParser.Parse(data, audioChannels: 1);
         Equal(1, setup.Codebooks.Length);
@@ -95,6 +96,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisSetupHeader_BadPacketType_Throws()
     {
+        CpuOnlyTest();
         byte[] data = BuildMinimalSetupPacket(1);
         data[0] = 0x04;
         bool threw = false;
@@ -105,6 +107,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisSetupHeader_BadMagic_Throws()
     {
+        CpuOnlyTest();
         byte[] data = BuildMinimalSetupPacket(1);
         data[2] = (byte)'X';
         bool threw = false;
@@ -115,6 +118,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisSetupHeader_FloorType0_ThrowsNotSupported()
     {
+        CpuOnlyTest();
         // Swap the floor_type 16-bit field value from 1 to 0. We don't rebuild the
         // rest of the packet because the parser bails right after reading type.
         // Easier: build a custom packet up to the floor_type field.

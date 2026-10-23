@@ -46,6 +46,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GainDecoder_IndependentCoding_RoundTripsAllSignalTypes()
     {
+        CpuOnlyTest();
         // Independent (conditional=0) coding reads a 3-bit MSB + 3-bit LSB for the first subframe.
         // So indices[0] is in [0, 63]. Remaining subframes use 41-symbol delta iCDF so each index is in [0, 40].
         sbyte[] original = { 37, 20, 15, 8 }; // 4 subframes
@@ -69,6 +70,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GainDecoder_ConditionalCoding_RoundTrips()
     {
+        CpuOnlyTest();
         // Conditional coding: all subframes use the 41-symbol delta iCDF (indices in [0, 40]).
         sbyte[] original = { 14, 28, 7, 33 };
         var enc = new OpusRangeEncoder(128);
@@ -88,6 +90,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GainDecoder_TwoSubframes_RoundTrips()
     {
+        CpuOnlyTest();
         // 10 ms frame uses 2 subframes.
         sbyte[] original = { 25, 5 };
         var enc = new OpusRangeEncoder(128);
@@ -105,6 +108,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GainDecoder_Dequantize_AfterDecodeIndices_ProducesNonZeroGains()
     {
+        CpuOnlyTest();
         // End-to-end: decode indices from a bitstream, then feed into Dequantize to get Q16 gains.
         sbyte[] original = { 40, 15, 10, 20 };
         var enc = new OpusRangeEncoder(128);
@@ -128,6 +132,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GainDecoder_InvalidSignalType_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(32);
         enc.Done();
         var dec = new OpusRangeDecoder(enc.ToArray());
@@ -141,6 +146,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GainDecoder_InvalidSubframeCount_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(32);
         enc.Done();
         var dec = new OpusRangeDecoder(enc.ToArray());
@@ -154,6 +160,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GainDecoder_NullRangeDecoder_Throws()
     {
+        CpuOnlyTest();
         sbyte[] indices = new sbyte[4];
         Throws<ArgumentNullException>(() =>
             SilkGainDecoder.DecodeIndices(indices, null!, signalType: 0, conditional: 0, nbSubfr: 4));

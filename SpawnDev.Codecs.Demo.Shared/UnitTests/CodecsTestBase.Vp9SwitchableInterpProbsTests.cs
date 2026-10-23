@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SwitchableInterpProbs_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(4, Vp9SwitchableInterpProbs.SwitchableFilterContexts);
         Equal(3, Vp9SwitchableInterpProbs.SwitchableFilters);
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SwitchableInterpProbs_TableShape()
     {
+        CpuOnlyTest();
         var t = new Vp9SwitchableInterpProbs();
         Equal(4, t.Probs.GetLength(0));
         Equal(2, t.Probs.GetLength(1));
@@ -26,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SwitchableInterpProbsParser_NoUpdates_LeavesTableUntouched()
     {
+        CpuOnlyTest();
         var data = new byte[8];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
 
@@ -44,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SwitchableInterpProbsParser_RejectsNullArgs()
     {
+        CpuOnlyTest();
         var data = new byte[8];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
         Throws<ArgumentNullException>(() =>

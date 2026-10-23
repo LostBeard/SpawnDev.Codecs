@@ -26,6 +26,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct4x4_ZeroCoefficients_LeavesPredictorUnchanged()
     {
+        CpuOnlyTest();
         var coeffs = new short[16]; // all zero
         var dest = MakePredictor(128);
         Vp9Idct4x4Reference.Idct4x4_16_Add(coeffs, dest, 4);
@@ -36,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct4x4_DcOnlyCoefficient_AppliesUniformResidual()
     {
+        CpuOnlyTest();
         // Input: DC = 1024 at [0,0], all other coeffs zero.
         // Math (cospi_16_64 = 11585, Q14 constants):
         //   row 0 iDCT of [1024,0,0,0]:
@@ -59,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct4x4_Clips_HighResidualToUpper255()
     {
+        CpuOnlyTest();
         // Push a DC coefficient high enough that predictor + residual > 255
         // and verify the result saturates at 255.
         var coeffs = new short[16];
@@ -72,6 +75,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct4x4_Clips_NegativeResidualToZero()
     {
+        CpuOnlyTest();
         // Negative DC -> residual pushes below zero, must clamp to 0.
         var coeffs = new short[16];
         coeffs[0] = -8192; // residual ~ -256 at every cell
@@ -84,6 +88,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct4x4_StridedDest_OnlyTouches4x4Block()
     {
+        CpuOnlyTest();
         // Put the 4x4 block at the top-left of a 16-byte-wide canvas and
         // verify pixels outside the 4x4 are untouched.
         var canvas = new byte[4 * 16]; // 4 rows, 16 cols
@@ -104,6 +109,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct4x4_IsDeterministic_ForRandomInputs()
     {
+        CpuOnlyTest();
         // Stress: 50 random coeff buffers must produce identical outputs
         // across repeated calls. Catches any hidden state.
         var rng = new Random(0xC0DEC);
@@ -126,6 +132,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct4x4_Throws_OnShortInput()
     {
+        CpuOnlyTest();
         var dest = MakePredictor(0);
         bool threw = false;
         try { Vp9Idct4x4Reference.Idct4x4_16_Add(new short[8], dest, 4); }
@@ -136,6 +143,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct4x4_Throws_OnBadStride()
     {
+        CpuOnlyTest();
         var coeffs = new short[16];
         var dest = new byte[16];
         bool threw = false;

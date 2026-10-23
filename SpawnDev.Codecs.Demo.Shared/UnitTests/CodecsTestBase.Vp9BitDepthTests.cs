@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BitDepth_NumericValues_AreActualBitsCount()
     {
+        CpuOnlyTest();
         Equal(8, (int)Vp9BitDepth.Bits8);
         Equal(10, (int)Vp9BitDepth.Bits10);
         Equal(12, (int)Vp9BitDepth.Bits12);
@@ -19,6 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BitDepth_Resolve_Profile0Or1_AlwaysBits8()
     {
+        CpuOnlyTest();
         Equal(Vp9BitDepth.Bits8, Vp9BitDepths.Resolve(Vp9Profile.Profile0, tenOrTwelveBit: false));
         Equal(Vp9BitDepth.Bits8, Vp9BitDepths.Resolve(Vp9Profile.Profile0, tenOrTwelveBit: true));
         Equal(Vp9BitDepth.Bits8, Vp9BitDepths.Resolve(Vp9Profile.Profile1, tenOrTwelveBit: false));
@@ -28,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BitDepth_Resolve_Profile2_FlagPicks10Or12()
     {
+        CpuOnlyTest();
         Equal(Vp9BitDepth.Bits10, Vp9BitDepths.Resolve(Vp9Profile.Profile2, tenOrTwelveBit: false));
         Equal(Vp9BitDepth.Bits12, Vp9BitDepths.Resolve(Vp9Profile.Profile2, tenOrTwelveBit: true));
     }
@@ -35,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BitDepth_Resolve_Profile3_FlagPicks10Or12()
     {
+        CpuOnlyTest();
         Equal(Vp9BitDepth.Bits10, Vp9BitDepths.Resolve(Vp9Profile.Profile3, tenOrTwelveBit: false));
         Equal(Vp9BitDepth.Bits12, Vp9BitDepths.Resolve(Vp9Profile.Profile3, tenOrTwelveBit: true));
     }
@@ -42,6 +46,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BitDepth_MaxSampleValue()
     {
+        CpuOnlyTest();
         Equal(255, Vp9BitDepths.MaxSampleValue(Vp9BitDepth.Bits8));
         Equal(1023, Vp9BitDepths.MaxSampleValue(Vp9BitDepth.Bits10));
         Equal(4095, Vp9BitDepths.MaxSampleValue(Vp9BitDepth.Bits12));
@@ -50,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BitDepth_MaxQuantizerIndex()
     {
+        CpuOnlyTest();
         Equal(255, Vp9BitDepths.MaxQuantizerIndex(Vp9BitDepth.Bits8));
         Equal(1023, Vp9BitDepths.MaxQuantizerIndex(Vp9BitDepth.Bits10));
         Equal(4095, Vp9BitDepths.MaxQuantizerIndex(Vp9BitDepth.Bits12));

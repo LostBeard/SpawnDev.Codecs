@@ -20,6 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct32x32_ZeroCoefficients_LeavesPredictorUnchanged()
     {
+        CpuOnlyTest();
         var coeffs = new short[1024];
         var dest = MakePredictor32x32(128);
         Vp9Idct32x32Reference.Idct32x32_1024_Add(coeffs, dest, 32);
@@ -29,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct32x32_Clips_HighResidualToUpper255()
     {
+        CpuOnlyTest();
         var coeffs = new short[1024];
         coeffs[0] = 32000;
         var dest = MakePredictor32x32(200);
@@ -39,6 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct32x32_Clips_NegativeResidualToZero()
     {
+        CpuOnlyTest();
         var coeffs = new short[1024];
         coeffs[0] = -32000;
         var dest = MakePredictor32x32(100);
@@ -49,6 +52,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct32x32_StridedDest_OnlyTouches32x32Block()
     {
+        CpuOnlyTest();
         // 32-row canvas 64 cols wide.
         var canvas = new byte[32 * 64];
         for (int i = 0; i < canvas.Length; i++) canvas[i] = 77;
@@ -63,6 +67,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct32x32_IsDeterministic_ForRandomInputs()
     {
+        CpuOnlyTest();
         var rng = new Random(0x3232);
         var coeffs = new short[1024];
         for (int trial = 0; trial < 8; trial++)
@@ -79,6 +84,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct32x32_SingleDcCoefficient_ProducesNonZeroResidual()
     {
+        CpuOnlyTest();
         var coeffs = new short[1024];
         coeffs[0] = 1024;
         var dest = MakePredictor32x32(100);
@@ -91,6 +97,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct32x32_Throws_OnShortInput()
     {
+        CpuOnlyTest();
         var dest = MakePredictor32x32(0);
         bool threw = false;
         try { Vp9Idct32x32Reference.Idct32x32_1024_Add(new short[512], dest, 32); }
@@ -101,6 +108,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct32x32_Throws_OnBadStride()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9Idct32x32Reference.Idct32x32_1024_Add(new short[1024], new byte[1024], 16); }
         catch (ArgumentException) { threw = true; }

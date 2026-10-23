@@ -80,6 +80,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_Nb40Ms_TwoInternalFrames_DecodesCorrectTotalSamples()
     {
+        CpuOnlyTest();
         // Config 2: NB SILK 40 ms, mono. 2 x 20 ms internal SILK frames.
         var indices = new SilkDecodedIndices
         {
@@ -110,6 +111,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_Wb60Ms_ThreeInternalFrames_DecodesCorrectTotalSamples()
     {
+        CpuOnlyTest();
         // Config 11: WB SILK 60 ms, mono. 3 x 20 ms internal SILK frames.
         var indices = new SilkDecodedIndices
         {
@@ -140,6 +142,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_Mb40Ms_TwoInternalFrames_AtNative12kHz()
     {
+        CpuOnlyTest();
         // Config 6: MB SILK 40 ms, mono. Output at 12 kHz (no resampling).
         var indices = new SilkDecodedIndices
         {

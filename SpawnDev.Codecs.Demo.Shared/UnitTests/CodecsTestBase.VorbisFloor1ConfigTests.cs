@@ -20,6 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1_SingleClass_MinimalConfig()
     {
+        CpuOnlyTest();
         // 1 partition belonging to class 0.
         // Class 0: dimensions = 1 (write 0), subclasses = 0 (no master book, 1 subclass book).
         //   subclass_books[0][0] = 5 (book index 5 written as 5 + 1 = 6).
@@ -49,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1_TwoClasses_WithMasterbookAndSubclasses()
     {
+        CpuOnlyTest();
         // 2 partitions: partition 0 in class 0, partition 1 in class 1.
         // Class 0: dimensions = 2 (write 1), subclasses = 1 (write 1) -> 2 subclass books,
         //          master book = 3 (write 3), subclass books 0 and 1 each = no-book (write 0 -> -1) then a real book 7 (write 8).
@@ -96,6 +98,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1_Multiplier_EncodesMinusOne()
     {
+        CpuOnlyTest();
         // Verify that the on-wire 2-bit value encodes (multiplier - 1).
         // Using 3 (written as 3) should decode to 4.
         var w = new VorbisTestWriter();
@@ -114,6 +117,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1_XListOrdering_KeepsInputOrder()
     {
+        CpuOnlyTest();
         // X list isn't sorted by the parser - it preserves bitstream order.
         // Write 3 partitions × 1 dim each, so 5 total X entries: [0, 2^rb, x0, x1, x2].
         var w = new VorbisTestWriter();
@@ -137,6 +141,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1_ExceedsSpecMaximum_Throws()
     {
+        CpuOnlyTest();
         // Spec maximum floor1_values = 65. Build a config that sums to 66.
         // Use 11 partitions × class-with-dims-6 => 11*6 = 66 + 2 = 68 > 65.
         // (Partitions max is 31 per the 5-bit field, so this is reachable.)

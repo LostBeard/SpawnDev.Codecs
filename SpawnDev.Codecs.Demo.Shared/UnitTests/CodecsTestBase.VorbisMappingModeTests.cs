@@ -29,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisMapping_MonoSingleSubmap_ParsesMinimal()
     {
+        CpuOnlyTest();
         // mono, 1 submap (no submap flag), no coupling, reserved 00, no mux (submaps == 1),
         // submap 0: reserved 8-bit, floor = 0, residue = 1.
         var w = new VorbisTestWriter();
@@ -49,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisMapping_StereoWithCoupling_ParsesCouplingPair()
     {
+        CpuOnlyTest();
         // Stereo, 1 submap, 1 coupling step (mag = channel 0, ang = channel 1).
         // ilog(audio_channels - 1) = ilog(1) = 1 bit per channel index.
         var w = new VorbisTestWriter();
@@ -70,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisMapping_MultipleSubmaps_ReadsMuxPerChannel()
     {
+        CpuOnlyTest();
         // 3-channel audio, 2 submaps. Channel 0 -> submap 1, channels 1,2 -> submap 0.
         var w = new VorbisTestWriter();
         w.Write(1, 1);           // submaps flag = yes
@@ -91,6 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisMapping_ReservedBitsNonZero_Throws()
     {
+        CpuOnlyTest();
         var w = new VorbisTestWriter();
         w.Write(0, 1); w.Write(0, 1);
         w.Write(1, 2);          // reserved = 01 -> violation
@@ -102,6 +106,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisMapping_CouplingPairWithSameChannel_Throws()
     {
+        CpuOnlyTest();
         var w = new VorbisTestWriter();
         w.Write(0, 1);           // submaps flag = no
         w.Write(1, 1);           // coupling flag = yes
@@ -117,6 +122,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisMode_SingleMode_ShortBlock_Parses()
     {
+        CpuOnlyTest();
         var w = new VorbisTestWriter();
         w.Write(0, 1);          // blockflag = short
         w.Write(0, 16);         // windowtype
@@ -132,6 +138,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisMode_TwoModes_MixedBlockSizesAndMappings()
     {
+        CpuOnlyTest();
         var w = new VorbisTestWriter();
         // mode 0 (short, mapping 0)
         w.Write(0, 1); w.Write(0, 16); w.Write(0, 16); w.Write(0, 8);
@@ -147,6 +154,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisMode_MissingFramingFlag_Throws()
     {
+        CpuOnlyTest();
         var w = new VorbisTestWriter();
         w.Write(0, 1); w.Write(0, 16); w.Write(0, 16); w.Write(0, 8);
         w.Write(0, 1); // framing flag = 0, violation
@@ -158,6 +166,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisMode_NonZeroWindowType_Throws()
     {
+        CpuOnlyTest();
         var w = new VorbisTestWriter();
         w.Write(0, 1); w.Write(1, 16); w.Write(0, 16); w.Write(0, 8); w.Write(1, 1);
         bool threw = false;
@@ -168,6 +177,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisMode_NonZeroTransformType_Throws()
     {
+        CpuOnlyTest();
         var w = new VorbisTestWriter();
         w.Write(0, 1); w.Write(0, 16); w.Write(1, 16); w.Write(0, 8); w.Write(1, 1);
         bool threw = false;

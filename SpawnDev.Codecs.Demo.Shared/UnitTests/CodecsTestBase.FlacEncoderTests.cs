@@ -33,6 +33,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_Mono_Silence_Roundtrips()
     {
+        CpuOnlyTest();
         var input = new int[512]; // all zero
         byte[] encoded = FlacEncoder.EncodeStream(input, sampleRateHz: 44100, channels: 1, bitsPerSample: 16, blockSize: 256);
         var decoded = FlacDecoder.Decode(encoded);
@@ -46,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_Mono_Sine_Roundtrips_ExactlyLossless()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(samplesPerChannel: 1024, channels: 1, sampleRateHz: 44100, bps: 16);
         byte[] encoded = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 256);
         var decoded = FlacDecoder.Decode(encoded);
@@ -56,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_Stereo_Sine_Roundtrips()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(samplesPerChannel: 512, channels: 2, sampleRateHz: 48000, bps: 16);
         byte[] encoded = FlacEncoder.EncodeStream(input, 48000, 2, 16, blockSize: 128);
         var decoded = FlacDecoder.Decode(encoded);
@@ -68,6 +71,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_24Bit_Roundtrips()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(samplesPerChannel: 300, channels: 1, sampleRateHz: 96000, bps: 24);
         byte[] encoded = FlacEncoder.EncodeStream(input, 96000, 1, 24, blockSize: 128);
         var decoded = FlacDecoder.Decode(encoded);
@@ -79,6 +83,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_8Bit_Roundtrips()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(samplesPerChannel: 200, channels: 1, sampleRateHz: 8000, bps: 8);
         byte[] encoded = FlacEncoder.EncodeStream(input, 8000, 1, 8, blockSize: 64);
         var decoded = FlacDecoder.Decode(encoded);
@@ -90,6 +95,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_MultipleFrames_Concatenate()
     {
+        CpuOnlyTest();
         // 10 frames of 64 samples each = 640 samples total.
         var input = GenerateSineInt(samplesPerChannel: 640, channels: 1, sampleRateHz: 44100, bps: 16);
         byte[] encoded = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 64);
@@ -101,6 +107,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_PartialLastBlock_Roundtrips()
     {
+        CpuOnlyTest();
         // 500 samples with blockSize 128 → 3 full blocks + 1 partial block of 116 samples.
         var input = GenerateSineInt(samplesPerChannel: 500, channels: 1, sampleRateHz: 44100, bps: 16);
         byte[] encoded = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 128);
@@ -112,6 +119,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_FourChannel_Roundtrips()
     {
+        CpuOnlyTest();
         // 4-channel surround: generate 256 samples with unique data per channel.
         int samplesPerChannel = 256;
         int channels = 4;
@@ -130,6 +138,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_CustomSampleRate_WithSideBytes_Roundtrips()
     {
+        CpuOnlyTest();
         // 37500 Hz does not match any fixed code; must use 16-bit side byte via code 0b1101.
         var input = GenerateSineInt(samplesPerChannel: 256, channels: 1, sampleRateHz: 37500, bps: 16);
         byte[] encoded = FlacEncoder.EncodeStream(input, 37500, 1, 16, blockSize: 128);
@@ -141,6 +150,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_CustomBlockSize_WithSideBytes_Roundtrips()
     {
+        CpuOnlyTest();
         // 100-sample block size: not in fixed table, use 8-bit side via code 0b0110.
         var input = GenerateSineInt(samplesPerChannel: 400, channels: 1, sampleRateHz: 44100, bps: 16);
         byte[] encoded = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 100);
@@ -152,6 +162,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_ValidatesBadChannels_Throws()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { _ = FlacEncoder.EncodeStream(new int[100], 44100, 0, 16); }
         catch (ArgumentException) { threw = true; }
@@ -161,6 +172,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_ValidatesBadBps_Throws()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { _ = FlacEncoder.EncodeStream(new int[100], 44100, 1, 11); }
         catch (ArgumentException) { threw = true; }
@@ -170,6 +182,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_StreamInfo_RecordsTotalSamples()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(samplesPerChannel: 777, channels: 1, sampleRateHz: 44100, bps: 16);
         byte[] encoded = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 128);
         var decoded = FlacDecoder.Decode(encoded);
@@ -179,6 +192,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_Silence_UsesConstantSubframes_CompactEncoding()
     {
+        CpuOnlyTest();
         // 1024 samples of silence. VERBATIM would need 16*1024 = 16384 bits per channel.
         // CONSTANT needs just 16 bits per channel. The encoded stream should be much
         // smaller than the VERBATIM baseline.
@@ -199,6 +213,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_DcOffset_UsesConstantSubframes()
     {
+        CpuOnlyTest();
         // Non-zero DC offset: every sample == 4242.
         var dc = new int[512];
         Array.Fill(dc, 4242);
@@ -213,6 +228,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_PerChannelMix_OneConstantOneVerbatim()
     {
+        CpuOnlyTest();
         // Stereo where channel 0 is silent but channel 1 is varying. Our encoder should pick
         // CONSTANT for ch0 and VERBATIM for ch1 on a per-subframe basis.
         int samplesPerChannel = 256;
@@ -230,6 +246,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_Sine_CompressesBelowVerbatim()
     {
+        CpuOnlyTest();
         // A 1024-sample 16-bit sine wave should compress well via FIXED order
         // selection. VERBATIM baseline = 1024 * 16 / 8 = 2048 bytes just for the
         // subframe payload; full file adds ~50 bytes of metadata/framing.
@@ -246,6 +263,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_Ramp_CompressesDramatically()
     {
+        CpuOnlyTest();
         // A monotonically-increasing ramp is a perfect fit for FIXED order 1
         // (first difference is constant). Encoder should pick FIXED order 1
         // with Rice param near 0, producing a near-trivial bit stream.
@@ -263,6 +281,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_Quadratic_CompressesWithFixedOrder2()
     {
+        CpuOnlyTest();
         // f(n) = n*n is perfectly fit by FIXED order 2 (2nd difference = constant 2).
         var input = new int[512];
         for (int i = 0; i < 512; i++) input[i] = i * i - 65536;
@@ -278,6 +297,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_StereoHighlyCorrelated_PicksMidSide()
     {
+        CpuOnlyTest();
         // L and R nearly identical -> side ~= 0 -> MidSide is MUCH cheaper than Independent.
         int samplesPerChannel = 1024;
         var input = new int[samplesPerChannel * 2];
@@ -301,6 +321,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_StereoUncorrelated_PicksIndependent_StillRoundtrips()
     {
+        CpuOnlyTest();
         // L and R independent noise: decor modes don't help. Encoder should pick
         // Independent. Test only verifies lossless roundtrip (not compression).
         int samplesPerChannel = 512;
@@ -320,6 +341,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_DampedSinusoid_CompressesWithLpc()
     {
+        CpuOnlyTest();
         // A damped sinusoid x[n] = A * exp(-alpha*n) * sin(omega*n) is a classical
         // signal that LPC order 2 fits near-perfectly. FIXED residual would be noisy,
         // LPC can drive residual near zero. This tests that LPC actually gets picked
@@ -344,6 +366,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoder_WhiteNoise_LargeBlock_LpcAvoidsFailure()
     {
+        CpuOnlyTest();
         // White noise is hard for ANY predictor. Verifies that when LPC doesn't
         // beat FIXED or VERBATIM, the encoder falls back cleanly without error.
         int samples = 1024;

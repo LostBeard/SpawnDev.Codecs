@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IvfRemuxer_BbbFixture_ProducesIdenticalSize()
     {
+        CpuOnlyTest();
         var src = LoadAv1Fixture();
         var remuxed = Av1IvfRemuxer.RemuxToBytes(src);
         Equal(src.Length, remuxed.Length);
@@ -19,6 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IvfRemuxer_BbbFixture_ProducesByteIdenticalOutput()
     {
+        CpuOnlyTest();
         var src = LoadAv1Fixture();
         var remuxed = Av1IvfRemuxer.RemuxToBytes(src);
         Equal(src.Length, remuxed.Length);
@@ -33,6 +35,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IvfRemuxer_BbbConfigSubstitution_ProducesByteIdenticalOutput()
     {
+        CpuOnlyTest();
         // Build the BBB-equivalent SH config from observed bits, substitute
         // it via the writer, and verify the remuxed output is byte-equivalent
         // to source. This proves the closed-loop SH writer path works
@@ -63,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IvfRemuxer_BbbFixture_RemuxedStreamReParseable()
     {
+        CpuOnlyTest();
         // The remuxed bytes must round-trip through Av1StreamAnalyzer
         // identically to the source.
         var src = LoadAv1Fixture();

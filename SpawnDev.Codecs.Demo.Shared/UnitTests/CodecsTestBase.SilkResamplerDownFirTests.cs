@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerDownFir_16To8_ZeroInput_ProducesZeroOutput()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         SilkResampler.Init(state, 16000, 8000, forEncode: false);
 
@@ -29,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerDownFir_16To8_OutputCountIsHalf()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         SilkResampler.Init(state, 16000, 8000, forEncode: false);
 
@@ -49,6 +51,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerDownFir_16To12_3To4_UsesExpectedCoefs()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         SilkResampler.Init(state, 16000, 12000, forEncode: false);
         Equal(SilkResamplerConstants.USE_DOWN_FIR, state.ResamplerFunction);
@@ -73,6 +76,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerDownFir_12To8_2To3_UsesExpectedCoefs()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         SilkResampler.Init(state, 12000, 8000, forEncode: false);
         if (!ReferenceEquals(state.Coefs, SilkResamplerTables.Coefs2To3))
@@ -93,6 +97,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerDownFir_16To8_StateCarriesAcrossCalls()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         SilkResampler.Init(state, 16000, 8000, forEncode: false);
 
@@ -121,6 +126,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerDownFir_DcInput_ProducesBoundedOutput()
     {
+        CpuOnlyTest();
         // DC input through the downsample filter should produce bounded output
         // (may or may not settle to DC level depending on filter's DC gain).
         var state = new SilkResamplerState();

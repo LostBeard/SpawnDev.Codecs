@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8BoolCoder_AlternatingBoolsAtProbHalf_RoundTrip()
     {
+        CpuOnlyTest();
         // 40 alternating bools at prob 128 - every "got 0 expected 1" failure
         // pattern surfaces here. Original encoder bug failed at index 11.
         var enc = new Vp8BoolEncoder();
@@ -31,6 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8BoolCoder_BoolsAtSkewedProbabilities_RoundTrip()
     {
+        CpuOnlyTest();
         // Wide probability range catches both rare-branch and common-branch paths.
         var enc = new Vp8BoolEncoder();
         int[] probs = { 128, 64, 200, 32, 240, 16, 250, 6 };
@@ -50,6 +52,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8BoolCoder_RawValues_RoundTrip()
     {
+        CpuOnlyTest();
         int[] values = { 0xA5, 0x12, 0xFF, 0x00, 0x7F, 0x3C, 0xBA, 0x10 };
         var enc = new Vp8BoolEncoder();
         foreach (var v in values) enc.EncodeValue(v, 8);
@@ -63,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8BoolCoder_MixedOpsStress_RoundTrip()
     {
+        CpuOnlyTest();
         // 1000 mixed operations - exercises the carry-propagation path
         // (long runs of 0xFF in the buffer require backward carry walks).
         var enc = new Vp8BoolEncoder();

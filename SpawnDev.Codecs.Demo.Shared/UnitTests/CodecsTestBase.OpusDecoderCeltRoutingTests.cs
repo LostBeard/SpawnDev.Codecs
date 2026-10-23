@@ -36,6 +36,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_CeltPacket_FullbandMono_BitExactMatchesConcentus()
     {
+        CpuOnlyTest();
         // RESTRICTED_LOWDELAY application + 48 kHz + 20 ms frame -> CELT mode
         // Fullband. This is a clean test of the CELT decode path.
         var src = ReferenceOracle.GenerateSineWave(1000, 48000, 1, 960);
@@ -68,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_CeltPacket_FullbandStereo_BitExactMatchesConcentus()
     {
+        CpuOnlyTest();
         // Stereo CELT. Two channels of a sine sweep, encoded as a
         // RESTRICTED_LOWDELAY packet (CELT mode).
         var src = ReferenceOracle.GenerateSineWave(880, 48000, 2, 960);
@@ -96,6 +98,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_CeltPacket_2_5msFrame_BitExactMatchesConcentus()
     {
+        CpuOnlyTest();
         // 2.5 ms frame at 48 kHz = 120 samples per channel. Smallest CELT frame.
         var src = ReferenceOracle.GenerateSineWave(2000, 48000, 1, 120);
         byte[] packet = ReferenceOracle.EncodeFrame(
@@ -122,6 +125,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_HybridPacket_FullbandMono_BitExactMatchesConcentus()
     {
+        CpuOnlyTest();
         // Hybrid mode is forced when AUDIO/VOIP application hint is paired
         // with SWB or FB at 10/20 ms frames at moderate bitrate. SILK
         // handles the low band, CELT the high band.
@@ -150,6 +154,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_CeltPacket_MultiPacketStream_StateCarriesAcrossPackets()
     {
+        CpuOnlyTest();
         // Encode 3 sequential 20 ms CELT packets - the decoder's MDCT overlap
         // and post-filter taps must carry over correctly between packets,
         // so each successive decode should match the oracle that was

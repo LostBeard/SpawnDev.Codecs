@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8ForwardTransform_ShortFdct4x4_AllZero_LibvpxQuirkIsBitExact()
     {
+        CpuOnlyTest();
         // libvpx vp8_short_fdct4x4_c has a per-pass rounding constant (+14500
         // / +7500 in pass 1, then column pass on those non-zero values) that
         // causes a deterministic small bias on all-zero input. Specifically
@@ -36,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8ForwardTransform_ShortFdct4x4_Determinism()
     {
+        CpuOnlyTest();
         var rng = new Random(0x8FD);
         var input = new short[16];
         for (int i = 0; i < 16; i++) input[i] = (short)rng.Next(-128, 128);
@@ -49,6 +51,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8ForwardTransform_ShortFdct4x4_FwdInv_RoundTripFlatBlock()
     {
+        CpuOnlyTest();
         // Flat residual = 0 -> all-zero coefficients -> inverse adds 0 to
         // predictor -> dest = predictor unchanged.
         var residual = new short[16];
@@ -65,6 +68,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8ForwardTransform_ShortFdct4x4_FwdInv_RoundTripSmallGradient()
     {
+        CpuOnlyTest();
         // 4x4 gradient pixels, predictor=128, residual = pixels - predictor.
         var pixels = new byte[16];
         for (int r = 0; r < 4; r++)
@@ -92,6 +96,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8ForwardTransform_ShortWalsh4x4_AllZero_ProducesAllZero()
     {
+        CpuOnlyTest();
         var input = new short[16];
         var output = new short[16];
         Vp8ForwardTransform.ShortWalsh4x4(input, 4, output);
@@ -101,6 +106,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8ForwardTransform_ShortWalsh4x4_FwdInv_DcOnlyRoundTrip()
     {
+        CpuOnlyTest();
         // Walsh transform on 4 DC values from 4 macroblock Y2 coefficients.
         // Round-trip should give back input (Walsh is its own inverse with
         // a known scale factor).

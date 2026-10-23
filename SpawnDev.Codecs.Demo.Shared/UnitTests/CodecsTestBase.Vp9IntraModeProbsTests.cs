@@ -12,6 +12,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeProbs_AllArraysHaveExpectedLengths()
     {
+        CpuOnlyTest();
         Equal(90, Vp9IntraModeProbs.KfUvModeProbs.Length);   // 10 x 9
         Equal(36, Vp9IntraModeProbs.DefaultIfYProbs.Length); // 4 x 9
         Equal(90, Vp9IntraModeProbs.DefaultIfUvProbs.Length); // 10 x 9
@@ -22,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeProbs_KfUvModeProbs_FirstAndLastRowsMatchLibvpx()
     {
+        CpuOnlyTest();
         // y = DcPred row 0: { 144, 11, 54, 157, 195, 130, 46, 58, 108 }
         Equal((byte)144, Vp9IntraModeProbs.KfUvModeProbs[0]);
         Equal((byte)11,  Vp9IntraModeProbs.KfUvModeProbs[1]);
@@ -36,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeProbs_DefaultIfYProbs_FirstAndLastRowsMatchLibvpx()
     {
+        CpuOnlyTest();
         // block_size < 8x8: { 65, 32, 18, 144, 162, 194, 41, 51, 98 }
         Equal((byte)65, Vp9IntraModeProbs.DefaultIfYProbs[0]);
         Equal((byte)32, Vp9IntraModeProbs.DefaultIfYProbs[1]);
@@ -50,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeProbs_DefaultIfUvProbs_FirstAndLastRowsMatchLibvpx()
     {
+        CpuOnlyTest();
         // y = DcPred row 0: { 120, 7, 76, 176, 208, 126, 28, 54, 103 }
         Equal((byte)120, Vp9IntraModeProbs.DefaultIfUvProbs[0]);
         Equal((byte)7,   Vp9IntraModeProbs.DefaultIfUvProbs[1]);
@@ -64,6 +68,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeProbs_KeyframeUvProbsHelper_ReturnsCorrectSliceForEveryYMode()
     {
+        CpuOnlyTest();
         // Each Y mode (0..9) yields a 9-byte slice. Verify by spot-
         // checking the first byte against the array layout.
         for (int y = 0; y < 10; y++)
@@ -78,6 +83,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeProbs_InterFrameYProbsHelper_ReturnsCorrectSliceForEveryGroup()
     {
+        CpuOnlyTest();
         for (int g = 0; g < 4; g++)
         {
             var slice = Vp9IntraModeProbs.InterFrameYProbs(g);
@@ -90,6 +96,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeProbs_InterFrameUvProbsHelper_ReturnsCorrectSliceForEveryYMode()
     {
+        CpuOnlyTest();
         for (int y = 0; y < 10; y++)
         {
             var slice = Vp9IntraModeProbs.InterFrameUvProbs((Vp9IntraMode)y);
@@ -102,6 +109,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeProbs_Helpers_RejectOutOfRangeArgs()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9IntraModeProbs.KeyframeUvProbs((Vp9IntraMode)10));
         Throws<ArgumentOutOfRangeException>(() =>
@@ -115,6 +123,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeProbs_DriveProbsIntoIntraModeTree_DecodesDcPredOnFirstZeroBit()
     {
+        CpuOnlyTest();
         // End-to-end: pull a real probability slice from this slice's
         // tables and decode through slice 153's Vp9IntraModeTree.Decode.
         // First bit = 0 -> DcPred regardless of which probs slice we picked.

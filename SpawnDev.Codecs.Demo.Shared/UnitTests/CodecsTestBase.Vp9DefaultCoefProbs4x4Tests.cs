@@ -13,12 +13,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DefaultCoefProbs4x4_HasCorrect432EntryLength()
     {
+        CpuOnlyTest();
         Equal(432, Vp9CoefProbs.DefaultCoefProbs4x4.Length);
     }
 
     [TestMethod]
     public void Vp9DefaultCoefProbs4x4_PinnedFirstEntries_MatchLibvpx()
     {
+        CpuOnlyTest();
         // From libvpx default_coef_probs_4x4 [Y plane][Intra][Band 0]:
         //   { 195, 29, 183 }
         //   { 84, 49, 136 }
@@ -38,6 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DefaultCoefProbs4x4_Band0Ctx3To5_AreZeroPadded()
     {
+        CpuOnlyTest();
         // Band 0 only has 3 actual contexts in libvpx; the rectangular
         // flat layout pads ctx 3..5 with zero across all 4 (plane, ref)
         // combinations. Verify the 36 padded entries are all zero.
@@ -55,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DefaultCoefProbs4x4_PinnedBand1FirstContext_MatchesLibvpx()
     {
+        CpuOnlyTest();
         // Band 1's first context starts right after band 0's 18 entries
         // (3 real + 3 zero-padded). libvpx Y/Intra/Band 1[0] = { 31, 107, 169 }.
         var p = Vp9CoefProbs.DefaultCoefProbs4x4;
@@ -66,6 +70,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DefaultCoefProbs4x4_PinnedUVInterBand5Last_MatchesLibvpx()
     {
+        CpuOnlyTest();
         // Last triple of the entire 4x4 table: UV plane / Inter ref /
         // Band 5 / ctx 5 = libvpx { 8, 23, 61 }. Pinning the very last
         // entry catches a class of off-by-one errors in the flat extraction.
@@ -80,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DefaultCoefProbs4x4_Index4x4_IsConsistentWithRowMajorMath()
     {
+        CpuOnlyTest();
         // Sanity-check the index helper round-trips. Every
         // (plane, ref, band, ctx, node) tuple should produce the same
         // index as the manual flat formula.

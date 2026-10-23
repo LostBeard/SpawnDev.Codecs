@@ -31,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_ConcentusEncodedSilk_NbMono_DecodesWithoutCrash()
     {
+        CpuOnlyTest();
         // Encode 20 ms of a 440 Hz sine at 8 kHz through Concentus with VOIP application.
         // This normally produces a SILK-mode Opus packet.
         var pcm = ReferenceOracle.GenerateSineWave(440, 8000, 1, 160);
@@ -68,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_ConcentusEncodedSilk_ComparedToConcentusDecode_RmsInSameBallpark()
     {
+        CpuOnlyTest();
         // Encode same signal, decode with both decoders, compare RMS levels.
         var srcPcm = ReferenceOracle.GenerateSineWave(440, 8000, 1, 160);
         byte[] packet = ReferenceOracle.EncodeFrame(srcPcm, 8000, 1, 160, OpusApplication.OPUS_APPLICATION_VOIP);
@@ -109,6 +111,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_ConcentusEncodedSilk_WbMono_20Ms_DecodesWithoutCrash()
     {
+        CpuOnlyTest();
         // WB (16 kHz internal) 20 ms. Concentus VOIP should emit SILK-WB for 16 kHz audio.
         var pcm = ReferenceOracle.GenerateSineWave(440, 16000, 1, 320);
         byte[] packet = ReferenceOracle.EncodeFrame(pcm, 16000, 1, 320, OpusApplication.OPUS_APPLICATION_VOIP);
@@ -141,6 +144,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_ConcentusEncodedSilk_Nb10Ms_DecodesWithoutCrash()
     {
+        CpuOnlyTest();
         // 10 ms NB frame.
         var pcm = ReferenceOracle.GenerateSineWave(440, 8000, 1, 80);
         byte[] packet = ReferenceOracle.EncodeFrame(pcm, 8000, 1, 80, OpusApplication.OPUS_APPLICATION_VOIP);
@@ -172,6 +176,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_ConcentusEncodedSilk_NbSilence_DecodesSilent()
     {
+        CpuOnlyTest();
         // Silent input -> SILK produces near-silent output. Our decoder should match.
         var pcm = new float[160]; // all zero
         byte[] packet = ReferenceOracle.EncodeFrame(pcm, 8000, 1, 160, OpusApplication.OPUS_APPLICATION_VOIP);

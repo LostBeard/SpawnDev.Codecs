@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Wav_Write_Read_16Bit_Mono_Roundtrips()
     {
+        CpuOnlyTest();
         var samples = new[] { 0, 100, -100, 32767, -32768, 1234, -1234 };
         byte[] wav = WavFileCodec.Write(samples, sampleRateHz: 44100, channels: 1, bitsPerSample: 16);
         var parsed = WavFileCodec.Read(wav);
@@ -30,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Wav_Write_Read_16Bit_Stereo_Roundtrips()
     {
+        CpuOnlyTest();
         var samples = new[] { 100, -100, 200, -200, 300, -300 };
         byte[] wav = WavFileCodec.Write(samples, 48000, 2, 16);
         var parsed = WavFileCodec.Read(wav);
@@ -42,6 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Wav_Write_Read_24Bit_Roundtrips()
     {
+        CpuOnlyTest();
         // 24-bit signed range is [-8388608, 8388607].
         var samples = new[] { 0, 1000, -1000, 8388607, -8388608, 123456 };
         byte[] wav = WavFileCodec.Write(samples, 48000, 1, 24);
@@ -53,6 +56,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Wav_Write_Read_32Bit_Roundtrips()
     {
+        CpuOnlyTest();
         var samples = new[] { 0, int.MaxValue, int.MinValue, 1_000_000, -1_000_000 };
         byte[] wav = WavFileCodec.Write(samples, 96000, 1, 32);
         var parsed = WavFileCodec.Read(wav);
@@ -63,6 +67,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Wav_Write_Read_8Bit_UnsignedOffset()
     {
+        CpuOnlyTest();
         // 8-bit WAV is UNSIGNED with 128 offset, but our API accepts signed in/out.
         var samples = new[] { 0, 50, -50, 127, -128 };
         byte[] wav = WavFileCodec.Write(samples, 22050, 1, 8);
@@ -74,6 +79,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Wav_Write_Read_8Channels()
     {
+        CpuOnlyTest();
         // 8 channels x 10 samples = 80 interleaved int values.
         int samplesPerChannel = 10;
         int channels = 8;
@@ -88,6 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Wav_Write_NonAlignedSize_Throws()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { _ = WavFileCodec.Write(new int[5], 44100, 2, 16); }
         catch (ArgumentException) { threw = true; }
@@ -97,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Wav_Read_BadRiff_Throws()
     {
+        CpuOnlyTest();
         var bad = new byte[44];
         bad[0] = (byte)'X'; bad[1] = (byte)'I'; bad[2] = (byte)'F'; bad[3] = (byte)'F';
         bool threw = false;
@@ -108,6 +116,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Wav_Read_MissingFmt_Throws()
     {
+        CpuOnlyTest();
         // Build a RIFF/WAVE with only a data chunk, no fmt.
         var bytes = new List<byte>();
         bytes.AddRange(new byte[] { (byte)'R', (byte)'I', (byte)'F', (byte)'F' });
@@ -125,6 +134,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Wav_WavToFlacToWav_RoundtripsLosslessly()
     {
+        CpuOnlyTest();
         // WAV → FLAC → WAV should yield the exact same samples (FLAC is lossless).
         var input = GenerateSineInt(samplesPerChannel: 1024, channels: 2, sampleRateHz: 44100, bps: 16);
         byte[] wavBytes = WavFileCodec.Write(input, 44100, 2, 16);
@@ -143,6 +153,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Wav_SkipsUnknownChunks()
     {
+        CpuOnlyTest();
         // Build a WAV with a LIST chunk before the data chunk - parser should skip LIST.
         var fmt = new byte[16];
         fmt[0] = 0x01; // format tag PCM

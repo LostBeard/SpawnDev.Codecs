@@ -35,6 +35,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9NeighborTables_4x4_AllThreeShapesValid()
     {
+        CpuOnlyTest();
         AssertNeighborTableShape(Vp9NeighborTables.DefaultScan4x4Neighbors, 16, "DefaultScan4x4Neighbors");
         AssertNeighborTableShape(Vp9NeighborTables.RowScan4x4Neighbors,     16, "RowScan4x4Neighbors");
         AssertNeighborTableShape(Vp9NeighborTables.ColScan4x4Neighbors,     16, "ColScan4x4Neighbors");
@@ -43,6 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9NeighborTables_8x8_AllThreeShapesValid()
     {
+        CpuOnlyTest();
         AssertNeighborTableShape(Vp9NeighborTables.DefaultScan8x8Neighbors, 64, "DefaultScan8x8Neighbors");
         AssertNeighborTableShape(Vp9NeighborTables.RowScan8x8Neighbors,     64, "RowScan8x8Neighbors");
         AssertNeighborTableShape(Vp9NeighborTables.ColScan8x8Neighbors,     64, "ColScan8x8Neighbors");
@@ -51,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9NeighborTables_4x4DefaultScan_PinnedFirstFewPairs()
     {
+        CpuOnlyTest();
         // Pinned pairs from libvpx default_scan_4x4_neighbors:
         // (0,0)(0,0)(0,0)(1,4)(4,4)(1,1)(8,8)(5,8)...
         var t = Vp9NeighborTables.DefaultScan4x4Neighbors;
@@ -64,6 +67,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9NeighborTables_4x4ColScan_PinnedFirstFewPairs()
     {
+        CpuOnlyTest();
         // Distinct from default - col scan has a (4,4) pair already at
         // index pair 2 instead of three (0,0) pairs.
         var t = Vp9NeighborTables.ColScan4x4Neighbors;
@@ -77,6 +81,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9NeighborTables_GetNeighbors4x4_DispatchesByScanType()
     {
+        CpuOnlyTest();
         True(ReferenceEquals(Vp9NeighborTables.DefaultScan4x4Neighbors, Vp9NeighborTables.GetNeighbors4x4(Vp9ScanType.Default)));
         True(ReferenceEquals(Vp9NeighborTables.RowScan4x4Neighbors,     Vp9NeighborTables.GetNeighbors4x4(Vp9ScanType.Row)));
         True(ReferenceEquals(Vp9NeighborTables.ColScan4x4Neighbors,     Vp9NeighborTables.GetNeighbors4x4(Vp9ScanType.Col)));
@@ -85,6 +90,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9NeighborTables_GetNeighbors8x8_DispatchesByScanType()
     {
+        CpuOnlyTest();
         True(ReferenceEquals(Vp9NeighborTables.DefaultScan8x8Neighbors, Vp9NeighborTables.GetNeighbors8x8(Vp9ScanType.Default)));
         True(ReferenceEquals(Vp9NeighborTables.RowScan8x8Neighbors,     Vp9NeighborTables.GetNeighbors8x8(Vp9ScanType.Row)));
         True(ReferenceEquals(Vp9NeighborTables.ColScan8x8Neighbors,     Vp9NeighborTables.GetNeighbors8x8(Vp9ScanType.Col)));
@@ -93,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9NeighborTables_16x16_AllThreeShapesValid()
     {
+        CpuOnlyTest();
         AssertNeighborTableShape(Vp9NeighborTables.DefaultScan16x16Neighbors, 256, "DefaultScan16x16Neighbors");
         AssertNeighborTableShape(Vp9NeighborTables.RowScan16x16Neighbors,     256, "RowScan16x16Neighbors");
         AssertNeighborTableShape(Vp9NeighborTables.ColScan16x16Neighbors,     256, "ColScan16x16Neighbors");
@@ -101,12 +108,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9NeighborTables_32x32_DefaultScanShapeValid()
     {
+        CpuOnlyTest();
         AssertNeighborTableShape(Vp9NeighborTables.DefaultScan32x32Neighbors, 1024, "DefaultScan32x32Neighbors");
     }
 
     [TestMethod]
     public void Vp9NeighborTables_16x16DefaultScan_PinnedFirstFewPairs()
     {
+        CpuOnlyTest();
         // Pinned vs libvpx default_scan_16x16_neighbors:
         //   (0,0)(0,0)(0,0)(16,16)(1,16)(1,1)(32,32)(17,32)...
         var t = Vp9NeighborTables.DefaultScan16x16Neighbors;
@@ -123,6 +132,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9NeighborTables_32x32DefaultScan_PinnedFirstAndLastPairs()
     {
+        CpuOnlyTest();
         // Pinned vs libvpx default_scan_32x32_neighbors first 8 pairs:
         //   (0,0)(0,0)(0,0)(32,32)(1,32)(1,1)(64,64)(33,64)
         var t = Vp9NeighborTables.DefaultScan32x32Neighbors;
@@ -142,6 +152,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9NeighborTables_GetNeighbors16x16_DispatchesByScanType()
     {
+        CpuOnlyTest();
         True(ReferenceEquals(Vp9NeighborTables.DefaultScan16x16Neighbors, Vp9NeighborTables.GetNeighbors16x16(Vp9ScanType.Default)));
         True(ReferenceEquals(Vp9NeighborTables.RowScan16x16Neighbors,     Vp9NeighborTables.GetNeighbors16x16(Vp9ScanType.Row)));
         True(ReferenceEquals(Vp9NeighborTables.ColScan16x16Neighbors,     Vp9NeighborTables.GetNeighbors16x16(Vp9ScanType.Col)));
@@ -150,6 +161,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9NeighborTables_GetNeighbors32x32_AlwaysReturnsDefault()
     {
+        CpuOnlyTest();
         True(ReferenceEquals(Vp9NeighborTables.DefaultScan32x32Neighbors, Vp9NeighborTables.GetNeighbors32x32(Vp9ScanType.Default)));
         True(ReferenceEquals(Vp9NeighborTables.DefaultScan32x32Neighbors, Vp9NeighborTables.GetNeighbors32x32(Vp9ScanType.Row)));
         True(ReferenceEquals(Vp9NeighborTables.DefaultScan32x32Neighbors, Vp9NeighborTables.GetNeighbors32x32(Vp9ScanType.Col)));

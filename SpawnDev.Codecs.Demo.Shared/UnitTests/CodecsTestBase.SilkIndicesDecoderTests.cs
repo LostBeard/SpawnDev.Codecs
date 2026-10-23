@@ -102,6 +102,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IndicesDecoder_Inactive_NoVad_Independent_NbMb_RoundTrip()
     {
+        CpuOnlyTest();
         // Simplest path: inactive (signalType=0), no VAD -> uses 2-symbol TypeOffsetNoVad iCDF.
         // Non-voiced means no pitch/LTP block. Conditional = 0 so gains are independent.
         var cb = SilkNlsfCodebookTables.NbMb;
@@ -147,6 +148,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IndicesDecoder_Unvoiced_Vad_Conditional_NbMb_RoundTrip()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.NbMb;
         var indices = new SilkDecodedIndices
         {
@@ -182,6 +184,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IndicesDecoder_Voiced_Vad_Independent_Wb_RoundTrip()
     {
+        CpuOnlyTest();
         // Full voiced WB path: signal type 2 (voiced), pitch + LTP + LTP scale, all exercised.
         var cb = SilkNlsfCodebookTables.Wb;
         var indices = new SilkDecodedIndices
@@ -228,6 +231,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IndicesDecoder_Voiced_DeltaPitchFromPrev_RoundTrip()
     {
+        CpuOnlyTest();
         // Voiced frame + conditional + prevVoiced enables delta pitch coding.
         // Pick a pitch lag that's within [prev - 8, prev + 11] so the delta encoder uses raw > 0.
         var cb = SilkNlsfCodebookTables.NbMb;
@@ -274,6 +278,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IndicesDecoder_Voiced_TenMs_UsesNarrowPitchContour()
     {
+        CpuOnlyTest();
         // 10 ms frame -> nbSubfr = 2; NLSF interp coef is NOT read (forced to 4 by decoder).
         var cb = SilkNlsfCodebookTables.NbMb;
         var indices = new SilkDecodedIndices
@@ -321,6 +326,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IndicesDecoder_NullIndices_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(32);
         enc.Done();
         var dec = new OpusRangeDecoder(enc.ToArray());
@@ -332,6 +338,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IndicesDecoder_NullRangeDecoder_Throws()
     {
+        CpuOnlyTest();
         var indices = new SilkDecodedIndices();
         Throws<ArgumentNullException>(() =>
             SilkIndicesDecoder.Decode(indices, null!, SilkNlsfCodebookTables.NbMb,
@@ -341,6 +348,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IndicesDecoder_NullCodebook_Throws()
     {
+        CpuOnlyTest();
         var indices = new SilkDecodedIndices();
         var enc = new OpusRangeEncoder(32);
         enc.Done();

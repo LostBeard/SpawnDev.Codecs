@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_RShiftRound_HandTracedValues()
     {
+        CpuOnlyTest();
         // shift == 1: (a >> 1) + (a & 1)
         Equal(1, silk_RSHIFT_ROUND(1, 1));   // (0) + 1 = 1
         Equal(1, silk_RSHIFT_ROUND(2, 1));   // 1 + 0 = 1
@@ -32,6 +33,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Limit32_ClampsWithinBounds()
     {
+        CpuOnlyTest();
         Equal(5, silk_LIMIT_32(5, 0, 10));
         Equal(0, silk_LIMIT_32(-100, 0, 10));
         Equal(10, silk_LIMIT_32(100, 0, 10));
@@ -42,6 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_AddSat16_SaturatesCorrectly()
     {
+        CpuOnlyTest();
         Equal((short)5, silk_ADD_SAT16(2, 3));
         Equal((short)-5, silk_ADD_SAT16(-2, -3));
         Equal(short.MaxValue, silk_ADD_SAT16(short.MaxValue, 100));
@@ -55,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_InsertionSort_SortsAscending()
     {
+        CpuOnlyTest();
         // Already sorted.
         Span<short> a = stackalloc short[] { 1, 2, 3, 4, 5 };
         silk_insertion_sort_increasing_all_values_int16(a);
@@ -83,6 +87,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_InsertionSort_HandlesNegatives()
     {
+        CpuOnlyTest();
         Span<short> a = stackalloc short[] { 3, -5, 0, 100, -1 };
         silk_insertion_sort_increasing_all_values_int16(a);
         short[] expected = { -5, -1, 0, 3, 100 };
@@ -94,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfStabilize_AlreadyStable_Unchanged()
     {
+        CpuOnlyTest();
         // NLSF sorted with plenty of spacing.
         Span<short> nlsf = stackalloc short[] { 1000, 5000, 10000, 20000, 30000 };
         short[] original = nlsf.ToArray();
@@ -108,6 +114,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfStabilize_TooCloseMiddle_SpacesApart()
     {
+        CpuOnlyTest();
         // NLSF vector with two middle entries too close.
         Span<short> nlsf = stackalloc short[] { 1000, 5000, 5100, 20000, 30000 };
         short[] deltaMin = { 500, 500, 500, 500, 500, 500 };
@@ -124,6 +131,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfStabilize_FirstBelowBoundary_ClampsUp()
     {
+        CpuOnlyTest();
         // First NLSF below its minimum; should be raised to deltaMin[0].
         Span<short> nlsf = stackalloc short[] { 100, 5000, 10000, 20000, 30000 };
         short[] deltaMin = { 500, 500, 500, 500, 500, 500 };
@@ -134,6 +142,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfStabilize_LastAboveBoundary_ClampsDown()
     {
+        CpuOnlyTest();
         // Last NLSF too close to the upper bound (1 << 15 = 32768).
         Span<short> nlsf = stackalloc short[] { 1000, 5000, 10000, 20000, 32700 };
         short[] deltaMin = { 500, 500, 500, 500, 500, 500 };
@@ -145,6 +154,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfStabilize_ReversedInput_FallbackSortsCorrectly()
     {
+        CpuOnlyTest();
         // A maliciously reversed input requires the fallback path in libopus; our port
         // is expected to produce a valid ordered output regardless of which path it takes.
         Span<short> nlsf = stackalloc short[] { 30000, 20000, 10000, 5000, 1000 };
@@ -160,6 +170,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfStabilize_DeltaMinTooSmall_Throws()
     {
+        CpuOnlyTest();
         short[] nlsf = new short[5];
         short[] deltaMin = new short[5]; // Missing the L+1 entry.
         Throws<ArgumentException>(() => SilkNlsfStabilize.Stabilize(nlsf, deltaMin));
@@ -168,6 +179,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfStabilize_LastDeltaZero_Throws()
     {
+        CpuOnlyTest();
         short[] nlsf = new short[5];
         short[] deltaMin = { 500, 500, 500, 500, 500, 0 }; // deltaMin[L] must be >= 1
         Throws<ArgumentException>(() => SilkNlsfStabilize.Stabilize(nlsf, deltaMin));

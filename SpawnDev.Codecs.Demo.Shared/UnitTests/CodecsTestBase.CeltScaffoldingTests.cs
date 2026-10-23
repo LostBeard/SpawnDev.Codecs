@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void CeltConstants_Eband5Ms_MatchesLibopus()
     {
+        CpuOnlyTest();
         // From libopus celt/modes.c: eband5ms[] has 22 entries for 21 bands.
         Equal(22, CeltConstants.Eband5Ms.Length);
         Equal(CeltConstants.NB_BANDS_FULLBAND, CeltConstants.Eband5Ms.Length - 1);
@@ -34,6 +35,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void CeltConstants_BandCounts_MatchLibopus()
     {
+        CpuOnlyTest();
         Equal(13, CeltConstants.NB_BANDS_NB);
         Equal(17, CeltConstants.NB_BANDS_WB);
         Equal(19, CeltConstants.NB_BANDS_SWB);
@@ -43,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void CeltConstants_FrameSizes_48kHz()
     {
+        CpuOnlyTest();
         Equal(120, CeltConstants.FRAME_SIZE_2_5MS);
         Equal(240, CeltConstants.FRAME_SIZE_5MS);
         Equal(480, CeltConstants.FRAME_SIZE_10MS);
@@ -90,6 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void CeltMode_EndBandForBandwidth_MapsCorrectly()
     {
+        CpuOnlyTest();
         Equal(CeltConstants.NB_BANDS_NB, CeltMode.EndBandForBandwidth(OpusBandwidth.Narrowband));
         Equal(CeltConstants.NB_BANDS_WB, CeltMode.EndBandForBandwidth(OpusBandwidth.Wideband));
         Equal(CeltConstants.NB_BANDS_SWB, CeltMode.EndBandForBandwidth(OpusBandwidth.Superwideband));
@@ -99,6 +103,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void CeltMode_EndBandForBandwidth_MediumbandThrows()
     {
+        CpuOnlyTest();
         // CELT does not operate at MB (libopus uses SILK for MB).
         Throws<ArgumentException>(() => CeltMode.EndBandForBandwidth(OpusBandwidth.Mediumband));
     }
@@ -120,6 +125,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void CeltConstants_FixedPoint_MatchesLibopus()
     {
+        CpuOnlyTest();
         // Spot-check that the canonical libopus fixed-point constants are
         // present and have their RFC-defined values.
         Equal(32767, CeltConstants.Q15ONE);

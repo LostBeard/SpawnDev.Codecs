@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9YModeProbsParser_NoUpdates_LeavesTableUntouched()
     {
+        CpuOnlyTest();
         var data = new byte[16];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
 
@@ -25,6 +26,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9YModeProbsParser_RejectsUndersizedBuffer()
     {
+        CpuOnlyTest();
         var data = new byte[16];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
         Throws<ArgumentException>(() =>
@@ -34,6 +36,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9YModeProbsParser_RejectsNullArgs()
     {
+        CpuOnlyTest();
         var data = new byte[16];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
         Throws<ArgumentNullException>(() =>

@@ -27,6 +27,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1Decoder_BbbStream_ParsesEverySequenceHeader_LearnsDimensions()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         await using var decoder = new Av1Decoder();
         var sink = new Av1RecordingSink();
@@ -57,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1Decoder_BbbStream_EmitsFramesAtCorrectDimensions()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         await using var decoder = new Av1Decoder();
         var sink = new Av1RecordingSink();
@@ -81,6 +83,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1Decoder_BbbFirstFrame_LastFrameObuCounts_IncludesSequenceHeader()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         await using var decoder = new Av1Decoder();
         var sink = new Av1RecordingSink();
@@ -96,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1Decoder_BbbStream_CumulativeStats_MatchObservedTotals()
     {
+        CpuOnlyTest();
         // After driving every BBB AV1 frame through the decoder, cumulative
         // counts should reflect the OBU type distribution + frame type
         // breakdown observed by the per-frame metadata tests.
@@ -142,6 +146,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1Decoder_BbbStream_TracksShowExistingFrameSeparately()
     {
+        CpuOnlyTest();
         // After driving every BBB AV1 frame, ShowExistingFrameCount + the
         // CumulativeFrameTypeCounts should add up to the total coded
         // frame data parses without overlap.
@@ -168,6 +173,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1Decoder_WriterBuiltMinimalStream_DecodesSequenceHeader()
     {
+        CpuOnlyTest();
         // The writers + parser/decoder loop: build a TD + SH stream
         // entirely with our writers, feed it back through Av1Decoder,
         // verify the decoder learns the dimensions.
@@ -206,6 +212,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1Decoder_BbbFirstFrame_PopulatesLastFrameHeader_AsKeyframe()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         await using var decoder = new Av1Decoder();
         var sink = new Av1RecordingSink();

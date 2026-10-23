@@ -14,6 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Aiff_Write_Read_16Bit_Mono_Roundtrips()
     {
+        CpuOnlyTest();
         var samples = new[] { 0, 100, -100, 32767, -32768, 1234, -1234 };
         byte[] aiff = AiffFileCodec.Write(samples, 44100, 1, 16);
         var parsed = AiffFileCodec.Read(aiff);
@@ -26,6 +27,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Aiff_Write_Read_24Bit_Stereo_Roundtrips()
     {
+        CpuOnlyTest();
         // 24-bit signed: range [-8388608, 8388607].
         var samples = new[] { 0, 0, 8388607, -8388608, 1234567, -1234567 };
         byte[] aiff = AiffFileCodec.Write(samples, 48000, 2, 24);
@@ -39,6 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Aiff_Write_Read_8Bit_Roundtrips()
     {
+        CpuOnlyTest();
         var samples = new[] { 0, 100, -100, 127, -128, 50 };
         byte[] aiff = AiffFileCodec.Write(samples, 22050, 1, 8);
         var parsed = AiffFileCodec.Read(aiff);
@@ -49,6 +52,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Aiff_Write_Read_32Bit_Roundtrips()
     {
+        CpuOnlyTest();
         var samples = new[] { 0, int.MaxValue, int.MinValue, 1_000_000, -1_000_000 };
         byte[] aiff = AiffFileCodec.Write(samples, 96000, 1, 32);
         var parsed = AiffFileCodec.Read(aiff);
@@ -59,6 +63,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Aiff_ExtendedFloat_SampleRate_RoundsCorrectly()
     {
+        CpuOnlyTest();
         // Exactly integer rates like 44100 and 48000 must round-trip through the
         // 80-bit extended float without loss of integer value.
         int[] rates = { 8000, 11025, 16000, 22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000 };
@@ -73,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Aiff_BadForm_Throws()
     {
+        CpuOnlyTest();
         var bad = new byte[60];
         bad[0] = (byte)'X'; bad[1] = (byte)'O'; bad[2] = (byte)'R'; bad[3] = (byte)'M';
         bool threw = false;
@@ -83,6 +89,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Aiff_NonAlignedSize_Throws()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { _ = AiffFileCodec.Write(new int[5], 44100, 2, 16); }
         catch (ArgumentException) { threw = true; }
@@ -92,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Aiff_ToFlacToAiff_RoundtripsLosslessly()
     {
+        CpuOnlyTest();
         // AIFF -> FLAC -> AIFF should preserve samples exactly.
         var input = GenerateSineInt(samplesPerChannel: 1024, channels: 2, sampleRateHz: 44100, bps: 16);
         byte[] aiffBytes = AiffFileCodec.Write(input, 44100, 2, 16);
@@ -108,6 +116,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Aiff_5Channels_Roundtrips()
     {
+        CpuOnlyTest();
         // AIFF doesn't limit channel count the way WAV does; 5-channel surround works.
         int samplesPerChannel = 32;
         int channels = 5;

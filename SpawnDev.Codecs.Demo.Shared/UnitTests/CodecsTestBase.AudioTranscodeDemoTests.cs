@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public Task AudioTranscodeDemo_FlacRoundTrip_LosslessSineRecovers()
     {
+        CpuOnlyTest();
         const int sampleRate = 44100;
         const double durationSec = 1.0;
         const int toneHz = 440;
@@ -59,6 +60,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public Task AudioTranscodeDemo_VorbisRoundTrip_LossySineRecovers()
     {
+        CpuOnlyTest();
         const int sampleRate = 44100;
         const double durationSec = 1.0;
         const int toneHz = 440;
@@ -100,6 +102,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task AudioTranscodeDemo_OpusRoundTrip_LossySineRecovers()
     {
+        CpuOnlyTest();
         // Opus is locked to 48 kHz internally. Use 48 kHz directly to skip
         // resampling for this test - the demo resamples for cross-codec
         // alignment, but here we just want round-trip integrity.

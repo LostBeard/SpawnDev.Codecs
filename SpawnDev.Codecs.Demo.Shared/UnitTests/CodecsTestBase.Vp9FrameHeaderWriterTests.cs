@@ -41,6 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameHeaderWriter_Keyframe_RoundTripsViaParser()
     {
+        CpuOnlyTest();
         var original = BuildKeyframeHeader(1920, 1080);
         var bytes = Vp9FrameHeaderWriter.WriteHeaderPrefix(original);
         var parsed = Vp9FrameHeaderParser.Parse(bytes);
@@ -61,6 +62,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameHeaderWriter_Keyframe_BytesMatchHandBuilt()
     {
+        CpuOnlyTest();
         // Hand-built helper from the parser test suite is the gold
         // reference. Writer output must match byte-for-byte.
         var handBuilt = BuildVp9Keyframe_Profile0_Bt601(640, 480);
@@ -75,6 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameHeaderWriter_DimensionRange_PreservesEdgeValues()
     {
+        CpuOnlyTest();
         // Keyframes at the smallest and largest legal dimensions.
         foreach (var (w, h) in new[] { (1, 1), (320, 180), (3840, 2160), (65536, 65536) })
         {
@@ -88,6 +91,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameHeaderWriter_RenderSizeOverride_RoundTrips()
     {
+        CpuOnlyTest();
         var original = new Vp9FrameHeader
         {
             Profile = 0,
@@ -119,6 +123,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameHeaderWriter_ShowExistingFrame_RoundTrips()
     {
+        CpuOnlyTest();
         var original = new Vp9FrameHeader
         {
             Profile = 0,

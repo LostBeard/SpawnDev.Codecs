@@ -11,12 +11,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefSelector_Nearest_EmptyList_IsZero()
     {
+        CpuOnlyTest();
         Equal(Vp9Mv.Zero, Vp9MvRefSelector.Nearest(new Vp9MvCandidatesList()));
     }
 
     [TestMethod]
     public void Vp9MvRefSelector_Nearest_OneElement_ReturnsIt()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         list.TryAdd(new Vp9Mv(7, -3));
         Equal(new Vp9Mv(7, -3), Vp9MvRefSelector.Nearest(list));
@@ -25,6 +27,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefSelector_Near_LessThanTwoElements_IsZero()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         Equal(Vp9Mv.Zero, Vp9MvRefSelector.Near(list));
         list.TryAdd(new Vp9Mv(1, 2));
@@ -34,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefSelector_Near_TwoElements_ReturnsSecond()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         list.TryAdd(new Vp9Mv(1, 2));
         list.TryAdd(new Vp9Mv(3, 4));
@@ -43,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefSelector_ForInterMode_NearestMv_PicksFirst()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         list.TryAdd(new Vp9Mv(11, 22));
         list.TryAdd(new Vp9Mv(33, 44));
@@ -53,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefSelector_ForInterMode_NearMv_PicksSecond()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         list.TryAdd(new Vp9Mv(11, 22));
         list.TryAdd(new Vp9Mv(33, 44));
@@ -63,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefSelector_ForInterMode_ZeroMv_AlwaysZero()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         list.TryAdd(new Vp9Mv(11, 22));
         list.TryAdd(new Vp9Mv(33, 44));
@@ -72,6 +79,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefSelector_ForInterMode_NewMv_UsesNearest()
     {
+        CpuOnlyTest();
         // NewMv reference for the diff is the nearest candidate.
         var list = new Vp9MvCandidatesList();
         list.TryAdd(new Vp9Mv(99, 100));
@@ -82,6 +90,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefSelector_ForInterMode_RejectsInvalidMode()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9MvRefSelector.ForInterMode(list, (Vp9InterMode)99));

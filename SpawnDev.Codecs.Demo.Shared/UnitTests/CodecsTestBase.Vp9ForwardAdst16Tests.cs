@@ -13,6 +13,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ForwardAdst16_AllZeroInput_ProducesAllZeroOutput()
     {
+        CpuOnlyTest();
         var input = new int[16];
         var output = new int[16];
         Vp9ForwardAdst16.Transform(input, output);
@@ -22,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ForwardAdst16_Determinism()
     {
+        CpuOnlyTest();
         var rng = new Random(0xAD16);
         var input = new int[16];
         for (int i = 0; i < 16; i++) input[i] = rng.Next(-2048, 2048);
@@ -35,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ForwardAdst16_ImpulseInput_NonZeroOutput()
     {
+        CpuOnlyTest();
         var input = new int[16];
         input[3] = 256;
         var output = new int[16];
@@ -47,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ForwardAdst16_2dRoundTrip_OnSmoothResidual_LowError()
     {
+        CpuOnlyTest();
         // Drive the dispatcher through the AdstAdst 16x16 path so this
         // test exercises both the column pass and the row pass plus the
         // half_round_shift compensation between passes.
@@ -81,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ForwardAdst16_Throws_OnShortInput()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9ForwardAdst16.Transform(new int[8], new int[16]); }
         catch (ArgumentException) { threw = true; }
@@ -90,6 +95,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ForwardAdst16_Throws_OnShortOutput()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9ForwardAdst16.Transform(new int[16], new int[8]); }
         catch (ArgumentException) { threw = true; }

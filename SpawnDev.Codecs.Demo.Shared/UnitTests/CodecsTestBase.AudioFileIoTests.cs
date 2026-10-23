@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFile_Encode_Decode_DiskRoundtrip()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(samplesPerChannel: 512, channels: 2, sampleRateHz: 44100, bps: 16);
         string path = Path.Combine(Path.GetTempPath(), $"flac_test_{Guid.NewGuid():N}.flac");
         try
@@ -37,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void WavFile_Write_Read_DiskRoundtrip()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(samplesPerChannel: 256, channels: 1, sampleRateHz: 48000, bps: 16);
         string path = Path.Combine(Path.GetTempPath(), $"wav_test_{Guid.NewGuid():N}.wav");
         try
@@ -55,6 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void AiffFile_Write_Read_DiskRoundtrip()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(samplesPerChannel: 128, channels: 2, sampleRateHz: 96000, bps: 24);
         string path = Path.Combine(Path.GetTempPath(), $"aiff_test_{Guid.NewGuid():N}.aiff");
         try
@@ -74,6 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FileApi_NullPath_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() => FlacDecoder.DecodeFile(null!));
         Throws<ArgumentNullException>(() => WavFileCodec.ReadFile(null!));
         Throws<ArgumentNullException>(() => AiffFileCodec.ReadFile(null!));
@@ -82,6 +86,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void WavToFlacToAiff_FileChain_RoundtripsLosslessly()
     {
+        CpuOnlyTest();
         // Full end-to-end: WAV -> FLAC -> AIFF all through disk, samples preserved.
         var input = GenerateSineInt(samplesPerChannel: 256, channels: 1, sampleRateHz: 44100, bps: 16);
         string wavPath = Path.Combine(Path.GetTempPath(), $"chain_{Guid.NewGuid():N}.wav");

@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ExcDequant_ZeroPulses_ProducesOffsetSignal()
     {
+        CpuOnlyTest();
         // All-zero pulses with inactive signalType=0, quantOffset=1: every sample should
         // equal +/-offsetQ14 depending on the PRNG sign.
         // offset_Q10 = QUANTIZATION_OFFSETS_Q10[0,1] = 240. offset_Q14 = 240 << 4 = 3840.
@@ -40,6 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ExcDequant_SinglePositivePulse_AppliesQuantAdjustAndOffset()
     {
+        CpuOnlyTest();
         // Place one pulse of magnitude +3 in an otherwise zero frame.
         // For that sample (before any PRNG sign): exc = 3 << 14 = 49152. Then > 0 so
         // subtract QUANT_LEVEL_ADJUST_Q10 << 4 = 1280. Then add offset_Q14.
@@ -59,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ExcDequant_SingleNegativePulse_AppliesQuantAdjustAndOffset()
     {
+        CpuOnlyTest();
         // Pulse of -2. exc = -2 << 14 = -32768. exc < 0 so add 1280 -> -31488. Add offset.
         // For voiced quantOffset=1: offset = 100, offset_Q14 = 1600.
         // -31488 + 1600 = -29888. Sign may flip.
@@ -77,6 +80,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ExcDequant_AllFourQuantizationOffsets_AppliedCorrectly()
     {
+        CpuOnlyTest();
         short[] pulses = new short[4];
         int[] exc = new int[4];
         int[] expectedOffsetsQ14 =
@@ -110,6 +114,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ExcDequant_PrngIsDeterministicAcrossCalls()
     {
+        CpuOnlyTest();
         // Same seed + same pulses -> same output on both calls.
         short[] pulses = { 1, -2, 3, 0, 0, -1, 2, 0 };
         int[] exc1 = new int[8];
@@ -124,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ExcDequant_DifferentSeeds_ProduceDifferentSignPatterns()
     {
+        CpuOnlyTest();
         // Same pulses + different seeds should produce different sign patterns.
         short[] pulses = new short[32];
         for (int i = 0; i < 32; i++) pulses[i] = 1;
@@ -146,6 +152,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ExcDequant_HandComputedReferenceValue()
     {
+        CpuOnlyTest();
         // Single pulse at position 0 with seed = 0.
         // silk_RAND(0) = RAND_INCREMENT = 907633515 (positive, so no sign flip).
         // pulse = 4. exc = 4 << 14 = 65536. 65536 > 0 so subtract 1280 -> 64256.
@@ -163,6 +170,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ExcDequant_HandComputedReferenceValue_NegativeRand()
     {
+        CpuOnlyTest();
         // Force sign-flip: we need seed whose silk_RAND produces a negative first value.
         // silk_RAND(seed=1) = 907633515 + 196314165 = 1,103,947,680 (positive).
         // silk_RAND(seed=2147483647) = ? Let's compute: RAND_INC + 2147483647 * RAND_MUL.
@@ -222,6 +230,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ExcDequant_InvalidSignalType_Throws()
     {
+        CpuOnlyTest();
         short[] pulses = new short[4];
         int[] exc = new int[4];
         Throws<ArgumentOutOfRangeException>(() =>
@@ -231,6 +240,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ExcDequant_InvalidQuantOffset_Throws()
     {
+        CpuOnlyTest();
         short[] pulses = new short[4];
         int[] exc = new int[4];
         Throws<ArgumentOutOfRangeException>(() =>
@@ -240,6 +250,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ExcDequant_OutputTooSmall_Throws()
     {
+        CpuOnlyTest();
         short[] pulses = new short[10];
         int[] exc = new int[9];
         Throws<ArgumentException>(() =>

@@ -12,6 +12,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SuperframeWriter_SingleFrame_RoundTripsViaParser()
     {
+        CpuOnlyTest();
         var frame = new byte[] { 0x80, 0x49, 0x83, 0x42, 0x01, 0x02, 0x03, 0x04 };
         var packet = Vp9SuperframeWriter.Emit(new[] { frame });
         // Single frame produces verbatim output (no marker).
@@ -28,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SuperframeWriter_TwoFrames_RoundTripsThroughParser()
     {
+        CpuOnlyTest();
         var f1 = new byte[100];
         for (int i = 0; i < f1.Length; i++) f1[i] = (byte)i;
         var f2 = new byte[200];
@@ -53,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SuperframeWriter_LargeFrames_UsesMultiByteSizes()
     {
+        CpuOnlyTest();
         var f1 = new byte[300];   // > 255 forces 2-byte size field
         var f2 = new byte[1000];
         for (int i = 0; i < f1.Length; i++) f1[i] = 0x42;
@@ -71,6 +74,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SuperframeWriter_RejectsInvalidInput()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() => Vp9SuperframeWriter.Emit(null!));
         Throws<ArgumentException>(() => Vp9SuperframeWriter.Emit(Array.Empty<byte[]>()));
         var nineFrames = new byte[9][];
@@ -81,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SuperframeWriter_BbbPackets_RoundTripBitExact()
     {
+        CpuOnlyTest();
         // Walk every BBB.webm video packet, parse + re-emit through writer,
         // verify every byte matches. BBB has no superframes in the fixture,
         // so each packet is a single frame.

@@ -34,6 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void BlockParser_NoLacing_YieldsSingleFrame_PreservesPayload()
     {
+        CpuOnlyTest();
         var payload = new byte[] { 0xDE, 0xAD, 0xBE, 0xEF, 0x55 };
         var body = BuildSimpleBlockNoLace(trackNum: 1, relTs: 0, keyframe: true, payload: payload);
         var frames = MatroskaBlockParser.Parse(body, clusterTimestamp: 100, isSimpleBlock: true);
@@ -48,6 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void BlockParser_Timestamp_IsSignedInt16_AddedToCluster()
     {
+        CpuOnlyTest();
         var body = BuildSimpleBlockNoLace(1, relTs: -5, keyframe: false, payload: new byte[] { 0xAA });
         var frames = MatroskaBlockParser.Parse(body, clusterTimestamp: 1000, isSimpleBlock: true);
         // int16 BE relative timestamp -5 + cluster 1000 = 995.
@@ -57,6 +59,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void BlockParser_Block_NotSimpleBlock_IgnoresKeyframeBit()
     {
+        CpuOnlyTest();
         // Same bit pattern that sets keyframe on a SimpleBlock; isSimpleBlock=false
         // must clear it.
         var body = BuildSimpleBlockNoLace(1, 0, keyframe: true, new byte[] { 0x01 });
@@ -67,6 +70,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void BlockParser_XiphLacing_ThreeFrames_RoundTrips()
     {
+        CpuOnlyTest();
         // Xiph lacing flags: bits 1-2 = 01 -> 0x02.
         // frame_count - 1 = 2 -> 0x02 in the lacing-count byte.
         // Frame sizes: 300, 100, remainder. Size 300 Xiph-encoded: 0xFF 0x2D.
@@ -102,6 +106,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void BlockParser_FixedLacing_FourEqualFrames()
     {
+        CpuOnlyTest();
         // 4 frames of 32 bytes each = 128 bytes total payload.
         byte[] payload = new byte[128];
         for (int i = 0; i < 128; i++) payload[i] = (byte)(i / 32); // stripe by quarter
@@ -125,6 +130,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void BlockParser_EbmlLacing_DecreasingSizes_RoundTrips()
     {
+        CpuOnlyTest();
         // EBML lacing: first size = 100 as unsigned VINT. Second = 80, encoded
         // as signed VINT delta (-20 from 100). Third = remainder.
         byte[] f0 = new byte[100];
@@ -163,6 +169,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void BlockParser_TruncatedBody_Throws()
     {
+        CpuOnlyTest();
         // Just enough for the VINT + 1 byte of timestamp - truncated before
         // completing the 2-byte timestamp read.
         byte[] body = new byte[] { 0x81, 0x00 };

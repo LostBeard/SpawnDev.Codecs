@@ -37,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSeekTable_EmptyPayload_ParsesToZeroPoints()
     {
+        CpuOnlyTest();
         var tbl = FlacSeekTableParser.Parse(Array.Empty<byte>());
         Equal(0, tbl.Points.Length);
     }
@@ -44,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSeekTable_SinglePoint_Parses()
     {
+        CpuOnlyTest();
         var point = new FlacSeekPoint(1_000_000UL, 0x123456789ABCUL, 4096);
         var payload = BuildSeekTablePayload(point);
         var tbl = FlacSeekTableParser.Parse(payload);
@@ -57,6 +59,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSeekTable_PlaceholderPoint_FlaggedCorrectly()
     {
+        CpuOnlyTest();
         var point = new FlacSeekPoint(FlacSeekPoint.PlaceholderSampleNumber, 0, 0);
         var tbl = FlacSeekTableParser.Parse(BuildSeekTablePayload(point));
         True(tbl.Points[0].IsPlaceholder);
@@ -65,6 +68,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSeekTable_MultiplePoints_PreservesOrder()
     {
+        CpuOnlyTest();
         var points = new[]
         {
             new FlacSeekPoint(0, 0, 4096),
@@ -85,6 +89,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSeekTable_MalformedLength_Throws()
     {
+        CpuOnlyTest();
         // 17 bytes is not a multiple of 18.
         var bad = new byte[17];
         bool threw = false;
@@ -95,6 +100,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSeekTable_FindNearest_PicksLargestNotExceedingTarget()
     {
+        CpuOnlyTest();
         var points = new[]
         {
             new FlacSeekPoint(0, 0, 4096),
@@ -118,6 +124,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSeekTable_FindNearest_SkipsPlaceholders()
     {
+        CpuOnlyTest();
         var points = new[]
         {
             new FlacSeekPoint(0, 0, 4096),
@@ -134,6 +141,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSeekTable_FindNearest_AllPlaceholders_ReturnsNull()
     {
+        CpuOnlyTest();
         var tbl = new FlacSeekTable
         {
             Points = new[] { new FlacSeekPoint(FlacSeekPoint.PlaceholderSampleNumber, 0, 0) },

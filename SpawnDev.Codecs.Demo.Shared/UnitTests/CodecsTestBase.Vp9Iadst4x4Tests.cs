@@ -23,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst4x4_ZeroCoefficients_LeavesPredictorUnchanged()
     {
+        CpuOnlyTest();
         // Short-circuit path: iadst4_c returns [0,0,0,0] when all inputs
         // are zero. Every residual is 0; predictor stays put.
         var coeffs = new short[16];
@@ -34,6 +35,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst4x4_Clips_HighInputToUpper255()
     {
+        CpuOnlyTest();
         // Saturate all coefficients at +2048. Expected behaviour: residuals
         // push every pixel to/above 255 at some point, clipping engages.
         // We just verify no byte exceeds 255 (clip lower bound) and the
@@ -54,6 +56,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst4x4_Clips_LargeNegativesToZero()
     {
+        CpuOnlyTest();
         var coeffs = new short[16];
         for (int i = 0; i < 16; i++) coeffs[i] = -2048;
         var dest = MakeIadstPredictor(10);
@@ -70,6 +73,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst4x4_IsDeterministic_ForRandomInputs()
     {
+        CpuOnlyTest();
         var rng = new Random(0xADE);
         var coeffs = new short[16];
         for (int trial = 0; trial < 50; trial++)
@@ -87,6 +91,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst4x4_SingleCoefficient_ProducesNonZeroResidual()
     {
+        CpuOnlyTest();
         // Unlike iDCT where a DC-only coefficient produces a uniform +32
         // residual, iADST's asymmetric butterfly scatters the energy
         // unevenly across the 4x4 block. Just pin "at least one pixel
@@ -103,6 +108,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst4x4_StridedDest_OnlyTouches4x4Block()
     {
+        CpuOnlyTest();
         var canvas = new byte[4 * 16];
         for (int i = 0; i < canvas.Length; i++) canvas[i] = 77;
         var coeffs = new short[16];
@@ -116,6 +122,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst4x4_Throws_OnShortInput()
     {
+        CpuOnlyTest();
         var dest = MakeIadstPredictor(0);
         bool threw = false;
         try { Vp9Iadst4x4Reference.IadstAdst4x4_16_Add(new short[8], dest, 4); }
@@ -126,6 +133,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst4x4_Throws_OnBadStride()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9Iadst4x4Reference.IadstAdst4x4_16_Add(new short[16], new byte[16], 2); }
         catch (ArgumentException) { threw = true; }

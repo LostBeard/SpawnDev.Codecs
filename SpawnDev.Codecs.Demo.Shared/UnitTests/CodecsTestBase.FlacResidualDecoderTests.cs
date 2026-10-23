@@ -43,6 +43,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacResidual_SinglePartition_Param0_AllZeros()
     {
+        CpuOnlyTest();
         // blockSize=4, predictor=0, partitionOrder=0, k=0. 4 residuals all zero.
         // Header: method=0(2), order=0(4) | Rice param=0(4) = 10 bits.
         // Residual zero with k=0: "1" (1 bit). x4 = 4 bits.
@@ -57,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacResidual_SinglePartition_Param2_Mixed_HandComputed()
     {
+        CpuOnlyTest();
         // Expected residuals: [0, 1, -1, 3] with k=2.
         var residuals = new[] { 0, 1, -1, 3 };
         var w = new FlacBitWriter();
@@ -70,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacResidual_SinglePartition_NegativeResiduals()
     {
+        CpuOnlyTest();
         var residuals = new[] { -5, -2, -1, 0, 1, 2, 5 };
         var w = new FlacBitWriter();
         WriteRiceHeader(w, 0, 0);
@@ -82,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacResidual_PartitionOrder1_TwoPartitions_DifferentParams()
     {
+        CpuOnlyTest();
         // blockSize=8, predictorOrder=2, partitionOrder=1 => 2 partitions.
         // Partition 0 size = 8/2 - 2 = 2 samples. Partition 1 size = 4 samples.
         // Partition 0: k=1, residuals [0, 1]. Partition 1: k=3, residuals [-3, 7, -8, 2].
@@ -104,6 +108,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacResidual_EscapeCode_VerbatimResiduals()
     {
+        CpuOnlyTest();
         // blockSize=4, predictor=0, partitionOrder=0, k=escape(15 for method 0).
         // Then 5-bit raw-bits field, then that many bits per residual, two's-complement.
         // Use rawBits=10, residuals [-100, 100, 0, 255].
@@ -125,6 +130,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacResidual_PartitionedRice2_5BitParam()
     {
+        CpuOnlyTest();
         // Coding method = 1, Rice parameter field is 5 bits wide (not 4).
         var residuals = new[] { 0, 1, -2, 3 };
         var w = new FlacBitWriter();
@@ -138,6 +144,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacResidual_ReservedCodingMethod_Throws()
     {
+        CpuOnlyTest();
         var w = new FlacBitWriter();
         w.Write(2, 2); // coding method 0b10 reserved
         w.Write(0, 4);
@@ -150,6 +157,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacResidual_PartitionOrderExceedsBlock_Throws()
     {
+        CpuOnlyTest();
         // blockSize=4, partitionOrder=3 (= 8 partitions) → partitionSize=0, invalid.
         var w = new FlacBitWriter();
         WriteRiceHeader(w, 0, 3);

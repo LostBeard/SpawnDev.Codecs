@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Clz32_HandTracedValues()
     {
+        CpuOnlyTest();
         Equal(32, silk_CLZ32(0));
         Equal(31, silk_CLZ32(1));
         Equal(30, silk_CLZ32(2));
@@ -31,6 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Max32_ReturnsLargerValue()
     {
+        CpuOnlyTest();
         Equal(5, silk_max_32(3, 5));
         Equal(5, silk_max_32(5, 3));
         Equal(0, silk_max_32(-10, 0));
@@ -40,6 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Add32Ovflw_WrapsAroundInt32()
     {
+        CpuOnlyTest();
         Equal(5, silk_ADD32_ovflw(2, 3));
         // Positive overflow wraps.
         Equal(int.MinValue, silk_ADD32_ovflw(int.MaxValue, 1));
@@ -50,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Smlabb_Ovflw_BasicAccumulate()
     {
+        CpuOnlyTest();
         Equal(10, silk_SMLABB_ovflw(1, 3, 3)); // 1 + 3*3 = 10
         Equal(0, silk_SMLABB_ovflw(0, 0, 0));
         // Overflow-wrapping behavior on the addition.
@@ -59,6 +63,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_AddRshiftUint_UnsignedSemantics()
     {
+        CpuOnlyTest();
         Equal(5u, silk_ADD_RSHIFT_uint(3u, 4u, 1));     // 3 + (4>>1) = 3 + 2 = 5
         Equal(0u, silk_ADD_RSHIFT_uint(0u, 0u, 0));
         Equal(uint.MaxValue, silk_ADD_RSHIFT_uint(uint.MaxValue, 0u, 0));
@@ -71,6 +76,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SumSqrShift_ZeroVector_ZeroEnergy()
     {
+        CpuOnlyTest();
         var x = new short[128];
         SilkSumSqrShift.Compute(x, out int energy, out int shift);
         Equal(0, energy, "energy of all zeros");
@@ -80,6 +86,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SumSqrShift_SingleNonzeroSample_MatchesSquare()
     {
+        CpuOnlyTest();
         // For a length-1 vector [5], sum(x^2) = 25. With small-length small-value input,
         // the auto-shift should be 0 (plenty of int32 headroom).
         var x = new short[] { 5 };
@@ -97,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SumSqrShift_KnownVector_ExactValue()
     {
+        CpuOnlyTest();
         // x = [1, 2, 3, 4]. Sum of squares = 1+4+9+16 = 30.
         var x = new short[] { 1, 2, 3, 4 };
         SilkSumSqrShift.Compute(x, out int energy, out int shift);
@@ -114,6 +122,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SumSqrShift_LargeValues_ShiftsRightToFit()
     {
+        CpuOnlyTest();
         // Vector of max-value samples (32767); length 256. Sum of squares = 256 * 32767^2 ≈ 2.75e11,
         // way larger than int32. Expect a nonzero shift so energy fits.
         var x = new short[256];
@@ -134,6 +143,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SumSqrShift_OddLength_HandlesTrailingSample()
     {
+        CpuOnlyTest();
         // Length 5: 4 paired + 1 trailing.
         var x = new short[] { 1, 2, 3, 4, 5 };
         SilkSumSqrShift.Compute(x, out int energy, out int shift);
@@ -147,6 +157,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SumSqrShift_MixedSignInput_OnlyAbsMatters()
     {
+        CpuOnlyTest();
         var positive = new short[] { 10, 20, 30 };
         var negative = new short[] { -10, -20, -30 };
 

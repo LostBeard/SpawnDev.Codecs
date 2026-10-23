@@ -39,6 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VideoTranscodeDemo_Vp8_GradientFrame_RoundTripsViaCpuApi()
     {
+        CpuOnlyTest();
         await VideoTranscodeDemoRoundTripAsync(
             "VP8", width: 64, height: 64, q: 30,
             (y, u, v, w, h, q) => Vp8KeyframeEncoder.EncodeKeyFrame(
@@ -49,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VideoTranscodeDemo_Vp9_GradientFrame_RoundTripsViaCpuApi()
     {
+        CpuOnlyTest();
         await VideoTranscodeDemoRoundTripAsync(
             "VP9", width: 64, height: 64, q: 30,
             (y, u, v, w, h, q) => Vp9KeyframeEncoder.EncodeKeyFrame(
@@ -59,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task VideoTranscodeDemo_Av1_GradientFrame_RoundTripsViaCpuApi()
     {
+        CpuOnlyTest();
         await VideoTranscodeDemoRoundTripAsync(
             "AV1", width: 64, height: 64, q: 32,
             (y, u, v, w, h, q) => Av1KeyframeEncoder.EncodeKeyFrame(

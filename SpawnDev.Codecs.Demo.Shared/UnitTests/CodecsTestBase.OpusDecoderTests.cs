@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_Config_InvalidSampleRate_Throws()
     {
+        CpuOnlyTest();
         var config = new OpusDecoderConfig { SampleRateHz = 44100, ChannelCount = 1 };
         Throws<ArgumentOutOfRangeException>(() => new OpusDecoder(config));
     }
@@ -25,6 +26,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_Config_InvalidChannelCount_Throws()
     {
+        CpuOnlyTest();
         var config = new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 3 };
         Throws<ArgumentOutOfRangeException>(() => new OpusDecoder(config));
     }
@@ -32,12 +34,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_Config_NullThrows()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() => new OpusDecoder(null!));
     }
 
     [TestMethod]
     public void OpusDecoder_Config_ValidSampleRates_AllSupported()
     {
+        CpuOnlyTest();
         int[] rates = { 8000, 12000, 16000, 24000, 48000 };
         foreach (int hz in rates)
         {
@@ -51,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_Codec_IsOpus()
     {
+        CpuOnlyTest();
         var dec = new OpusDecoder(new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 1 });
         Equal(AudioCodec.Opus, dec.Codec);
     }
@@ -60,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusCodec_CreateDecoder_ReturnsIAudioDecoder()
     {
+        CpuOnlyTest();
         var decoder = OpusCodec.CreateDecoder(new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 2 });
         NotNull(decoder);
         Equal(AudioCodec.Opus, decoder.Codec);
@@ -72,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task OpusDecoder_DecodePacket_InvalidPacket_Throws()
     {
+        CpuOnlyTest();
         var dec = new OpusDecoder(new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 1 });
         try
         {
@@ -84,6 +91,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task OpusDecoder_DecodePacket_BufferTooSmall_Throws()
     {
+        CpuOnlyTest();
         var dec = new OpusDecoder(new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 1 });
         // TOC config 0 = SILK NB 10ms mono = 480 samples @ 48kHz
         byte[] packet = { 0x00, 0x00, 0x00, 0x00 };
@@ -99,6 +107,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task OpusDecoder_DecodePacket_HybridPath_DecodesWithoutThrowing()
     {
+        CpuOnlyTest();
         // TOC config 12: Hybrid SWB 10ms mono = 480 samples @ 48kHz.
         // Packet body is just zeros - this is not a valid encoded payload,
         // but the CELT-backed Hybrid path must accept it and produce output
@@ -119,6 +128,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task OpusDecoder_DecodePacket_CeltPath_DecodesWithoutThrowing()
     {
+        CpuOnlyTest();
         // TOC config 16: CELT NB 2.5ms mono = 120 samples @ 48kHz.
         // Same contract as the Hybrid test above: produces output, no throw.
         var dec = new OpusDecoder(new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 1 });
@@ -137,6 +147,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task OpusDecoder_DecodePacket_AfterDispose_Throws()
     {
+        CpuOnlyTest();
         var dec = new OpusDecoder(new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 1 });
         await dec.DisposeAsync();
         try
@@ -152,6 +163,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task OpusDecoder_DecodePacket_ShortOverload_InvalidPacket_Throws()
     {
+        CpuOnlyTest();
         var dec = new OpusDecoder(new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 1 });
         try
         {

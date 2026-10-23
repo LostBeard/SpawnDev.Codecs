@@ -14,6 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StateConfigure_NbMb20Ms_SetsExpectedDimensions()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         state.Configure(fsKHz: 8, nbSubfr: 4, lpcOrder: 10);
 
@@ -28,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StateConfigure_Wb20Ms_SetsExpectedDimensions()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         state.Configure(fsKHz: 16, nbSubfr: 4, lpcOrder: 16);
 
@@ -42,6 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StateConfigure_Wb10Ms_HalfFrame()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         state.Configure(fsKHz: 16, nbSubfr: 2, lpcOrder: 16);
 
@@ -53,6 +56,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StateConfigure_Mb20Ms_SetsExpectedDimensions()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         state.Configure(fsKHz: 12, nbSubfr: 4, lpcOrder: 10);
 
@@ -64,6 +68,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StateConfigure_InvalidFsKHz_Throws()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         Throws<ArgumentException>(() => state.Configure(fsKHz: 24, nbSubfr: 4, lpcOrder: 16));
     }
@@ -71,6 +76,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StateConfigure_InvalidNbSubfr_Throws()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         Throws<ArgumentException>(() => state.Configure(fsKHz: 16, nbSubfr: 3, lpcOrder: 16));
     }
@@ -78,6 +84,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StateConfigure_InvalidLpcOrder_Throws()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         Throws<ArgumentException>(() => state.Configure(fsKHz: 16, nbSubfr: 4, lpcOrder: 12));
     }
@@ -85,6 +92,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StateReset_ClearsAllScalarsAndBuffers()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         state.Configure(fsKHz: 16, nbSubfr: 4, lpcOrder: 16);
 
@@ -125,6 +133,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StateBuffers_SizedForWorstCaseWb20Ms()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         // OutBuf and SLtpQ15 need to hold LTP_MEM_LENGTH + FRAME_LENGTH at worst case WB 20ms.
         int worstCase = SilkConstants.MAX_LTP_MEM_LENGTH + SilkConstants.MAX_FRAME_LENGTH;

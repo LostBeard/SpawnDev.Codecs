@@ -23,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkNlsfCb_NbMb_HasCorrectShape()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.NbMb;
         Equal(32, cb.NVectors);
         Equal(10, cb.Order);
@@ -42,6 +43,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkNlsfCb_NbMb_SampleEntries_MatchLibopus()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.NbMb;
 
         // First row of silk_NLSF_CB1_NB_MB_Q8.
@@ -77,6 +79,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkNlsfCb_Wb_HasCorrectShape()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.Wb;
         Equal(32, cb.NVectors);
         Equal(16, cb.Order);
@@ -96,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkNlsfCb_Wb_SampleEntries_MatchLibopus()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.Wb;
 
         // First row of silk_NLSF_CB1_WB_Q8: starts at 7, 23, 38, ... ends at 239.
@@ -131,6 +135,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkNlsfCb_Icdf_EndsWithZero()
     {
+        CpuOnlyTest();
         // Each iCDF sub-table ends with 0 so the range coder can reach the terminal state.
         // NB/MB: two sub-tables of 32 entries each.
         var nbMb = SilkNlsfCodebookTables.NbMb;

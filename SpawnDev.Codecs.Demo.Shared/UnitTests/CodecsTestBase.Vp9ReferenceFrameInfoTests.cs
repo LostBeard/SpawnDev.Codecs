@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ReferenceFrameInfo_Parse_KnownPattern()
     {
+        CpuOnlyTest();
         // 3 references: Last=2 sign=0; Golden=5 sign=1; AltRef=7 sign=0.
         // 12 bits total.
         var data = BitsToBytes(
@@ -33,6 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ReferenceFrameInfo_Parse_AllZeros()
     {
+        CpuOnlyTest();
         var data = BitsToBytes(
             (0, 3), (0, 1),
             (0, 3), (0, 1),
@@ -50,6 +52,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ReferenceFrameInfo_Parse_AllMaxValues()
     {
+        CpuOnlyTest();
         // All three references: idx=7 (max), bias=1.
         var data = BitsToBytes(
             (7, 3), (1, 1),
@@ -68,6 +71,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ReferenceFrameInfo_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(3, Vp9ReferenceFrameInfo.RefsPerFrame);
         Equal(3, Vp9ReferenceFrameInfo.RefFramesLog2);
         Equal(8, Vp9ReferenceFrameInfo.RefFramesPoolSize);

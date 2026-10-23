@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcAnalysisFilter_AllZeroInput_ProducesAllZeroOutput()
     {
+        CpuOnlyTest();
         short[] input = new short[100];
         short[] bQ12 = { 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000 };
         short[] output = new short[100];
@@ -26,6 +27,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcAnalysisFilter_ZeroCoefficients_PassesInputThrough()
     {
+        CpuOnlyTest();
         // With all filter coefficients zero, out[n] = in[n] >> 0 (identity) for n >= d.
         short[] input = new short[20];
         for (int i = 0; i < 20; i++) input[i] = (short)(i * 100);
@@ -45,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcAnalysisFilter_SingleTapCoefficient_MatchesManualCalculation()
     {
+        CpuOnlyTest();
         // b[0] = 4096 (= 1.0 in Q12). Filter becomes: out[n] = in[n] - 1.0 * in[n-1].
         // For a constant input c, out[n] = c - c = 0 after the filter-history region.
         short[] input = new short[20];
@@ -62,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcAnalysisFilter_SingleTapCoefficient_OnRampInput_ProducesConstantDelta()
     {
+        CpuOnlyTest();
         // b[0] = 4096 (1.0 in Q12). For in[n] = n, out[n] = in[n] - in[n-1] = 1 for n >= d.
         short[] input = new short[20];
         for (int i = 0; i < 20; i++) input[i] = (short)i;
@@ -78,6 +82,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcAnalysisFilter_OddOrder_Throws()
     {
+        CpuOnlyTest();
         short[] input = new short[20];
         short[] bQ12 = new short[7];
         short[] output = new short[20];
@@ -88,6 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcAnalysisFilter_OrderBelowSix_Throws()
     {
+        CpuOnlyTest();
         short[] input = new short[20];
         short[] bQ12 = new short[4];
         short[] output = new short[20];
@@ -98,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcAnalysisFilter_OrderGreaterThanLen_Throws()
     {
+        CpuOnlyTest();
         short[] input = new short[10];
         short[] bQ12 = new short[16];
         short[] output = new short[10];
@@ -108,6 +115,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcAnalysisFilter_BQ12TooSmall_Throws()
     {
+        CpuOnlyTest();
         short[] input = new short[20];
         short[] bQ12 = new short[5]; // needs 6 for d=6
         short[] output = new short[20];
@@ -120,6 +128,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcAnalysisFilter_Order10_RampInput_ProducesSmoothOutput()
     {
+        CpuOnlyTest();
         // Realistic SILK NB/MB order of 10.
         short[] input = new short[100];
         for (int i = 0; i < 100; i++) input[i] = (short)(i * 10);
@@ -138,6 +147,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcAnalysisFilter_Order16_DoesNotCrash()
     {
+        CpuOnlyTest();
         // Realistic SILK WB order of 16. Just verify it runs to completion.
         short[] input = new short[200];
         var rng = new Random(42);

@@ -47,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisIdent_Canonical_StereoFullband_Parses()
     {
+        CpuOnlyTest();
         var data = BuildIdentHeader(
             version: 0, channels: 2, sampleRate: 48000,
             bitrateMax: 0, bitrateNom: 192000, bitrateMin: 0,
@@ -63,6 +64,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisIdent_FreqAtNarrowband_Parses()
     {
+        CpuOnlyTest();
         var data = BuildIdentHeader(0, 1, 8000, 0, 0, 0, 6, 13);
         var h = VorbisIdentificationHeaderParser.Parse(data);
         Equal(1, h.AudioChannels);
@@ -74,6 +76,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisIdent_WrongVersion_Throws()
     {
+        CpuOnlyTest();
         var data = BuildIdentHeader(1, 2, 48000, 0, 0, 0, 8, 11);
         bool threw = false;
         try { _ = VorbisIdentificationHeaderParser.Parse(data); }
@@ -84,6 +87,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisIdent_ZeroChannels_Throws()
     {
+        CpuOnlyTest();
         var data = BuildIdentHeader(0, 0, 48000, 0, 0, 0, 8, 11);
         bool threw = false;
         try { _ = VorbisIdentificationHeaderParser.Parse(data); }
@@ -94,6 +98,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisIdent_Bs0LargerThanBs1_Throws()
     {
+        CpuOnlyTest();
         var data = BuildIdentHeader(0, 2, 48000, 0, 0, 0, 11, 8);
         bool threw = false;
         try { _ = VorbisIdentificationHeaderParser.Parse(data); }
@@ -104,6 +109,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisIdent_FramingFlagClear_Throws()
     {
+        CpuOnlyTest();
         var data = BuildIdentHeader(0, 2, 48000, 0, 0, 0, 8, 11, framingFlag: false);
         bool threw = false;
         try { _ = VorbisIdentificationHeaderParser.Parse(data); }
@@ -114,6 +120,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisIdent_WrongPacketType_Throws()
     {
+        CpuOnlyTest();
         var data = BuildIdentHeader(0, 2, 48000, 0, 0, 0, 8, 11);
         data[0] = 0x03;
         bool threw = false;
@@ -125,6 +132,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisIdent_BadMagic_Throws()
     {
+        CpuOnlyTest();
         var data = BuildIdentHeader(0, 2, 48000, 0, 0, 0, 8, 11);
         data[3] = (byte)'X';
         bool threw = false;
@@ -138,6 +146,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisComment_VendorAndThreeComments_Parses()
     {
+        CpuOnlyTest();
         string vendor = "Test Encoder 1.0";
         var comments = new[] { "ARTIST=TJ", "TITLE=SpawnDev Codecs", "ALBUM=Phase 1a" };
         var bytes = BuildCommentHeader(vendor, comments, framingFlag: true);
@@ -152,6 +161,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisComment_Utf8Content_RoundTrips()
     {
+        CpuOnlyTest();
         string vendor = "VendΘr"; // non-ASCII
         var comments = new[] { "TITLE=Μπουζούκι", "ARTIST=漢字" };
         var bytes = BuildCommentHeader(vendor, comments, framingFlag: true);
@@ -164,6 +174,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisComment_EmptyCommentList_Parses()
     {
+        CpuOnlyTest();
         var bytes = BuildCommentHeader("Vendor", Array.Empty<string>(), framingFlag: true);
         var h = VorbisCommentHeaderParser.Parse(bytes);
         Equal("Vendor", h.Vendor);
@@ -173,6 +184,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisComment_FramingFlagOptional_ForNonVorbisUsers()
     {
+        CpuOnlyTest();
         // Opus / FLAC embed the Vorbis comment structure but omit the framing flag.
         var bytes = BuildCommentHeader("Vendor", new[] { "A=1" }, framingFlag: false);
         var h = VorbisCommentHeaderParser.Parse(bytes);
@@ -183,6 +195,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisComment_WrongPacketType_Throws()
     {
+        CpuOnlyTest();
         var bytes = BuildCommentHeader("V", new[] { "A=1" }, framingFlag: true);
         bytes[0] = 0x01;
         bool threw = false;
@@ -194,6 +207,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisComment_BadMagic_Throws()
     {
+        CpuOnlyTest();
         var bytes = BuildCommentHeader("V", new[] { "A=1" }, framingFlag: true);
         bytes[5] = (byte)'X';
         bool threw = false;

@@ -51,6 +51,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ParametersDecoder_InactiveFrame_PitchAndLtpZero()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.NbMb;
         var idx = BuildInactiveIndices();
         var output = new SilkDecodedParameters();
@@ -76,6 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ParametersDecoder_VoicedFrame_AllFieldsPopulated()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.NbMb;
         var idx = BuildVoicedIndices();
         var output = new SilkDecodedParameters();
@@ -108,6 +110,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ParametersDecoder_VoicedFrame_LtpTapsShiftedToQ14()
     {
+        CpuOnlyTest();
         // Verify that LTP taps are the Q7 codebook entries left-shifted by 7 (Q7 -> Q14).
         var cb = SilkNlsfCodebookTables.NbMb;
         var idx = BuildVoicedIndices();
@@ -141,6 +144,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ParametersDecoder_InterpolationDisabled_FirstHalfCopiesSecondHalf()
     {
+        CpuOnlyTest();
         // NlsfInterpCoefQ2 == 4 (the disabled/"just use current frame" value): the decoder
         // should copy the second-half LPC into the first half without re-deriving.
         var cb = SilkNlsfCodebookTables.NbMb;
@@ -166,6 +170,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ParametersDecoder_InterpolationEnabled_FirstHalfDiffersFromSecondHalf()
     {
+        CpuOnlyTest();
         // With prev NLSFs set to a DIFFERENT vector than current, interp coef < 4 should
         // yield a first-half LPC that differs from the second half.
         var cb = SilkNlsfCodebookTables.NbMb;
@@ -196,6 +201,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ParametersDecoder_PrevNlsfUpdatedToCurrentOnExit()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.Wb;
         var idx = BuildInactiveIndices();
         idx.NlsfIndices[0] = 7;
@@ -219,6 +225,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ParametersDecoder_LtpScaleTable_AllThreeIndices()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.NbMb;
         int[] expectedScales = { 15565, 12288, 8192 };
         var idx = BuildVoicedIndices();
@@ -243,6 +250,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ParametersDecoder_NullOutput_Throws()
     {
+        CpuOnlyTest();
         short[] prevNlsf = new short[SilkConstants.MAX_LPC_ORDER];
         sbyte lastGainIdx = 0;
         var idx = BuildInactiveIndices();
@@ -254,6 +262,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ParametersDecoder_UnsupportedFsKHz_Throws()
     {
+        CpuOnlyTest();
         var idx = BuildInactiveIndices();
         var output = new SilkDecodedParameters();
         short[] prevNlsf = new short[SilkConstants.MAX_LPC_ORDER];

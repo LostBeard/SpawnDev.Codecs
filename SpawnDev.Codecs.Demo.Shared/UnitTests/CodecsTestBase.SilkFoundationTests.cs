@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Smulwb_Basics()
     {
+        CpuOnlyTest();
         // silk_SMULWB(a, b) = (a * (short)b) >> 16
         Equal(0, silk_SMULWB(0, 0));
         Equal(0, silk_SMULWB(1 << 16, 0));
@@ -32,6 +33,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Smulbb_Basics()
     {
+        CpuOnlyTest();
         Equal(0, silk_SMULBB(0, 0));
         Equal(1, silk_SMULBB(1, 1));
         Equal(6, silk_SMULBB(2, 3));
@@ -43,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Smlawb_AccumulatesCorrectly()
     {
+        CpuOnlyTest();
         // silk_SMLAWB(a, b, c) = a + ((b * (short)c) >> 16)
         Equal(0, silk_SMLAWB(0, 0, 0));
         Equal(5, silk_SMLAWB(5, 1 << 16, 0));
@@ -52,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Mla_AccumulatesProduct()
     {
+        CpuOnlyTest();
         Equal(10, silk_MLA(1, 3, 3));      // 1 + 3*3 = 10
         Equal(0, silk_MLA(0, 0, 0));
         Equal(-5, silk_MLA(-5, 1, 0));      // -5 + 1*0 = -5
@@ -60,6 +64,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Shifts_WorkLikeC()
     {
+        CpuOnlyTest();
         Equal(16, silk_LSHIFT(1, 4));
         Equal(1, silk_RSHIFT(16, 4));
         // Arithmetic right shift preserves sign.
@@ -70,6 +75,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_AddShifts_WorkLikeC()
     {
+        CpuOnlyTest();
         Equal(10, silk_ADD_RSHIFT32(8, 4, 1));   // 8 + (4 >> 1) = 10
         Equal(10, silk_ADD_LSHIFT32(2, 1, 3));   // 2 + (1 << 3) = 10
     }
@@ -77,6 +83,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Limit_Clamps()
     {
+        CpuOnlyTest();
         Equal(5, silk_LIMIT_int(5, 0, 10));
         Equal(0, silk_LIMIT_int(-5, 0, 10));
         Equal(10, silk_LIMIT_int(15, 0, 10));
@@ -86,6 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_MinMax_MatchesMath()
     {
+        CpuOnlyTest();
         Equal(1, silk_min_int(1, 2));
         Equal(2, silk_max_int(1, 2));
         Equal(-5, silk_min_int(-5, 5));
@@ -94,6 +102,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_ClzFrac_HandTracedValues()
     {
+        CpuOnlyTest();
         // (inVal, expectedLz, expectedFracQ7)
         var cases = new (int v, int lz, int frac)[]
         {
@@ -126,6 +135,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkLog2_Log2lin_KnownPoints()
     {
+        CpuOnlyTest();
         // silk_log2lin(0) = 1 (parabolic approx starts at 1, frac=0 => out stays 1)
         Equal(1, SilkLog2.silk_log2lin(0));
         // silk_log2lin(128) = 2 (128 in Q7 == 1.0; 2^1 = 2)
@@ -139,6 +149,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkLog2_Log2lin_ClampsOutOfRange()
     {
+        CpuOnlyTest();
         Equal(0, SilkLog2.silk_log2lin(-1));
         Equal(0, SilkLog2.silk_log2lin(-100));
         Equal(silk_int32_MAX, SilkLog2.silk_log2lin(3967));
@@ -148,6 +159,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkLog2_Lin2log_KnownPoints()
     {
+        CpuOnlyTest();
         Equal(0, SilkLog2.silk_lin2log(1));
         Equal(128, SilkLog2.silk_lin2log(2));
         Equal(256, SilkLog2.silk_lin2log(4));
@@ -157,6 +169,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkLog2_RoundTrip_WithinTolerance()
     {
+        CpuOnlyTest();
         // log2lin(lin2log(x)) should be close to x for reasonable x.
         // libopus uses parabolic approximation so small error is expected; we tolerate
         // up to ~1.5% since the approx has known ~1% worst case over the range.
@@ -176,6 +189,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkGainDecoder_UnconditionalFirst_ProducesExpectedGain()
     {
+        CpuOnlyTest();
         // With conditional=0 and prev_ind=0 ignored, first index directly sets prev_ind.
         // Then the gain is derived from silk_log2lin(INV_SCALE * prev_ind + OFFSET).
         sbyte prev = 0;
@@ -189,6 +203,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkGainDecoder_UnconditionalFirst_LimitsDownwardJump()
     {
+        CpuOnlyTest();
         // Unconditional first index: prev = max(ind[0], prev - 16).
         // If prev starts at 40 and ind[0] is 10, prev becomes max(10, 24) = 24.
         sbyte prev = 40;
@@ -201,6 +216,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkGainDecoder_DeltaCoded_AccumulatesCorrectly()
     {
+        CpuOnlyTest();
         // conditional=1 means first subframe is delta from prev. Subsequent subframes
         // are always delta. Simple deltas (ind_tmp = ind + MIN_DELTA_GAIN_QUANT, then
         // accumulate).
@@ -224,6 +240,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkGainDecoder_InvalidNbSubfr_Throws()
     {
+        CpuOnlyTest();
         sbyte prev = 0;
         int[] gains = new int[4];
         sbyte[] ind = { 0, 0, 0, 0 };
@@ -242,6 +259,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkGainDecoder_BufferTooSmall_Throws()
     {
+        CpuOnlyTest();
         sbyte prev = 0;
         int[] gains = new int[2];
         sbyte[] ind = { 0, 0, 0, 0 };
@@ -257,6 +275,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkConstants_DerivedValues_MatchLibopusPreprocessor()
     {
+        CpuOnlyTest();
         // Hand-computed per libopus silk/gain_quant.c preprocessor arithmetic.
         Equal(2090, SilkConstants.GAIN_OFFSET_Q7, "GAIN_OFFSET_Q7");
         Equal(2251, SilkConstants.GAIN_SCALE_Q16, "GAIN_SCALE_Q16");

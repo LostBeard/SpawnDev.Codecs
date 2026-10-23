@@ -12,6 +12,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8FrameTag_KeyFrame320x240_ParsesAllFields()
     {
+        CpuOnlyTest();
         // Build a synthetic key frame tag:
         //   bit 0 = 0 (key)
         //   bits 1..3 = 0 (Bicubic version)
@@ -41,6 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8FrameTag_InterFrameNoSync_ParsesPrefixOnly()
     {
+        CpuOnlyTest();
         // Inter frame: bit 0 = 1
         //   bits 1..3 = 1 (BilinearSimpleLoopFilter)
         //   bit 4 = 1 (show_frame)
@@ -61,6 +63,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8FrameTag_KeyFrameInvalidStartCode_Throws()
     {
+        CpuOnlyTest();
         var frame = new byte[]
         {
             0x10, 0x0C, 0x00,
@@ -73,12 +76,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8FrameTag_TruncatedFrame_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => Vp8FrameTagParser.Parse(new byte[2]));
     }
 
     [TestMethod]
     public void Vp8FrameTag_TruncatedKeyFrame_Throws()
     {
+        CpuOnlyTest();
         // Key frame tag (3 bytes) but missing the 7-byte key extension.
         var frame = new byte[] { 0x10, 0x0C, 0x00, 0x9D, 0x01 };
         Throws<ArgumentException>(() => Vp8FrameTagParser.Parse(frame));
@@ -87,6 +92,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8FrameTag_KeyFrameMaxDimensions_ParsesCorrectly()
     {
+        CpuOnlyTest();
         // 14-bit width + 14-bit height max = 0x3FFF = 16383 each.
         var frame = new byte[]
         {

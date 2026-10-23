@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IvfDetector_BbbAv1Fixture_DetectsAv1()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         Equal(true, IvfDetector.IsIvf(bytes));
         Equal(IvfCodec.Av1, IvfDetector.DetectCodec(bytes));
@@ -19,6 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IvfDetector_RandomBytes_RejectsAsNotIvf()
     {
+        CpuOnlyTest();
         var bytes = new byte[64];
         for (int i = 0; i < bytes.Length; i++) bytes[i] = (byte)(i + 1);
         Equal(false, IvfDetector.IsIvf(bytes));
@@ -28,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IvfDetector_TruncatedHeader_Rejects()
     {
+        CpuOnlyTest();
         var bytes = new byte[16]; // less than 32 bytes
         bytes[0] = (byte)'D'; bytes[1] = (byte)'K'; bytes[2] = (byte)'I'; bytes[3] = (byte)'F';
         Equal(false, IvfDetector.IsIvf(bytes));
@@ -37,6 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IvfDetector_Vp90FourCc_DetectsVp9()
     {
+        CpuOnlyTest();
         // Build a minimal IVF header with VP90 fourcc.
         var bytes = new byte[32];
         bytes[0] = (byte)'D'; bytes[1] = (byte)'K'; bytes[2] = (byte)'I'; bytes[3] = (byte)'F';

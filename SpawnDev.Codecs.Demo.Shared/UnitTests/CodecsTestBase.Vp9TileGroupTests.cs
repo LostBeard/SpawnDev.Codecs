@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TileGroup_BbbFirstKeyframe_OneTileExtracted()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         var video = container.Tracks.First(t => t.IsVideo);
@@ -50,6 +51,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TileGroup_AllBbbVisibleFrames_TilesFitInFrame()
     {
+        CpuOnlyTest();
         // For every visible BBB frame, the extracted tile slices must
         // tile-cover the post-compressed-header region exactly:
         //   sum(tileSize + 4 if !last else 0) == remaining bytes

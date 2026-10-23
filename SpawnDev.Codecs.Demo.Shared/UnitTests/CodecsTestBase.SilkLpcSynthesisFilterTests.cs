@@ -13,6 +13,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcSynthesisFilter_ZeroInput_ZeroState_ProducesZeroPcm()
     {
+        CpuOnlyTest();
         // All-zero residual, all-zero state, any LPC coefs: output PCM is zero (the
         // rounding bias leaks into the state buffer as small positive values, but
         // after gain-scaling they round to 0 at the PCM output).
@@ -31,6 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcSynthesisFilter_ZeroCoefficients_OutputMirrorsResidual()
     {
+        CpuOnlyTest();
         // With all LPC coefs zero, the synthesis filter reduces to:
         //   state[i] = pres[i] + (rounding << 4)
         //   pcm[i] = SAT16(RSHIFT_ROUND(state[i] * Gain_Q10, 8))
@@ -62,6 +64,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcSynthesisFilter_WriteToStateMatchesResidualPlusPrediction()
     {
+        CpuOnlyTest();
         // Verify the state buffer value at position MAX_LPC_ORDER matches the formula
         // state[MAX+0] = pres[0] + (LPC_pred_Q10 << 4) with zero history.
         int[] state = new int[SilkConstants.MAX_LPC_ORDER + 1];
@@ -81,6 +84,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcSynthesisFilter_Order16_DoesNotCrashAtRealisticSize()
     {
+        CpuOnlyTest();
         // Realistic WB 20ms / 4 subframes = 80 samples per subframe at fs=16kHz.
         int[] state = new int[SilkConstants.MAX_LPC_ORDER + 80];
         var rng = new Random(123);
@@ -102,6 +106,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcSynthesisFilter_HistoryAffectsOutput()
     {
+        CpuOnlyTest();
         // Seed non-zero history values and verify they influence the output.
         // Use a simple coefficient that multiplies the last history sample.
         int[] stateA = new int[SilkConstants.MAX_LPC_ORDER + 1];
@@ -126,6 +131,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcSynthesisFilter_InvalidOrder_Throws()
     {
+        CpuOnlyTest();
         int[] state = new int[30];
         int[] pres = new int[10];
         short[] aQ12 = new short[12];
@@ -137,6 +143,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcSynthesisFilter_StateBufferTooSmall_Throws()
     {
+        CpuOnlyTest();
         int[] state = new int[SilkConstants.MAX_LPC_ORDER + 5]; // need +10
         int[] pres = new int[10];
         short[] aQ12 = new short[10];

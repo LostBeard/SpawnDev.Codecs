@@ -11,12 +11,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvComponentReader_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(1, Vp9MvComponentReader.Class0Bits);
     }
 
     [TestMethod]
     public void Vp9MvComponentReader_AllZeroBits_IsSmallestPositive()
     {
+        CpuOnlyTest();
         // sign=0, class tree all zeros -> Class0,
         //   d=0 (one zero bit), fp all zeros -> Fp0, hp implicit 1.
         // mag = 0 + ((0 << 3) | (0 << 1) | 1) + 1 = 2
@@ -31,6 +33,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvComponentReader_Class0_Hp_AllZero_Magnitude1()
     {
+        CpuOnlyTest();
         // sign=0, class=Class0, d=0, fp=Fp0, hp=0 -> mag = ((0<<3)|(0<<1)|0)+1 = 1
         var probs = NewProbs();
         int mv = Vp9MvComponentReader.ReadComponent(
@@ -43,6 +46,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvComponentReader_SignBit_Negates()
     {
+        CpuOnlyTest();
         // sign=1 -> negate. d=0, fr=0, hp=1 (no HP) -> mag = 2 -> return -2.
         var probs = NewProbs();
         int[] bits = new int[20];
@@ -55,6 +59,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvComponentReader_Class1_NonClass0Path()
     {
+        CpuOnlyTest();
         // sign=0, class tree: 1, 0 -> Class1.
         // class != Class0 -> read n = 1 + CLASS0_BITS = 2 bits as offset.
         // bits[0]=0, bits[1]=0 -> d = 0
@@ -79,6 +84,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvComponentReader_RejectsNullReader()
     {
+        CpuOnlyTest();
         var probs = NewProbs();
         Throws<ArgumentNullException>(() =>
             Vp9MvComponentReader.ReadComponent((Vp9BoolDecoder)null!, probs, false));
@@ -87,6 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvComponentReader_RejectsNullProbs()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() =>
             Vp9MvComponentReader.ReadComponent(p => 0, null!, false));
     }
@@ -94,6 +101,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvComponentReader_DelegateOverload_MatchesBoolDecoder()
     {
+        CpuOnlyTest();
         // Smoke test: when the bool decoder reads a bitstream of all
         // zero bytes, the prob comparison matches "always 0" output;
         // verify the delegate path agrees with the bool-decoder path.

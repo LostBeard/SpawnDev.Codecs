@@ -43,6 +43,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1Forward2d_Dct4x4_FwdInv_RoundTripSmall()
     {
+        CpuOnlyTest();
         // Probe scaling factor empirically; at least one of qScale 1, 2, 4, 8
         // should give max error within bound (depends on internal libaom shifts).
         int e1 = RoundTripAv1_2D(Av1TxSize.Tx4x4, Av1TxType.DctDct, 0xD44, 1);
@@ -57,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1Forward2d_Dct8x8_FwdInv_RoundTripSmall()
     {
+        CpuOnlyTest();
         int e1 = RoundTripAv1_2D(Av1TxSize.Tx8x8, Av1TxType.DctDct, 0xD88, 1);
         int e2 = RoundTripAv1_2D(Av1TxSize.Tx8x8, Av1TxType.DctDct, 0xD88, 2);
         int e4 = RoundTripAv1_2D(Av1TxSize.Tx8x8, Av1TxType.DctDct, 0xD88, 4);
@@ -69,6 +71,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1Forward2d_Dct16x16_FwdInv_RoundTripSmall()
     {
+        CpuOnlyTest();
         int e1 = RoundTripAv1_2D(Av1TxSize.Tx16x16, Av1TxType.DctDct, 0xD16, 1);
         int e2 = RoundTripAv1_2D(Av1TxSize.Tx16x16, Av1TxType.DctDct, 0xD16, 2);
         int e4 = RoundTripAv1_2D(Av1TxSize.Tx16x16, Av1TxType.DctDct, 0xD16, 4);
@@ -81,6 +84,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1Forward2d_AllZero_ProducesAllZero()
     {
+        CpuOnlyTest();
         var input = new short[256];
         var output = new int[256];
         Av1Forward2dTransform.Apply(Av1TxSize.Tx16x16, Av1TxType.DctDct, input, output);
@@ -90,6 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1Forward2d_Determinism()
     {
+        CpuOnlyTest();
         var rng = new Random(0xD2D);
         var input = new short[64];
         for (int i = 0; i < 64; i++) input[i] = (short)rng.Next(-100, 100);

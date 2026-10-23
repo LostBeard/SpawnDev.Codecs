@@ -19,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisEncoder_Ctor_RejectsStereo()
     {
+        CpuOnlyTest();
         Throws<NotSupportedException>(() => new VorbisAudioEncoder(new VorbisAudioEncoderOptions
         {
             SampleRateHz = 44100,
@@ -30,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisEncoder_Ctor_RejectsBadBlockSize()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => new VorbisAudioEncoder(new VorbisAudioEncoderOptions
         {
             SampleRateHz = 44100,
@@ -41,6 +43,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisEncoder_Headers_ParseCleanly()
     {
+        CpuOnlyTest();
         var enc = new VorbisAudioEncoder(new VorbisAudioEncoderOptions
         {
             SampleRateHz = 48000,
@@ -71,6 +74,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisEncoder_RoundTrip_440Hz_DominantFrequencyMatches()
     {
+        CpuOnlyTest();
         const int sr = 44100;
         const double targetHz = 440.0;
         const int totalSamples = sr; // 1 second
@@ -113,6 +117,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisEncoder_RoundTrip_880Hz_DominantFrequencyMatches()
     {
+        CpuOnlyTest();
         // Different test frequency to make sure the encoder isn't accidentally
         // tone-locked. 880 Hz = A5.
         const int sr = 44100;
@@ -152,6 +157,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisBitWriter_RoundTripsThroughReader()
     {
+        CpuOnlyTest();
         // Sanity check that the LSB-first writer and reader pair correctly.
         var writer = new VorbisBitWriter();
         writer.WriteBits(5u, 3);

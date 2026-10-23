@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvFpTree_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(4, Vp9MvFpTree.FpSize);
         Equal(6, Vp9MvFpTree.Tree.Length);
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvFpTree_Decode_AllZero_PicksFp0()
     {
+        CpuOnlyTest();
         Equal(Vp9MvFpType.Fp0,
             Vp9MvFpTree.Decode(p => 0, new byte[] { 128, 128, 128 }));
     }
@@ -25,6 +27,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvFpTree_Decode_OneZero_PicksFp1()
     {
+        CpuOnlyTest();
         int callIdx = 0;
         int[] bits = { 1, 0 };
         Equal(Vp9MvFpType.Fp1,
@@ -34,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvFpTree_Decode_TwoZero_PicksFp2()
     {
+        CpuOnlyTest();
         int callIdx = 0;
         int[] bits = { 1, 1, 0 };
         Equal(Vp9MvFpType.Fp2,
@@ -43,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvFpTree_Decode_AllOnes_PicksFp3()
     {
+        CpuOnlyTest();
         int callIdx = 0;
         int[] bits = { 1, 1, 1 };
         Equal(Vp9MvFpType.Fp3,
@@ -52,6 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvFpTree_Decode_RejectsShortProbs()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() =>
             Vp9MvFpTree.Decode(p => 0, new byte[] { 128, 128 }));
     }
@@ -59,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvFpTree_Decode_RejectsNullReader()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() =>
             Vp9MvFpTree.Decode(null!, new byte[] { 128, 128, 128 }));
     }

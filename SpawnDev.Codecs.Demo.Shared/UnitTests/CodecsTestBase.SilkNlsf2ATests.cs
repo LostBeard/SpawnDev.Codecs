@@ -20,6 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Nlsf2A_InvalidOrder_Throws()
     {
+        CpuOnlyTest();
         var nlsf = new short[12];
         var aQ12 = new short[12];
         Throws<ArgumentException>(() => SilkNlsf2A.Compute(aQ12, nlsf, 12));
@@ -28,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Nlsf2A_OutputTooSmall_Throws()
     {
+        CpuOnlyTest();
         var nlsf = new short[10];
         var aQ12 = new short[9];
         Throws<ArgumentException>(() => SilkNlsf2A.Compute(aQ12, nlsf, 10));
@@ -36,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Nlsf2A_InputTooSmall_Throws()
     {
+        CpuOnlyTest();
         var nlsf = new short[9];
         var aQ12 = new short[10];
         Throws<ArgumentException>(() => SilkNlsf2A.Compute(aQ12, nlsf, 10));
@@ -46,6 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Nlsf2A_EvenlySpacedOrder10_ProducesStableFilter()
     {
+        CpuOnlyTest();
         // NLSF[k] = 32768 * (k+1) / (d+1) for k in [0, d).
         // This gives d distinct LSFs distributed over [0, pi] with uniform spacing,
         // which maps to a mild, clearly-stable filter.
@@ -66,6 +70,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Nlsf2A_EvenlySpacedOrder16_ProducesStableFilter()
     {
+        CpuOnlyTest();
         var nlsf = new short[16];
         for (int k = 0; k < 16; k++)
         {
@@ -85,6 +90,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Nlsf2A_AlwaysProducesStableFilter_Order10()
     {
+        CpuOnlyTest();
         // Generate 500 random sorted-ascending NLSF vectors and verify the output
         // filter is always stable. The stability loop MUST converge within
         // MAX_LPC_STABILIZE_ITERATIONS regardless of input.
@@ -117,6 +123,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Nlsf2A_AlwaysProducesStableFilter_Order16()
     {
+        CpuOnlyTest();
         var rng = new Random(0x5A6B7C);
         var aQ12 = new short[16];
         var nlsf = new short[16];
@@ -145,6 +152,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Nlsf2A_MinimallySeparatedNlsfs_StillStable()
     {
+        CpuOnlyTest();
         // Tightly packed NLSFs stress the bandwidth-expansion loop. Pack NLSFs
         // near the middle with min separation to exercise the stability iterations.
         var nlsf = new short[10];
@@ -164,6 +172,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Nlsf2A_NlsfsSpanningFullRange_Stable()
     {
+        CpuOnlyTest();
         // NLSFs near the extremes (small and large) produce filters with poles close to
         // unit circle in one direction. Stability loop must still converge.
         var nlsf = new short[10] { 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 32700 };

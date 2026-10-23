@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TxSizeInfo_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(4, Vp9TxSizeInfo.TxSizes);
         Equal(4, Vp9TxSizeInfo.SideLength.Length);
         Equal(4, Vp9TxSizeInfo.CoefCounts.Length);
@@ -19,6 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TxSizeInfo_Side_AllSizes()
     {
+        CpuOnlyTest();
         Equal(4, Vp9TxSizeInfo.Side(Vp9TxSize.Tx4x4));
         Equal(8, Vp9TxSizeInfo.Side(Vp9TxSize.Tx8x8));
         Equal(16, Vp9TxSizeInfo.Side(Vp9TxSize.Tx16x16));
@@ -28,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TxSizeInfo_CoefCount_AllSizes()
     {
+        CpuOnlyTest();
         Equal(16, Vp9TxSizeInfo.CoefCount(Vp9TxSize.Tx4x4));
         Equal(64, Vp9TxSizeInfo.CoefCount(Vp9TxSize.Tx8x8));
         Equal(256, Vp9TxSizeInfo.CoefCount(Vp9TxSize.Tx16x16));
@@ -37,6 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TxSizeInfo_Log2Side_AllSizes()
     {
+        CpuOnlyTest();
         Equal(2, Vp9TxSizeInfo.Log2Side(Vp9TxSize.Tx4x4));
         Equal(3, Vp9TxSizeInfo.Log2Side(Vp9TxSize.Tx8x8));
         Equal(4, Vp9TxSizeInfo.Log2Side(Vp9TxSize.Tx16x16));
@@ -46,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TxSizeInfo_CoefCount_EqualsSideSquared()
     {
+        CpuOnlyTest();
         for (int i = 0; i < Vp9TxSizeInfo.TxSizes; i++)
         {
             int side = Vp9TxSizeInfo.SideLength[i];
@@ -56,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TxSizeInfo_Side_RejectsOutOfRange()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9TxSizeInfo.Side((Vp9TxSize)99));
     }
@@ -63,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TxSizeInfo_CoefCount_RejectsOutOfRange()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9TxSizeInfo.CoefCount((Vp9TxSize)99));
     }

@@ -21,12 +21,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_EmptyPacket_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => OpusPacketParser.Parse(ReadOnlyMemory<byte>.Empty));
     }
 
     [TestMethod]
     public void Parser_TryParse_EmptyPacket_ReturnsInvalid()
     {
+        CpuOnlyTest();
         bool ok = OpusPacketParser.TryParse(ReadOnlyMemory<byte>.Empty, false, out _, out var err);
         False(ok);
         Equal(OpusPacketError.InvalidPacket, err);
@@ -35,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_CountCode0_SingleFrame()
     {
+        CpuOnlyTest();
         byte toc = 0x00;
         byte[] payload = { 0x11, 0x22, 0x33, 0x44, 0x55 };
         byte[] packet = BuildSimplePacket(toc, payload);
@@ -53,6 +56,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_CountCode1_TwoCbrFrames()
     {
+        CpuOnlyTest();
         byte toc = 0x09; // config 1 SILK NB 20ms, count=1
         byte[] payload = { 0xAA, 0xBB, 0xCC, 0xDD };
         byte[] packet = BuildSimplePacket(toc, payload);
@@ -66,6 +70,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_CountCode1_OddPayload_Throws()
     {
+        CpuOnlyTest();
         byte[] packet = BuildSimplePacket(0x09, 0xAA, 0xBB, 0xCC);
         Throws<ArgumentException>(() => OpusPacketParser.Parse(packet));
     }
@@ -73,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_CountCode2_TwoVbrFrames_ShortSize()
     {
+        CpuOnlyTest();
         byte[] packet = { 0x0A, 3, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE };
         var parsed = OpusPacketParser.Parse(packet);
         Equal(2, parsed.FrameCount);
@@ -85,6 +91,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_CountCode2_TwoVbrFrames_LongSize()
     {
+        CpuOnlyTest();
         byte toc = 0x0A;
         byte[] firstFrame = new byte[260];
         for (int i = 0; i < 260; i++) firstFrame[i] = (byte)(i & 0xFF);
@@ -110,6 +117,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_CountCode2_SizeBeyondBuffer_Throws()
     {
+        CpuOnlyTest();
         byte[] packet = { 0x0A, 100, 0x01, 0x02 };
         Throws<ArgumentException>(() => OpusPacketParser.Parse(packet));
     }
@@ -117,6 +125,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_CountCode3_CbrMultiple()
     {
+        CpuOnlyTest();
         byte toc = 0x03;
         byte ch = 0x04; // 4 frames, VBR=0 (CBR)
         byte[] payload = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88 };
@@ -135,6 +144,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_CountCode3_VbrMultiple()
     {
+        CpuOnlyTest();
         byte toc = 0x03;
         byte ch = 0x83; // 3 frames, VBR=1
         byte[] frame0 = { 0xAA, 0xAA, 0xAA };
@@ -161,6 +171,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_CountCode3_WithPadding()
     {
+        CpuOnlyTest();
         byte toc = 0x03;
         byte ch = 0xC3; // VBR + padding + count=3
         byte padBytes = 5;
@@ -190,6 +201,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_CountCode3_ZeroFrames_Throws()
     {
+        CpuOnlyTest();
         byte[] packet = { 0x03, 0x00 };
         Throws<ArgumentException>(() => OpusPacketParser.Parse(packet));
     }
@@ -197,6 +209,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_CountCode3_TooManyFrames_Throws()
     {
+        CpuOnlyTest();
         // config 3 SILK NB 60ms = 2880 samples @ 48k. 5 * 2880 = 14400 > 5760.
         byte[] packet = { 0x1B, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00 };
         Throws<ArgumentException>(() => OpusPacketParser.Parse(packet));
@@ -205,6 +218,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_Frames_ReferenceOriginalBuffer_NoCopy()
     {
+        CpuOnlyTest();
         byte[] packet = BuildSimplePacket(0x00, 0x11, 0x22, 0x33);
         var data = packet.AsMemory();
         var parsed = OpusPacketParser.Parse(data);
@@ -216,6 +230,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_GetTotalSamples_SingleFrame20ms()
     {
+        CpuOnlyTest();
         byte[] packet = BuildSimplePacket(0x08, 0x00, 0x00);
         var parsed = OpusPacketParser.Parse(packet);
         Equal(960, parsed.GetTotalSamples(48_000));
@@ -224,6 +239,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_GetTotalSamples_TwoFrames20ms()
     {
+        CpuOnlyTest();
         byte[] packet = BuildSimplePacket(0x09, 0x00, 0x00, 0x00, 0x00);
         var parsed = OpusPacketParser.Parse(packet);
         Equal(2, parsed.FrameCount);
@@ -233,6 +249,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Parser_SelfDelimited_SingleFrame()
     {
+        CpuOnlyTest();
         byte[] frame = { 0x11, 0x22, 0x33, 0x44 };
         var packet = new byte[1 + 1 + frame.Length];
         packet[0] = 0x00;

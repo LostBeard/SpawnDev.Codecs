@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1KeyframeWalker_BbbFirstKeyframe_DecodesWithoutThrowing()
     {
+        CpuOnlyTest();
         // The walker has been wired through partition decode + mode info
         // read + coefficient decode + inverse transform + intra prediction +
         // reconstruction. This test confirms the decode pipeline runs to
@@ -46,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1KeyframeWalker_BbbFirstKeyframe_PixelMeansApproximateFfmpeg()
     {
+        CpuOnlyTest();
         // ffmpeg ground truth (libdav1d decode of the first keyframe):
         //   Y mean = 97.40, U mean = 108.98, V mean = 124.76
         // The decoder pipeline is implemented end-to-end but the directional
@@ -103,6 +105,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1KeyframeWalker_RejectsInterFrameInputs()
     {
+        CpuOnlyTest();
         // Build a minimal mock complete header with FrameType=InterFrame.
         // The walker is supposed to fail loudly on inter inputs.
         var sh = new Av1SequenceHeader

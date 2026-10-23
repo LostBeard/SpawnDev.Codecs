@@ -20,6 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisBitReader_SingleBit_LSBFirst()
     {
+        CpuOnlyTest();
         // byte 0x01: bit 0 = 1, bits 1..7 = 0.
         byte[] data = { 0x01 };
         var r = new VorbisBitReader(data);
@@ -37,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisBitReader_BytePrimer_LsbFirstReverseOfFlac()
     {
+        CpuOnlyTest();
         // byte 0x81 = 1000_0001. LSB-first reads: 1, 0, 0, 0, 0, 0, 0, 1.
         byte[] data = { 0x81 };
         var r = new VorbisBitReader(data);
@@ -53,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisBitReader_FullByteAligned_ReturnsRawByte()
     {
+        CpuOnlyTest();
         byte[] data = { 0xA5, 0x3C };
         var r = new VorbisBitReader(data);
         Equal(0xA5u, r.ReadBits(8));
@@ -62,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisBitReader_CrossByteBoundary_PacksBitsLsbFirst()
     {
+        CpuOnlyTest();
         // Two bytes 0x0F 0xF0 = 0000_1111 1111_0000.
         // Read 4 bits then 8 bits: first 4 = 0x0F (low nibble of byte 0),
         // next 8 = (high nibble of byte 0) | (low nibble of byte 1 << 4) = 0 | (0 << 4)? wait
@@ -78,6 +82,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisBitReader_24BitIntegerLe()
     {
+        CpuOnlyTest();
         // Vorbis codebook sync word is 0x564342 packed LSB-first over 24 bits.
         // LSB-first 24 bits of 0x564342 is stored as bytes 0x42 0x43 0x56.
         byte[] data = { 0x42, 0x43, 0x56 };
@@ -88,6 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisBitReader_ReadBits_Zero_NoAdvance()
     {
+        CpuOnlyTest();
         byte[] data = { 0xFF };
         var r = new VorbisBitReader(data);
         Equal(0u, r.ReadBits(0));
@@ -98,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisBitReader_Signed_NegativeInterpretation()
     {
+        CpuOnlyTest();
         // 5-bit value 0b11111 = -1 two's complement.
         byte[] data = { 0x1F }; // bottom 5 bits = 11111
         var r = new VorbisBitReader(data);
@@ -107,6 +114,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisBitReader_Signed_PositiveInterpretation()
     {
+        CpuOnlyTest();
         // 5-bit value 0b01010 = +10. Byte 0x0A.
         byte[] data = { 0x0A };
         var r = new VorbisBitReader(data);
@@ -116,6 +124,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisBitReader_AlignToByte_DiscardsPartialByte()
     {
+        CpuOnlyTest();
         byte[] data = { 0x55, 0xAA };
         var r = new VorbisBitReader(data);
         _ = r.ReadBits(3);
@@ -127,6 +136,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisBitReader_InsufficientBits_Throws()
     {
+        CpuOnlyTest();
         byte[] data = { 0xFF };
         bool threw = false;
         try
@@ -141,6 +151,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisBitReader_32BitMax_ReadsWithoutOverflow()
     {
+        CpuOnlyTest();
         // 32-bit value 0xFFFFFFFF packed LSB-first = bytes FF FF FF FF.
         byte[] data = { 0xFF, 0xFF, 0xFF, 0xFF };
         Equal(0xFFFFFFFFu, VorbisRead(data, 32));

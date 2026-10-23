@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResidualDequant_AllZeros_ProducesAllZeros()
     {
+        CpuOnlyTest();
         // indices = 0, predictor = anything. out_Q10 starts at 0; each iter multiplies 0 by
         // pred and writes 0 back. Result: all zeros.
         int order = 10;
@@ -32,6 +33,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResidualDequant_SingleNonZeroIndex_ProducesExpectedValue()
     {
+        CpuOnlyTest();
         // Indices = [0, 0, ..., 0, 1] (only last set). Predictor = all zeros.
         // For i=order-1: outQ10 = 1 << 10 = 1024. 1024 > 0 so subtract 102 -> 922.
         //                outQ10 = silk_SMLAWB(0, 922, 65536) = 0 + (922 * 65536 high-word of low-16).
@@ -63,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResidualDequant_NegativeIndex_AddsLevelAdj()
     {
+        CpuOnlyTest();
         // Single negative index at end.
         int order = 10;
         var indices = new sbyte[order];
@@ -124,6 +127,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecode_ZeroResiduals_ReturnsCodebookEntry()
     {
+        CpuOnlyTest();
         // indices = [0, 0, 0, ..., 0]: first-stage=0, residuals all zero.
         // With zero residuals, pNLSF_Q15[i] = silk_ADD_LSHIFT32(0, cb1[i], 7) = cb1[i] << 7.
         // Then stabilize checks ordering / spacing.
@@ -144,6 +148,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecode_Output_IsOrderedAfterStabilize()
     {
+        CpuOnlyTest();
         // Even with unusual residuals, after stabilize the output must be monotonically ordered
         // with respect to the codebook's deltaMin_Q15 spacing constraint.
         var cb = BuildDecoderTestCodebook();
@@ -165,6 +170,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecode_Output_WithinQ15Range()
     {
+        CpuOnlyTest();
         var cb = BuildDecoderTestCodebook();
         var indices = new sbyte[cb.Order + 1];
         for (int i = 1; i <= cb.Order; i++) indices[i] = (sbyte)(i - 5); // -4..5 range
@@ -182,6 +188,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecode_OutputTooSmall_Throws()
     {
+        CpuOnlyTest();
         var cb = BuildDecoderTestCodebook();
         short[] small = new short[5];
         sbyte[] indices = new sbyte[cb.Order + 1];
@@ -191,6 +198,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecode_IndicesTooShort_Throws()
     {
+        CpuOnlyTest();
         var cb = BuildDecoderTestCodebook();
         short[] nlsfQ15 = new short[cb.Order];
         sbyte[] tooShort = new sbyte[cb.Order]; // needs order+1
@@ -200,6 +208,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecode_NullCodebook_Throws()
     {
+        CpuOnlyTest();
         short[] nlsfQ15 = new short[10];
         sbyte[] indices = new sbyte[11];
         Throws<ArgumentNullException>(() => SilkNlsfDecoder.Decode(nlsfQ15, indices, null!));

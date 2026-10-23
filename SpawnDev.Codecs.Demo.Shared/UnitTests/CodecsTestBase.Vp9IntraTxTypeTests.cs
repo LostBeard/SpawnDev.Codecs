@@ -13,72 +13,84 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraTxType_Lookup_HasTenEntries()
     {
+        CpuOnlyTest();
         Equal(10, Vp9IntraTxType.Lookup.Length);
     }
 
     [TestMethod]
     public void Vp9IntraTxType_DcMode_IsDctDct()
     {
+        CpuOnlyTest();
         Equal(Vp9TxType.DctDct, Vp9IntraTxType.ForMode(Vp9IntraMode.DcPred));
     }
 
     [TestMethod]
     public void Vp9IntraTxType_VMode_IsAdstDct()
     {
+        CpuOnlyTest();
         Equal(Vp9TxType.AdstDct, Vp9IntraTxType.ForMode(Vp9IntraMode.VPred));
     }
 
     [TestMethod]
     public void Vp9IntraTxType_HMode_IsDctAdst()
     {
+        CpuOnlyTest();
         Equal(Vp9TxType.DctAdst, Vp9IntraTxType.ForMode(Vp9IntraMode.HPred));
     }
 
     [TestMethod]
     public void Vp9IntraTxType_D45Mode_IsDctDct()
     {
+        CpuOnlyTest();
         Equal(Vp9TxType.DctDct, Vp9IntraTxType.ForMode(Vp9IntraMode.D45Pred));
     }
 
     [TestMethod]
     public void Vp9IntraTxType_D135Mode_IsAdstAdst()
     {
+        CpuOnlyTest();
         Equal(Vp9TxType.AdstAdst, Vp9IntraTxType.ForMode(Vp9IntraMode.D135Pred));
     }
 
     [TestMethod]
     public void Vp9IntraTxType_D117Mode_IsAdstDct()
     {
+        CpuOnlyTest();
         Equal(Vp9TxType.AdstDct, Vp9IntraTxType.ForMode(Vp9IntraMode.D117Pred));
     }
 
     [TestMethod]
     public void Vp9IntraTxType_D153Mode_IsDctAdst()
     {
+        CpuOnlyTest();
         Equal(Vp9TxType.DctAdst, Vp9IntraTxType.ForMode(Vp9IntraMode.D153Pred));
     }
 
     [TestMethod]
     public void Vp9IntraTxType_D207Mode_IsDctAdst()
     {
+        CpuOnlyTest();
         Equal(Vp9TxType.DctAdst, Vp9IntraTxType.ForMode(Vp9IntraMode.D207Pred));
     }
 
     [TestMethod]
     public void Vp9IntraTxType_D63Mode_IsAdstDct()
     {
+        CpuOnlyTest();
         Equal(Vp9TxType.AdstDct, Vp9IntraTxType.ForMode(Vp9IntraMode.D63Pred));
     }
 
     [TestMethod]
     public void Vp9IntraTxType_TmMode_IsAdstAdst()
     {
+        CpuOnlyTest();
         Equal(Vp9TxType.AdstAdst, Vp9IntraTxType.ForMode(Vp9IntraMode.TmPred));
     }
 
     [TestMethod]
     public void Vp9IntraTxType_RowAndColumnBitsMatchSemantics()
     {
+        CpuOnlyTest();
         // Per libvpx: low bit = row is iADST, high bit = col is iADST.
         // Verify the enum values encode that.
         Equal(0, (int)Vp9TxType.DctDct);    // row=DCT, col=DCT
@@ -101,6 +113,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraTxType_RejectsOutOfRangeMode()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9IntraTxType.ForMode((Vp9IntraMode)99));
     }

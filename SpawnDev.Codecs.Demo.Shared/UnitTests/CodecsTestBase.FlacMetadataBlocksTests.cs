@@ -46,6 +46,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacReadAllBlocks_StreamInfoOnly_ReturnsNullOptionals()
     {
+        CpuOnlyTest();
         // Use the existing encoder's output; it emits STREAMINFO as the only metadata block.
         var input = GenerateSineInt(64, 1, 44100, 16);
         byte[] flac = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 64);
@@ -60,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacReadAllBlocks_StreamInfoPlusVorbisComment_Parses()
     {
+        CpuOnlyTest();
         // Build a synthetic FLAC prelude: fLaC + STREAMINFO (not last) + VORBIS_COMMENT (last).
         var input = GenerateSineInt(64, 1, 44100, 16);
         byte[] nativeFlac = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 64);
@@ -89,6 +91,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacReadAllBlocks_StreamInfoPlusSeekTable_Parses()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(64, 1, 44100, 16);
         byte[] nativeFlac = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 64);
         var streamInfoPayload = new byte[34];
@@ -127,6 +130,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacReadAllBlocks_StreamInfoPlusCommentAndSeek_Both()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(64, 1, 44100, 16);
         byte[] nativeFlac = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 64);
         var streamInfoPayload = new byte[34];

@@ -30,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisAudioDecoder_Construct_SetupWithNoCodebooks_Succeeds()
     {
+        CpuOnlyTest();
         var ident = MiniIdent(1);
         var setup = new VorbisSetupHeader
         {
@@ -46,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisAudioDecoder_EmptyPacket_ReturnsZeroFrames()
     {
+        CpuOnlyTest();
         var ident = MiniIdent(1);
         var setup = new VorbisSetupHeader
         {
@@ -64,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisAudioDecoder_NullHeaders_Throws()
     {
+        CpuOnlyTest();
         var ident = MiniIdent(1);
         var setup = new VorbisSetupHeader
         {

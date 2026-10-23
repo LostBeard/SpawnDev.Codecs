@@ -23,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcInvPredGain_AllZeroOrder1_ReturnsOneQ30()
     {
+        CpuOnlyTest();
         // Order 1, A_Q12 = [0]. Trivially stable (poles at origin).
         // invGain = 1 - 0 = 1.0 in Q30 = 2^30 = 1073741824.
         Equal(1 << 30, SilkLpcInvPredGain.Compute(new short[] { 0 }, 1));
@@ -31,6 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcInvPredGain_AllZeroOrder16_ReturnsOneQ30()
     {
+        CpuOnlyTest();
         // Order 16 all-zero filter: still invGain = 2^30 since each iteration leaves
         // the accumulator unchanged (rc_k = 0 -> rc_mult1 = 2^30 -> LSHIFT(SMMUL(g, 2^30), 2) = g).
         var a = new short[16];
@@ -40,6 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcInvPredGain_Order1_PositiveHalf_ReturnsThreeQuarters()
     {
+        CpuOnlyTest();
         // A_Q12 = [2048] represents 0.5. The extracted reflection coefficient is rc = -0.5
         // (libopus convention rc = -A). invGain = 1 - rc^2 = 0.75 in Q30 = 805306368.
         Equal(805306368, SilkLpcInvPredGain.Compute(new short[] { 2048 }, 1));
@@ -48,6 +51,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcInvPredGain_Order1_NegativeHalf_ReturnsThreeQuarters()
     {
+        CpuOnlyTest();
         // rc^2 is sign-independent so A_Q12 = [-2048] yields the same 0.75 Q30 value.
         Equal(805306368, SilkLpcInvPredGain.Compute(new short[] { -2048 }, 1));
     }
@@ -57,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcInvPredGain_Order1_DcSumAtFourThousandNinetySix_ReturnsZero()
     {
+        CpuOnlyTest();
         // DC_resp = 4096 triggers the early-exit check in the public entry point.
         Equal(0, SilkLpcInvPredGain.Compute(new short[] { 4096 }, 1));
     }
@@ -64,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcInvPredGain_Order2_DcSumAtFourThousandNinetySix_ReturnsZero()
     {
+        CpuOnlyTest();
         // [2048, 2048] -> DC_resp = 4096 -> early-exit.
         Equal(0, SilkLpcInvPredGain.Compute(new short[] { 2048, 2048 }, 2));
     }
@@ -71,6 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcInvPredGain_Order1_JustBelowALimit_IsStable()
     {
+        CpuOnlyTest();
         // A_LIMIT in QA=24 is 16773022. A_Q12 = 4094 -> A_QA = 4094<<12 = 16769024 < A_LIMIT.
         // DC_resp = 4094 < 4096 so DC check passes. Filter is accepted as stable.
         int gain = SilkLpcInvPredGain.Compute(new short[] { 4094 }, 1);
@@ -81,6 +88,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcInvPredGain_Order1_JustAboveALimit_ReturnsZero()
     {
+        CpuOnlyTest();
         // A_Q12 = 4095 -> A_QA = 16773120 > A_LIMIT (16773022). DC_resp = 4095 < 4096 so DC
         // check passes, but the per-coefficient A_LIMIT check inside the QA routine rejects.
         Equal(0, SilkLpcInvPredGain.Compute(new short[] { 4095 }, 1));
@@ -89,6 +97,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcInvPredGain_Order1_NegativeAtLimit_ReturnsZero()
     {
+        CpuOnlyTest();
         // Negative side: A_Q12 = -4095 -> A_QA = -16773120 < -A_LIMIT. DC check passes
         // (DC_resp -4095 is not >= 4096) but the inner A_LIMIT check rejects.
         Equal(0, SilkLpcInvPredGain.Compute(new short[] { -4095 }, 1));
@@ -99,6 +108,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcInvPredGain_Output_IsAlwaysInInclusiveRangeZeroToTwoToThe30()
     {
+        CpuOnlyTest();
         // Stress: generate many stable filters of various orders and confirm the output
         // never exceeds 2^30 and is never negative.
         var rng = new Random(0xABCDEF);
@@ -167,6 +177,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcInvPredGain_StableClaim_IsBackedByImpulseResponse()
     {
+        CpuOnlyTest();
         // Libopus-style contract: any filter we claim is stable (gain != 0) must also
         // pass the impulse-response test. 1000 trials x 9 orders x 16 dynamic-range shifts.
         var rng = new Random(0);
@@ -209,6 +220,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcInvPredGain_UnstableClaim_IsPermitted()
     {
+        CpuOnlyTest();
         // Inverse direction - verify that when the impulse response clearly shows
         // divergence, the function returns 0 (rejects the filter). This is NOT guaranteed
         // by libopus semantics (the impulse test is a floor, not a ceiling), but we do
@@ -232,6 +244,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LpcInvPredGain_KnownStable_MatchesExpectedSample()
     {
+        CpuOnlyTest();
         // Deterministic fixture: a mild low-pass filter that is clearly stable.
         // A_Q12 = [1024, -256, 64] (coefficients shrinking geometrically).
         // Regression oracle: run the function and verify the result matches itself

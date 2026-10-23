@@ -93,6 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_StereoNbInactive20Ms_InterleavesLR()
     {
+        CpuOnlyTest();
         // Config 1 (NB 20 ms) + stereo bit. Both channels inactive (VAD=false, signalType=0).
         var mid = new SilkDecodedIndices
         {
@@ -140,6 +141,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_StereoWb20Ms_InterleavesLR()
     {
+        CpuOnlyTest();
         // Config 9 (WB 20 ms) + stereo.
         var mid = new SilkDecodedIndices
         {
@@ -183,6 +185,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_StereoNbAt48kHz_ResamplesBothChannels()
     {
+        CpuOnlyTest();
         // NB stereo packet decoded to 48 kHz output. Exercises the per-channel
         // resampler pair (6x upsample from 8 kHz mid/side signals).
         var mid = new SilkDecodedIndices
@@ -223,6 +226,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_StereoWbAt48kHz_ResamplesBothChannels()
     {
+        CpuOnlyTest();
         // WB stereo at 48 kHz output - 3x upsample via IIR_FIR.
         var mid = new SilkDecodedIndices
         {

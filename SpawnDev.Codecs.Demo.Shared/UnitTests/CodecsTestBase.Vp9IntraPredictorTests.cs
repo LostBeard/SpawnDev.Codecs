@@ -21,6 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraPredictor_Dispatches_DcPred_BothEdges()
     {
+        CpuOnlyTest();
         var above = BuildPattern(4, 10);
         var left = BuildPattern(4, 50);
 
@@ -38,6 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraPredictor_Dispatches_DcPred_TopOnly_WhenLeftMissing()
     {
+        CpuOnlyTest();
         var above = BuildPattern(8, 30);
         var left = new byte[8];
 
@@ -56,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraPredictor_Dispatches_DcPred_LeftOnly_WhenAboveMissing()
     {
+        CpuOnlyTest();
         var above = new byte[8];
         var left = BuildPattern(8, 70);
 
@@ -74,6 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraPredictor_Dispatches_DcPred_128_WhenNoEdges()
     {
+        CpuOnlyTest();
         var above = new byte[4];
         var left = new byte[4];
 
@@ -89,6 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraPredictor_Dispatches_VPred_MatchesDirectCall()
     {
+        CpuOnlyTest();
         var above = BuildPattern(4, 5);
         var left = new byte[4];
 
@@ -106,6 +111,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraPredictor_Dispatches_HPred_MatchesDirectCall()
     {
+        CpuOnlyTest();
         var above = new byte[4];
         var left = BuildPattern(4, 99);
 
@@ -123,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraPredictor_Dispatches_TmPred_MatchesDirectCall()
     {
+        CpuOnlyTest();
         var above = BuildPattern(4, 10);
         var left = BuildPattern(4, 30);
         const byte topLeft = 5;
@@ -141,6 +148,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraPredictor_Dispatches_D45_MatchesDirectCall()
     {
+        CpuOnlyTest();
         var above = BuildPattern(8, 10);  // D45 needs 2N samples
         var left = new byte[4];
 
@@ -158,6 +166,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraPredictor_Dispatches_D63_MatchesDirectCall()
     {
+        CpuOnlyTest();
         var above = BuildPattern(8, 80);
         var left = new byte[4];
 
@@ -175,6 +184,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraPredictor_Dispatches_D135_MatchesDirectCall()
     {
+        CpuOnlyTest();
         var above = BuildPattern(4, 10);
         var left = BuildPattern(4, 50);
         const byte topLeft = 5;
@@ -193,6 +203,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraPredictor_Dispatches_D117_MatchesDirectCall()
     {
+        CpuOnlyTest();
         var above = BuildPattern(4, 10);
         var left = BuildPattern(4, 50);
         const byte topLeft = 5;
@@ -211,6 +222,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraPredictor_Dispatches_D153_MatchesDirectCall()
     {
+        CpuOnlyTest();
         var above = BuildPattern(4, 10);
         var left = BuildPattern(4, 50);
         const byte topLeft = 5;
@@ -229,6 +241,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraPredictor_Dispatches_D207_MatchesDirectCall()
     {
+        CpuOnlyTest();
         var above = new byte[4];
         var left = BuildPattern(4, 50);
 
@@ -246,6 +259,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraPredictor_RejectsUnknownMode()
     {
+        CpuOnlyTest();
         var above = new byte[4];
         var left = new byte[4];
         var dst = new byte[16];

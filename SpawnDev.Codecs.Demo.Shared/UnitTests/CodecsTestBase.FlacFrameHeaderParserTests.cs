@@ -75,6 +75,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_Fixed_192_44100_Stereo_16bit_Parses()
     {
+        CpuOnlyTest();
         // bsize=0b0001 (192), srate=0b1001 (44100), chan=0b0001 (2 indep), bps=0b100 (16), blocking=0
         var bytes = BuildFrameHeaderBytes(0b0001, 0b1001, 0b0001, 0b100, blocking: 0);
         var header = FlacFrameHeaderParser.Parse(bytes, TestStreamInfo());
@@ -91,6 +92,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_Variable_48000_MidSide_24bit_Parses()
     {
+        CpuOnlyTest();
         // bsize=0b1010 (1024), srate=0b1010 (48000), chan=0b1010 (M/S), bps=0b110 (24), blocking=1
         var bytes = BuildFrameHeaderBytes(0b1010, 0b1010, 0b1010, 0b110, blocking: 1);
         var header = FlacFrameHeaderParser.Parse(bytes, TestStreamInfo());
@@ -105,6 +107,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_BlockSizeCode0110_8bitSide_Resolves()
     {
+        CpuOnlyTest();
         // bsize=0b0110 -> read 8 bits side => actual block size = side + 1.
         // Side byte = 99 -> block size 100.
         var bytes = BuildFrameHeaderBytes(0b0110, 0b1001, 0b0001, 0b100, blocking: 0,
@@ -116,6 +119,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_BlockSizeCode0111_16bitSide_Resolves()
     {
+        CpuOnlyTest();
         // bsize=0b0111 -> read 16 bits side => actual block size = side + 1.
         // Side bytes = 0x1F 0xFF = 8191 -> block size 8192.
         var bytes = BuildFrameHeaderBytes(0b0111, 0b1001, 0b0001, 0b100, blocking: 0,
@@ -127,6 +131,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_SampleRateCode1100_kHzSide_Resolves()
     {
+        CpuOnlyTest();
         // srate=0b1100 -> 8-bit side byte in kHz. Side = 48 -> 48000 Hz.
         var bytes = BuildFrameHeaderBytes(0b0001, 0b1100, 0b0001, 0b100, blocking: 0,
             sideBytes: new byte[] { 48 });
@@ -137,6 +142,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_SampleRateCode1101_HzSide_Resolves()
     {
+        CpuOnlyTest();
         // srate=0b1101 -> 16-bit side in Hz. Side = 0xAC44 = 44100.
         var bytes = BuildFrameHeaderBytes(0b0001, 0b1101, 0b0001, 0b100, blocking: 0,
             sideBytes: new byte[] { 0xAC, 0x44 });
@@ -147,6 +153,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_SampleRateCode1110_DecaHzSide_Resolves()
     {
+        CpuOnlyTest();
         // srate=0b1110 -> 16-bit side in decaHz. Side = 4410 (0x113A) -> 44100 Hz.
         var bytes = BuildFrameHeaderBytes(0b0001, 0b1110, 0b0001, 0b100, blocking: 0,
             sideBytes: new byte[] { 0x11, 0x3A });
@@ -157,6 +164,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_SampleRateCode0000_FallsBackToStreamInfo()
     {
+        CpuOnlyTest();
         var bytes = BuildFrameHeaderBytes(0b0001, 0b0000, 0b0001, 0b100, blocking: 0);
         var header = FlacFrameHeaderParser.Parse(bytes, TestStreamInfo());
         Equal(44100, header.SampleRateHz);
@@ -165,6 +173,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_BpsCode000_FallsBackToStreamInfo()
     {
+        CpuOnlyTest();
         var bytes = BuildFrameHeaderBytes(0b0001, 0b1001, 0b0001, 0b000, blocking: 0);
         var header = FlacFrameHeaderParser.Parse(bytes, TestStreamInfo());
         Equal(16, header.BitsPerSample); // from streaminfo
@@ -173,6 +182,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_ChannelAssignment_LeftSide()
     {
+        CpuOnlyTest();
         var bytes = BuildFrameHeaderBytes(0b0001, 0b1001, 0b1000, 0b100, blocking: 0);
         var header = FlacFrameHeaderParser.Parse(bytes, TestStreamInfo());
         Equal(FlacChannelAssignment.LeftSide, header.ChannelAssignment);
@@ -182,6 +192,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_ChannelAssignment_RightSide()
     {
+        CpuOnlyTest();
         var bytes = BuildFrameHeaderBytes(0b0001, 0b1001, 0b1001, 0b100, blocking: 0);
         var header = FlacFrameHeaderParser.Parse(bytes, TestStreamInfo());
         Equal(FlacChannelAssignment.RightSide, header.ChannelAssignment);
@@ -190,6 +201,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_ChannelAssignment_EightIndependent()
     {
+        CpuOnlyTest();
         var bytes = BuildFrameHeaderBytes(0b0001, 0b1001, 0b0111, 0b100, blocking: 0);
         var header = FlacFrameHeaderParser.Parse(bytes, TestStreamInfo());
         Equal(FlacChannelAssignment.Independent, header.ChannelAssignment);
@@ -199,6 +211,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_BadSync_Throws()
     {
+        CpuOnlyTest();
         var bytes = BuildFrameHeaderBytes(0b0001, 0b1001, 0b0001, 0b100, blocking: 0);
         // Corrupt the sync.
         bytes[0] = 0x00;
@@ -209,6 +222,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_BadCrc8_Throws()
     {
+        CpuOnlyTest();
         var bytes = BuildFrameHeaderBytes(0b0001, 0b1001, 0b0001, 0b100, blocking: 0);
         // Corrupt the final CRC byte.
         bytes[bytes.Length - 1] ^= 0xFF;
@@ -219,6 +233,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_ReservedBpsCode011_Throws()
     {
+        CpuOnlyTest();
         var bytes = BuildFrameHeaderBytes(0b0001, 0b1001, 0b0001, 0b011, blocking: 0);
         Throws<InvalidDataException>(() =>
             FlacFrameHeaderParser.Parse(bytes, TestStreamInfo()));
@@ -227,6 +242,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_ReservedBlockSizeCode0000_Throws()
     {
+        CpuOnlyTest();
         var bytes = BuildFrameHeaderBytes(0b0000, 0b1001, 0b0001, 0b100, blocking: 0);
         Throws<InvalidDataException>(() =>
             FlacFrameHeaderParser.Parse(bytes, TestStreamInfo()));
@@ -235,6 +251,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_InvalidSampleRateCode1111_Throws()
     {
+        CpuOnlyTest();
         var bytes = BuildFrameHeaderBytes(0b0001, 0b1111, 0b0001, 0b100, blocking: 0);
         Throws<InvalidDataException>(() =>
             FlacFrameHeaderParser.Parse(bytes, TestStreamInfo()));
@@ -243,6 +260,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_ReservedChannelCode1011_Throws()
     {
+        CpuOnlyTest();
         var bytes = BuildFrameHeaderBytes(0b0001, 0b1001, 0b1011, 0b100, blocking: 0);
         Throws<InvalidDataException>(() =>
             FlacFrameHeaderParser.Parse(bytes, TestStreamInfo()));
@@ -251,6 +269,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_BlockSize_AllPowerOfTwoCodes()
     {
+        CpuOnlyTest();
         // Codes 0b1000..0b1111 -> 256, 512, 1024, 2048, 4096, 8192, 16384, 32768.
         int[] expected = { 256, 512, 1024, 2048, 4096, 8192, 16384, 32768 };
         for (int i = 0; i < 8; i++)
@@ -265,6 +284,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_SampleRate_AllFixedCodes()
     {
+        CpuOnlyTest();
         // Codes 0b0001..0b1011 -> 88200, 176400, 192000, 8000, 16000, 22050, 24000, 32000, 44100, 48000, 96000.
         int[] expected = { 88200, 176400, 192000, 8000, 16000, 22050, 24000, 32000, 44100, 48000, 96000 };
         for (int i = 0; i < expected.Length; i++)
@@ -279,6 +299,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_BitsPerSample_AllFixedCodes()
     {
+        CpuOnlyTest();
         var expected = new Dictionary<int, int>
         {
             [0b001] = 8,
@@ -299,6 +320,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrameHeader_Utf8FrameNumber_MultiByte_Parses()
     {
+        CpuOnlyTest();
         // Frame number = 0xA2 (162) encoded as 2-byte UTF-8: 0xC2 0xA2.
         // BuildFrameHeaderBytes expects a single byte for the UTF-8 number; we bypass it.
         var bytes = BuildFrameHeaderBytes(0b0001, 0b1001, 0b0001, 0b100, blocking: 0);

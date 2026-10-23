@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvSubPel_OneEighthToQ4_DoublesValue()
     {
+        CpuOnlyTest();
         Equal(0, Vp9MvSubPel.OneEighthPelToQ4(0));
         Equal(2, Vp9MvSubPel.OneEighthPelToQ4(1));
         Equal(8, Vp9MvSubPel.OneEighthPelToQ4(4));   // 1/2 pel = 8/16
@@ -21,6 +22,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvSubPel_Split_ZeroIsZeroZero()
     {
+        CpuOnlyTest();
         var (pel, sub) = Vp9MvSubPel.Split(0);
         Equal(0, pel);
         Equal(0, sub);
@@ -29,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvSubPel_Split_OnePixel_PelOneSubZero()
     {
+        CpuOnlyTest();
         var (pel, sub) = Vp9MvSubPel.Split(16);
         Equal(1, pel);
         Equal(0, sub);
@@ -37,6 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvSubPel_Split_HalfPel_PelZeroSub8()
     {
+        CpuOnlyTest();
         var (pel, sub) = Vp9MvSubPel.Split(8);
         Equal(0, pel);
         Equal(8, sub);
@@ -45,6 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvSubPel_Split_NegativeOne_PelMinusOneSub15()
     {
+        CpuOnlyTest();
         // Arithmetic shift: (-1) >> 4 = -1; (-1) & 15 = 15.
         var (pel, sub) = Vp9MvSubPel.Split(-1);
         Equal(-1, pel);
@@ -54,6 +59,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvSubPel_Split_NegativePixel()
     {
+        CpuOnlyTest();
         // -16 = -1 pel exactly.
         var (pel, sub) = Vp9MvSubPel.Split(-16);
         Equal(-1, pel);
@@ -63,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvSubPel_Combine_RoundtripsPositive()
     {
+        CpuOnlyTest();
         for (int q4 = 0; q4 < 100; q4++)
         {
             var (pel, sub) = Vp9MvSubPel.Split(q4);
@@ -73,6 +80,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvSubPel_Combine_RoundtripsNegative()
     {
+        CpuOnlyTest();
         for (int q4 = -64; q4 < 0; q4++)
         {
             var (pel, sub) = Vp9MvSubPel.Split(q4);
@@ -83,6 +91,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvSubPel_Combine_RejectsOutOfRangeSubPel()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9MvSubPel.Combine(0, 16));
         Throws<ArgumentOutOfRangeException>(() =>

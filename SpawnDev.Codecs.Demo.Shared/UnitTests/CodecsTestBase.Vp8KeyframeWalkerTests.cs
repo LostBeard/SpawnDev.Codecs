@@ -20,6 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8KeyframeWalker_RejectsNonKeyFrame()
     {
+        CpuOnlyTest();
         var tag = new Vp8FrameTag
         {
             IsKeyFrame = false,
@@ -38,6 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8KeyframeWalker_MultiPartition_DecodesIdenticallyToSinglePartition()
     {
+        CpuOnlyTest();
         // The walker has supported 1/2/4/8 token partitions since 86c2209 (this test replaced
         // a stale "RejectsMultiPartition" that expected NotImplementedException). The partition
         // count only changes how token bytes are split across the frame, never the picture, so
@@ -72,6 +74,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8KeyframeWalker_RejectsMismatchedEntropyContextsCols()
     {
+        CpuOnlyTest();
         var tag = MakeMinimalKeyTag(64, 64);
         var hdr = MakeMinimalKeyHeader();
         var bd = new Vp8BoolDecoder(new byte[] { 0x00, 0x00, 0x00, 0x00 });
@@ -84,6 +87,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8KeyframeWalker_AllSkipMb_ReconstructsBaselinePrediction()
     {
+        CpuOnlyTest();
         // Build a minimal frame where every MB is DcPred + skip. The walker
         // should produce a flat-128 luma plane (DC predicted with no neighbors)
         // and chroma equally.
@@ -147,6 +151,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8KeyframeWalker_SingleMbDcPred_NoResidual_ReconstructsBaseline()
     {
+        CpuOnlyTest();
         // 1 MB, DcPred, skip_coeff=true. Y/U/V should all be 128.
         const int Width = 16, Height = 16;
         var tag = MakeMinimalKeyTag(Width, Height);
@@ -175,6 +180,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8KeyframeWalker_SingleMb_NoSkip_ZeroResidual_StillBaseline()
     {
+        CpuOnlyTest();
         // 1 MB, DcPred, skip_coeff=false but all coef blocks empty.
         // Y2 emits "block empty" bit; each Y4 emits "empty" with firstCoef=1;
         // each UV emits "empty". Total: 1 (Y2) + 16 (Y4) + 8 (UV) = 25 bits.
@@ -218,6 +224,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8KeyframeWalker_FrameBufferDimensions_RoundsToMb()
     {
+        CpuOnlyTest();
         // Walker should accept non-MB-aligned dimensions and store strides
         // accordingly. Check via the buffer's reported strides.
         var fb = new Vp8FrameBuffer(17, 17);

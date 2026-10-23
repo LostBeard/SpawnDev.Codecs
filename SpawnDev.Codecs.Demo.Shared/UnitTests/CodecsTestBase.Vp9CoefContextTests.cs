@@ -13,6 +13,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefContext_PtEnergyClass_HasCorrectLengthAndValues()
     {
+        CpuOnlyTest();
         // libvpx vp9_pt_energy_class = { 0, 1, 2, 3, 3, 4, 4, 5, 5, 5, 5, 5 }.
         Equal(12, Vp9CoefContext.PtEnergyClass.Length);
         Equal((byte)0, Vp9CoefContext.PtEnergyClass[(int)Vp9CoefToken.Zero]);
@@ -32,6 +33,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefContext_GetCoefContext_ScanPos0HasAllZeroNeighbors_ReturnsZero()
     {
+        CpuOnlyTest();
         // Default 4x4 scan: scan position 0 has neighbors (0, 0); the
         // token cache starts all-zeros so e0 + e1 = 0; context = (1 + 0
         // + 0) >> 1 = 0.
@@ -44,6 +46,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefContext_GetCoefContext_OneEnergyClass1Neighbor_ReturnsOne()
     {
+        CpuOnlyTest();
         // Default 4x4 scan: scan position 3 has neighbors (1, 4) per
         // libvpx default_scan_4x4_neighbors. If raster position 1 has
         // energy class 1 (One token) and raster position 4 is zero,
@@ -58,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefContext_GetCoefContext_BothNeighborsHighEnergy_ReturnsFive()
     {
+        CpuOnlyTest();
         // Default 4x4 scan position 3 has neighbors (1, 4). With both
         // neighbors at energy class 5 (Cat3+), the raw context value is
         // (1 + 5 + 5) >> 1 = 5. libvpx vp9_scan.h get_coef_context does
@@ -76,6 +80,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefContext_GetCoefContext_BothEnergyClass2_ReturnsContext2()
     {
+        CpuOnlyTest();
         // (1 + 2 + 2) >> 1 = 2 - exact boundary case at the cap.
         var neighbors = Vp9NeighborTables.DefaultScan4x4Neighbors.AsSpan();
         Span<byte> cache = stackalloc byte[16];
@@ -88,6 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefContext_GetCoefContext_BothEnergyClass1_ReturnsContext1()
     {
+        CpuOnlyTest();
         // (1 + 1 + 1) >> 1 = 1 - just below the cap.
         var neighbors = Vp9NeighborTables.DefaultScan4x4Neighbors.AsSpan();
         Span<byte> cache = stackalloc byte[16];
@@ -100,6 +106,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefContext_GetCoefContext_RejectsOutOfRangeScanPos()
     {
+        CpuOnlyTest();
         var neighbors = Vp9NeighborTables.DefaultScan4x4Neighbors.AsSpan();
         Span<byte> cache = stackalloc byte[16];
         // 4x4 neighbors has 17 pairs (16 scan pos + boundary), so

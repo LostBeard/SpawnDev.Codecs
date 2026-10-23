@@ -61,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSubframe_Constant_Positive_Replicates()
     {
+        CpuOnlyTest();
         var w = new FlacBitWriter();
         WriteSubframeHeader(w, FlacSubframeKind.Constant, 0, 0);
         WriteSigned(w, 42, 16);
@@ -71,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSubframe_Constant_Negative_Replicates()
     {
+        CpuOnlyTest();
         var w = new FlacBitWriter();
         WriteSubframeHeader(w, FlacSubframeKind.Constant, 0, 0);
         WriteSigned(w, -12345, 16);
@@ -83,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSubframe_Verbatim_MixedSamples()
     {
+        CpuOnlyTest();
         var expected = new[] { 10, -10, 20, -20, int.MaxValue >> 16 };
         var w = new FlacBitWriter();
         WriteSubframeHeader(w, FlacSubframeKind.Verbatim, 0, 0);
@@ -96,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSubframe_FixedOrder0_ResidualIsSample()
     {
+        CpuOnlyTest();
         // Order 0: predictor = 0, so samples = residual.
         var expected = new[] { 1, 2, -1, 3, -3, 0 };
         var w = new FlacBitWriter();
@@ -111,6 +115,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSubframe_FixedOrder1_Reconstructs()
     {
+        CpuOnlyTest();
         // Target samples: [5, 7, 10, 8, 15].
         // Warm-up = 5. Residuals = [s[n] - s[n-1]] = [2, 3, -2, 7].
         var w = new FlacBitWriter();
@@ -126,6 +131,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSubframe_FixedOrder2_Reconstructs()
     {
+        CpuOnlyTest();
         // Target samples: [3, 6, 10, 15, 21, 28]
         // Differences (order 1): [3, 4, 5, 6, 7]
         // Second differences (order 2): [1, 1, 1, 1]
@@ -144,6 +150,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSubframe_FixedOrder4_Reconstructs()
     {
+        CpuOnlyTest();
         // Target: sample[n] = n*n*n (cubic). 4th difference of a cubic is 0, so residuals = 0.
         // samples = [0, 1, 8, 27, 64, 125, 216, 343].
         var expected = new int[8];
@@ -164,6 +171,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSubframe_Lpc_Order1_Decays()
     {
+        CpuOnlyTest();
         // Classic decay: coef = 1, quant level = 1.
         // predictor = (1 * prev) >> 1 = prev / 2 (integer floor).
         // With warm-up = 100, residual = [0, 0, 0, 0], samples decay:
@@ -184,6 +192,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSubframe_Lpc_Order2_MatchesHandComputed()
     {
+        CpuOnlyTest();
         // Coefs = [1, 1], quant = 1, precision = 4.
         // predictor = (1*prev + 1*prev2) >> 1.
         // Warm-ups: s[0]=10, s[1]=6. Residuals: [1, -1, 0].
@@ -209,6 +218,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSubframe_Lpc_NegativeQuantLevel_Throws()
     {
+        CpuOnlyTest();
         // libFLAC treats negative quant level as invalid (encoder never produces them).
         var w = new FlacBitWriter();
         WriteSubframeHeader(w, FlacSubframeKind.Lpc, 1, 0);
@@ -228,6 +238,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSubframe_Lpc_ReservedPrecision1111_Throws()
     {
+        CpuOnlyTest();
         var w = new FlacBitWriter();
         WriteSubframeHeader(w, FlacSubframeKind.Lpc, 1, 0);
         WriteSigned(w, 0, 16);
@@ -245,6 +256,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSubframe_Constant_WithWastedBits_LeftShifts()
     {
+        CpuOnlyTest();
         // 3 wasted bits → decoder reads value at (bps - 3), then left-shifts by 3.
         // bps = 16, effective bps = 13. Value 5 at 13 bits, final = 5 << 3 = 40.
         var w = new FlacBitWriter();
@@ -257,6 +269,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacSubframe_Verbatim_WithWastedBits_LeftShifts()
     {
+        CpuOnlyTest();
         // bps=16, wasted=4, effective bps = 12. Samples -100, 50 → -1600, 800 after shift.
         var w = new FlacBitWriter();
         WriteSubframeHeader(w, FlacSubframeKind.Verbatim, 0, wastedBits: 4);

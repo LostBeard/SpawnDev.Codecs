@@ -11,12 +11,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvCandidatesList_Capacity_Is2()
     {
+        CpuOnlyTest();
         Equal(2, Vp9MvCandidatesList.MaxCandidates);
     }
 
     [TestMethod]
     public void Vp9MvCandidatesList_Empty_AfterConstruction()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         Equal(0, list.Count);
         Equal(false, list.IsFull);
@@ -26,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvCandidatesList_TryAdd_Distinct_Adds()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         Equal(true, list.TryAdd(new Vp9Mv(1, 2)));
         Equal(1, list.Count);
@@ -37,6 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvCandidatesList_TryAdd_Duplicate_Rejected()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         list.TryAdd(new Vp9Mv(1, 2));
         Equal(false, list.TryAdd(new Vp9Mv(1, 2))); // same as first
@@ -46,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvCandidatesList_TryAdd_Full_Rejected()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         list.TryAdd(new Vp9Mv(1, 2));
         list.TryAdd(new Vp9Mv(3, 4));
@@ -56,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvCandidatesList_Indexer_AccessesAddedCandidates()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         list.TryAdd(new Vp9Mv(7, 11));
         list.TryAdd(new Vp9Mv(-3, 5));
@@ -66,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvCandidatesList_Indexer_OutOfRange_Throws()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         list.TryAdd(new Vp9Mv(1, 2));
         Throws<ArgumentOutOfRangeException>(() => _ = list[1]);  // only [0] valid
@@ -75,6 +82,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvCandidatesList_Clear_ResetsToEmpty()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         list.TryAdd(new Vp9Mv(1, 2));
         list.TryAdd(new Vp9Mv(3, 4));
@@ -86,6 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvCandidatesList_AsSpan_ReflectsCount()
     {
+        CpuOnlyTest();
         var list = new Vp9MvCandidatesList();
         Equal(0, list.AsSpan().Length);
         list.TryAdd(new Vp9Mv(1, 2));

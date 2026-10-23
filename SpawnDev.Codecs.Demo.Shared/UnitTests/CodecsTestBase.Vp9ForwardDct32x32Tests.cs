@@ -13,6 +13,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ForwardDct32x32_AllZeroInput_ProducesAllZeroOutput()
     {
+        CpuOnlyTest();
         var input = new short[1024];
         var output = new int[1024];
         Vp9ForwardDct32x32.Transform(input, 32, output);
@@ -22,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ForwardDct32x32_ConstantInput_PutsEnergyInDcOnly()
     {
+        CpuOnlyTest();
         var input = new short[1024];
         for (int i = 0; i < 1024; i++) input[i] = 8;
         var output = new int[1024];
@@ -34,6 +36,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ForwardDct32x32_Determinism()
     {
+        CpuOnlyTest();
         var rng = new Random(0xF000);
         var input = new short[1024];
         for (int i = 0; i < 1024; i++) input[i] = (short)rng.Next(-128, 128);
@@ -47,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ForwardDct32x32_FwdInvRoundTrip_OnSmoothResidual_LowError()
     {
+        CpuOnlyTest();
         // Smooth gradient residual avoids overflow in the int -> short cast.
         // Per libvpx FwdInvLargeOpt tolerance: ~1 absolute error per pixel
         // is acceptable for the 32x32 DCT pair (half_round_shift between
@@ -81,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ForwardDct32x32_Throws_OnShortInput()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9ForwardDct32x32.Transform(new short[256], 32, new int[1024]); }
         catch (ArgumentException) { threw = true; }
@@ -90,6 +95,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ForwardDct32x32_Throws_OnShortOutput()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9ForwardDct32x32.Transform(new short[1024], 32, new int[512]); }
         catch (ArgumentException) { threw = true; }

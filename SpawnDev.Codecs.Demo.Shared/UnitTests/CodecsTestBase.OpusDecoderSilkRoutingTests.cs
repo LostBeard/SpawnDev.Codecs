@@ -79,6 +79,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_NbInactive20Ms_SingleFrame_DecodesViaSilkRouting()
     {
+        CpuOnlyTest();
         // Config 1: NB SILK 20 ms, mono. Single Opus frame (frame-count-code 0).
         var indices = new SilkDecodedIndices
         {
@@ -113,6 +114,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_WbUnvoiced20Ms_SingleFrame_DecodesViaSilkRouting()
     {
+        CpuOnlyTest();
         var indices = new SilkDecodedIndices
         {
             SignalType = SilkSideInfoDecoder.TypeUnvoiced,
@@ -145,6 +147,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_SilkAt16kHzOutput_NoResamplingPath()
     {
+        CpuOnlyTest();
         // Output rate equal to internal SILK rate -> no resampler instantiated.
         var indices = new SilkDecodedIndices
         {

@@ -28,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DefaultCoefProbs8x8_HasCorrectShapeAndPadding()
     {
+        CpuOnlyTest();
         AssertProbTableShape(Vp9CoefProbs.DefaultCoefProbs8x8, "DefaultCoefProbs8x8");
         // First triple from libvpx 8x8 Y/Intra/Band 0 ctx 0: { 125, 34, 187 }.
         Equal((byte)125, Vp9CoefProbs.DefaultCoefProbs8x8[Vp9CoefProbs.Index4x4(0, 0, 0, 0, 0)]);
@@ -38,6 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DefaultCoefProbs16x16_HasCorrectShapeAndPadding()
     {
+        CpuOnlyTest();
         AssertProbTableShape(Vp9CoefProbs.DefaultCoefProbs16x16, "DefaultCoefProbs16x16");
         // First triple from libvpx 16x16 Y/Intra/Band 0 ctx 0:
         // libvpx default_coef_probs_16x16[0][0][0][0] = { 7, 27, 153 }
@@ -50,6 +52,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DefaultCoefProbs32x32_HasCorrectShapeAndPadding()
     {
+        CpuOnlyTest();
         AssertProbTableShape(Vp9CoefProbs.DefaultCoefProbs32x32, "DefaultCoefProbs32x32");
         // First triple from libvpx 32x32 Y/Intra/Band 0 ctx 0:
         // libvpx default_coef_probs_32x32[0][0][0][0] = { 17, 38, 140 }
@@ -62,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DefaultCoefProbs_DispatcherReturnsCorrectArray()
     {
+        CpuOnlyTest();
         True(ReferenceEquals(Vp9CoefProbs.DefaultCoefProbs4x4,   Vp9CoefProbs.DefaultCoefProbsFor(Vp9TxSize.Tx4x4)));
         True(ReferenceEquals(Vp9CoefProbs.DefaultCoefProbs8x8,   Vp9CoefProbs.DefaultCoefProbsFor(Vp9TxSize.Tx8x8)));
         True(ReferenceEquals(Vp9CoefProbs.DefaultCoefProbs16x16, Vp9CoefProbs.DefaultCoefProbsFor(Vp9TxSize.Tx16x16)));
@@ -71,6 +75,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DefaultCoefProbs_AllNonPadEntries_AreInValidRange()
     {
+        CpuOnlyTest();
         // VP9 probabilities live in [1, 255]; 0 is reserved for "dead
         // prob tree" (libvpx MIN_PROB = 1). Verify across all four prob
         // tables that every NON-PADDING entry satisfies the invariant.

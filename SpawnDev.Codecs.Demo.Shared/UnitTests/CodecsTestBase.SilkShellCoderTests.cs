@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ShellCoder_ZeroPulses_AllZeros()
     {
+        CpuOnlyTest();
         short[] zeros = new short[SilkConstants.SHELL_CODEC_FRAME_LENGTH];
 
         var enc = new OpusRangeEncoder(64);
@@ -36,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ShellCoder_SinglePulseAtEachPosition_RoundTrip()
     {
+        CpuOnlyTest();
         // For each of the 16 positions, put a single pulse there and verify it round-trips.
         for (int pos = 0; pos < SilkConstants.SHELL_CODEC_FRAME_LENGTH; pos++)
         {
@@ -62,6 +64,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ShellCoder_EvenlyDistributedPulses_AllTotals_RoundTrip()
     {
+        CpuOnlyTest();
         // For each total in [0, 16], distribute as evenly as possible across 16 slots.
         for (int total = 0; total <= SilkConstants.SILK_MAX_PULSES; total++)
         {
@@ -93,6 +96,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ShellCoder_RandomizedDistributions_RoundTrip()
     {
+        CpuOnlyTest();
         var rng = new Random(0x0EADBEEF);
         for (int trial = 0; trial < 200; trial++)
         {
@@ -132,6 +136,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ShellCoder_Decode_NullRangeDecoder_Throws()
     {
+        CpuOnlyTest();
         short[] pulses = new short[SilkConstants.SHELL_CODEC_FRAME_LENGTH];
         Throws<ArgumentNullException>(() => SilkShellCoder.Decode(pulses, null!, 4));
     }
@@ -139,6 +144,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ShellCoder_Decode_PulsesSpanTooSmall_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(32);
         enc.Done();
         var dec = new OpusRangeDecoder(enc.ToArray());
@@ -149,6 +155,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ShellCoder_Encode_PulseSumMismatch_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(64);
         short[] pulses = new short[SilkConstants.SHELL_CODEC_FRAME_LENGTH];
         pulses[0] = 2;
@@ -160,6 +167,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ShellCoder_Offsets_HasExpectedShape()
     {
+        CpuOnlyTest();
         Equal(SilkConstants.SILK_MAX_PULSES + 1, SilkShellCodeTables.Offsets.Length);
         Equal((byte)0, SilkShellCodeTables.Offsets[0]);
         Equal((byte)0, SilkShellCodeTables.Offsets[1]);
@@ -169,6 +177,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ShellCoder_Tables_AllOneFiftyTwoBytes()
     {
+        CpuOnlyTest();
         Equal(152, SilkShellCodeTables.Table0.Length);
         Equal(152, SilkShellCodeTables.Table1.Length);
         Equal(152, SilkShellCodeTables.Table2.Length);

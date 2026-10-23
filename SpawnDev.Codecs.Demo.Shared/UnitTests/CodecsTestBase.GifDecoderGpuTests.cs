@@ -148,6 +148,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GifDecoderGpu_SomeFixturesDifferBetweenThePillowAndWebTruths()
     {
+        CpuOnlyTest();
         // If the two modes agreed everywhere, the two tests above would not prove that Compositing does anything.
         var differing = new List<string>();
         foreach (var name in GifValidFixtureNames())

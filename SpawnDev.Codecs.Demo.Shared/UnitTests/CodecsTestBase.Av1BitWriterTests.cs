@@ -13,6 +13,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1BitWriter_EmptyAfterTrailingBits_IsOneByte()
     {
+        CpuOnlyTest();
         var bw = new Av1BitWriter();
         bw.WriteTrailingBits();
         var bytes = bw.ToArray();
@@ -23,6 +24,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1BitWriter_SingleByteThroughTrailing_PreservesBits()
     {
+        CpuOnlyTest();
         var bw = new Av1BitWriter();
         bw.WriteBits(0xA5, 8); // 10100101
         bw.WriteTrailingBits();
@@ -35,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1BitWriter_MixedFlags_ReadBackInOrder()
     {
+        CpuOnlyTest();
         var bw = new Av1BitWriter();
         bw.WriteFlag(true);
         bw.WriteFlag(false);
@@ -57,6 +60,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1BitWriter_LargeMultiByteField_ReadBack()
     {
+        CpuOnlyTest();
         var bw = new Av1BitWriter();
         // 24-bit value: 0xABCDEF.
         bw.WriteBits(0xABCDEF, 24);
@@ -74,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1BitWriter_RejectsValueOutOfRange()
     {
+        CpuOnlyTest();
         var bw = new Av1BitWriter();
         // 5 fits in 3 bits but 8 does not.
         Throws<ArgumentException>(() => bw.WriteBits(8, 3));
@@ -86,6 +91,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1BitWriter_ZeroBitsIsNoop()
     {
+        CpuOnlyTest();
         var bw = new Av1BitWriter();
         bw.WriteFlag(true);
         bw.WriteBits(0, 0);
@@ -100,6 +106,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1BitWriter_PositionTracksBitsWritten()
     {
+        CpuOnlyTest();
         var bw = new Av1BitWriter();
         Equal(0, bw.BitPosition);
         bw.WriteFlag(true);
@@ -113,6 +120,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1BitWriter_ToArrayWithoutTrailing_Throws()
     {
+        CpuOnlyTest();
         var bw = new Av1BitWriter();
         bw.WriteFlag(true);
         // Position is 1, not byte-aligned. ToArray must reject.

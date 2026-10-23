@@ -32,6 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IvfRemuxer_BbbAsIvf_RemuxIsByteIdentical()
     {
+        CpuOnlyTest();
         var bbbIvf = BuildBbbVp9Ivf();
         var remuxed = Vp9IvfRemuxer.RemuxToBytes(bbbIvf);
         Equal(bbbIvf.Length, remuxed.Length);
@@ -46,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IvfRemuxer_BbbAsIvf_HeaderPreserved()
     {
+        CpuOnlyTest();
         var bbbIvf = BuildBbbVp9Ivf();
         var remuxed = Vp9IvfRemuxer.RemuxToBytes(bbbIvf);
 

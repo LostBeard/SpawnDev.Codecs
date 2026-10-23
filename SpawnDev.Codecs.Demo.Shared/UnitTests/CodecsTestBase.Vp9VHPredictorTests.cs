@@ -12,6 +12,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9VHPredictor_VPredict_4x4_CopiesAboveToEveryRow()
     {
+        CpuOnlyTest();
         // above = [10, 20, 30, 40]; output is 4 copies of that row.
         var above = new byte[] { 10, 20, 30, 40 };
         var dst = new byte[16];
@@ -28,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9VHPredictor_VPredict_8x8_AllSamplesAtFullRange()
     {
+        CpuOnlyTest();
         var above = new byte[] { 0, 50, 100, 150, 200, 250, 255, 128 };
         var dst = new byte[64];
         Vp9VHPredictor.VPredict(above, dst, n: 8, stride: 8);
@@ -39,6 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9VHPredictor_HPredict_4x4_ReplicatesLeftColumnAcrossRow()
     {
+        CpuOnlyTest();
         // left = [11, 22, 33, 44]; output is each row filled with left[row].
         var left = new byte[] { 11, 22, 33, 44 };
         var dst = new byte[16];
@@ -51,6 +54,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9VHPredictor_HPredict_16x16_FlatLeftAtBoundaryValues()
     {
+        CpuOnlyTest();
         var left = new byte[16];
         for (int i = 0; i < 16; i++) left[i] = (byte)(i * 17); // 0, 17, 34, ..., 255
         var dst = new byte[256];
@@ -63,6 +67,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9VHPredictor_VPredict_32x32_StridedDest_OnlyTouchesBlock()
     {
+        CpuOnlyTest();
         var above = new byte[32];
         for (int i = 0; i < 32; i++) above[i] = (byte)i;
         const int stride = 64;
@@ -82,6 +87,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9VHPredictor_HPredict_8x8_WithLargeStride_DoesNotOverwriteOutOfBlock()
     {
+        CpuOnlyTest();
         var left = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 };
         const int stride = 16;
         var canvas = new byte[stride * 8];
@@ -100,6 +106,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9VHPredictor_RejectsInvalidSize()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9VHPredictor.VPredict(new byte[5], new byte[25], n: 5, stride: 5));
         Throws<ArgumentOutOfRangeException>(() =>
@@ -109,6 +116,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9VHPredictor_RejectsTooSmallEdgeSpans()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() =>
             Vp9VHPredictor.VPredict(new byte[3], new byte[16], n: 4, stride: 4));
         Throws<ArgumentException>(() =>

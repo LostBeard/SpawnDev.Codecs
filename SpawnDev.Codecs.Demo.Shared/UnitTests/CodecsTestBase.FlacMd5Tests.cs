@@ -26,6 +26,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMd5_EmptyString_MatchesRfc1321()
     {
+        CpuOnlyTest();
         // MD5("") = d41d8cd98f00b204e9800998ecf8427e
         Equal("d41d8cd98f00b204e9800998ecf8427e", Hex(Md5OfString("")));
     }
@@ -33,6 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMd5_LetterA_MatchesRfc1321()
     {
+        CpuOnlyTest();
         // MD5("a") = 0cc175b9c0f1b6a831c399e269772661
         Equal("0cc175b9c0f1b6a831c399e269772661", Hex(Md5OfString("a")));
     }
@@ -40,6 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMd5_Abc_MatchesRfc1321()
     {
+        CpuOnlyTest();
         // MD5("abc") = 900150983cd24fb0d6963f7d28e17f72
         Equal("900150983cd24fb0d6963f7d28e17f72", Hex(Md5OfString("abc")));
     }
@@ -47,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMd5_MessageDigest_MatchesRfc1321()
     {
+        CpuOnlyTest();
         // MD5("message digest") = f96b697d7cb7938d525a2f31aaf161d0
         Equal("f96b697d7cb7938d525a2f31aaf161d0", Hex(Md5OfString("message digest")));
     }
@@ -54,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMd5_Alphabet_MatchesRfc1321()
     {
+        CpuOnlyTest();
         // MD5("abcdefghijklmnopqrstuvwxyz") = c3fcd3d76192e4007dfb496cca67e13b
         Equal("c3fcd3d76192e4007dfb496cca67e13b", Hex(Md5OfString("abcdefghijklmnopqrstuvwxyz")));
     }
@@ -61,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMd5_AlphaNum_MatchesRfc1321()
     {
+        CpuOnlyTest();
         // MD5 of the RFC 1321 "A...Za...z0...9" test string:
         //   d174ab98d277d9f5a5611c2c9f419d9f
         Equal("d174ab98d277d9f5a5611c2c9f419d9f",
@@ -70,6 +76,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMd5_EightyDigits_MatchesRfc1321()
     {
+        CpuOnlyTest();
         // MD5 of 80 '1' digits = "8 x 1234567890" = 57edf4a22be3c955ac49da2e2107b67a.
         Equal("57edf4a22be3c955ac49da2e2107b67a",
             Hex(Md5OfString(string.Concat(Enumerable.Repeat("1234567890", 8)))));
@@ -78,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMd5_16BitPcm_PacksAsLeTwosComplement()
     {
+        CpuOnlyTest();
         // Single sample -1 at 16 bits = 0xFFFF little-endian (bytes 0xFF 0xFF).
         // MD5(FF FF) verified against a reference implementation.
         var samples = new[] { -1 };
@@ -96,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMd5_DecoderVerifiesLosslessRoundtrip()
     {
+        CpuOnlyTest();
         // Encode, decode, verify MD5 - the whole integrity pipeline end-to-end.
         var input = GenerateSineInt(samplesPerChannel: 1024, channels: 2, sampleRateHz: 44100, bps: 16);
         byte[] encoded = FlacEncoder.EncodeStream(input, 44100, 2, 16, blockSize: 1024);
@@ -106,6 +115,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMd5_DecoderRejectsCorruptedStreamInfoMd5()
     {
+        CpuOnlyTest();
         // Tamper with the MD5 bytes in STREAMINFO - decode should succeed but VerifyMd5 should fail.
         var input = GenerateSineInt(samplesPerChannel: 128, channels: 1, sampleRateHz: 44100, bps: 16);
         byte[] encoded = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 128);
@@ -119,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMd5_AllZeroStoredMd5_VerifyReturnsTrue()
     {
+        CpuOnlyTest();
         // Synthetic stream with a zero MD5 in STREAMINFO must verify true (encoder declined to compute).
         var streamInfo = new FlacStreamInfo
         {

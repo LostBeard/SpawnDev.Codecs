@@ -14,6 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StereoMsToLr_ConstantMidZeroSide_ConvergesToMidOnBothChannels()
     {
+        CpuOnlyTest();
         // Input layout: x1[0..1] is state prefix (zero), x1[2..frameLength+1] is fresh mid data.
         // Libopus writes L output to x1[1..frameLength] and R output to x2[1..frameLength].
         // With constant mid = 1000 and zero side + zero predictors, after the low-pass filter
@@ -40,6 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StereoMsToLr_ZeroMidChannel_SideOnly_ProducesMirroredLR()
     {
+        CpuOnlyTest();
         // Zero mid + non-zero side: L = 0 + side ~= side, R = 0 - side = -side. L + R = 0.
         var state = new SilkStereoState();
         int fsKHz = 16;
@@ -65,6 +67,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StereoMsToLr_StateCarriesAcrossFrames()
     {
+        CpuOnlyTest();
         var state = new SilkStereoState();
         int fsKHz = 8;
         int frameLength = 160;
@@ -101,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StereoMsToLr_Reset_ClearsAllState()
     {
+        CpuOnlyTest();
         var state = new SilkStereoState();
         state.SMid[0] = 100;
         state.SSide[1] = -50;
@@ -119,6 +123,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StereoMsToLr_NullState_Throws()
     {
+        CpuOnlyTest();
         short[] x1 = new short[162];
         short[] x2 = new short[162];
         Throws<ArgumentNullException>(() =>
@@ -128,6 +133,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StereoMsToLr_UndersizedBuffers_Throw()
     {
+        CpuOnlyTest();
         var state = new SilkStereoState();
         short[] small = new short[100];
         short[] ok = new short[162];

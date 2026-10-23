@@ -23,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TxMode_EnumValuesMatchLibvpxOrdering()
     {
+        CpuOnlyTest();
         Equal((byte)0, (byte)Vp9TxMode.Only4x4);
         Equal((byte)1, (byte)Vp9TxMode.AllowOnly8x8);
         Equal((byte)2, (byte)Vp9TxMode.AllowOnly16x16);
@@ -33,6 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_ReadTxMode_LosslessForcesOnly4x4()
     {
+        CpuOnlyTest();
         // Lossless: no bits should be read; the literal reader is
         // never invoked. We pass a reader that throws if called to
         // assert this contract.
@@ -45,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_ReadTxMode_LiteralZeroProducesOnly4x4()
     {
+        CpuOnlyTest();
         // Non-lossless, ReadLiteral(2) = 0 -> tx_mode = Only4x4. No
         // extension bit read.
         var read = ScriptedLiteralReader(new uint[] { 0 });
@@ -55,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_ReadTxMode_LiteralOneProducesAllowOnly8x8()
     {
+        CpuOnlyTest();
         var read = ScriptedLiteralReader(new uint[] { 1 });
         var mode = Vp9CompressedHeader.ReadTxMode(read, isLossless: false);
         Equal(Vp9TxMode.AllowOnly8x8, mode);
@@ -63,6 +67,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_ReadTxMode_LiteralTwoProducesAllowOnly16x16()
     {
+        CpuOnlyTest();
         var read = ScriptedLiteralReader(new uint[] { 2 });
         var mode = Vp9CompressedHeader.ReadTxMode(read, isLossless: false);
         Equal(Vp9TxMode.AllowOnly16x16, mode);
@@ -71,6 +76,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_ReadTxMode_LiteralThreeWithExtensionZeroProducesAllow32x32()
     {
+        CpuOnlyTest();
         // ReadLiteral(2) = 3, then ReadLiteral(1) = 0 -> 3 + 0 = Allow32x32.
         var read = ScriptedLiteralReader(new uint[] { 3, 0 });
         var mode = Vp9CompressedHeader.ReadTxMode(read, isLossless: false);
@@ -80,6 +86,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_ReadTxMode_LiteralThreeWithExtensionOneProducesTxModeSelect()
     {
+        CpuOnlyTest();
         // ReadLiteral(2) = 3, then ReadLiteral(1) = 1 -> 3 + 1 = TxModeSelect.
         var read = ScriptedLiteralReader(new uint[] { 3, 1 });
         var mode = Vp9CompressedHeader.ReadTxMode(read, isLossless: false);
@@ -89,6 +96,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_ReadTxMode_BoolDecoderOverload_AllZeroBufferProducesOnly4x4()
     {
+        CpuOnlyTest();
         // End-to-end through the real Vp9BoolDecoder: an all-zero
         // buffer drives ReadLiteral(2) to return 0, so the result
         // must be Only4x4.

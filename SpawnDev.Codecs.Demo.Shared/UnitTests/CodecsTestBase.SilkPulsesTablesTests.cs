@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesTables_Constants_MatchLibopus()
     {
+        CpuOnlyTest();
         Equal(4, SilkConstants.LOG2_SHELL_CODEC_FRAME_LENGTH);
         Equal(16, SilkConstants.SHELL_CODEC_FRAME_LENGTH);
         Equal(20, SilkConstants.MAX_NB_SHELL_BLOCKS);
@@ -27,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesTables_RateLevels_HasTwoRowsOfNine()
     {
+        CpuOnlyTest();
         Equal(18, SilkIcdfTables.RateLevels.Length);
         Equal(9, SilkIcdfTables.RateLevelsEntriesPerType);
 
@@ -43,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesTables_RateLevels_OffsetMatchesSignalTypeShift()
     {
+        CpuOnlyTest();
         // signalType >> 1 picks the row: 0 or 1 for non-voiced (inactive/unvoiced), 1 for voiced.
         Equal(0, SilkIcdfTables.RateLevelsOffset(0)); // inactive
         Equal(0, SilkIcdfTables.RateLevelsOffset(1)); // unvoiced
@@ -52,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesTables_PulsesPerBlock_HasTenRowsOfEighteen()
     {
+        CpuOnlyTest();
         Equal(180, SilkIcdfTables.PulsesPerBlock.Length);
         Equal(18, SilkIcdfTables.PulsesPerBlockEntriesPerRow);
         Equal(SilkConstants.N_RATE_LEVELS,
@@ -73,6 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesTables_PulsesPerBlock_AllRowsEndInZero()
     {
+        CpuOnlyTest();
         // Each iCDF must terminate in 0 so the range coder can reach its final state.
         for (int row = 0; row < SilkConstants.N_RATE_LEVELS; row++)
         {
@@ -84,6 +89,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesTables_Sign_HasSixRowsOfSeven()
     {
+        CpuOnlyTest();
         Equal(42, SilkIcdfTables.Sign.Length);
         Equal(7, SilkIcdfTables.SignEntriesPerRow);
 
@@ -99,6 +105,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesTables_Sign_OffsetMatchesRowIndexFormula()
     {
+        CpuOnlyTest();
         // row_index = quantOffsetType + 2 * signalType
         // row 0: signalType=0, quantOffsetType=0
         // row 1: signalType=0, quantOffsetType=1
@@ -117,6 +124,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesTables_Lsb_IsTwoSymbolBinaryIcdf()
     {
+        CpuOnlyTest();
         Equal(2, SilkIcdfTables.Lsb.Length);
         Equal((byte)120, SilkIcdfTables.Lsb[0]);
         Equal((byte)0, SilkIcdfTables.Lsb[1]);

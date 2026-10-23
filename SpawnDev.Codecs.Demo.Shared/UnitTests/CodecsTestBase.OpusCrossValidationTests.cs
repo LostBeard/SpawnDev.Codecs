@@ -113,6 +113,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task CrossValidate_SilkNb_20ms_Mono()
     {
+        CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSineWave(440, 8000, 1, 160);
         await RunCrossValidation("SILK-NB-20ms-mono", pcm, 8000, 1, 160, OpusApplication.OPUS_APPLICATION_VOIP);
     }
@@ -120,6 +121,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task CrossValidate_SilkWb_20ms_Mono()
     {
+        CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSineWave(440, 16000, 1, 320);
         await RunCrossValidation("SILK-WB-20ms-mono", pcm, 16000, 1, 320, OpusApplication.OPUS_APPLICATION_VOIP);
     }
@@ -127,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task CrossValidate_SilkMb_20ms_Stereo()
     {
+        CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSineWave(440, 12000, 2, 240);
         await RunCrossValidation("SILK-MB-20ms-stereo", pcm, 12000, 2, 240, OpusApplication.OPUS_APPLICATION_VOIP);
     }
@@ -134,6 +137,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task CrossValidate_SilkNb_10ms_Mono()
     {
+        CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSineWave(440, 8000, 1, 80);
         await RunCrossValidation("SILK-NB-10ms-mono", pcm, 8000, 1, 80, OpusApplication.OPUS_APPLICATION_VOIP);
     }
@@ -141,6 +145,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task CrossValidate_Silk_Silence_Mono()
     {
+        CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSilence(1, 320);
         await RunCrossValidation("SILK-WB-20ms-silence-mono", pcm, 16000, 1, 320, OpusApplication.OPUS_APPLICATION_VOIP);
     }
@@ -150,6 +155,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task CrossValidate_HybridSwb_20ms_Mono()
     {
+        CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSineWave(440, 24000, 1, 480);
         await RunCrossValidation("Hybrid-SWB-20ms-mono", pcm, 24000, 1, 480, OpusApplication.OPUS_APPLICATION_VOIP);
     }
@@ -157,6 +163,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task CrossValidate_HybridFb_20ms_Stereo()
     {
+        CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSineWave(440, 48000, 2, 960);
         await RunCrossValidation("Hybrid-FB-20ms-stereo", pcm, 48000, 2, 960, OpusApplication.OPUS_APPLICATION_VOIP);
     }
@@ -166,6 +173,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task CrossValidate_CeltFb_2p5ms_Mono()
     {
+        CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSineWave(440, 48000, 1, 120);
         await RunCrossValidation("CELT-FB-2.5ms-mono", pcm, 48000, 1, 120, OpusApplication.OPUS_APPLICATION_RESTRICTED_LOWDELAY);
     }
@@ -173,6 +181,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task CrossValidate_CeltFb_5ms_Stereo()
     {
+        CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSineWave(440, 48000, 2, 240);
         await RunCrossValidation("CELT-FB-5ms-stereo", pcm, 48000, 2, 240, OpusApplication.OPUS_APPLICATION_RESTRICTED_LOWDELAY);
     }
@@ -180,6 +189,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task CrossValidate_CeltFb_10ms_Mono()
     {
+        CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSineWave(440, 48000, 1, 480);
         await RunCrossValidation("CELT-FB-10ms-mono", pcm, 48000, 1, 480, OpusApplication.OPUS_APPLICATION_RESTRICTED_LOWDELAY);
     }
@@ -187,6 +197,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task CrossValidate_CeltFb_20ms_Stereo()
     {
+        CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSineWave(440, 48000, 2, 960);
         await RunCrossValidation("CELT-FB-20ms-stereo", pcm, 48000, 2, 960, OpusApplication.OPUS_APPLICATION_RESTRICTED_LOWDELAY);
     }

@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisMath_Ilog_KnownValues()
     {
+        CpuOnlyTest();
         Equal(0, VorbisMath.Ilog(0));
         Equal(1, VorbisMath.Ilog(1));
         Equal(2, VorbisMath.Ilog(2));
@@ -30,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisMath_Lookup1Values_KnownGeometries()
     {
+        CpuOnlyTest();
         // lookup1_values(64, 2) = 8 because 8^2 = 64.
         Equal(8, VorbisMath.Lookup1Values(64, 2));
         // lookup1_values(27, 3) = 3 because 3^3 = 27.
@@ -43,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisMath_Float32Unpack_RoundNumbers()
     {
+        CpuOnlyTest();
         // 0 is trivially 0.
         Equal(0.0, VorbisMath.Float32Unpack(0));
         // mantissa=1, exponent=788 -> 1 * 2^0 = 1.0
@@ -94,6 +97,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisCodebook_Unordered_Dense_4Entries_2BitEach()
     {
+        CpuOnlyTest();
         // dimensions=1, entries=4, ordered=0, sparse=0, each length=2 (write 1),
         // lookup_type=0.
         var w = new VorbisTestWriter();
@@ -116,6 +120,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisCodebook_Sparse_SomeEntriesUnused()
     {
+        CpuOnlyTest();
         // dimensions=1, entries=3, ordered=0, sparse=1
         // entry 0: used, length 3 -> flag=1, length-1=2
         // entry 1: unused        -> flag=0
@@ -139,6 +144,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisCodebook_Ordered_MonotonicLengths()
     {
+        CpuOnlyTest();
         // dimensions=1, entries=5, ordered=1.
         // initial length = 2 (write 1), run lengths: 2 entries of length 2, 3 entries of length 3.
         // ilog(5 - 0) = 3 bits to encode "2" (first run count)
@@ -160,6 +166,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisCodebook_LookupType2_MultiplicandsParsed()
     {
+        CpuOnlyTest();
         // dimensions=2, entries=3, ordered=0, sparse=0, lengths=[1,2,2]
         // lookup_type=2 -> multiplicand count = 3*2 = 6
         // min_value and delta_value packed as zero floats.
@@ -190,6 +197,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisCodebook_BadSync_Throws()
     {
+        CpuOnlyTest();
         var w = new VorbisTestWriter();
         w.Write(0xABCDEF, 24);
         bool threw = false;
@@ -200,6 +208,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisCodebook_ReservedLookupType_Throws()
     {
+        CpuOnlyTest();
         var w = new VorbisTestWriter();
         w.Write(0x564342, 24);
         w.Write(1, 16);

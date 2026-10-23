@@ -40,6 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mp4Ftyp_IsomBrand_WithCompatibles_Parses()
     {
+        CpuOnlyTest();
         var bytes = BuildFtypBytes("isom", 512, "isom", "iso2", "avc1", "mp41");
         var boxes = Mp4BoxReader.ReadAll(bytes);
         Equal(1, boxes.Count);
@@ -56,6 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mp4Ftyp_Av01Brand_Parses()
     {
+        CpuOnlyTest();
         // av01 = AV1-in-MP4 per the AOMedia spec.
         var bytes = BuildFtypBytes("av01", 0, "av01", "iso6", "mp41");
         var boxes = Mp4BoxReader.ReadAll(bytes);
@@ -68,6 +70,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mp4Ftyp_NoCompatibleBrands_Parses()
     {
+        CpuOnlyTest();
         var bytes = BuildFtypBytes("mp42", 1);
         var boxes = Mp4BoxReader.ReadAll(bytes);
         var ftyp = Mp4FileTypeBoxParser.Parse(boxes[0], bytes);
@@ -79,6 +82,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mp4Ftyp_WrongBoxType_Throws()
     {
+        CpuOnlyTest();
         // Build a box whose type is not 'ftyp' and feed it to the parser.
         var moov = new byte[] { 0, 0, 0, 8, (byte)'m', (byte)'o', (byte)'o', (byte)'v' };
         var boxes = Mp4BoxReader.ReadAll(moov);
@@ -91,6 +95,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mp4Ftyp_TooSmall_Throws()
     {
+        CpuOnlyTest();
         // ftyp box of 12 bytes (header + 4 bytes) - not enough for major + minor.
         var bytes = new byte[12];
         bytes[0] = 0; bytes[1] = 0; bytes[2] = 0; bytes[3] = 12;

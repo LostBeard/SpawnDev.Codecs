@@ -55,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacDecoder_Mono_SingleConstantFrame_DecodesToInterleavedPcm()
     {
+        CpuOnlyTest();
         // Build one mono CONSTANT frame (value 1234, 4 samples).
         var w = new FlacBitWriter();
         WriteSubframeHeader(w, FlacSubframeKind.Constant, 0, 0);
@@ -77,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacDecoder_Mono_MultipleFrames_ConcatenatesPcm()
     {
+        CpuOnlyTest();
         // Frame 1: CONSTANT value 100, 4 samples.
         // Frame 2: CONSTANT value -200, 4 samples.
         var w1 = new FlacBitWriter();
@@ -109,6 +111,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacDecoder_Stereo_MidSide_InterleavesLr()
     {
+        CpuOnlyTest();
         int[] L = { 5, 5, -10, 100 };
         int[] R = { 3, 2, -6, 100 };
         int[] mid = new int[4];
@@ -143,6 +146,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacDecoder_FrameByFrame_ReadsExactlyOnce()
     {
+        CpuOnlyTest();
         var w = new FlacBitWriter();
         WriteSubframeHeader(w, FlacSubframeKind.Constant, 0, 0);
         WriteSigned(w, 42, 16);
@@ -165,6 +169,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacDecoder_MetadataOnly_NoFrames_ReturnsEmpty()
     {
+        CpuOnlyTest();
         var stream = BuildFlacStreamWithMetadata(
             sampleRate: 44100, channels: 1, bps: 16, minBlock: 4, maxBlock: 4,
             frameBytes: Array.Empty<byte>());
@@ -176,6 +181,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacDecoder_BadMarker_Throws()
     {
+        CpuOnlyTest();
         byte[] bad = new byte[] { (byte)'X', (byte)'Y', (byte)'Z', (byte)'!' };
         bool threw = false;
         try { _ = FlacDecoder.Decode(bad); }

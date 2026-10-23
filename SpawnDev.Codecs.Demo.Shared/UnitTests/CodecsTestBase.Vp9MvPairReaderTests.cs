@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvPairReader_JointHasVertical_HzvnzAndHnzvnzOnly()
     {
+        CpuOnlyTest();
         Equal(false, Vp9MvPairReader.JointHasVertical(Vp9MvJointType.Zero));
         Equal(false, Vp9MvPairReader.JointHasVertical(Vp9MvJointType.Hnzvz));
         Equal(true, Vp9MvPairReader.JointHasVertical(Vp9MvJointType.Hzvnz));
@@ -20,6 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvPairReader_JointHasHorizontal_HnzvzAndHnzvnzOnly()
     {
+        CpuOnlyTest();
         Equal(false, Vp9MvPairReader.JointHasHorizontal(Vp9MvJointType.Zero));
         Equal(true, Vp9MvPairReader.JointHasHorizontal(Vp9MvJointType.Hnzvz));
         Equal(false, Vp9MvPairReader.JointHasHorizontal(Vp9MvJointType.Hzvnz));
@@ -29,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvPairReader_ZeroJoint_ReturnsZeroPair()
     {
+        CpuOnlyTest();
         // Joint tree: bit 0 = 0 -> Zero leaf. No component reads needed.
         var probs = NewMvProbsForPair();
         var (v, h) = Vp9MvPairReader.ReadDiff(p => 0, probs, useHp: false);
@@ -39,6 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvPairReader_HnzvzJoint_ReadsOnlyHorizontal()
     {
+        CpuOnlyTest();
         // 1, 0 -> Hnzvz (horizontal only).
         // Then horizontal component reads sign + class tree (zeros to Class0)
         // + d=0 + fp tree zeros + hp implicit 1 -> mag = 2.
@@ -56,6 +60,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvPairReader_HzvnzJoint_ReadsOnlyVertical()
     {
+        CpuOnlyTest();
         // 1, 1, 0 -> Hzvnz (vertical only).
         var probs = NewMvProbsForPair();
         int callIdx = 0;
@@ -72,6 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvPairReader_HnzvnzJoint_ReadsBothInOrder()
     {
+        CpuOnlyTest();
         // 1, 1, 1 -> Hnzvnz.
         // Then vertical component (Class0 with d=0, fp=Fp0, no HP) -> 2.
         // Then horizontal component (same path) -> 2.
@@ -89,6 +95,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvPairReader_RejectsNullReader()
     {
+        CpuOnlyTest();
         var probs = NewMvProbsForPair();
         Throws<ArgumentNullException>(() =>
             Vp9MvPairReader.ReadDiff((Vp9BoolDecoder)null!, probs, false));
@@ -97,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvPairReader_RejectsNullProbs()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() =>
             Vp9MvPairReader.ReadDiff(p => 0, null!, false));
     }

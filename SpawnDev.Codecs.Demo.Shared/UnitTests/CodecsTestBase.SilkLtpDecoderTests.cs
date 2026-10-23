@@ -34,6 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LtpDecoder_CodebookZero_AllGainIndices_RoundTrip()
     {
+        CpuOnlyTest();
         // Codebook 0 has 8 symbols. Exercise every index across 4 subframes.
         for (int gainIdx = 0; gainIdx < 8; gainIdx++)
         {
@@ -57,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LtpDecoder_CodebookOne_MixedIndices_RoundTrip()
     {
+        CpuOnlyTest();
         // Codebook 1 has 16 symbols. Mix of values per subframe.
         sbyte[] ltp = { 3, 10, 14, 7 };
         var enc = new OpusRangeEncoder(64);
@@ -77,6 +79,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LtpDecoder_CodebookTwo_FullRange_RoundTrip()
     {
+        CpuOnlyTest();
         // Codebook 2 has 32 symbols. Test the extremes and midpoints.
         sbyte[] ltp = { 0, 31, 15, 16 };
         var enc = new OpusRangeEncoder(64);
@@ -97,6 +100,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LtpDecoder_ConditionalCoding_ScaleIndexForcedToZero()
     {
+        CpuOnlyTest();
         // conditional != 0 -> LTP scale index is NOT read from the bitstream and should be 0.
         sbyte[] ltp = { 5, 3, 7, 1 };
         var enc = new OpusRangeEncoder(64);
@@ -117,6 +121,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LtpDecoder_TwoSubframes_RoundTrip()
     {
+        CpuOnlyTest();
         sbyte[] ltp = { 6, 2 };
         var enc = new OpusRangeEncoder(64);
         EncodeLtpIndices(enc, perIdx: 0, ltp, conditional: 0, ltpScaleIdx: 2);
@@ -137,6 +142,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LtpDecoder_AllThreePerIndices_ThenScale_SequentialStream()
     {
+        CpuOnlyTest();
         // Ensure the decoder reads the right iCDF for each per index and advances the
         // bitstream position correctly to read the scale at the end.
         for (int perIdx = 0; perIdx < 3; perIdx++)
@@ -164,6 +170,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LtpDecoder_NullRangeDecoder_Throws()
     {
+        CpuOnlyTest();
         sbyte[] ltp = new sbyte[4];
         Throws<ArgumentNullException>(() =>
             SilkLtpDecoder.DecodeIndices(ltp, null!, 0, 4, out _, out _));
@@ -172,6 +179,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LtpDecoder_InvalidNbSubfr_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(32);
         enc.Done();
         var dec = new OpusRangeDecoder(enc.ToArray());
@@ -183,6 +191,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LtpGainSelector_InvalidIndex_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() => SilkIcdfTables.SelectLtpGain(3));
         Throws<ArgumentOutOfRangeException>(() => SilkIcdfTables.SelectLtpGain(-1));
     }
@@ -190,6 +199,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LtpGainSelector_ReturnsReferenceEquality()
     {
+        CpuOnlyTest();
         if (!ReferenceEquals(SilkIcdfTables.LtpGain0, SilkIcdfTables.SelectLtpGain(0)))
             throw new Exception("SelectLtpGain(0) should return LtpGain0 ref");
         if (!ReferenceEquals(SilkIcdfTables.LtpGain1, SilkIcdfTables.SelectLtpGain(1)))

@@ -12,6 +12,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8IntraPredictor16x16_DcPred_NoNeighbors_Returns128()
     {
+        CpuOnlyTest();
         // No above + no left -> DC = 128 fill.
         Span<byte> above = stackalloc byte[16];
         Span<byte> left = stackalloc byte[16];
@@ -29,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8IntraPredictor16x16_DcPred_AllOnesNeighbors_ReturnsOne()
     {
+        CpuOnlyTest();
         Span<byte> above = stackalloc byte[16];
         Span<byte> left = stackalloc byte[16];
         for (int i = 0; i < 16; i++) { above[i] = 1; left[i] = 1; }
@@ -47,6 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8IntraPredictor16x16_DcPred_OnlyAbove_AveragesAboveOnly()
     {
+        CpuOnlyTest();
         Span<byte> above = stackalloc byte[16];
         Span<byte> left = stackalloc byte[16];
         for (int i = 0; i < 16; i++) above[i] = 32;
@@ -65,6 +68,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8IntraPredictor16x16_VPred_CopiesAboveRowDown()
     {
+        CpuOnlyTest();
         Span<byte> above = stackalloc byte[16];
         Span<byte> left = stackalloc byte[16];
         for (int i = 0; i < 16; i++) above[i] = (byte)(10 + i);
@@ -81,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8IntraPredictor16x16_HPred_CopiesLeftColumnRight()
     {
+        CpuOnlyTest();
         Span<byte> above = stackalloc byte[16];
         Span<byte> left = stackalloc byte[16];
         for (int i = 0; i < 16; i++) left[i] = (byte)(50 + i);
@@ -97,6 +102,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8IntraPredictor16x16_TmPred_KnownInput_KnownOutput()
     {
+        CpuOnlyTest();
         // TM: pixel[r][c] = above[c] + left[r] - top_left, clamped.
         Span<byte> above = stackalloc byte[16];
         Span<byte> left = stackalloc byte[16];
@@ -115,6 +121,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8IntraPredictor16x16_TmPred_ClampsAt255()
     {
+        CpuOnlyTest();
         Span<byte> above = stackalloc byte[16];
         Span<byte> left = stackalloc byte[16];
         for (int i = 0; i < 16; i++) { above[i] = 255; left[i] = 255; }
@@ -132,6 +139,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8IntraPredictor16x16_TmPred_ClampsAtZero()
     {
+        CpuOnlyTest();
         Span<byte> above = stackalloc byte[16];
         Span<byte> left = stackalloc byte[16];
         // above all 0, left all 0, topLeft 200 -> 0 + 0 - 200 = -200, clamp to 0

@@ -37,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeCore_Unvoiced_ZeroPulses_ProducesValidPcmRange()
     {
+        CpuOnlyTest();
         var state = NewNbState();
         var parameters = NewNbParameters(gainQ16: 65536); // 1.0 Q16
         short[] pulses = new short[state.FrameLength]; // all zero
@@ -60,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeCore_Unvoiced_StateIsUpdatedAfterDecode()
     {
+        CpuOnlyTest();
         var state = NewNbState();
         var parameters = NewNbParameters(gainQ16: 100000);
         short[] pulses = new short[state.FrameLength];
@@ -84,6 +86,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeCore_Unvoiced_TwoBackToBackFrames_NoCrash()
     {
+        CpuOnlyTest();
         var state = NewNbState();
         var parameters = NewNbParameters(gainQ16: 65536);
         short[] pulses = new short[state.FrameLength];
@@ -109,6 +112,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeCore_Inactive_NoLtp_ProducesValidOutput()
     {
+        CpuOnlyTest();
         // Inactive (signalType=0) should behave identically to unvoiced w.r.t. synthesis
         // (no LTP), just using different offset values.
         var state = NewNbState();
@@ -132,6 +136,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeCore_Voiced_FirstFrameFromReset_NoCrash()
     {
+        CpuOnlyTest();
         // First-frame voiced: previous output buffer is zero (fresh reset), so
         // rewhitening produces zero LTP state. Still a valid (silent-ish) decode path.
         var state = NewNbState();
@@ -168,6 +173,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeCore_Voiced_WithNlsfInterpolation_NoCrash()
     {
+        CpuOnlyTest();
         // Voiced + NLSF interpolation enabled exercises the k==2 rewhiten branch.
         var state = NewNbState();
         var parameters = NewNbParameters(gainQ16: 65536);
@@ -199,6 +205,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeCore_NullState_Throws()
     {
+        CpuOnlyTest();
         var parameters = NewNbParameters(65536);
         short[] pulses = new short[160];
         short[] xq = new short[160];
@@ -209,6 +216,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeCore_NullParameters_Throws()
     {
+        CpuOnlyTest();
         var state = NewNbState();
         short[] pulses = new short[160];
         short[] xq = new short[160];
@@ -219,6 +227,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeCore_UnconfiguredState_Throws()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState(); // NO Configure() call
         var parameters = NewNbParameters(65536);
         short[] pulses = new short[160];
@@ -230,6 +239,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeCore_ZeroPrevGain_Throws()
     {
+        CpuOnlyTest();
         var state = NewNbState();
         state.PrevGainQ16 = 0; // manually nuked
         var parameters = NewNbParameters(65536);
@@ -245,6 +255,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeCore_OutputTooSmall_Throws()
     {
+        CpuOnlyTest();
         var state = NewNbState();
         var parameters = NewNbParameters(65536);
         short[] pulses = new short[state.FrameLength];

@@ -21,6 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IntraPredictor_V_CopiesAboveIntoEveryRow()
     {
+        CpuOnlyTest();
         var (dst, above, left) = MakeBlock(8, 8);
         for (int i = 0; i < 8; i++) above[i] = (byte)(50 + i * 10);
         Av1IntraPredictor.Vertical(dst, 8, 8, 8, above, left);
@@ -36,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IntraPredictor_H_ReplicatesLeftPerRow()
     {
+        CpuOnlyTest();
         var (dst, above, left) = MakeBlock(8, 8);
         for (int i = 0; i < 8; i++) left[i] = (byte)(40 + i * 5);
         Av1IntraPredictor.Horizontal(dst, 8, 8, 8, above, left);
@@ -51,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IntraPredictor_Dc_AveragesAllAvailableEdges()
     {
+        CpuOnlyTest();
         var (dst, above, left) = MakeBlock(4, 4);
         // 4 above pixels: 100, 200, 100, 200 -> sum 600
         // 4 left pixels: 50, 50, 100, 100 -> sum 300
@@ -64,6 +67,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IntraPredictor_DcLeft_AveragesLeftOnly()
     {
+        CpuOnlyTest();
         var (dst, above, left) = MakeBlock(4, 4);
         // sum = 50+100+150+200 = 500, dc = (500+2)/4 = 125
         left[0] = 50; left[1] = 100; left[2] = 150; left[3] = 200;
@@ -74,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IntraPredictor_DcTop_AveragesAboveOnly()
     {
+        CpuOnlyTest();
         var (dst, above, left) = MakeBlock(4, 4);
         above[0] = 80; above[1] = 80; above[2] = 80; above[3] = 80;
         Av1IntraPredictor.DcTop(dst, 4, 4, 4, above, left);
@@ -83,6 +88,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IntraPredictor_Dc128_FillsWithMidGray()
     {
+        CpuOnlyTest();
         var (dst, above, left) = MakeBlock(8, 8);
         Av1IntraPredictor.Dc128(dst, 8, 8, 8, above, left);
         for (int i = 0; i < 64; i++) Equal(128, dst[i]);
@@ -91,6 +97,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IntraPredictor_Paeth_OnFlatEdges_ProducesFlatBlock()
     {
+        CpuOnlyTest();
         var (dst, above, left) = MakeBlock(4, 4);
         for (int i = 0; i < 4; i++) above[i] = 100;
         for (int i = 0; i < 4; i++) left[i] = 100;
@@ -102,6 +109,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IntraPredictor_Paeth_PicksClosestToBase()
     {
+        CpuOnlyTest();
         // top=255, left=0, topLeft=128: base = 255 + 0 - 128 = 127
         // pLeft = |127 - 0| = 127
         // pTop = |127 - 255| = 128
@@ -118,6 +126,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IntraPredictor_Smooth_BlendsTowardCorners()
     {
+        CpuOnlyTest();
         var (dst, above, left) = MakeBlock(4, 4);
         // Edges all 100 -> smooth blend should be ~100
         for (int i = 0; i < 4; i++) { above[i] = 100; left[i] = 100; }
@@ -128,6 +137,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IntraPredictor_SmoothV_BlendsTopWithBottomLeft()
     {
+        CpuOnlyTest();
         var (dst, above, left) = MakeBlock(4, 4);
         for (int i = 0; i < 4; i++) above[i] = 200;
         for (int i = 0; i < 4; i++) left[i] = 100;
@@ -144,6 +154,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1IntraPredictor_SmoothH_BlendsLeftWithTopRight()
     {
+        CpuOnlyTest();
         var (dst, above, left) = MakeBlock(4, 4);
         for (int i = 0; i < 4; i++) above[i] = 200;
         for (int i = 0; i < 4; i++) left[i] = 100;

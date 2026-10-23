@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterFrameProbs_DefaultInterModeProbs_HasCorrectShape()
     {
+        CpuOnlyTest();
         Equal(21, Vp9InterFrameProbs.DefaultInterModeProbs.Length); // 7 * 3
         Equal(7, Vp9InterFrameProbs.InterModeContexts);
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterFrameProbs_DefaultInterModeProbs_FirstAndLastContextsMatchLibvpx()
     {
+        CpuOnlyTest();
         var t = Vp9InterFrameProbs.DefaultInterModeProbs;
         // ctx 0: { 2, 173, 34 }
         Equal((byte)2,   t[0]);
@@ -32,6 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterFrameProbs_DefaultSkipProbs_MatchesLibvpx()
     {
+        CpuOnlyTest();
         Equal(3, Vp9InterFrameProbs.DefaultSkipProbs.Length);
         Equal((byte)192, Vp9InterFrameProbs.DefaultSkipProbs[0]);
         Equal((byte)128, Vp9InterFrameProbs.DefaultSkipProbs[1]);
@@ -41,6 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterFrameProbs_DefaultIntraInterProb_MatchesLibvpx()
     {
+        CpuOnlyTest();
         Equal(4, Vp9InterFrameProbs.DefaultIntraInterProb.Length);
         Equal((byte)9,   Vp9InterFrameProbs.DefaultIntraInterProb[0]);
         Equal((byte)102, Vp9InterFrameProbs.DefaultIntraInterProb[1]);
@@ -51,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterFrameProbs_InterModeProbsHelper_ReturnsExpectedSlices()
     {
+        CpuOnlyTest();
         // Each context returns a 3-byte slice; spot-check at ctx 3
         // ({ 7, 94, 66 }) and ctx 4 ({ 8, 64, 46 }).
         var c3 = Vp9InterFrameProbs.InterModeProbs(3);
@@ -68,6 +73,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterFrameProbs_InterModeProbsHelper_RejectsOutOfRange()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9InterFrameProbs.InterModeProbs(7));
         Throws<ArgumentOutOfRangeException>(() =>
@@ -77,6 +83,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterFrameProbs_DriveInterModeProbsIntoTree_DecodesZeroMvOnFirstZeroBit()
     {
+        CpuOnlyTest();
         // End-to-end: pull a real probability slice and decode through
         // slice 158's Vp9InterModeTree.Decode. First bit = 0 -> ZeroMv.
         var probs = Vp9InterFrameProbs.InterModeProbs(0);

@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameScale_Identity_HasNoScaleAndStep16()
     {
+        CpuOnlyTest();
         var s = Vp9FrameScale.Identity;
         Equal(Vp9ScaleFactors.RefNoScale, s.XScale);
         Equal(Vp9ScaleFactors.RefNoScale, s.YScale);
@@ -22,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameScale_Compute_SameDimensions_IsIdentity()
     {
+        CpuOnlyTest();
         var s = Vp9FrameScale.Compute(1280, 720, 1280, 720);
         Equal(Vp9ScaleFactors.RefNoScale, s.XScale);
         Equal(Vp9ScaleFactors.RefNoScale, s.YScale);
@@ -33,6 +35,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameScale_Compute_RefBigger_StepLarger()
     {
+        CpuOnlyTest();
         // 2x larger reference (current 640x360, ref 1280x720) -> step 32.
         var s = Vp9FrameScale.Compute(640, 360, 1280, 720);
         Equal(2 * Vp9ScaleFactors.RefNoScale, s.XScale);
@@ -45,6 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameScale_Compute_RefSmaller_StepSmaller()
     {
+        CpuOnlyTest();
         // 0.5x reference -> step 8.
         var s = Vp9FrameScale.Compute(1280, 720, 640, 360);
         Equal(8192, s.XScale);
@@ -56,6 +60,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameScale_Compute_AnamorphicScale()
     {
+        CpuOnlyTest();
         // Same vertical, 2x horizontal: x_step = 32, y_step = 16.
         var s = Vp9FrameScale.Compute(640, 720, 1280, 720);
         Equal(32, s.XStep);
@@ -66,6 +71,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameScale_RecordEquality()
     {
+        CpuOnlyTest();
         var a = Vp9FrameScale.Compute(640, 360, 1280, 720);
         var b = Vp9FrameScale.Compute(640, 360, 1280, 720);
         Equal(a, b);
@@ -75,6 +81,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameScale_Compute_RejectsZeroOrNegativeDimensions()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() => Vp9FrameScale.Compute(0, 720, 1280, 720));
         Throws<ArgumentOutOfRangeException>(() => Vp9FrameScale.Compute(640, -1, 1280, 720));
         Throws<ArgumentOutOfRangeException>(() => Vp9FrameScale.Compute(640, 720, 0, 720));

@@ -86,6 +86,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8IntraPredictor4x4_VerticalLeft_LastTwoValuesFollowRfc6386()
     {
+        CpuOnlyTest();
         // RFC 6386 B_VL_PRED: "the last two values do not strictly follow the pattern": B[2][3] = avg3(A4,A5,A6) and
         // B[3][3] = avg3(A5,A6,A7). The library had B[3][3] = avg3(A4,A5,A6), which only real lossy files exposed.
         var above = new byte[] { 0, 10, 20, 30, 40, 50, 60, 70, 80 };   // above[-1] = 0, above[0..7] = 10..80
@@ -100,6 +101,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8LossyFixtures_Manifest_CoversEveryKeyframeFeature()
     {
+        CpuOnlyTest();
         // A corpus that silently stops covering a feature would make the decoder tests below meaningless.
         var rows = Vp8LossyManifest();
         var names = Vp8LossyFixtureNames();
@@ -253,6 +255,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8FullKeyframeDecoderGpu_WavefrontSchedule_RespectsEveryDependency()
     {
+        CpuOnlyTest();
         // The CPU backend runs the threads of one launch in index order, which hides a wrong wavefront; the GPU backends do
         // not. So the schedule itself is checked: for every macroblock, its left, top, top-left and top-right neighbours
         // (the pixels reconstruction and the loop filter read or modify) are on EARLIER diagonals; macroblocks sharing a
@@ -431,6 +434,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8LossyFixtures_CpuReference_MatchesFfmpeg_AllFixtures()
     {
+        CpuOnlyTest();
         // The reference walker + Vp8LoopFilter against ffmpeg's decode of the SAME bytes.
         var failures = new List<string>();
         foreach (var name in Vp8LossyFixtureNames())

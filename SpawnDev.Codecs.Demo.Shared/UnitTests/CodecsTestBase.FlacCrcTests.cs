@@ -22,12 +22,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacCrc_Compute8_EmptyInput_IsZero()
     {
+        CpuOnlyTest();
         Equal((byte)0x00, InvokeCompute8(Array.Empty<byte>()));
     }
 
     [TestMethod]
     public void FlacCrc_Compute8_Standard_123456789_IsF4()
     {
+        CpuOnlyTest();
         // "123456789" is the universal CRC check string; CRC-8/SMBUS (= FLAC CRC-8) = 0xF4.
         byte[] input = System.Text.Encoding.ASCII.GetBytes("123456789");
         Equal((byte)0xF4, InvokeCompute8(input));
@@ -36,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacCrc_Compute8_SingleZero_IsZero()
     {
+        CpuOnlyTest();
         // CRC of a single 0-byte under this variant is 0 (init=0, 0 XOR 0 = 0, table[0]=0).
         Equal((byte)0x00, InvokeCompute8(new byte[] { 0x00 }));
     }
@@ -43,6 +46,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacCrc_Compute8_Deterministic()
     {
+        CpuOnlyTest();
         // Same input twice produces the same result.
         byte[] input = { 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE };
         byte a = InvokeCompute8(input);
@@ -53,6 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacCrc_Compute8_InputSensitive()
     {
+        CpuOnlyTest();
         // Changing one bit changes the CRC.
         byte[] a = { 0xDE, 0xAD, 0xBE, 0xEF };
         byte[] b = { 0xDE, 0xAD, 0xBE, 0xEE };
@@ -65,12 +70,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacCrc_Compute16_EmptyInput_IsZero()
     {
+        CpuOnlyTest();
         Equal((ushort)0x0000, InvokeCompute16(Array.Empty<byte>()));
     }
 
     [TestMethod]
     public void FlacCrc_Compute16_Standard_123456789_IsFEE8()
     {
+        CpuOnlyTest();
         // CRC-16/UMTS aka CRC-16/BUYPASS (= FLAC CRC-16) check = 0xFEE8.
         byte[] input = System.Text.Encoding.ASCII.GetBytes("123456789");
         Equal((ushort)0xFEE8, InvokeCompute16(input));
@@ -79,12 +86,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacCrc_Compute16_SingleZero_IsZero()
     {
+        CpuOnlyTest();
         Equal((ushort)0x0000, InvokeCompute16(new byte[] { 0x00 }));
     }
 
     [TestMethod]
     public void FlacCrc_Compute16_Deterministic()
     {
+        CpuOnlyTest();
         byte[] input = { 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE };
         ushort a = InvokeCompute16(input);
         ushort b = InvokeCompute16(input);
@@ -94,6 +103,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacCrc_Compute16_InputSensitive()
     {
+        CpuOnlyTest();
         byte[] a = { 0xDE, 0xAD, 0xBE, 0xEF };
         byte[] b = { 0xDE, 0xAD, 0xBE, 0xEE };
         True(InvokeCompute16(a) != InvokeCompute16(b),

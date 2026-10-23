@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompoundReferenceMode_LastGoldenAgree_AltRefIsFixed()
     {
+        CpuOnlyTest();
         // Last and Golden both biased = false; AltRef = true.
         var mode = Vp9CompoundReferenceMode.Compute(
             lastBias: false, goldenBias: false, altRefBias: true);
@@ -22,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompoundReferenceMode_LastGoldenAgree_BothBiased_AltRefIsFixed()
     {
+        CpuOnlyTest();
         var mode = Vp9CompoundReferenceMode.Compute(
             lastBias: true, goldenBias: true, altRefBias: false);
         Equal(Vp9MvReferenceFrame.AltRef, mode.FixedRef);
@@ -32,6 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompoundReferenceMode_LastAltRefAgree_GoldenIsFixed()
     {
+        CpuOnlyTest();
         var mode = Vp9CompoundReferenceMode.Compute(
             lastBias: false, goldenBias: true, altRefBias: false);
         Equal(Vp9MvReferenceFrame.Golden, mode.FixedRef);
@@ -42,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompoundReferenceMode_GoldenAltRefAgree_LastIsFixed()
     {
+        CpuOnlyTest();
         var mode = Vp9CompoundReferenceMode.Compute(
             lastBias: true, goldenBias: false, altRefBias: false);
         Equal(Vp9MvReferenceFrame.Last, mode.FixedRef);
@@ -52,6 +56,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompoundReferenceMode_AllSame_FallsThroughToLastGoldenAgree()
     {
+        CpuOnlyTest();
         // All three biased the same: lastBias == goldenBias is true,
         // so we hit the first branch -> AltRef fixed.
         var allFalse = Vp9CompoundReferenceMode.Compute(false, false, false);
@@ -64,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompoundReferenceMode_RecordEquality()
     {
+        CpuOnlyTest();
         var a = Vp9CompoundReferenceMode.Compute(false, false, true);
         var b = Vp9CompoundReferenceMode.Compute(false, false, true);
         Equal(a, b);

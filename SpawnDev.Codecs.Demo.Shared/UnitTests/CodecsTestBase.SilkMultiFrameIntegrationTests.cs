@@ -26,6 +26,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MultiFrame_TwoIndependentInactiveFrames_StateAdvances()
     {
+        CpuOnlyTest();
         // Two independent (conditional=0) inactive frames. Verify state updates
         // correctly frame-to-frame: LastGainIndex and PrevNlsfQ15 both change.
         var cb = SilkNlsfCodebookTables.NbMb;
@@ -89,6 +90,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MultiFrame_SecondFrameInterpolatesFromFirst_LpcDiffersAcrossHalves()
     {
+        CpuOnlyTest();
         // Frame 1: independent, sets up prev NLSFs.
         // Frame 2: same independent decode BUT with NlsfInterpCoefQ2 = 2 so first half
         //          LPC is interpolated from frame 1's NLSFs.
@@ -138,6 +140,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MultiFrame_ConditionalGain_DeltaEncodingFromPrevLastIndex()
     {
+        CpuOnlyTest();
         // Frame 1: independent gains (any values).
         // Frame 2: conditional gains, verify delta math works against stored LastGainIndex.
         var cb = SilkNlsfCodebookTables.NbMb;
@@ -174,6 +177,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MultiFrame_VoicedPitchDelta_UsesPrevLagIndex()
     {
+        CpuOnlyTest();
         // Two voiced frames. Frame 2 uses delta pitch coding keyed on frame 1's
         // decoded lag. Verify the state carries prev lag / prev voiced through correctly.
         var cb = SilkNlsfCodebookTables.NbMb;
@@ -242,6 +246,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MultiFrame_StateReset_RestoresFirstFrameBehavior()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.NbMb;
         var state = new SilkChannelDecoderState();
 

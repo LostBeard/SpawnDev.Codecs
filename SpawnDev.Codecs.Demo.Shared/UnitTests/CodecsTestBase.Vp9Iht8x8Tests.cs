@@ -20,6 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht8x8_DctDct_MatchesIdct8x8Reference()
     {
+        CpuOnlyTest();
         var rng = new Random(0xE1);
         for (int trial = 0; trial < 10; trial++)
         {
@@ -40,6 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht8x8_AdstAdst_MatchesIadst8x8Reference()
     {
+        CpuOnlyTest();
         var rng = new Random(0xE3);
         for (int trial = 0; trial < 10; trial++)
         {
@@ -60,6 +62,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht8x8_AdstDct_VsDctAdst_ProduceDifferentOutput()
     {
+        CpuOnlyTest();
         // Pattern that breaks 2D symmetry: non-zero AC coefficients that
         // aren't symmetric across the main diagonal. If the dispatcher
         // swapped row + col transforms, the two modes would coincide.
@@ -82,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht8x8_AllFourTxTypes_ZeroInput_LeavePredictorUnchanged()
     {
+        CpuOnlyTest();
         var coeffs = new short[64];
         foreach (var tx in new[] { Vp9TxType8x8.DctDct, Vp9TxType8x8.AdstDct,
                                     Vp9TxType8x8.DctAdst, Vp9TxType8x8.AdstAdst })
@@ -95,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht8x8_AllFourTxTypes_ProduceValidPixels()
     {
+        CpuOnlyTest();
         var rng = new Random(0xE7);
         var coeffs = new short[64];
         for (int i = 0; i < 64; i++) coeffs[i] = (short)rng.Next(-4096, 4096);
@@ -114,6 +119,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht8x8_Throws_OnShortInput()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9Iht8x8Reference.Iht8x8_64_Add(Vp9TxType8x8.DctDct, new short[32], new byte[64], 8); }
         catch (ArgumentException) { threw = true; }
@@ -123,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht8x8_Throws_OnBadStride()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9Iht8x8Reference.Iht8x8_64_Add(Vp9TxType8x8.DctDct, new short[64], new byte[64], 4); }
         catch (ArgumentException) { threw = true; }

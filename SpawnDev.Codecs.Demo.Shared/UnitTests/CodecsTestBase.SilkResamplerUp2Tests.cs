@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerUp2_8To16_ZeroInput_ProducesZeroOutput()
     {
+        CpuOnlyTest();
         // Zero input with zero state should yield zero output (filter has no free-running response).
         var state = new SilkResamplerState();
         SilkResampler.Init(state, fsHzIn: 8000, fsHzOut: 16000, forEncode: false);
@@ -30,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerUp2_8To16_OutputCountIsDouble()
     {
+        CpuOnlyTest();
         // For an exact 2x upsampler, input length 80 -> output length 160.
         var state = new SilkResamplerState();
         SilkResampler.Init(state, fsHzIn: 8000, fsHzOut: 16000, forEncode: false);
@@ -55,6 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerUp2_8To16_DcInput_ProducesBoundedDcOutput()
     {
+        CpuOnlyTest();
         // DC (constant) input passes through all-pass filter at unity gain. The all-pass
         // cascade preserves DC level; output should be near the input constant after
         // the filter settles.
@@ -84,6 +87,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerUp2_8To16_StateCarriesAcrossCalls()
     {
+        CpuOnlyTest();
         // A continuous sinusoid decoded across two batches should not have a discontinuity
         // at the batch boundary. Verify the output is smooth (bounded derivative) around
         // the batch-2 start.
@@ -113,6 +117,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerUp2_12To24_AlsoDispatchesAndProducesDoubleCount()
     {
+        CpuOnlyTest();
         // 12 -> 24 kHz is also a 2x upsample, uses the same up2 path.
         var state = new SilkResamplerState();
         SilkResampler.Init(state, fsHzIn: 12000, fsHzOut: 24000, forEncode: false);

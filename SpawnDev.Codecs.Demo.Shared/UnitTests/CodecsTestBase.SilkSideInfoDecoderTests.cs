@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SideInfo_SignalType_NoVadTable_AllRawValues_RoundTrip()
     {
+        CpuOnlyTest();
         // No-VAD iCDF has 2 symbols: Ix in {0, 1}. signalType = 0 (inactive), offset in {0, 1}.
         for (int raw = 0; raw < 2; raw++)
         {
@@ -33,6 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SideInfo_SignalType_VadTable_AllRawValues_RoundTrip()
     {
+        CpuOnlyTest();
         // VAD iCDF has 4 symbols: Ix in {0..3}, +2 -> effective in {2..5}.
         // signalType = Ix >> 1 ∈ {1, 2} (unvoiced or voiced), offset ∈ {0, 1}.
         for (int raw = 0; raw < 4; raw++)
@@ -59,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SideInfo_Seed_AllValues_RoundTrip()
     {
+        CpuOnlyTest();
         // Uniform4 -> seed in {0, 1, 2, 3}.
         for (int s = 0; s < 4; s++)
         {
@@ -75,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SideInfo_SignalType_NullRangeDecoder_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() =>
             SilkSideInfoDecoder.DecodeSignalType(null!, useVadTable: true));
     }
@@ -82,12 +86,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SideInfo_Seed_NullRangeDecoder_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() => SilkSideInfoDecoder.DecodeSeed(null!));
     }
 
     [TestMethod]
     public void SideInfo_SequentialDecode_MatchesSequentialEncode()
     {
+        CpuOnlyTest();
         // End-to-end: encode signal type + seed in sequence, verify both round-trip in order.
         var enc = new OpusRangeEncoder(64);
         // Signal type (VAD): raw=3 -> signalType=2 (voiced), offset=1.

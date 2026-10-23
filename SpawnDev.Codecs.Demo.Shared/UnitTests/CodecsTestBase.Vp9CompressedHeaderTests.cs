@@ -14,6 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_Lossless_ForcesOnly4x4()
     {
+        CpuOnlyTest();
         var data = new byte[64];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
         var state = new Vp9CompressedHeaderState();
@@ -35,6 +36,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_IntraOnly_NoInterFrameTablesRead()
     {
+        CpuOnlyTest();
         // Buffer is all zeros so:
         //   tx_mode bits f(2) = 0 -> Only4x4
         //   coef_probs flag for 4x4 = 0 -> no update
@@ -70,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_InterFrame_ReadsInterTables()
     {
+        CpuOnlyTest();
         // Zero buffer: every update flag reads as 0, every prob unchanged.
         // We just verify the parser walks without throwing and lands at
         // SingleReference (because compound_reference_allowed = false
@@ -97,6 +100,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_InterFrame_CompoundAllowed_BitsConsumed()
     {
+        CpuOnlyTest();
         // Different sign biases -> compound_reference_allowed = true ->
         // the parser reads 1 reference_mode bit (0 with zero buffer ->
         // still SingleReference).
@@ -121,6 +125,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_State_TableShapesInitializedCorrectly()
     {
+        CpuOnlyTest();
         var s = new Vp9CompressedHeaderState();
         Equal(4, s.CoefProbs.Length);
         for (int i = 0; i < 4; i++)
@@ -132,6 +137,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_State_PartitionProbsSeededFromKfDefaults()
     {
+        CpuOnlyTest();
         var s = new Vp9CompressedHeaderState();
         for (int i = 0; i < s.PartitionProbs.Length; i++)
             Equal(Vp9PartitionProbs.KfPartitionProbs[i], s.PartitionProbs[i]);
@@ -140,6 +146,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_State_YModeProbsSeededFromIfDefaults()
     {
+        CpuOnlyTest();
         var s = new Vp9CompressedHeaderState();
         for (int i = 0; i < s.YModeProbs.Length; i++)
             Equal(Vp9IntraModeProbs.DefaultIfYProbs[i], s.YModeProbs[i]);
@@ -148,6 +155,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompressedHeader_RejectsNullArgs()
     {
+        CpuOnlyTest();
         var data = new byte[16];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
         var inputs = new Vp9CompressedHeaderInputs(

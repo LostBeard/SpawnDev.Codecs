@@ -13,6 +13,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9StreamValidator_BbbFixture_ReportsNoErrors()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         var video = container.Tracks.First(t => t.IsVideo);
@@ -29,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9StreamValidator_EmptyPacketStream_ReportsError()
     {
+        CpuOnlyTest();
         var result = Vp9StreamValidator.Validate(Array.Empty<ReadOnlyMemory<byte>>());
         Equal(false, result.IsValid);
         True(result.Findings.Any(f =>
@@ -40,6 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9StreamValidator_BadPacketBytes_ReportsError()
     {
+        CpuOnlyTest();
         // Just random bytes - won't even parse as a frame header.
         var bad = new byte[100];
         for (int i = 0; i < bad.Length; i++) bad[i] = (byte)i;

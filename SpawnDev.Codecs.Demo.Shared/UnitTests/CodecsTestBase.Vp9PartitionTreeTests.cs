@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionType_EnumValuesMatchLibvpxOrdering()
     {
+        CpuOnlyTest();
         Equal((byte)0, (byte)Vp9PartitionType.None);
         Equal((byte)1, (byte)Vp9PartitionType.Horz);
         Equal((byte)2, (byte)Vp9PartitionType.Vert);
@@ -20,6 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionTree_HasCorrectShape()
     {
+        CpuOnlyTest();
         // 6 entries = 3 internal nodes x 2 branches.
         Equal(6, Vp9PartitionTree.Tree.Length);
         Equal((sbyte)0,  Vp9PartitionTree.Tree[0]);   // -None = 0
@@ -33,6 +35,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionTree_DecodesNoneOnFirstZeroBit()
     {
+        CpuOnlyTest();
         var bits = new int[] { 0 };
         int idx = 0;
         var p = Vp9PartitionTree.Decode(_ => bits[idx++], stackalloc byte[3] { 128, 128, 128 });
@@ -42,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionTree_DecodesHorzOnSecondBitZero()
     {
+        CpuOnlyTest();
         // ROOT: bit 1 -> i=2, then bit 0 at probs[1] -> -Horz.
         var bits = new int[] { 1, 0 };
         int idx = 0;
@@ -52,6 +56,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionTree_DecodesVertOnSecondBitOneThirdBitZero()
     {
+        CpuOnlyTest();
         // ROOT: 1 -> i=2, 1 -> i=4, 0 -> -Vert.
         var bits = new int[] { 1, 1, 0 };
         int idx = 0;
@@ -62,6 +67,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionTree_DecodesSplitOnAllBitsOne()
     {
+        CpuOnlyTest();
         // ROOT: 1 -> i=2, 1 -> i=4, 1 -> -Split.
         var bits = new int[] { 1, 1, 1 };
         int idx = 0;
@@ -72,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9PartitionTree_RejectsUndersizedProbs()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => Vp9PartitionTree.Decode(_ => 0, new byte[2]));
     }
 }

@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1SequenceHeaderWriter_BbbConfig_RoundTripsThroughParser()
     {
+        CpuOnlyTest();
         var cfg = new Av1SequenceHeaderConfig
         {
             SeqProfile = 0,
@@ -49,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1SequenceHeaderWriter_HighBitDepth10_RoundTrips()
     {
+        CpuOnlyTest();
         var cfg = new Av1SequenceHeaderConfig
         {
             SeqProfile = 0,
@@ -70,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1SequenceHeaderWriter_4kFrame_RoundTrips()
     {
+        CpuOnlyTest();
         var cfg = new Av1SequenceHeaderConfig
         {
             SeqProfile = 0,
@@ -88,6 +91,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1SequenceHeaderWriter_Monochrome_RoundTrips()
     {
+        CpuOnlyTest();
         var cfg = new Av1SequenceHeaderConfig
         {
             SeqProfile = 0,
@@ -107,6 +111,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1SequenceHeaderWriter_WrappedAsObu_StreamHasValidShape()
     {
+        CpuOnlyTest();
         var cfg = new Av1SequenceHeaderConfig
         {
             SeqProfile = 0,
@@ -130,6 +135,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1SequenceHeaderWriter_BbbConfig_BitExactMatchesLibaomBytes()
     {
+        CpuOnlyTest();
         // Strongest spec validation: build the config that mirrors what
         // libaom-av1 chose for the BBB encode (observed by parsing the
         // source SH bit-by-bit) and verify our writer emits IDENTICAL
@@ -197,6 +203,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1SequenceHeaderWriter_BbbSh_ParseToConfigEchoesBitExact()
     {
+        CpuOnlyTest();
         // The full closed loop: parse a real libaom-encoded SH OBU, build
         // the writer config straight from the parsed Av1SequenceHeader via
         // Av1SequenceHeaderConfig.FromHeader, and verify the writer emits
@@ -231,6 +238,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1SequenceHeaderWriter_RejectsInvalidConfigs()
     {
+        CpuOnlyTest();
         // 12-bit on profile 0 is invalid.
         Throws<ArgumentException>(() => Av1SequenceHeaderWriter.EmitPayload(
             new Av1SequenceHeaderConfig

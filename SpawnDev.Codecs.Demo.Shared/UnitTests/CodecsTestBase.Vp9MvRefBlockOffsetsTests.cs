@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefBlockOffsets_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(8, Vp9MvRefBlockOffsets.Neighbours);
         Equal(13, Vp9MvRefBlockOffsets.Lookup.GetLength(0));
         Equal(8, Vp9MvRefBlockOffsets.Lookup.GetLength(1));
@@ -20,6 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefBlockOffsets_AllSubEightSizes_Identical()
     {
+        CpuOnlyTest();
         // Block4x4 / 4x8 / 8x4 / 8x8 all share the same 8-neighbor pattern.
         for (int n = 0; n < 8; n++)
         {
@@ -36,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefBlockOffsets_Block16x16_FirstNeighbor_IsAbove()
     {
+        CpuOnlyTest();
         var (r, c) = Vp9MvRefBlockOffsets.GetOffset(Vp9BlockSize.Block16x16, 0);
         Equal((sbyte)-1, r);
         Equal((sbyte)0, c);
@@ -44,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefBlockOffsets_Block64x64_FarBelow()
     {
+        CpuOnlyTest();
         // 64x64 has unusually large positive offsets to reach into the
         // already-decoded right-of-the-block neighbors.
         var (r, c) = Vp9MvRefBlockOffsets.GetOffset(Vp9BlockSize.Block64x64, 7);
@@ -54,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefBlockOffsets_Rejects_OutOfRangeBlockSize()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9MvRefBlockOffsets.GetOffset((Vp9BlockSize)99, 0));
     }
@@ -61,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefBlockOffsets_Rejects_OutOfRangeNeighbor()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9MvRefBlockOffsets.GetOffset(Vp9BlockSize.Block16x16, 8));
         Throws<ArgumentOutOfRangeException>(() =>

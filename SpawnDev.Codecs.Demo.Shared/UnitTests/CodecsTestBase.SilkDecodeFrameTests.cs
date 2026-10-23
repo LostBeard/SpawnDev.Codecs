@@ -106,6 +106,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeFrame_InactiveNoVadIndependent_FirstFrame_DecodesSuccessfully()
     {
+        CpuOnlyTest();
         // Simplest end-to-end test: inactive signal type, no VAD, independent coding,
         // all-zero pulses. The entire pipeline should produce valid PCM.
         var state = new SilkChannelDecoderState();
@@ -147,6 +148,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeFrame_UnvoicedWithVad_FirstFrame_DecodesSuccessfully()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         state.Configure(fsKHz: 8, nbSubfr: 4, lpcOrder: 10);
         state.Reset();
@@ -181,6 +183,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeFrame_VoicedWithLtp_FirstFrame_DecodesSuccessfully()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         state.Configure(fsKHz: 8, nbSubfr: 4, lpcOrder: 10);
         state.Reset();
@@ -224,6 +227,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeFrame_TwoBackToBackFrames_OutBufShiftsCorrectly()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         state.Configure(fsKHz: 8, nbSubfr: 4, lpcOrder: 10);
         state.Reset();
@@ -272,6 +276,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeFrame_FirstFrameAfterReset_FlagFlipsToFalse()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         state.Configure(fsKHz: 8, nbSubfr: 4, lpcOrder: 10);
         state.Reset();
@@ -302,6 +307,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeFrame_WbInactiveFrame_DecodesSuccessfully()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         state.Configure(fsKHz: 16, nbSubfr: 4, lpcOrder: 16);
         state.Reset();
@@ -335,6 +341,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeFrame_NullState_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(64);
         enc.Done();
         var dec = new OpusRangeDecoder(enc.ToArray());
@@ -346,6 +353,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeFrame_UnconfiguredState_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(64);
         enc.Done();
         var dec = new OpusRangeDecoder(enc.ToArray());
@@ -358,6 +366,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void DecodeFrame_OutputBufferTooSmall_Throws()
     {
+        CpuOnlyTest();
         var state = new SilkChannelDecoderState();
         state.Configure(fsKHz: 8, nbSubfr: 4, lpcOrder: 10);
         state.Reset();

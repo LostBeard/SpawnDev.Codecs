@@ -88,6 +88,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BitReader_ReadsMsbFirst_AcrossByteBoundaries()
     {
+        CpuOnlyTest();
         // 2 bytes: 0b1010_1100 0b1111_0011 = 0xAC 0xF3.
         // Read 3 bits -> 0b101 = 5
         // Read 5 bits -> 0b01100 = 12
@@ -103,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BitReader_ReadsZeroBits_ReturnsZero()
     {
+        CpuOnlyTest();
         var r = new Vp9BitReader(new byte[] { 0xFF });
         Equal(0u, r.ReadBits(0));
         Equal(8, r.BitsRemaining);
@@ -111,6 +113,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BitReader_ReadingPastEnd_Throws()
     {
+        CpuOnlyTest();
         var r = new Vp9BitReader(new byte[] { 0xFF });
         _ = r.ReadBits(8);
         bool threw = false;
@@ -123,6 +126,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameHeader_Parse_Profile0_Keyframe_640x480()
     {
+        CpuOnlyTest();
         var bytes = BuildVp9Keyframe_Profile0_Bt601(640, 480);
         var h = Vp9FrameHeaderParser.Parse(bytes);
         Equal(0, h.Profile);
@@ -144,6 +148,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameHeader_Parse_Profile0_Keyframe_1920x1080()
     {
+        CpuOnlyTest();
         var bytes = BuildVp9Keyframe_Profile0_Bt601(1920, 1080);
         var h = Vp9FrameHeaderParser.Parse(bytes);
         Equal(1920, h.FrameWidth);
@@ -153,6 +158,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameHeader_Parse_InvalidFrameMarker_Throws()
     {
+        CpuOnlyTest();
         // 0xFF first byte: top 2 bits are 11, not 10.
         bool threw = false;
         try { _ = Vp9FrameHeaderParser.Parse(new byte[] { 0xFF, 0xFF, 0xFF, 0xFF }); }
@@ -163,6 +169,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameHeader_Parse_ShowExistingFrame_EarlyReturns()
     {
+        CpuOnlyTest();
         // marker 10, profile_low 0, profile_high 0, show_existing 1, map_idx 5.
         // Bit pattern: 10 0 0 1 101 ... then padding.
         // = 0b1000_1101 first byte = 0x8D.
@@ -179,6 +186,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameHeader_Parse_EmptyBuffer_Throws()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { _ = Vp9FrameHeaderParser.Parse(ReadOnlySpan<byte>.Empty); }
         catch (InvalidDataException) { threw = true; }
@@ -190,6 +198,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameHeader_Parse_BigBuckBunny_KeyframesHaveConsistentDimensions()
     {
+        CpuOnlyTest();
         // Every keyframe in a stream must declare the same frame size.
         // Use the first keyframe to establish dimensions, then verify all
         // subsequent keyframes match.
@@ -231,6 +240,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameHeader_Parse_BigBuckBunny_ProfileIsZero_BitDepthEight()
     {
+        CpuOnlyTest();
         // The bundled Big Buck Bunny fixture is encoded as profile 0 VP9
         // (8-bit 4:2:0), which every mainline WebM encoder produces unless
         // explicitly configured otherwise. Pinning these values catches

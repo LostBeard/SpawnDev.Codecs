@@ -22,6 +22,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisHuffmanDecoder_AllEqualLengths_RoundtripsEverySymbol()
     {
+        CpuOnlyTest();
         // 4-entry codebook, all length 2.
         var lengths = new[] { 2, 2, 2, 2 };
         var table = VorbisHuffman.Build(lengths);
@@ -41,6 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisHuffmanDecoder_VariableLengths_RoundtripsCanonicalExample()
     {
+        CpuOnlyTest();
         // 1 entry at length 1 (idx 0 -> code 0)
         // 2 entries at length 2 (idx 1 -> code 10 = 2, idx 2 -> code 11 = 3)
         var lengths = new[] { 1, 2, 2 };
@@ -59,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisHuffmanDecoder_SparseCodebook_SkipsUnusedEntries()
     {
+        CpuOnlyTest();
         // Entries 0 and 2 used with length 1; entry 1 unused.
         var lengths = new[] { 1, 0, 1 };
         var table = VorbisHuffman.Build(lengths);
@@ -75,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisHuffmanDecoder_DeepTree_8Entries3Bits()
     {
+        CpuOnlyTest();
         // 8-entry codebook, every entry at length 3 -> full binary tree of depth 3.
         var lengths = new int[8];
         for (int i = 0; i < 8; i++) lengths[i] = 3;
@@ -92,6 +96,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisHuffmanDecoder_MixedLengthEntries_DecodesInOrder()
     {
+        CpuOnlyTest();
         // 5 entries with lengths 2, 3, 3, 3, 3. One short code, four long ones.
         // Canonical codes (computed by Build):
         // idx 0 len 2 -> 00 = 0
@@ -120,6 +125,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisHuffmanDecoder_SingleEntryCodebook_AlwaysDecodesZero()
     {
+        CpuOnlyTest();
         // Single-used-entry degenerate: entry 0 at some length. Build assigns code 0.
         // Decoder should succeed after reading `length` zero bits.
         var lengths = new[] { 4 };

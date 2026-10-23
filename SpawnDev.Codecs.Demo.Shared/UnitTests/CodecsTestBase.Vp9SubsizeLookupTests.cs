@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubsizeLookup_LookupShape()
     {
+        CpuOnlyTest();
         Equal(4, Vp9SubsizeLookup.Lookup.GetLength(0));
         Equal(13, Vp9SubsizeLookup.Lookup.GetLength(1));
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubsizeLookup_None_PreservesParent()
     {
+        CpuOnlyTest();
         for (int i = 0; i < Vp9BlockSizes.Count; i++)
         {
             Equal((Vp9BlockSize)i,
@@ -28,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubsizeLookup_Horz_SquareParents()
     {
+        CpuOnlyTest();
         Equal(Vp9BlockSize.Block8x4,
             Vp9SubsizeLookup.Subsize(Vp9BlockSize.Block8x8, Vp9PartitionType.Horz));
         Equal(Vp9BlockSize.Block16x8,
@@ -41,6 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubsizeLookup_Vert_SquareParents()
     {
+        CpuOnlyTest();
         Equal(Vp9BlockSize.Block4x8,
             Vp9SubsizeLookup.Subsize(Vp9BlockSize.Block8x8, Vp9PartitionType.Vert));
         Equal(Vp9BlockSize.Block8x16,
@@ -54,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubsizeLookup_Split_SquareParents()
     {
+        CpuOnlyTest();
         Equal(Vp9BlockSize.Block4x4,
             Vp9SubsizeLookup.Subsize(Vp9BlockSize.Block8x8, Vp9PartitionType.Split));
         Equal(Vp9BlockSize.Block8x8,
@@ -67,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubsizeLookup_NonSquareParent_HorzVertSplit_AreInvalid()
     {
+        CpuOnlyTest();
         // Non-square parents and 4x4 cannot legally be re-partitioned
         // by HORZ / VERT / SPLIT in the VP9 bitstream.
         Vp9BlockSize[] illegal =
@@ -91,6 +97,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubsizeLookup_RejectsOutOfRange()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9SubsizeLookup.Subsize(Vp9BlockSize.Block8x8, (Vp9PartitionType)99));
         Throws<ArgumentOutOfRangeException>(() =>

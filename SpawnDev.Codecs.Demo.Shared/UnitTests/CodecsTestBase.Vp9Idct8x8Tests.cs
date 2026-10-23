@@ -19,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct8x8_ZeroCoefficients_LeavesPredictorUnchanged()
     {
+        CpuOnlyTest();
         var coeffs = new short[64];
         var dest = MakePredictor8x8(128);
         Vp9Idct8x8Reference.Idct8x8_64_Add(coeffs, dest, 8);
@@ -28,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct8x8_DcOnlyCoefficient_AppliesUniformResidual()
     {
+        CpuOnlyTest();
         // DC = 1024 at [0,0]. Hand-derived:
         //   row 0 iDCT of [1024,0,...,0] -> [724,724,...,724]
         //   other rows -> all zero
@@ -45,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct8x8_Clips_HighResidualToUpper255()
     {
+        CpuOnlyTest();
         var coeffs = new short[64];
         coeffs[0] = 16384; // push residual well above 256
         var dest = MakePredictor8x8(200);
@@ -55,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct8x8_Clips_NegativeResidualToZero()
     {
+        CpuOnlyTest();
         var coeffs = new short[64];
         coeffs[0] = -16384;
         var dest = MakePredictor8x8(100);
@@ -65,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct8x8_StridedDest_OnlyTouches8x8Block()
     {
+        CpuOnlyTest();
         // 8x8 block at top-left of an 8-row x 24-col canvas.
         var canvas = new byte[8 * 24];
         for (int i = 0; i < canvas.Length; i++) canvas[i] = 77;
@@ -83,6 +88,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct8x8_IsDeterministic_ForRandomInputs()
     {
+        CpuOnlyTest();
         var rng = new Random(0x8);
         var coeffs = new short[64];
         for (int trial = 0; trial < 30; trial++)
@@ -99,6 +105,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct8x8_Throws_OnShortInput()
     {
+        CpuOnlyTest();
         var dest = MakePredictor8x8(0);
         bool threw = false;
         try { Vp9Idct8x8Reference.Idct8x8_64_Add(new short[32], dest, 8); }
@@ -109,6 +116,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Idct8x8_Throws_OnBadStride()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9Idct8x8Reference.Idct8x8_64_Add(new short[64], new byte[64], 4); }
         catch (ArgumentException) { threw = true; }

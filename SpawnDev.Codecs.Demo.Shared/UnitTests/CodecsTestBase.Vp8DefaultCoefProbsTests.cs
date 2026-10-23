@@ -13,6 +13,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8DefaultCoefProbs_Dimensions_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(4, Vp8DefaultCoefProbs.BlockTypes);
         Equal(8, Vp8DefaultCoefProbs.CoefBands);
         Equal(3, Vp8DefaultCoefProbs.PrevCoefContexts);
@@ -26,6 +27,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8DefaultCoefProbs_Type0Band0_AllNeutral128()
     {
+        CpuOnlyTest();
         // Block Type 0 (Y after Y2), Band 0 (DC) - all probs initialize to 128.
         // libvpx default_coef_probs[0][0][*][*] = 128 for all 33 entries.
         for (int ctx = 0; ctx < 3; ctx++)
@@ -36,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8DefaultCoefProbs_Type0Band1_Context0_MatchesLibvpx()
     {
+        CpuOnlyTest();
         // libvpx: { 253, 136, 254, 255, 228, 219, 128, 128, 128, 128, 128 }
         byte[] expected = { 253, 136, 254, 255, 228, 219, 128, 128, 128, 128, 128 };
         for (int n = 0; n < 11; n++)
@@ -45,6 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8DefaultCoefProbs_Type1Band0_Context2_MatchesLibvpx()
     {
+        CpuOnlyTest();
         // libvpx: { 68, 47, 146, 208, 149, 167, 221, 162, 255, 223, 128 }
         byte[] expected = { 68, 47, 146, 208, 149, 167, 221, 162, 255, 223, 128 };
         for (int n = 0; n < 11; n++)
@@ -54,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8DefaultCoefProbs_Type3Band0_Context0_MatchesLibvpx()
     {
+        CpuOnlyTest();
         // Y2 (Block Type 3), Band 0, Context 0: highest energy class normally,
         // libvpx: { 202, 24, 213, 235, 186, 191, 220, 160, 240, 175, 255 }
         byte[] expected = { 202, 24, 213, 235, 186, 191, 220, 160, 240, 175, 255 };
@@ -64,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8DefaultCoefProbs_Type2Band7_AllNeutral128()
     {
+        CpuOnlyTest();
         // UV (Block Type 2), Band 7: all probs 128 in libvpx.
         for (int ctx = 0; ctx < 3; ctx++)
             for (int node = 0; node < 11; node++)

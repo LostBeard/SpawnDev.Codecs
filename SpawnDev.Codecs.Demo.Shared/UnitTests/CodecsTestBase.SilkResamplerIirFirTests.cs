@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerIirFir_16To48_ZeroInput_ProducesZeroOutput()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         SilkResampler.Init(state, fsHzIn: 16000, fsHzOut: 48000, forEncode: false);
         Equal(SilkResamplerConstants.USE_IIR_FIR, state.ResamplerFunction);
@@ -30,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerIirFir_16To48_OutputCountIs3x()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         SilkResampler.Init(state, fsHzIn: 16000, fsHzOut: 48000, forEncode: false);
 
@@ -49,6 +51,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerIirFir_16To24_NonIntegerRatio()
     {
+        CpuOnlyTest();
         // 16 -> 24 kHz is a 3/2 ratio; not exact 2x, routes through IIR_FIR.
         var state = new SilkResamplerState();
         SilkResampler.Init(state, fsHzIn: 16000, fsHzOut: 24000, forEncode: false);
@@ -69,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerIirFir_12To48_4xRatio()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         SilkResampler.Init(state, fsHzIn: 12000, fsHzOut: 48000, forEncode: false);
         Equal(SilkResamplerConstants.USE_IIR_FIR, state.ResamplerFunction);
@@ -89,6 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerIirFir_8To48_6xRatio()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         SilkResampler.Init(state, fsHzIn: 8000, fsHzOut: 48000, forEncode: false);
         Equal(SilkResamplerConstants.USE_IIR_FIR, state.ResamplerFunction);
@@ -109,6 +114,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerIirFir_16To48_StateCarriesAcrossCalls()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         SilkResampler.Init(state, 16000, 48000, forEncode: false);
 
@@ -134,6 +140,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerInit_AllStubPaths_NowImplemented()
     {
+        CpuOnlyTest();
         // After slice 45 there should be no stubbed Apply() paths. This test
         // replaces the old NotImplementedPaths check.
         var state = new SilkResamplerState();

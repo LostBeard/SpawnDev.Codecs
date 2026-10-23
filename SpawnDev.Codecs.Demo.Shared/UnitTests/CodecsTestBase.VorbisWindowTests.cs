@@ -14,6 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisWindow_Canonical_ProducesValuesInUnitInterval()
     {
+        CpuOnlyTest();
         var w = VorbisWindow.GenerateCanonical(64);
         Equal(64, w.Length);
         for (int i = 0; i < w.Length; i++)
@@ -25,6 +26,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisWindow_Canonical_SymmetricAroundCenter()
     {
+        CpuOnlyTest();
         // Window is symmetric: w[i] = w[n - 1 - i] to float precision.
         var w = VorbisWindow.GenerateCanonical(128);
         for (int i = 0; i < 128; i++)
@@ -38,6 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisWindow_Canonical_PrincenBradleyComplementarity()
     {
+        CpuOnlyTest();
         // Vorbis window satisfies w[i]^2 + w[i + n/2]^2 = 1 (Princen-Bradley).
         int n = 256;
         var w = VorbisWindow.GenerateCanonical(n);
@@ -53,6 +56,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisWindow_Canonical_CenterSamples_AtOneHalf()
     {
+        CpuOnlyTest();
         // The midpoint samples evaluate to sin(pi/4) = 1/sqrt(2) approximately.
         int n = 64;
         var w = VorbisWindow.GenerateCanonical(n);
@@ -65,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisWindow_Transition_BothLong_MatchesCanonical()
     {
+        CpuOnlyTest();
         var transition = VorbisWindow.GenerateTransition(longSize: 64, shortSize: 16, prevLong: true, nextLong: true);
         var canonical = VorbisWindow.GenerateCanonical(64);
         for (int i = 0; i < 64; i++)
@@ -75,6 +80,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisWindow_Transition_LeftShort_HasZeroPrefix()
     {
+        CpuOnlyTest();
         // prev=short -> the first (halfLong - halfShort) samples are zero,
         // then the short-window rise, then ones up to the center.
         var w = VorbisWindow.GenerateTransition(64, 16, prevLong: false, nextLong: true);
@@ -93,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisWindow_Transition_RightShort_HasZeroSuffix()
     {
+        CpuOnlyTest();
         var w = VorbisWindow.GenerateTransition(64, 16, prevLong: true, nextLong: false);
         int halfLong = 32;
         int halfShort = 8;
@@ -103,6 +110,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisWindow_OverlapAdd_PointwiseSum()
     {
+        CpuOnlyTest();
         var prev = new float[] { 1f, 2f, 3f, 4f };
         var cur = new float[] { 10f, 20f, 30f, 40f };
         var output = new float[4];
@@ -113,6 +121,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisWindow_OverlapAdd_LengthMismatch_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() =>
             VorbisWindow.OverlapAdd(new float[4], new float[5], new float[4]));
     }
@@ -120,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisWindow_Canonical_LengthTooSmall_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => VorbisWindow.GenerateCanonical(1));
     }
 }

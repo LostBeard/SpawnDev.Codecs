@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TmPredictor_4x4_FlatInputs_ProduceCornerExtrapolation()
     {
+        CpuOnlyTest();
         // top_left=100, above=all 100, left=all 100 -> dst = 100+100-100 = 100.
         var above = new byte[] { 100, 100, 100, 100 };
         var left = new byte[] { 100, 100, 100, 100 };
@@ -22,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TmPredictor_4x4_KnownPattern()
     {
+        CpuOnlyTest();
         // top_left=10, above=[20, 30, 40, 50], left=[60, 70, 80, 90].
         // Row 0: left=60, dst[c] = clip(60 + above[c] - 10) =
         //   clip(70, 80, 90, 100) = 70, 80, 90, 100.
@@ -43,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TmPredictor_4x4_ClipsHighToTwoFiveFive()
     {
+        CpuOnlyTest();
         // top_left=0, above=all 200, left=all 200 -> dst = 200+200-0 = 400 -> clamps to 255.
         var above = new byte[] { 200, 200, 200, 200 };
         var left = new byte[] { 200, 200, 200, 200 };
@@ -54,6 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TmPredictor_4x4_ClipsLowToZero()
     {
+        CpuOnlyTest();
         // top_left=200, above=all 50, left=all 50 -> dst = 50+50-200 = -100 -> clamps to 0.
         var above = new byte[] { 50, 50, 50, 50 };
         var left = new byte[] { 50, 50, 50, 50 };
@@ -65,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TmPredictor_8x8_MixedClipping()
     {
+        CpuOnlyTest();
         // Asymmetric inputs that produce both clipped-high and clipped-low
         // pixels, plus in-range middle values. Confirms per-pixel clipping
         // not a wholesale block-level branch.
@@ -91,6 +96,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TmPredictor_16x16_StridedDest_OnlyTouchesBlock()
     {
+        CpuOnlyTest();
         var above = new byte[16];
         var left = new byte[16];
         for (int i = 0; i < 16; i++) { above[i] = 100; left[i] = 100; }
@@ -111,6 +117,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TmPredictor_32x32_FlatInputProducesFlatOutput()
     {
+        CpuOnlyTest();
         var above = new byte[32];
         var left = new byte[32];
         for (int i = 0; i < 32; i++) { above[i] = 80; left[i] = 80; }
@@ -122,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TmPredictor_RejectsInvalidSize()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9TmPredictor.TmPredict(0, new byte[5], new byte[5], new byte[25], n: 5, stride: 5));
     }
@@ -129,6 +137,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TmPredictor_RejectsTooSmallEdgeSpans()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() =>
             Vp9TmPredictor.TmPredict(0, new byte[3], new byte[4], new byte[16], n: 4, stride: 4));
         Throws<ArgumentException>(() =>

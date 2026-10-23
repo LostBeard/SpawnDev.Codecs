@@ -13,6 +13,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefToken_ValuesMatchLibvpxDefines()
     {
+        CpuOnlyTest();
         // libvpx vp9_entropy.h: ZERO_TOKEN=0, ONE_TOKEN=1, ..., EOB_TOKEN=11.
         Equal((byte)0,  (byte)Vp9CoefToken.Zero);
         Equal((byte)1,  (byte)Vp9CoefToken.One);
@@ -31,6 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefTrees_CoefConTree_HasCorrectShape()
     {
+        CpuOnlyTest();
         // 16 entries = 8 internal nodes x 2 branches.
         Equal(16, Vp9CoefTrees.CoefConTree.Length);
         // Spot-check pinned entries against libvpx vp9_coef_con_tree.
@@ -47,6 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefTrees_DecodeConToken_BitSequenceLeadsToTwoToken()
     {
+        CpuOnlyTest();
         // From the tree: i=0 (LOW_VAL), bit 0 -> i=2 (TWO), bit 0 -> -Two.
         // So bits [0, 0] should decode TWO_TOKEN.
         var bits = new int[] { 0, 0 };
@@ -58,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefTrees_DecodeConToken_BitSequenceLeadsToThreeToken()
     {
+        CpuOnlyTest();
         // i=0 -> bit 0 -> i=2 (TWO) -> bit 1 -> i=4 (THREE) -> bit 0 -> -Three.
         var bits = new int[] { 0, 1, 0 };
         int idx = 0;
@@ -68,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefTrees_DecodeConToken_BitSequenceLeadsToFourToken()
     {
+        CpuOnlyTest();
         // i=0 -> bit 0 -> i=2 -> bit 1 -> i=4 -> bit 1 -> -Four.
         var bits = new int[] { 0, 1, 1 };
         int idx = 0;
@@ -78,6 +83,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefTrees_DecodeConToken_BitSequenceLeadsToCategory1()
     {
+        CpuOnlyTest();
         // i=0 -> bit 1 -> i=6 (HIGH_LOW) -> bit 0 -> i=8 (CAT_ONE) -> bit 0 -> -Cat1.
         var bits = new int[] { 1, 0, 0 };
         int idx = 0;
@@ -88,6 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefTrees_DecodeConToken_BitSequenceLeadsToCategory6()
     {
+        CpuOnlyTest();
         // i=0 -> 1 -> i=6 -> 1 -> i=10 (CAT_THREEFOUR) -> 1 -> i=14 (CAT_FIVE) -> 1 -> -Cat6.
         var bits = new int[] { 1, 1, 1, 1 };
         int idx = 0;
@@ -98,6 +105,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefTrees_DecodeConToken_RejectsUndersizedProbs()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => Vp9CoefTrees.DecodeConToken(_ => 0, new byte[7]));
     }
 }

@@ -55,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrame_Mono_ConstantSubframe_DecodesCorrectly()
     {
+        CpuOnlyTest();
         // Mono frame with CONSTANT subframe value = 1234 across 4 samples.
         // bsize code 0b0110 + side byte 3 → 4-sample block. chan 0b0000 = 1 channel.
         // bps 0b100 = 16.
@@ -78,6 +79,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrame_Stereo_Independent_TwoVerbatimSubframes()
     {
+        CpuOnlyTest();
         // Stereo independent: chan 0b0001, block size 4, both channels VERBATIM 16-bit.
         var w = new FlacBitWriter();
         // Channel 0 VERBATIM with samples [10, 20, 30, 40]
@@ -103,6 +105,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrame_Stereo_LeftSide_Decorrelates()
     {
+        CpuOnlyTest();
         // Original L = [100, 200, 300, 400], R = [50, 100, 150, 200].
         // Side = L - R = [50, 100, 150, 200] (same as R in this particular case).
         // Encoded: ch0 = L (verbatim 16-bit), ch1 = side (verbatim 17-bit).
@@ -132,6 +135,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrame_Stereo_RightSide_Decorrelates()
     {
+        CpuOnlyTest();
         int[] L = { 100, 200, 300, 400 };
         int[] R = { 50, 100, 150, 200 };
         int[] side = { L[0] - R[0], L[1] - R[1], L[2] - R[2], L[3] - R[3] };
@@ -158,6 +162,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrame_Stereo_MidSide_Decorrelates()
     {
+        CpuOnlyTest();
         // L = 5, R = 3 → mid = 4, side = 2.
         // L = 5, R = 2 → mid = 3, side = 3 (tests odd-side case).
         // L = -10, R = -6 → mid = -8, side = -4.
@@ -193,6 +198,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrame_BadCrc16_Throws()
     {
+        CpuOnlyTest();
         var w = new FlacBitWriter();
         WriteSubframeHeader(w, FlacSubframeKind.Constant, 0, 0);
         WriteSigned(w, 0, 16);
@@ -211,6 +217,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacFrame_Mono_FixedOrder1_EndToEnd()
     {
+        CpuOnlyTest();
         // Mono frame with FIXED order 1 subframe, target samples [5, 7, 10, 8, 15].
         var w = new FlacBitWriter();
         WriteSubframeHeader(w, FlacSubframeKind.Fixed, 1, 0);

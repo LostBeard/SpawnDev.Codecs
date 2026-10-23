@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1StreamAnalyzer_BbbFixture_ReturnsCompleteSummary()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         var summary = Av1StreamAnalyzer.Analyze(bytes);
 
@@ -43,6 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1StreamAnalyzer_BbbFixture_FirstFrameIsVisibleKeyframe()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         var summary = Av1StreamAnalyzer.Analyze(bytes);
         var first = summary.CodedFrames[0];
@@ -55,6 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1StreamAnalyzer_BbbFixture_PreservesFramePts()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         var summary = Av1StreamAnalyzer.Analyze(bytes);
         // Each coded frame's Pts is the IVF Pts of its containing TU.
@@ -71,6 +74,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1StreamAnalyzer_BbbFixture_ShowExistingMapsToValidSlot()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         var summary = Av1StreamAnalyzer.Analyze(bytes);
         foreach (var se in summary.ShowExistingFrames)

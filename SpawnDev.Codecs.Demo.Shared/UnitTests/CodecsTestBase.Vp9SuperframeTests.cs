@@ -55,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Superframe_NoIndex_ReturnsSingleFrame()
     {
+        CpuOnlyTest();
         // Non-superframe: last byte just happens to not match 0b110.....
         var packet = new byte[] { 0x85, 0x49, 0x83, 0x42, 0x00, 0x00 };
         var sf = Vp9SuperframeParser.Parse(packet);
@@ -67,6 +68,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Superframe_TwoFrames_1ByteSize_Unpacks()
     {
+        CpuOnlyTest();
         var packet = BuildVp9Superframe(new[] { 50, 30 }, bytesPerSize: 1);
         var sf = Vp9SuperframeParser.Parse(packet);
         True(sf.HadIndex);
@@ -83,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Superframe_EightFrames_2ByteSize_Unpacks()
     {
+        CpuOnlyTest();
         // Exercise the max frame count (3-bit field saturates at 7 for n=8).
         var sizes = new[] { 100, 200, 150, 75, 300, 500, 50, 400 };
         var packet = BuildVp9Superframe(sizes, bytesPerSize: 2);
@@ -101,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Superframe_4ByteSize_HandlesLargeFrames()
     {
+        CpuOnlyTest();
         // 4-byte size fields support up to ~4GB frames. Verify the parser
         // reads the full 4 bytes correctly for a mid-sized value.
         var sizes = new[] { 70_000, 50_000 }; // neither fits in 2 bytes
@@ -114,6 +118,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Superframe_EmptyPacket_Throws()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { _ = Vp9SuperframeParser.Parse(ReadOnlySpan<byte>.Empty); }
         catch (InvalidDataException) { threw = true; }
@@ -123,6 +128,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Superframe_IndexOverrunsPacket_Throws()
     {
+        CpuOnlyTest();
         // A malicious or corrupt marker claiming 8 frames × 4 bytes = 32
         // bytes of index in a 4-byte packet must be rejected.
         // 0xDF = 0b110_11_111: marker=110, bpfm1=3 (4 bytes each),
@@ -137,6 +143,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Superframe_FrameSizeOverrunsBeforeIndex_Throws()
     {
+        CpuOnlyTest();
         // Build a valid-looking superframe but claim frame 0 is larger
         // than the available space before the index.
         var packet = BuildVp9Superframe(new[] { 10, 10 }, bytesPerSize: 1);
@@ -153,6 +160,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Superframe_SingleFrame_WithIndex_Unpacks()
     {
+        CpuOnlyTest();
         // n=1 is valid - index marker just marks a 1-frame wrapper.
         var packet = BuildVp9Superframe(new[] { 42 }, bytesPerSize: 1);
         var sf = Vp9SuperframeParser.Parse(packet);
@@ -165,6 +173,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Superframe_RealBigBuckBunnyVideoFrames_AllParseCleanly()
     {
+        CpuOnlyTest();
         // Integration test: pull every VP9 video packet out of the bundled
         // WebM, run it through the superframe parser, and verify each
         // yields at least one non-empty frame slice with total bytes not

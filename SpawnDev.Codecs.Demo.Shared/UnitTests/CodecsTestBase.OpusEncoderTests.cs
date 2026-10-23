@@ -86,6 +86,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Voip_Mono_8kHz_20ms_Roundtrips()
     {
+        CpuOnlyTest();
         int samples = OpusEncoderTests_EncodeAndDecode(
             OpusEncoderApplication.Voip,
             sampleRateHz: 8000, channelCount: 1, frameSizeSamples: 160,
@@ -98,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Audio_Mono_48kHz_20ms_Roundtrips()
     {
+        CpuOnlyTest();
         int samples = OpusEncoderTests_EncodeAndDecode(
             OpusEncoderApplication.Audio,
             sampleRateHz: 48000, channelCount: 1, frameSizeSamples: 960,
@@ -110,6 +112,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_RestrictedLowDelay_Mono_48kHz_20ms_Roundtrips()
     {
+        CpuOnlyTest();
         int samples = OpusEncoderTests_EncodeAndDecode(
             OpusEncoderApplication.RestrictedLowDelay,
             sampleRateHz: 48000, channelCount: 1, frameSizeSamples: 960,
@@ -126,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Audio_Mono_48kHz_2_5ms_Roundtrips()
     {
+        CpuOnlyTest();
         // 2.5 ms at 48 kHz = 120 samples/channel.
         int samples = OpusEncoderTests_EncodeAndDecode(
             OpusEncoderApplication.RestrictedLowDelay,
@@ -138,6 +142,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Audio_Mono_48kHz_5ms_Roundtrips()
     {
+        CpuOnlyTest();
         // 5 ms at 48 kHz = 240 samples/channel.
         int samples = OpusEncoderTests_EncodeAndDecode(
             OpusEncoderApplication.RestrictedLowDelay,
@@ -150,6 +155,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Audio_Mono_48kHz_10ms_Roundtrips()
     {
+        CpuOnlyTest();
         // 10 ms at 48 kHz = 480 samples/channel.
         int samples = OpusEncoderTests_EncodeAndDecode(
             OpusEncoderApplication.Audio,
@@ -162,6 +168,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Audio_Mono_48kHz_20ms_Roundtrips_FrameSizes()
     {
+        CpuOnlyTest();
         // 20 ms at 48 kHz = 960 samples/channel.
         int samples = OpusEncoderTests_EncodeAndDecode(
             OpusEncoderApplication.Audio,
@@ -178,6 +185,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Audio_Mono_8kHz_20ms_Roundtrips()
     {
+        CpuOnlyTest();
         // 20 ms at 8 kHz = 160 samples/channel.
         int samples = OpusEncoderTests_EncodeAndDecode(
             OpusEncoderApplication.Audio,
@@ -190,6 +198,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Audio_Mono_16kHz_20ms_Roundtrips()
     {
+        CpuOnlyTest();
         // 20 ms at 16 kHz = 320 samples/channel.
         int samples = OpusEncoderTests_EncodeAndDecode(
             OpusEncoderApplication.Audio,
@@ -202,6 +211,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Audio_Mono_24kHz_20ms_Roundtrips()
     {
+        CpuOnlyTest();
         // 20 ms at 24 kHz = 480 samples/channel.
         int samples = OpusEncoderTests_EncodeAndDecode(
             OpusEncoderApplication.Audio,
@@ -218,6 +228,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Audio_Stereo_48kHz_20ms_Roundtrips()
     {
+        CpuOnlyTest();
         int samples = OpusEncoderTests_EncodeAndDecode(
             OpusEncoderApplication.Audio,
             sampleRateHz: 48000, channelCount: 2, frameSizeSamples: 960,
@@ -229,6 +240,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Voip_Stereo_16kHz_20ms_Roundtrips()
     {
+        CpuOnlyTest();
         int samples = OpusEncoderTests_EncodeAndDecode(
             OpusEncoderApplication.Voip,
             sampleRateHz: 16000, channelCount: 2, frameSizeSamples: 320,
@@ -244,6 +256,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Audio_Mono_48kHz_ThreeFrames_Stream_Roundtrips()
     {
+        CpuOnlyTest();
         const int sampleRateHz = 48000;
         const int channelCount = 1;
         const int frameSizeSamples = 960; // 20 ms at 48 kHz
@@ -295,6 +308,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Silence_Roundtrips_NearZero()
     {
+        CpuOnlyTest();
         const int sampleRateHz = 48000;
         const int channelCount = 1;
         const int frameSizeSamples = 960;
@@ -330,6 +344,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Sine_Roundtrips_NonZeroEnergy()
     {
+        CpuOnlyTest();
         // Encode a clearly-audible sine then decode and confirm the decoded
         // signal is not trivially zero. This catches the failure mode where
         // the encoder silently produces a DTX packet for a tone.

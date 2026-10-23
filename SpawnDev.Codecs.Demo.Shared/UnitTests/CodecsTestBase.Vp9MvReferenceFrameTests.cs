@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvReferenceFrame_NumericValues_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(0, (int)Vp9MvReferenceFrame.Intra);
         Equal(1, (int)Vp9MvReferenceFrame.Last);
         Equal(2, (int)Vp9MvReferenceFrame.Golden);
@@ -21,6 +22,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvReferenceFrame_IsInter_ExcludesIntra()
     {
+        CpuOnlyTest();
         Equal(false, Vp9MvReferenceFrames.IsInter(Vp9MvReferenceFrame.Intra));
         Equal(true, Vp9MvReferenceFrames.IsInter(Vp9MvReferenceFrame.Last));
         Equal(true, Vp9MvReferenceFrames.IsInter(Vp9MvReferenceFrame.Golden));
@@ -30,6 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvReferenceFrame_ToReferenceSlot_Mapping()
     {
+        CpuOnlyTest();
         Equal(Vp9ReferenceSlot.Last, Vp9MvReferenceFrames.ToReferenceSlot(Vp9MvReferenceFrame.Last));
         Equal(Vp9ReferenceSlot.Golden, Vp9MvReferenceFrames.ToReferenceSlot(Vp9MvReferenceFrame.Golden));
         Equal(Vp9ReferenceSlot.AltRef, Vp9MvReferenceFrames.ToReferenceSlot(Vp9MvReferenceFrame.AltRef));
@@ -38,6 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvReferenceFrame_ToReferenceSlot_RejectsIntra()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9MvReferenceFrames.ToReferenceSlot(Vp9MvReferenceFrame.Intra));
     }

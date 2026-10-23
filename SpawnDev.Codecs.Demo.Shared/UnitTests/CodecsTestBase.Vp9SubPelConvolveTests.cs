@@ -11,12 +11,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_FilterBits_Is7()
     {
+        CpuOnlyTest();
         Equal(7, Vp9SubPelConvolve.FilterBits);
     }
 
     [TestMethod]
     public void Vp9SubPelConvolve_Identity_PassesCenter()
     {
+        CpuOnlyTest();
         // Sub-pel 0 is { 0, 0, 0, 128, 0, 0, 0, 0 } across all filters.
         // Dot product picks out src[srcStart + 3], divided by 128 (round).
         // With src[3] = 200, output = (200 * 128 + 64) >> 7 = 25664 >> 7 = 200.
@@ -28,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_Bilinear_HalfPel_AveragesCenters()
     {
+        CpuOnlyTest();
         // Bilinear at sub-pel 8 is { 0, 0, -12, 76, 76, -12, 0, 0 }.
         // With src[3] = src[4] = 100 and src[2] = src[5] = 100 (constant
         // sequence), dot product = 100 * (-12 + 76 + 76 - 12) = 100 * 128 = 12800.
@@ -40,6 +43,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_Constant_PreservedAcrossAllSubPel()
     {
+        CpuOnlyTest();
         // For a constant input sequence, the filter produces the same
         // constant (since rows sum to 128 and rounding is symmetric).
         var src = new byte[8];
@@ -61,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_Identity_AllZerosReturnZero()
     {
+        CpuOnlyTest();
         var src = new byte[8];
         Equal((byte)0, Vp9SubPelConvolve.ConvolveSample(
             src, 0, Vp9InterpFilter.EightTap, 0));
@@ -71,6 +76,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_Identity_AllMaxReturnMax()
     {
+        CpuOnlyTest();
         var src = new byte[8];
         for (int i = 0; i < 8; i++) src[i] = 255;
         for (int p = 0; p < Vp9SubPelFilters.SubPelShifts; p++)
@@ -83,6 +89,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_Clamps_NegativeOvershoot()
     {
+        CpuOnlyTest();
         // Construct an input that produces a negative pre-clamp sum.
         // EightTap at sub-pel 1: { 0, 1, -5, 126, 8, -3, 1, 0 }.
         // src[2] = 255, others = 0 -> sum = 255 * (-5) = -1275.
@@ -97,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_Clamps_PositiveOvershoot()
     {
+        CpuOnlyTest();
         // EightTapSharp at sub-pel 8: { -4, 11, -23, 80, 80, -23, 11, -4 }.
         // src[3] = src[4] = 255, others = 0
         // -> sum = 255 * 80 + 255 * 80 = 40800.
@@ -109,6 +117,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_RejectsBadFilterRowLength()
     {
+        CpuOnlyTest();
         var src = new byte[8];
         Throws<ArgumentException>(() =>
             Vp9SubPelConvolve.ConvolveSample(src, 0, new short[] { 0, 0, 0, 128, 0, 0, 0 }));
@@ -117,6 +126,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_RejectsOutOfRangeSrcStart()
     {
+        CpuOnlyTest();
         var src = new byte[8];
         var rowArr = new short[] { 0, 0, 0, 128, 0, 0, 0, 0 };
         Throws<ArgumentOutOfRangeException>(() =>
@@ -126,6 +136,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_Horiz_NoScale_IdentityCopiesPixels()
     {
+        CpuOnlyTest();
         // x0_q4 = 0 (sub-pel 0 = identity), x_step_q4 = 16 (1.0 step).
         // Source row of 16 padded pixels (3 left + 8 actual + 5 right).
         var src = new byte[16];
@@ -163,6 +174,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_Horiz_ConstantInput_ConstantOutput()
     {
+        CpuOnlyTest();
         // Constant input of 100 across all positions; any sub-pel
         // produces 100 (filter rows sum to 128).
         var src = new byte[64];
@@ -184,6 +196,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_Vert_NoScale_IdentityCopiesPixels()
     {
+        CpuOnlyTest();
         // 1-column source of 16 padded rows, identity sub-pel.
         // Each output row maps to src[srcStart + (3 + y) * stride].
         const int rows = 16, cols = 1, stride = 1;
@@ -240,6 +253,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_Copy_RowMatchesSourceExactly()
     {
+        CpuOnlyTest();
         const int sw = 16, stride = sw;
         var src = new byte[2 * stride];
         for (int i = 0; i < src.Length; i++) src[i] = (byte)(i + 1);
@@ -261,6 +275,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_Avg_AveragesSourceWithExistingDst()
     {
+        CpuOnlyTest();
         // dst[i] = (existing + src[i] + 1) >> 1.
         var src = new byte[8];
         var dst = new byte[8];
@@ -285,6 +300,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_2D_ConstantInput_ConstantOutput()
     {
+        CpuOnlyTest();
         // A constant source produces a constant output for any sub-pel
         // pair (both filter passes preserve constants).
         const int stride = 32;
@@ -308,6 +324,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_Vert_ConstantInput_ConstantOutput()
     {
+        CpuOnlyTest();
         const int rows = 64, stride = 8;
         var src = new byte[rows * stride];
         for (int i = 0; i < src.Length; i++) src[i] = 137;
@@ -328,6 +345,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SubPelConvolve_Horiz_MultiRow_CopiesEachIndependently()
     {
+        CpuOnlyTest();
         // 2-row source, identity sub-pel: output rows match source rows
         // (offset by 3 from srcStart per identity tap pattern).
         var src = new byte[2 * 16];

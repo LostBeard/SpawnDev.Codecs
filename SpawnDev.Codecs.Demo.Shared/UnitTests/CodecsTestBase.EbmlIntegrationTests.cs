@@ -73,6 +73,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void EbmlIntegration_Library_Resolves_FromSpawnDevCodecs()
     {
+        CpuOnlyTest();
         // Prove SpawnDev.EBML is accessible through the Codecs project and
         // that its default schemas (ebml + matroska + webm) come loaded.
         var parser = new EBMLParser();
@@ -85,6 +86,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void EbmlIntegration_IsEBML_OnWebMHeader_ReturnsTrue()
     {
+        CpuOnlyTest();
         // Feed a hand-built EBML header to the library's IsEBML detector.
         using var stream = new MemoryStream(EbmlIntegration_BuildHeader("webm"));
         var parser = new EBMLParser();
@@ -94,6 +96,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void EbmlIntegration_IsEBML_OnGarbage_ReturnsFalse()
     {
+        CpuOnlyTest();
         using var stream = new MemoryStream(new byte[] { 0, 0, 0, 0, 0 });
         var parser = new EBMLParser();
         False(parser.IsEBML(stream), "garbage must not look like EBML");
@@ -102,6 +105,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void EbmlIntegration_ParseDocument_WebMHeader_ReadsDocType()
     {
+        CpuOnlyTest();
         // This is the production code path Codecs demuxers will use: hand a
         // Stream to the parser, get back a document, read /EBML/DocType.
         using var stream = new MemoryStream(EbmlIntegration_BuildHeader("webm"));
@@ -114,6 +118,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void EbmlIntegration_ParseDocument_MatroskaHeader_ReadsDocType()
     {
+        CpuOnlyTest();
         using var stream = new MemoryStream(EbmlIntegration_BuildHeader("matroska"));
         var parser = new EBMLParser();
         var doc = parser.ParseDocument(stream);
@@ -124,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void EbmlIntegration_Document_HeaderIsMasterElement()
     {
+        CpuOnlyTest();
         using var stream = new MemoryStream(EbmlIntegration_BuildHeader("webm"));
         var parser = new EBMLParser();
         var doc = parser.ParseDocument(stream);

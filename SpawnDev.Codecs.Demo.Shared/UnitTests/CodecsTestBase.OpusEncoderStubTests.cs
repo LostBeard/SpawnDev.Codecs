@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Construct_ExposesCodecAndConfig()
     {
+        CpuOnlyTest();
         var enc = new OpusEncoder(new OpusEncoderConfig
         {
             SampleRateHz = 48000,
@@ -30,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Construct_BadSampleRate_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => new OpusEncoder(new OpusEncoderConfig
         {
             SampleRateHz = 11025,
@@ -40,6 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_Construct_BadChannelCount_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => new OpusEncoder(new OpusEncoderConfig
         {
             SampleRateHz = 48000,
@@ -50,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_EncodeFrame_BadFrameSize_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusEncoder(new OpusEncoderConfig
         {
             SampleRateHz = 48000,
@@ -64,6 +68,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_EncodeFrame_PcmTooShort_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusEncoder(new OpusEncoderConfig
         {
             SampleRateHz = 48000,
@@ -79,6 +84,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusEncoder_AfterDispose_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusEncoder(new OpusEncoderConfig
         {
             SampleRateHz = 48000,

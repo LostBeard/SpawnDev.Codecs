@@ -12,6 +12,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1StreamValidator_BbbFixture_ReportsNoErrors()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         var result = Av1StreamValidator.Validate(bytes);
         Equal(true, result.IsValid);
@@ -25,6 +26,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1StreamValidator_RejectsBadIvfHeader()
     {
+        CpuOnlyTest();
         // Stream that is NOT a valid IVF (just random bytes).
         var bytes = new byte[64];
         for (int i = 0; i < bytes.Length; i++) bytes[i] = (byte)(i + 1);
@@ -37,6 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1StreamValidator_StreamWithoutSequenceHeader_ReportsError()
     {
+        CpuOnlyTest();
         // Build a minimal IVF with a TD OBU but no SH OBU.
         using var ms = new MemoryStream();
         var writer = new IvfWriter(ms, "AV01", 320, 180);
@@ -53,6 +56,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1StreamValidator_FoundCount_MatchesIndividualCounts()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         var result = Av1StreamValidator.Validate(bytes);
         int sum = result.CountBy(Av1ValidationSeverity.Info)

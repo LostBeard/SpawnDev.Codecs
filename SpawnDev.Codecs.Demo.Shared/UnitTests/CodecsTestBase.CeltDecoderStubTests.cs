@@ -41,6 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void CeltDecoder_NullMode_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() => new CeltDecoder(null!));
     }
 
@@ -84,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusDecoder_CeltPacket_ProducesValidPcm()
     {
+        CpuOnlyTest();
         // Generate a CELT-mode Opus packet via Concentus by encoding music-like
         // audio with the AUDIO application hint at a high enough bitrate. We
         // verify the packet's mode then run our OpusDecoder and confirm it

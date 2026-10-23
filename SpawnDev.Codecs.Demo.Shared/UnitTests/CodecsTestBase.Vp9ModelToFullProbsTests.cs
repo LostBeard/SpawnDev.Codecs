@@ -13,6 +13,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ModelToFullProbs_ConstantsMatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(3,  Vp9CoefProbs.UnconstrainedNodes);
         Equal(8,  Vp9CoefProbs.ModelNodes);
         Equal(11, Vp9CoefProbs.EntropyNodes);
@@ -22,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ModelToFullProbs_CopiesModelThenAppendsPareto8Row()
     {
+        CpuOnlyTest();
         // For pivot = 1, pareto8_full[0] = { 3, 86, 128, 6, 86, 23, 88, 29 }.
         var model = new byte[] { 100, 50, 1 };
         var full = new byte[11];
@@ -46,6 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ModelToFullProbs_PivotEqualsTwoIndexesSecondPareto8Row()
     {
+        CpuOnlyTest();
         // pareto8_full[1] = { 6, 86, 128, 11, 87, 42, 91, 52 }.
         var model = new byte[] { 200, 150, 2 };
         var full = new byte[11];
@@ -60,6 +63,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ModelToFullProbs_PivotEquals255IndexesLastPareto8Row()
     {
+        CpuOnlyTest();
         // pareto8_full[254] = { 255, 246, 247, 255, 239, 255, 253, 255 }.
         var model = new byte[] { 1, 1, 255 };
         var full = new byte[11];
@@ -77,6 +81,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ModelToFullProbs_PivotZero_ThrowsInvalidData()
     {
+        CpuOnlyTest();
         // Pivot probability of 0 would index Pareto8Full at row -1 -
         // libvpx asserts the same condition. A correct VP9 bitstream
         // never produces a zero pivot for a coefficient that's actually
@@ -90,6 +95,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ModelToFullProbs_RejectsTooSmallBuffers()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => Vp9CoefProbs.ModelToFullProbs(new byte[2], new byte[11]));
         Throws<ArgumentException>(() => Vp9CoefProbs.ModelToFullProbs(new byte[3], new byte[10]));
     }
@@ -97,6 +103,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ModelToFullProbs_DrivenByDefaultCoefProbs4x4_ProducesValidFullVector()
     {
+        CpuOnlyTest();
         // End-to-end: pull a stored 3-entry model out of slice 142's
         // 4x4 default prob table, expand it, and verify the result has
         // a non-zero entry at every position. This sanity-checks that

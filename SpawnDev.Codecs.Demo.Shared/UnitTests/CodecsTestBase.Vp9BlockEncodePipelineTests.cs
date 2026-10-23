@@ -92,6 +92,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockEncodePipeline_FlatBlock_LowQ_ReconstructsExactly()
     {
+        CpuOnlyTest();
         // Flat 128 block -> zero residual -> all-zero coefs -> 1-byte
         // bitstream (just the EOB bit + 32 trailing zeros). Reconstruction
         // is bit-exact (no quantization loss possible for zero coefs).
@@ -105,6 +106,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockEncodePipeline_DcOffset_LowQ_LowError()
     {
+        CpuOnlyTest();
         // Constant block != predictor -> single DC coefficient; round-trip
         // through quantize + entropy + dequantize + inverse DCT gives
         // back the same constant within a few units.
@@ -122,6 +124,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockEncodePipeline_Gradient_LowQ_LowError()
     {
+        CpuOnlyTest();
         // Gradient block exercises every basis function. Low Q -> low
         // quantization error.
         var pixels = new byte[16];
@@ -140,6 +143,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockEncodePipeline_RandomBlocks_HighQ_BoundedError()
     {
+        CpuOnlyTest();
         // High Q -> larger error per pixel. Bound at +/- 16 which is
         // generous for Q=80 on natural-ish data.
         var rng = new Random(0xB10C);
@@ -160,6 +164,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockEncodePipeline_AllZero_ProducesSingleEobByte()
     {
+        CpuOnlyTest();
         // The all-zero block emits only the leading marker bit + the
         // single EOB bit + 32 zero flush bits. Stream should fit in a
         // few bytes (libvpx vpx_stop_encode emits up to 4 trailing
@@ -232,6 +237,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockEncodePipeline_8x8_FlatBlock_LowQ_ReconstructsExactly()
     {
+        CpuOnlyTest();
         var pixels = new byte[64];
         for (int i = 0; i < 64; i++) pixels[i] = 128;
 
@@ -242,6 +248,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockEncodePipeline_8x8_Gradient_LowQ_LowError()
     {
+        CpuOnlyTest();
         var pixels = new byte[64];
         for (int r = 0; r < 8; r++)
             for (int c = 0; c < 8; c++)
@@ -311,6 +318,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockEncodePipeline_16x16_FlatBlock_LowQ_ReconstructsExactly()
     {
+        CpuOnlyTest();
         var pixels = new byte[256];
         for (int i = 0; i < 256; i++) pixels[i] = 128;
 
@@ -321,6 +329,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockEncodePipeline_16x16_Gradient_LowQ_LowError()
     {
+        CpuOnlyTest();
         var pixels = new byte[256];
         for (int r = 0; r < 16; r++)
             for (int c = 0; c < 16; c++)

@@ -12,6 +12,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8InverseTransform_DcOnlyIdctAdd_ZeroDc_ProducesZeroDeltaPlusPred()
     {
+        CpuOnlyTest();
         // input_dc=0 -> a1 = (0+4)>>3 = 0. Output is just pred.
         Span<byte> pred = stackalloc byte[16];
         Span<byte> dst = stackalloc byte[16];
@@ -26,6 +27,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8InverseTransform_DcOnlyIdctAdd_PositiveDc_AddsConstant()
     {
+        CpuOnlyTest();
         // input_dc=8 -> a1 = (8+4)>>3 = 1. Output is pred + 1.
         Span<byte> pred = stackalloc byte[16];
         Span<byte> dst = stackalloc byte[16];
@@ -40,6 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8InverseTransform_DcOnlyIdctAdd_NegativeDc_ClampsAtZero()
     {
+        CpuOnlyTest();
         // input_dc=-808 -> a1 = (-808+4)>>3 = -100. pred=50 -> a = -50, clamp to 0.
         Span<byte> pred = stackalloc byte[16];
         Span<byte> dst = stackalloc byte[16];
@@ -54,6 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8InverseTransform_DcOnlyIdctAdd_LargePositiveDc_ClampsAt255()
     {
+        CpuOnlyTest();
         // input_dc=2040 -> a1 = (2040+4)>>3 = 255. pred=200 -> a = 455, clamp to 255.
         Span<byte> pred = stackalloc byte[16];
         Span<byte> dst = stackalloc byte[16];
@@ -68,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8InverseTransform_ShortIdct4x4Llm_AllZeroCoeffs_ProducesZeroDeltaPlusPred()
     {
+        CpuOnlyTest();
         // All-zero input -> output = pred (no residual added, all clamped passthrough).
         Span<short> input = stackalloc short[16];
         Span<byte> pred = stackalloc byte[16];
@@ -83,6 +88,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8InverseTransform_ShortInvWalsh4x4_KnownInput_KnownOutput()
     {
+        CpuOnlyTest();
         // Walsh-Hadamard is an orthogonal transform. WalshFwd then WalshInv
         // applied to integers yields the original scaled by 16. We test the
         // identity case here: input is the all-equal-DC pattern that

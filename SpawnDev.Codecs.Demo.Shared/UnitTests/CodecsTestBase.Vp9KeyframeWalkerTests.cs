@@ -55,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeWalker_DecodesBbbFirstKeyframe_NoExceptions()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         var video = container.Tracks.First(t => t.IsVideo);
@@ -89,6 +90,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeWalker_FirstYBlock_IsBitExactVsFfmpeg()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         var video = container.Tracks.First(t => t.IsVideo);
@@ -128,6 +130,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeWalker_PlaneStats_AreInRecognizableBand()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         var video = container.Tracks.First(t => t.IsVideo);
@@ -169,6 +172,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeWalker_RejectsInterFrame_ThrowsNotImplemented()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         var video = container.Tracks.First(t => t.IsVideo);

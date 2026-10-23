@@ -13,6 +13,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Dequantizer_LookupTables_HaveExactly256Entries()
     {
+        CpuOnlyTest();
         Equal(256, Vp9Dequantizer.DcQLookup8.Length);
         Equal(256, Vp9Dequantizer.AcQLookup8.Length);
     }
@@ -20,6 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Dequantizer_DcLookup_KnownEndpointsMatchSpec()
     {
+        CpuOnlyTest();
         // Pinned values straight out of libvpx vp9_quant_common.c
         // dc_qlookup table - hand-verified against the C source.
         Equal((short)4,    Vp9Dequantizer.DcQLookup8[0]);
@@ -33,6 +35,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Dequantizer_AcLookup_KnownEndpointsMatchSpec()
     {
+        CpuOnlyTest();
         Equal((short)4,    Vp9Dequantizer.AcQLookup8[0]);
         Equal((short)8,    Vp9Dequantizer.AcQLookup8[1]);
         Equal((short)22,   Vp9Dequantizer.AcQLookup8[15]);
@@ -44,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Dequantizer_DcQuant_AppliesDeltaThenClamps()
     {
+        CpuOnlyTest();
         // No delta - direct lookup.
         Equal((short)Vp9Dequantizer.DcQLookup8[42], Vp9Dequantizer.DcQuant(42, 0));
         // Positive delta within range - delta is added before lookup.
@@ -59,6 +63,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Dequantizer_AcQuant_AppliesDeltaThenClamps()
     {
+        CpuOnlyTest();
         Equal((short)Vp9Dequantizer.AcQLookup8[42], Vp9Dequantizer.AcQuant(42, 0));
         Equal((short)Vp9Dequantizer.AcQLookup8[50], Vp9Dequantizer.AcQuant(42, 8));
         Equal((short)Vp9Dequantizer.AcQLookup8[34], Vp9Dequantizer.AcQuant(42, -8));
@@ -69,6 +74,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Dequantizer_PlaneQuantizer_BuildsBothFromBaseAndDeltas()
     {
+        CpuOnlyTest();
         var pq = Vp9Dequantizer.PlaneQuantizer(qIndex: 60, dcDelta: -2, acDelta: 3);
         Equal(Vp9Dequantizer.DcQuant(60, -2), pq.Dc);
         Equal(Vp9Dequantizer.AcQuant(60, 3), pq.Ac);
@@ -77,6 +83,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Dequantizer_DequantizeInPlace_ZeroCoefficientsStayZero()
     {
+        CpuOnlyTest();
         var coeffs = new short[16];
         var quant = new Vp9PlaneQuantizer(Dc: 17, Ac: 23);
         Vp9Dequantizer.DequantizeInPlace(coeffs, quant);
@@ -87,6 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Dequantizer_DequantizeInPlace_AppliesDcThenAc()
     {
+        CpuOnlyTest();
         // First coefficient uses Dc, every subsequent coefficient uses Ac.
         var coeffs = new short[] { 3, 5, 7, 11 };
         var quant = new Vp9PlaneQuantizer(Dc: 100, Ac: 50);
@@ -100,6 +108,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Dequantizer_DequantizeInPlace_NegativeCoefficientsPreserveSign()
     {
+        CpuOnlyTest();
         var coeffs = new short[] { -10, -20, 30 };
         var quant = new Vp9PlaneQuantizer(Dc: 7, Ac: 11);
         Vp9Dequantizer.DequantizeInPlace(coeffs, quant);
@@ -111,6 +120,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Dequantizer_DequantizeInPlace_SaturatesAtInt16Bounds()
     {
+        CpuOnlyTest();
         // 4096 * 16 = 65536 > short.MaxValue (32767) -> clamps high.
         // -4096 * 16 = -65536 < short.MinValue (-32768) -> clamps low.
         var coeffs = new short[] { 4096, -4096, 100, -100 };
@@ -125,6 +135,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Dequantizer_DequantizeInPlace_EmptySpanIsNoOp()
     {
+        CpuOnlyTest();
         Span<short> empty = stackalloc short[0];
         var quant = new Vp9PlaneQuantizer(Dc: 10, Ac: 20);
         Vp9Dequantizer.DequantizeInPlace(empty, quant);
@@ -134,6 +145,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Dequantizer_DequantizeInPlace_FollowedByIdct4x4_RoundTripsThroughPipeline()
     {
+        CpuOnlyTest();
         // End-to-end: build a quantized 4x4 block, dequantize, run iDCT 4x4
         // residual-add against a flat predictor. Verifies the dequant value
         // domain (int16) feeds the existing iDCT path correctly.

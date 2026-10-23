@@ -12,6 +12,9 @@ namespace SpawnDev.Codecs.DemoConsole.UnitTests;
 /// </summary>
 public class CpuCodecsTests : CodecsTestBase
 {
+    /// <summary>The CPU-only tests (no accelerator) run here and nowhere else.</summary>
+    protected override bool RunsCpuOnlyTests => true;
+
     protected override ValueTask<(Context, Accelerator)> CreateKernelAcceleratorAsync()
     {
         var ctx = Context.Create(b => b.CPU());

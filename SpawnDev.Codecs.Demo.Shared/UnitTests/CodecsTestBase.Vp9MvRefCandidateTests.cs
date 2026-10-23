@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefCandidate_None_HasIntraRef_ZeroMv()
     {
+        CpuOnlyTest();
         Equal(Vp9MvReferenceFrame.Intra, Vp9MvRefCandidate.None.ReferenceFrame);
         Equal(Vp9Mv.Zero, Vp9MvRefCandidate.None.Mv);
         Equal(true, Vp9MvRefCandidate.None.IsIntra);
@@ -20,6 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefCandidate_IsIntra_OnlyForIntraRef()
     {
+        CpuOnlyTest();
         var intra = new Vp9MvRefCandidate(Vp9Mv.Zero, Vp9MvReferenceFrame.Intra);
         var last = new Vp9MvRefCandidate(new Vp9Mv(8, -8), Vp9MvReferenceFrame.Last);
         Equal(true, intra.IsIntra);
@@ -29,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefCandidate_HasMotion_FalseForZeroMv()
     {
+        CpuOnlyTest();
         var c = new Vp9MvRefCandidate(Vp9Mv.Zero, Vp9MvReferenceFrame.Last);
         Equal(false, c.HasMotion);
     }
@@ -36,6 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefCandidate_HasMotion_TrueForNonzero()
     {
+        CpuOnlyTest();
         Equal(true, new Vp9MvRefCandidate(new Vp9Mv(1, 0), Vp9MvReferenceFrame.Last).HasMotion);
         Equal(true, new Vp9MvRefCandidate(new Vp9Mv(0, 1), Vp9MvReferenceFrame.Last).HasMotion);
         Equal(true, new Vp9MvRefCandidate(new Vp9Mv(-5, 8), Vp9MvReferenceFrame.AltRef).HasMotion);
@@ -44,6 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefCandidate_RecordEquality()
     {
+        CpuOnlyTest();
         var a = new Vp9MvRefCandidate(new Vp9Mv(7, 11), Vp9MvReferenceFrame.Golden);
         var b = new Vp9MvRefCandidate(new Vp9Mv(7, 11), Vp9MvReferenceFrame.Golden);
         var c = new Vp9MvRefCandidate(new Vp9Mv(7, 11), Vp9MvReferenceFrame.Last);

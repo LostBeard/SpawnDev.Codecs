@@ -14,6 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LtpGainTables_Vq0_HasExpectedShape()
     {
+        CpuOnlyTest();
         // 8 entries x 5 taps.
         Equal(40, SilkLtpGainTables.Vq0.Length);
         Equal(5, SilkLtpGainTables.LtpVecSize);
@@ -22,12 +23,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LtpGainTables_Vq1_HasExpectedShape()
     {
+        CpuOnlyTest();
         Equal(80, SilkLtpGainTables.Vq1.Length);
     }
 
     [TestMethod]
     public void LtpGainTables_Vq2_HasExpectedShape()
     {
+        CpuOnlyTest();
         Equal(160, SilkLtpGainTables.Vq2.Length);
     }
 
@@ -36,6 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GetGainVector_Cb0_Entry0_MatchesLibopus()
     {
+        CpuOnlyTest();
         // silk_LTP_gain_vq_0[0] = { 4, 6, 24, 7, 5 }
         sbyte[] taps = new sbyte[5];
         SilkLtpDecoder.GetGainVector(taps, perIndex: 0, ltpIndex: 0);
@@ -45,6 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GetGainVector_Cb0_LastEntry_MatchesLibopus()
     {
+        CpuOnlyTest();
         // silk_LTP_gain_vq_0[7] = { 16, 14, 38, -3, 33 }
         sbyte[] taps = new sbyte[5];
         SilkLtpDecoder.GetGainVector(taps, perIndex: 0, ltpIndex: 7);
@@ -54,6 +59,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GetGainVector_Cb1_Entry0_MatchesLibopus()
     {
+        CpuOnlyTest();
         // silk_LTP_gain_vq_1[0] = { 13, 22, 39, 23, 12 }
         sbyte[] taps = new sbyte[5];
         SilkLtpDecoder.GetGainVector(taps, perIndex: 1, ltpIndex: 0);
@@ -63,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GetGainVector_Cb1_LastEntry_MatchesLibopus()
     {
+        CpuOnlyTest();
         // silk_LTP_gain_vq_1[15] = { 3, -1, 21, 16, 41 }
         sbyte[] taps = new sbyte[5];
         SilkLtpDecoder.GetGainVector(taps, perIndex: 1, ltpIndex: 15);
@@ -72,6 +79,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GetGainVector_Cb2_Entry0_MatchesLibopus()
     {
+        CpuOnlyTest();
         // silk_LTP_gain_vq_2[0] = { -6, 27, 61, 39, 5 }
         sbyte[] taps = new sbyte[5];
         SilkLtpDecoder.GetGainVector(taps, perIndex: 2, ltpIndex: 0);
@@ -81,6 +89,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GetGainVector_Cb2_LastEntry_MatchesLibopus()
     {
+        CpuOnlyTest();
         // silk_LTP_gain_vq_2[31] = { 2, 0, 9, 10, 88 }
         sbyte[] taps = new sbyte[5];
         SilkLtpDecoder.GetGainVector(taps, perIndex: 2, ltpIndex: 31);
@@ -92,6 +101,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GetGainVector_Cb2_MidEntry_MatchesLibopus()
     {
+        CpuOnlyTest();
         // silk_LTP_gain_vq_2[16] = { -1, 4, 124, 2, -4 }
         sbyte[] taps = new sbyte[5];
         SilkLtpDecoder.GetGainVector(taps, perIndex: 2, ltpIndex: 16);
@@ -103,6 +113,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GetGainVector_OutputTooSmall_Throws()
     {
+        CpuOnlyTest();
         sbyte[] small = new sbyte[4];
         Throws<ArgumentException>(() =>
             SilkLtpDecoder.GetGainVector(small, 0, 0));
@@ -111,6 +122,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GetGainVector_InvalidPerIndex_Throws()
     {
+        CpuOnlyTest();
         sbyte[] taps = new sbyte[5];
         Throws<ArgumentOutOfRangeException>(() =>
             SilkLtpDecoder.GetGainVector(taps, perIndex: 3, ltpIndex: 0));
@@ -119,6 +131,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GetGainVector_LtpIndexOutOfRange_Throws()
     {
+        CpuOnlyTest();
         sbyte[] taps = new sbyte[5];
         // Cb0 has 8 entries; 8 is out of range.
         Throws<ArgumentOutOfRangeException>(() =>
@@ -136,6 +149,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void LtpGainTables_Select_ReferenceEquality()
     {
+        CpuOnlyTest();
         if (!ReferenceEquals(SilkLtpGainTables.Vq0, SilkLtpGainTables.Select(0)))
             throw new Exception("Select(0) should reference Vq0");
         if (!ReferenceEquals(SilkLtpGainTables.Vq1, SilkLtpGainTables.Select(1)))

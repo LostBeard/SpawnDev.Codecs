@@ -37,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MatroskaContainer_OnBigBuckBunnyWebM_ReportsWebMDocType()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         True(container.IsWebM, $"expected WebM, got DocType '{container.DocType}'");
@@ -46,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MatroskaContainer_OnBigBuckBunnyWebM_EnumeratesTracks()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         var tracks = container.Tracks.ToList();
@@ -61,6 +63,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MatroskaContainer_BigBuckBunny_HasVideoTrack_WithVp9Codec()
     {
+        CpuOnlyTest();
         // The bundled fixture is a VP9 WebM. Exercise the full detection
         // path: enumerate tracks, find the video one, check its codec ID
         // matches the Matroska codec-registry string for VP9.
@@ -74,6 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MatroskaContainer_OnBigBuckBunnyWebM_YieldsVideoFrames()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         var videoTrack = container.Tracks.FirstOrDefault(t => t.IsVideo);
@@ -95,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MatroskaContainer_Frames_AreTimestampOrdered_WithinTrack()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         var videoTrack = container.Tracks.First(t => t.IsVideo);
@@ -115,6 +120,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MatroskaContainer_SegmentInfo_ExposesTimestampScale_ForBigBuckBunny()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         var info = container.SegmentInfo;
@@ -126,6 +132,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MatroskaContainer_SegmentInfo_DurationConvertsToRealTimeSpan()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         var info = container.SegmentInfo;
@@ -141,6 +148,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MatroskaContainer_SegmentInfo_DefaultsTimestampScale_WhenElementAbsent()
     {
+        CpuOnlyTest();
         // Hand-build a minimal WebM with no /Segment/Info. The container
         // should still return a populated SegmentInfo object with the
         // spec-default TimestampScale of 1,000,000.
@@ -160,6 +168,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MatroskaContainer_Frames_FirstVideoFrame_IsKeyframe()
     {
+        CpuOnlyTest();
         // The very first video frame in any well-formed stream must be a
         // keyframe - otherwise there's nothing for a decoder to reference.
         using var stream = LoadBigBuckBunnyWebM();
@@ -174,6 +183,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MatroskaContainer_ThrowsOnNullStream()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { _ = new MatroskaContainer(null!); }
         catch (ArgumentNullException) { threw = true; }
@@ -183,6 +193,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void MatroskaContainer_ThrowsOnNonEbmlStream()
     {
+        CpuOnlyTest();
         using var garbage = new MemoryStream(new byte[] { 0, 0, 0, 0, 0, 0, 0, 0 });
         bool threw = false;
         try { _ = new MatroskaContainer(garbage); }

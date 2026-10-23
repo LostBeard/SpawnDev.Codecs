@@ -23,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8LossyEncoderReference_AllFixtures_ByteIdenticalWithLibwebp()
     {
+        CpuOnlyTest();
         var text = System.Text.Encoding.UTF8.GetString(ReadEmbedded(WebPLossyEncPrefix + "manifest.tsv"));
         var yuvCache = new Dictionary<string, byte[]>();
         var failures = new List<string>();

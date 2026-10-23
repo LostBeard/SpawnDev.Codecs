@@ -14,6 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefProbsParser_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(2, Vp9CoefProbsParser.PlaneTypes);
         Equal(2, Vp9CoefProbsParser.RefTypes);
         Equal(6, Vp9CoefProbsParser.CoefBands);
@@ -25,6 +26,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefProbsParser_BandCoefContexts_DcVsAc()
     {
+        CpuOnlyTest();
         // Band 0 (DC) has 3 contexts; bands 1..5 (AC) have 6.
         Equal(3, Vp9CoefProbsParser.BandCoefContexts(0));
         Equal(6, Vp9CoefProbsParser.BandCoefContexts(1));
@@ -34,6 +36,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefProbsParser_FlatIndex_MatchesAxisOrdering()
     {
+        CpuOnlyTest();
         // [plane][ref][band][ctx][node] row-major. Stride table:
         //   node:1; ctx:3; band:6*3=18; ref:6*18=108; plane:2*108=216.
         Equal(0, Vp9CoefProbsParser.FlatIndex(0, 0, 0, 0, 0));
@@ -49,6 +52,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefProbsParser_TxModeToBiggestTxSize_AllValues()
     {
+        CpuOnlyTest();
         Equal(0, Vp9CoefProbsParser.TxModeToBiggestTxSize(Vp9TxMode.Only4x4));
         Equal(1, Vp9CoefProbsParser.TxModeToBiggestTxSize(Vp9TxMode.AllowOnly8x8));
         Equal(2, Vp9CoefProbsParser.TxModeToBiggestTxSize(Vp9TxMode.AllowOnly16x16));
@@ -59,6 +63,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefProbsParser_TxModeToBiggestTxSize_RejectsUnknown()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9CoefProbsParser.TxModeToBiggestTxSize((Vp9TxMode)99));
     }
@@ -66,6 +71,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefProbsParser_NoUpdate_LeavesTableUntouched()
     {
+        CpuOnlyTest();
         // Build a buffer that decodes to: marker=0 (init), then update_flag=0.
         // Vp9BoolDecoder's internal arithmetic with prob=128 on 0x00 byte
         // contents reads as 0, 0, 0... Init consumes 1 bit; we need the
@@ -86,6 +92,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefProbsParser_ReadCoefProbs_AllTxSizesUntouched_WhenNoUpdates()
     {
+        CpuOnlyTest();
         // 4 update flags all 0 (one per tx_size). Buffer of zeros suffices.
         var data = new byte[16];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
@@ -110,6 +117,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefProbsParser_ReadCoefProbs_OnlyUpToMaxTxSize_Walked()
     {
+        CpuOnlyTest();
         // For tx_mode = Only4x4, only tables[0] should be walked. Tables 1..3
         // shouldn't even be inspected. Since our buffer encodes 4 update flags
         // as 0, only the first is read; the remaining are still readable
@@ -135,6 +143,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefProbsParser_RejectsUndersizedTable()
     {
+        CpuOnlyTest();
         var data = new byte[16];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
         var tooSmall = new byte[Vp9CoefProbsParser.FlatSize - 1];

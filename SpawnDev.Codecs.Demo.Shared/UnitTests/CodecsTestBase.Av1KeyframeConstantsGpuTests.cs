@@ -21,6 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1KeyframeConstantsGpu_BufferSizes_MatchLayout()
     {
+        CpuOnlyTest();
         var byteBuf = Av1KeyframeConstantsGpu.BuildByteConstsBuffer();
         var ushortBuf = Av1KeyframeConstantsGpu.BuildUshortConstsBuffer();
 
@@ -31,6 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1KeyframeConstantsGpu_ScanTables_MatchSource()
     {
+        CpuOnlyTest();
         var ushortBuf = Av1KeyframeConstantsGpu.BuildUshortConstsBuffer();
 
         // Tx8x8 + DCT_DCT - 64 entries.
@@ -49,6 +51,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1KeyframeConstantsGpu_NzMapCtxOffset_RoundTrips()
     {
+        CpuOnlyTest();
         var byteBuf = Av1KeyframeConstantsGpu.BuildByteConstsBuffer();
 
         // Tx8x8 NzMapCtxOffset (libaom TX_SIZE index 1).
@@ -67,6 +70,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1KeyframeConstantsGpu_EobGroupStartAndOffsetBits_RoundTrip()
     {
+        CpuOnlyTest();
         var byteBuf = Av1KeyframeConstantsGpu.BuildByteConstsBuffer();
 
         // EobGroupStart - 12 entries, little-endian ushort.
@@ -93,6 +97,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1KeyframeConstantsGpu_CdfSentinels_MatchSource()
     {
+        CpuOnlyTest();
         var ushortBuf = Av1KeyframeConstantsGpu.BuildUshortConstsBuffer();
 
         // Sentinel: TxbSkipCdf at qctx=0, txs_local=0 (Tx8x8 -> libaom 1), ctx=0, sym=0.
@@ -152,6 +157,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1KeyframeConstantsGpu_Tx4x4_AllEntries_MatchSource()
     {
+        CpuOnlyTest();
         // Boundary-MB chroma at non-aligned VP9/AV1 dims uses Tx4x4 scans/CDFs.
         // This test verifies every Tx4x4 entry packs bit-exact vs the libaom
         // default tables (txsCtx index 0 throughout).

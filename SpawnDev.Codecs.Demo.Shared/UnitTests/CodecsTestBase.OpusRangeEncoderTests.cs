@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_Ctor_Capacity_AllocatesBuffer()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(64);
         Equal(0u, enc.RangeBytes);
         Equal(0, enc.Error);
@@ -24,18 +25,21 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_Ctor_NegativeCapacity_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() => new OpusRangeEncoder(-1));
     }
 
     [TestMethod]
     public void Encoder_Ctor_NullBuffer_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() => new OpusRangeEncoder(null!, 0, 0));
     }
 
     [TestMethod]
     public void Encoder_Ctor_OffsetOutOfRange_Throws()
     {
+        CpuOnlyTest();
         var buf = new byte[4];
         Throws<ArgumentOutOfRangeException>(() => new OpusRangeEncoder(buf, 5, 0));
     }
@@ -43,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_Encode_AfterDone_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(64);
         enc.EncodeBitLogP(1, 2);
         enc.Done();
@@ -52,6 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_ToArray_BeforeDone_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(64);
         enc.EncodeBitLogP(1, 2);
         Throws<InvalidOperationException>(() => enc.ToArray());
@@ -60,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_Done_Twice_IsNoOp()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(64);
         enc.EncodeBitLogP(1, 2);
         enc.Done();
@@ -72,6 +79,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_RoundTrip_SingleBitLogP()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(64);
         enc.EncodeBitLogP(1, 3);
         enc.Done();
@@ -83,6 +91,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_RoundTrip_MultipleBitLogP()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(128);
         int[] bits = { 1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0 };
         int[] logps = { 2, 3, 1, 4, 2, 5, 3, 2, 1, 3, 4, 2, 3, 1, 2, 5 };
@@ -100,6 +109,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_RoundTrip_IcdfSmallTable()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(128);
         var icdf = new byte[] { 200, 100, 50, 0 };
         int[] symbols = { 0, 1, 2, 3, 1, 2, 0, 3, 2, 1 };
@@ -114,6 +124,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_RoundTrip_Icdf16Wide()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(256);
         var icdf = new ushort[] { 60000, 50000, 40000, 30000, 20000, 10000, 0 };
         int[] symbols = { 0, 6, 3, 1, 5, 2, 4, 0, 6, 3, 5, 1, 2, 4 };
@@ -127,6 +138,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_RoundTrip_EncodeUpdatePair()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(128);
         uint ft = 16;
         uint[] symbols = { 0, 5, 10, 15, 7, 3, 11, 2, 14, 8, 1, 9 };
@@ -145,6 +157,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_RoundTrip_EncodeBinDecodeBin()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(128);
         int bits = 5;
         uint[] symbols = { 0, 31, 15, 1, 30, 7, 22, 13 };
@@ -162,6 +175,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_RoundTrip_RawBitsSmall()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(128);
         uint[] values = { 5, 0, 15, 7, 1, 8, 14, 3 };
         foreach (uint v in values) enc.EncodeBits(v, 4);
@@ -174,6 +188,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_RoundTrip_RawBitsLarge()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(256);
         uint[] values = { 0x12345, 0xABCDE, 0x1FFFFFF, 0x0, 0x55555 };
         foreach (uint v in values) enc.EncodeBits(v, 25);
@@ -186,6 +201,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_RoundTrip_UintSmall()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(64);
         uint ft = 100;
         uint[] values = { 0, 50, 99, 17, 82, 3 };
@@ -199,6 +215,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_RoundTrip_UintLarge()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(256);
         uint ft = 1u << 20;
         uint[] values = { 0, ft - 1u, 0x12345, 0xABCDE, 0x7FFFF };
@@ -212,6 +229,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_RoundTrip_MixedOperations()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(512);
         var icdf = new byte[] { 180, 100, 30, 0 };
 
@@ -246,6 +264,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_RoundTrip_LongRandomSymbolStream()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(1024);
         var icdf = new byte[] { 240, 200, 150, 100, 60, 30, 10, 0 };
         var rng = new Random(42);
@@ -271,6 +290,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_Shrink_ValidSize_Succeeds()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(256);
         enc.EncodeBits(0x5A, 8);
         enc.Shrink(128);
@@ -283,6 +303,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_Shrink_TooSmall_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(128);
         enc.EncodeBits(0xABCDEF, 24);
         enc.EncodeBits(0x123456, 24);
@@ -293,6 +314,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Encoder_PatchInitialBits_UpdatesFirstByte()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(64);
         enc.EncodeBitLogP(0, 2);
         enc.EncodeBitLogP(1, 2);

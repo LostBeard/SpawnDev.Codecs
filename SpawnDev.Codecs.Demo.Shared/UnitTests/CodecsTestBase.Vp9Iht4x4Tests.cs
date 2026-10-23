@@ -21,6 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht4x4_DctDct_MatchesIdct4x4Reference()
     {
+        CpuOnlyTest();
         // tx_type=0 must exactly match the standalone iDCT 4x4 reference
         // on every input, because it IS the same transform.
         var rng = new Random(0xD1);
@@ -43,6 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht4x4_AdstAdst_MatchesIadstReference()
     {
+        CpuOnlyTest();
         // tx_type=3 must match the pure ADST_ADST reference from slice 121.
         var rng = new Random(0xD3);
         for (int trial = 0; trial < 10; trial++)
@@ -64,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht4x4_AdstDct_VsDctAdst_ProduceDifferentOutput()
     {
+        CpuOnlyTest();
         // ADST_DCT (tx_type=1) and DCT_ADST (tx_type=2) are distinct
         // transforms - they apply iADST to different axes. For a
         // non-symmetric coefficient pattern they must produce non-identical
@@ -86,6 +89,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht4x4_AllFourTxTypes_ZeroInput_LeavePredictorUnchanged()
     {
+        CpuOnlyTest();
         // Every tx_type on an all-zero input must leave the predictor
         // untouched - no residual to add.
         var coeffs = new short[16];
@@ -102,6 +106,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht4x4_AllFourTxTypes_ProduceValidPixels()
     {
+        CpuOnlyTest();
         // Stress: every tx_type on a random input must produce output
         // bytes in [0, 255] (clipping works) and a deterministic result.
         var rng = new Random(0xD7);
@@ -124,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht4x4_Throws_OnShortInput()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9Iht4x4Reference.Iht4x4_16_Add(Vp9TxType4x4.DctDct, new short[8], new byte[16], 4); }
         catch (ArgumentException) { threw = true; }
@@ -133,6 +139,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht4x4_Throws_OnBadStride()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9Iht4x4Reference.Iht4x4_16_Add(Vp9TxType4x4.DctDct, new short[16], new byte[16], 2); }
         catch (ArgumentException) { threw = true; }

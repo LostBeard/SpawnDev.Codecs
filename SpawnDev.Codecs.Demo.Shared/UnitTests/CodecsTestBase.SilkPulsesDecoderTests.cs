@@ -19,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesDecoder_AllZero_RoundTrip_NbFrame()
     {
+        CpuOnlyTest();
         int frameLength = 160; // NB 20 ms = 10 shell blocks x 16 samples
         short[] pulses = new short[frameLength];
 
@@ -39,6 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesDecoder_SinglePositivePulse_RoundTrip()
     {
+        CpuOnlyTest();
         // One pulse in block 2, position 5, magnitude +3, for a WB 20 ms frame (320 samples).
         int frameLength = 320;
         short[] pulses = new short[frameLength];
@@ -59,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesDecoder_SingleNegativePulse_RoundTrip()
     {
+        CpuOnlyTest();
         int frameLength = 160;
         short[] pulses = new short[frameLength];
         pulses[7 * 16 + 12] = -4;
@@ -80,6 +83,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesDecoder_DistributedAcrossBlocks_RoundTrip()
     {
+        CpuOnlyTest();
         int frameLength = 320;
         short[] pulses = new short[frameLength];
         // Scatter positive and negative pulses across several blocks.
@@ -107,6 +111,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesDecoder_LargePulseRequiringLsbExtension_RoundTrip()
     {
+        CpuOnlyTest();
         // One block with a lot of pulses - sum > SILK_MAX_PULSES (16) triggers the
         // escape path with nLshifts >= 1. Choose magnitudes that cleanly shift-right.
         int frameLength = 160;
@@ -133,6 +138,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesDecoder_RandomSmallDistributions_RoundTrip()
     {
+        CpuOnlyTest();
         int frameLength = 160;
         var rng = new Random(0x12345678);
 
@@ -207,6 +213,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesDecoder_NullRangeDecoder_Throws()
     {
+        CpuOnlyTest();
         short[] pulses = new short[160];
         Throws<ArgumentNullException>(() =>
             SilkPulsesDecoder.Decode(pulses, null!, 1, 0, 160));
@@ -215,6 +222,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesDecoder_InvalidSignalType_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(32);
         enc.Done();
         var dec = new OpusRangeDecoder(enc.ToArray());
@@ -226,6 +234,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PulsesDecoder_InvalidQuantOffset_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(32);
         enc.Done();
         var dec = new OpusRangeDecoder(enc.ToArray());

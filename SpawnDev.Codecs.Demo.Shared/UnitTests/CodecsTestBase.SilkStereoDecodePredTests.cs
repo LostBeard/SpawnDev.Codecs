@@ -31,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StereoDecodePred_IndicesZero_DecodesNearZeroPredictors()
     {
+        CpuOnlyTest();
         // All indices zero -> first quantization point (-13732 Q13) for both predictors.
         // After pre-subtract: predQ13[0] = -13732 - (-13732) = 0, predQ13[1] = -13732.
         // Actually with the step interpolation it's not exactly the quant points.
@@ -52,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StereoDecodePred_DistinctIndices_DecodeRoundTrip()
     {
+        CpuOnlyTest();
         // Pick two different index triples and verify we can recover them.
         var enc = new OpusRangeEncoder(64);
         EncodeStereoPred(enc,
@@ -71,6 +73,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StereoDecodePred_SymmetricIndices_PreSubtractedDeltaIsZero()
     {
+        CpuOnlyTest();
         // When both predictor indices are identical, the pre-subtraction yields predQ13[0] = 0.
         var enc = new OpusRangeEncoder(64);
         EncodeStereoPred(enc, 2, 3, 1, 2, 3, 1);
@@ -85,6 +88,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StereoDecodeMidOnly_ZeroSymbol_ReturnsZero()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(32);
         enc.EncodeIcdf(0, SilkStereoDecodePred.StereoOnlyCodeMidIcdf, 8);
         enc.Done();
@@ -95,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StereoDecodeMidOnly_OneSymbol_ReturnsOne()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(32);
         enc.EncodeIcdf(1, SilkStereoDecodePred.StereoOnlyCodeMidIcdf, 8);
         enc.Done();
@@ -107,6 +112,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StereoPredTables_ExpectedShapes()
     {
+        CpuOnlyTest();
         Equal(SilkStereoDecodePred.StereoQuantTabSize, SilkStereoDecodePred.StereoPredQuantQ13.Length);
         Equal(25, SilkStereoDecodePred.StereoPredJointIcdf.Length);
         Equal(2, SilkStereoDecodePred.StereoOnlyCodeMidIcdf.Length);
@@ -128,6 +134,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StereoDecodePred_NullDecoder_Throws()
     {
+        CpuOnlyTest();
         int[] predQ13 = new int[2];
         Throws<ArgumentNullException>(() => SilkStereoDecodePred.DecodePred(null!, predQ13));
     }
@@ -135,6 +142,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void StereoDecodePred_OutputTooSmall_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(32);
         enc.Done();
         var dec = new OpusRangeDecoder(enc.ToArray());

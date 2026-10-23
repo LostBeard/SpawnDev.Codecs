@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggWriter_SmallPacket_RoundtripsThroughReader()
     {
+        CpuOnlyTest();
         byte[] payload = { 0xAA, 0xBB, 0xCC, 0xDD, 0xEE };
         byte[] pageBytes = OggPageWriter.WriteSinglePacketPage(
             headerType: OggConstants.HeaderTypeBeginningOfStream,
@@ -33,6 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggWriter_ExactMultipleOf255_NeedsTerminator()
     {
+        CpuOnlyTest();
         // 255-byte packet: segmentize produces [255, 0].
         byte[] payload = new byte[255];
         for (int i = 0; i < 255; i++) payload[i] = (byte)i;
@@ -47,6 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggWriter_600BytePacket_SegmentTableHasThreeEntries()
     {
+        CpuOnlyTest();
         // 600 = 255 + 255 + 90 -> 3 segments.
         byte[] payload = new byte[600];
         for (int i = 0; i < 600; i++) payload[i] = (byte)(i & 0xFF);
@@ -62,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggWriter_ZeroLengthPacket_SingleZeroSegment()
     {
+        CpuOnlyTest();
         byte[] pageBytes = OggPageWriter.WriteSinglePacketPage(0, 0, 1, 0, ReadOnlySpan<byte>.Empty);
         var page = OggPageReader.ParseAt(pageBytes);
         Equal(1, page.SegmentLengths.Length);
@@ -72,6 +76,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggWriter_WriteStream_PacketsAreAssembledBack()
     {
+        CpuOnlyTest();
         var packets = new[]
         {
             new OggOutgoingPacket { Data = new byte[] { 0xA1, 0xA2, 0xA3 }, GranulePosition = 0 },
@@ -101,6 +106,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggWriter_ReaderRejectsCorruptedWriterOutput()
     {
+        CpuOnlyTest();
         byte[] payload = { 1, 2, 3, 4 };
         byte[] pageBytes = OggPageWriter.WriteSinglePacketPage(0, 0, 1, 0, payload);
         // Flip one byte in the payload without updating CRC - reader should detect.
@@ -113,6 +119,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggWriter_EmptyPacketList_Throws()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { _ = OggPageWriter.WriteStream(1, Array.Empty<OggOutgoingPacket>()); }
         catch (ArgumentException) { threw = true; }
@@ -122,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OggWriter_RoundtripOpusStream_WritesDecodesTheSameWay()
     {
+        CpuOnlyTest();
         // Build a minimal Opus-in-Ogg stream via the writer and ensure OpusOggDecoder accepts it.
         // Not all test signals will be SILK; guard with UnsupportedTestException.
         int frameLen = 960;

@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerInit_Decoder_IdentityRate_SelectsCopyPath()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         SilkResampler.Init(state, fsHzIn: 16000, fsHzOut: 16000, forEncode: false);
         Equal(SilkResamplerConstants.USE_COPY, state.ResamplerFunction);
@@ -27,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerInit_Decoder_8To16_SelectsUp2Path()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         SilkResampler.Init(state, fsHzIn: 8000, fsHzOut: 16000, forEncode: false);
         Equal(SilkResamplerConstants.USE_UP2_HQ_WRAPPER, state.ResamplerFunction);
@@ -35,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerInit_Decoder_16To48_SelectsIirFirPath()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         SilkResampler.Init(state, fsHzIn: 16000, fsHzOut: 48000, forEncode: false);
         Equal(SilkResamplerConstants.USE_IIR_FIR, state.ResamplerFunction);
@@ -43,6 +46,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerInit_Decoder_16To24_SelectsIirFirPath()
     {
+        CpuOnlyTest();
         // 16 -> 24 kHz is a 3/2 upsample, not exact 2x, so it uses IIR_FIR.
         var state = new SilkResamplerState();
         SilkResampler.Init(state, fsHzIn: 16000, fsHzOut: 24000, forEncode: false);
@@ -52,6 +56,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerInit_Decoder_16To8_SelectsDownFirPath()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         SilkResampler.Init(state, fsHzIn: 16000, fsHzOut: 8000, forEncode: false);
         Equal(SilkResamplerConstants.USE_DOWN_FIR, state.ResamplerFunction);
@@ -62,6 +67,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerInit_Decoder_12To8_SelectsDownFirPath_3Over4()
     {
+        CpuOnlyTest();
         // 12 * 4 == 8 * 6, hmm. Actually silk's condition is: fs_out * 4 == fs_in * 3
         // (i.e. 3/4 downsample): 8 * 4 = 32, 12 * 3 = 36. Nope. Try other:
         // fs_out * 3 == fs_in * 2: 8 * 3 = 24, 12 * 2 = 24. YES => 2/3 downsample.
@@ -77,6 +83,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerInit_DelayMatrix_Decoder_MatchesLibopus()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
 
         // Decoder row for fs_in=16: {0, 3, 12, 7, 7, 7} for outputs {8, 12, 16, 24, 48, 96}.
@@ -99,6 +106,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerInit_DelayMatrix_Decoder_Nb_MatchesLibopus()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
 
         // Decoder row for fs_in=8: {4, 0, 2, 0, 0, 0}.
@@ -114,6 +122,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerInit_Decoder_InvalidInputRate_Throws()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         Throws<ArgumentException>(() =>
             SilkResampler.Init(state, 24000, 48000, forEncode: false));
@@ -124,6 +133,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerInit_Encoder_InvalidOutputRate_Throws()
     {
+        CpuOnlyTest();
         var state = new SilkResamplerState();
         Throws<ArgumentException>(() =>
             SilkResampler.Init(state, 48000, 48000, forEncode: true));
@@ -134,6 +144,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerApply_IdentityRate_PassesThroughOverOneBatch()
     {
+        CpuOnlyTest();
         // 16 kHz in, 16 kHz out, 10 ms batch = 160 samples.
         var state = new SilkResamplerState();
         SilkResampler.Init(state, 16000, 16000, forEncode: false);
@@ -167,6 +178,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ResamplerApply_IdentityRate_StateCarriesAcrossCalls()
     {
+        CpuOnlyTest();
         // Two back-to-back identity-rate calls. The second call's first samples should
         // pick up from the first call's delay buffer.
         var state = new SilkResamplerState();

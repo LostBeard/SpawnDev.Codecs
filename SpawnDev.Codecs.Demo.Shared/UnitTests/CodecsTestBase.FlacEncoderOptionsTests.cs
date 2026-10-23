@@ -14,6 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoderOptions_VorbisComments_InjectedAndDecoded()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(256, 1, 44100, 16);
         var opts = new FlacEncoderOptions
         {
@@ -38,6 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoderOptions_EmptyCommentList_OmitsBlock()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(64, 1, 44100, 16);
         var opts = new FlacEncoderOptions
         {
@@ -53,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoderOptions_NullCommentList_OmitsBlock()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(64, 1, 44100, 16);
         var opts = new FlacEncoderOptions { BlockSize = 64 };
         byte[] flac = FlacEncoder.EncodeStream(input, 44100, 1, 16, opts);
@@ -63,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoderOptions_Utf8Content_RoundtripsExactly()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(64, 1, 44100, 16);
         var opts = new FlacEncoderOptions
         {
@@ -81,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacEncoderOptions_NullOptions_Throws()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(64, 1, 44100, 16);
         bool threw = false;
         try { _ = FlacEncoder.EncodeStream(input, 44100, 1, 16, (FlacEncoderOptions)null!); }

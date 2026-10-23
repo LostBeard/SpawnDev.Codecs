@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SuperblockMath_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(3, Vp9SuperblockMath.MiSizeLog2);
         Equal(8, Vp9SuperblockMath.MiSize);
         Equal(3, Vp9SuperblockMath.MiPerSbLog2);
@@ -22,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SuperblockMath_PixelMiRoundtrip()
     {
+        CpuOnlyTest();
         Equal(0, Vp9SuperblockMath.PixelToMi(0));
         Equal(0, Vp9SuperblockMath.PixelToMi(7));
         Equal(1, Vp9SuperblockMath.PixelToMi(8));
@@ -36,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SuperblockMath_MiToSb()
     {
+        CpuOnlyTest();
         Equal(0, Vp9SuperblockMath.MiToSb(0));
         Equal(0, Vp9SuperblockMath.MiToSb(7));
         Equal(1, Vp9SuperblockMath.MiToSb(8));
@@ -45,6 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SuperblockMath_AlignToSbPixels()
     {
+        CpuOnlyTest();
         Equal(0, Vp9SuperblockMath.AlignToSbPixels(0));
         Equal(64, Vp9SuperblockMath.AlignToSbPixels(1));
         Equal(64, Vp9SuperblockMath.AlignToSbPixels(64));
@@ -56,6 +60,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SuperblockMath_AlignToSbMi()
     {
+        CpuOnlyTest();
         Equal(0, Vp9SuperblockMath.AlignToSbMi(0));
         Equal(8, Vp9SuperblockMath.AlignToSbMi(1));
         Equal(8, Vp9SuperblockMath.AlignToSbMi(8));
@@ -66,6 +71,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SuperblockMath_SbsForPixels()
     {
+        CpuOnlyTest();
         Equal(0, Vp9SuperblockMath.SbsForPixels(0));
         Equal(1, Vp9SuperblockMath.SbsForPixels(1));
         Equal(1, Vp9SuperblockMath.SbsForPixels(64));
@@ -78,6 +84,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SuperblockMath_SbsForMi()
     {
+        CpuOnlyTest();
         Equal(0, Vp9SuperblockMath.SbsForMi(0));
         Equal(1, Vp9SuperblockMath.SbsForMi(1));
         Equal(1, Vp9SuperblockMath.SbsForMi(8));

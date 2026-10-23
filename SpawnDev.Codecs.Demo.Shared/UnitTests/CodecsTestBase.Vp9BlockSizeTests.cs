@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockSize_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(13, Vp9BlockSizes.Count);
         Equal(Vp9BlockSize.Block64x64, Vp9BlockSizes.Largest);
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockSize_LookupArrayLengths()
     {
+        CpuOnlyTest();
         Equal(13, Vp9BlockSizes.WidthPx.Length);
         Equal(13, Vp9BlockSizes.HeightPx.Length);
         Equal(13, Vp9BlockSizes.Num8x8Wide.Length);
@@ -32,6 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockSize_Width_AllSizes()
     {
+        CpuOnlyTest();
         Equal(4, Vp9BlockSizes.Width(Vp9BlockSize.Block4x4));
         Equal(4, Vp9BlockSizes.Width(Vp9BlockSize.Block4x8));
         Equal(8, Vp9BlockSizes.Width(Vp9BlockSize.Block8x4));
@@ -50,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockSize_Height_AllSizes()
     {
+        CpuOnlyTest();
         Equal(4, Vp9BlockSizes.Height(Vp9BlockSize.Block4x4));
         Equal(8, Vp9BlockSizes.Height(Vp9BlockSize.Block4x8));
         Equal(4, Vp9BlockSizes.Height(Vp9BlockSize.Block8x4));
@@ -68,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockSize_MiWidthHeight_64x64Is8x8()
     {
+        CpuOnlyTest();
         Equal(8, Vp9BlockSizes.MiWidth(Vp9BlockSize.Block64x64));
         Equal(8, Vp9BlockSizes.MiHeight(Vp9BlockSize.Block64x64));
         Equal(1, Vp9BlockSizes.MiWidth(Vp9BlockSize.Block8x8));
@@ -77,6 +82,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockSize_B4x4WidthHeight_4x4Is1x1()
     {
+        CpuOnlyTest();
         Equal(1, Vp9BlockSizes.B4x4Width(Vp9BlockSize.Block4x4));
         Equal(1, Vp9BlockSizes.B4x4Height(Vp9BlockSize.Block4x4));
         Equal(16, Vp9BlockSizes.B4x4Width(Vp9BlockSize.Block64x64));
@@ -86,6 +92,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockSize_NumPelsLog2_64x64Is12()
     {
+        CpuOnlyTest();
         // 64x64 = 4096 pels = 2^12.
         Equal(12, Vp9BlockSizes.NumPelsLog2[(int)Vp9BlockSize.Block64x64]);
         // 4x4 = 16 pels = 2^4.
@@ -99,6 +106,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockSize_IsSquare()
     {
+        CpuOnlyTest();
         Equal(true, Vp9BlockSizes.IsSquare(Vp9BlockSize.Block4x4));
         Equal(true, Vp9BlockSizes.IsSquare(Vp9BlockSize.Block8x8));
         Equal(true, Vp9BlockSizes.IsSquare(Vp9BlockSize.Block16x16));
@@ -113,6 +121,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockSize_NumPelsLog2_DerivedFromWidthHeight()
     {
+        CpuOnlyTest();
         // Verify NumPelsLog2 is consistent with Width * Height = 2^NumPelsLog2.
         for (int i = 0; i < Vp9BlockSizes.Count; i++)
         {
@@ -126,6 +135,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockSize_B4x4WidthLog2_MatchesNum4x4Wide()
     {
+        CpuOnlyTest();
         // b_width_log2_lookup[i] == log2(num_4x4_blocks_wide_lookup[i]).
         Equal(13, Vp9BlockSizes.B4x4WidthLog2.Length);
         for (int i = 0; i < Vp9BlockSizes.Count; i++)
@@ -139,6 +149,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockSize_B4x4HeightLog2_MatchesNum4x4High()
     {
+        CpuOnlyTest();
         // b_height_log2_lookup[i] == log2(num_4x4_blocks_high_lookup[i]).
         Equal(13, Vp9BlockSizes.B4x4HeightLog2.Length);
         for (int i = 0; i < Vp9BlockSizes.Count; i++)
@@ -152,6 +163,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockSize_B4x4Log2_64x64Is4()
     {
+        CpuOnlyTest();
         Equal(4, Vp9BlockSizes.B4x4WidthLog2[(int)Vp9BlockSize.Block64x64]);
         Equal(4, Vp9BlockSizes.B4x4HeightLog2[(int)Vp9BlockSize.Block64x64]);
         Equal(0, Vp9BlockSizes.B4x4WidthLog2[(int)Vp9BlockSize.Block4x4]);

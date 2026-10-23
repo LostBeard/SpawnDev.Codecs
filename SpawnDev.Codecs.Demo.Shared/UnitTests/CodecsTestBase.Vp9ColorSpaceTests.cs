@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ColorRange_NumericValues_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(0, (int)Vp9ColorRange.Studio);
         Equal(1, (int)Vp9ColorRange.Full);
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ColorSpaces_IsRgb_OnlyForSrgb()
     {
+        CpuOnlyTest();
         Equal(false, Vp9ColorSpaces.IsRgb(Vp9ColorSpace.Unknown));
         Equal(false, Vp9ColorSpaces.IsRgb(Vp9ColorSpace.Bt601));
         Equal(false, Vp9ColorSpaces.IsRgb(Vp9ColorSpace.Bt709));
@@ -28,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ColorSpaces_ImpliesFullRange_OnlyForSrgb()
     {
+        CpuOnlyTest();
         Equal(false, Vp9ColorSpaces.ImpliesFullRange(Vp9ColorSpace.Unknown));
         Equal(false, Vp9ColorSpaces.ImpliesFullRange(Vp9ColorSpace.Bt601));
         Equal(true, Vp9ColorSpaces.ImpliesFullRange(Vp9ColorSpace.Srgb));

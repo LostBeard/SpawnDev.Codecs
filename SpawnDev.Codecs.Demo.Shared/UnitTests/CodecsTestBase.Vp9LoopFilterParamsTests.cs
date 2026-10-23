@@ -44,6 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9LoopFilterParams_Disabled_ParsesMinimalLayout()
     {
+        CpuOnlyTest();
         // filter_level=42 (6b), sharpness_level=3 (3b), mode_ref_delta_enabled=0 (1b)
         // Total 10 bits.
         var data = BitsToBytes(
@@ -64,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9LoopFilterParams_EnabledWithoutUpdate_ParsesEnabledFlag()
     {
+        CpuOnlyTest();
         // filter_level=10 (6b), sharpness_level=0 (3b),
         // mode_ref_delta_enabled=1 (1b), mode_ref_delta_update=0 (1b).
         var data = BitsToBytes(
@@ -86,6 +88,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9LoopFilterParams_UpdateAllRefAndModeDeltas_PositiveValues()
     {
+        CpuOnlyTest();
         // ref_deltas[0..3] all updated with +5, +10, +15, +20.
         // mode_deltas[0..1] all updated with +1, +2.
         // Each signed literal is 6 magnitude bits + 1 sign bit; sign=0 for positive.
@@ -122,6 +125,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9LoopFilterParams_NegativeDeltas_SignBitFlipsValue()
     {
+        CpuOnlyTest();
         // Just one ref delta = -7 (mag=7, sign=1).
         var data = BitsToBytes(
             (0, 6),  // filter_level
@@ -151,6 +155,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9LoopFilterParams_PartialRefUpdate_OnlyMarkedSlotsCarryValues()
     {
+        CpuOnlyTest();
         // ref_deltas: update [0]=+1, [2]=+3. Skip [1] and [3].
         // mode_deltas: update [1]=+5. Skip [0].
         var data = BitsToBytes(
@@ -180,6 +185,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9LoopFilterParams_FilterLevelMaxValue()
     {
+        CpuOnlyTest();
         var data = BitsToBytes(
             (63, 6),  // max filter_level
             (7, 3),   // max sharpness_level

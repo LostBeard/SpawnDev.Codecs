@@ -12,6 +12,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefProbs_CatProbs_HaveCorrectLengthsAndPinnedValues()
     {
+        CpuOnlyTest();
         // Lengths from libvpx (cat<n>_prob has n entries, except cat6
         // which has 14 for 8-bit / 18 for 12-bit).
         Equal(1,  Vp9CoefProbs.Cat1Prob.Length);
@@ -35,6 +36,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefProbs_Pareto8Full_HasCorrectShape()
     {
+        CpuOnlyTest();
         // 255 x 8 byte table from libvpx.
         Equal(255, Vp9CoefProbs.Pareto8Full.GetLength(0));
         Equal(8,   Vp9CoefProbs.Pareto8Full.GetLength(1));
@@ -43,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefProbs_Pareto8Full_PinnedFirstAndLastRows()
     {
+        CpuOnlyTest();
         // First row: { 3, 86, 128, 6, 86, 23, 88, 29 }
         Equal((byte)3,   Vp9CoefProbs.Pareto8Full[0, 0]);
         Equal((byte)86,  Vp9CoefProbs.Pareto8Full[0, 1]);
@@ -67,6 +70,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefProbs_Pareto8Full_AllValuesInValidRange()
     {
+        CpuOnlyTest();
         // VP9 probabilities are uint8 values in [1, 255] - 0 is reserved
         // for "the probability tree is dead" and never appears in a
         // legitimate prob table (libvpx clamps to MIN_PROB = 1 at every

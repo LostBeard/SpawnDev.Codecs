@@ -19,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ForwardDct4_AllZero_ProducesAllZero()
     {
+        CpuOnlyTest();
         var input = new int[4];
         var output = new int[4];
         Av1ForwardDct4.Transform(input, output);
@@ -28,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ForwardDct4_Determinism()
     {
+        CpuOnlyTest();
         var rng = new Random(0xD4D4);
         var input = new int[4];
         for (int i = 0; i < 4; i++) input[i] = rng.Next(-1024, 1024);
@@ -41,6 +43,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ForwardDct4_FwdInv_RoundTripWithinTolerance()
     {
+        CpuOnlyTest();
         // Round-trip: input -> forward -> inverse -> ~scaled input.
         // libaom Dct4 is normalised so fwd+inv produces input * 2 (one factor
         // of sqrt(2) in each direction = 2 total). We check that the
@@ -75,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ForwardDct8_FwdInv_RoundTripWithinTolerance()
     {
+        CpuOnlyTest();
         var rng = new Random(0x88);
         var input = new int[8];
         for (int i = 0; i < 8; i++) input[i] = rng.Next(-512, 512);
@@ -100,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ForwardDct16_FwdInv_RoundTripWithinTolerance()
     {
+        CpuOnlyTest();
         // Probe the actual scaling factor empirically since AV1's 16-point
         // 1D DCT round-trip multiplier is non-obvious (libaom internal
         // shift schedule for higher sizes diverges from the 4/8 pattern).
@@ -129,6 +134,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ForwardAdst8_FwdInv_RoundTripWithinTolerance()
     {
+        CpuOnlyTest();
         var rng = new Random(0xA8);
         var input = new int[8];
         for (int i = 0; i < 8; i++) input[i] = rng.Next(-512, 512);
@@ -155,6 +161,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ForwardAdst8_AllZero_ProducesAllZero()
     {
+        CpuOnlyTest();
         var input = new int[8];
         var output = new int[8];
         Av1ForwardAdst8.Transform(input, output);
@@ -164,6 +171,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ForwardAdst16_FwdInv_RoundTripWithinTolerance()
     {
+        CpuOnlyTest();
         var rng = new Random(0xA10);
         var input = new int[16];
         for (int i = 0; i < 16; i++) input[i] = rng.Next(-512, 512);
@@ -191,6 +199,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ForwardAdst16_AllZero_ProducesAllZero()
     {
+        CpuOnlyTest();
         var input = new int[16];
         var output = new int[16];
         Av1ForwardAdst16.Transform(input, output);
@@ -200,6 +209,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ForwardDct32_AllZero_ProducesAllZero()
     {
+        CpuOnlyTest();
         var input = new int[32];
         var output = new int[32];
         Av1ForwardDct32.Transform(input, output);
@@ -209,6 +219,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ForwardDct32_Determinism()
     {
+        CpuOnlyTest();
         var rng = new Random(0xD32);
         var input = new int[32];
         for (int i = 0; i < 32; i++) input[i] = rng.Next(-512, 512);
@@ -222,6 +233,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ForwardDct32_ConstantInput_ConcentratesEnergyInDc()
     {
+        CpuOnlyTest();
         // Constant input -> DCT energy concentrated in slot 0 (DC).
         // AC slots should all be much smaller in absolute value than DC.
         var input = new int[32];
@@ -241,6 +253,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ForwardAdst4_FwdInv_RoundTripWithinTolerance()
     {
+        CpuOnlyTest();
         var rng = new Random(0xAD);
         var input = new int[4];
         for (int i = 0; i < 4; i++) input[i] = rng.Next(-512, 512);
@@ -266,6 +279,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ForwardDct4_DcOnly_NonZeroDcCoefficient()
     {
+        CpuOnlyTest();
         // Constant input -> energy concentrated in DC.
         var input = new int[4];
         for (int i = 0; i < 4; i++) input[i] = 100;

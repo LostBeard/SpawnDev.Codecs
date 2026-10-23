@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9QuantizationParams_AllZero_IsLossless()
     {
+        CpuOnlyTest();
         // base_q_idx=0, no deltas (3 zero flags).
         var data = BitsToBytes(
             (0, 8),
@@ -28,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9QuantizationParams_NonZeroBaseQIndex_NotLossless()
     {
+        CpuOnlyTest();
         var data = BitsToBytes(
             (100, 8),
             (0, 1), (0, 1), (0, 1));
@@ -41,6 +43,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9QuantizationParams_AllDeltas_PositiveValues()
     {
+        CpuOnlyTest();
         // base_q_idx=64, y_dc=+3, uv_dc=+5, uv_ac=+7.
         var data = BitsToBytes(
             (64, 8),
@@ -60,6 +63,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9QuantizationParams_NegativeDelta_HandledViaSignBit()
     {
+        CpuOnlyTest();
         var data = BitsToBytes(
             (50, 8),
             (1, 1), (4, 4), (1, 1),  // y_dc=-4 (mag=4, sign=1)
@@ -77,6 +81,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9QuantizationParams_BaseQIdxMaxValue()
     {
+        CpuOnlyTest();
         var data = BitsToBytes(
             (255, 8),
             (0, 1), (0, 1), (0, 1));
@@ -90,6 +95,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9QuantizationParams_OnlySomeDeltasPresent()
     {
+        CpuOnlyTest();
         // y_dc skipped, uv_dc=+1, uv_ac skipped.
         var data = BitsToBytes(
             (5, 8),

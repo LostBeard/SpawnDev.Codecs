@@ -14,6 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoderResample_Wb20Ms_Internal16_Output48_FrameLengthIsTripled()
     {
+        CpuOnlyTest();
         var dec = new SilkDecoder(
             internalSampleRateHz: 16000, frameLengthMs: 20, outputSampleRateHz: 48000);
         Equal(16000, dec.InternalSampleRateHz);
@@ -24,6 +25,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoderResample_Nb20Ms_Internal8_Output48_FrameLengthIs6x()
     {
+        CpuOnlyTest();
         var dec = new SilkDecoder(
             internalSampleRateHz: 8000, frameLengthMs: 20, outputSampleRateHz: 48000);
         Equal(8000, dec.InternalSampleRateHz);
@@ -34,6 +36,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoderResample_16To48_DecodesAndResamplesCleanly()
     {
+        CpuOnlyTest();
         var dec = new SilkDecoder(
             internalSampleRateHz: 16000, frameLengthMs: 20, outputSampleRateHz: 48000);
 
@@ -66,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoderResample_8To48_MaxUpsampleFactor()
     {
+        CpuOnlyTest();
         // 6x upsampler: internal 8 kHz -> output 48 kHz.
         var dec = new SilkDecoder(
             internalSampleRateHz: 8000, frameLengthMs: 20, outputSampleRateHz: 48000);
@@ -97,6 +101,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoderResample_Reset_ReinitializesResampler()
     {
+        CpuOnlyTest();
         var dec = new SilkDecoder(16000, 20, 48000);
 
         var indices = new SilkDecodedIndices
@@ -132,6 +137,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoderResample_InvalidOutputRate_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => new SilkDecoder(16000, 20, 36000));
         Throws<ArgumentException>(() => new SilkDecoder(16000, 20, 44100));
     }
@@ -139,6 +145,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkDecoderResample_EveryValidSilkToApiCombination_Works()
     {
+        CpuOnlyTest();
         // Every decode-direction rate pair: 3 internal x 5 output = 15 combinations.
         int[] internalRates = { 8000, 12000, 16000 };
         int[] outputRates = { 8000, 12000, 16000, 24000, 48000 };

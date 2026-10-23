@@ -28,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraBlockDecode_TxSizeToN_AllSizes()
     {
+        CpuOnlyTest();
         Equal(4, Vp9IntraBlockDecode.TxSizeToN(Vp9TxSize.Tx4x4));
         Equal(8, Vp9IntraBlockDecode.TxSizeToN(Vp9TxSize.Tx8x8));
         Equal(16, Vp9IntraBlockDecode.TxSizeToN(Vp9TxSize.Tx16x16));
@@ -37,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraBlockDecode_TxSizeToN_RejectsUnknown()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9IntraBlockDecode.TxSizeToN((Vp9TxSize)99));
     }
@@ -44,6 +46,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraBlockDecode_DcPred_4x4_ComposesPredictAndIht()
     {
+        CpuOnlyTest();
         var above = EdgePattern(4, 30);
         var left = EdgePattern(4, 80);
         var coeffs = CoeffPattern(4);
@@ -69,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraBlockDecode_VPred_8x8_UsesAdstDctTxType()
     {
+        CpuOnlyTest();
         var above = EdgePattern(8, 50);
         var left = EdgePattern(8, 90);
         var coeffs = CoeffPattern(8);
@@ -93,6 +97,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraBlockDecode_TmPred_16x16_UsesAdstAdstTxType()
     {
+        CpuOnlyTest();
         var above = EdgePattern(16, 10);
         var left = EdgePattern(16, 70);
         var coeffs = CoeffPattern(16);
@@ -118,6 +123,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraBlockDecode_32x32_AlwaysUsesDctDctEvenForTmMode()
     {
+        CpuOnlyTest();
         var above = EdgePattern(32, 40);
         var left = EdgePattern(32, 90);
         var coeffs = CoeffPattern(32);
@@ -143,6 +149,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraBlockDecode_DcPred_NoEdges_Uses128Variant()
     {
+        CpuOnlyTest();
         var above = new byte[4];
         var left = new byte[4];
         var coeffs = new short[16];  // zero residual -> output stays at 128
@@ -160,6 +167,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraBlockDecode_D207_LeftOnly_4x4_Roundtrips()
     {
+        CpuOnlyTest();
         var above = new byte[4];
         var left = EdgePattern(4, 100);
         var coeffs = new short[16];  // zero residual; output should match D207 prediction

@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_Nb20Ms_ContourZero_AllSubframesEqualBaseLag()
     {
+        CpuOnlyTest();
         // silk_CB_lags_stage2[k][0] = 0 for all k, so every subframe should be baseLag.
         int fsKHz = 8;
         short lagIndex = 10; // -> baseLag = 2*8 + 10 = 26
@@ -29,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_Nb20Ms_ContourOne_AppliesExpectedDeltas()
     {
+        CpuOnlyTest();
         // silk_CB_lags_stage2[*][1] = {2, 1, 0, -1}
         int fsKHz = 8;
         short lagIndex = 10;
@@ -43,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_Nb20Ms_AllContours_WithinLagRange()
     {
+        CpuOnlyTest();
         // For a mid-range lagIndex, every contour should produce lags strictly within [minLag, maxLag].
         int fsKHz = 8;
         int minLag = SilkConstants.PE_MIN_LAG_MS * fsKHz;
@@ -65,6 +68,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_Nb10Ms_ContourZero_BothSubframesEqualBaseLag()
     {
+        CpuOnlyTest();
         // silk_CB_lags_stage2_10_ms[k][0] = 0 for both rows.
         int[] lags = new int[2];
         SilkPitchDecoder.ComputeLags(lags, lagIndex: 5, contourIndex: 0, fsKHz: 8, nbSubfr: 2);
@@ -75,6 +79,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_Nb10Ms_ContourOne_FirstSubframeOffsetPlusOne()
     {
+        CpuOnlyTest();
         // silk_CB_lags_stage2_10_ms[*][1] = {1, 0}
         int[] lags = new int[2];
         SilkPitchDecoder.ComputeLags(lags, lagIndex: 5, contourIndex: 1, fsKHz: 8, nbSubfr: 2);
@@ -85,6 +90,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_Nb10Ms_ContourTwo_SecondSubframeOffsetPlusOne()
     {
+        CpuOnlyTest();
         // silk_CB_lags_stage2_10_ms[*][2] = {0, 1}
         int[] lags = new int[2];
         SilkPitchDecoder.ComputeLags(lags, lagIndex: 5, contourIndex: 2, fsKHz: 8, nbSubfr: 2);
@@ -97,6 +103,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_Wb20Ms_ContourZero_AllSubframesEqualBaseLag()
     {
+        CpuOnlyTest();
         // silk_CB_lags_stage3[k][0] = 0 for all k.
         int[] lags = new int[4];
         SilkPitchDecoder.ComputeLags(lags, lagIndex: 50, contourIndex: 0, fsKHz: 16, nbSubfr: 4);
@@ -107,6 +114,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_Wb20Ms_LastContour_AppliesExpectedDeltas()
     {
+        CpuOnlyTest();
         // silk_CB_lags_stage3[*][33] = {-9, -3,  3,  9}  (taking the last column of each row)
         int[] lags = new int[4];
         SilkPitchDecoder.ComputeLags(lags, lagIndex: 100, contourIndex: 33, fsKHz: 16, nbSubfr: 4);
@@ -122,6 +130,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_Mb10Ms_LastContour_AppliesExpectedDeltas()
     {
+        CpuOnlyTest();
         // silk_CB_lags_stage3_10_ms[*][11] = {-3, 3}
         int[] lags = new int[2];
         SilkPitchDecoder.ComputeLags(lags, lagIndex: 30, contourIndex: 11, fsKHz: 12, nbSubfr: 2);
@@ -135,6 +144,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_Nb20Ms_SmallLagWithNegativeDelta_ClampsToMinLag()
     {
+        CpuOnlyTest();
         // lagIndex = 0 -> baseLag = minLag = 16 at fsKHz=8. Contour 3 has a -1 at subframe 3:
         // silk_CB_lags_stage2[3][3] = 1 -> no clamp, but contour 2 has stage2[0][2] = -1:
         // baseLag + (-1) = 15 < minLag=16 -> should clamp to 16.
@@ -152,6 +162,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_Nb20Ms_LargeLagWithPositiveDelta_ClampsToMaxLag()
     {
+        CpuOnlyTest();
         // lagIndex at the top of the iCDF (31) -> baseLag = minLag + 31 = 47. maxLag = 144.
         // Well within range; won't clamp. But if we artificially push lagIndex past the
         // coarse-iCDF range (library never does this in practice), we should clamp.
@@ -171,6 +182,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_UnsupportedFsKHz_Throws()
     {
+        CpuOnlyTest();
         int[] lags = new int[4];
         Throws<ArgumentException>(() =>
             SilkPitchDecoder.ComputeLags(lags, 0, 0, fsKHz: 11, nbSubfr: 4));
@@ -179,6 +191,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_InvalidNbSubfr_Throws()
     {
+        CpuOnlyTest();
         int[] lags = new int[4];
         Throws<ArgumentException>(() =>
             SilkPitchDecoder.ComputeLags(lags, 0, 0, fsKHz: 16, nbSubfr: 3));
@@ -187,6 +200,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_ContourIndexOutOfRange_Throws()
     {
+        CpuOnlyTest();
         int[] lags = new int[4];
         // fsKHz=16, nbSubfr=4 -> cbSize = PE_NB_CBKS_STAGE3_MAX = 34. 34 is out of range.
         Throws<ArgumentOutOfRangeException>(() =>
@@ -196,6 +210,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ComputeLags_OutputTooSmall_Throws()
     {
+        CpuOnlyTest();
         int[] small = new int[3];
         Throws<ArgumentException>(() =>
             SilkPitchDecoder.ComputeLags(small, 0, 0, fsKHz: 16, nbSubfr: 4));

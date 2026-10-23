@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Sigmoid_InputZero_ReturnsHalf()
     {
+        CpuOnlyTest();
         // Input 0 in Q5 -> index 0 -> sigm_LUT_pos_Q15[0] = 16384 (= 0.5 in Q15).
         Equal(16384, SilkSigmoid.silk_sigm_Q15(0));
     }
@@ -22,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Sigmoid_ExactLutPoints_MatchTable()
     {
+        CpuOnlyTest();
         // Positive branch, exact LUT indices (inQ5 = 0, 32, 64, 96, 128, 160).
         int[] expectedPos = { 16384, 23955, 28861, 31213, 32178, 32548 };
         for (int i = 0; i < 6; i++)
@@ -42,6 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Sigmoid_LargePositive_ClipsTo32767()
     {
+        CpuOnlyTest();
         Equal(32767, SilkSigmoid.silk_sigm_Q15(6 * 32));
         Equal(32767, SilkSigmoid.silk_sigm_Q15(1000));
         Equal(32767, SilkSigmoid.silk_sigm_Q15(int.MaxValue));
@@ -50,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Sigmoid_LargeNegative_ClipsToZero()
     {
+        CpuOnlyTest();
         Equal(0, SilkSigmoid.silk_sigm_Q15(-6 * 32));
         Equal(0, SilkSigmoid.silk_sigm_Q15(-1000));
         Equal(0, SilkSigmoid.silk_sigm_Q15(int.MinValue + 1));
@@ -58,6 +62,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Sigmoid_NearlyMonotonic_AcrossRange()
     {
+        CpuOnlyTest();
         // The libopus LUT approximation is NOT strictly monotonic at LUT-entry transitions
         // because each LUT value is independently rounded. However the function is
         // monotonic WITHIN each 32-sample LUT segment, and the overall envelope is
@@ -76,6 +81,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Sigmoid_MidpointPositive_ExactInterpolation()
     {
+        CpuOnlyTest();
         // inQ5 = 16 (half-step between 0 and 32). Expected:
         //   sigm_LUT_pos_Q15[0] + slope[0] * (16 & 0x1F)
         //   = 16384 + 237 * 16
@@ -86,6 +92,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Sigmoid_MidpointNegative_ExactInterpolation()
     {
+        CpuOnlyTest();
         // inQ5 = -16 -> in = 16 (abs), index 0, neg branch:
         //   sigm_LUT_neg_Q15[0] - slope[0] * 16
         //   = 16384 - 237 * 16
@@ -96,6 +103,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Sigmoid_ApproximateSymmetryAroundOrigin()
     {
+        CpuOnlyTest();
         // sigmoid(x) + sigmoid(-x) == 1 in continuous math. In this Q15 LUT approximation,
         // pos[i] and neg[i] are rounded independently, so the sum at non-zero exact LUT
         // points is 32767 (off by 1 from the ideal 32768). At the origin it's exactly

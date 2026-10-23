@@ -12,6 +12,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Reconstruct_4x4_AddsResidualToPredicted()
     {
+        CpuOnlyTest();
         // dst = 100; residual = +20 -> dst = 120 across the block.
         var dst = new byte[16];
         for (int i = 0; i < 16; i++) dst[i] = 100;
@@ -26,6 +27,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Reconstruct_4x4_ClipsBelowZeroToZero()
     {
+        CpuOnlyTest();
         var dst = new byte[16];
         for (int i = 0; i < 16; i++) dst[i] = 50;
         var residual = new short[16];
@@ -39,6 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Reconstruct_4x4_ClipsAbove255To255()
     {
+        CpuOnlyTest();
         var dst = new byte[16];
         for (int i = 0; i < 16; i++) dst[i] = 200;
         var residual = new short[16];
@@ -52,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Reconstruct_4x4_PerCellMath()
     {
+        CpuOnlyTest();
         // dst[i] = 10*i mod 256, residual[i] = -3*i; expected = clip(10*i - 3*i) = clip(7*i).
         var dst = new byte[16];
         var residual = new short[16];
@@ -74,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Reconstruct_8x8_RespectsStridedDst()
     {
+        CpuOnlyTest();
         const int stride = 16;
         var canvas = new byte[stride * 8];
         for (int i = 0; i < canvas.Length; i++) canvas[i] = 222;
@@ -99,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Reconstruct_16x16_LargestSizeRoundtrip()
     {
+        CpuOnlyTest();
         var dst = new byte[256];
         var residual = new short[256];
         for (int i = 0; i < 256; i++)
@@ -122,6 +128,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Reconstruct_32x32_AllSizes()
     {
+        CpuOnlyTest();
         var dst = new byte[32 * 32];
         for (int i = 0; i < dst.Length; i++) dst[i] = 128;
         var residual = new short[32 * 32];
@@ -140,6 +147,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Reconstruct_RejectsInvalidArgs()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9Reconstruct.AddResidual(new byte[25], new short[25], n: 5, stride: 5));
         Throws<ArgumentException>(() =>

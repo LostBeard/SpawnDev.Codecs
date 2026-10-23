@@ -43,6 +43,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusHead_Stereo_48kHz_NoGain_ParsesCanonical()
     {
+        CpuOnlyTest();
         var bytes = BuildOpusHeadPacket(channels: 2, preSkip: 312, inputRate: 48000, gainQ78: 0, family: 0);
         var h = OpusHeadParser.Parse(bytes);
         Equal(1, h.Version);
@@ -57,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusHead_Gain_SignedDecoding()
     {
+        CpuOnlyTest();
         // Q7.8 gain = -3 dB nominal. In Q7.8 that's -3 * 256 = -768.
         // -768 in 16-bit signed little-endian: (-768 & 0xFFFF) = 0xFD00 -> bytes 0x00 0xFD.
         var bytes = BuildOpusHeadPacket(1, 0, 48000, -768, 0);
@@ -67,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusHead_Surround51_Family1_WithMappingTable()
     {
+        CpuOnlyTest();
         byte[] map = { 0, 4, 1, 2, 3, 5 };
         var bytes = BuildOpusHeadPacket(channels: 6, preSkip: 100, inputRate: 48000, gainQ78: 0,
             family: 1, streamCount: 4, coupledCount: 2, mapping: map);
@@ -82,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusHead_WrongMagic_Throws()
     {
+        CpuOnlyTest();
         var bytes = BuildOpusHeadPacket(2, 0, 48000, 0, 0);
         bytes[0] = (byte)'X';
         bool threw = false;
@@ -92,6 +96,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusHead_ZeroChannels_Throws()
     {
+        CpuOnlyTest();
         var bytes = BuildOpusHeadPacket(1, 0, 48000, 0, 0);
         bytes[9] = 0;
         bool threw = false;
@@ -124,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusTags_VendorAndComments_Parse()
     {
+        CpuOnlyTest();
         var bytes = BuildOpusTagsPacket("libopus 1.3.1", new[] { "ARTIST=Bach", "TITLE=BWV 1060" });
         var t = OpusTagsParser.Parse(bytes);
         Equal("libopus 1.3.1", t.Vendor);
@@ -135,6 +141,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusTags_EmptyComments_Parse()
     {
+        CpuOnlyTest();
         var bytes = BuildOpusTagsPacket("V", Array.Empty<string>());
         var t = OpusTagsParser.Parse(bytes);
         Equal("V", t.Vendor);
@@ -144,6 +151,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusTags_WrongMagic_Throws()
     {
+        CpuOnlyTest();
         var bytes = BuildOpusTagsPacket("V", new[] { "A=1" });
         bytes[0] = (byte)'Z';
         bool threw = false;
@@ -206,6 +214,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusOggDecoder_ConcentusEncodedSilk_RoundtripDecodes()
     {
+        CpuOnlyTest();
         // Encode 4 frames of 20ms speech-like signal via Concentus, build an Opus-in-Ogg
         // byte stream, and decode through our OpusOggDecoder.
         int frameLen = 960; // 20ms at 48 kHz
@@ -253,6 +262,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusOggDecoder_EmptyStream_Throws()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { _ = OpusOggDecoder.DecodeAsync(Array.Empty<byte>()).Result; }
         catch (AggregateException ae) when (ae.InnerException is InvalidDataException) { threw = true; }
@@ -263,6 +273,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void OpusOggDecoder_MultiStreamMapping_ThrowsNotSupported()
     {
+        CpuOnlyTest();
         // Build an OpusHead declaring mapping family 1 + 6 channels. OpusOggDecoder
         // should throw NotSupportedException at that point.
         var head = BuildOpusHeadPacket(channels: 6, preSkip: 0, inputRate: 48000, gainQ78: 0,

@@ -27,6 +27,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisInverseCoupling_PositiveMag_PositiveAng_YieldsMsMinus()
     {
+        CpuOnlyTest();
         // mag=5, ang=3 -> newM = 5, newA = 5 - 3 = 2.
         var magBuf = new float[] { 5f };
         var angBuf = new float[] { 3f };
@@ -39,6 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisInverseCoupling_PositiveMag_NegativeAng_YieldsMsPlus()
     {
+        CpuOnlyTest();
         // mag=5, ang=-3 -> newA = 5, newM = 5 + (-3) = 2.
         var magBuf = new float[] { 5f };
         var angBuf = new float[] { -3f };
@@ -51,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisInverseCoupling_NegativeMag_PositiveAng()
     {
+        CpuOnlyTest();
         // mag=-5, ang=3 -> newM = -5, newA = -5 + 3 = -2.
         var magBuf = new float[] { -5f };
         var angBuf = new float[] { 3f };
@@ -63,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisInverseCoupling_NegativeMag_NegativeAng()
     {
+        CpuOnlyTest();
         // mag=-5, ang=-3 -> newA = -5, newM = -5 - (-3) = -2.
         var magBuf = new float[] { -5f };
         var angBuf = new float[] { -3f };
@@ -75,6 +79,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisInverseCoupling_NoCouplingSteps_NoChange()
     {
+        CpuOnlyTest();
         var ch0 = new float[] { 1.1f, 2.2f, 3.3f };
         var ch1 = new float[] { -1.1f, -2.2f, -3.3f };
         var mapping = MakeMapping(Array.Empty<int>(), Array.Empty<int>());
@@ -86,6 +91,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisInverseCoupling_MultipleBins_AppliedElementwise()
     {
+        CpuOnlyTest();
         // Each bin handled independently.
         var mag = new[] { 5f, -5f, 5f, -5f };
         var ang = new[] { 3f, 3f, -3f, -3f };
@@ -98,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisInverseCoupling_MultipleSteps_AppliedInReverse()
     {
+        CpuOnlyTest();
         // 2 coupling steps. Steps apply in LAST -> FIRST order.
         var ch0 = new float[] { 10f };
         var ch1 = new float[] { 2f };

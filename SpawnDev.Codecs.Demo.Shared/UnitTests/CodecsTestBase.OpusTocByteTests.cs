@@ -13,6 +13,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void TocByte_Config_MapsToCorrectModeAndBandwidth_AllConfigs()
     {
+        CpuOnlyTest();
         // RFC 6716 Table 2:
         //   0-3:  SILK  NB
         //   4-7:  SILK  MB
@@ -58,6 +59,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void TocByte_StereoBit_SetsChannelCount()
     {
+        CpuOnlyTest();
         var mono = new OpusTocByte(0x00);
         var stereo = new OpusTocByte(0x04);
         Equal(1, mono.ChannelCount);
@@ -69,6 +71,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void TocByte_FrameCountCode_ExtractsLowTwoBits()
     {
+        CpuOnlyTest();
         var cases = new (byte value, int expected)[]
         {
             (0x00, 0),
@@ -85,6 +88,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void TocByte_GetSamplesPerFrame_MatchesRfcTable()
     {
+        CpuOnlyTest();
         // (config, expected samples @ 48kHz)
         var cases = new (int config, int expected)[]
         {
@@ -109,6 +113,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void TocByte_GetSamplesPerFrame_ZeroSampleRate_Throws()
     {
+        CpuOnlyTest();
         var toc = new OpusTocByte(0x00);
         Throws<ArgumentOutOfRangeException>(() => toc.GetSamplesPerFrame(0));
     }
@@ -116,6 +121,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void TocByte_ToString_IncludesAllFields()
     {
+        CpuOnlyTest();
         var toc = new OpusTocByte(0x77); // config 14 Hybrid FB, stereo=1, c=3
         string s = toc.ToString();
         Contains("0x77", s);

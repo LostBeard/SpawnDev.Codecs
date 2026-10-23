@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisOggDecoder_HeadersOnlyStream_ParsesThreeHeaders()
     {
+        CpuOnlyTest();
         byte[] identPacket = BuildIdentHeader(
             version: 0, channels: 1, sampleRate: 48000,
             bitrateMax: 0, bitrateNom: 128000, bitrateMin: 0,
@@ -54,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisOggDecoder_MissingHeaderPacket_Throws()
     {
+        CpuOnlyTest();
         byte[] identPacket = BuildIdentHeader(0, 1, 48000, 0, 0, 0, 8, 11);
         byte[] commentPacket = BuildCommentHeader("V", Array.Empty<string>(), framingFlag: true);
         var outgoing = new List<OggOutgoingPacket>
@@ -70,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisOggDecoder_EmptyStream_Throws()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { _ = VorbisOggDecoder.Decode(Array.Empty<byte>()); } catch (InvalidDataException) { threw = true; }
         True(threw);
@@ -78,6 +81,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisOggDecoder_FirstPageNotBos_Throws()
     {
+        CpuOnlyTest();
         // Manually build a page with BOS flag cleared.
         byte[] identPacket = BuildIdentHeader(0, 1, 48000, 0, 0, 0, 8, 11);
         byte[] page = OggPageWriter.WriteSinglePacketPage(

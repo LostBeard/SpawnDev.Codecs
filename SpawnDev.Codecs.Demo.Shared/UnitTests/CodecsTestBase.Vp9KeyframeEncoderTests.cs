@@ -57,6 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9KeyframeEncoder_EncodesFlat16x16Black_HasValidSyncCode()
     {
+        CpuOnlyTest();
         var (y, u, v) = MakeFlatYuv420(16, 16, yValue: 16, uValue: 128, vValue: 128);
         byte[] frame = Vp9KeyframeEncoder.EncodeKeyFrame(
             y, ySrcStride: 16,
@@ -87,6 +88,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeEncoder_FlatBlack16x16_RoundTripsViaWalker()
     {
+        CpuOnlyTest();
         const byte ySrcVal = 16;
         const byte uSrcVal = 128;
         const byte vSrcVal = 128;
@@ -125,6 +127,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeEncoder_FlatGray32x32_RoundTripsViaWalker()
     {
+        CpuOnlyTest();
         const byte ySrcVal = 128;
         const byte uSrcVal = 128;
         const byte vSrcVal = 128;
@@ -164,6 +167,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeEncoder_Gradient32x32_RoundTripsWithinTolerance()
     {
+        CpuOnlyTest();
         const int W = 32, H = 32;
         var ySrc = new byte[W * H];
         for (int r = 0; r < H; r++)
@@ -208,6 +212,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9KeyframeEncoder_Gradient32x32_PerBlockBitstreamConsistent()
     {
+        CpuOnlyTest();
         const int W = 32, H = 32;
         var ySrc = new byte[W * H];
         for (int r = 0; r < H; r++)
@@ -267,6 +272,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9KeyframeEncoder_FlatBlack16x16_OutputIsCompact()
     {
+        CpuOnlyTest();
         var (y, u, v) = MakeFlatYuv420(16, 16, yValue: 16, uValue: 128, vValue: 128);
         byte[] frame = Vp9KeyframeEncoder.EncodeKeyFrame(
             y, ySrcStride: 16,

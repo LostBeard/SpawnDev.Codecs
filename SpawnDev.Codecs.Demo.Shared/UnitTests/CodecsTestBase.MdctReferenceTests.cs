@@ -12,6 +12,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mdct_ZeroInput_ZeroOutput()
     {
+        CpuOnlyTest();
         var input = new float[16];
         var output = MdctReference.Transform(input);
         Equal(8, output.Length);
@@ -21,6 +22,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mdct_OutputLength_IsHalfInput()
     {
+        CpuOnlyTest();
         var input = new float[32];
         var output = MdctReference.Transform(input);
         Equal(16, output.Length);
@@ -29,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mdct_Linearity()
     {
+        CpuOnlyTest();
         const int n = 8;
         var a = new float[2 * n];
         var b = new float[2 * n];
@@ -54,18 +57,21 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mdct_OddInputLength_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => MdctReference.Transform(new float[9], new float[4]));
     }
 
     [TestMethod]
     public void Mdct_WrongOutputLength_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => MdctReference.Transform(new float[16], new float[10]));
     }
 
     [TestMethod]
     public void Mdct_Imdct_Roundtrip_TdacSymmetry()
     {
+        CpuOnlyTest();
         // Time-domain alias cancellation (TDAC) property: for one block x of
         // length 2N, IMDCT(MDCT(x)) yields aliased time samples y such that
         //   y[n]          = N * (-x[N - 1 - n] + x[n])          for n in [0, N)
@@ -99,6 +105,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mdct_InputOf2_RunsWithoutError()
     {
+        CpuOnlyTest();
         // Smallest useful input (N = 1).
         var input = new float[2] { 0.5f, -0.25f };
         var output = MdctReference.Transform(input);
@@ -109,6 +116,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mdct_LargerSizes_ProduceFiniteOutput()
     {
+        CpuOnlyTest();
         foreach (int inputLen in new[] { 16, 32, 64, 128 })
         {
             var input = new float[inputLen];

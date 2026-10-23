@@ -31,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1FrameHeaderWriter_VisibleKeyFrame_RoundTripsThroughParser()
     {
+        CpuOnlyTest();
         var sh = BuildBbbLikeSequenceHeader();
         var cfg = new Av1FrameHeaderConfig
         {
@@ -52,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1FrameHeaderWriter_VisibleInterFrame_ErrorResilientFalse_RoundTrips()
     {
+        CpuOnlyTest();
         var sh = BuildBbbLikeSequenceHeader();
         var cfg = new Av1FrameHeaderConfig
         {
@@ -72,6 +74,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1FrameHeaderWriter_HiddenFrame_ShowableTrue_RoundTrips()
     {
+        CpuOnlyTest();
         var sh = BuildBbbLikeSequenceHeader();
         var cfg = new Av1FrameHeaderConfig
         {
@@ -90,6 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1FrameHeaderWriter_ShowExistingFrame_RoundTrips()
     {
+        CpuOnlyTest();
         var sh = BuildBbbLikeSequenceHeader();
         var cfg = new Av1FrameHeaderConfig
         {
@@ -105,6 +109,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1FrameHeaderWriter_IntraOnlyFrame_RoundTrips()
     {
+        CpuOnlyTest();
         var sh = BuildBbbLikeSequenceHeader();
         var cfg = new Av1FrameHeaderConfig
         {
@@ -123,6 +128,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1FrameHeaderWriter_SwitchFrame_RoundTrips()
     {
+        CpuOnlyTest();
         var sh = BuildBbbLikeSequenceHeader();
         var cfg = new Av1FrameHeaderConfig
         {
@@ -143,6 +149,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1FrameHeaderWriter_FromHeader_RoundTripsViaWriter()
     {
+        CpuOnlyTest();
         // Closed loop: build a FrameHeader by emitting a known config,
         // parse it back, convert to config via FromHeader, re-emit,
         // verify byte-equivalent output.
@@ -173,6 +180,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1FrameHeaderWriter_RejectsImplicitErrorResilientMisconfig()
     {
+        CpuOnlyTest();
         var sh = BuildBbbLikeSequenceHeader();
         // SwitchFrame requires implicit ErrorResilientMode = true
         Throws<ArgumentException>(() => Av1FrameHeaderWriter.EmitPayload(
@@ -202,6 +210,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1FrameHeaderWriter_ReducedStillPictureHeader_EmptyHeader()
     {
+        CpuOnlyTest();
         // When SH says reduced_still_picture_header=true, parser ignores
         // the header bytes and returns a fixed key/show/intra value. The
         // writer matches that by writing only trailing-bits.

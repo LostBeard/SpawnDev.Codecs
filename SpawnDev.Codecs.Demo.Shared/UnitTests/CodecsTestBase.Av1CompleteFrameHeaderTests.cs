@@ -14,6 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_ParsesWithoutThrowing()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         // Find the SequenceHeader and the first Frame OBU.
         var firstIvf = IvfReader.EnumerateFrames(bytes).First();
@@ -49,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_HasReasonableTileInfo()
     {
+        CpuOnlyTest();
         var (sh, payload) = LoadBbbAv1FirstKeyframe();
         var complete = Av1CompleteFrameHeaderParser.Parse(payload, sh);
         // 320x180 BBB encoded by libaom uses uniform 1x1 tiling per
@@ -61,6 +63,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_QuantBaseQindex_MatchesLibdav1d()
     {
+        CpuOnlyTest();
         // Spot-check baseQindex against what libdav1d reports for this fixture.
         // libaom encoded BBB at high quality so baseQindex is in single digits.
         var (sh, payload) = LoadBbbAv1FirstKeyframe();
@@ -72,6 +75,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_TileGroupExtraction_Succeeds()
     {
+        CpuOnlyTest();
         // Now that the header parser is bit-cursor-correct, the tile group
         // extractor should succeed and find exactly 1 tile covering the
         // remainder of the frame payload.
@@ -90,6 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_QuantInBand()
     {
+        CpuOnlyTest();
         var (sh, payload) = LoadBbbAv1FirstKeyframe();
         var complete = Av1CompleteFrameHeaderParser.Parse(payload, sh);
         // libaom typical default qindex ~ 80-160 for medium quality. BBB ffmpeg
@@ -106,6 +111,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_SegmentationDisabled()
     {
+        CpuOnlyTest();
         var (sh, payload) = LoadBbbAv1FirstKeyframe();
         var complete = Av1CompleteFrameHeaderParser.Parse(payload, sh);
         // BBB encoded by libaom defaults to segmentation OFF.
@@ -115,6 +121,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_LoopFilterLevelsValid()
     {
+        CpuOnlyTest();
         var (sh, payload) = LoadBbbAv1FirstKeyframe();
         var complete = Av1CompleteFrameHeaderParser.Parse(payload, sh);
         // 6-bit unsigned literals -> 0..63 each
@@ -125,6 +132,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_HasCdefParamsWhenEnabled()
     {
+        CpuOnlyTest();
         var (sh, payload) = LoadBbbAv1FirstKeyframe();
         var complete = Av1CompleteFrameHeaderParser.Parse(payload, sh);
         if (sh.EnableCdef && !complete.CodedLossless && !complete.Prefix.AllowIntraBc)
@@ -138,6 +146,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_TxModeAndReducedTxSet()
     {
+        CpuOnlyTest();
         var (sh, payload) = LoadBbbAv1FirstKeyframe();
         var complete = Av1CompleteFrameHeaderParser.Parse(payload, sh);
         // Either Largest (1) or Select (2) is valid for non-lossless keyframes.
@@ -150,6 +159,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_HeaderSizeIsReasonable()
     {
+        CpuOnlyTest();
         var (sh, payload) = LoadBbbAv1FirstKeyframe();
         var complete = Av1CompleteFrameHeaderParser.Parse(payload, sh);
         // Uncompressed header for a 320x180 keyframe is < 100 bytes typically.

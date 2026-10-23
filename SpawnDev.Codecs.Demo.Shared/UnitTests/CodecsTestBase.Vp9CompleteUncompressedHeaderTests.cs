@@ -20,6 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompleteUncompressedHeader_BbbFirstKeyframe_ParsesAllFields()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         var video = container.Tracks.First(t => t.IsVideo);
@@ -67,6 +68,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompleteUncompressedHeader_AllVisibleBbbFrames_ParseWithoutThrowing()
     {
+        CpuOnlyTest();
         // Smoke test: the complete header parser handles every variant
         // present in the BBB fixture. Without ref frame sizes, inter
         // frames using frame_size_with_refs will fall back to (0,0)
@@ -109,6 +111,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CompleteUncompressedHeader_FirstPartitionSize_FitsInFrame()
     {
+        CpuOnlyTest();
         // Every frame in the BBB fixture must satisfy:
         //   uncompressed_header_size + first_partition_size <= frame_length
         // Otherwise the compressed header wouldn't fit and the bool decoder

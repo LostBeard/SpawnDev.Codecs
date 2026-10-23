@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterMode_OffsetValuesMatchLibvpx()
     {
+        CpuOnlyTest();
         // libvpx INTER_OFFSET: NEARESTMV=0, NEARMV=1, ZEROMV=2, NEWMV=3.
         Equal((byte)0, (byte)Vp9InterMode.NearestMv);
         Equal((byte)1, (byte)Vp9InterMode.NearMv);
@@ -22,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterModeTree_HasCorrectShape()
     {
+        CpuOnlyTest();
         // 6 entries = 3 internal nodes x 2 branches.
         Equal(6, Vp9InterModeTree.Tree.Length);
         Equal((sbyte)(-2), Vp9InterModeTree.Tree[0]); // -ZeroMv = -2
@@ -35,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterModeTree_DecodesZeroMvOnFirstZeroBit()
     {
+        CpuOnlyTest();
         // Tree slot 0 = -ZeroMv = -2, leaf.
         var bits = new int[] { 0 };
         int idx = 0;
@@ -45,6 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterModeTree_DecodesNearestMvOnPath_1_0()
     {
+        CpuOnlyTest();
         // i=0 bit 1 -> i=2 (NEAREST_NM), bit 0 -> -NearestMv = 0 leaf.
         var bits = new int[] { 1, 0 };
         int idx = 0;
@@ -55,6 +59,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterModeTree_DecodesNearMvOnPath_1_1_0()
     {
+        CpuOnlyTest();
         // i=0 bit 1 -> i=2, bit 1 -> i=4 (NEAR_OR_NEW), bit 0 -> -NearMv = -1.
         var bits = new int[] { 1, 1, 0 };
         int idx = 0;
@@ -65,6 +70,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterModeTree_DecodesNewMvOnPath_1_1_1()
     {
+        CpuOnlyTest();
         // ...bit 1 -> -NewMv = -3.
         var bits = new int[] { 1, 1, 1 };
         int idx = 0;
@@ -75,6 +81,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterModeTree_RejectsUndersizedProbs()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => Vp9InterModeTree.Decode(_ => 0, new byte[2]));
     }
 }

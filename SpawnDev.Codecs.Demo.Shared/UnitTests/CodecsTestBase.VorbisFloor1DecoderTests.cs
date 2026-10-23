@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1Decoder_NonzeroFlagClear_ReturnsNull()
     {
+        CpuOnlyTest();
         // "Nonzero" bit 0 -> decoder returns null (silent floor), no further reads.
         var cfg = new VorbisFloor1Config
         {
@@ -38,6 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1Decoder_SinglePartition_NoMasterbook_ReadsYValues()
     {
+        CpuOnlyTest();
         // 1 partition, 1 class, class dimensions 1, subclasses 0.
         // Subclass book 0 = codebook 0 (4-entry len-2 codebook, codes 00/01/10/11 -> entries 0/1/2/3).
         var cfg = new VorbisFloor1Config
@@ -72,6 +74,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1Decoder_ClassSubclasses_ReadsMasterbookFirst()
     {
+        CpuOnlyTest();
         // Class with subclasses=1 (2 subclass slots). Masterbook returns a 2-bit
         // cval; low bit indexes the subclass table.
         //   subclass[0] = codebook index 1 (4-entry 2-bit codebook)
@@ -124,6 +127,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1Decoder_MultiplierEndpointBits_PicksRightWidth()
     {
+        CpuOnlyTest();
         // Multiplier 4 -> endpointBits = 6. Values fit in 6 bits (0..63).
         var cfg = new VorbisFloor1Config
         {
@@ -150,6 +154,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1Decoder_BadMasterbookIndex_Throws()
     {
+        CpuOnlyTest();
         var cfg = new VorbisFloor1Config
         {
             Partitions = 1,

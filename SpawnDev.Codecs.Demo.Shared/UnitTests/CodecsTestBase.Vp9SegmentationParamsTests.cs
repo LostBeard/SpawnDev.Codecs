@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationParams_Disabled_ParsesSingleFlag()
     {
+        CpuOnlyTest();
         var data = BitsToBytes((0, 1));  // enabled=0
         var s = Vp9SegmentationParamsParser.Parse(data);
         Equal(false, s.Enabled);
@@ -21,6 +22,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationParams_EnabledNoUpdates_ReadsTwoFlags()
     {
+        CpuOnlyTest();
         // enabled=1, update_map=0, update_data=0.
         var data = BitsToBytes((1, 1), (0, 1), (0, 1));
         var s = Vp9SegmentationParamsParser.Parse(data);
@@ -32,6 +34,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationParams_UpdateMap_TreeProbsAndTemporalFlag()
     {
+        CpuOnlyTest();
         // enabled=1, update_map=1.
         // 7 tree probs: [50, _, 100, _, 200, _, 75] - alternating present/absent.
         // No temporal update -> all 3 pred probs remain at MaxProb=255.
@@ -69,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationParams_UpdateMapWithTemporalUpdate_ReadsPredProbs()
     {
+        CpuOnlyTest();
         var data = BitsToBytes(
             (1, 1),                     // enabled
             (1, 1),                     // update_map
@@ -92,6 +96,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationParams_UpdateData_AllFeaturesDisabled()
     {
+        CpuOnlyTest();
         // enabled=1, update_map=0, update_data=1, abs_delta=0.
         // For 8 segments * 4 features = 32 feature_enabled flags, all 0.
         var fields = new (uint, int)[36];
@@ -117,6 +122,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationParams_UpdateData_AltQAndAltLfWithSign()
     {
+        CpuOnlyTest();
         // enabled=1, update_map=0, update_data=1, abs_delta=1.
         // Segment 0: ALT_Q=+30, ALT_LF=-5, REF_FRAME and SKIP disabled.
         // All other segments: all features disabled.
@@ -153,6 +159,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationParams_UpdateData_RefFrameAndSkipFeatures()
     {
+        CpuOnlyTest();
         // Segment 3: REF_FRAME=2 (golden, 2 bits), SKIP enabled (no payload).
         var fields = new System.Collections.Generic.List<(uint, int)>
         {

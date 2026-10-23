@@ -41,6 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisAudio_SingleMode_ShortBlock_NoModeBits()
     {
+        CpuOnlyTest();
         // Only 1 mode -> ilog(0) = 0 bits for mode selection. Short block -> no window flags.
         var modes = new[] { new VorbisModeConfig { BlockFlag = false, Mapping = 0 } };
         var setup = MakeSetup(modes);
@@ -61,6 +62,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisAudio_TwoModes_SelectsShortBlock()
     {
+        CpuOnlyTest();
         // Two modes: index 0 = short, index 1 = long. ilog(1) = 1 bit.
         var modes = new[]
         {
@@ -81,6 +83,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisAudio_TwoModes_SelectsLongBlock_ReadsWindowFlags()
     {
+        CpuOnlyTest();
         var modes = new[]
         {
             new VorbisModeConfig { BlockFlag = false, Mapping = 0 },
@@ -104,6 +107,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisAudio_FourModes_UsesTwoModeBits()
     {
+        CpuOnlyTest();
         // 4 modes -> ilog(3) = 2 bits of mode selection.
         var modes = new[]
         {
@@ -129,6 +133,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisAudio_PacketTypeOne_Throws()
     {
+        CpuOnlyTest();
         // Packet type = 1 indicates a header packet, not an audio packet.
         var modes = new[] { new VorbisModeConfig { BlockFlag = false, Mapping = 0 } };
         var setup = MakeSetup(modes);
@@ -144,6 +149,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisAudio_CustomBlockSizes_ReflectedInResult()
     {
+        CpuOnlyTest();
         var modes = new[]
         {
             new VorbisModeConfig { BlockFlag = false, Mapping = 0 },

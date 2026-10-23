@@ -36,6 +36,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ScanTables_4x4_AllThreeScansAreValidPermutations()
     {
+        CpuOnlyTest();
         AssertValidScanPermutation(Vp9ScanTables.DefaultScan4x4, 16);
         AssertValidScanPermutation(Vp9ScanTables.RowScan4x4, 16);
         AssertValidScanPermutation(Vp9ScanTables.ColScan4x4, 16);
@@ -44,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ScanTables_8x8_AllThreeScansAreValidPermutations()
     {
+        CpuOnlyTest();
         AssertValidScanPermutation(Vp9ScanTables.DefaultScan8x8, 64);
         AssertValidScanPermutation(Vp9ScanTables.RowScan8x8, 64);
         AssertValidScanPermutation(Vp9ScanTables.ColScan8x8, 64);
@@ -52,6 +54,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ScanTables_16x16_AllThreeScansAreValidPermutations()
     {
+        CpuOnlyTest();
         AssertValidScanPermutation(Vp9ScanTables.DefaultScan16x16, 256);
         AssertValidScanPermutation(Vp9ScanTables.RowScan16x16, 256);
         AssertValidScanPermutation(Vp9ScanTables.ColScan16x16, 256);
@@ -60,12 +63,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ScanTables_32x32_DefaultScanIsValidPermutation()
     {
+        CpuOnlyTest();
         AssertValidScanPermutation(Vp9ScanTables.DefaultScan32x32, 1024);
     }
 
     [TestMethod]
     public void Vp9ScanTables_4x4DefaultScan_PinnedFirstAndLastEntries()
     {
+        CpuOnlyTest();
         // Pinned vs libvpx default_scan_4x4: starts 0,4,1,5,8,...
         // and ends ...11,15.
         Equal((ushort)0,  Vp9ScanTables.DefaultScan4x4[0]);
@@ -79,6 +84,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ScanTables_4x4RowScan_PinnedFirstAndLastEntries()
     {
+        CpuOnlyTest();
         Equal((ushort)0,  Vp9ScanTables.RowScan4x4[0]);
         Equal((ushort)1,  Vp9ScanTables.RowScan4x4[1]);
         Equal((ushort)4,  Vp9ScanTables.RowScan4x4[2]);
@@ -88,6 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ScanTables_4x4ColScan_PinnedFirstAndLastEntries()
     {
+        CpuOnlyTest();
         Equal((ushort)0,  Vp9ScanTables.ColScan4x4[0]);
         Equal((ushort)4,  Vp9ScanTables.ColScan4x4[1]);
         Equal((ushort)8,  Vp9ScanTables.ColScan4x4[2]);
@@ -97,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ScanTables_32x32DefaultScan_LastEntryIs1023()
     {
+        CpuOnlyTest();
         // The 1024-entry table's terminal value must be the highest
         // raster position - the permutation invariant test catches
         // missing entries, but pinning the last value too gives a
@@ -107,6 +115,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ScanTables_ScanTypeForTxType4x4_MapsCorrectly()
     {
+        CpuOnlyTest();
         Equal(Vp9ScanType.Default, Vp9ScanTables.ScanTypeForTxType4x4(Vp9TxType4x4.DctDct));
         Equal(Vp9ScanType.Row,     Vp9ScanTables.ScanTypeForTxType4x4(Vp9TxType4x4.AdstDct));
         Equal(Vp9ScanType.Col,     Vp9ScanTables.ScanTypeForTxType4x4(Vp9TxType4x4.DctAdst));
@@ -116,6 +125,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ScanTables_ScanTypeForTxType8x8_MapsCorrectly()
     {
+        CpuOnlyTest();
         Equal(Vp9ScanType.Default, Vp9ScanTables.ScanTypeForTxType8x8(Vp9TxType8x8.DctDct));
         Equal(Vp9ScanType.Row,     Vp9ScanTables.ScanTypeForTxType8x8(Vp9TxType8x8.AdstDct));
         Equal(Vp9ScanType.Col,     Vp9ScanTables.ScanTypeForTxType8x8(Vp9TxType8x8.DctAdst));
@@ -125,6 +135,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ScanTables_GetScan_DispatchesByTxSizeAndScanType()
     {
+        CpuOnlyTest();
         // 4x4 / 8x8 / 16x16 cover all three flavors; 32x32 falls
         // back to default for any flavor.
         True(ReferenceEquals(Vp9ScanTables.DefaultScan4x4,   Vp9ScanTables.GetScan(Vp9TxSize.Tx4x4,   Vp9ScanType.Default)));

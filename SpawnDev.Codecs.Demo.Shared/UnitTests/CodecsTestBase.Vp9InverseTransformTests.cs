@@ -32,6 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InverseTransform_4x4_DctDct_MatchesDirectIht()
     {
+        CpuOnlyTest();
         var input = BuildResidual(4);
         var expected = BuildDest(4);
         Vp9Iht4x4Reference.Iht4x4_16_Add(Vp9TxType4x4.DctDct, input, expected, 4);
@@ -45,6 +46,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InverseTransform_4x4_AdstAdst_MatchesDirectIht()
     {
+        CpuOnlyTest();
         var input = BuildResidual(4);
         var expected = BuildDest(4);
         Vp9Iht4x4Reference.Iht4x4_16_Add(Vp9TxType4x4.AdstAdst, input, expected, 4);
@@ -58,6 +60,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InverseTransform_8x8_DctDct_MatchesDirectIht()
     {
+        CpuOnlyTest();
         var input = BuildResidual(8);
         var expected = BuildDest(8);
         Vp9Iht8x8Reference.Iht8x8_64_Add(Vp9TxType8x8.DctDct, input, expected, 8);
@@ -71,6 +74,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InverseTransform_8x8_AdstDct_MatchesDirectIht()
     {
+        CpuOnlyTest();
         var input = BuildResidual(8);
         var expected = BuildDest(8);
         Vp9Iht8x8Reference.Iht8x8_64_Add(Vp9TxType8x8.AdstDct, input, expected, 8);
@@ -84,6 +88,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InverseTransform_16x16_DctDct_MatchesDirectIht()
     {
+        CpuOnlyTest();
         var input = BuildResidual(16);
         var expected = BuildDest(16);
         Vp9Iht16x16Reference.Iht16x16_256_Add(Vp9TxType16x16.DctDct, input, expected, 16);
@@ -97,6 +102,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InverseTransform_16x16_DctAdst_MatchesDirectIht()
     {
+        CpuOnlyTest();
         var input = BuildResidual(16);
         var expected = BuildDest(16);
         Vp9Iht16x16Reference.Iht16x16_256_Add(Vp9TxType16x16.DctAdst, input, expected, 16);
@@ -110,6 +116,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InverseTransform_32x32_DctDct_MatchesDirectIdct()
     {
+        CpuOnlyTest();
         var input = BuildResidual(32);
         var expected = BuildDest(32);
         Vp9Idct32x32Reference.Idct32x32_1024_Add(input, expected, 32);
@@ -123,6 +130,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InverseTransform_32x32_NonDctDct_Throws()
     {
+        CpuOnlyTest();
         var input = new short[1024];
         var dest = new byte[1024];
         Throws<ArgumentException>(() =>
@@ -136,6 +144,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InverseTransform_UnknownTxSize_Throws()
     {
+        CpuOnlyTest();
         var input = new short[16];
         var dest = new byte[16];
         Throws<ArgumentOutOfRangeException>(() =>

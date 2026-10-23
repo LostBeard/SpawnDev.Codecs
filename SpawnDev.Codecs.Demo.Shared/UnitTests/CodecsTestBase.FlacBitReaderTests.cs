@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadBits_ByteAligned_ReturnsFullByte()
     {
+        CpuOnlyTest();
         byte[] data = { 0xA5, 0x3C };
         var r = new FlacBitReader(data);
         Equal(0xA5u, r.ReadBits(8));
@@ -26,6 +27,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadBits_SingleBitsMsbFirst()
     {
+        CpuOnlyTest();
         // 0xA5 = 1010 0101
         byte[] data = { 0xA5 };
         var r = new FlacBitReader(data);
@@ -43,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadBits_PartialByte()
     {
+        CpuOnlyTest();
         // 0xA5 = 1010 0101; take top 3 bits (101 = 5), then next 5 bits (00101 = 5).
         byte[] data = { 0xA5 };
         var r = new FlacBitReader(data);
@@ -54,6 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadBits_CrossByteBoundary()
     {
+        CpuOnlyTest();
         // 0xA5 0x3C = 1010 0101 0011 1100
         // Skip 4 bits (1010), then read 8 bits (0101 0011) = 0x53.
         byte[] data = { 0xA5, 0x3C };
@@ -67,6 +71,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadBits_Span_MultiByte()
     {
+        CpuOnlyTest();
         // 16-bit field spanning full reader; 0xA53C.
         byte[] data = { 0xA5, 0x3C };
         var r = new FlacBitReader(data);
@@ -77,6 +82,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadBits_MaxWidth_32Bits()
     {
+        CpuOnlyTest();
         // 32-bit big-endian integer 0xDEADBEEF.
         byte[] data = { 0xDE, 0xAD, 0xBE, 0xEF };
         var r = new FlacBitReader(data);
@@ -87,6 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadBits_Zero_ReturnsZero_NoAdvance()
     {
+        CpuOnlyTest();
         byte[] data = { 0xFF };
         var r = new FlacBitReader(data);
         Equal(0u, r.ReadBits(0));
@@ -97,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadBits_OutOfRange_Throws()
     {
+        CpuOnlyTest();
         byte[] data = { 0xFF };
         Throws<ArgumentOutOfRangeException>(() =>
         {
@@ -113,6 +121,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadBits_NotEnough_Throws()
     {
+        CpuOnlyTest();
         byte[] data = { 0xFF };
         Throws<InvalidOperationException>(() =>
         {
@@ -124,6 +133,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_BitsRemaining_And_Position_Track()
     {
+        CpuOnlyTest();
         byte[] data = { 0xFF, 0xFF };
         var r = new FlacBitReader(data);
         Equal(16, r.BitsRemaining);
@@ -143,6 +153,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadBitsSigned_Positive()
     {
+        CpuOnlyTest();
         // 5-bit signed integer 0b01010 = +10.
         byte[] data = { 0b01010_000 };
         var r = new FlacBitReader(data);
@@ -152,6 +163,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadBitsSigned_NegativeSignExtend()
     {
+        CpuOnlyTest();
         // 5-bit signed integer 0b11010 = -6 (two's complement).
         byte[] data = { 0b11010_000 };
         var r = new FlacBitReader(data);
@@ -161,6 +173,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadBitsSigned_FullWidth32()
     {
+        CpuOnlyTest();
         // 0x80000000 as a 32-bit signed int = int.MinValue.
         byte[] data = { 0x80, 0x00, 0x00, 0x00 };
         var r = new FlacBitReader(data);
@@ -170,6 +183,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadBitsSigned_AllOnes()
     {
+        CpuOnlyTest();
         // 4 bits all-ones = -1.
         byte[] data = { 0xF0 };
         var r = new FlacBitReader(data);
@@ -179,6 +193,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadBitsSigned_InvalidWidth_Throws()
     {
+        CpuOnlyTest();
         byte[] data = { 0xFF };
         Throws<ArgumentOutOfRangeException>(() =>
         {
@@ -195,6 +210,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUnary_ZeroPrefix()
     {
+        CpuOnlyTest();
         // 0b1000_0000: no leading zeros, terminating 1 is the first bit.
         byte[] data = { 0x80 };
         var r = new FlacBitReader(data);
@@ -205,6 +221,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUnary_SevenZeros()
     {
+        CpuOnlyTest();
         // 0b0000_0001: 7 zero bits then a terminating 1.
         byte[] data = { 0x01 };
         var r = new FlacBitReader(data);
@@ -216,6 +233,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUnary_CrossesByteBoundary()
     {
+        CpuOnlyTest();
         // 0x00 0x40 = 0000 0000 0100 0000: 9 zero bits then a 1.
         byte[] data = { 0x00, 0x40 };
         var r = new FlacBitReader(data);
@@ -226,6 +244,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUnary_ExceedsStream_Throws()
     {
+        CpuOnlyTest();
         // All zeros, no terminating 1.
         byte[] data = { 0x00, 0x00 };
         Throws<InvalidOperationException>(() =>
@@ -238,6 +257,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_AlignToByte_FromMidByte()
     {
+        CpuOnlyTest();
         byte[] data = { 0xFF, 0x55 };
         var r = new FlacBitReader(data);
         _ = r.ReadBits(3);
@@ -250,6 +270,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_AlignToByte_OnBoundary_NoOp()
     {
+        CpuOnlyTest();
         byte[] data = { 0xFF, 0x55 };
         var r = new FlacBitReader(data);
         _ = r.ReadBits(8);
@@ -264,6 +285,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUtf8VarLen_AsciiRange_OneByte()
     {
+        CpuOnlyTest();
         // Any byte < 0x80 is itself the value.
         byte[] data = { 0x00 };
         var r = new FlacBitReader(data);
@@ -275,6 +297,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUtf8VarLen_TwoByte()
     {
+        CpuOnlyTest();
         // Classic UTF-8 encoding of U+00A2 (¢): 0xC2 0xA2 => 0xA2 (162).
         byte[] data = { 0xC2, 0xA2 };
         var r = new FlacBitReader(data);
@@ -284,6 +307,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUtf8VarLen_ThreeByte()
     {
+        CpuOnlyTest();
         // U+20AC (€): 0xE2 0x82 0xAC => 0x20AC (8364).
         byte[] data = { 0xE2, 0x82, 0xAC };
         var r = new FlacBitReader(data);
@@ -293,6 +317,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUtf8VarLen_FourByte()
     {
+        CpuOnlyTest();
         // U+1F600 (😀): 0xF0 0x9F 0x98 0x80 => 0x1F600.
         byte[] data = { 0xF0, 0x9F, 0x98, 0x80 };
         var r = new FlacBitReader(data);
@@ -302,6 +327,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUtf8VarLen_FiveByte()
     {
+        CpuOnlyTest();
         // 5-byte form (0xF8-0xFB lead, 4 continuations, 26 bits). firstByte & 0x03 = 0.
         // 0xF8 0x82 0x83 0x84 0x85 -> value = (2<<18)|(3<<12)|(4<<6)|5
         byte[] data = { 0xF8, 0x82, 0x83, 0x84, 0x85 };
@@ -313,6 +339,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUtf8VarLen_SixByte_FrameNumber()
     {
+        CpuOnlyTest();
         // 6-byte form (0xFC-0xFD lead, 5 continuations, 31 bits). firstByte & 0x01 = 0.
         // 0xFC 0x81 0x82 0x83 0x84 0x85 -> value = (1<<24)|(2<<18)|(3<<12)|(4<<6)|5
         byte[] data = { 0xFC, 0x81, 0x82, 0x83, 0x84, 0x85 };
@@ -324,6 +351,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUtf8VarLen_SevenByte_SampleNumber()
     {
+        CpuOnlyTest();
         // 7-byte form is the sample-number path; firstByte must be exactly 0xFE (36 bits).
         // 0xFE 0x82 0x83 0x84 0x85 0x86 0x87 -> value = (2<<30)|(3<<24)|(4<<18)|(5<<12)|(6<<6)|7
         byte[] data = { 0xFE, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87 };
@@ -335,6 +363,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUtf8VarLen_SevenByte_NotAllowed_Throws()
     {
+        CpuOnlyTest();
         // maxBytes=6 (frame-number path) must reject a 7-byte 0xFE lead.
         byte[] data = { 0xFE, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87 };
         Throws<InvalidOperationException>(() =>
@@ -347,6 +376,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUtf8VarLen_InvalidContinuation_Throws()
     {
+        CpuOnlyTest();
         // 2-byte start (0xC2) followed by a non-continuation byte (0x00).
         byte[] data = { 0xC2, 0x00 };
         Throws<InvalidOperationException>(() =>
@@ -359,6 +389,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUtf8VarLen_InvalidLead_Throws()
     {
+        CpuOnlyTest();
         // 0x80 is a bare continuation byte, cannot be a lead.
         byte[] data = { 0x80 };
         Throws<InvalidOperationException>(() =>
@@ -371,6 +402,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacBitReader_ReadUtf8VarLen_InvalidMaxBytes_Throws()
     {
+        CpuOnlyTest();
         byte[] data = { 0x00 };
         Throws<ArgumentException>(() =>
         {

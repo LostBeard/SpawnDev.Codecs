@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefBands_4x4_Has16EntriesAcrossSixBands()
     {
+        CpuOnlyTest();
         var t = Vp9CoefBands.CoefBand4x4;
         Equal(16, t.Length);
         // Band 0 starts at position 0 (DC), every band index appears
@@ -29,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefBands_4x4_BandSizesMatchLibvpx()
     {
+        CpuOnlyTest();
         // libvpx layout: bands 0..5 = sizes [1, 2, 3, 4, 3, 3].
         var counts = new int[6];
         foreach (var b in Vp9CoefBands.CoefBand4x4)
@@ -39,6 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefBands_8x8Plus_Has1024EntriesAcrossSixBands()
     {
+        CpuOnlyTest();
         var t = Vp9CoefBands.CoefBandTrans8x8Plus;
         Equal(1024, t.Length);
         Equal((byte)0, t[0]);
@@ -50,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefBands_8x8Plus_BandSizesMatchLibvpx()
     {
+        CpuOnlyTest();
         // libvpx layout: bands 0..5 = sizes [1, 2, 3, 4, 11, 1003].
         var counts = new int[6];
         foreach (var b in Vp9CoefBands.CoefBandTrans8x8Plus)
@@ -60,6 +64,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefBands_GetBand_DispatchesBySize()
     {
+        CpuOnlyTest();
         // 4x4 hits CoefBand4x4 directly.
         for (int i = 0; i < 16; i++)
             Equal(Vp9CoefBands.CoefBand4x4[i], Vp9CoefBands.GetBand(Vp9TxSize.Tx4x4, i));
@@ -80,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9CoefBands_GetBand_ThrowsOnOutOfRange()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() => Vp9CoefBands.GetBand(Vp9TxSize.Tx4x4, 16));
         Throws<ArgumentOutOfRangeException>(() => Vp9CoefBands.GetBand(Vp9TxSize.Tx8x8, 64));
         Throws<ArgumentOutOfRangeException>(() => Vp9CoefBands.GetBand(Vp9TxSize.Tx16x16, 256));

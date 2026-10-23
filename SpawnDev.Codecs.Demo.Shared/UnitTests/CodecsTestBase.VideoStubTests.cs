@@ -42,6 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp8Decoder_Codec_IsVp8()
     {
+        CpuOnlyTest();
         await using var dec = new Vp8Decoder();
         Equal(VideoCodec.Vp8, dec.Codec);
     }
@@ -49,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Decoder_Codec_IsVp9()
     {
+        CpuOnlyTest();
         await using var dec = new Vp9Decoder();
         Equal(VideoCodec.Vp9, dec.Codec);
     }
@@ -56,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1Decoder_Codec_IsAv1()
     {
+        CpuOnlyTest();
         await using var dec = new Av1Decoder();
         Equal(VideoCodec.Av1, dec.Codec);
     }
@@ -63,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp8Decoder_DecodesOwnEncoderKeyframe()
     {
+        CpuOnlyTest();
         // Encode a 16x16 flat Y=128 keyframe with our encoder, then decode
         // it through the public IVideoDecoder surface and verify the sink
         // received a frame of the right dimensions with luma close to 128.
@@ -93,6 +97,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp8Decoder_InterFrame_ThrowsDescriptive()
     {
+        CpuOnlyTest();
         // Synthesise a non-keyframe tag (low bit of byte 0 = 1 -> P-frame).
         // The decoder should reject it with a clear message rather than
         // crashing inside the walker.
@@ -114,6 +119,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Decoder_DecodesOwnEncoderKeyframe()
     {
+        CpuOnlyTest();
         // Encode a 16x16 flat Y=128 keyframe with our VP9 encoder, then run
         // it through the public Vp9Decoder API which now drives the walker
         // (was a placeholder mid-gray emitter before commit 2814322).
@@ -142,6 +148,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Av1Decoder_DecodesOwnEncoderKeyframe()
     {
+        CpuOnlyTest();
         // Encode a 16x16 flat Y=128 keyframe with our AV1 encoder, then run
         // it through the public Av1Decoder API which now drives the walker.
         // AV1 has a known small per-block drift so the tolerance is wider

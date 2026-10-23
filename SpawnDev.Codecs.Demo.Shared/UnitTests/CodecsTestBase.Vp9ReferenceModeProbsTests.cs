@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ReferenceModeProbs_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(5, Vp9ReferenceModeProbs.CompInterContexts);
         Equal(5, Vp9ReferenceModeProbs.RefContexts);
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ReferenceModeProbs_TableShapes()
     {
+        CpuOnlyTest();
         var probs = new Vp9ReferenceModeProbs();
         Equal(5, probs.CompInterProb.Length);
         Equal(5, probs.SingleRefProb.GetLength(0));
@@ -28,6 +30,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ReferenceModeProbsParser_SingleReference_OnlySingleRefRead()
     {
+        CpuOnlyTest();
         // SINGLE_REFERENCE: skip comp_inter (only on SELECT) and skip comp_ref.
         // Only single_ref is read.
         var data = new byte[16];
@@ -56,6 +59,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ReferenceModeProbsParser_CompoundReference_OnlyCompRefRead()
     {
+        CpuOnlyTest();
         var data = new byte[16];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
         var probs = new Vp9ReferenceModeProbs();
@@ -77,6 +81,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ReferenceModeProbsParser_ReferenceModeSelect_AllThreeRead()
     {
+        CpuOnlyTest();
         // All three sub-tables read; with zero buffer, all probs unchanged.
         var data = new byte[32];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
@@ -103,6 +108,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9ReferenceModeProbsParser_RejectsNullArgs()
     {
+        CpuOnlyTest();
         var data = new byte[16];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
         Throws<ArgumentNullException>(() =>

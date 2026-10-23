@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TxModeProbs_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(2, Vp9TxModeProbs.TxSizeContexts);
         Equal(4, Vp9TxModeProbs.TxSizes);
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TxModeProbs_TableShapes()
     {
+        CpuOnlyTest();
         var probs = new Vp9TxModeProbs();
         // p8x8 = [2][1], p16x16 = [2][2], p32x32 = [2][3].
         Equal(2, probs.P8x8.GetLength(0));
@@ -31,6 +33,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TxModeProbs_DefaultsMatchLibvpx()
     {
+        CpuOnlyTest();
         // libvpx vp9_entropymode.c default_tx_probs:
         //   p32x32 = { { 3, 136, 37 }, { 5, 52, 13 } }
         //   p16x16 = { { 20, 152 }, { 15, 101 } }
@@ -59,6 +62,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TxModeProbs_Parse_NoUpdates_LeavesTableUntouched()
     {
+        CpuOnlyTest();
         // 12 update flags, all zero. Buffer of zeros suffices.
         var data = new byte[8];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
@@ -81,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9TxModeProbs_Parse_RejectsNullArgs()
     {
+        CpuOnlyTest();
         var data = new byte[8];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
         Throws<ArgumentNullException>(() =>

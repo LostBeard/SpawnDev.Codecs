@@ -32,6 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IvfReader_BbbAv1Fixture_HeaderMatchesExpected()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         var header = IvfReader.ParseHeader(bytes);
         Equal("AV01", header.FourCc);
@@ -46,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IvfReader_BbbAv1Fixture_FrameCount()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         int count = 0;
         long lastPts = -1;
@@ -64,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ObuParser_BbbFirstFrame_StartsWithTemporalDelimiterOrSequenceHeader()
     {
+        CpuOnlyTest();
         // First IVF frame should contain a TemporalDelimiter OBU at the
         // start of every Temporal Unit, often followed by SequenceHeader
         // (for the first TU in the stream) and a Frame OBU.
@@ -84,6 +87,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1SequenceHeader_BbbFirstFrame_ParsesProfileAndDimensions()
     {
+        CpuOnlyTest();
         // Find the SequenceHeader OBU in the first AV1 frame and parse it.
         var bytes = LoadAv1Fixture();
         var firstFrame = IvfReader.EnumerateFrames(bytes).First();
@@ -114,6 +118,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1SequenceHeader_BbbFirstFrame_ParsesAdvancedFlags()
     {
+        CpuOnlyTest();
         // Verify the parser surfaces every conditional bit observed in
         // the libaom-encoded BBB SH (decoded from the bitstream by hand:
         // see inspect_bbb_sh.cs).
@@ -164,6 +169,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1FrameHeader_BbbFirstFrame_FirstFrameIsKey()
     {
+        CpuOnlyTest();
         // The first IVF frame must be a keyframe.
         var bytes = LoadAv1Fixture();
         var firstFrame = IvfReader.EnumerateFrames(bytes).First();
@@ -194,6 +200,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1FrameHeader_BbbFirstFrame_ParsesPostPrefixFields()
     {
+        CpuOnlyTest();
         // After my SH-driven prefix extension, the parser surfaces
         // disable_cdf_update + allow_screen_content_tools + force_integer_mv
         // for BBB's first keyframe. Verify these get plausible values.
@@ -231,6 +238,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1FrameHeader_BbbAllFrames_FrameTypesPlausible()
     {
+        CpuOnlyTest();
         // Walk every frame, count frame types. BBB should produce 1
         // keyframe + many inter.
         var bytes = LoadAv1Fixture();
@@ -267,6 +275,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ObuParser_BbbAllFrames_ParseWithoutErrors()
     {
+        CpuOnlyTest();
         // Drive every frame through the OBU parser and verify all OBUs
         // declare a known type and have non-negative payload lengths.
         var bytes = LoadAv1Fixture();

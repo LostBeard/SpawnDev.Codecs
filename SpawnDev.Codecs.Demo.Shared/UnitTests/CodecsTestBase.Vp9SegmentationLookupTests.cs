@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationLookup_MaxQuantizerIndex_Is255()
     {
+        CpuOnlyTest();
         // VP9 Profile 0 (8-bit) MAXQ = 255.
         Equal(255, Vp9SegmentationLookup.MaxQuantizerIndex);
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationLookup_IsFeatureActive_DisabledSegmentation_AlwaysFalse()
     {
+        CpuOnlyTest();
         var seg = MakeSegmentation(enabled: false);
         seg.FeatureEnabled[0, (int)Vp9SegFeature.AltQ] = true;
         Equal(false, Vp9SegmentationLookup.IsFeatureActive(seg, 0, Vp9SegFeature.AltQ));
@@ -26,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationLookup_IsFeatureActive_EnabledSegmentation_RespectsFlag()
     {
+        CpuOnlyTest();
         var seg = MakeSegmentation(enabled: true);
         seg.FeatureEnabled[0, (int)Vp9SegFeature.AltQ] = true;
         seg.FeatureEnabled[0, (int)Vp9SegFeature.AltLf] = false;
@@ -36,6 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationLookup_GetFeatureData_ReturnsRawValue()
     {
+        CpuOnlyTest();
         var seg = MakeSegmentation(enabled: true);
         seg.FeatureData[3, (int)Vp9SegFeature.AltQ] = 42;
         Equal(42, Vp9SegmentationLookup.GetFeatureData(seg, 3, Vp9SegFeature.AltQ));
@@ -44,6 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationLookup_ResolveQIndex_NoSegment_ReturnsBase()
     {
+        CpuOnlyTest();
         var seg = MakeSegmentation(enabled: false);
         Equal(64, Vp9SegmentationLookup.ResolveQIndex(seg, 0, 64));
     }
@@ -51,6 +56,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationLookup_ResolveQIndex_AltQInactive_ReturnsBase()
     {
+        CpuOnlyTest();
         var seg = MakeSegmentation(enabled: true);
         // AltQ feature is disabled for this segment.
         Equal(64, Vp9SegmentationLookup.ResolveQIndex(seg, 0, 64));
@@ -59,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationLookup_ResolveQIndex_DeltaMode_AddsToBase()
     {
+        CpuOnlyTest();
         var seg = MakeSegmentation(enabled: true, absDelta: false);
         seg.FeatureEnabled[0, (int)Vp9SegFeature.AltQ] = true;
         seg.FeatureData[0, (int)Vp9SegFeature.AltQ] = -10;
@@ -69,6 +76,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationLookup_ResolveQIndex_AbsoluteMode_IgnoresBase()
     {
+        CpuOnlyTest();
         var seg = MakeSegmentation(enabled: true, absDelta: true);
         seg.FeatureEnabled[1, (int)Vp9SegFeature.AltQ] = true;
         seg.FeatureData[1, (int)Vp9SegFeature.AltQ] = 100;
@@ -79,6 +87,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationLookup_ResolveQIndex_ClampsToZero()
     {
+        CpuOnlyTest();
         var seg = MakeSegmentation(enabled: true, absDelta: false);
         seg.FeatureEnabled[0, (int)Vp9SegFeature.AltQ] = true;
         seg.FeatureData[0, (int)Vp9SegFeature.AltQ] = -1000;
@@ -89,6 +98,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationLookup_ResolveQIndex_ClampsToMaxQ()
     {
+        CpuOnlyTest();
         var seg = MakeSegmentation(enabled: true, absDelta: true);
         seg.FeatureEnabled[0, (int)Vp9SegFeature.AltQ] = true;
         seg.FeatureData[0, (int)Vp9SegFeature.AltQ] = 9999;
@@ -99,6 +109,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SegmentationLookup_RejectsNullSegmentation()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() =>
             Vp9SegmentationLookup.IsFeatureActive(null!, 0, Vp9SegFeature.AltQ));
         Throws<ArgumentNullException>(() =>

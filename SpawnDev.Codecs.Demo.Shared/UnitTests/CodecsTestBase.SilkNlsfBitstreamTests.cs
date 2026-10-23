@@ -77,6 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecodeIndices_NbMb_ZeroResiduals_AllSignalTypes_RoundTrip()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.NbMb;
         int order = cb.Order;
         sbyte[] orig = new sbyte[order + 1];
@@ -108,6 +109,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecodeIndices_Wb_ZeroResiduals_AllSignalTypes_RoundTrip()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.Wb;
         int order = cb.Order;
         sbyte[] orig = new sbyte[order + 1];
@@ -139,6 +141,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecodeIndices_NonZeroResiduals_WithinAmplitude_RoundTrip()
     {
+        CpuOnlyTest();
         var cb = SilkNlsfCodebookTables.NbMb;
         int order = cb.Order;
         sbyte[] orig = new sbyte[order + 1];
@@ -166,6 +169,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecodeIndices_RailExtensionNegative_RoundTrip()
     {
+        CpuOnlyTest();
         // Indices at -amp (triggers low rail) and beyond -amp (triggers NlsfExt decode).
         // With NLSF_QUANT_MAX_AMPLITUDE = 4, ix==0 case maps signedIdx = -amp - ext.
         // So signedIdx values -4, -5, ..., -10 all exercise the rail path (ext = 0..6).
@@ -194,6 +198,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecodeIndices_RailExtensionPositive_RoundTrip()
     {
+        CpuOnlyTest();
         // signedIdx at +amp (core = railTop), beyond +amp (ext kicks in). Values 4..10.
         var cb = SilkNlsfCodebookTables.NbMb;
         int order = cb.Order;
@@ -220,6 +225,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecodeIndices_ThenFullDecode_ProducesStableLpc()
     {
+        CpuOnlyTest();
         // End-to-end: bitstream -> DecodeIndices -> Decode -> Nlsf2A -> stable LPC.
         var cb = SilkNlsfCodebookTables.Wb;
         int order = cb.Order;
@@ -248,6 +254,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecodeIndices_InvalidSignalType_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(32);
         enc.Done();
         var dec = new OpusRangeDecoder(enc.ToArray());
@@ -259,6 +266,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecodeIndices_NullCodebook_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(32);
         enc.Done();
         var dec = new OpusRangeDecoder(enc.ToArray());
@@ -270,6 +278,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfDecodeIndices_NullRangeDecoder_Throws()
     {
+        CpuOnlyTest();
         sbyte[] indices = new sbyte[11];
         Throws<ArgumentNullException>(() =>
             SilkNlsfDecoder.DecodeIndices(indices, null!, SilkNlsfCodebookTables.NbMb, signalType: 0, nbSubfr: 4));

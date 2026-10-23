@@ -31,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InverseScanTables_4x4_AllThreeFlavorsRoundTrip()
     {
+        CpuOnlyTest();
         AssertIscanRoundTripsScan(Vp9ScanTables.DefaultScan4x4, Vp9InverseScanTables.DefaultIscan4x4, 16, "default 4x4");
         AssertIscanRoundTripsScan(Vp9ScanTables.RowScan4x4,     Vp9InverseScanTables.RowIscan4x4,     16, "row 4x4");
         AssertIscanRoundTripsScan(Vp9ScanTables.ColScan4x4,     Vp9InverseScanTables.ColIscan4x4,     16, "col 4x4");
@@ -39,6 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InverseScanTables_8x8_AllThreeFlavorsRoundTrip()
     {
+        CpuOnlyTest();
         AssertIscanRoundTripsScan(Vp9ScanTables.DefaultScan8x8, Vp9InverseScanTables.DefaultIscan8x8, 64, "default 8x8");
         AssertIscanRoundTripsScan(Vp9ScanTables.RowScan8x8,     Vp9InverseScanTables.RowIscan8x8,     64, "row 8x8");
         AssertIscanRoundTripsScan(Vp9ScanTables.ColScan8x8,     Vp9InverseScanTables.ColIscan8x8,     64, "col 8x8");
@@ -47,6 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InverseScanTables_16x16_AllThreeFlavorsRoundTrip()
     {
+        CpuOnlyTest();
         AssertIscanRoundTripsScan(Vp9ScanTables.DefaultScan16x16, Vp9InverseScanTables.DefaultIscan16x16, 256, "default 16x16");
         AssertIscanRoundTripsScan(Vp9ScanTables.RowScan16x16,     Vp9InverseScanTables.RowIscan16x16,     256, "row 16x16");
         AssertIscanRoundTripsScan(Vp9ScanTables.ColScan16x16,     Vp9InverseScanTables.ColIscan16x16,     256, "col 16x16");
@@ -55,12 +58,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InverseScanTables_32x32_DefaultFlavorRoundTrips()
     {
+        CpuOnlyTest();
         AssertIscanRoundTripsScan(Vp9ScanTables.DefaultScan32x32, Vp9InverseScanTables.DefaultIscan32x32, 1024, "default 32x32");
     }
 
     [TestMethod]
     public void Vp9InverseScanTables_GetIscan_DispatchesCorrectly()
     {
+        CpuOnlyTest();
         True(ReferenceEquals(Vp9InverseScanTables.DefaultIscan4x4,  Vp9InverseScanTables.GetIscan(Vp9TxSize.Tx4x4,   Vp9ScanType.Default)));
         True(ReferenceEquals(Vp9InverseScanTables.RowIscan4x4,      Vp9InverseScanTables.GetIscan(Vp9TxSize.Tx4x4,   Vp9ScanType.Row)));
         True(ReferenceEquals(Vp9InverseScanTables.ColIscan4x4,      Vp9InverseScanTables.GetIscan(Vp9TxSize.Tx4x4,   Vp9ScanType.Col)));

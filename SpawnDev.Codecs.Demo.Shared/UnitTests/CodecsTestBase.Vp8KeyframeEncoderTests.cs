@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8KeyframeEncoder_FlatLuma_RoundTripsViaWalker()
     {
+        CpuOnlyTest();
         // Sweep flat luma values through Encode -> Walker decode. With the
         // Y2 PLANE_TYPE bug (formerly type 3, fixed to type 1) the decode
         // would produce -1353 instead of -76 for luma=64, leading to
@@ -52,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8KeyframeEncoder_MultiMbGradient_RoundTripsViaWalker()
     {
+        CpuOnlyTest();
         // 32x32 = 2x2 MB grid. Without the encoder reconstruction write-back
         // (which mirrors the decoder's inverse pipeline back into recon),
         // MB(0,1) onwards used 127/129 edge fills as predictor, while the
@@ -88,6 +90,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8KeyframeEncoder_UsesPlaneType1ForY2_NotPlaneType3()
     {
+        CpuOnlyTest();
         // Direct check of the Y2 block type bug. Decode the Y2 coefficient
         // block from the encoded frame using BOTH PLANE_TYPE = 1 (correct,
         // libvpx) and PLANE_TYPE = 3 (the original buggy choice). After the
@@ -129,6 +132,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp8KeyframeEncoder_RejectsBaseQIndex_OutOfRange()
     {
+        CpuOnlyTest();
         // BaseQIndex is a 7-bit field per RFC 6386 sec 9.6 (range 0..127).
         // Q >= 128 wraps to 7 bits in the bitstream while the encoder uses
         // the original value internally => decoder + encoder use different

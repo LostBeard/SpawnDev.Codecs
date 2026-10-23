@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Smulww_ProducesExpectedProduct()
     {
+        CpuOnlyTest();
         // silk_SMULWW(65536, x) == x (chirp of 1.0 identity)
         Equal(100, silk_SMULWW(65536, 100));
         Equal(-100, silk_SMULWW(65536, -100));
@@ -32,6 +33,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void SilkMacros_Smulww_HandlesLargeValues()
     {
+        CpuOnlyTest();
         // chirp of 1.0 preserves large values without loss in the bottom 16 bits.
         Equal(1 << 20, silk_SMULWW(65536, 1 << 20));
     }
@@ -41,6 +43,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Bwexpander16_ChirpOne_Identity()
     {
+        CpuOnlyTest();
         // chirp == 65536 (1.0 in Q16) should be very close to identity for 16-bit AR.
         Span<short> ar = stackalloc short[] { 1000, 2000, 3000, 4000 };
         short[] original = ar.ToArray();
@@ -58,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Bwexpander16_ChirpZero_Zeroes()
     {
+        CpuOnlyTest();
         // chirp == 0 multiplies everything by 0. Should produce all zeros (with some rounding).
         Span<short> ar = stackalloc short[] { 1000, 2000, 3000, 4000 };
         SilkBwexpander.Expand16(ar, 0);
@@ -70,6 +74,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Bwexpander16_ChirpHalf_HalvesFirstCoeff()
     {
+        CpuOnlyTest();
         // chirp == 32768 (0.5 in Q16). First coefficient should be approximately halved.
         Span<short> ar = stackalloc short[] { 10000, 0, 0, 0 };
         SilkBwexpander.Expand16(ar, 32768);
@@ -81,6 +86,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Bwexpander16_EmptyArray_NoOp()
     {
+        CpuOnlyTest();
         Span<short> ar = Span<short>.Empty;
         SilkBwexpander.Expand16(ar, 32768); // should not throw
     }
@@ -88,6 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Bwexpander32_ChirpOne_Identity()
     {
+        CpuOnlyTest();
         Span<int> ar = stackalloc int[] { 1000, 2000, 3000, 4000 };
         int[] original = ar.ToArray();
         SilkBwexpander.Expand32(ar, 65536);
@@ -103,6 +110,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Bwexpander32_ChirpZero_Zeroes()
     {
+        CpuOnlyTest();
         Span<int> ar = stackalloc int[] { 1 << 20, 1 << 20, 1 << 20, 1 << 20 };
         SilkBwexpander.Expand32(ar, 0);
         for (int i = 0; i < ar.Length; i++)
@@ -114,6 +122,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Bwexpander32_ChirpDecaysAlongCoefficients()
     {
+        CpuOnlyTest();
         // With chirp = 0.9 (in Q16: 58982), later coefficients get smaller: coef[i] scaled by
         // chirp^(i+1). ar[3] / ar[0] should be roughly chirp^3 of the original proportionality.
         Span<int> ar = stackalloc int[] { 1 << 20, 1 << 20, 1 << 20, 1 << 20 };
@@ -132,6 +141,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Bwexpander32_EmptyArray_NoOp()
     {
+        CpuOnlyTest();
         Span<int> ar = Span<int>.Empty;
         SilkBwexpander.Expand32(ar, 32768);
     }

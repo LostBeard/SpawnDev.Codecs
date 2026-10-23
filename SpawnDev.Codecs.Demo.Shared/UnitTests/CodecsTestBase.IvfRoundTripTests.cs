@@ -28,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IvfRoundTrip_EmptyStream_ReadsHeaderOnly()
     {
+        CpuOnlyTest();
         var bytes = BuildIvf("VP80", 320, 240, Array.Empty<(byte[], long)>());
         var hdr = IvfReader.ParseHeader(bytes);
         Equal("VP80", hdr.FourCc);
@@ -43,6 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IvfRoundTrip_SingleFrame_RecoversBytes()
     {
+        CpuOnlyTest();
         var payload = new byte[] { 0x01, 0x02, 0x03, 0x04, 0x05 };
         var bytes = BuildIvf("VP90", 640, 480, new[] { (payload, 0L) });
 
@@ -62,6 +64,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IvfRoundTrip_MultipleFrames_PreservesPtsOrder()
     {
+        CpuOnlyTest();
         var rng = new Random(0x1F1F);
         var sources = new List<(byte[] payload, long pts)>();
         for (int i = 0; i < 32; i++)
@@ -89,6 +92,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IvfRoundTrip_LargeFrame_RecoversBytes()
     {
+        CpuOnlyTest();
         // 2 MiB frame (above the typical 1 KiB stack threshold).
         var payload = new byte[2 * 1024 * 1024];
         for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i & 0xFF);
@@ -103,6 +107,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IvfRoundTrip_ZeroLengthFrame_ReadsAsZeroBytes()
     {
+        CpuOnlyTest();
         // VP9 super-frames sometimes produce zero-length packets; the
         // writer must encode them and the reader must enumerate them
         // without skipping or crashing.
@@ -123,6 +128,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IvfRoundTrip_FourCcVariants_AllAccepted()
     {
+        CpuOnlyTest();
         // Cover every codec that ships in this library: VP80, VP90, AV01.
         foreach (var fourCc in new[] { "VP80", "VP90", "AV01" })
         {
@@ -137,6 +143,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IvfRoundTrip_FrameRateAndTimeScale_Preserved()
     {
+        CpuOnlyTest();
         var bytes = BuildIvf("VP90", 320, 240, Array.Empty<(byte[], long)>(),
             frameRate: 60, timeScale: 1001);
         var hdr = IvfReader.ParseHeader(bytes);
@@ -147,6 +154,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void IvfRoundTrip_FrameCountPatchedByFinish()
     {
+        CpuOnlyTest();
         // Construct without calling Finish: num_frames stays 0.
         // Construct with Finish: num_frames = actual count.
         using var ms1 = new MemoryStream();

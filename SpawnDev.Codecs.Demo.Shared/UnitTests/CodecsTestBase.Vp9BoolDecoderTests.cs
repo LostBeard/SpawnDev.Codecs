@@ -28,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BoolDecoder_InitOnZeroBuffer_Succeeds()
     {
+        CpuOnlyTest();
         var buf = FilledBuffer(0x00, 64);
         var d = new Vp9BoolDecoder(buf, 0, buf.Length);
         // After init with all-zero buffer the decoder is in a valid state.
@@ -38,6 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BoolDecoder_InitOnHighBitBuffer_Throws()
     {
+        CpuOnlyTest();
         // First bit of 0x80 is 1, which libvpx treats as a stream-init
         // corruption signal.
         var buf = FilledBuffer(0x80, 64);
@@ -50,6 +52,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BoolDecoder_AllZeroBuffer_ReadsAllZeros()
     {
+        CpuOnlyTest();
         // With prob=128 the split is (range-1)/2 + 1. For value=0 the
         // comparison always falls into the "bit=0" branch. Because all
         // loaded bytes are 0, value stays 0 and every read returns 0.
@@ -62,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BoolDecoder_AllZeroBuffer_ExtremeProb255_AlsoReadsZero()
     {
+        CpuOnlyTest();
         // With prob=255 the split is range-1 (very large), so "bit=1"
         // only fires if value is essentially at the top of the range.
         // All-zero value means bit=0 forever.
@@ -74,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BoolDecoder_IsDeterministic_OnSameBuffer()
     {
+        CpuOnlyTest();
         var buf = new byte[]
         {
             0x00, 0x41, 0x7E, 0x23, 0x5A, 0x0F, 0xC3, 0x81,
@@ -88,6 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BoolDecoder_ReadLiteral_SumsIndividualReadBits()
     {
+        CpuOnlyTest();
         var buf = new byte[]
         {
             0x00, 0x5A, 0x3C, 0x91, 0x42, 0x7E, 0x08, 0xF0,
@@ -107,6 +113,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BoolDecoder_ReadLiteral_ZeroBits_ReturnsZero()
     {
+        CpuOnlyTest();
         var buf = FilledBuffer(0x00, 16);
         var d = new Vp9BoolDecoder(buf, 0, buf.Length);
         Equal(0u, d.ReadLiteral(0));
@@ -115,6 +122,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BoolDecoder_InitWithOffset_UsesCorrectWindow()
     {
+        CpuOnlyTest();
         // Prefix the buffer with noise, but init the decoder offset
         // into the buffer. The decode path should only see what's
         // starting at `offset`.
@@ -132,6 +140,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BoolDecoder_ConstructorThrows_OnBadArgs()
     {
+        CpuOnlyTest();
         bool t1 = false;
         try { _ = new Vp9BoolDecoder(null!, 0, 0); }
         catch (ArgumentNullException) { t1 = true; }

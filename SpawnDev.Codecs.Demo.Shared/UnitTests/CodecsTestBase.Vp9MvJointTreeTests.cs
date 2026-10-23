@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvJointTree_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(4, Vp9MvJointTree.Joints);
         Equal(6, Vp9MvJointTree.Tree.Length);
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvJointTree_Tree_Layout()
     {
+        CpuOnlyTest();
         // Internal nodes:
         //   ROOT  : -Zero, 2
         //   i=2   : -Hnzvz, 4
@@ -33,6 +35,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvJointTree_Decode_AllZero_PicksZeroJoint()
     {
+        CpuOnlyTest();
         // readBit returns 0 -> picks ROOT.left = -Zero = leaf 0.
         Equal(Vp9MvJointType.Zero,
             Vp9MvJointTree.Decode(p => 0, new byte[] { 128, 128, 128 }));
@@ -41,6 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvJointTree_Decode_OneZeroOne_PicksHnzvz()
     {
+        CpuOnlyTest();
         // bit 0 = 1 -> ROOT.right = 2.
         // bit 1 = 0 -> i2.left = -Hnzvz = leaf 1.
         int callIdx = 0;
@@ -52,6 +56,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvJointTree_Decode_BitsTwo_PicksHzvnz()
     {
+        CpuOnlyTest();
         // 1 -> ROOT.right = 2; 1 -> i2.right = 4; 0 -> i4.left = -Hzvnz.
         int callIdx = 0;
         int[] bits = { 1, 1, 0 };
@@ -62,6 +67,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvJointTree_Decode_BitsThree_PicksHnzvnz()
     {
+        CpuOnlyTest();
         // 1, 1, 1 -> all rights -> -Hnzvnz.
         int callIdx = 0;
         int[] bits = { 1, 1, 1 };
@@ -72,6 +78,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvJointTree_Decode_RejectsShortProbs()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() =>
             Vp9MvJointTree.Decode(p => 0, new byte[] { 128, 128 }));
     }
@@ -79,6 +86,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvJointTree_Decode_RejectsNullReader()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() =>
             Vp9MvJointTree.Decode(null!, new byte[] { 128, 128, 128 }));
     }
@@ -86,6 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvJointTree_Decode_UsesIndexedProbs()
     {
+        CpuOnlyTest();
         // ROOT uses probs[0]; i2 uses probs[1]; i4 uses probs[2].
         // Verify by capturing prob arg per call.
         int callIdx = 0;

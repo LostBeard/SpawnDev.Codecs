@@ -54,6 +54,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Decoder_DecodesBigBuckBunny_ReportsCorrectDimensions()
     {
+        CpuOnlyTest();
         // Drive every packet from the BBB.webm fixture through the
         // VP9 decoder. Verify dimensions become 320x180 after the
         // first keyframe and stay there.
@@ -80,6 +81,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Decoder_DecodesBigBuckBunny_EmittedFramesHaveCorrectPlaneSizes()
     {
+        CpuOnlyTest();
         // Every emitted frame must have:
         //   Y plane = 320 * 180 = 57_600 bytes
         //   U/V planes = 160 * 90 = 14_400 bytes (4:2:0)
@@ -110,6 +112,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Decoder_FirstFrameIsKeyframe_LearnsDimensions()
     {
+        CpuOnlyTest();
         // The first packet in the BBB fixture must contain a keyframe.
         // After feeding only that packet, the decoder's Width / Height
         // should already be populated.
@@ -143,6 +146,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Decoder_BbbStream_CumulativeStatsMatchObservedTotals()
     {
+        CpuOnlyTest();
         // Drive every packet from BBB.webm and verify the cumulative
         // counters match: 300 visible frames + non-zero KeyFrame count.
         using var stream = LoadBigBuckBunnyWebM();
@@ -174,6 +178,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Decoder_BbbFirstFrame_FirstPartitionDecisionDecodes()
     {
+        CpuOnlyTest();
         // First step toward block-level VP9 decode: read the very first
         // partition decision from BBB's first SB. Compose:
         //   - Default keyframe partition probs (no compressed-header diff_update yet)
@@ -210,6 +215,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Decoder_BbbFirstFrame_BoolDecoderInitializesOverTile()
     {
+        CpuOnlyTest();
         // Smoke test: drive the BBB.webm first frame's tile 0 bytes
         // through Vp9BoolDecoder. Reading the first 100 single-bit
         // decisions should not throw - this proves the entropy reader
@@ -241,6 +247,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Decoder_RejectsNullSink()
     {
+        CpuOnlyTest();
         await using var decoder = new Vp9Decoder();
         var packet = new byte[] { 0x80, 0x49, 0x83, 0x42, 0, 0, 0 };
         bool threw = false;
@@ -252,6 +259,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Decoder_FirstFrame_PlaneSizesMatchFfmpegGroundTruth()
     {
+        CpuOnlyTest();
         // Cross-check our decoder's output plane geometry against the
         // ffmpeg-decoded ground truth for the same first frame.
         //
@@ -299,6 +307,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public async Task Vp9Decoder_DecodesEntireStream_NoExceptions()
     {
+        CpuOnlyTest();
         // Smoke test: feed every video packet, verify nothing throws.
         // This exercises every header variant (key, inter, hidden alt-ref)
         // present in the 10-second BBB fixture.

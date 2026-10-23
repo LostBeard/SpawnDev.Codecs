@@ -19,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1InverseDct4_OnAllZeros_ProducesAllZeros()
     {
+        CpuOnlyTest();
         Span<int> input = stackalloc int[4];
         Span<int> output = stackalloc int[4];
         Av1InverseDct4.Transform(input, output);
@@ -28,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1InverseDct4_OnDcImpulse_ScalesEqually()
     {
+        CpuOnlyTest();
         // A DC-only input [V,0,0,0] should produce 4 identical outputs at scale
         // V * cospi[32] * cospi[32] * 4 / (1<<bit) - the iDCT scaling factor.
         // For V=1024 with cos_bit=12: cospi[32]=2896, half_btf returns
@@ -48,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1InverseDct8_OnAllZeros_ProducesAllZeros()
     {
+        CpuOnlyTest();
         Span<int> input = stackalloc int[8];
         Span<int> output = stackalloc int[8];
         Av1InverseDct8.Transform(input, output);
@@ -57,6 +60,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1InverseDct8_OnDcImpulse_ProducesEqualOutputs()
     {
+        CpuOnlyTest();
         Span<int> input = stackalloc int[8];
         Span<int> output = stackalloc int[8];
         input[0] = 2048;
@@ -68,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1InverseDct16_OnAllZeros_ProducesAllZeros()
     {
+        CpuOnlyTest();
         Span<int> input = stackalloc int[16];
         Span<int> output = stackalloc int[16];
         Av1InverseDct16.Transform(input, output);
@@ -77,6 +82,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1InverseDct16_OnDcImpulse_ProducesEqualOutputs()
     {
+        CpuOnlyTest();
         Span<int> input = stackalloc int[16];
         Span<int> output = stackalloc int[16];
         input[0] = 4096;
@@ -88,6 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1InverseAdst4_OnAllZeros_ProducesAllZeros()
     {
+        CpuOnlyTest();
         Span<int> input = stackalloc int[4];
         Span<int> output = stackalloc int[4];
         Av1InverseAdst4.Transform(input, output);
@@ -97,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1InverseAdst4_PreservesNonzeroNature()
     {
+        CpuOnlyTest();
         Span<int> input = stackalloc int[4] { 100, 50, 25, 10 };
         Span<int> output = stackalloc int[4];
         Av1InverseAdst4.Transform(input, output);
@@ -109,6 +117,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1InverseAdst8_PreservesNonzeroNature()
     {
+        CpuOnlyTest();
         Span<int> input = stackalloc int[8] { 200, 100, 50, 25, 12, 6, 3, 1 };
         Span<int> output = stackalloc int[8];
         Av1InverseAdst8.Transform(input, output);
@@ -120,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1InverseAdst16_PreservesNonzeroNature()
     {
+        CpuOnlyTest();
         Span<int> input = stackalloc int[16];
         for (int i = 0; i < 16; i++) input[i] = 256 >> i;
         Span<int> output = stackalloc int[16];
@@ -132,6 +142,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1InverseIdentity4_ScalesBySqrt2()
     {
+        CpuOnlyTest();
         // Identity transform 4: scale by sqrt(2) * 2^12 / 2^12 = sqrt(2).
         // For input [128,0,0,0]: output[0] = round(5793 * 128 / 4096) = 181.
         Span<int> input = stackalloc int[4] { 128, 0, 0, 0 };
@@ -146,6 +157,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1InverseIdentity8_ScalesBy2()
     {
+        CpuOnlyTest();
         Span<int> input = stackalloc int[8] { 100, 50, 25, 10, -5, -10, -20, -50 };
         Span<int> output = stackalloc int[8];
         Av1InverseIdentity.Transform8(input, output);
@@ -155,6 +167,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1InverseIdentity16_ScalesBy2Sqrt2()
     {
+        CpuOnlyTest();
         Span<int> input = stackalloc int[16];
         input[0] = 100;
         Span<int> output = stackalloc int[16];
@@ -166,6 +179,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1InverseIdentity32_ScalesBy4()
     {
+        CpuOnlyTest();
         Span<int> input = stackalloc int[32];
         for (int i = 0; i < 32; i++) input[i] = i * 7 - 100;
         Span<int> output = stackalloc int[32];

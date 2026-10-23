@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1KeyframeEncoder_FlatGray16x16_HeadersParseAndDecode()
     {
+        CpuOnlyTest();
         const int W = 16, H = 16;
         var ySrc = new byte[W * H];
         var uSrc = new byte[(W / 2) * (H / 2)];
@@ -60,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1KeyframeEncoder_FlatGray16x16_RoundTripsThroughWalker()
     {
+        CpuOnlyTest();
         const int W = 16, H = 16;
         var ySrc = new byte[W * H];
         var uSrc = new byte[(W / 2) * (H / 2)];
@@ -116,6 +118,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1KeyframeEncoder_OutputWrapsValidIvf()
     {
+        CpuOnlyTest();
         const int W = 32, H = 32;
         var ySrc = new byte[W * H];
         var uSrc = new byte[(W / 2) * (H / 2)];

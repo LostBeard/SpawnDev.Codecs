@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraMode_EnumValuesMatchLibvpx()
     {
+        CpuOnlyTest();
         Equal((byte)0, (byte)Vp9IntraMode.DcPred);
         Equal((byte)1, (byte)Vp9IntraMode.VPred);
         Equal((byte)2, (byte)Vp9IntraMode.HPred);
@@ -27,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeTree_HasCorrectShape()
     {
+        CpuOnlyTest();
         // 18 entries (9 internal nodes x 2 branches).
         Equal(18, Vp9IntraModeTree.Tree.Length);
         // Spot-check the pinned topology.
@@ -41,6 +43,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeTree_DecodesDcPredOnFirstZeroBit()
     {
+        CpuOnlyTest();
         // Tree slot 0 = -DcPred = 0; with bit 0 read first, walker
         // returns DcPred immediately.
         var bits = new int[] { 0 };
@@ -52,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeTree_DecodesTmPredOnPath_1_0()
     {
+        CpuOnlyTest();
         // i=0 bit 1 -> i=2 (TM_NODE), bit 0 -> -TmPred leaf.
         var bits = new int[] { 1, 0 };
         int idx = 0;
@@ -62,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeTree_DecodesVPredOnPath_1_1_0()
     {
+        CpuOnlyTest();
         // i=0 bit 1 -> i=2, bit 1 -> i=4 (V_NODE), bit 0 -> -VPred.
         var bits = new int[] { 1, 1, 0 };
         int idx = 0;
@@ -72,6 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeTree_DecodesHPredOnPath_1_1_1_0_0()
     {
+        CpuOnlyTest();
         // i=0 bit 1 -> i=2, bit 1 -> i=4, bit 1 -> i=6 (COM_NODE), bit 0 -> i=8 (H_NODE), bit 0 -> -HPred.
         var bits = new int[] { 1, 1, 1, 0, 0 };
         int idx = 0;
@@ -82,6 +88,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeTree_DecodesD135PredOnPath_1_1_1_0_1_0()
     {
+        CpuOnlyTest();
         // ...COM_NODE bit 0 -> H_NODE, bit 1 -> i=10 (D135_NODE), bit 0 -> -D135Pred.
         var bits = new int[] { 1, 1, 1, 0, 1, 0 };
         int idx = 0;
@@ -92,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeTree_DecodesD207PredOnPath_AllOnesIntoD153_Last1()
     {
+        CpuOnlyTest();
         // i=0 bit 1, i=2 bit 1, i=4 bit 1 -> i=6 (COM_NODE),
         // bit 1 -> i=12 (D45_NODE), bit 1 -> i=14 (D63_NODE),
         // bit 1 -> i=16 (D153_NODE), bit 1 -> -D207Pred.
@@ -104,6 +112,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraModeTree_RejectsUndersizedProbs()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() => Vp9IntraModeTree.Decode(_ => 0, new byte[8]));
     }
 }

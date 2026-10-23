@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvBoundsCalculator_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(8, Vp9MvBoundsCalculator.MiSize);
         Equal(192, Vp9MvBoundsCalculator.EncBorderInPixels);
         Equal(4, Vp9MvBoundsCalculator.InterpExtend);
@@ -21,6 +22,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvBoundsCalculator_TopLeftBlock_IsNegOnlyForTopLeft()
     {
+        CpuOnlyTest();
         // mi (0, 0) of an 8x8 block in a 32x32-mi (256x256-pixel) frame.
         // mb_to_top_edge = 0; mb_to_left_edge = 0.
         // mb_to_bottom_edge = (32 - 1 - 0) * 8 << 3 = 248 * 8 = 1984.
@@ -40,6 +42,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvBoundsCalculator_BottomRightBlock_IsZeroOnlyForBottomRight()
     {
+        CpuOnlyTest();
         // 32x32 mi frame, 8x8 block at mi (31, 31) - last block.
         // mb_to_top_edge = -31 * 8 << 3 = -1984.
         // mb_to_bottom_edge = (32 - 1 - 31) * 8 << 3 = 0.
@@ -59,6 +62,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvBoundsCalculator_LargerBlock_BoundsShrink()
     {
+        CpuOnlyTest();
         // 16x16 block at (0, 0) of 32x32 mi frame.
         // bw = 2, bh = 2. mb_to_bottom = (32 - 2 - 0) * 8 << 3 = 30*64 = 1920.
         // bounds = (-1504, 1920+1504, -1504, 1920+1504) = (-1504, 3424, -1504, 3424).
@@ -73,6 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvBoundsCalculator_RejectsNegativeMiPosition()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9MvBoundsCalculator.Compute(-1, 0, Vp9BlockSize.Block8x8, 32, 32));
         Throws<ArgumentOutOfRangeException>(() =>
@@ -82,6 +87,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvBoundsCalculator_RejectsNonPositiveFrameDimensions()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9MvBoundsCalculator.Compute(0, 0, Vp9BlockSize.Block8x8, 0, 32));
         Throws<ArgumentOutOfRangeException>(() =>

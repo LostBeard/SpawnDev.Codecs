@@ -21,6 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefDecoder_EobAtPositionZero_ReturnsZeroAndAllZeros()
     {
+        CpuOnlyTest();
         // Bit 0 = 0 means "EOB" at scan position 0.
         var read = BlockBitReader(new int[] { 0 });
         var block = new short[16];
@@ -34,6 +35,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefDecoder_ZeroAtPosZero_ThenOneAtPos1_ThenEobAtPos2()
     {
+        CpuOnlyTest();
         // Per VP9 spec sec 6.4.21 + libvpx vp9/decoder/vp9_detokenize.c:
         // after a ZERO token, the inner zero loop only re-reads the
         // ZERO_CONTEXT_NODE bit (NOT EOB) at the next position. The
@@ -63,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefDecoder_PositiveOneAtPositionZero_WritesOneAtRasterZero()
     {
+        CpuOnlyTest();
         // c=0: EOB?=1, ZERO?=1, ONE?=0 (One token), sign=0 (positive) -> +1
         // c=1: EOB?=0 (EOB)
         var read = BlockBitReader(new int[] { 1, 1, 0, 0, 0 });
@@ -79,6 +82,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefDecoder_NegativeOneAtPositionZero_WritesMinusOneAtRasterZero()
     {
+        CpuOnlyTest();
         // ...sign = 1 -> -1.
         var read = BlockBitReader(new int[] { 1, 1, 0, 1, 0 });
         var block = new short[16];
@@ -93,6 +97,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefDecoder_ThreePositiveOnes_LandAtScanRasterPositions()
     {
+        CpuOnlyTest();
         // c=0,1,2 each: ONE token positive (4 bits)
         // c=3: EOB
         var perCoef = new int[] { 1, 1, 0, 0 }; // ONE positive
@@ -122,6 +127,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefDecoder_TwoTokenAtPositionZero_WritesTwoSignedAtRasterZero()
     {
+        CpuOnlyTest();
         // c=0: EOB?=1, ZERO?=1, ONE?=1 (constrained tree), tree:
         //   bit 0 (LOW_VAL) -> i=2 (TWO node)
         //   bit 0 -> -Two leaf
@@ -139,6 +145,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefDecoder_8x8Block_RoutesThroughBigPlaneArrays()
     {
+        CpuOnlyTest();
         // Smoke test that 8x8 routing pulls the right scan / neighbor /
         // prob arrays. Single ONE positive then EOB.
         var read = BlockBitReader(new int[] { 1, 1, 0, 0, 0 });
@@ -155,6 +162,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefDecoder_RejectsUndersizedBlock()
     {
+        CpuOnlyTest();
         var read = BlockBitReader(new int[] { 0 });
         Throws<ArgumentException>(() =>
             Vp9BlockCoefDecoder.DecodeBlockCoefficients(

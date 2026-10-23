@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst16x16_ZeroCoefficients_LeavesPredictorUnchanged()
     {
+        CpuOnlyTest();
         var coeffs = new short[256];
         var dest = MakeIadst16Predictor(128);
         Vp9Iadst16x16Reference.IadstAdst16x16_256_Add(coeffs, dest, 16);
@@ -27,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst16x16_IsDeterministic_ForRandomInputs()
     {
+        CpuOnlyTest();
         var rng = new Random(0xAD16);
         var coeffs = new short[256];
         for (int trial = 0; trial < 10; trial++)
@@ -43,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst16x16_SingleCoefficient_ProducesNonZeroResidual()
     {
+        CpuOnlyTest();
         var coeffs = new short[256];
         coeffs[0] = 1024;
         var dest = MakeIadst16Predictor(100);
@@ -55,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst16x16_HighPositive_OutputsValidPixels()
     {
+        CpuOnlyTest();
         var coeffs = new short[256];
         for (int i = 0; i < 256; i++) coeffs[i] = 2048;
         var dest = MakeIadst16Predictor(250);
@@ -65,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst16x16_LargeNegatives_ClipToZeroSomewhere()
     {
+        CpuOnlyTest();
         var coeffs = new short[256];
         for (int i = 0; i < 256; i++) coeffs[i] = -2048;
         var dest = MakeIadst16Predictor(10);
@@ -78,6 +83,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst16x16_StridedDest_OnlyTouches16x16Block()
     {
+        CpuOnlyTest();
         var canvas = new byte[16 * 32];
         for (int i = 0; i < canvas.Length; i++) canvas[i] = 77;
         var coeffs = new short[256];
@@ -91,6 +97,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst16x16_Throws_OnShortInput()
     {
+        CpuOnlyTest();
         var dest = MakeIadst16Predictor(0);
         bool threw = false;
         try { Vp9Iadst16x16Reference.IadstAdst16x16_256_Add(new short[128], dest, 16); }
@@ -101,6 +108,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iadst16x16_Throws_OnBadStride()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9Iadst16x16Reference.IadstAdst16x16_256_Add(new short[256], new byte[256], 8); }
         catch (ArgumentException) { threw = true; }

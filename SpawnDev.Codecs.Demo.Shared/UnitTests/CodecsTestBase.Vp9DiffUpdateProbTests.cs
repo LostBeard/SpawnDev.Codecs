@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DiffUpdateProb_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(252, Vp9DiffUpdateProb.UpdateProb);
         Equal(255, Vp9DiffUpdateProb.MaxProb);
         Equal(255, Vp9DiffUpdateProb.InvMapTable.Length);
@@ -23,6 +24,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DiffUpdateProb_InvMapTable_FirstFewEntries()
     {
+        CpuOnlyTest();
         // First 19 entries spread early codes across the prob range.
         Equal((byte)7, Vp9DiffUpdateProb.InvMapTable[0]);
         Equal((byte)20, Vp9DiffUpdateProb.InvMapTable[1]);
@@ -39,6 +41,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DiffUpdateProb_InvRecenterNonneg_OverflowBranch()
     {
+        CpuOnlyTest();
         // v > 2m -> return v unchanged.
         Equal(100, Vp9DiffUpdateProb.InvRecenterNonneg(100, 30));  // 100 > 60
         Equal(50, Vp9DiffUpdateProb.InvRecenterNonneg(50, 10));    // 50 > 20
@@ -47,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DiffUpdateProb_InvRecenterNonneg_OddBranch()
     {
+        CpuOnlyTest();
         // v <= 2m, v odd -> m - ((v+1) >> 1).
         // v=1, m=10: 10 - 1 = 9.
         Equal(9, Vp9DiffUpdateProb.InvRecenterNonneg(1, 10));
@@ -59,6 +63,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DiffUpdateProb_InvRecenterNonneg_EvenBranch()
     {
+        CpuOnlyTest();
         // v <= 2m, v even -> m + (v >> 1).
         // v=0, m=10: 10 + 0 = 10.
         Equal(10, Vp9DiffUpdateProb.InvRecenterNonneg(0, 10));
@@ -71,6 +76,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DiffUpdateProb_InvRemapProb_LowerHalf()
     {
+        CpuOnlyTest();
         // m <= MAX_PROB/2 + 0.5 -> use 1 + InvRecenterNonneg(v, m-1).
         // v=0 maps to InvMapTable[0]=7.
         // m=100, m-1=99. (99<<1)=198 <= 255. Branch = 1 + InvRecenterNonneg(7, 99).
@@ -81,6 +87,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DiffUpdateProb_InvRemapProb_UpperHalf()
     {
+        CpuOnlyTest();
         // m=200, m-1=199. (199<<1)=398 > 255. Branch = MaxProb - InvRecenterNonneg(v, MaxProb-1-m+1).
         // Wait the formula is MAX_PROB - InvRecenterNonneg(v, MAX_PROB - 1 - m).
         // After m-- in the function, m is now 199. So we use MAX_PROB - 1 - 199 = 55.
@@ -92,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DiffUpdateProb_InvRemapProb_Symmetry()
     {
+        CpuOnlyTest();
         // For v=0 (smallest delta), the new prob should be near current m.
         // Quick spot check: m=128 (boundary).
         // m-1=127. (127<<1)=254 <= 255 (yes, the lower-half branch).
@@ -103,6 +111,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DiffUpdateProb_InvRemapProb_RejectsOutOfRangeV()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9DiffUpdateProb.InvRemapProb(255, 100));  // v == MaxProb
         Throws<ArgumentOutOfRangeException>(() =>

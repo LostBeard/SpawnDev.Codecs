@@ -14,6 +14,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GainAdjust_SameGain_ReturnsOneAndLeavesStateUnchanged()
     {
+        CpuOnlyTest();
         int[] state = new int[SilkConstants.MAX_LPC_ORDER];
         for (int i = 0; i < state.Length; i++) state[i] = (i + 1) * 10000;
         int[] original = new int[SilkConstants.MAX_LPC_ORDER];
@@ -28,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GainAdjust_GainIncreasedByTwo_ScalesStateDownByHalf()
     {
+        CpuOnlyTest();
         // prevGain = 1.0 Q16, curGain = 2.0 Q16. Ratio = 0.5 Q16 = 32768.
         int[] state = new int[SilkConstants.MAX_LPC_ORDER];
         for (int i = 0; i < state.Length; i++) state[i] = 100000;
@@ -47,6 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GainAdjust_GainHalved_ScalesStateUpByTwo()
     {
+        CpuOnlyTest();
         // prevGain = 2.0 Q16, curGain = 1.0 Q16. Ratio = 2.0 Q16 = 131072.
         int[] state = new int[SilkConstants.MAX_LPC_ORDER];
         for (int i = 0; i < state.Length; i++) state[i] = 50000;
@@ -65,6 +68,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GainAdjust_OnlyScalesFirstMaxLpcOrderSamples()
     {
+        CpuOnlyTest();
         // State buffer of length MAX_LPC_ORDER + 10. The extra 10 samples should NOT
         // be touched (those are the "current subframe output slots", not history).
         int[] state = new int[SilkConstants.MAX_LPC_ORDER + 10];
@@ -86,6 +90,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GainAdjust_ZeroCurGain_Throws()
     {
+        CpuOnlyTest();
         int[] state = new int[SilkConstants.MAX_LPC_ORDER];
         Throws<ArgumentException>(() =>
             SilkGainAdjust.Apply(state, prevGainQ16: 65536, curGainQ16: 0));
@@ -94,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void GainAdjust_StateTooSmall_Throws()
     {
+        CpuOnlyTest();
         int[] state = new int[SilkConstants.MAX_LPC_ORDER - 1];
         Throws<ArgumentException>(() =>
             SilkGainAdjust.Apply(state, prevGainQ16: 65536, curGainQ16: 131072));

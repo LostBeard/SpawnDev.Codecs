@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9LoopFilterParamsMerge_RefDeltas_NullParsed_PreservesPersistent()
     {
+        CpuOnlyTest();
         var persistent = new int[] { 1, 2, 3, 4 };
         var merged = Vp9LoopFilterParamsMerge.MergeRefDeltas(null, persistent);
         Equal(4, merged.Length);
@@ -23,6 +24,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9LoopFilterParamsMerge_RefDeltas_AllUpdated_OverridesPersistent()
     {
+        CpuOnlyTest();
         var persistent = new int[] { 1, 2, 3, 4 };
         var parsed = new int?[] { 10, 20, 30, 40 };
         var merged = Vp9LoopFilterParamsMerge.MergeRefDeltas(parsed, persistent);
@@ -35,6 +37,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9LoopFilterParamsMerge_RefDeltas_PartialUpdate_MixesValues()
     {
+        CpuOnlyTest();
         var persistent = new int[] { 1, 2, 3, 4 };
         var parsed = new int?[] { 10, null, 30, null };
         var merged = Vp9LoopFilterParamsMerge.MergeRefDeltas(parsed, persistent);
@@ -47,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9LoopFilterParamsMerge_RefDeltas_EmptyParsed_PreservesPersistent()
     {
+        CpuOnlyTest();
         // Length-zero parsed array (e.g. when ModeRefDeltaUpdate=false).
         var persistent = new int[] { 5, 6, 7, 8 };
         var parsed = Array.Empty<int?>();
@@ -60,6 +64,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9LoopFilterParamsMerge_ModeDeltas_NullParsed_PreservesPersistent()
     {
+        CpuOnlyTest();
         var persistent = new int[] { -3, 7 };
         var merged = Vp9LoopFilterParamsMerge.MergeModeDeltas(null, persistent);
         Equal(-3, merged[0]);
@@ -69,6 +74,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9LoopFilterParamsMerge_ModeDeltas_PartialUpdate()
     {
+        CpuOnlyTest();
         var persistent = new int[] { -3, 7 };
         var parsed = new int?[] { null, 11 };
         var merged = Vp9LoopFilterParamsMerge.MergeModeDeltas(parsed, persistent);
@@ -79,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9LoopFilterParamsMerge_RejectsNullPersistent()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() =>
             Vp9LoopFilterParamsMerge.MergeRefDeltas(null, null!));
         Throws<ArgumentNullException>(() =>
@@ -88,6 +95,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9LoopFilterParamsMerge_RejectsWrongLengthPersistent()
     {
+        CpuOnlyTest();
         Throws<ArgumentException>(() =>
             Vp9LoopFilterParamsMerge.MergeRefDeltas(null, new int[] { 1, 2 }));
         Throws<ArgumentException>(() =>

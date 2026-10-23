@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterpFilter_Switchable_FirstBitOne()
     {
+        CpuOnlyTest();
         var data = BitsToBytes((1, 1));  // bit 0 = 1 -> Switchable, no further bits
         var f = Vp9InterpFilterParser.Parse(data);
         Equal(Vp9InterpFilter.Switchable, f);
@@ -19,6 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterpFilter_EightTap_BitZeroIndex0()
     {
+        CpuOnlyTest();
         var data = BitsToBytes((0, 1), (0, 2));  // bit 0 = 0, then 2 bits = 0
         var f = Vp9InterpFilterParser.Parse(data);
         Equal(Vp9InterpFilter.EightTap, f);
@@ -27,6 +29,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterpFilter_EightTapSmooth_BitZeroIndex1()
     {
+        CpuOnlyTest();
         var data = BitsToBytes((0, 1), (1, 2));
         var f = Vp9InterpFilterParser.Parse(data);
         Equal(Vp9InterpFilter.EightTapSmooth, f);
@@ -35,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterpFilter_EightTapSharp_BitZeroIndex2()
     {
+        CpuOnlyTest();
         var data = BitsToBytes((0, 1), (2, 2));
         var f = Vp9InterpFilterParser.Parse(data);
         Equal(Vp9InterpFilter.EightTapSharp, f);
@@ -43,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9InterpFilter_Bilinear_BitZeroIndex3()
     {
+        CpuOnlyTest();
         var data = BitsToBytes((0, 1), (3, 2));
         var f = Vp9InterpFilterParser.Parse(data);
         Equal(Vp9InterpFilter.Bilinear, f);

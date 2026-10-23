@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht16x16_DctDct_MatchesIdct16x16Reference()
     {
+        CpuOnlyTest();
         var rng = new Random(0xF1);
         for (int trial = 0; trial < 10; trial++)
         {
@@ -38,6 +39,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht16x16_AdstAdst_MatchesIadst16x16Reference()
     {
+        CpuOnlyTest();
         var rng = new Random(0xF3);
         for (int trial = 0; trial < 10; trial++)
         {
@@ -58,6 +60,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht16x16_AdstDct_VsDctAdst_ProduceDifferentOutput()
     {
+        CpuOnlyTest();
         var coeffs = new short[256];
         coeffs[1] = 1200;
         coeffs[17] = -800;
@@ -77,6 +80,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht16x16_AllFourTxTypes_ZeroInput_LeavePredictorUnchanged()
     {
+        CpuOnlyTest();
         var coeffs = new short[256];
         foreach (var tx in new[] { Vp9TxType16x16.DctDct, Vp9TxType16x16.AdstDct,
                                     Vp9TxType16x16.DctAdst, Vp9TxType16x16.AdstAdst })
@@ -90,6 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht16x16_AllFourTxTypes_ProduceValidPixels()
     {
+        CpuOnlyTest();
         var rng = new Random(0xF7);
         var coeffs = new short[256];
         for (int i = 0; i < 256; i++) coeffs[i] = (short)rng.Next(-4096, 4096);
@@ -109,6 +114,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht16x16_Throws_OnShortInput()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9Iht16x16Reference.Iht16x16_256_Add(Vp9TxType16x16.DctDct, new short[128], new byte[256], 16); }
         catch (ArgumentException) { threw = true; }
@@ -118,6 +124,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9Iht16x16_Throws_OnBadStride()
     {
+        CpuOnlyTest();
         bool threw = false;
         try { Vp9Iht16x16Reference.Iht16x16_256_Add(Vp9TxType16x16.DctDct, new short[256], new byte[256], 8); }
         catch (ArgumentException) { threw = true; }

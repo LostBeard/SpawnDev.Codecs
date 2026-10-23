@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvProbs_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(4, Vp9MvProbs.MvJoints);
         Equal(252, Vp9MvProbs.MvUpdateProb);
         Equal(11, Vp9MvComponentProbs.MvClasses);
@@ -22,6 +23,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvProbs_TableShapes()
     {
+        CpuOnlyTest();
         var probs = new Vp9MvProbs();
         Equal(3, probs.Joints.Length);
         Equal(2, probs.Components.Length);
@@ -36,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvProbsParser_NoUpdates_LeavesTableUntouched_NoHp()
     {
+        CpuOnlyTest();
         var data = new byte[64];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
 
@@ -66,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvProbsParser_NoUpdates_AllowHp_HpProbsAlsoUntouched()
     {
+        CpuOnlyTest();
         var data = new byte[64];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
 
@@ -88,6 +92,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvProbsParser_UpdateMvProb_ReturnsCurrent_WhenFlagZero()
     {
+        CpuOnlyTest();
         // Zero buffer -> read flag = 0 -> return current.
         var data = new byte[8];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
@@ -98,6 +103,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvProbsParser_RejectsNullArgs()
     {
+        CpuOnlyTest();
         var data = new byte[8];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
         Throws<ArgumentNullException>(() =>

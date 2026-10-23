@@ -38,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfUnpack_AllZeros_ProducesZeroIndicesAndPredEntry0()
     {
+        CpuOnlyTest();
         // Order=10, 5 ec_sel bytes per vector. All zero ec_sel -> ec_ix all zero.
         // Predictor: (entry & 1) == 0 and (entry >> 4 & 1) == 0, so indices are
         // predQ8[i] and predQ8[i+1] for even i.
@@ -64,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfUnpack_EntryOne_SelectsPredictorUpperHalf()
     {
+        CpuOnlyTest();
         // entry=1 => bit 0 set. Predictor for even i: predQ8[i + 1*(order-1)] = predQ8[i+9].
         // bit 4 not set -> predictor for odd i: predQ8[i + 0*9 + 1] = predQ8[i+1].
         short order = 10;
@@ -99,6 +101,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfUnpack_MaxEntropyIndex_ProducesBoundMultiple()
     {
+        CpuOnlyTest();
         // entry=0xFE (bits 1..3 = 7, bits 5..7 = 7). Both ec_ix values should equal 7 * bound.
         short order = 10;
         byte[] ecSel = new byte[5];
@@ -121,6 +124,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfUnpack_CodebookIndexOutOfRange_Throws()
     {
+        CpuOnlyTest();
         short order = 10;
         var cb = BuildSyntheticCodebook(order, new byte[5], new byte[20]);
         short[] ecIx = new short[10];
@@ -133,6 +137,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfUnpack_OutputBuffersTooSmall_Throws()
     {
+        CpuOnlyTest();
         short order = 10;
         var cb = BuildSyntheticCodebook(order, new byte[5], new byte[20]);
 
@@ -148,6 +153,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void NlsfUnpack_SecondCodebookVector_UsesCorrectEcSelOffset()
     {
+        CpuOnlyTest();
         // 2 vectors of order 10 -> 2 * 5 = 10 ec_sel bytes.
         // Vector 0: all zeros. Vector 1: all 0x02 (entropy bits 1..3 = 1).
         short order = 10;

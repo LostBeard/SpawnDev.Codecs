@@ -37,6 +37,21 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>
+    /// True in the ONE lane that runs the CPU-only tests (<c>CpuCodecsTests</c>, desktop). A CPU-only test never touches an
+    /// accelerator (bit readers, tables, parsers, the CPU reference ports): it runs the same managed code on every lane, so
+    /// running it again on CUDA / OpenCL / WebGPU / WebGL / Wasm only burns host CPU - in the browser lanes that is
+    /// single-threaded .NET Wasm.
+    /// </summary>
+    protected virtual bool RunsCpuOnlyTests => false;
+
+    /// <summary>First statement of every CPU-only test: skip unless this is the lane that runs them (see <see cref="RunsCpuOnlyTests"/>).</summary>
+    protected void CpuOnlyTest()
+    {
+        if (!RunsCpuOnlyTests)
+            throw new UnsupportedTestException("CPU-only test (no accelerator): it runs once, in the desktop CPU lane (CpuCodecsTests).");
+    }
+
+    /// <summary>
     /// Throw <see cref="UnsupportedTestException"/> if the supplied accelerator's
     /// backend cannot satisfy the requirements. Use at the top of any test whose
     /// kernels need features not available on every backend (atomics, shared

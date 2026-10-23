@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SyncCode_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(0x49, Vp9SyncCode.Byte0);
         Equal(0x83, Vp9SyncCode.Byte1);
         Equal(0x42, Vp9SyncCode.Byte2);
@@ -20,6 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SyncCode_AsArray_ReturnsThreeBytes()
     {
+        CpuOnlyTest();
         var arr = Vp9SyncCode.AsArray();
         Equal(3, arr.Length);
         Equal((byte)0x49, arr[0]);
@@ -30,6 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SyncCode_Matches_TrueForExactSequence()
     {
+        CpuOnlyTest();
         var data = new byte[] { 0x49, 0x83, 0x42, 0xFF };
         Equal(true, Vp9SyncCode.Matches(data, 0));
     }
@@ -37,6 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SyncCode_Matches_FalseForWrongFirstByte()
     {
+        CpuOnlyTest();
         var data = new byte[] { 0x48, 0x83, 0x42 };
         Equal(false, Vp9SyncCode.Matches(data, 0));
     }
@@ -44,6 +48,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SyncCode_Matches_FalseForTruncated()
     {
+        CpuOnlyTest();
         var data = new byte[] { 0x49, 0x83 };
         Equal(false, Vp9SyncCode.Matches(data, 0));
     }
@@ -51,6 +56,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SyncCode_Matches_TrueAtNonZeroOffset()
     {
+        CpuOnlyTest();
         var data = new byte[] { 0xFF, 0xFF, 0x49, 0x83, 0x42, 0xFF };
         Equal(true, Vp9SyncCode.Matches(data, 2));
     }
@@ -58,6 +64,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SyncCode_Matches_FalseWhenOffsetPastEnd()
     {
+        CpuOnlyTest();
         var data = new byte[] { 0x49, 0x83, 0x42 };
         Equal(false, Vp9SyncCode.Matches(data, 1)); // not enough bytes after offset 1
     }
@@ -65,6 +72,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SyncCode_Matches_RejectsNegativeOffset()
     {
+        CpuOnlyTest();
         var data = new byte[] { 0x49, 0x83, 0x42 };
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9SyncCode.Matches(data, -1));

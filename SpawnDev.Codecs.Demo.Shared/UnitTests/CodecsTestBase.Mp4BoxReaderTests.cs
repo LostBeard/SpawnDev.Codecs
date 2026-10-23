@@ -27,6 +27,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mp4Box_FlatLeafBoxes_Enumerated()
     {
+        CpuOnlyTest();
         // ftyp (16 bytes: header + 8 bytes payload) followed by free (8-byte header only).
         var stream = new List<byte>();
         stream.AddRange(Mp4BoxHeader("ftyp", 16));
@@ -46,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mp4Box_ContainerBox_RecursesIntoChildren()
     {
+        CpuOnlyTest();
         // moov (container) { mvhd (8 bytes, empty leaf), trak (container) { tkhd (8 bytes) } }
         // moov outer size = 8 (moov hdr) + 8 (mvhd) + 8 (trak hdr) + 8 (tkhd) = 32.
         // trak inner size = 8 (hdr) + 8 (tkhd) = 16.
@@ -67,6 +69,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mp4Box_FindFirst_FindsNestedBox()
     {
+        CpuOnlyTest();
         // moov > trak > mdia > minf > stbl > stsd (all container boxes except stsd).
         // Build a deeply-nested structure and verify FindFirst reaches stsd.
         var tkhd = Mp4BoxHeader("tkhd", 8);
@@ -96,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mp4Box_ExtendedSize_Size1IndicatesLarge()
     {
+        CpuOnlyTest();
         // Build a box with size=1 then 8-byte extended size.
         // Total size = 16 (header 8 + ext 8) + 0 payload = 16.
         var bytes = new byte[16];
@@ -114,6 +118,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mp4Box_SizeZero_ExtendsToEndOfFile()
     {
+        CpuOnlyTest();
         // Size=0 means "to end of file"; the box consumes whatever bytes remain.
         var bytes = new byte[32];
         // size 0, type 'mdat'.
@@ -127,6 +132,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mp4Box_TruncatedHeader_Throws()
     {
+        CpuOnlyTest();
         var bytes = new byte[] { 0, 0, 0 };
         bool threw = false;
         try { Mp4BoxReader.ReadAll(bytes); } catch (InvalidDataException) { threw = true; }
@@ -136,6 +142,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Mp4Box_SizeExceedsBuffer_Throws()
     {
+        CpuOnlyTest();
         // size=1000 but only 16 bytes total.
         var bytes = new byte[16];
         bytes[3] = 1000 & 0xFF;

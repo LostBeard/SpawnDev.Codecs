@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefScanner_NoNeighbors_LeavesResultEmpty()
     {
+        CpuOnlyTest();
         var result = new Vp9MvRefCandidatesByRef();
         // Block at (0, 0) with miAt returning null for everything.
         Vp9MvRefScanner.ScanCandidates(
@@ -27,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefScanner_IntraNeighbors_LeaveResultEmpty()
     {
+        CpuOnlyTest();
         var result = new Vp9MvRefCandidatesByRef();
         Vp9MvRefScanner.ScanCandidates(
             curMiRow: 5, curMiCol: 5,
@@ -48,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefScanner_InterNeighbors_PopulatesByRef()
     {
+        CpuOnlyTest();
         var result = new Vp9MvRefCandidatesByRef();
         // All neighbors are inter blocks against the Last reference,
         // each with a distinct MV.
@@ -82,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefScanner_CompoundNeighbor_PopulatesBothRefs()
     {
+        CpuOnlyTest();
         var result = new Vp9MvRefCandidatesByRef();
         Vp9MvRefScanner.ScanCandidates(
             curMiRow: 5, curMiCol: 5,
@@ -110,6 +114,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefScanner_OutOfBoundsNeighbors_Skipped()
     {
+        CpuOnlyTest();
         var result = new Vp9MvRefCandidatesByRef();
         int callCount = 0;
         Vp9MvRefScanner.ScanCandidates(
@@ -133,6 +138,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefScanner_RejectsNullMiAt()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() =>
             Vp9MvRefScanner.ScanCandidates(0, 0, Vp9BlockSize.Block8x8, 32, 32, null!,
                 new Vp9MvRefCandidatesByRef()));
@@ -141,6 +147,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvRefScanner_RejectsNullResult()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() =>
             Vp9MvRefScanner.ScanCandidates(0, 0, Vp9BlockSize.Block8x8, 32, 32, (r, c) => null, null!));
     }

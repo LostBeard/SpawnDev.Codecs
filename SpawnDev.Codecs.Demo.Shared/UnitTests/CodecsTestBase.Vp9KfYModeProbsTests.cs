@@ -13,12 +13,14 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9KfYModeProbs_HasCorrect900EntryLength()
     {
+        CpuOnlyTest();
         Equal(900, Vp9IntraModeProbs.KfYModeProbs.Length);
     }
 
     [TestMethod]
     public void Vp9KfYModeProbs_FirstContextMatchesLibvpx()
     {
+        CpuOnlyTest();
         // (above = DcPred, left = DcPred): { 137, 30, 42, 148, 151, 207, 70, 52, 91 }
         var t = Vp9IntraModeProbs.KfYModeProbs;
         Equal((byte)137, t[0]);
@@ -30,6 +32,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9KfYModeProbs_LastContextMatchesLibvpx()
     {
+        CpuOnlyTest();
         // (above = TmPred, left = TmPred): { 43, 81, 53, 140, 169, 204, 68, 84, 72 }
         var t = Vp9IntraModeProbs.KfYModeProbs;
         Equal((byte)43, t[891]);
@@ -40,6 +43,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9KfYModeProbs_MidContextMatchesLibvpx()
     {
+        CpuOnlyTest();
         // (above = D45Pred, left = HPred): { 62, 30, 23, 158, 200, 207, 59, 57, 50 }
         // Index = (3 * 10 + 2) * 9 = 32 * 9 = 288
         var t = Vp9IntraModeProbs.KfYModeProbs;
@@ -57,6 +61,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9KfYModeProbs_KeyframeYProbsHelper_ReturnsExpectedSlice()
     {
+        CpuOnlyTest();
         // Spot-check (above = HPred, left = DcPred) against libvpx.
         // Row 2 (above = h) starts at index 2 * 10 = 20 contexts in,
         // = 20 * 9 = 180 bytes. Sub-index 0 (left = dc).
@@ -72,6 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9KfYModeProbs_KeyframeYProbsHelper_CoversFull10x10ContextDomain()
     {
+        CpuOnlyTest();
         // Every (above, left) pair returns a valid 9-byte slice and
         // the slice content matches the manually computed flat index.
         for (int a = 0; a < 10; a++)
@@ -88,6 +94,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9KfYModeProbs_KeyframeYProbsHelper_RejectsOutOfRangeArgs()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9IntraModeProbs.KeyframeYProbs((Vp9IntraMode)10, Vp9IntraMode.DcPred));
         Throws<ArgumentOutOfRangeException>(() =>
@@ -97,6 +104,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9KfYModeProbs_DriveProbsIntoIntraModeTree_DecodesDcPredOnFirstZeroBit()
     {
+        CpuOnlyTest();
         // End-to-end: pull a real probability slice and decode through
         // slice 153's Vp9IntraModeTree.Decode. First bit = 0 -> DcPred.
         var probs = Vp9IntraModeProbs.KeyframeYProbs(Vp9IntraMode.DcPred, Vp9IntraMode.DcPred);

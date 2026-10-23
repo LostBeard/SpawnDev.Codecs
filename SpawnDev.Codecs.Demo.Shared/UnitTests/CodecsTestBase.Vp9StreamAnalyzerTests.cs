@@ -12,6 +12,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9StreamAnalyzer_BbbFixture_ReturnsCompleteSummary()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         var video = container.Tracks.First(t => t.IsVideo);
@@ -42,6 +43,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9StreamAnalyzer_BbbFixture_FirstFrameIsKeyframe()
     {
+        CpuOnlyTest();
         using var stream = LoadBigBuckBunnyWebM();
         var container = new MatroskaContainer(stream);
         var video = container.Tracks.First(t => t.IsVideo);

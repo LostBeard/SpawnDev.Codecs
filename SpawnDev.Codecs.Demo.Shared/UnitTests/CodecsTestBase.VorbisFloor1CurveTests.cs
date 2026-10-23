@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1Curve_LowNeighbour_TakesLargestStrictlyLessThan()
     {
+        CpuOnlyTest();
         // x = [0, 128, 4, 64, 32, 16], i = 5 -> neighbours considered are j=0..4.
         // x[i] = 16. Values strictly less than 16 among x[0..4]: 0 (idx 0), 4 (idx 2).
         // Largest: 4 at index 2.
@@ -25,6 +26,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1Curve_HighNeighbour_TakesSmallestStrictlyGreaterThan()
     {
+        CpuOnlyTest();
         // Same array, same i. Values strictly > 16 among x[0..4]: 128 (idx 1),
         // 64 (idx 3), 32 (idx 4). Smallest = 32 at index 4.
         int[] x = { 0, 128, 4, 64, 32, 16 };
@@ -34,6 +36,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1Curve_RenderPoint_IntegerInterpolationAtHalf()
     {
+        CpuOnlyTest();
         // Line from (0, 100) to (10, 200), sample at x=5.
         // dy=100, adx=10, ady=100, err=100*5=500, off=500/10=50 -> y = 100+50 = 150.
         Equal(150, VorbisFloor1Curve.RenderPoint(0, 100, 10, 200, 5));
@@ -42,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1Curve_RenderPoint_NegativeSlope()
     {
+        CpuOnlyTest();
         // Line (0, 200) to (10, 100), sample at x=5 -> y = 150 (symmetric).
         Equal(150, VorbisFloor1Curve.RenderPoint(0, 200, 10, 100, 5));
     }
@@ -49,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1Curve_RenderPoint_Endpoints()
     {
+        CpuOnlyTest();
         // At x=0 and x=10, returns exact endpoint values.
         Equal(100, VorbisFloor1Curve.RenderPoint(0, 100, 10, 200, 0));
         Equal(200, VorbisFloor1Curve.RenderPoint(0, 100, 10, 200, 10));
@@ -57,6 +62,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1Curve_Render_FullCurve_ProducesPositiveFloats()
     {
+        CpuOnlyTest();
         // Minimal floor: 1 partition class 0, dims 1, subclasses 0, one X at 10.
         // multiplier 1, rangeBits 4 -> XList = [0, 16, 10].
         // decodedY = [100, 50, 20]. The rest of the fields (Partitions, class
@@ -90,6 +96,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1Curve_Render_LengthMismatch_Throws()
     {
+        CpuOnlyTest();
         var cfg = new VorbisFloor1Config
         {
             Partitions = 0, PartitionClassList = Array.Empty<int>(),
@@ -109,6 +116,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisFloor1Curve_Render_DifferentMultipliers_ProduceFiniteCurves()
     {
+        CpuOnlyTest();
         foreach (int mult in new[] { 1, 2, 3, 4 })
         {
             var cfg = new VorbisFloor1Config

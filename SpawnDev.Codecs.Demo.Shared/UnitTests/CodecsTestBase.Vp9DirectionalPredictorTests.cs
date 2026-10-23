@@ -13,6 +13,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D45_4x4_KnownPattern()
     {
+        CpuOnlyTest();
         // above = [10, 20, 30, 40, 50, 60, 70, 80].
         // above_right = above[3] = 40.
         // Row 0: AVG3(10,20,30)=20, AVG3(20,30,40)=30, AVG3(30,40,50)=40, dst[3]=40.
@@ -35,6 +36,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D45_4x4_FlatInput_ProducesFlatOutput()
     {
+        CpuOnlyTest();
         // above = all 100. AVG3(100,100,100) = (100+200+100+2)>>2 = 100.
         // above_right = 100. Whole block = 100.
         var above = new byte[8];
@@ -47,6 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D45_8x8_FlatInputProducesFlatOutput()
     {
+        CpuOnlyTest();
         var above = new byte[16];
         for (int i = 0; i < 16; i++) above[i] = 50;
         var dst = new byte[64];
@@ -57,6 +60,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D63_4x4_KnownPattern()
     {
+        CpuOnlyTest();
         // above = [10, 20, 30, 40, 50, 60, 70, 80].
         // Row 0: AVG2 of consecutive pairs:
         //   AVG2(10,20)=(10+20+1)/2=15
@@ -82,6 +86,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D63_FlatInputProducesFlatOutput()
     {
+        CpuOnlyTest();
         var above = new byte[16];
         for (int i = 0; i < 16; i++) above[i] = 200;
         var dst = new byte[64];
@@ -92,6 +97,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D45_StridedDest_OnlyTouchesBlock()
     {
+        CpuOnlyTest();
         var above = new byte[16];
         for (int i = 0; i < 16; i++) above[i] = 80;
         const int stride = 16;
@@ -110,6 +116,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D45_RejectsInvalidArgs()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9DirectionalPredictor.D45Predict(new byte[10], new byte[25], n: 5, stride: 5));
         Throws<ArgumentException>(() =>
@@ -119,6 +126,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D63_RejectsInvalidArgs()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9DirectionalPredictor.D63Predict(new byte[10], new byte[25], n: 5, stride: 5));
         Throws<ArgumentException>(() =>
@@ -128,6 +136,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D135_4x4_KnownPattern()
     {
+        CpuOnlyTest();
         // above = [10, 20, 30, 40]; left = [50, 60, 70, 80]; topLeft = 5.
         // border[0] = AVG3(left[1], left[2], left[3]) = AVG3(60, 70, 80) = 70
         // border[1] = AVG3(left[0], left[1], left[2]) = AVG3(50, 60, 70) = 60
@@ -154,6 +163,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D135_FlatInputProducesFlatOutput()
     {
+        CpuOnlyTest();
         var above = new byte[8];
         var left = new byte[8];
         for (int i = 0; i < 8; i++) { above[i] = 100; left[i] = 100; }
@@ -165,6 +175,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D135_StridedDest_OnlyTouchesBlock()
     {
+        CpuOnlyTest();
         var above = new byte[16];
         var left = new byte[16];
         for (int i = 0; i < 16; i++) { above[i] = 80; left[i] = 80; }
@@ -184,6 +195,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D135_RejectsInvalidArgs()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9DirectionalPredictor.D135Predict(0, new byte[5], new byte[5], new byte[25], n: 5, stride: 5));
         Throws<ArgumentException>(() =>
@@ -195,6 +207,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D117_4x4_KnownPattern()
     {
+        CpuOnlyTest();
         // above = [10, 20, 30, 40]; left = [50, 60, 70, 80]; topLeft = 5.
         // Row 0 (AVG2): AVG2(5,10)=8, AVG2(10,20)=15, AVG2(20,30)=25, AVG2(30,40)=35.
         // Row 1 (AVG3): AVG3(50,5,10)=18, AVG3(5,10,20)=11, AVG3(10,20,30)=20, AVG3(20,30,40)=30.
@@ -216,6 +229,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D117_FlatInputProducesFlatOutput()
     {
+        CpuOnlyTest();
         var above = new byte[8];
         var left = new byte[8];
         for (int i = 0; i < 8; i++) { above[i] = 100; left[i] = 100; }
@@ -227,6 +241,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D117_RejectsInvalidArgs()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9DirectionalPredictor.D117Predict(0, new byte[5], new byte[5], new byte[25], n: 5, stride: 5));
         Throws<ArgumentException>(() =>
@@ -238,6 +253,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D153_4x4_KnownPattern()
     {
+        CpuOnlyTest();
         // above = [10, 20, 30, 40]; left = [50, 60, 70, 80]; topLeft = 5.
         // Col 0 (AVG2): AVG2(5,50)=28, AVG2(50,60)=55, AVG2(60,70)=65, AVG2(70,80)=75.
         // Col 1 (AVG3): AVG3(50,5,10)=18, AVG3(5,50,60)=41, AVG3(50,60,70)=60, AVG3(60,70,80)=70.
@@ -261,6 +277,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D153_FlatInputProducesFlatOutput()
     {
+        CpuOnlyTest();
         var above = new byte[8];
         var left = new byte[8];
         for (int i = 0; i < 8; i++) { above[i] = 100; left[i] = 100; }
@@ -272,6 +289,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D153_RejectsInvalidArgs()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9DirectionalPredictor.D153Predict(0, new byte[5], new byte[5], new byte[25], n: 5, stride: 5));
         Throws<ArgumentException>(() =>
@@ -283,6 +301,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D207_4x4_KnownPattern()
     {
+        CpuOnlyTest();
         // left = [50, 60, 70, 80].
         // Col 0: AVG2(50,60)=55, AVG2(60,70)=65, AVG2(70,80)=75, dst[3][0]=left[3]=80.
         // Col 1: AVG3(50,60,70)=60, AVG3(60,70,80)=70,
@@ -304,6 +323,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D207_FlatInputProducesFlatOutput()
     {
+        CpuOnlyTest();
         var left = new byte[8];
         for (int i = 0; i < 8; i++) left[i] = 100;
         var dst = new byte[64];
@@ -314,6 +334,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D207_StridedDest_OnlyTouchesBlock()
     {
+        CpuOnlyTest();
         var left = new byte[16];
         for (int i = 0; i < 16; i++) left[i] = 80;
         const int stride = 32;
@@ -332,6 +353,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9DirectionalPredictor_D207_RejectsInvalidArgs()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() =>
             Vp9DirectionalPredictor.D207Predict(new byte[5], new byte[25], n: 5, stride: 5));
         Throws<ArgumentException>(() =>

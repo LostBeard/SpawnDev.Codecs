@@ -20,6 +20,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ObuWriter_Leb128_RoundTripCanonicalValues()
     {
+        CpuOnlyTest();
         long[] values = { 0, 1, 0x7F, 0x80, 0xFF, 0x3FFF, 0x4000, 0x1FFFFF, 0x200000, int.MaxValue };
         foreach (var v in values)
         {
@@ -37,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ObuWriter_Leb128_KnownEncodings()
     {
+        CpuOnlyTest();
         // 0x80 LEB128 = [0x80, 0x01].
         var buf2 = new byte[2];
         int n = Av1ObuWriter.WriteLeb128(buf2, 0x80);
@@ -55,6 +57,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ObuWriter_BbbFirstFrame_RoundTripsBitExact()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         var firstFrame = IvfReader.EnumerateFrames(bytes).First();
         int total = 0;
@@ -86,6 +89,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ObuWriter_BbbAllFrames_RoundTripsBitExact()
     {
+        CpuOnlyTest();
         var bytes = LoadAv1Fixture();
         int frames = 0;
         int obus = 0;
@@ -125,6 +129,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ObuWriter_BbbAllFrames_ConcatenatedRoundTripMatchesSource()
     {
+        CpuOnlyTest();
         // Stream-level closed loop: for every IVF frame's OBU payload,
         // re-emit each OBU through Av1ObuWriter, concatenate them, and
         // verify the result is byte-identical to the source IVF frame
@@ -161,6 +166,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1ObuWriter_BbbFirstFrame_ConcatenatedRoundTripMatchesSource()
     {
+        CpuOnlyTest();
         // Stronger end-to-end check: concatenate every re-emitted OBU and
         // verify the resulting buffer is byte-identical to the original
         // IVF frame payload.

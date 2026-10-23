@@ -62,6 +62,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefEncoder_AllZero4x4_RoundTrips()
     {
+        CpuOnlyTest();
         var input = new short[16];
         RoundTripCoefBlock(
             Vp9TxSize.Tx4x4, 16, Vp9ScanType.Default,
@@ -72,6 +73,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefEncoder_DcOnly4x4_RoundTrips()
     {
+        CpuOnlyTest();
         var input = new short[16];
         input[0] = 17;
         RoundTripCoefBlock(
@@ -83,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefEncoder_NegativeOne4x4_RoundTrips()
     {
+        CpuOnlyTest();
         var input = new short[16];
         input[0] = -1;
         RoundTripCoefBlock(
@@ -94,6 +97,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefEncoder_AllMagnitudes4x4_RoundTrips()
     {
+        CpuOnlyTest();
         // Cover every code path (One, Two, Three, Four, Cat1..Cat6) by
         // assigning magnitudes to scan positions 0..9 so eob = 10 exactly,
         // independent of the raster-vs-scan mapping.
@@ -112,6 +116,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefEncoder_RandomSparse8x8_RoundTrips()
     {
+        CpuOnlyTest();
         var rng = new Random(0x8888);
         for (int trial = 0; trial < 4; trial++)
         {
@@ -143,6 +148,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefEncoder_Plane_RefType_Variants_RoundTrip()
     {
+        CpuOnlyTest();
         // Cover all 4 (planeType, refType) combinations - each maps to a
         // different probability subtable so the bit stream differs but
         // the round-trip must still hold.
@@ -166,6 +172,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9BlockCoefEncoder_Random16x16_RoundTrips()
     {
+        CpuOnlyTest();
         var rng = new Random(0x1616);
         var input = new short[256];
         for (int i = 0; i < 256; i++)

@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvBuilder_LowerPrecision_AllowedHp_NoChange()
     {
+        CpuOnlyTest();
         Equal(7, Vp9MvBuilder.LowerMvPrecisionComponent(7, allowHighPrecision: true));
         Equal(-3, Vp9MvBuilder.LowerMvPrecisionComponent(-3, allowHighPrecision: true));
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvBuilder_LowerPrecision_EvenComponent_NoChange()
     {
+        CpuOnlyTest();
         Equal(8, Vp9MvBuilder.LowerMvPrecisionComponent(8, allowHighPrecision: false));
         Equal(0, Vp9MvBuilder.LowerMvPrecisionComponent(0, allowHighPrecision: false));
         Equal(-12, Vp9MvBuilder.LowerMvPrecisionComponent(-12, allowHighPrecision: false));
@@ -26,6 +28,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvBuilder_LowerPrecision_PositiveOdd_SubtractsOne()
     {
+        CpuOnlyTest();
         Equal(6, Vp9MvBuilder.LowerMvPrecisionComponent(7, allowHighPrecision: false));
         Equal(0, Vp9MvBuilder.LowerMvPrecisionComponent(1, allowHighPrecision: false));
     }
@@ -33,6 +36,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvBuilder_LowerPrecision_NegativeOdd_AddsOne()
     {
+        CpuOnlyTest();
         Equal(-6, Vp9MvBuilder.LowerMvPrecisionComponent(-7, allowHighPrecision: false));
         Equal(0, Vp9MvBuilder.LowerMvPrecisionComponent(-1, allowHighPrecision: false));
     }
@@ -40,6 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvBuilder_LowerPrecision_StructForm()
     {
+        CpuOnlyTest();
         // (7, -3) with !allowHp -> (6, -2). Both LSB-cleared toward zero.
         var mv = new Vp9Mv(7, -3);
         var lowered = Vp9MvBuilder.LowerMvPrecision(mv, allowHighPrecision: false);
@@ -50,6 +55,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvBuilder_ApplyDiff_AddsAndClamps()
     {
+        CpuOnlyTest();
         // ref = (10, 20); diff = (5, -10); allowHp = true.
         // Result: (15, 10).
         var result = Vp9MvBuilder.ApplyDiff(
@@ -61,6 +67,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvBuilder_ApplyDiff_NoHp_LowersPrecision()
     {
+        CpuOnlyTest();
         // ref = (4, 4); diff = (3, 5); not allow hp.
         // sum = (7, 9) -> lower (6, 8). Both odd -> rounded toward zero.
         var result = Vp9MvBuilder.ApplyDiff(
@@ -72,6 +79,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MvBuilder_ApplyDiff_ClampsExtreme()
     {
+        CpuOnlyTest();
         // ref near upper bound + huge positive diff -> clamps to Upp - 1.
         var result = Vp9MvBuilder.ApplyDiff(
             new Vp9Mv(16000, -16000), vertDiff: 5000, horizDiff: -5000, allowHighPrecision: true);

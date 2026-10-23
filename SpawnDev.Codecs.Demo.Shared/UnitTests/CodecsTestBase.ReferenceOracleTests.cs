@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ReferenceOracle_GenerateSineWave_HasCorrectLength()
     {
+        CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSineWave(440, 48000, 2, 960);
         Equal(960 * 2, pcm.Length, "Sine wave should be samples * channels long");
     }
@@ -23,6 +24,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ReferenceOracle_GenerateSineWave_ValuesInAmplitudeRange()
     {
+        CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSineWave(440, 48000, 1, 480, amplitude: 0.5);
         foreach (var v in pcm)
         {
@@ -33,6 +35,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ReferenceOracle_Encode_Silence_ProducesValidPacket()
     {
+        CpuOnlyTest();
         var silence = ReferenceOracle.GenerateSilence(1, 960);
         var opusBytes = ReferenceOracle.EncodeFrame(silence, 48000, 1, 960);
         True(opusBytes.Length > 0, "Encoded packet should have bytes");
@@ -42,6 +45,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ReferenceOracle_Encode_SineWave_ProducesValidPacket()
     {
+        CpuOnlyTest();
         var sine = ReferenceOracle.GenerateSineWave(440, 48000, 1, 960);
         var opusBytes = ReferenceOracle.EncodeFrame(sine, 48000, 1, 960);
         InRange(opusBytes.Length, 1, 1275);
@@ -50,6 +54,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ReferenceOracle_RoundTrip_Silence_ProducesExpectedLength()
     {
+        CpuOnlyTest();
         var silence = ReferenceOracle.GenerateSilence(1, 960);
         var opusBytes = ReferenceOracle.EncodeFrame(silence, 48000, 1, 960);
         var decoded = ReferenceOracle.DecodePacket(opusBytes, 48000, 1);
@@ -59,6 +64,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ReferenceOracle_RoundTrip_SineWave_PreservesDominantFrequency()
     {
+        CpuOnlyTest();
         // Opus is lossy so we can't check bit-exact, but a 440 Hz sine wave should decode
         // to something roughly resembling a 440 Hz sine wave (not silence, not noise).
         var sine = ReferenceOracle.GenerateSineWave(440, 48000, 1, 960, amplitude: 0.5);
@@ -79,6 +85,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ReferenceOracle_Stereo_RoundTrip_Works()
     {
+        CpuOnlyTest();
         var silence = ReferenceOracle.GenerateSilence(2, 960);
         var opusBytes = ReferenceOracle.EncodeFrame(silence, 48000, 2, 960);
         var decoded = ReferenceOracle.DecodePacket(opusBytes, 48000, 2);
@@ -88,6 +95,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void ReferenceOracle_MultipleSampleRates_Succeed()
     {
+        CpuOnlyTest();
         int[] rates = { 8000, 12000, 16000, 24000, 48000 };
         foreach (var rate in rates)
         {

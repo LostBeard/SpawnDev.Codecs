@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameSizeLimits_Constants_MatchSpec()
     {
+        CpuOnlyTest();
         Equal(1, Vp9FrameSizeLimits.MinWidth);
         Equal(65536, Vp9FrameSizeLimits.MaxWidth);
         Equal(1, Vp9FrameSizeLimits.MinHeight);
@@ -20,6 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameSizeLimits_IsValid_TypicalSizes()
     {
+        CpuOnlyTest();
         Equal(true, Vp9FrameSizeLimits.IsValid(1280, 720));
         Equal(true, Vp9FrameSizeLimits.IsValid(1920, 1080));
         Equal(true, Vp9FrameSizeLimits.IsValid(3840, 2160));
@@ -31,6 +33,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameSizeLimits_IsValid_RejectsOutOfRange()
     {
+        CpuOnlyTest();
         Equal(false, Vp9FrameSizeLimits.IsValid(0, 720));
         Equal(false, Vp9FrameSizeLimits.IsValid(1280, 0));
         Equal(false, Vp9FrameSizeLimits.IsValid(65537, 720));
@@ -41,6 +44,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameSizeLimits_Validate_DoesNotThrowForValid()
     {
+        CpuOnlyTest();
         Vp9FrameSizeLimits.Validate(1280, 720);
         Vp9FrameSizeLimits.Validate(1, 1);
         Vp9FrameSizeLimits.Validate(65536, 65536);
@@ -49,6 +53,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9FrameSizeLimits_Validate_ThrowsForInvalid()
     {
+        CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() => Vp9FrameSizeLimits.Validate(0, 720));
         Throws<ArgumentOutOfRangeException>(() => Vp9FrameSizeLimits.Validate(1280, 65537));
         Throws<ArgumentOutOfRangeException>(() => Vp9FrameSizeLimits.Validate(-1, 720));

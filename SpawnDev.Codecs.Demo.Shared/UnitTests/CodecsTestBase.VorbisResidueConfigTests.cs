@@ -21,6 +21,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisResidue_Type0_SingleClassification_SinglePass_Parses()
     {
+        CpuOnlyTest();
         // begin = 0, end = 128, partition_size = 32 (write 31), classifications = 1 (write 0), classbook = 2.
         // cascade[0]: low bits = 0b001 (write 1), bitflag = 0 (no high bits) -> cascade = 0b001 = 1.
         //   Only pass 0 is active. books[0][0] = 5.
@@ -51,6 +52,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisResidue_Type1_MultipleCascadePasses()
     {
+        CpuOnlyTest();
         // cascade value 0b00001011 = 11 (passes 0, 1, 3).
         // low bits = 011 = 3, bitflag = 1, high bits = 00001 = 1 -> cascade = (1<<3) | 3 = 11.
         var w = new VorbisTestWriter();
@@ -75,6 +77,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisResidue_Type2_MultipleClassifications()
     {
+        CpuOnlyTest();
         // 2 classifications, each with different cascade patterns.
         var w = new VorbisTestWriter();
         w.Write(0, 24); w.Write(64, 24); w.Write(15, 24); // 16-sample partitions
@@ -103,6 +106,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisResidue_InvalidType_Throws()
     {
+        CpuOnlyTest();
         var w = new VorbisTestWriter();
         // Data doesn't matter; parser rejects before reading.
         bool threw = false;
@@ -114,6 +118,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisResidue_EndBeforeBegin_Throws()
     {
+        CpuOnlyTest();
         var w = new VorbisTestWriter();
         w.Write(100, 24);           // begin
         w.Write(50, 24);            // end < begin
@@ -129,6 +134,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisResidue_CascadeZero_NoBooksRead()
     {
+        CpuOnlyTest();
         // Classification with cascade = 0: no books are read for that classification.
         var w = new VorbisTestWriter();
         w.Write(0, 24); w.Write(64, 24); w.Write(15, 24);

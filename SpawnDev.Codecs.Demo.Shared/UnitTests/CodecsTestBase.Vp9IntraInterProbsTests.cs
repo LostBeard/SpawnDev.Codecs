@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraInterProbs_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(4, Vp9IntraInterProbs.IntraInterContexts);
         Equal(4, new Vp9IntraInterProbs().Probs.Length);
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraInterProbs_Parse_NoUpdates_LeavesTableUntouched()
     {
+        CpuOnlyTest();
         var data = new byte[8];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
 
@@ -38,6 +40,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9IntraInterProbs_Parse_RejectsNullArgs()
     {
+        CpuOnlyTest();
         var data = new byte[8];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
         Throws<ArgumentNullException>(() =>

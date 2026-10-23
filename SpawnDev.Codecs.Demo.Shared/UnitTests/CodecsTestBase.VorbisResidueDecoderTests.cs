@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisResidue_AllChannelsDoNotDecode_LeavesOutputUnchanged()
     {
+        CpuOnlyTest();
         // Minimal config; actual bit reader never consumed because all
         // channels are skipped.
         var cfg = new VorbisResidueConfig
@@ -53,6 +54,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisResidue_NToReadIsZero_NoReads()
     {
+        CpuOnlyTest();
         // actual range clamps to 0 when End <= Begin or n is below Begin.
         var cfg = new VorbisResidueConfig
         {
@@ -78,6 +80,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisResidue_RangeNotAlignedToPartition_Throws()
     {
+        CpuOnlyTest();
         var cfg = new VorbisResidueConfig
         {
             Type = VorbisResidueType.Type0,
@@ -106,6 +109,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void VorbisResidue_CascadeAllZero_NoVectorBooks_OutputRemainsZero()
     {
+        CpuOnlyTest();
         // Classbook decodes classifications but since every pass's book index
         // is -1, no residue vectors are added. Output stays at the initial
         // zero state.

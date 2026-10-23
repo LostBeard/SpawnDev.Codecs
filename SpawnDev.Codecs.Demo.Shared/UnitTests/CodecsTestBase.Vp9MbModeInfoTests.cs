@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MbModeInfo_Intra_IsIntraTrue()
     {
+        CpuOnlyTest();
         var info = new Vp9MbModeInfo
         {
             BlockSize = Vp9BlockSize.Block16x16,
@@ -30,6 +31,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MbModeInfo_InterSingleRef_IsIntraFalse_NotCompound()
     {
+        CpuOnlyTest();
         var info = new Vp9MbModeInfo
         {
             BlockSize = Vp9BlockSize.Block32x32,
@@ -50,6 +52,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MbModeInfo_InterCompound_IsCompoundTrue()
     {
+        CpuOnlyTest();
         var info = new Vp9MbModeInfo
         {
             BlockSize = Vp9BlockSize.Block16x16,
@@ -70,6 +73,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MbModeInfo_DefaultsForOmittedFields()
     {
+        CpuOnlyTest();
         var info = new Vp9MbModeInfo
         {
             BlockSize = Vp9BlockSize.Block8x8,
@@ -88,6 +92,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9MbModeInfo_RecordEquality()
     {
+        CpuOnlyTest();
         var a = new Vp9MbModeInfo
         {
             BlockSize = Vp9BlockSize.Block8x8,

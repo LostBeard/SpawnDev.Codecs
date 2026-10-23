@@ -47,6 +47,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadStreamMarker_Valid()
     {
+        CpuOnlyTest();
         byte[] data = { (byte)'f', (byte)'L', (byte)'a', (byte)'C', 0x00 };
         FlacMetadataParser.ReadStreamMarker(data, out int bytesRead);
         Equal(4, bytesRead);
@@ -55,6 +56,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadStreamMarker_Wrong_Throws()
     {
+        CpuOnlyTest();
         byte[] data = { (byte)'F', (byte)'L', (byte)'A', (byte)'C' };
         Throws<InvalidDataException>(() =>
             FlacMetadataParser.ReadStreamMarker(data, out _));
@@ -63,6 +65,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadStreamMarker_Short_Throws()
     {
+        CpuOnlyTest();
         byte[] data = { (byte)'f', (byte)'L', (byte)'a' };
         Throws<InvalidDataException>(() =>
             FlacMetadataParser.ReadStreamMarker(data, out _));
@@ -71,6 +74,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadBlockHeader_Decomposes()
     {
+        CpuOnlyTest();
         // isLast=1, blockType=6 (PICTURE), length=0x123456 -> 0x86 0x12 0x34 0x56
         byte[] data = { 0x86, 0x12, 0x34, 0x56 };
         var hdr = FlacMetadataParser.ReadBlockHeader(data, out int bytesRead);
@@ -83,6 +87,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadBlockHeader_NotLast()
     {
+        CpuOnlyTest();
         // isLast=0, blockType=3 (SEEKTABLE), length=0 -> 0x03 0x00 0x00 0x00
         byte[] data = { 0x03, 0x00, 0x00, 0x00 };
         var hdr = FlacMetadataParser.ReadBlockHeader(data, out _);
@@ -94,6 +99,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadStreamInfo_CanonicalFields()
     {
+        CpuOnlyTest();
         var payload = BuildCanonicalStreamInfoPayload();
         var info = FlacMetadataParser.ReadStreamInfo(payload);
         Equal(4096, info.MinBlockSize);
@@ -112,6 +118,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadStreamInfo_VariableRate_48kHz_Mono_24bit()
     {
+        CpuOnlyTest();
         // MinBlock=4608, MaxBlock=4608, MinFrame=0, MaxFrame=0, Rate=48000, Ch=1, BPS=24, Total=0
         // SampleRate=48000=0x0BB80, Ch-1=0, BPS-1=23, TotalSamples=0
         // Packed 64 bits: (0x0BB80 << 44) | (0 << 41) | (23 << 36) | 0
@@ -151,6 +158,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadStreamInfo_TooShort_Throws()
     {
+        CpuOnlyTest();
         byte[] data = new byte[10];
         Throws<InvalidDataException>(() =>
             FlacMetadataParser.ReadStreamInfo(data));
@@ -159,6 +167,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadStreamInfo_InvalidSampleRate_Throws()
     {
+        CpuOnlyTest();
         // SampleRate = 0 is invalid.
         var payload = new byte[34];
         // Bytes 0..9 already zero. Bytes 10..17 all zero = SampleRate=0, ch-1=0, bps-1=0, total=0.
@@ -177,6 +186,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadStreamInfo_InvalidBitsPerSample_Throws()
     {
+        CpuOnlyTest();
         // BPS = 3 (below min 4) is invalid. BPS-1 = 2.
         // Build payload with valid rate (8000 = 0x01F40) and invalid bps.
         // (0x01F40 << 44) | (0 << 41) | (2 << 36) | 0
@@ -199,6 +209,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadStreamPrelude_SingleStreamInfoBlock()
     {
+        CpuOnlyTest();
         var data = BuildCanonicalPrelude();
         var (info, audioOffset) = FlacMetadataParser.ReadStreamPrelude(data);
         Equal(44100, info.SampleRateHz);
@@ -210,6 +221,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadStreamPrelude_MultipleBlocks_StopsAtLast()
     {
+        CpuOnlyTest();
         // "fLaC" + STREAMINFO (not last) + PADDING (last, 10 zero bytes) + fake audio byte.
         var streamInfoPayload = BuildCanonicalStreamInfoPayload();
         var bytes = new List<byte>();
@@ -234,6 +246,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadStreamPrelude_BadMarker_Throws()
     {
+        CpuOnlyTest();
         var data = new byte[42];
         // First 4 bytes wrong.
         data[0] = 0xDE; data[1] = 0xAD; data[2] = 0xBE; data[3] = 0xEF;
@@ -244,6 +257,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadStreamPrelude_FirstBlockNotStreamInfo_Throws()
     {
+        CpuOnlyTest();
         // "fLaC" + PADDING as first block (invalid - STREAMINFO must be first).
         var bytes = new List<byte>();
         bytes.AddRange(new byte[] { (byte)'f', (byte)'L', (byte)'a', (byte)'C' });
@@ -256,6 +270,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacMetadataParser_ReadStreamPrelude_StreamInfoTruncated_Throws()
     {
+        CpuOnlyTest();
         var bytes = new List<byte>();
         bytes.AddRange(new byte[] { (byte)'f', (byte)'L', (byte)'a', (byte)'C' });
         bytes.AddRange(new byte[] { 0x80, 0x00, 0x00, 0x22 });

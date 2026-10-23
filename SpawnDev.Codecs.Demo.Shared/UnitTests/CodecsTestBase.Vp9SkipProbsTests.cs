@@ -11,6 +11,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SkipProbs_Constants_MatchLibvpx()
     {
+        CpuOnlyTest();
         Equal(3, Vp9SkipProbs.SkipContexts);
         Equal(3, new Vp9SkipProbs().Probs.Length);
     }
@@ -18,6 +19,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SkipProbs_DefaultProbs_MatchLibvpx()
     {
+        CpuOnlyTest();
         // libvpx vp9_entropymode.c default_skip_probs[3] = { 192, 128, 64 }.
         // The compressed header applies diff_update_prob deltas FROM these
         // defaults; zero-init would corrupt every downstream skip read.
@@ -36,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SkipProbs_DefaultProbs_IsDefensivelyCloned()
     {
+        CpuOnlyTest();
         // Mutating one instance must not poison the static defaults or
         // other instances - the constructor uses Clone(), this pins it.
         var a = new Vp9SkipProbs();
@@ -48,6 +51,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SkipProbs_Parse_NoUpdates_LeavesTableUntouched()
     {
+        CpuOnlyTest();
         var data = new byte[8];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
 
@@ -66,6 +70,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Vp9SkipProbs_Parse_RejectsNullArgs()
     {
+        CpuOnlyTest();
         var data = new byte[8];
         var reader = new Vp9BoolDecoder(data, 0, data.Length);
         Throws<ArgumentNullException>(() =>

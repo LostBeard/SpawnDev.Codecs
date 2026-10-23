@@ -50,6 +50,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PitchDecoder_AbsoluteNb20Ms_RoundTrips()
     {
+        CpuOnlyTest();
         // fs_kHz = 8 (NB), 20 ms -> 4 subframes, contour iCDF = PitchContourNb (11 symbols).
         int coarse = 17, lsb = 3, contour = 5;
         var enc = new OpusRangeEncoder(64);
@@ -69,6 +70,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PitchDecoder_AbsoluteMb20Ms_RoundTrips()
     {
+        CpuOnlyTest();
         // fs_kHz = 12 (MB), uses Uniform6 for LSB. Contour iCDF = PitchContour (34 symbols).
         int coarse = 10, lsb = 4, contour = 22;
         var enc = new OpusRangeEncoder(64);
@@ -88,6 +90,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PitchDecoder_AbsoluteWb20Ms_RoundTrips()
     {
+        CpuOnlyTest();
         // fs_kHz = 16 (WB), Uniform8 for LSB, PitchContour (non-NB 20 ms).
         int coarse = 25, lsb = 6, contour = 15;
         var enc = new OpusRangeEncoder(64);
@@ -108,6 +111,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PitchDecoder_DeltaCoding_RawSymbolOne_ProducesNegativeEightDelta()
     {
+        CpuOnlyTest();
         // Raw delta = 1 -> decoded delta = 1 - 9 = -8.
         int contour = 10;
         short prevLag = 80;
@@ -127,6 +131,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PitchDecoder_DeltaCoding_RawSymbolAllNonZero_RoundTrips()
     {
+        CpuOnlyTest();
         // All 20 non-zero raw delta symbols produce unique results via prevLag + (raw - 9).
         int contour = 3;
         short prevLag = 100;
@@ -149,6 +154,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PitchDecoder_DeltaCoding_RawZero_FallsBackToAbsolute()
     {
+        CpuOnlyTest();
         // Raw delta == 0 signals "switch to absolute coding".
         int coarse = 12, lsb = 2, contour = 8;
         var enc = new OpusRangeEncoder(64);
@@ -170,6 +176,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PitchDecoder_AbsoluteNb10Ms_UsesNarrowContourTable()
     {
+        CpuOnlyTest();
         // fs_kHz=8, nb_subfr=2 -> PitchContour10MsNb (3 symbols).
         int coarse = 5, lsb = 1, contour = 2;
         var enc = new OpusRangeEncoder(64);
@@ -188,6 +195,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PitchDecoder_AbsoluteWb10Ms_UsesWideContourTable()
     {
+        CpuOnlyTest();
         int coarse = 20, lsb = 7, contour = 11;
         var enc = new OpusRangeEncoder(64);
         EncodeAbsolutePitchIndices(enc, 16, 2, coarse, lsb, contour);
@@ -207,6 +215,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PitchDecoder_NullRangeDecoder_Throws()
     {
+        CpuOnlyTest();
         Throws<ArgumentNullException>(() =>
             SilkPitchDecoder.DecodeIndices(null!, 16, 4, 0, false, 0));
     }
@@ -214,6 +223,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PitchDecoder_UnsupportedFsKHz_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(32);
         enc.Done();
         var dec = new OpusRangeDecoder(enc.ToArray());
@@ -225,6 +235,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PitchDecoder_InvalidNbSubfr_Throws()
     {
+        CpuOnlyTest();
         var enc = new OpusRangeEncoder(32);
         enc.Done();
         var dec = new OpusRangeDecoder(enc.ToArray());
@@ -238,6 +249,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void PitchTables_SelectorsMatchLibopus()
     {
+        CpuOnlyTest();
         Same(SilkIcdfTables.PitchContourNb, SilkIcdfTables.SelectPitchContour(8, 4), "NB 20ms");
         Same(SilkIcdfTables.PitchContour10MsNb, SilkIcdfTables.SelectPitchContour(8, 2), "NB 10ms");
         Same(SilkIcdfTables.PitchContour, SilkIcdfTables.SelectPitchContour(16, 4), "WB 20ms");

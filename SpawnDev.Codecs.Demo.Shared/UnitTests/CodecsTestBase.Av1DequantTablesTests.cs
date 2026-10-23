@@ -12,6 +12,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1DequantTables_HaveCorrectLengths()
     {
+        CpuOnlyTest();
         Equal(256, Av1DequantTables.DcLookup8.Length);
         Equal(256, Av1DequantTables.DcLookup10.Length);
         Equal(256, Av1DequantTables.DcLookup12.Length);
@@ -23,6 +24,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1DequantTables_DcQuantQtx_MatchesLibaomValues()
     {
+        CpuOnlyTest();
         // Spot-check known libaom values from the source table:
         Equal(4, Av1DequantTables.DcQuantQtx(0, 0, 8));
         Equal(8, Av1DequantTables.DcQuantQtx(1, 0, 8));
@@ -36,6 +38,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1DequantTables_AcQuantQtx_MatchesLibaomValues()
     {
+        CpuOnlyTest();
         Equal(4, Av1DequantTables.AcQuantQtx(0, 0, 8));
         Equal(8, Av1DequantTables.AcQuantQtx(1, 0, 8));
         Equal(1828, Av1DequantTables.AcQuantQtx(255, 0, 8));
@@ -46,6 +49,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1DequantTables_DeltaShiftsQindex()
     {
+        CpuOnlyTest();
         // qindex 100 + delta -10 -> lookup at 90
         // libaom: dc_qlookup_QTX[90] = 81 (counted from table)
         Equal(81, Av1DequantTables.DcQuantQtx(100, -10, 8));
@@ -54,6 +58,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1DequantTables_DeltaClampsToRange()
     {
+        CpuOnlyTest();
         // qindex 200 + delta 100 -> clamp to 255 -> 1336
         Equal(1336, Av1DequantTables.DcQuantQtx(200, 100, 8));
         // qindex 50 + delta -100 -> clamp to 0 -> 4
@@ -63,6 +68,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1SmoothWeights_HaveExpectedLayout()
     {
+        CpuOnlyTest();
         // Total length should be 4+8+16+32+64 = 124
         Equal(124, Av1SmoothWeights.Weights.Length);
         // First entry of each block size = 255 (max)
@@ -76,6 +82,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void Av1SmoothWeights_GetWeights_SlicesCorrectRange()
     {
+        CpuOnlyTest();
         Equal(4, Av1SmoothWeights.GetWeights(4).Length);
         Equal(8, Av1SmoothWeights.GetWeights(8).Length);
         Equal(16, Av1SmoothWeights.GetWeights(16).Length);

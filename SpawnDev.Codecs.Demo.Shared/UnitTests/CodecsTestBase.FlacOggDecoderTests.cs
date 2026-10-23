@@ -66,6 +66,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacOgg_MonoSine_RoundtripsThroughNativeAndOggWrapping()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(samplesPerChannel: 1024, channels: 1, sampleRateHz: 44100, bps: 16);
         byte[] nativeFlac = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 1024);
         byte[] ogg = BuildFlacOggBytes(nativeFlac);
@@ -79,6 +80,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacOgg_StereoMultiframe_Roundtrips()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(samplesPerChannel: 512, channels: 2, sampleRateHz: 48000, bps: 16);
         byte[] nativeFlac = FlacEncoder.EncodeStream(input, 48000, 2, 16, blockSize: 128);
         byte[] ogg = BuildFlacOggBytes(nativeFlac);
@@ -91,6 +93,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacOgg_24BitMono_Roundtrips()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(samplesPerChannel: 300, channels: 1, sampleRateHz: 96000, bps: 24);
         byte[] nativeFlac = FlacEncoder.EncodeStream(input, 96000, 1, 24, blockSize: 128);
         byte[] ogg = BuildFlacOggBytes(nativeFlac);
@@ -102,6 +105,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacOgg_BadMappingMarker_Throws()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(128, 1, 44100, 16);
         byte[] nativeFlac = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 128);
         var packets = NativeFlacToFlacInOggPackets(nativeFlac);
@@ -116,6 +120,7 @@ public abstract partial class CodecsTestBase
     [TestMethod]
     public void FlacOgg_MissingFlacMagic_Throws()
     {
+        CpuOnlyTest();
         var input = GenerateSineInt(128, 1, 44100, 16);
         byte[] nativeFlac = FlacEncoder.EncodeStream(input, 44100, 1, 16, blockSize: 128);
         var packets = NativeFlacToFlacInOggPackets(nativeFlac);
