@@ -121,9 +121,10 @@ internal sealed class GifEncoderKernels : IDisposable
     public const int HashSlots = 8192;
     /// <summary>
     /// Pixels of every segment one LZW launch encodes: a pixel is a hash probe chain of dependent loads (about 0.7 us on
-    /// one desktop GPU thread), plus at most two dictionary resets of HashSlots stores per chunk: a few ms per launch.
+    /// one desktop GPU thread), plus at most two dictionary resets of HashSlots stores per chunk: 4096 was a 17.8 ms launch
+    /// on CUDA (Nsight), 1024 is ~4 ms.
     /// </summary>
-    public const int LzwChunk = 4096;
+    public const int LzwChunk = 1024;
     /// <summary>Ints of resumable state per LZW thread.</summary>
     public const int LzwStateInts = 8;
     /// <summary>Segment bytes one gather thread ORs into the payload.</summary>

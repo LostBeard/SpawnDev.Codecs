@@ -46,7 +46,7 @@ internal sealed class ExactPaletteBuilder : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, int> _scanAlpha;
     private readonly Action<Index1D, ArrayView<int>, int> _setLimit;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _setLimitFrom;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _insert;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _insert;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _finishCount;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>> _finishRank;
 
@@ -60,7 +60,7 @@ internal sealed class ExactPaletteBuilder : IDisposable
         _scanAlpha = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, int>(ScanAlphaKernel);
         _setLimit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, int>(SetLimitKernel);
         _setLimitFrom = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int>(SetLimitFromKernel);
-        _insert = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(InsertKernel);
+        _insert = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(InsertKernel);
         _finishCount = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(FinishCountKernel);
         _finishRank = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(FinishRankKernel);
         _table = accelerator.Allocate1D<int>(TableSlots);
@@ -103,10 +103,14 @@ internal sealed class ExactPaletteBuilder : IDisposable
         _setLimitFrom(1, _state.View, flags, flagIndex, maxColors);
     }
 
+    /// <summary>Pixels per insert launch (one launch over a whole large picture was 17 ms on CUDA: hash probes contend).</summary>
+    public const int InsertPixelsPerLaunch = 1 << 18;
+
     /// <summary>Add the opaque colours of <paramref name="pixelCount"/> RGBA pixels (alpha &gt;= threshold) to the set.</summary>
     public void Insert(ArrayView<byte> rgba, int pixelCount, int alphaThreshold)
     {
-        if (pixelCount > 0) _insert(pixelCount, rgba, _table.View, _state.View, alphaThreshold);
+        for (int first = 0; first < pixelCount; first += InsertPixelsPerLaunch)
+            _insert(Math.Min(InsertPixelsPerLaunch, pixelCount - first), rgba, _table.View, _state.View, alphaThreshold, first);
     }
 
     /// <summary>Produce the sorted palette and the Exact / PaletteCount verdict.</summary>
@@ -135,9 +139,9 @@ internal sealed class ExactPaletteBuilder : IDisposable
     }
 
     private static void InsertKernel(
-        Index1D index, ArrayView<byte> rgba, ArrayView<int> table, ArrayView<int> state, int threshold)
+        Index1D index, ArrayView<byte> rgba, ArrayView<int> table, ArrayView<int> state, int threshold, int first)
     {
-        int p = index.X * 4;
+        int p = (first + index.X) * 4;
         int a = rgba[p + 3];
         int limit = state[ExactPaletteState.Limit];
         bool opaque = a >= threshold;
