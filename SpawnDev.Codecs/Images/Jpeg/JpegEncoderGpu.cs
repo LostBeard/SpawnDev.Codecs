@@ -70,8 +70,8 @@ public sealed class JpegEncodeOptions
 /// <remarks>Not thread-safe: one in-flight encode per instance.</remarks>
 public sealed class JpegEncoderGpu : IDisposable
 {
-    /// <summary>Blocks one entropy dispatch advances per restart segment (bounds the run time of a single launch).</summary>
-    internal const int BlocksPerDispatch = 8192;
+    /// <summary>Blocks one entropy dispatch advances per restart segment: bounds a launch (8192 was a 37 ms launch on CUDA).</summary>
+    internal const int BlocksPerDispatch = 1024;
 
     /// <summary>Worst-case bytes of entropy-coded data per 8x8 block (incl. 0xFF stuffing).</summary>
     internal const int MaxBytesPerBlock = 400;

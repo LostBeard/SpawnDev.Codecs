@@ -112,6 +112,9 @@ public static class JpegMeta
     public const int HuffDirty = 18;
     /// <summary>First component id seen in the frame header (used by the colour space rules).</summary>
     public const int FirstCompId = 19;
+    /// <summary>Resumable marker walk (ScanMarkersKernel): the position to continue from, the phase (0 = start, 1 = running,
+    /// 2 = finished), whether the EXIF orientation was found.</summary>
+    public const int ScanPos = 20, ScanPhase = 21, ScanExifDone = 22;
 
     // ---- host-written -----------------------------------------------------------------------------------------------
     /// <summary>First slot the host writes after the scan.</summary>

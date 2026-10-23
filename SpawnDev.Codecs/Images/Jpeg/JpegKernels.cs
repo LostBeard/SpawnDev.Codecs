@@ -3,14 +3,16 @@
 // The JPEG decode kernels. Every stage runs on the accelerator; the host only dispatches and reads back a few
 // scalars (the metadata block):
 //
-//   1. ScanMarkers  (1 thread)         walks the marker segments: frame header, quantization / Huffman tables, restart
+//   0. EcsSummary   (1 thread / 4 KB)  per chunk: where entropy-coded data ends, RSTn count (exact, see the kernel).
+//   1. ScanMarkers  (1 thread, resumable launches of ScanBudget work) walks the marker segments: frame header, quantization / Huffman tables, restart
 //                                      interval, JFIF / Adobe / EXIF facts, one scan-table entry per SOS (including the
 //                                      end of its entropy-coded data). Quantization tables are latched per component at
 //                                      the component's first scan, Huffman tables are snapshotted per scan.
 //   2. ClearCoef    (1 thread / coef)  zeroes the coefficient buffer.
 //   per scan:
 //   3. BuildHuff    (8 threads)        raw DHT tables -> derived decode tables (9-bit lookahead + canonical maxcode).
-//   4. FindRestarts (1 thread)         locates the RSTn markers of the scan: start / end of every restart segment.
+//   4. FindRestarts (1 thread / chunk) locates the RSTn markers of the scan: start / end of every restart segment
+//                                      (count per chunk, prefix over chunks, fill per chunk, finish).
 //   5. DecodeScan   (1 thread / restart segment, chunked) Huffman decode of baseline / extended / progressive scans
 //                                      into the coefficient buffer. Each dispatch advances a bounded number of MCUs and
 //                                      saves its bit-reader state, so no single launch runs for long (GPU watchdogs).
@@ -30,9 +32,13 @@ namespace SpawnDev.Codecs.Images.Jpeg;
 /// <summary>Loads and launches the JPEG decode kernels.</summary>
 public sealed class JpegKernels : IDisposable
 {
-    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _scan;
+    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, ArrayView<int>> _scan;
+    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _ecsSummary;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _rstCount;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _rstPrefix;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int> _rstFill;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int> _rstFinish;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _buildHuff;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _findRestarts;
     private readonly Action<Index1D, ArrayView<short>> _clearCoef;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
         ArrayView<int>, ArrayView<int>, int, int, int> _decodeScan;
@@ -45,11 +51,16 @@ public sealed class JpegKernels : IDisposable
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _scan = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(ScanMarkersKernel);
+            Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, ArrayView<int>>(ScanMarkersKernel);
+        _ecsSummary = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, ArrayView<int>>(EcsSummaryKernel);
+        _rstCount = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(RstCountKernel);
+        _rstPrefix = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(RstPrefixKernel);
+        _rstFill = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int>(RstFillKernel);
+        _rstFinish = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int>(RstFinishKernel);
         _buildHuff = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(BuildHuffKernel);
-        _findRestarts = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(FindRestartsKernel);
         _clearCoef = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>>(ClearCoefKernel);
         _decodeScan = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
@@ -62,11 +73,23 @@ public sealed class JpegKernels : IDisposable
             Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(OrientKernel);
     }
 
-    /// <summary>Marker scan; fills <paramref name="meta"/> and the Huffman set table. <paramref name="headerOnly"/> stops at the first SOS.</summary>
+    /// <summary>Ints of the per-chunk work buffer for a file / scan of <paramref name="bytes"/> bytes (2 per chunk + 1).</summary>
+    public static long ChunkWorkInts(long bytes) => 2 * ((bytes + EcsChunk - 1) / EcsChunk) + 2;
+
+    /// <summary>Per-chunk summary of where entropy-coded data ends (one thread per <see cref="EcsChunk"/> bytes).</summary>
+    public void EcsSummary(ArrayView<byte> file, int fileLength, ArrayView<int> summary)
+        => _ecsSummary((fileLength + EcsChunk - 1) / EcsChunk, file, fileLength, summary);
+
+    /// <summary>
+    /// <paramref name="launches"/> bounded launches of the marker walk; fills <paramref name="meta"/> and the Huffman set
+    /// table. <paramref name="headerOnly"/> stops at the first SOS. The caller zeroes meta[ScanPhase] before the first
+    /// launch and launches until it reads 2 there (EcsSummary first).
+    /// </summary>
     public void ScanMarkers(ArrayView<byte> file, int fileLength, ArrayView<int> meta, ArrayView<int> huffRaw,
-        ArrayView<int> consts, bool headerOnly)
+        ArrayView<int> consts, bool headerOnly, ArrayView<int> summary, int launches)
     {
-        _scan(1, file, fileLength, meta, huffRaw, consts, headerOnly ? 1 : 0);
+        for (int i = 0; i < launches; i++)
+            _scan(1, file, fileLength, meta, huffRaw, consts, headerOnly ? 1 : 0, summary);
     }
 
     /// <summary>Derive the Huffman decode tables of scan <paramref name="scan"/> into <paramref name="huff"/>.</summary>
@@ -75,10 +98,23 @@ public sealed class JpegKernels : IDisposable
         _buildHuff(8, meta, huffRaw, huff, scan);
     }
 
-    /// <summary>Locate the <paramref name="segmentCount"/> restart segments of a scan.</summary>
-    public void FindRestarts(ArrayView<byte> file, ArrayView<int> meta, ArrayView<int> segs, int scan, int segmentCount)
+    /// <summary>
+    /// Locate the <paramref name="segmentCount"/> restart segments of a scan whose entropy-coded data is
+    /// [<paramref name="ecsStart"/>, <paramref name="ecsEnd"/>) (parallel over chunks; <paramref name="work"/> holds
+    /// <see cref="ChunkWorkInts"/> of the data's size).
+    /// </summary>
+    public void FindRestarts(ArrayView<byte> file, ArrayView<int> meta, ArrayView<int> segs, ArrayView<int> work, int scan,
+        int segmentCount, int ecsStart, int ecsEnd)
     {
-        _findRestarts(1, file, meta, segs, scan, segmentCount);
+        int firstChunk = ecsStart / EcsChunk;
+        int chunks = ecsEnd > ecsStart ? (ecsEnd - 1) / EcsChunk - firstChunk + 1 : 0;
+        if (segmentCount > 1 && chunks > 0)
+        {
+            _rstCount(chunks, file, meta, work, scan, firstChunk);
+            _rstPrefix(1, meta, work, chunks);
+            _rstFill(chunks, file, meta, work, segs, scan, segmentCount, firstChunk);
+        }
+        _rstFinish(1, meta, work, segs, scan, segmentCount, segmentCount > 1 ? chunks : 0);
     }
 
     /// <summary>Zero the first <paramref name="count"/> coefficients.</summary>
@@ -185,11 +221,63 @@ public sealed class JpegKernels : IDisposable
     /// Offset of the first marker after entropy-coded data starting at <paramref name="start"/> (byte stuffing, fill
     /// bytes and RSTn markers are skipped; RSTn markers are counted).
     /// </summary>
-    private static int FindEntropyEnd(ArrayView<byte> f, int start, int fileLen, ref int rstCount)
+    /// <summary>Bytes per thread of the entropy-coded data summary (EcsSummaryKernel).</summary>
+    public const int EcsChunk = 4096;
+
+    /// <summary>
+    /// Chunk <paramref name="index"/> of the file: the first position of a marker that ends entropy-coded data (0xFF
+    /// followed by anything but 0x00, 0xFF or RSTn; fileLen for a 0xFF that is the last byte) or -1, and the number of
+    /// RSTn markers before it. Whether a 0xFF at position i is stuffing, fill, RSTn or a marker depends on byte i + 1
+    /// only, and the serial walk (FindEntropyEnd) never steps over a 0xFF, so these per-chunk facts give exactly the
+    /// walk's answer from any position on.
+    /// </summary>
+    private static void EcsSummaryKernel(Index1D index, ArrayView<byte> file, int fileLen, ArrayView<int> summary)
+    {
+        int c = index.X;
+        int i = c * EcsChunk;
+        int e = i + EcsChunk;
+        if (e > fileLen) e = fileLen;
+        int first = -1;
+        int rst = 0;
+        bool go = i < e;
+        while (go)
+        {
+            if (file[i] == 0xFF)
+            {
+                if (i + 1 >= fileLen)
+                {
+                    first = fileLen;
+                }
+                else
+                {
+                    int n = file[i + 1];
+                    bool isRst = (n >= 0xD0) & (n <= 0xD7);
+                    bool ordinary = (n == 0) | (n == 0xFF);
+                    if (isRst) rst++;
+                    else if (!ordinary) first = i;
+                }
+            }
+            i++;
+            go = (i < e) & (first < 0);
+        }
+        summary[2 * c] = first;
+        summary[2 * c + 1] = rst;
+    }
+
+    /// <summary>
+    /// End of the entropy-coded data that starts at <paramref name="start"/> (the position of the marker after it) and
+    /// the RSTn markers inside it: the byte walk covers the rest of the start's chunk, the per-chunk summaries the rest
+    /// (so the cost is bounded by EcsChunk + the number of chunks, not by the size of the scan). Adds the work done to
+    /// <paramref name="cost"/>.
+    /// </summary>
+    private static int FindEntropyEnd(ArrayView<byte> f, int start, int fileLen, ref int rstCount, ArrayView<int> summary, ref int cost)
     {
         int p = start;
+        int chunkEnd = (start / EcsChunk + 1) * EcsChunk;
+        if (chunkEnd > fileLen) chunkEnd = fileLen;
+        cost += chunkEnd - start;
         int result = -1;
-        bool go1 = (result < 0) & (p < fileLen);
+        bool go1 = (result < 0) & (p < chunkEnd);
         while (go1)
         {
             if (f[p] != 0xFF)
@@ -209,7 +297,19 @@ public sealed class JpegKernels : IDisposable
                 else if (isRst) { rstCount++; p += 2; }
                 else result = p;
             }
-            go1 = (result < 0) & (p < fileLen);
+            go1 = (result < 0) & (p < chunkEnd);
+        }
+        int chunks = (fileLen + EcsChunk - 1) / EcsChunk;
+        int k = start / EcsChunk + 1;
+        bool go2 = (result < 0) & (k < chunks);
+        while (go2)
+        {
+            int first = summary[2 * k];
+            rstCount += summary[2 * k + 1];
+            if (first >= 0) result = first;
+            k++;
+            cost++;
+            go2 = (result < 0) & (k < chunks);
         }
         if (result < 0) result = fileLen;
         return result;
@@ -382,7 +482,8 @@ public sealed class JpegKernels : IDisposable
         return err;
     }
 
-    private static int ParseSos(ArrayView<byte> f, int p, int n, int fileLen, ArrayView<int> meta, ArrayView<int> huffRaw)
+    private static int ParseSos(ArrayView<byte> f, int p, int n, int fileLen, ArrayView<int> meta, ArrayView<int> huffRaw,
+        ArrayView<int> summary, ref int cost)
     {
         int err = 0;
         if (meta[JpegMeta.SofSeen] == 0)
@@ -553,7 +654,7 @@ public sealed class JpegKernels : IDisposable
                 {
                     int ecsStart = p + n;
                     int rst = 0;
-                    int ecsEnd = FindEntropyEnd(f, ecsStart, fileLen, ref rst);
+                    int ecsEnd = FindEntropyEnd(f, ecsStart, fileLen, ref rst, summary, ref cost);
                     meta[sb + JpegMeta.ScSs] = ss;
                     meta[sb + JpegMeta.ScSe] = se;
                     meta[sb + JpegMeta.ScAh] = ah;
@@ -569,23 +670,41 @@ public sealed class JpegKernels : IDisposable
         return err;
     }
 
+    /// <summary>Work units (bytes walked or parsed, chunks consulted) one ScanMarkers launch may spend.</summary>
+    public const int ScanBudget = 65536;
+
+    /// <summary>
+    /// One bounded launch of the marker walk. The walk resumes from meta[ScanPos] (meta[ScanPhase] 0 = start, 1 =
+    /// running, 2 = finished: the host zeroes ScanPhase and launches until it reads 2). Entropy-coded data is skipped
+    /// through the per-chunk summaries (EcsSummaryKernel ran first), long 0xFF fill runs are resumed byte-exactly.
+    /// </summary>
     private static void ScanMarkersKernel(
         Index1D _, ArrayView<byte> file, int fileLen, ArrayView<int> meta, ArrayView<int> huffRaw,
-        ArrayView<int> consts, int headerOnly)
+        ArrayView<int> consts, int headerOnly, ArrayView<int> summary)
     {
-        for (int i = 0; i < JpegMeta.Size; i++) meta[i] = 0;
-        meta[JpegMeta.Orientation] = 1;
-        int work = JpegMeta.MaxHuffSets * JpegMeta.RawSetStride;
-        for (int t = 0; t < 8; t++) huffRaw[work + t * JpegMeta.RawTableStride] = 0;
-
+        int phase = meta[JpegMeta.ScanPhase];
+        if (phase == 2) return;
         int err = 0;
-        bool soi = false;
-        if (fileLen >= 2) soi = (file[0] == 0xFF) & (file[1] == 0xD8);
-        if (!soi) err = (int)JpegError.NotJpeg;
-
         int pos = 2;
         int done = 0;
         int exifDone = 0;
+        if (phase == 0)
+        {
+            for (int i = 0; i < JpegMeta.Size; i++) meta[i] = 0;
+            meta[JpegMeta.Orientation] = 1;
+            int work = JpegMeta.MaxHuffSets * JpegMeta.RawSetStride;
+            for (int t = 0; t < 8; t++) huffRaw[work + t * JpegMeta.RawTableStride] = 0;
+            bool soi = false;
+            if (fileLen >= 2) soi = (file[0] == 0xFF) & (file[1] == 0xD8);
+            if (!soi) err = (int)JpegError.NotJpeg;
+        }
+        else
+        {
+            pos = meta[JpegMeta.ScanPos];
+            exifDone = meta[JpegMeta.ScanExifDone];
+        }
+
+        int cost = 0;
         bool go8 = (err == 0) & (done == 0);
         while (go8)
         {
@@ -605,15 +724,32 @@ public sealed class JpegKernels : IDisposable
                 {
                     if (pos < fileLen)
                     {
-                        if (file[pos] == 0xFF) pos++;
+                        if (file[pos] == 0xFF)
+                        {
+                            pos++;
+                            cost++;
+                            // out of budget inside a fill run: yield; the next launch continues the run
+                            if (cost >= ScanBudget) skipping = 2;
+                        }
                         else skipping = 0;
                     }
                     else
                     {
                         skipping = 0;
                     }
+                    if (skipping == 2)
+                    {
+                        // step back onto a 0xFF so the resumed iteration sees a marker prefix again
+                        pos--;
+                        skipping = 0;
+                        done = 2;
+                    }
                 }
-                if (pos >= fileLen)
+                if (done == 2)
+                {
+                    // yield (handled after the loop)
+                }
+                else if (pos >= fileLen)
                 {
                     err = (int)JpegError.TruncatedHeaders;
                 }
@@ -657,6 +793,10 @@ public sealed class JpegKernels : IDisposable
                                 int p = pos + 2;
                                 int n = len - 2;
                                 int segEnd = pos + len;
+                                cost++;
+                                bool parsed = (marker == 0xC4) | (marker == 0xDB) | (marker == 0xE1) | (marker == 0xDA)
+                                            | (marker == 0xC0) | (marker == 0xC1) | (marker == 0xC2);
+                                if (parsed) cost += n;
                                 bool sofKnown = (marker == 0xC0) | (marker == 0xC1) | (marker == 0xC2);
                                 bool unsupportedSof = (marker == 0xC3) | ((marker >= 0xC5) & (marker <= 0xC7))
                                                     | ((marker >= 0xC9) & (marker <= 0xCB)) | ((marker >= 0xCD) & (marker <= 0xCF))
@@ -686,7 +826,7 @@ public sealed class JpegKernels : IDisposable
                                 }
                                 else if (marker == 0xDA)
                                 {
-                                    err = ParseSos(file, p, n, fileLen, meta, huffRaw);
+                                    err = ParseSos(file, p, n, fileLen, meta, huffRaw, summary, ref cost);
                                     if (err == 0)
                                     {
                                         int sb = JpegMeta.Scans + (meta[JpegMeta.ScanCount] - 1) * JpegMeta.ScanStride;
@@ -745,15 +885,26 @@ public sealed class JpegKernels : IDisposable
                     }
                 }
             }
-            go8 = (err == 0) & (done == 0);
+            go8 = (err == 0) & (done == 0) & (cost < ScanBudget);
         }
 
-        if (err == 0)
+        bool finished = (err != 0) | (done == 1);
+        if (finished)
         {
-            if (meta[JpegMeta.SofSeen] == 0) err = (int)JpegError.NoFrame;
-            else if (meta[JpegMeta.ScanCount] == 0) err = (int)JpegError.NoImageData;
+            if (err == 0)
+            {
+                if (meta[JpegMeta.SofSeen] == 0) err = (int)JpegError.NoFrame;
+                else if (meta[JpegMeta.ScanCount] == 0) err = (int)JpegError.NoImageData;
+            }
+            meta[JpegMeta.Error] = err;
+            meta[JpegMeta.ScanPhase] = 2;
         }
-        meta[JpegMeta.Error] = err;
+        else
+        {
+            meta[JpegMeta.ScanPos] = pos;
+            meta[JpegMeta.ScanExifDone] = exifDone;
+            meta[JpegMeta.ScanPhase] = 1;
+        }
     }
 
     // =================================================================================================================
@@ -821,77 +972,117 @@ public sealed class JpegKernels : IDisposable
     // 4. Restart segments
     // =================================================================================================================
 
-    private static void FindRestartsKernel(
-        Index1D _, ArrayView<byte> file, ArrayView<int> meta, ArrayView<int> segs, int scan, int segmentCount)
+    // Restart segments, in parallel over EcsChunk-byte chunks of the scan's entropy-coded data [start, end):
+    //   RstCount (one thread per chunk: RSTn markers whose 0xFF lies in the chunk), RstPrefix (one thread over the
+    //   chunks: exclusive prefix = the index of the chunk's first RSTn), RstFill (one thread per chunk: checks each
+    //   marker's number and writes the segment bounds), RstFinish (one thread: the count check; on any error every
+    //   segment is made empty). The same result as walking the bytes in one thread, without a launch that grows with
+    //   the scan. The per-chunk ints live in `work` (2 per chunk: count / first index, error).
+
+    private static void RstRange(ArrayView<int> meta, int scan, int chunk, out int lo, out int hi)
+    {
+        int sb = JpegMeta.Scans + scan * JpegMeta.ScanStride;
+        int start = meta[sb + JpegMeta.ScEcsStart];
+        int end = meta[sb + JpegMeta.ScEcsEnd];
+        lo = chunk * EcsChunk;
+        hi = lo + EcsChunk;
+        if (lo < start) lo = start;
+        // a marker's 0xFF must have its second byte inside the data: positions < end - 1 (the serial walk's bound)
+        if (hi > end - 1) hi = end - 1;
+    }
+
+    private static void RstCountKernel(Index1D index, ArrayView<byte> file, ArrayView<int> meta, ArrayView<int> work, int scan, int firstChunk)
+    {
+        int c = firstChunk + index.X;
+        RstRange(meta, scan, c, out int lo, out int hi);
+        int count = 0;
+        for (int i = lo; i < hi; i++)
+        {
+            if (file[i] == 0xFF)
+            {
+                int n = file[i + 1];
+                bool isRst = (n >= 0xD0) & (n <= 0xD7);
+                if (isRst) count++;
+            }
+        }
+        work[2 * index.X] = count;
+        work[2 * index.X + 1] = 0;
+    }
+
+    private static void RstPrefixKernel(Index1D _, ArrayView<int> meta, ArrayView<int> work, int chunks)
+    {
+        int running = 0;
+        for (int c = 0; c < chunks; c++)
+        {
+            int n = work[2 * c];
+            work[2 * c] = running;
+            running += n;
+        }
+        work[2 * chunks] = running;
+    }
+
+    private static void RstFillKernel(
+        Index1D index, ArrayView<byte> file, ArrayView<int> meta, ArrayView<int> work, ArrayView<int> segs,
+        int scan, int segmentCount, int firstChunk)
+    {
+        int c = firstChunk + index.X;
+        RstRange(meta, scan, c, out int lo, out int hi);
+        int k = work[2 * index.X];
+        int err = 0;
+        for (int i = lo; i < hi; i++)
+        {
+            if (file[i] == 0xFF)
+            {
+                int n = file[i + 1];
+                bool isRst = (n >= 0xD0) & (n <= 0xD7);
+                if (isRst)
+                {
+                    bool wrongNumber = n - 0xD0 != (k & 7);
+                    bool tooMany = k + 1 >= segmentCount;
+                    if (wrongNumber | tooMany)
+                    {
+                        err = 1;
+                    }
+                    else
+                    {
+                        segs[2 * k + 1] = i;
+                        segs[2 * k + 2] = i + 2;
+                    }
+                    k++;
+                }
+            }
+        }
+        work[2 * index.X + 1] = err;
+    }
+
+    private static void RstFinishKernel(Index1D _, ArrayView<int> meta, ArrayView<int> work, ArrayView<int> segs, int scan, int segmentCount, int chunks)
     {
         int sb = JpegMeta.Scans + scan * JpegMeta.ScanStride;
         int start = meta[sb + JpegMeta.ScEcsStart];
         int end = meta[sb + JpegMeta.ScEcsEnd];
         segs[0] = start;
-        segs[1] = end;
+        int err = 0;
+        int total = 0;
         if (segmentCount > 1)
         {
-            int k = 0;
-            int p = start;
-            int err = 0;
-            bool go9 = (p < end - 1) & (err == 0);
-            while (go9)
+            for (int c = 0; c < chunks; c++)
+                if (work[2 * c + 1] != 0) err = (int)JpegError.BadRestart;
+            total = work[2 * chunks];
+            if ((err == 0) & (total + 1 != segmentCount)) err = (int)JpegError.BadRestart;
+        }
+        if (err == 0)
+        {
+            segs[2 * total + 1] = end;
+        }
+        else
+        {
+            if (meta[JpegMeta.Error] == 0) meta[JpegMeta.Error] = err;
+            // The segments after a bad marker were never located (and the others may be stale): make every segment empty so
+            // no decode thread reads outside this file (a CUDA illegal memory access on bad_restart_order before this).
+            for (int j = 0; j < segmentCount; j++)
             {
-                if (file[p] != 0xFF)
-                {
-                    p++;
-                }
-                else
-                {
-                    int n = file[p + 1];
-                    bool isRst = (n >= 0xD0) & (n <= 0xD7);
-                    if (n == 0)
-                    {
-                        p += 2;
-                    }
-                    else if (n == 0xFF)
-                    {
-                        p += 1;
-                    }
-                    else if (isRst)
-                    {
-                        if (n - 0xD0 != (k & 7))
-                        {
-                            err = (int)JpegError.BadRestart;
-                        }
-                        else if (k + 1 >= segmentCount)
-                        {
-                            err = (int)JpegError.BadRestart;
-                        }
-                        else
-                        {
-                            segs[2 * k + 1] = p;
-                            k++;
-                            segs[2 * k] = p + 2;
-                            segs[2 * k + 1] = end;
-                            p += 2;
-                        }
-                    }
-                    else
-                    {
-                        p += 2;
-                    }
-                }
-                go9 = (p < end - 1) & (err == 0);
-            }
-            bool c10 = (err == 0) & (k + 1 != segmentCount);
-            if (c10) err = (int)JpegError.BadRestart;
-            if (err != 0)
-            {
-                if (meta[JpegMeta.Error] == 0) meta[JpegMeta.Error] = err;
-                // The segments after the bad marker were never located: their slots still hold the ranges of an EARLIER
-                // file. Make every segment empty so no decode thread can read outside this file (a CUDA illegal memory
-                // access on bad_restart_order before this).
-                for (int j = 0; j < segmentCount; j++)
-                {
-                    segs[2 * j] = end;
-                    segs[2 * j + 1] = end;
-                }
+                segs[2 * j] = end;
+                segs[2 * j + 1] = end;
             }
         }
     }

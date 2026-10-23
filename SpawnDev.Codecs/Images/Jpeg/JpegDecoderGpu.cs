@@ -49,8 +49,8 @@ public sealed class JpegDecodeOptions
 /// </remarks>
 public sealed class JpegDecoderGpu : IDisposable
 {
-    /// <summary>Blocks one decode dispatch advances per restart segment (bounds the run time of a single launch).</summary>
-    internal const int BlocksPerDispatch = 8192;
+    /// <summary>Blocks one decode dispatch advances per restart segment: bounds a launch (~5 us per block on one GPU thread, 8192 was a 41 ms launch on CUDA).</summary>
+    internal const int BlocksPerDispatch = 1024;
 
     private readonly Accelerator _accelerator;
     private readonly JpegKernels _kernels;
@@ -66,6 +66,7 @@ public sealed class JpegDecoderGpu : IDisposable
     private readonly StageBuffer<byte> _planes;
     private readonly StageBuffer<byte> _rgba;
     private readonly StageBuffer<int> _segs;
+    private readonly StageBuffer<int> _chunkWork;
     private readonly StageBuffer<int> _state;
 
     /// <summary>Compile the kernels and upload the constants.</summary>
@@ -87,6 +88,7 @@ public sealed class JpegDecoderGpu : IDisposable
         _planes = new StageBuffer<byte>(accelerator);
         _rgba = new StageBuffer<byte>(accelerator);
         _segs = new StageBuffer<int>(accelerator);
+        _chunkWork = new StageBuffer<int>(accelerator);
         _state = new StageBuffer<int>(accelerator);
     }
 
@@ -107,7 +109,7 @@ public sealed class JpegDecoderGpu : IDisposable
     {
         public int Ns;
         public int[] Comps = new int[4];
-        public int Ss, Se, Ah, Al, RestartInterval, RstCount;
+        public int Ss, Se, Ah, Al, RestartInterval, RstCount, EcsStart, EcsEnd;
         public long TotalMcus;
         public int SegmentCount;
         public int BlocksPerMcu;
@@ -313,6 +315,8 @@ public sealed class JpegDecoderGpu : IDisposable
                 Al = scanRows[b + JpegMeta.ScAl],
                 RestartInterval = scanRows[b + JpegMeta.ScRestartInterval],
                 RstCount = scanRows[b + JpegMeta.ScRstCount],
+                EcsStart = scanRows[b + JpegMeta.ScEcsStart],
+                EcsEnd = scanRows[b + JpegMeta.ScEcsEnd],
             };
             for (int k = 0; k < si.Ns; k++)
             {
@@ -356,8 +360,19 @@ public sealed class JpegDecoderGpu : IDisposable
     private async Task<int[]> ScanAsync(ArrayView1D<byte, Stride1D.Dense> file, int fileLength, bool headerOnly)
     {
         if (fileLength <= 0 || fileLength > file.Length) throw new ArgumentOutOfRangeException(nameof(fileLength));
-        _kernels.ScanMarkers(file, fileLength, _meta.View, _huffRaw.View, _consts.View, headerOnly);
-        await _accelerator.SynchronizeAsync();
+        // Bounded launches: the per-chunk summary (parallel), then the resumable walk until it reports phase 2.
+        var summary = _chunkWork.Ensure(JpegKernels.ChunkWorkInts(fileLength));
+        _kernels.EcsSummary(file, fileLength, summary);
+        _meta.View.SubView(JpegMeta.ScanPhase, 1).MemSetToZero();
+        int launches = 1;
+        while (true)
+        {
+            _kernels.ScanMarkers(file, fileLength, _meta.View, _huffRaw.View, _consts.View, headerOnly, summary, launches);
+            await _accelerator.SynchronizeAsync();
+            var phase = await _meta.View.SubView(JpegMeta.ScanPhase, 1).CopyToHostAsync();
+            if (phase[0] == 2) break;
+            launches = 8;
+        }
         return await _meta.View.SubView(0, JpegMeta.Scans).CopyToHostAsync();
     }
 
@@ -433,7 +448,8 @@ public sealed class JpegDecoderGpu : IDisposable
         {
             var si = layout.Scans[s];
             _kernels.BuildHuff(_meta.View, _huffRaw.View, _huff.View, s);
-            _kernels.FindRestarts(file, _meta.View, _segs.View, s, si.SegmentCount);
+            _kernels.FindRestarts(file, _meta.View, _segs.View, _chunkWork.Ensure(JpegKernels.ChunkWorkInts(si.EcsEnd - si.EcsStart + JpegKernels.EcsChunk)),
+                s, si.SegmentCount, si.EcsStart, si.EcsEnd);
             long perSegment = si.RestartInterval > 0 ? Math.Min(si.RestartInterval, si.TotalMcus) : si.TotalMcus;
             int budget = Math.Max(1, BlocksPerDispatch / Math.Max(1, si.BlocksPerMcu));
             int rounds = (int)((perSegment + budget - 1) / budget);
@@ -545,6 +561,7 @@ public sealed class JpegDecoderGpu : IDisposable
         _planes.Dispose();
         _rgba.Dispose();
         _segs.Dispose();
+        _chunkWork.Dispose();
         _state.Dispose();
     }
 }
