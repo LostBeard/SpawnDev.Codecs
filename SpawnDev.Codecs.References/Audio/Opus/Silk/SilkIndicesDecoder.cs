@@ -30,6 +30,8 @@ internal static class SilkIndicesDecoder
     /// <param name="conditional">0 for independent coding, non-zero for conditional (delta) coding.</param>
     /// <param name="prevLagIndex">Previous frame's pitch lag (used when conditional &amp; prev voiced).</param>
     /// <param name="prevSignalTypeWasVoiced">Whether the previous frame was voiced (enables delta-lag coding).</param>
+    /// <param name="skipLtpScale">libopus CODE_INDEPENDENTLY_NO_LTP_SCALING (the side channel right after a mid-only
+    /// frame): independent coding, but the LTP scale index is not coded (fixed 0).</param>
     internal static void Decode(
         SilkDecodedIndices indices,
         OpusRangeDecoder rangeDec,
@@ -40,7 +42,8 @@ internal static class SilkIndicesDecoder
         int nbSubfr,
         int conditional,
         short prevLagIndex,
-        bool prevSignalTypeWasVoiced)
+        bool prevSignalTypeWasVoiced,
+        bool skipLtpScale = false)
     {
         if (indices is null) throw new ArgumentNullException(nameof(indices));
         if (rangeDec is null) throw new ArgumentNullException(nameof(rangeDec));
@@ -80,7 +83,8 @@ internal static class SilkIndicesDecoder
             SilkLtpDecoder.DecodeIndices(
                 indices.LtpIndices.AsSpan(0, nbSubfr),
                 rangeDec,
-                conditional: conditional,
+                // libopus reads the LTP scale only for CODE_INDEPENDENTLY, not CODE_INDEPENDENTLY_NO_LTP_SCALING.
+                conditional: conditional != 0 || skipLtpScale ? 1 : 0,
                 nbSubfr: nbSubfr,
                 out sbyte perIdx,
                 out sbyte scaleIdx);

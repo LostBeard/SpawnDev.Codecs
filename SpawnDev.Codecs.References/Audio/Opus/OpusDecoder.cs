@@ -29,23 +29,22 @@ public sealed class OpusDecoder : IAudioDecoder
     // 6716 sec 4.3 inter-frame state requirements.
     private Celt.CeltDecoder? _celtDecoder;
 
-    // Lazily-constructed SILK decoders, keyed by (internal-fs-kHz, frame-length-ms).
-    // Mono packets use _silkDecoderMono; stereo packets additionally use _silkDecoderSide
-    // and _silkStereoState for mid/side processing.
-    private SilkDecoder? _silkDecoderMono;
-    private SilkDecoder? _silkDecoderSide;
-    private SilkStereoState? _silkStereoState;
-    private int _silkInternalKHz;
-    private int _silkFrameLengthMs;
-    private short[]? _silkPcmScratch;
-    // Stereo needs MID and SIDE internal-rate PCM plus 2-sample prefix for MS->LR.
-    private short[]? _silkMidScratch;
-    private short[]? _silkSideScratch;
-    // Stereo-only: resamplers for L and R channels when output rate differs from internal.
+    // SILK, structured like libopus silk_Decode: one raw channel decoder per stream channel (mid, side), the shared
+    // stereo state (MS->LR history, also the mono 2-sample buffering = sStereo), one resampler per output channel.
+    private SilkDecoder? _silkMid;
+    private SilkDecoder? _silkSide;
+    private readonly SilkStereoState _silkStereoState = new();
     private SilkResamplerState? _silkResamplerL;
     private SilkResamplerState? _silkResamplerR;
+    private int _silkInternalKHz;        // 0 until the first SILK frame
+    private int _silkPrevStreamChannels; // libopus psDec->nChannelsInternal
+    private bool _silkPrevDecodeOnlyMiddle;
+    // Internal-rate mid/side with the 2-sample prefix MS->LR and the mono buffering use.
+    private short[]? _silkMidScratch;
+    private short[]? _silkSideScratch;
     private short[]? _silkResampleLOut;
     private short[]? _silkResampleROut;
+    private readonly short[] _silkLbrrPulses = new short[SilkConstants.MAX_FRAME_LENGTH + SilkConstants.SHELL_CODEC_FRAME_LENGTH];
 
     /// <summary>Creates a new Opus decoder with the given configuration.</summary>
     public OpusDecoder(OpusDecoderConfig config)
@@ -232,201 +231,211 @@ public sealed class OpusDecoder : IAudioDecoder
                 $"SILK packet duration {totalMs} ms not a standard SILK duration."),
         };
 
-        bool stereo = toc.IsStereo;
-        EnsureSilkDecoders(internalKHz, silkFrameLengthMs, stereo);
-
-        var rangeDec = new OpusRangeDecoder(frame.ToArray());
-
-        // Header: VAD flags (mid channel for each frame + side channel for each frame
-        // if stereo), then single LBRR flag.
-        Span<int> vadMid = stackalloc int[3];
-        Span<int> vadSide = stackalloc int[3];
-        for (int f = 0; f < silkFrameCount; f++)
-        {
-            vadMid[f] = rangeDec.DecodeBitLogP(1);
-            if (stereo) vadSide[f] = rangeDec.DecodeBitLogP(1);
-        }
-        int lbrrFlag = rangeDec.DecodeBitLogP(1);
-        if (lbrrFlag != 0)
-        {
-            throw new NotImplementedException(
-                "SILK LBRR (low-bitrate redundancy) frames are not yet implemented.");
-        }
-
-        int outputLenPerFrameInternal = _silkDecoderMono!.InternalSampleRateHz == _config.SampleRateHz
-            ? _silkDecoderMono.FrameLength
-            : internalKHz * silkFrameLengthMs;
-        int outputLenPerFrame = _silkDecoderMono.FrameLength;
-        int totalOutputLen = outputLenPerFrame * silkFrameCount;
-        int totalOutputSamples = totalOutputLen * (stereo ? 2 : 1);
-
-        if (pcmOut.Length < totalOutputSamples)
+        // libopus silk_Decode, one call per SILK frame of the packet. nChannelsInternal = the packet's stereo bit,
+        // nChannelsAPI = the decoder's channel count.
+        int streamChannels = toc.IsStereo ? 2 : 1;
+        bool apiStereo = _config.ChannelCount == 2;
+        int internalFrameLen = internalKHz * silkFrameLengthMs;
+        int outputFrameLen = _config.SampleRateHz / 1000 * silkFrameLengthMs;
+        if (pcmOut.Length < outputFrameLen * silkFrameCount * _config.ChannelCount)
         {
             throw new ArgumentException(
-                $"pcmOut too small: need {totalOutputSamples} samples for {totalMs} ms {(stereo ? "stereo" : "mono")} at {_config.SampleRateHz} Hz.",
+                $"pcmOut too small: need {outputFrameLen * silkFrameCount * _config.ChannelCount} samples for {totalMs} ms at {_config.SampleRateHz} Hz.",
                 nameof(pcmOut));
         }
 
-        if (!stereo)
+        // Stream channel / rate transitions (silk_Decode, before the frame header).
+        bool monoToStereo = streamChannels > _silkPrevStreamChannels;
+        bool stereoToMono = streamChannels == 1 && _silkPrevStreamChannels == 2 && internalKHz == _silkInternalKHz;
+        _silkMid ??= new SilkDecoder(internalKHz * 1000, silkFrameLengthMs);
+        if (monoToStereo || _silkSide is null)
         {
-            // Mono path (unchanged from slice 49).
-            if (_silkPcmScratch is null || _silkPcmScratch.Length < outputLenPerFrame)
-            {
-                _silkPcmScratch = new short[outputLenPerFrame];
-            }
-            for (int f = 0; f < silkFrameCount; f++)
-            {
-                _silkDecoderMono.DecodeFromRange(
-                    rangeDec,
-                    _silkPcmScratch.AsSpan(0, outputLenPerFrame),
-                    vadFlag: vadMid[f] != 0,
-                    conditional: f > 0);
-
-                int outputOffset = f * outputLenPerFrame;
-                for (int i = 0; i < outputLenPerFrame; i++)
-                {
-                    pcmOut[outputOffset + i] = _silkPcmScratch[i] / 32768.0f;
-                }
-            }
-            return;
+            // silk_init_decoder on the second channel; set_fs below then sees a rate change and resets it again.
+            _silkSide = new SilkDecoder(internalKHz * 1000, silkFrameLengthMs);
         }
-
-        // ---- Stereo path ----
-        //
-        // Per internal SILK frame:
-        //   1. Read stereo predictors (2 Q13 values).
-        //   2. If this side-VAD flag == 0, read mid-only flag. Else mid_only = 0.
-        //   3. Decode mid channel (with conditional = frame index > 0).
-        //   4. Unless mid_only, decode side channel.
-        //   5. Run SilkStereoMsToLr on internal-rate buffers (output at internal rate).
-        //   6. Resample mid/side independently to output rate if needed... actually
-        //      MS->LR runs at the INTERNAL rate; we then resample L/R separately.
-        //
-        // Simplification for this slice: if the Opus config is 10/20 ms single-internal-frame
-        // stereo, we run the above. Multi-frame stereo packets (40/60 ms) are allowed but
-        // use the same per-frame logic.
-        int internalFrameLen = internalKHz * silkFrameLengthMs;
-        int bufLen = internalFrameLen + 2;
-        if (_silkMidScratch is null || _silkMidScratch.Length < bufLen)
+        _silkMid.SetFs(internalKHz, silkFrameLengthMs);
+        if (streamChannels == 2) _silkSide.SetFs(internalKHz, silkFrameLengthMs);
+        if (_silkResamplerL is null || internalKHz != _silkInternalKHz)
         {
-            _silkMidScratch = new short[bufLen];
+            // silk_decoder_set_fs re-inits the resampler when the internal rate changes.
+            _silkResamplerL = new SilkResamplerState();
+            SilkResampler.Init(_silkResamplerL, internalKHz * 1000, _config.SampleRateHz, forEncode: false);
+            _silkResamplerR = new SilkResamplerState();
+            SilkResampler.Init(_silkResamplerR, internalKHz * 1000, _config.SampleRateHz, forEncode: false);
         }
-        if (_silkSideScratch is null || _silkSideScratch.Length < bufLen)
+        if (apiStereo && streamChannels == 2 && _silkPrevStreamChannels == 1)
         {
-            _silkSideScratch = new short[bufLen];
+            _silkStereoState.PredPrevQ13[0] = _silkStereoState.PredPrevQ13[1] = 0;
+            _silkStereoState.SSide[0] = _silkStereoState.SSide[1] = 0;
+            _silkResamplerR!.CopyFrom(_silkResamplerL);
         }
+        _silkInternalKHz = internalKHz;
+        _silkPrevStreamChannels = streamChannels;
 
-        Span<int> predQ13 = stackalloc int[2];
-
-        int outputRateKHz = _config.SampleRateHz / 1000;
-        int outputFrameLen = outputRateKHz * silkFrameLengthMs;
-        // Always resample (libopus silk_Decode): equal rates use the copy resampler, which still applies the input delay.
+        if (_silkMidScratch is null || _silkMidScratch.Length < internalFrameLen + 2)
+        {
+            _silkMidScratch = new short[internalFrameLen + 2];
+            _silkSideScratch = new short[internalFrameLen + 2];
+        }
         if (_silkResampleLOut is null || _silkResampleLOut.Length < outputFrameLen)
         {
             _silkResampleLOut = new short[outputFrameLen];
             _silkResampleROut = new short[outputFrameLen];
         }
+        short[] mid = _silkMidScratch;
+        short[] side = _silkSideScratch!;
 
-        for (int f = 0; f < silkFrameCount; f++)
+        var rangeDec = new OpusRangeDecoder(frame.ToArray());
+
+        // Header (RFC 6716 4.2.3): per channel, one VAD flag per SILK frame then that channel's LBRR flag.
+        Span<int> vad = stackalloc int[6];      // [channel * 3 + frame]
+        Span<int> lbrrFlags = stackalloc int[6];
+        Span<int> lbrrFlag = stackalloc int[2];
+        for (int n = 0; n < streamChannels; n++)
         {
-            SilkStereoDecodePred.DecodePred(rangeDec, predQ13);
-
-            int midOnly = (vadSide[f] == 0 && f == 0)
-                ? SilkStereoDecodePred.DecodeMidOnly(rangeDec)
-                : 0;
-
-            // Decode mid into internal-rate scratch at position [2..internalFrameLen+1].
-            short[] midTemp = new short[internalFrameLen];
-            _silkDecoderMono.DecodeFromRange(
-                rangeDec,
-                midTemp.AsSpan(),
-                vadFlag: vadMid[f] != 0,
-                conditional: f > 0);
-            midTemp.AsSpan().CopyTo(_silkMidScratch.AsSpan(2, internalFrameLen));
-
-            if (midOnly == 0)
+            for (int f = 0; f < silkFrameCount; f++) vad[n * 3 + f] = rangeDec.DecodeBitLogP(1);
+            lbrrFlag[n] = rangeDec.DecodeBitLogP(1);
+        }
+        for (int n = 0; n < streamChannels; n++)
+        {
+            if (lbrrFlag[n] == 0) continue;
+            if (silkFrameCount == 1)
             {
-                short[] sideTemp = new short[internalFrameLen];
-                _silkDecoderSide!.DecodeFromRange(
-                    rangeDec,
-                    sideTemp.AsSpan(),
-                    vadFlag: vadSide[f] != 0,
-                    conditional: f > 0);
-                sideTemp.AsSpan().CopyTo(_silkSideScratch.AsSpan(2, internalFrameLen));
+                lbrrFlags[n * 3] = 1;
             }
             else
             {
-                _silkSideScratch.AsSpan(2, internalFrameLen).Clear();
+                int lbrrSymbol = rangeDec.DecodeIcdf(silkFrameCount == 2 ? LbrrFlags2Icdf : LbrrFlags3Icdf, 8) + 1;
+                for (int f = 0; f < silkFrameCount; f++) lbrrFlags[n * 3 + f] = (lbrrSymbol >> f) & 1;
+            }
+        }
+
+        // Regular decoding skips all LBRR data (it only matters for packet-loss recovery): parse and discard.
+        Span<int> predQ13 = stackalloc int[2];
+        if (lbrrFlag[0] != 0 || lbrrFlag[1] != 0)
+        {
+            SkipLbrrFrames(rangeDec, internalKHz, silkFrameLengthMs, silkFrameCount, streamChannels, lbrrFlags, predQ13);
+        }
+
+        for (int f = 0; f < silkFrameCount; f++)
+        {
+            int decodeOnlyMiddle = 0;
+            if (streamChannels == 2)
+            {
+                SilkStereoDecodePred.DecodePred(rangeDec, predQ13);
+                if (vad[3 + f] == 0) decodeOnlyMiddle = SilkStereoDecodePred.DecodeMidOnly(rangeDec);
+                if (decodeOnlyMiddle == 0 && _silkPrevDecodeOnlyMiddle)
+                {
+                    // First frame with side coding after mid-only frames: reset the side prediction memory.
+                    _silkSide.ResetPredictionMemory();
+                }
             }
 
-            // MS -> LR at internal rate.
-            SilkStereoMsToLr.Apply(_silkStereoState!, _silkMidScratch, _silkSideScratch,
-                predQ13, internalKHz, internalFrameLen);
-
-            // Resample L and R independently from internal to output rate.
-            SilkResampler.Apply(_silkResamplerL!,
-                _silkResampleLOut!.AsSpan(0, outputFrameLen),
-                _silkMidScratch.AsSpan(1, internalFrameLen),
-                internalFrameLen);
-            SilkResampler.Apply(_silkResamplerR!,
-                _silkResampleROut!.AsSpan(0, outputFrameLen),
-                _silkSideScratch.AsSpan(1, internalFrameLen),
-                internalFrameLen);
-
-            int baseOffset = f * outputFrameLen * 2;
-            for (int i = 0; i < outputFrameLen; i++)
+            _silkMid.DecodeRawFromRange(rangeDec, mid.AsSpan(2, internalFrameLen), vadFlag: vad[f] != 0,
+                conditional: f > 0);
+            if (streamChannels == 2)
             {
-                pcmOut[baseOffset + 2 * i] = _silkResampleLOut![i] / 32768.0f;
-                pcmOut[baseOffset + 2 * i + 1] = _silkResampleROut![i] / 32768.0f;
+                if (decodeOnlyMiddle == 0)
+                {
+                    // CODE_INDEPENDENTLY for the packet's first frame, CODE_INDEPENDENTLY_NO_LTP_SCALING right after a
+                    // mid-only frame, CODE_CONDITIONALLY otherwise.
+                    bool noLtpScaling = f > 0 && _silkPrevDecodeOnlyMiddle;
+                    _silkSide.DecodeRawFromRange(rangeDec, side.AsSpan(2, internalFrameLen), vadFlag: vad[3 + f] != 0,
+                        conditional: f > 0 && !noLtpScaling, skipLtpScale: noLtpScaling);
+                }
+                else
+                {
+                    side.AsSpan(2, internalFrameLen).Clear();
+                }
+            }
+
+            short[] outL = _silkResampleLOut;
+            short[] outR = _silkResampleROut!;
+            if (apiStereo && streamChannels == 2)
+            {
+                SilkStereoMsToLr.Apply(_silkStereoState, mid, side, predQ13, internalKHz, internalFrameLen);
+                SilkResampler.Apply(_silkResamplerL!, outL.AsSpan(0, outputFrameLen), mid.AsSpan(1, internalFrameLen), internalFrameLen);
+                SilkResampler.Apply(_silkResamplerR!, outR.AsSpan(0, outputFrameLen), side.AsSpan(1, internalFrameLen), internalFrameLen);
+            }
+            else
+            {
+                // Mono buffering through sStereo.sMid (shared with MS->LR), then resample from index 1.
+                mid[0] = _silkStereoState.SMid[0];
+                mid[1] = _silkStereoState.SMid[1];
+                _silkStereoState.SMid[0] = mid[internalFrameLen];
+                _silkStereoState.SMid[1] = mid[internalFrameLen + 1];
+                SilkResampler.Apply(_silkResamplerL!, outL.AsSpan(0, outputFrameLen), mid.AsSpan(1, internalFrameLen), internalFrameLen);
+                if (apiStereo)
+                {
+                    if (stereoToMono && f == 0)
+                    {
+                        // Newly collapsed stereo: the right channel runs through its own resampler once more.
+                        SilkResampler.Apply(_silkResamplerR!, outR.AsSpan(0, outputFrameLen), mid.AsSpan(1, internalFrameLen), internalFrameLen);
+                    }
+                    else
+                    {
+                        outL.AsSpan(0, outputFrameLen).CopyTo(outR);
+                    }
+                }
+            }
+            _silkPrevDecodeOnlyMiddle = decodeOnlyMiddle != 0;
+
+            if (apiStereo)
+            {
+                int baseOffset = f * outputFrameLen * 2;
+                for (int i = 0; i < outputFrameLen; i++)
+                {
+                    pcmOut[baseOffset + 2 * i] = outL[i] / 32768.0f;
+                    pcmOut[baseOffset + 2 * i + 1] = outR[i] / 32768.0f;
+                }
+            }
+            else
+            {
+                int baseOffset = f * outputFrameLen;
+                for (int i = 0; i < outputFrameLen; i++) pcmOut[baseOffset + i] = outL[i] / 32768.0f;
             }
         }
     }
 
-    private void EnsureSilkDecoders(int internalKHz, int frameLengthMs, bool stereo)
+    // libopus silk_LBRR_flags_2_iCDF / silk_LBRR_flags_3_iCDF.
+    private static ReadOnlySpan<byte> LbrrFlags2Icdf => [203, 150, 0];
+    private static ReadOnlySpan<byte> LbrrFlags3Icdf => [215, 195, 166, 125, 110, 82, 0];
+
+    /// <summary>
+    /// libopus silk_Decode's FLAG_DECODE_NORMAL LBRR skip: per frame, per channel with an LBRR frame, the stereo
+    /// predictors (+ mid-only flag), the indices and the pulses are read and thrown away. The values it touches are
+    /// all re-read for the regular frames that follow, so nothing persists.
+    /// </summary>
+    private void SkipLbrrFrames(OpusRangeDecoder rangeDec, int internalKHz, int frameLengthMs, int frameCount,
+        int streamChannels, ReadOnlySpan<int> lbrrFlags, Span<int> predScratch)
     {
-        bool configChanged = _silkDecoderMono is null ||
-            _silkInternalKHz != internalKHz ||
-            _silkFrameLengthMs != frameLengthMs;
-
-        if (configChanged)
+        int nbSubfr = frameLengthMs == 20 ? SilkConstants.PE_MAX_NB_SUBFR : SilkConstants.PE_MAX_NB_SUBFR / 2;
+        int frameLength = internalKHz * frameLengthMs;
+        SilkNlsfCodebook codebook = internalKHz == 16 ? SilkNlsfCodebookTables.Wb : SilkNlsfCodebookTables.NbMb;
+        int shellLen = SilkConstants.SHELL_CODEC_FRAME_LENGTH;
+        Span<short> pulses = _silkLbrrPulses.AsSpan(0, (frameLength + shellLen - 1) & ~(shellLen - 1));
+        // decode_indices with decode_LBRR reads delta pitch against the channel's ec_prev state, which the previous
+        // LBRR frame of the same channel set.
+        Span<short> prevLag = stackalloc short[2];
+        Span<int> prevVoiced = stackalloc int[2];
+        var indices = new SilkDecodedIndices();
+        for (int f = 0; f < frameCount; f++)
         {
-            // For stereo we currently decode at internal rate (no resampling). For mono
-            // we can decode directly at output rate.
-            int outputRateHz = stereo ? internalKHz * 1000 : _config.SampleRateHz;
-
-            _silkDecoderMono = new SilkDecoder(
-                internalSampleRateHz: internalKHz * 1000,
-                frameLengthMs: frameLengthMs,
-                outputSampleRateHz: outputRateHz);
-            _silkInternalKHz = internalKHz;
-            _silkFrameLengthMs = frameLengthMs;
-            _silkPcmScratch = null;
-            _silkMidScratch = null;
-            _silkSideScratch = null;
-            _silkDecoderSide = null;
-            _silkStereoState = null;
-        }
-
-        if (stereo)
-        {
-            if (_silkDecoderSide is null)
+            for (int n = 0; n < streamChannels; n++)
             {
-                _silkDecoderSide = new SilkDecoder(
-                    internalSampleRateHz: internalKHz * 1000,
-                    frameLengthMs: frameLengthMs,
-                    outputSampleRateHz: internalKHz * 1000);
-            }
-            _silkStereoState ??= new SilkStereoState();
-
-            // A per-channel resampler pair, also for equal rates (copy resampler + input delay, as libopus).
-            if (_silkResamplerL is null || configChanged)
-            {
-                _silkResamplerL = new SilkResamplerState();
-                SilkResampler.Init(_silkResamplerL, internalKHz * 1000, _config.SampleRateHz, forEncode: false);
-                _silkResamplerR = new SilkResamplerState();
-                SilkResampler.Init(_silkResamplerR, internalKHz * 1000, _config.SampleRateHz, forEncode: false);
-                _silkResampleLOut = null;
-                _silkResampleROut = null;
+                if (lbrrFlags[n * 3 + f] == 0) continue;
+                if (streamChannels == 2 && n == 0)
+                {
+                    SilkStereoDecodePred.DecodePred(rangeDec, predScratch);
+                    if (lbrrFlags[3 + f] == 0) SilkStereoDecodePred.DecodeMidOnly(rangeDec);
+                }
+                int conditional = f > 0 && lbrrFlags[n * 3 + f - 1] != 0 ? 1 : 0;
+                SilkIndicesDecoder.Decode(indices, rangeDec, codebook, vadFlag: false, decodeLbrr: true,
+                    fsKHz: internalKHz, nbSubfr: nbSubfr, conditional: conditional,
+                    prevLagIndex: prevLag[n], prevSignalTypeWasVoiced: prevVoiced[n] != 0);
+                prevLag[n] = indices.LagIndex;
+                prevVoiced[n] = indices.SignalType == SilkConstants.TYPE_VOICED ? 1 : 0;
+                SilkPulsesDecoder.Decode(pulses, rangeDec, indices.SignalType, indices.QuantOffsetType, frameLength);
             }
         }
     }

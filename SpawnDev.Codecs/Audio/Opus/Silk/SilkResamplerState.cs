@@ -71,4 +71,22 @@ internal sealed class SilkResamplerState
         InputDelay = 0;
         Coefs = null;
     }
+
+    /// <summary>Copy every buffer + scalar from <paramref name="src"/> (libopus memcpy of the resampler struct).</summary>
+    public void CopyFrom(SilkResamplerState src)
+    {
+        src.SIir.CopyTo(SIir, 0);
+        src.SFirI32.CopyTo(SFirI32, 0);
+        src.SFirI16.CopyTo(SFirI16, 0);
+        src.DelayBuf.CopyTo(DelayBuf, 0);
+        ResamplerFunction = src.ResamplerFunction;
+        BatchSize = src.BatchSize;
+        InvRatioQ16 = src.InvRatioQ16;
+        FirOrder = src.FirOrder;
+        FirFracs = src.FirFracs;
+        FsInKHz = src.FsInKHz;
+        FsOutKHz = src.FsOutKHz;
+        InputDelay = src.InputDelay;
+        Coefs = src.Coefs;
+    }
 }

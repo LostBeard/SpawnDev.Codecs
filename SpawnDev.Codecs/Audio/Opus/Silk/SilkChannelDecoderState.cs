@@ -154,4 +154,18 @@ internal sealed class SilkChannelDecoderState
         FirstFrameAfterReset = true;
         LagPrev = 100; // libopus init value
     }
+
+    /// <summary>
+    /// libopus silk_Decode's side-channel reset for the first frame that codes the side channel after a mid-only
+    /// frame: clears the prediction memory (outBuf, sLPC_Q14_buf) and the scalar history, keeps the rest.
+    /// </summary>
+    public void ResetPredictionMemory()
+    {
+        Array.Clear(OutBuf, 0, OutBuf.Length);
+        Array.Clear(SLpcQ14Buf, 0, SLpcQ14Buf.Length);
+        LagPrev = 100;
+        LastGainIndex = 10;
+        PrevSignalType = SilkConstants.TYPE_NO_VOICE_ACTIVITY;
+        FirstFrameAfterReset = true;
+    }
 }

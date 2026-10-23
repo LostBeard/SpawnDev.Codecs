@@ -27,12 +27,15 @@ internal static class SilkDecodeFrame
     /// <param name="pOut">Output PCM buffer. Length &gt;= <see cref="SilkChannelDecoderState.FrameLength"/>.</param>
     /// <param name="vadFlag">VAD flag for the current frame. Controls signal-type iCDF selection.</param>
     /// <param name="conditional">0 for independent coding, non-zero for conditional / delta coding.</param>
+    /// <param name="skipLtpScale">libopus CODE_INDEPENDENTLY_NO_LTP_SCALING: with <paramref name="conditional"/> 0,
+    /// the LTP scale index is not coded.</param>
     internal static void Decode(
         SilkChannelDecoderState state,
         OpusRangeDecoder rangeDec,
         Span<short> pOut,
         bool vadFlag,
-        int conditional)
+        int conditional,
+        bool skipLtpScale = false)
     {
         if (state is null) throw new ArgumentNullException(nameof(state));
         if (rangeDec is null) throw new ArgumentNullException(nameof(rangeDec));
@@ -61,7 +64,8 @@ internal static class SilkDecodeFrame
             nbSubfr: state.NbSubfr,
             conditional: conditional,
             prevLagIndex: state.PrevLagIndex,
-            prevSignalTypeWasVoiced: state.PrevSignalTypeWasVoiced);
+            prevSignalTypeWasVoiced: state.PrevSignalTypeWasVoiced,
+            skipLtpScale: skipLtpScale);
 
         // First-frame-after-reset suppresses NLSF interpolation (prev NLSFs are garbage).
         if (state.FirstFrameAfterReset)

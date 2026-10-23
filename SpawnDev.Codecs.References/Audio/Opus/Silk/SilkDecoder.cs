@@ -16,6 +16,7 @@ public sealed class SilkDecoder
     private readonly SilkChannelDecoderState _state;
     private readonly SilkResamplerState? _resamplerState;
     private readonly short[]? _internalPcmBuf;
+    private readonly short[] _sMid = new short[2];
     private readonly int _internalFrameLength;
     private readonly int _outputFrameLength;
 
@@ -72,7 +73,9 @@ public sealed class SilkDecoder
         // output start that many samples early (CrossValidate_Silk* vs Concentus failed since they were written).
         _resamplerState = new SilkResamplerState();
         SilkResampler.Init(_resamplerState, internalSampleRateHz, outputSampleRateHz, forEncode: false);
-        _internalPcmBuf = new short[_internalFrameLength];
+        // 2 prefix samples: silk_Decode's mono "Buffering" (sStereo.sMid) feeds the resampler from index 1, one more
+        // sample of delay on top of the resampler's.
+        _internalPcmBuf = new short[_internalFrameLength + 2];
 
         InternalSampleRateHz = internalSampleRateHz;
         OutputSampleRateHz = outputSampleRateHz;
@@ -104,6 +107,7 @@ public sealed class SilkDecoder
     public void Reset()
     {
         _state.Reset();
+        _sMid[0] = _sMid[1] = 0;
         if (_resamplerState is not null)
         {
             SilkResampler.Init(_resamplerState, InternalSampleRateHz, OutputSampleRateHz, forEncode: false);
@@ -145,10 +149,44 @@ public sealed class SilkDecoder
             throw new ArgumentException(
                 $"pcmOut too small (need {_outputFrameLength}).", nameof(pcmOut));
 
-        SilkDecodeFrame.Decode(_state, rangeDec, _internalPcmBuf!.AsSpan(0, _internalFrameLength),
-            vadFlag, conditional ? 1 : 0);
-        SilkResampler.Apply(_resamplerState!, pcmOut, _internalPcmBuf.AsSpan(0, _internalFrameLength),
-            _internalFrameLength);
+        var buf = _internalPcmBuf!;
+        SilkDecodeFrame.Decode(_state, rangeDec, buf.AsSpan(2, _internalFrameLength), vadFlag, conditional ? 1 : 0);
+        // silk_Decode mono branch: buf[0..1] = last frame's tail, then resample from buf[1].
+        buf[0] = _sMid[0];
+        buf[1] = _sMid[1];
+        _sMid[0] = buf[_internalFrameLength];
+        _sMid[1] = buf[_internalFrameLength + 1];
+        SilkResampler.Apply(_resamplerState!, pcmOut, buf.AsSpan(1, _internalFrameLength), _internalFrameLength);
         return _outputFrameLength;
     }
+
+    /// <summary>
+    /// Decode one SILK frame at the internal rate with no buffering and no resampling: the per-channel output that
+    /// silk_Decode hands to silk_stereo_MS_to_LR. The Opus stereo path uses it; it does its own MS-to-LR and resampling.
+    /// </summary>
+    internal void DecodeRawFromRange(OpusRangeDecoder rangeDec, Span<short> internalPcmOut, bool vadFlag, bool conditional,
+        bool skipLtpScale = false)
+    {
+        int frameLength = _state.FrameLength;
+        if (internalPcmOut.Length < frameLength)
+            throw new ArgumentException($"internalPcmOut too small (need {frameLength}).", nameof(internalPcmOut));
+        SilkDecodeFrame.Decode(_state, rangeDec, internalPcmOut.Slice(0, frameLength), vadFlag, conditional ? 1 : 0,
+            skipLtpScale);
+    }
+
+    /// <summary>
+    /// libopus silk_decoder_set_fs for the raw path (<see cref="DecodeRawFromRange"/> only; the public
+    /// buffering/resampling API keeps its constructor geometry): a frame-length change keeps all state, an
+    /// internal-rate change also resets the prediction memory.
+    /// </summary>
+    internal void SetFs(int fsKHz, int frameLengthMs)
+    {
+        int nbSubfr = frameLengthMs == 20 ? SilkConstants.PE_MAX_NB_SUBFR : SilkConstants.PE_MAX_NB_SUBFR / 2;
+        bool fsChanged = _state.FsKHz != fsKHz;
+        _state.Configure(fsKHz, nbSubfr, fsKHz == 16 ? 16 : 10);
+        if (fsChanged) _state.ResetPredictionMemory();
+    }
+
+    /// <summary>The side channel's prediction-memory reset when it is coded again after mid-only frames.</summary>
+    internal void ResetPredictionMemory() => _state.ResetPredictionMemory();
 }

@@ -43,8 +43,23 @@ public abstract partial class CodecsTestBase
         {
             float diff = Math.Abs(expected[i] - actual[i]);
             if (diff > tolerance)
-                throw new Exception($"[{context}] sample {i} differs: expected {expected[i]}, got {actual[i]} (diff={diff})");
+                throw new Exception($"[{context}] sample {i} differs: expected {expected[i]}, got {actual[i]} (diff={diff}). "
+                    + $"First non-zero: expected {FirstNonZero(expected)}, got {FirstNonZero(actual)}. "
+                    + $"expected[{i}..]: {Window(expected, i)}; got[{i}..]: {Window(actual, i)}");
         }
+    }
+
+    private static int FirstNonZero(ReadOnlySpan<float> s)
+    {
+        for (int i = 0; i < s.Length; i++) if (s[i] != 0f) return i;
+        return -1;
+    }
+
+    private static string Window(ReadOnlySpan<float> s, int start)
+    {
+        var parts = new List<string>();
+        for (int i = start; i < Math.Min(s.Length, start + 12); i++) parts.Add(((int)MathF.Round(s[i] * 32768f)).ToString());
+        return string.Join(",", parts);
     }
 
     /// <summary>

@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 /// <summary>
 /// Tests for stereo SILK routing in <see cref="OpusDecoder"/>. Builds minimal
-/// stereo Opus SILK packets (TOC + VAD_mid + VAD_side + LBRR prefix + stereo
+/// stereo Opus SILK packets (TOC + VAD_mid + LBRR_mid + VAD_side + LBRR_side + stereo
 /// predictors + mid/side SILK indices) and verifies the decoder produces
 /// interleaved L/R float PCM without crashing.
 /// </summary>
@@ -35,10 +35,11 @@ public abstract partial class CodecsTestBase
 
         var enc = new OpusRangeEncoder(1024);
 
-        // VAD flags: mid, side, then LBRR (single frame = 1 triple).
+        // RFC 6716 4.2.3 header: mid VAD flag(s) + mid LBRR flag, then side VAD flag(s) + side LBRR flag.
         enc.EncodeBitLogP(vadMid ? 1 : 0, 1);
+        enc.EncodeBitLogP(0, 1); // no mid LBRR
         enc.EncodeBitLogP(vadSide ? 1 : 0, 1);
-        enc.EncodeBitLogP(0, 1); // no LBRR
+        enc.EncodeBitLogP(0, 1); // no side LBRR
 
         // Stereo predictors via the test-side helper from the SilkStereoDecodePredTests file.
         int joint = 5 * p0c + p1c;
