@@ -78,6 +78,71 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
+    public async Task ImageDecoderGpu_GifBmpWebPFixtures_DispatchAndMatchTruth()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var dec = new ImageDecoderGpu(acc);   // one facade instance: all six decoders live side by side
+            var failures = new List<string>();
+            var counts = new Dictionary<ImageFormat, int>();
+
+            // (label, file, expected RGBA8 of the first frame, format)
+            var cases = new List<(string label, byte[] file, byte[] expected, ImageFormat format)>();
+            foreach (var n in GifBmpFixtureNames(BmpFixturePrefix, ".bmp"))
+                cases.Add(("bmp/" + n, ReadEmbedded(BmpFixturePrefix + n + ".bmp"), ReadEmbedded(BmpFixturePrefix + n + ".rgba8"), ImageFormat.Bmp));
+            foreach (var n in GifValidFixtureNames())
+            {
+                var truth = GifTruth(n, "pil", GifMetaJson(n));
+                if (truth != null) cases.Add(("gif/" + n, GifFixture(n), truth[0], ImageFormat.Gif));
+            }
+            foreach (var row in WebPManifest().Where(r => r.Kind == "still"))
+                cases.Add(("webp-lossless/" + row.Name, WebPFile(row.Name), WebPTruth(row.Truth), ImageFormat.WebP));
+            foreach (var row in WebPLossyManifest().Where(r => r.HasTruth && r.Frames == 1 && r.Folder == "WebPLossy"))
+                cases.Add(("webp-lossy/" + row.Name, WebPLossyFile(row), WebPLossyTruth(row, 0), ImageFormat.WebP));
+
+            foreach (var (label, file, expected, format) in cases)
+            {
+                try
+                {
+                    var sniffed = ImageDecoderGpu.Detect(file.AsSpan(0, Math.Min(file.Length, ImageFormatDetector.SniffLength)));
+                    if (sniffed != format) failures.Add($"{label}: Detect says {sniffed}, expected {format}");
+                    var info = await dec.ReadInfoAsync(file);
+                    if (info.Format != format) failures.Add($"{label}: ReadInfoAsync format {info.Format}, expected {format}");
+
+                    var managed = await dec.DecodeAsync(file);
+                    if (managed.Info.Format != format) failures.Add($"{label}: DecodeAsync format {managed.Info.Format}, expected {format}");
+                    var diff = ComparePixels(expected, managed.Pixels, 4, managed.Info.Width);
+                    if (diff != null) failures.Add($"{label} [managed]: {diff}");
+
+                    using var dFile = acc.Allocate1D<byte>(file.Length + 5);
+                    DeviceTransfer.Upload(dFile.View, file);
+                    using var dOut = acc.Allocate1D<byte>(expected.Length + 3);
+                    var fill = new byte[dOut.Length];
+                    System.Array.Fill(fill, (byte)0xAB);
+                    DeviceTransfer.Upload(dOut.View, fill);
+                    var viewInfo = await dec.DecodeAsync(dFile.View, file.Length, dOut.View, PixelFormat.Rgba8);
+                    var viewPixels = await DeviceTransfer.DownloadAsync(dOut.View, expected.Length);
+                    diff = ComparePixels(expected, viewPixels, 4, viewInfo.Width);
+                    if (diff != null) failures.Add($"{label} [ArrayView1D]: {diff}");
+
+                    counts[format] = counts.GetValueOrDefault(format) + 1;
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"{label}: threw {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+
+            True(failures.Count == 0, $"{failures.Count} facade failure(s):\n" + string.Join("\n", failures.Take(15)));
+            True(counts.GetValueOrDefault(ImageFormat.Bmp) >= 5, $"too few BMP fixtures ({counts.GetValueOrDefault(ImageFormat.Bmp)})");
+            True(counts.GetValueOrDefault(ImageFormat.Gif) >= 5, $"too few GIF fixtures ({counts.GetValueOrDefault(ImageFormat.Gif)})");
+            True(counts.GetValueOrDefault(ImageFormat.WebP) >= 60, $"too few WebP fixtures ({counts.GetValueOrDefault(ImageFormat.WebP)})");
+        }
+        finally { acc.Dispose(); ctx.Dispose(); }
+    }
+
+    [TestMethod]
     public async Task ImageDecoderGpu_UnrecognisedBytes_AreRejectedAsUnknown()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

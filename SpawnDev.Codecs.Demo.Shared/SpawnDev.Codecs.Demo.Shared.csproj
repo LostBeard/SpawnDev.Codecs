@@ -50,6 +50,7 @@
 		<EmbeddedResource Include="TestData\Png\*" />
 		<EmbeddedResource Include="TestData\Jpeg\*" />
 		<EmbeddedResource Include="TestData\WebPYuv\*" />
+		<EmbeddedResource Include="TestData\WebPLossy\*" />
 		<EmbeddedResource Include="TestData\Gif\*" />
 		<EmbeddedResource Include="TestData\GifEnc\*" />
 		<EmbeddedResource Include="TestData\Bmp\*" />

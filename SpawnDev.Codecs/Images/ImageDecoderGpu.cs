@@ -7,8 +7,11 @@
 using System.Runtime.Versioning;
 using ILGPU;
 using ILGPU.Runtime;
+using SpawnDev.Codecs.Images.Bmp;
+using SpawnDev.Codecs.Images.Gif;
 using SpawnDev.Codecs.Images.Jpeg;
 using SpawnDev.Codecs.Images.Png;
+using SpawnDev.Codecs.Images.WebP;
 using SpawnDev.ILGPU;
 using SpawnDev.SpawnJS.JSObjects;
 
@@ -21,6 +24,9 @@ public sealed class ImageDecoderGpu : IDisposable
     private readonly Accelerator _accelerator;
     private PngDecoderGpu? _png;
     private JpegDecoderGpu? _jpeg;
+    private GifDecoderGpu? _gif;
+    private BmpDecoderGpu? _bmp;
+    private WebPDecoderGpu? _webp;
     private readonly StageBuffer<byte> _stageIn;
 
     /// <summary>Create a decoder; format decoders are compiled on first use.</summary>
@@ -39,6 +45,15 @@ public sealed class ImageDecoderGpu : IDisposable
 
     /// <summary>The JPEG decoder (compiled on first access) for JPEG-specific calls such as <see cref="JpegDecodeOptions"/>.</summary>
     public JpegDecoderGpu Jpeg => _jpeg ??= new JpegDecoderGpu(_accelerator);
+
+    /// <summary>The GIF decoder (compiled on first access) for GIF-specific calls such as frames and the loop count.</summary>
+    public GifDecoderGpu Gif => _gif ??= new GifDecoderGpu(_accelerator);
+
+    /// <summary>The BMP decoder (compiled on first access).</summary>
+    public BmpDecoderGpu Bmp => _bmp ??= new BmpDecoderGpu(_accelerator);
+
+    /// <summary>The WebP decoder (compiled on first access) for WebP-specific calls such as frames, metadata and the alpha plane.</summary>
+    public WebPDecoderGpu WebP => _webp ??= new WebPDecoderGpu(_accelerator);
 
     private static Exception NotSupported(ImageFormat format) => format == ImageFormat.Unknown
         ? new ImageDecodeException(ImageFormat.Unknown, "unrecognised image format")
@@ -64,6 +79,9 @@ public sealed class ImageDecoderGpu : IDisposable
         {
             case ImageFormat.Png: return await Png.ReadInfoAsync(file, fileLength);
             case ImageFormat.Jpeg: return await Jpeg.ReadInfoAsync(file, fileLength);
+            case ImageFormat.Gif: return await Gif.ReadInfoAsync(file, fileLength);
+            case ImageFormat.Bmp: return await Bmp.ReadInfoAsync(file, fileLength);
+            case ImageFormat.WebP: return await WebP.ReadInfoAsync(file, fileLength);
             default: throw NotSupported(format);
         }
     }
@@ -78,6 +96,9 @@ public sealed class ImageDecoderGpu : IDisposable
         {
             case ImageFormat.Png: return await Png.DecodeAsync(file, fileLength, output, format);
             case ImageFormat.Jpeg: return await Jpeg.DecodeAsync(file, fileLength, output, format);
+            case ImageFormat.Gif: return await Gif.DecodeAsync(file, fileLength, output, format);
+            case ImageFormat.Bmp: return await Bmp.DecodeAsync(file, fileLength, output, format);
+            case ImageFormat.WebP: return await WebP.DecodeAsync(file, fileLength, output, format);
             default: throw NotSupported(detected);
         }
     }
@@ -101,6 +122,9 @@ public sealed class ImageDecoderGpu : IDisposable
         {
             case ImageFormat.Png: return await Png.ReadInfoAsync(file);
             case ImageFormat.Jpeg: return await Jpeg.ReadInfoAsync(file);
+            case ImageFormat.Gif: return await Gif.ReadInfoAsync(file);
+            case ImageFormat.Bmp: return await Bmp.ReadInfoAsync(file);
+            case ImageFormat.WebP: return await WebP.ReadInfoAsync(file);
             default: throw NotSupported(format);
         }
     }
@@ -113,6 +137,9 @@ public sealed class ImageDecoderGpu : IDisposable
         {
             case ImageFormat.Png: return await Png.DecodeAsync(file, format);
             case ImageFormat.Jpeg: return await Jpeg.DecodeAsync(file, format);
+            case ImageFormat.Gif: return await Gif.DecodeAsync(file, format);
+            case ImageFormat.Bmp: return await Bmp.DecodeAsync(file, format);
+            case ImageFormat.WebP: return await WebP.DecodeAsync(file, format);
             default: throw NotSupported(detected);
         }
     }
@@ -144,6 +171,9 @@ public sealed class ImageDecoderGpu : IDisposable
         {
             case ImageFormat.Png: return await Png.DecodeAsync(file, format);
             case ImageFormat.Jpeg: return await Jpeg.DecodeAsync(file, format);
+            case ImageFormat.Gif: return await Gif.DecodeAsync(file, format);
+            case ImageFormat.Bmp: return await Bmp.DecodeAsync(file, format);
+            case ImageFormat.WebP: return await WebP.DecodeAsync(file, format);
             default: throw NotSupported(head);
         }
     }
@@ -163,6 +193,9 @@ public sealed class ImageDecoderGpu : IDisposable
     {
         _png?.Dispose();
         _jpeg?.Dispose();
+        _gif?.Dispose();
+        _bmp?.Dispose();
+        _webp?.Dispose();
         _stageIn.Dispose();
     }
 }

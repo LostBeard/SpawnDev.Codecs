@@ -47,6 +47,7 @@ public sealed class WebPKernels : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<uint>> _alphaCopy;
     private readonly Action<Index1D, ArrayView<uint>, int, int, int, int> _alphaUnfilter;
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<byte>> _alphaPack;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>> _applyAlpha;
     private readonly Action<Index1D, ArrayView<byte>, int, int, int, int, int> _clearRect;
     private readonly Action<Index1D, ArrayView<byte>> _clearAll;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, int, int, int, int, int> _composite;
@@ -74,6 +75,7 @@ public sealed class WebPKernels : IDisposable
         _alphaUnfilter = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<uint>, int, int, int, int>(AlphaUnfilterKernel);
         _alphaPack = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<uint>, ArrayView<byte>>(AlphaPackKernel);
+        _applyAlpha = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>>(ApplyAlphaKernel);
         _clearRect = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, int, int, int, int, int>(ClearRectKernel);
         _clearAll = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>>(ClearAllKernel);
@@ -141,6 +143,9 @@ public sealed class WebPKernels : IDisposable
 
     /// <summary>One sample per uint to bytes.</summary>
     public void AlphaPack(ArrayView<uint> plane, ArrayView<byte> output, int count) => _alphaPack(count, plane, output);
+
+    /// <summary>Write an alpha plane (one byte per pixel) into the A channel of an RGBA8 picture of <paramref name="count"/> pixels.</summary>
+    public void ApplyAlpha(ArrayView<byte> rgba, ArrayView<byte> alpha, int count) => _applyAlpha(count, rgba, alpha);
 
     /// <summary>Clear a rectangle of an RGBA8 canvas to transparent black.</summary>
     public void ClearRect(ArrayView<byte> canvas, int canvasWidth, int x, int y, int w, int h)
@@ -810,6 +815,11 @@ public sealed class WebPKernels : IDisposable
     private static void AlphaPackKernel(Index1D index, ArrayView<uint> plane, ArrayView<byte> output)
     {
         output[index.X] = (byte)plane[index.X];
+    }
+
+    private static void ApplyAlphaKernel(Index1D index, ArrayView<byte> rgba, ArrayView<byte> alpha)
+    {
+        rgba[index.X * 4 + 3] = alpha[index.X];
     }
 
     /// <summary>

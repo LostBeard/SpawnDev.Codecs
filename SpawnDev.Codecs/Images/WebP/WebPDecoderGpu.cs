@@ -14,11 +14,11 @@
 // Supported: the RIFF container (simple VP8L files, VP8X extended files with ICCP / EXIF / XMP, ANIM / ANMF
 // animations), the complete VP8L lossless bitstream (all four transforms, colour cache, meta prefix codes,
 // LZ77 with the 120 short distance codes), animation compositing (blend + dispose) bit-exact with libwebp's
-// WebPAnimDecoder. Lossy VP8 chunks are recognised and rejected with ImageDecodeException ("lossy WebP not yet
-// supported"); ReadInfo / ReadFrames still describe such files. The alpha plane of a lossy image (the ALPH chunk:
-// raw or VP8L-compressed, with the none / horizontal / vertical / gradient filters) IS decoded, by DecodeAlphaAsync,
-// so a VP8 decoder only has to supply the colour half. The structure keeps the image decode behind one switch on the
-// payload kind, so a VP8 decoder plugs in next to VP8L.
+// WebPAnimDecoder. Lossy images (a VP8 keyframe, optionally with an ALPH chunk) decode through the full-syntax VP8
+// keyframe decoder (Vp8FullKeyframeDecoderGpu), the libwebp-exact fancy-upsampling YUV -> RGBA converter
+// (WebPYuvToRgbaGpu) and the ALPH plane decoder (raw or VP8L-compressed, with the none / horizontal / vertical /
+// gradient filters), all on the accelerator; lossy and lossless frames can be mixed in one animation. The VP8 kernels
+// are compiled on the first lossy image. DecodeAlphaAsync still exposes the alpha plane on its own.
 //
 // DecodeAsync of an animated file returns its first frame (the canvas as it looks while frame 0 is shown);
 // ReadFramesAsync / DecodeFrameAsync give every frame.
@@ -26,6 +26,8 @@
 using System.Runtime.Versioning;
 using ILGPU;
 using ILGPU.Runtime;
+using SpawnDev.Codecs.Images.Yuv;
+using SpawnDev.Codecs.Video.Vp8;
 using SpawnDev.ILGPU;
 using SpawnDev.SpawnJS.JSObjects;
 
@@ -58,6 +60,14 @@ public sealed class WebPDecoderGpu : IDisposable
     private readonly StageBuffer<uint> _pixB;
     private readonly StageBuffer<byte> _frameRgba;
 
+    // Lossy (VP8) path: compiled on first use, so a consumer that only decodes lossless WebP never builds the VP8 kernels.
+    private Vp8FullKeyframeDecoderGpu? _vp8;
+    private WebPYuvToRgbaGpu? _yuv;
+    private readonly StageBuffer<byte> _planeY;
+    private readonly StageBuffer<byte> _planeU;
+    private readonly StageBuffer<byte> _planeV;
+    private readonly StageBuffer<byte> _alphaPlane;
+
     /// <summary>Compile the kernels and upload the constant tables.</summary>
     /// <param name="accelerator">The accelerator to decode on.</param>
     /// <param name="initialPoolInts">
@@ -85,6 +95,10 @@ public sealed class WebPDecoderGpu : IDisposable
         _pixA = new StageBuffer<uint>(accelerator);
         _pixB = new StageBuffer<uint>(accelerator);
         _frameRgba = new StageBuffer<byte>(accelerator);
+        _planeY = new StageBuffer<byte>(accelerator);
+        _planeU = new StageBuffer<byte>(accelerator);
+        _planeV = new StageBuffer<byte>(accelerator);
+        _alphaPlane = new StageBuffer<byte>(accelerator);
     }
 
     // ------------------------------------------------------------------
@@ -284,16 +298,29 @@ public sealed class WebPDecoderGpu : IDisposable
 
         if (!layout.Animated)
         {
-            if (layout.StillKind != 1) throw Error(WebPError.LossyUnsupported);
-            EnsureDecodeBuffers(layout.Width, layout.Height, layout.Width, layout.Height);
-            await DecodeVp8lAsync(file, layout.Meta[WebPMeta.ImageOffset], layout.Meta[WebPMeta.ImageLength],
-                layout.Width, layout.Height, output);
+            int kind = layout.StillKind;
+            if (kind is < 1 or > 3) throw Error(WebPError.NoImageData);
+            if (kind == 1)
+            {
+                EnsureDecodeBuffers(layout.Width, layout.Height, layout.Width, layout.Height);
+                await DecodeVp8lAsync(file, layout.Meta[WebPMeta.ImageOffset], layout.Meta[WebPMeta.ImageLength],
+                    layout.Width, layout.Height, output);
+            }
+            else
+            {
+                // An ALPH plane is decoded with the lossless machinery; a plain lossy image needs none of it.
+                if (kind == 3) EnsureDecodeBuffers(layout.Width, layout.Height, layout.Width, layout.Height);
+                EnsureLossyBuffers((long)layout.Width * layout.Height,
+                    WebPYuvToRgbaGpu.ChromaPlaneSize(layout.Width, layout.Height), kind == 3);
+                await DecodeLossyAsync(file, layout, 0, layout.Meta[WebPMeta.ImageOffset], layout.Meta[WebPMeta.ImageLength],
+                    layout.Width, layout.Height, kind == 3, output);
+            }
         }
         else
         {
             // Check every frame we are about to composite before dispatching anything.
             for (int k = 0; k <= frameIndex; k++)
-                if (layout.FrameField(k, WebPMeta.FrKind) != 1) throw Error(WebPError.LossyUnsupported);
+                if (layout.FrameField(k, WebPMeta.FrKind) is < 1 or > 3) throw Error(WebPError.NoImageData);
             EnsureAnimationBuffers(layout, frameIndex);
             await CompositeFramesAsync(file, layout, frameIndex, output);
         }
@@ -329,6 +356,62 @@ public sealed class WebPDecoderGpu : IDisposable
         _work.Ensure(maxWork);
         _pool.Ensure(_initialPoolInts);
         _frameRgba.Ensure(maxPixels * 4);
+
+        // Lossy frames need the YUV planes (and an alpha plane) sized for the largest of them, before any is queued.
+        long lumaMax = 0, chromaMax = 0;
+        bool anyAlph = false;
+        for (int k = 0; k <= lastFrame; k++)
+        {
+            int kind = layout.FrameField(k, WebPMeta.FrKind);
+            if (kind == 1) continue;
+            int w = layout.FrameField(k, WebPMeta.FrW), h = layout.FrameField(k, WebPMeta.FrH);
+            lumaMax = Math.Max(lumaMax, (long)w * h);
+            chromaMax = Math.Max(chromaMax, WebPYuvToRgbaGpu.ChromaPlaneSize(w, h));
+            anyAlph |= kind == 3;
+        }
+        if (lumaMax > 0) EnsureLossyBuffers(lumaMax, chromaMax, anyAlph);
+    }
+
+    /// <summary>
+    /// Create the VP8 decoder + converter (first lossy image) and size the plane buffers. Called at the START of a public
+    /// call: growing a buffer disposes the old one, which must not happen while kernels using it are queued.
+    /// </summary>
+    private void EnsureLossyBuffers(long lumaBytes, long chromaBytes, bool alpha)
+    {
+        _vp8 ??= new Vp8FullKeyframeDecoderGpu(_accelerator);
+        _yuv ??= new WebPYuvToRgbaGpu(_accelerator);
+        _planeY.Ensure(lumaBytes);
+        _planeU.Ensure(chromaBytes);
+        _planeV.Ensure(chromaBytes);
+        if (alpha) _alphaPlane.Ensure(lumaBytes);
+    }
+
+    /// <summary>
+    /// Decode one VP8 keyframe (the colour half of a lossy image) and its ALPH plane, if it has one, into
+    /// <paramref name="rgba"/>: VP8 planes -> libwebp-exact fancy-upsampled RGBA -> alpha merged into channel A. Nothing but the
+    /// frame tag and the VP8 meta block crosses to the host.
+    /// </summary>
+    private async Task DecodeLossyAsync(
+        ArrayView1D<byte, Stride1D.Dense> file, Layout layout, int frameIndex, int payloadOffset, int payloadLength,
+        int w, int h, bool hasAlph, ArrayView1D<byte, Stride1D.Dense> rgba)
+    {
+        var encoded = file.SubView(payloadOffset, payloadLength);
+        try
+        {
+            var tag = await _vp8!.ReadFrameTagAsync(encoded);
+            if (tag.Width != w || tag.Height != h) throw Error(WebPError.CanvasMismatch);
+            await _vp8.DecodeKeyFrameAsync(encoded, payloadLength, _planeY.View, _planeU.View, _planeV.View);
+        }
+        catch (Vp8DecodeException ex)
+        {
+            throw new ImageDecodeException(ImageFormat.WebP, "invalid VP8 data: " + ex.Message);
+        }
+        _yuv!.Convert(_planeY.View, _planeU.View, _planeV.View, w, h, rgba);
+        if (hasAlph)
+        {
+            await DecodeAlphaCoreAsync(file, layout, frameIndex, _alphaPlane.View);
+            _kernels.ApplyAlpha(rgba, _alphaPlane.View, w * h);
+        }
     }
 
     /// <summary>libwebp anim_decode.c IsKeyFrame.</summary>
@@ -370,7 +453,12 @@ public sealed class WebPDecoderGpu : IDisposable
             if (isKey) _kernels.ClearAll(canvas, cw * ch);
             else if (prevBg) _kernels.ClearRect(canvas, cw, px, py, pw, ph);
 
-            await DecodeVp8lAsync(file, l.FrameField(k, WebPMeta.FrOffset), l.FrameField(k, WebPMeta.FrLength), fw, fh, _frameRgba.View);
+            int kind = l.FrameField(k, WebPMeta.FrKind);
+            if (kind == 1)
+                await DecodeVp8lAsync(file, l.FrameField(k, WebPMeta.FrOffset), l.FrameField(k, WebPMeta.FrLength), fw, fh, _frameRgba.View);
+            else
+                await DecodeLossyAsync(file, l, k, l.FrameField(k, WebPMeta.FrOffset), l.FrameField(k, WebPMeta.FrLength),
+                    fw, fh, kind == 3, _frameRgba.View);
 
             bool blend = !isKey && (flags & 2) == 0;
             _kernels.Composite(canvas, _frameRgba.View, cw, fx, fy, fw, fh, blend ? 1 : 0, prevBg ? 1 : 0, px, py, pw, ph);
@@ -718,5 +806,10 @@ public sealed class WebPDecoderGpu : IDisposable
         _pixA.Dispose();
         _pixB.Dispose();
         _frameRgba.Dispose();
+        _planeY.Dispose();
+        _planeU.Dispose();
+        _planeV.Dispose();
+        _alphaPlane.Dispose();
+        _vp8?.Dispose();
     }
 }
