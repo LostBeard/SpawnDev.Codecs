@@ -193,9 +193,12 @@ internal sealed class GifEncoderKernels : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _header;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _trailer;
 
+    private readonly LaunchPacer _pacer;
+
     public GifEncoderKernels(Accelerator a)
     {
         ArgumentNullException.ThrowIfNull(a);
+        _pacer = new LaunchPacer(a);
         _prepGlobal = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(PrepGlobalKernel);
         _framePalette = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(FramePaletteKernel);
         _hist = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(HistKernel);
@@ -249,7 +252,7 @@ internal sealed class GifEncoderKernels : IDisposable
     /// (<see cref="Hist"/> first): a chain of bounded launches, <paramref name="maxColors"/> - 1 split rounds (an upper
     /// bound of the splits; a round after the last split does nothing). Nothing happens for a frame with an exact palette.
     /// </summary>
-    public void MedianCut(ArrayView<int> scratch, ArrayView<int> finfo, ArrayView<int> gstate, ArrayView<int> fpal,
+    public async ValueTask MedianCutAsync(ArrayView<int> scratch, ArrayView<int> finfo, ArrayView<int> gstate, ArrayView<int> fpal,
         ArrayView<int> prm, int frame, int maxColors)
     {
         _medLaneCount(MedLanes, scratch, finfo, gstate, frame);
@@ -262,6 +265,7 @@ internal sealed class GifEncoderKernels : IDisposable
             _medPartCount(MedLanes, scratch);
             _medPrefix(1, scratch);
             _medScatter(MedLanes, scratch);
+            await _pacer.LaunchedAsync();
         }
         _medFinalCopy(MedLanes, scratch);
         _medAccumulate(MedLanes, scratch);

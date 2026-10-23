@@ -57,9 +57,12 @@ public sealed class PngKernels : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _toRgba;
 
     /// <summary>Compile the kernels.</summary>
+    private readonly LaunchPacer _pacer;
+
     public PngKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        _pacer = new LaunchPacer(accelerator);
         _scanInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, ArrayView<int>>(ScanInitKernel);
         _scan = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(ScanKernel);
@@ -125,11 +128,14 @@ public sealed class PngKernels : IDisposable
     /// (<paramref name="filterBpp"/> = <see cref="PngMeta.FilterBytesPerPixel"/>): launches of
     /// <see cref="UnfilterLaneBytes"/> bytes per lane, in order.
     /// </summary>
-    public void Unfilter(ArrayView<byte> raw, ArrayView<int> meta, long rawSize, int filterBpp)
+    public async ValueTask UnfilterAsync(ArrayView<byte> raw, ArrayView<int> meta, long rawSize, int filterBpp)
     {
         long chunk = (long)UnfilterLaneBytes * filterBpp;
         for (long start = 0; start < rawSize; start += chunk)
+        {
             _unfilter(filterBpp, raw, meta, (int)start, (int)Math.Min(rawSize, start + chunk));
+            await _pacer.LaunchedAsync();
+        }
     }
 
     /// <summary>Convert the unfiltered samples to RGBA8 / RGBA16 in <paramref name="output"/>.</summary>

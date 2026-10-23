@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
             using var dScratch = acc.Allocate1D<int>(InflateGpu.ScratchInts);
             using var dResult = acc.Allocate1D<int>(1);
             DeviceTransfer.Upload(dZ.View, zlib);
-            inflate.Run(dZ.View, zlib.Length, dOut.View, raw.Length, dScratch.View, dResult.View, verifyAdler: true);
+            await inflate.RunAsync(dZ.View, zlib.Length, dOut.View, raw.Length, dScratch.View, dResult.View, verifyAdler: true);
             await acc.SynchronizeAsync();
             Equal(raw.Length, (await dResult.View.CopyToHostAsync())[0], $"{what}: InflateGpu result");
 

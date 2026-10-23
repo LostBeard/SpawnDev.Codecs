@@ -63,10 +63,13 @@ public sealed class WebPEncodeKernels : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _finalizeFrame;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _finalizeAnim;
 
+    private readonly LaunchPacer _pacer;
+
     /// <summary>Compile the kernels.</summary>
     public WebPEncodeKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        _pacer = new LaunchPacer(accelerator);
         _toArgb = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<uint>, int>(ToArgbKernel);
         _analyzeInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(AnalyzeInitKernel);
         _analyze = accelerator.LoadAutoGroupedStreamKernel<
@@ -127,10 +130,14 @@ public sealed class WebPEncodeKernels : IDisposable
     public void ToArgb(ArrayView<byte> rgba, ArrayView<uint> argb, int pixels, int exact) => _toArgb(pixels, rgba, argb, exact);
 
     /// <summary>Colour analysis (alpha, palette) of <paramref name="pixels"/> pixels: set-up, bounded resumable scan launches, finish.</summary>
-    public void Analyze(ArrayView<uint> argb, ArrayView<int> work, ArrayView<int> meta, long pixels)
+    public async ValueTask AnalyzeAsync(ArrayView<uint> argb, ArrayView<int> work, ArrayView<int> meta, long pixels)
     {
         _analyzeInit(1024, work, meta);
-        for (int i = Vp8lEncLayout.Steps(pixels); i > 0; i--) _analyze(1, argb, work, meta);
+        for (int i = Vp8lEncLayout.Steps(pixels); i > 0; i--)
+        {
+            _analyze(1, argb, work, meta);
+            await _pacer.LaunchedAsync();
+        }
         _analyzeFinish(1, work, meta);
     }
 
@@ -161,20 +168,28 @@ public sealed class WebPEncodeKernels : IDisposable
     /// LZ77 + colour cache tokenisation of the main image of <paramref name="pixels"/> (packed) pixels: a parallel set-up, then
     /// bounded launches that each continue the serial walk where the previous one stopped.
     /// </summary>
-    public void Tokenize(ArrayView<uint> main, ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables, int cacheBits, long pixels)
+    public async ValueTask TokenizeAsync(ArrayView<uint> main, ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables, int cacheBits, long pixels)
     {
         _tokenizeInit(1 << Vp8lEncLayout.HashBits, work, meta, cacheBits);
-        for (int i = Vp8lEncLayout.Steps(pixels, Vp8lEncLayout.TokenizeChunk); i > 0; i--) _tokenize(1, main, work, tok, meta, tables, cacheBits);
+        for (int i = Vp8lEncLayout.Steps(pixels, Vp8lEncLayout.TokenizeChunk); i > 0; i--)
+        {
+            _tokenize(1, main, work, tok, meta, tables, cacheBits);
+            await _pacer.LaunchedAsync();
+        }
     }
 
     /// <summary>Huffman codes of the five main prefix codes (one thread each).</summary>
     public void BuildCodes(ArrayView<int> work, ArrayView<int> meta) => _buildCodes(5, work, meta);
 
     /// <summary>Per-tile histograms of the main token stream (for the meta prefix codes); <paramref name="pixels"/> bounds the token count.</summary>
-    public void TileHistograms(ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables, int tiles, long pixels)
+    public async ValueTask TileHistogramsAsync(ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables, int tiles, long pixels)
     {
         _tileHistInit(tiles * Vp8lEncLayout.SetAlphaMax, work, meta);
-        for (int i = Vp8lEncLayout.Steps(pixels); i > 0; i--) _tileHist(1, work, tok, meta, tables);
+        for (int i = Vp8lEncLayout.Steps(pixels); i > 0; i--)
+        {
+            _tileHist(1, work, tok, meta, tables);
+            await _pacer.LaunchedAsync();
+        }
     }
 
     /// <summary>Clusters the <paramref name="tiles"/> tiles into at most <paramref name="groups"/> prefix groups (see Vp8lEncodeGroups).</summary>
@@ -200,10 +215,14 @@ public sealed class WebPEncodeKernels : IDisposable
     public void BuildGroupCodes(ArrayView<int> work, ArrayView<int> meta) => _buildGroupCodes(Vp8lEncodeGroups.MaxGroups * 5, work, meta);
 
     /// <summary>Bitstream: header, transforms, codes (one launch), the tokens (bounded resumable launches), the last byte.</summary>
-    public void Emit(ArrayView<byte> output, ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables, long pixels)
+    public async ValueTask EmitAsync(ArrayView<byte> output, ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables, long pixels)
     {
         _emitHead(1, output, work, tok, meta, tables);
-        for (int i = Vp8lEncLayout.Steps(pixels); i > 0; i--) _emitTokens(1, output, work, tok, meta, tables);
+        for (int i = Vp8lEncLayout.Steps(pixels); i > 0; i--)
+        {
+            _emitTokens(1, output, work, tok, meta, tables);
+            await _pacer.LaunchedAsync();
+        }
         _emitTail(1, output, work, meta);
     }
 

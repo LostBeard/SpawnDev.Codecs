@@ -243,9 +243,13 @@ public sealed class WebPLossyEncoderGpu : IDisposable
             _setup(1, _mbRecs.View, _meta.View, _tables.View, _qTable.View,
                 state.SubView(l.StCoeffs, WebPLossySetupKernel.ProbaCount), state.SubView(l.StStats, WebPLossySetupKernel.ProbaCount),
                 state.SubView(l.StLevelCost, WebPLossySetupKernel.LevelCostCount));
+            var pacer = new LaunchPacer(_accelerator);
             for (int row = 0; row < l.MbH; row++)
                 for (int x = 0; x < l.MbW; x += WebPLossyEncodeRowKernel.MbsPerLaunch)
+                {
                     _row(1, yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x, x + WebPLossyEncodeRowKernel.MbsPerLaunch);
+                    await pacer.LaunchedAsync();
+                }
             await _accelerator.SynchronizeAsync();
             var m = await _meta.View.CopyToHostAsync();
             var err = (WebPLossyEncError)m[M.Error];
@@ -266,11 +270,17 @@ public sealed class WebPLossyEncoderGpu : IDisposable
             _finishProbas(1, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, _scratch.View);
             int tokenSteps = Math.Max(1, (m[M.TokenCount] + WebPLossyFinishKernel.TokensPerLaunch - 1) / WebPLossyFinishKernel.TokensPerLaunch);
             for (int i = 0; i < tokenSteps; i++)
+            {
                 _finishTokens(1, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, _scratch.View);
+                await pacer.LaunchedAsync();
+            }
             _finishHeader(1, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, _scratch.View);
             int modeSteps = (l.MbCount + WebPLossyFinishKernel.MbsPerLaunch - 1) / WebPLossyFinishKernel.MbsPerLaunch;
             for (int i = 0; i < modeSteps; i++)
+            {
                 _finishModes(1, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, _scratch.View);
+                await pacer.LaunchedAsync();
+            }
             _finishEnd(1, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, _scratch.View);
             await _accelerator.SynchronizeAsync();
             var f = await _meta.View.SubView(0, M.Seg).CopyToHostAsync();

@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
         using var dResult = acc.Allocate1D<int>(1);
         DeviceTransfer.Upload(dZ.View, zlib);
         dOut.View.MemSetToZero();
-        kernel.Run(dZ.View, zlib.Length, dOut.View, outputCapacity, dScratch.View, dResult.View, verifyAdler);
+        await kernel.RunAsync(dZ.View, zlib.Length, dOut.View, outputCapacity, dScratch.View, dResult.View, verifyAdler);
         await acc.SynchronizeAsync();
         int result = (await dResult.View.CopyToHostAsync())[0];
         byte[] output = result > 0

@@ -617,8 +617,12 @@ public sealed class JpegEncoderGpu : IDisposable
         int budget = Math.Max(1, BlocksPerDispatch / g.BlocksPerMcu);
         int rounds = (int)((perSegment + budget - 1) / budget);
         var dst = g.SegmentCount == 1 ? output : _scratch.View;
+        var pacer = new LaunchPacer(_accelerator);
         for (int r = 0; r < Math.Max(1, rounds); r++)
+        {
             _kernels.Entropy(_coefs.View, dst, _meta.View, _consts.View, _state.View, g.SegmentCount, budget, r);
+            await pacer.LaunchedAsync();
+        }
         _kernels.Prefix(output, _meta.View, _state.View);
         if (g.SegmentCount > 1)
             _kernels.Assemble(_scratch.View, output, _meta.View, _state.View, (long)g.SegmentCount * g.SlotSize);
@@ -654,16 +658,23 @@ public sealed class JpegEncoderGpu : IDisposable
             var sc = g.Scans[s];
             int budget = Math.Max(1, BlocksPerDispatch / Math.Max(1, sc.BlocksPerMcu));
             int rounds = Math.Max(1, (int)((sc.PerSegmentMcus + budget - 1) / budget));
+            var pacer = new LaunchPacer(_accelerator);
             _scanKernels.ClearHist(_hist.View);
             for (int r = 0; r < rounds; r++)
+            {
                 _scanKernels.Scan(_coefs.View, output, _meta.View, _tabs.View, _hist.View, _state.View, _bitbuf.View,
                     sc.SegmentCount, s, true, budget, r);
+                await pacer.LaunchedAsync();
+            }
             _scanKernels.GenTables(_hist.View, _tabs.View);
             _scanKernels.Place(output, _sos.View, _meta.View, _tabs.View, s);
             var dst = sc.SegmentCount == 1 ? output : _scratch.View;
             for (int r = 0; r < rounds; r++)
+            {
                 _scanKernels.Scan(_coefs.View, dst, _meta.View, _tabs.View, _hist.View, _state.View, _bitbuf.View,
                     sc.SegmentCount, s, false, budget, r);
+                await pacer.LaunchedAsync();
+            }
             _scanKernels.Finish(_meta.View, _state.View, s);
             if (sc.SegmentCount > 1)
                 _kernels.Assemble(_scratch.View, output, _meta.View, _state.View, (long)sc.SegmentCount * sc.Slot);

@@ -510,8 +510,12 @@ public sealed class GifDecoderGpu : IDisposable
             _plan.View.SubView(0, plan.Length).CopyFromCPU(ref plan[0], plan.Length);
             // LZW is resumable: bounded launches continue from the state the previous one left (the bound always finishes every frame).
             _kernels.LzwInit(_meta.View, _plan.View, _lzwState.View, count);
+            var pacer = new LaunchPacer(_accelerator);
             for (long s = 0; s < lzwSteps; s++)
+            {
                 _kernels.LzwStep(file, _meta.View, _plan.View, indices, _lzwScratch.View, _lzwState.View, count);
+                await pacer.LaunchedAsync();
+            }
             await _accelerator.SynchronizeAsync();
 
             var status = await _plan.View.SubView(0, plan.Length).CopyToHostAsync();
@@ -542,8 +546,12 @@ public sealed class GifDecoderGpu : IDisposable
             if (stepInts.Length > 0)
             {
                 _steps.View.SubView(0, stepInts.Length).CopyFromCPU(ref stepInts[0], stepInts.Length);
+                var compositePacer = new LaunchPacer(_accelerator);
                 for (int s = 0; s < planner.StepCount; s++)
+                {
                     _kernels.Composite(file, _meta.View, _steps.View, indices, canvas, saved, s, planner.Threads[s]);
+                    await compositePacer.LaunchedAsync();
+                }
             }
             // The next batch overwrites the steps and the index buffer: let these kernels finish first.
             await _accelerator.SynchronizeAsync();

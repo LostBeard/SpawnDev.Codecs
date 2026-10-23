@@ -378,13 +378,18 @@ internal sealed class DeflateBlockRunner : IDisposable
         Kernels.RunAdler(data, _adler.View, _res.View, _prm.View, blocks, piecesPerBlock);
         int parseSteps = DeflateGpu.ParseSteps(BlockSize);
         int emitSteps = DeflateGpu.EmitSteps(BlockSize);
+        var pacer = new LaunchPacer(_accelerator);
         for (int first = 0; first < blocks; first += wave)
         {
             int count = Math.Min(wave, blocks - first);
             Kernels.RunInit(_scratch.View, _prm.View, first, count);
             if (level > 0)
             {
-                for (int i = 0; i < parseSteps; i++) Kernels.RunParse(data, _scratch.View, _prm.View, first, count);
+                for (int i = 0; i < parseSteps; i++)
+                {
+                    Kernels.RunParse(data, _scratch.View, _prm.View, first, count);
+                    await pacer.LaunchedAsync();
+                }
                 if (level >= 3)
                 {
                     // Lazy matching can stop a parse launch on its compare budget before ParseChunk positions.
@@ -400,7 +405,11 @@ internal sealed class DeflateBlockRunner : IDisposable
                 }
             }
             Kernels.RunPlan(data, _slots.View, _scratch.View, _prm.View, first, count);
-            for (int i = 0; i < emitSteps; i++) Kernels.RunEmit(data, _slots.View, _scratch.View, _prm.View, first, count);
+            for (int i = 0; i < emitSteps; i++)
+            {
+                Kernels.RunEmit(data, _slots.View, _scratch.View, _prm.View, first, count);
+                await pacer.LaunchedAsync();
+            }
             Kernels.RunResult(_scratch.View, _res.View, _prm.View, first, count);
         }
     }

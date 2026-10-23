@@ -20,11 +20,13 @@ public sealed class InflateKernel : IDisposable
 {
     private readonly Action<Index1D, ArrayView<byte>, int, int, ArrayView<int>, ArrayView<int>, int> _init;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _step;
+    private readonly LaunchPacer _pacer;
 
     /// <summary>Compile.</summary>
     public InflateKernel(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        _pacer = new LaunchPacer(accelerator);
         _init = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, int, int, ArrayView<int>, ArrayView<int>, int>(InflateInitKernel);
         _step = accelerator.LoadAutoGroupedStreamKernel<
@@ -44,7 +46,7 @@ public sealed class InflateKernel : IDisposable
     /// <param name="scratch">At least <see cref="InflateGpu.ScratchInts"/> ints of working memory.</param>
     /// <param name="result">At least one int.</param>
     /// <param name="verifyAdler">Verify the zlib Adler-32 trailer.</param>
-    public void Run(
+    public async ValueTask RunAsync(
         ArrayView<byte> zlib, int zlibLength,
         ArrayView<byte> output, int outputCapacity,
         ArrayView<int> scratch, ArrayView<int> result,
@@ -57,7 +59,11 @@ public sealed class InflateKernel : IDisposable
         if (result.Length < 1) throw new ArgumentException("result must hold 1 int.", nameof(result));
         _init(1, zlib, zlibLength, outputCapacity, scratch, result, verifyAdler ? 1 : 0);
         int steps = InflateGpu.MaxSteps(zlibLength, outputCapacity);
-        for (int i = 0; i < steps; i++) _step(1, zlib, output, scratch, result);
+        for (int i = 0; i < steps; i++)
+        {
+            _step(1, zlib, output, scratch, result);
+            await _pacer.LaunchedAsync();
+        }
     }
 
     private static void InflateInitKernel(

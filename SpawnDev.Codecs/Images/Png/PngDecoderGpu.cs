@@ -278,9 +278,9 @@ public sealed class PngDecoderGpu : IDisposable
              .CopyFromCPU(ref layout.HostSlots[0], layout.HostSlots.Length);
 
         _kernels.GatherIdat(file, _idatTable.View, _zlib.View, _meta.View, layout.IdatTotal);
-        _inflate.Run(_zlib.View, layout.IdatTotal, _raw.View, (int)layout.RawSize,
+        await _inflate.RunAsync(_zlib.View, layout.IdatTotal, _raw.View, (int)layout.RawSize,
             _inflateScratch.View, _inflateResult.View, verifyAdler: true);
-        _kernels.Unfilter(_raw.View, _meta.View, layout.RawSize, layout.FilterBpp);
+        await _kernels.UnfilterAsync(_raw.View, _meta.View, layout.RawSize, layout.FilterBpp);
         _kernels.ToRgba(file, _raw.View, output, _meta.View, info.Width * info.Height);
         await _accelerator.SynchronizeAsync();
 

@@ -216,11 +216,19 @@ public sealed class Vp8FullKeyframeDecoderGpu : IDisposable
 
             ArrayView<byte> enc = encoded;
             _header(1, enc, dMeta.View, dBd.View, dProbs.View, _defaultProbs.View, _updateProbs.View, _dcQ.View, _acQ.View);
+            // Every launch is bounded; the pacer keeps the GPU work in flight short (see LaunchPacer).
+            var pacer = new LaunchPacer(_accelerator);
             for (int row = 0; row < mbRows; row++)
+            {
                 _modes(1, enc, dMeta.View, dBd.View, dRecs.View, _tables.View, row);
+                await pacer.LaunchedAsync();
+            }
             for (int row = 0; row < mbRows; row++)
                 for (int col = 0; col < mbCols; col += Vp8FullTokenKernel.MbsPerLaunch)
+                {
                     _tokens(1, enc, dMeta.View, dBd.View, dRecs.View, dProbs.View, dCoeffs.View, dAbove.View, _tables.View, row, col, col + Vp8FullTokenKernel.MbsPerLaunch);
+                    await pacer.LaunchedAsync();
+                }
 
             int diagonals = mbCols + Vp8FullMeta.WaveRowWeight * (mbRows - 1);
             for (int d = 0; d < diagonals; d++)
@@ -228,12 +236,14 @@ public sealed class Vp8FullKeyframeDecoderGpu : IDisposable
                 WaveRange(d, mbCols, mbRows, out int rowLo, out int count);
                 if (count <= 0) continue;                // a single-column picture has no macroblock on odd diagonals
                 _recon(count, yT, uT, vT, dRecs.View, dCoeffs.View, dMeta.View, d, rowLo);
+                await pacer.LaunchedAsync();
             }
             for (int d = 0; d < diagonals; d++)
             {
                 WaveRange(d, mbCols, mbRows, out int rowLo, out int count);
                 if (count <= 0) continue;                // a single-column picture has no macroblock on odd diagonals
                 _loopFilter(count, yT, uT, vT, dRecs.View, dMeta.View, d, rowLo);
+                await pacer.LaunchedAsync();
             }
 
             if (!aligned)

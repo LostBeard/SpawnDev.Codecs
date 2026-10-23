@@ -493,19 +493,22 @@ public sealed class WebPDecoderGpu : IDisposable
         int stepBase = Vp8lLayout.StepBase(w, h);
         while (true)
         {
-            // Bounded launches of the resumable decode: the first batch covers the pixels (plus a margin for the headers,
-            // the sub-images and the prefix codes), then one int of the state tells whether more are needed.
+            // Bounded launches of the resumable decode in batches of LaunchPacer.WaitEvery (the GPU work in flight stays
+            // short); after each batch one int of the state tells whether more are needed.
             _work.View.SubView(stepBase, Vp8lLayout.StepInts).MemSetToZero();
-            long batch = (long)w * h / Vp8lDecodeGpu.StepBudget + 4;
+            long batch = Math.Min(LaunchPacer.WaitEvery, (long)w * h / Vp8lDecodeGpu.StepBudget + 4);
             bool finished = false;
             while (!finished)
             {
                 for (long i = 0; i < batch; i++)
+                {
                     _kernels.DecodeStep(file, payloadOffset, payloadLength, w, h, poolCap, _meta.View, _work.View, _pool.View, _pixA.View, _tables.View);
+                    if ((i + 1) % LaunchPacer.FlushEvery == 0) _accelerator.Flush();
+                }
                 await _accelerator.SynchronizeAsync();
                 var phase = await _work.View.SubView(stepBase + Vp8lDecodeGpu.SPhase, 1).CopyToHostAsync();
                 finished = phase[0] == Vp8lDecodeGpu.PhaseFinished;
-                batch = 16;
+                batch = LaunchPacer.WaitEvery;
             }
             m = await _meta.View.CopyToHostAsync();
             var err = (WebPError)m[WebPMeta.DecodeError];
@@ -541,7 +544,7 @@ public sealed class WebPDecoderGpu : IDisposable
                     _kernels.CrossColor(cur, _work.View, data, bits, curW, curW * h);
                     break;
                 case WebPMeta.KindPredictor:
-                    _kernels.Predictor(cur, _work.View, data, bits, curW, h);
+                    await _kernels.PredictorAsync(cur, _work.View, data, bits, curW, h);
                     break;
                 default:
                     _kernels.ColorIndex(cur, other, _work.View, data, m[rec + WebPMeta.TrCount], bits, curW, tw, h);
@@ -628,7 +631,7 @@ public sealed class WebPDecoderGpu : IDisposable
             plane = await DecodeVp8lPixelsAsync(file, off - 4, len + 4, w, h);
             _kernels.AlphaGreen(plane, (int)n);
         }
-        _kernels.AlphaUnfilter(plane, w, h, filter);
+        await _kernels.AlphaUnfilterAsync(plane, w, h, filter);
         _kernels.AlphaPack(plane, alpha, (int)n);
         await _accelerator.SynchronizeAsync();
         return frame;

@@ -311,7 +311,7 @@ public sealed class GifEncoderGpu : IDisposable
                 var frameView = rgba.SubView(f * frameBytes, frameBytes);
                 _quant.View.SubView(GifEncoderKernels.HistOff, GifEncoderKernels.HistInts).MemSetToZero();
                 _kernels.Hist(frameView, _quant.View, finfo, _gstate.View, _prm.View, f, pixels);
-                _kernels.MedianCut(_quant.View, finfo, _gstate.View, fpal, _prm.View, f, o.MaxColors);
+                await _kernels.MedianCutAsync(_quant.View, finfo, _gstate.View, fpal, _prm.View, f, o.MaxColors);
             }
         }
         _kernels.Layout(_gstate.View, finfo, _prm.View, dispView, frames);
@@ -336,6 +336,7 @@ public sealed class GifEncoderGpu : IDisposable
         ArrayView1D<int, Stride1D.Dense> err = default;
         if (fsFrames != null) err = _err.Ensure((long)pixels * 3);
 
+        var pacer = new LaunchPacer(_accelerator);
         for (int f0 = 0; f0 < frames; f0 += perBatch)
         {
             int n = Math.Min(perBatch, frames - f0);
@@ -349,7 +350,10 @@ public sealed class GifEncoderGpu : IDisposable
                     var rgbaFrame = rgba.SubView((f0 + j) * frameBytes, frameBytes);
                     var idxFrame = idx.SubView((long)j * pixels, pixels);
                     for (int wave = 0; wave < width + 2 * (height - 1); wave++)
+                    {
                         _kernels.FsWave(rgbaFrame, idxFrame, err, fpal, finfo, _prm.View, wave, f0 + j, height);
+                        await pacer.LaunchedAsync();
+                    }
                 }
             }
             payload.SubView(0, (long)n * geo.PayloadWords).MemSetToZero();
@@ -361,7 +365,10 @@ public sealed class GifEncoderGpu : IDisposable
                 hash.SubView(0, (long)threads * GifEncoderKernels.HashSlots).MemSetToZero();
                 _kernels.LzwInit(idx, seg, lzwState, finfo, _prm.View, f0, s, geo.SegBound, threads);
                 for (int step = 0; step < lzwSteps; step++)
+                {
                     _kernels.LzwStep(idx, seg, segInfo, hash, finfo, _prm.View, lzwState, f0, s, geo.SegBound, threads);
+                    await pacer.LaunchedAsync();
+                }
             }
             _kernels.SegOffsets(segInfo, segOff, finfo, _prm.View, f0, n);
             _kernels.FrameOffsets(_gstate.View, finfo, f0, n);

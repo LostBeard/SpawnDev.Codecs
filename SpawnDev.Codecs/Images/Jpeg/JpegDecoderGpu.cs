@@ -444,6 +444,7 @@ public sealed class JpegDecoderGpu : IDisposable
              .CopyFromCPU(ref layout.HostSlots[0], layout.HostSlots.Length);
 
         _kernels.ClearCoef(_coef.View, (int)layout.TotalCoefs);
+        var pacer = new LaunchPacer(_accelerator);
         for (int s = 0; s < layout.Scans.Length; s++)
         {
             var si = layout.Scans[s];
@@ -454,8 +455,11 @@ public sealed class JpegDecoderGpu : IDisposable
             int budget = Math.Max(1, BlocksPerDispatch / Math.Max(1, si.BlocksPerMcu));
             int rounds = (int)((perSegment + budget - 1) / budget);
             for (int r = 0; r < Math.Max(1, rounds); r++)
+            {
                 _kernels.DecodeScan(file, _coef.View, _meta.View, _huff.View, _segs.View, _consts.View, _state.View,
                     s, si.SegmentCount, budget, r);
+                await pacer.LaunchedAsync();
+            }
         }
         _kernels.Idct(_coef.View, _planes.View, _meta.View, layout.TotalBlocks);
         _kernels.ColorConvert(_planes.View, _meta.View, colorTarget, layout.Width, layout.Width * layout.Height);

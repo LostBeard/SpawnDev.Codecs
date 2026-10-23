@@ -53,10 +53,13 @@ public sealed class WebPKernels : IDisposable
     private readonly Action<Index1D, ArrayView<byte>> _clearAll;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, int, int, int, int, int> _composite;
 
+    private readonly LaunchPacer _pacer;
+
     /// <summary>Compile the kernels.</summary>
     public WebPKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        _pacer = new LaunchPacer(accelerator);
         _scan = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, int>(ScanKernel);
         _decode = accelerator.LoadAutoGroupedStreamKernel<
@@ -117,11 +120,14 @@ public sealed class WebPKernels : IDisposable
     public const int PredictorPixelsPerLaunch = 16384;
 
     /// <summary>Inverse predictor transform, in place: one thread in raster order, cut into launches of whole rows.</summary>
-    public void Predictor(ArrayView<uint> pix, ArrayView<int> work, int dataBase, int bits, int width, int height)
+    public async ValueTask PredictorAsync(ArrayView<uint> pix, ArrayView<int> work, int dataBase, int bits, int width, int height)
     {
         int rows = Math.Max(1, PredictorPixelsPerLaunch / Math.Max(1, width));
         for (int y = 0; y < height; y += rows)
+        {
             _predictor(1, pix, work, dataBase, bits, width, height, y, Math.Min(rows, height - y));
+            await _pacer.LaunchedAsync();
+        }
     }
 
     /// <summary>Inverse colour indexing: <paramref name="src"/> (packed, width <paramref name="srcWidth"/>) to <paramref name="dst"/> (width <paramref name="width"/>).</summary>
@@ -146,14 +152,17 @@ public sealed class WebPKernels : IDisposable
     /// both directions, so it is one thread in raster order (an anti-diagonal wavefront can replace it later), cut into
     /// launches of whole rows (<see cref="PredictorPixelsPerLaunch"/> samples) so no launch holds the GPU long.
     /// </summary>
-    public void AlphaUnfilter(ArrayView<uint> plane, int width, int height, int filter)
+    public async ValueTask AlphaUnfilterAsync(ArrayView<uint> plane, int width, int height, int filter)
     {
         if (filter == 0) return;
         if (filter == 3)
         {
             int rows = Math.Max(1, PredictorPixelsPerLaunch / Math.Max(1, width));
             for (int y = 0; y < height; y += rows)
+            {
                 _alphaUnfilter(1, plane, width, height, filter, y, Math.Min(rows, height - y));
+                await _pacer.LaunchedAsync();
+            }
             return;
         }
         _alphaUnfilter(1, plane, width, height, filter, 0, 0);
