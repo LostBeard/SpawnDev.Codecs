@@ -386,4 +386,53 @@ public abstract partial class CodecsTestBase
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
+
+    // ---- bounded launches: images that need many launches of every resumable stage ----
+
+    /// <summary>
+    /// 1500x900 RGBA: rows wider than one filter-cost segment, 83 blocks in three waves, layout and CRC pieces per chunk;
+    /// the host reader checks every chunk CRC, the Adler-32 and the pixels, and the GPU decoder reads it back too.
+    /// </summary>
+    [TestMethod(Timeout = 600000)]
+    public async Task PngEncoderGpu_LargeImage_ManyBlocks_RoundTripsOnHostReader()
+    {
+        const int w = 1500, h = 900;
+        var src = PicturePixels(w, h, 0x5E0B, opaque: false, gray: false);
+        var file = await EncodePngManagedAsync(src, w, h, null);
+        var png = ReadPngOnHost(file);
+        True(png.IdatCount > 64, $"expected many IDAT blocks, got {png.IdatCount}");
+        True(png.FilterTypes.Distinct().Count() >= 2, "adaptive filtering should mix filter types");
+        AssertPixelsEqual(src, png.Rgba8, "1500x900 host reader");
+
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var dec = new PngDecoderGpu(acc);
+            AssertPixelsEqual(src, (await dec.DecodeAsync(file)).Pixels, "1500x900 GPU decoder");
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    /// <summary>
+    /// Level 3 with 1 MiB blocks (IDAT chunks of 100+ CRC pieces) and a lazy-parse compare budget far below what the
+    /// blocks need, so the parse finishes only through the host's unfinished-parse loop: same bytes as the default budget.
+    /// </summary>
+    [TestMethod(Timeout = 600000)]
+    public async Task PngEncoderGpu_Level3_BigBlocks_SmallCompareBudget_SameBytes()
+    {
+        const int w = 1200, h = 700;
+        var src = PicturePixels(w, h, 0x5E0C, opaque: false, gray: false);
+        var options = new PngEncodeOptions { CompressionLevel = 3, BlockSize = 1 << 20 };
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var normal = new PngEncoderGpu(acc);
+            using var starved = new PngEncoderGpu(acc) { ParseCompareBudget = 4096 };
+            byte[] a = await normal.EncodeAsync(src, w, h, options);
+            byte[] b = await starved.EncodeAsync(src, w, h, options);
+            EqualBytes(a, b, "level 3 PNG with a 4096-compare budget vs the default budget");
+            AssertPixelsEqual(src, ReadPngOnHost(b).Rgba8, "1200x700 level 3 host reader");
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
 }

@@ -91,8 +91,13 @@ public sealed class PngEncoderGpu : IDisposable
     private readonly StageBuffer<byte> _filtered;
     private readonly StageBuffer<byte> _header;
     private readonly StageBuffer<int> _layout;
+    private readonly StageBuffer<int> _filterCosts;
+    private readonly StageBuffer<uint> _crcPieces;
     private readonly StageBuffer<byte> _stageIn;
     private readonly StageBuffer<byte> _stageOut;
+
+    /// <summary>Compare budget of a lazy (level 3) parse launch (tests lower it; the output does not depend on it).</summary>
+    internal int ParseCompareBudget { get; set; } = DeflateGpu.ParseCompareBudget;
 
     /// <summary>Compile the kernels.</summary>
     /// <param name="accelerator">The accelerator.</param>
@@ -104,12 +109,16 @@ public sealed class PngEncoderGpu : IDisposable
         _wave = threadsPerWave;
         _kernels = new PngEncodeKernels(accelerator);
         _meta = accelerator.Allocate1D<int>(PngEncMeta.Size);
-        _crcTable = accelerator.Allocate1D<uint>(256);
-        _crcTable.View.CopyFromCPU(Crc32Gpu.BuildTable());
+        // CRC table + the zero-byte shift of one CRC piece (chunk CRCs are computed in parallel pieces).
+        uint[] crcTable = Crc32Gpu.BuildTableWithShift();
+        _crcTable = accelerator.Allocate1D<uint>(crcTable.Length);
+        _crcTable.View.CopyFromCPU(crcTable);
         _raw = new StageBuffer<byte>(accelerator);
         _filtered = new StageBuffer<byte>(accelerator);
         _header = new StageBuffer<byte>(accelerator);
         _layout = new StageBuffer<int>(accelerator);
+        _filterCosts = new StageBuffer<int>(accelerator);
+        _crcPieces = new StageBuffer<uint>(accelerator);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
     }
@@ -208,22 +217,31 @@ public sealed class PngEncoderGpu : IDisposable
         meta[PngEncMeta.Height] = height;
         meta[PngEncMeta.FilterMode] = (int)options.Filter;
         meta[PngEncMeta.HeaderLength] = header.Length;
+        int filterSegments = PngEncodeKernels.FilterSegments(rowBytes);
+        meta[PngEncMeta.FilterSegments] = filterSegments;
         _meta.View.CopyFromCPU(ref meta[0], meta.Length);
 
+        bool adaptive = options.Filter == PngFilterMode.Adaptive;
         _raw.Ensure(filteredL);
         _filtered.Ensure(filteredL);
+        _filterCosts.Ensure(adaptive ? (long)height * filterSegments * 5 : 1);
         _kernels.Pack(rgba, _raw.View, _meta.View, (int)pixels);
-        _kernels.Filter(_raw.View, _filtered.View, _meta.View, height);
+        _kernels.Filter(_raw.View, _filtered.View, _filterCosts.View, _meta.View, height, rowBytes, adaptive);
 
         if (!_runners.TryGetValue(options.BlockSize, out var runner))
         {
             runner = new DeflateBlockRunner(_accelerator, options.BlockSize, _wave);
             _runners[options.BlockSize] = runner;
         }
-        runner.Run(_filtered.View, filteredLen, options.CompressionLevel);
-        _layout.Ensure(runner.BlockCount + 1);
-        _kernels.Layout(runner.Res, runner.Prm, _layout.View, _meta.View);
-        _kernels.Frame(runner.Slots, _header.View, output, runner.Res, _layout.View, runner.Prm, _crcTable.View, _meta.View, runner.BlockCount);
+        runner.ParseCompareBudget = ParseCompareBudget;
+        int blocks = DeflateBlockRunner.BlocksFor(filteredLen, options.BlockSize);
+        int piecesPerChunk = PngEncodeKernels.MaxCrcPiecesPerChunk(options.BlockSize);
+        _layout.Ensure(blocks + 1);
+        _crcPieces.Ensure((long)blocks * piecesPerChunk);
+        await runner.RunAsync(_filtered.View, filteredLen, options.CompressionLevel);
+        _kernels.Layout(runner.Res, runner.Prm, _layout.View, _meta.View, blocks);
+        _kernels.Frame(runner.Slots, _header.View, header.Length, output, runner.Res, _layout.View, runner.Prm,
+            _crcTable.View, _crcPieces.View, _meta.View, blocks, (int)runner.SlotBytes, piecesPerChunk);
         await _accelerator.SynchronizeAsync();
 
         int total = (await _meta.View.SubView(PngEncMeta.Total, 1).CopyToHostAsync())[0];
@@ -274,6 +292,8 @@ public sealed class PngEncoderGpu : IDisposable
         _filtered.Dispose();
         _header.Dispose();
         _layout.Dispose();
+        _filterCosts.Dispose();
+        _crcPieces.Dispose();
         _stageIn.Dispose();
         _stageOut.Dispose();
     }

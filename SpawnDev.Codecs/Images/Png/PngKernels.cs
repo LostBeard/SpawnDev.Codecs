@@ -3,20 +3,27 @@
 // The PNG decode kernels. Every stage of the decode runs on the accelerator; the host only dispatches and
 // reads back a few scalars:
 //
-//   1. ScanKernel    (1 thread)   walks the chunk list: chunk table, IDAT gather table, IHDR/PLTE/tRNS/acTL facts.
-//   2. CrcKernel     (1 thread per chunk)  verifies critical-chunk CRC-32s.
+//   1. Scan          (resumable, 1 thread)  walks the chunk list: chunk table, IDAT gather table, IHDR/PLTE/tRNS/acTL
+//                                    facts, and the CRC piece table. ScanChunks chunks per launch.
+//   2. CrcPiece      (1 thread per CRC piece)  CRC-32 of one Crc32Gpu.PieceBytes piece of a chunk.
+//      CrcCombine    (1 thread per chunk, resumable)  folds the pieces of each chunk, verifies critical-chunk CRCs.
 //   3. GatherKernel  (1 thread per byte)   concatenates the IDAT payloads into one zlib stream.
-//   4. InflateKernel (1 thread)   zlib -> filtered scanlines (Compression/InflateKernel).
-//   5. UnfilterKernel(1 thread)   reverses the per-scanline filters, in place.
+//   4. InflateKernel (resumable, 1 thread) zlib -> filtered scanlines (Compression/InflateKernel).
+//   5. Unfilter      (1 thread per filter byte lane)  reverses the per-scanline filters, in place, UnfilterLaneBytes
+//                                    bytes per lane per launch.
 //   6. ToRgbaKernel  (1 thread per output pixel)  samples -> RGBA8 / RGBA16: palette, tRNS, bit depths 1..16,
 //                                  gray / RGB / gray-alpha / RGBA, Adam7 de-interlacing.
 //
 // Inflate and unfilter are sequential dependency chains (each output byte depends on earlier ones), so per
-// the library's cardinal rule they are single GPU threads: still accelerator-resident, never on the host.
+// the library's cardinal rule they run on single GPU threads (unfilter: one per byte lane, the lanes never
+// read each other): still accelerator-resident, never on the host. No launch does work that grows with the
+// file: every serial stage is a chain of bounded launches whose count the host knows from the sizes it
+// already has (a long launch stalls the desktop compositor and trips the OS GPU watchdog).
 // All scalar metadata travels in one shared int buffer (PngMeta) so a kernel and the host cannot disagree.
 
 using ILGPU;
 using ILGPU.Runtime;
+using SpawnDev.Codecs.Compression;
 
 namespace SpawnDev.Codecs.Images.Png;
 
@@ -31,38 +38,80 @@ public sealed class PngKernels : IDisposable
     private const uint TypeActl = 0x6163544C;
     private const uint TypeSrgb = 0x73524742;
 
+    /// <summary>Chunks one scan launch walks at most.</summary>
+    public const int ScanChunks = 4096;
+
+    /// <summary>
+    /// Bytes one unfilter lane reverses per launch. One thread per filter byte lane (bpp lanes) walks its bytes in
+    /// scanline order; 32 KiB is about 2 ms on a desktop GPU.
+    /// </summary>
+    public const int UnfilterLaneBytes = 32768;
+
+    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _scanInit;
     private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _scan;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>> _crc;
+    private readonly Action<Index1D, ArrayView<int>> _scanFinish;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, ArrayView<int>> _crcPiece;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, int> _crcCombine;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>> _gather;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _unfilter;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, int, int> _unfilter;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _toRgba;
 
     /// <summary>Compile the kernels.</summary>
     public PngKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        _scanInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, ArrayView<int>>(ScanInitKernel);
         _scan = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(ScanKernel);
-        _crc = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>>(CrcKernel);
+        _scanFinish = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(ScanFinishKernel);
+        _crcPiece = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, ArrayView<int>>(CrcPieceKernel);
+        _crcCombine = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, int>(CrcCombineKernel);
         _gather = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>>(GatherKernel);
         _unfilter = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<int>>(UnfilterKernel);
+            Index1D, ArrayView<byte>, ArrayView<int>, int, int>(UnfilterKernel);
         _toRgba = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(ToRgbaKernel);
     }
 
-    /// <summary>Chunk scan: fills <paramref name="chunks"/> (4 ints per chunk), <paramref name="idat"/> (3 per IDAT) and <paramref name="meta"/>.</summary>
+    /// <summary>Upper bound of the chunks a file of <paramref name="fileLength"/> bytes holds (each chunk is at least 12 bytes).</summary>
+    public static int MaxChunks(int fileLength, int chunkCapacity) =>
+        (int)Math.Min(chunkCapacity, Math.Max(0, fileLength - 8) / 12 + 1);
+
+    /// <summary>Upper bound of the CRC pieces of a file's chunks (the size the piece buffer of <see cref="CheckCrc"/> needs).</summary>
+    public static long MaxCrcPieces(int fileLength, int chunkCapacity) =>
+        (long)Crc32Gpu.PiecesOf(Math.Max(1, fileLength)) + MaxChunks(fileLength, chunkCapacity);
+
+    /// <summary>
+    /// Chunk scan: fills <paramref name="chunks"/> (4 ints per chunk: type, data offset, length, first CRC piece),
+    /// <paramref name="idat"/> (3 per IDAT) and <paramref name="meta"/>. A set-up launch, then launches of
+    /// <see cref="ScanChunks"/> chunks each (as many as the file can hold), then a finishing launch.
+    /// </summary>
     public void Scan(ArrayView<byte> file, int fileLength, ArrayView<int> chunks, ArrayView<int> idat, ArrayView<int> meta, int chunkCapacity)
     {
-        _scan(1, file, fileLength, chunks, idat, meta, chunkCapacity);
+        _scanInit(1, file, fileLength, meta);
+        // One iteration per chunk plus the one that ends the walk (IEND, an error, or a full table).
+        int steps = (MaxChunks(fileLength, chunkCapacity) + 1 + ScanChunks - 1) / ScanChunks;
+        for (int i = 0; i < steps; i++) _scan(1, file, fileLength, chunks, idat, meta, chunkCapacity);
+        _scanFinish(1, meta);
     }
 
-    /// <summary>CRC check of up to <paramref name="chunkCapacity"/> chunks (extra threads exit at once).</summary>
-    public void CheckCrc(ArrayView<byte> file, ArrayView<int> chunks, ArrayView<uint> crcTable, ArrayView<int> meta, int chunkCapacity)
+    /// <summary>
+    /// CRC check of the scanned chunks of a file of <paramref name="fileLength"/> bytes: piece CRCs in parallel into
+    /// <paramref name="pieces"/> (at least <see cref="MaxCrcPieces"/> uints), then bounded combine launches per chunk.
+    /// <paramref name="crcTable"/> is <see cref="Crc32Gpu.BuildTableWithShift"/>. Surplus threads exit at once.
+    /// </summary>
+    public void CheckCrc(
+        ArrayView<byte> file, int fileLength, ArrayView<int> chunks, ArrayView<uint> crcTable, ArrayView<uint> pieces,
+        ArrayView<int> meta, int chunkCapacity)
     {
-        _crc(chunkCapacity, file, chunks, crcTable, meta);
+        int maxChunks = MaxChunks(fileLength, chunkCapacity);
+        long maxPieces = MaxCrcPieces(fileLength, chunkCapacity);
+        _crcPiece((int)maxPieces, file, chunks, crcTable, pieces, meta);
+        int steps = Crc32Gpu.CombineSteps(Crc32Gpu.PiecesOf(Math.Max(1, fileLength)));
+        for (int s = 0; s < steps; s++) _crcCombine(maxChunks, file, chunks, crcTable, pieces, meta, s);
     }
 
     /// <summary>Concatenate the IDAT payloads into <paramref name="zlib"/> (<paramref name="idatTotal"/> bytes).</summary>
@@ -71,10 +120,16 @@ public sealed class PngKernels : IDisposable
         if (idatTotal > 0) _gather(idatTotal, file, idat, zlib, meta);
     }
 
-    /// <summary>Reverse the scanline filters of <paramref name="raw"/> in place.</summary>
-    public void Unfilter(ArrayView<byte> raw, ArrayView<int> meta)
+    /// <summary>
+    /// Reverse the scanline filters of the first <paramref name="rawSize"/> bytes of <paramref name="raw"/> in place
+    /// (<paramref name="filterBpp"/> = <see cref="PngMeta.FilterBytesPerPixel"/>): launches of
+    /// <see cref="UnfilterLaneBytes"/> bytes per lane, in order.
+    /// </summary>
+    public void Unfilter(ArrayView<byte> raw, ArrayView<int> meta, long rawSize, int filterBpp)
     {
-        _unfilter(1, raw, meta);
+        long chunk = (long)UnfilterLaneBytes * filterBpp;
+        for (long start = 0; start < rawSize; start += chunk)
+            _unfilter(filterBpp, raw, meta, (int)start, (int)Math.Min(rawSize, start + chunk));
     }
 
     /// <summary>Convert the unfiltered samples to RGBA8 / RGBA16 in <paramref name="output"/>.</summary>
@@ -84,7 +139,7 @@ public sealed class PngKernels : IDisposable
     }
 
     // ------------------------------------------------------------------
-    // 1. Chunk scan
+    // 1. Chunk scan (resumable)
     // ------------------------------------------------------------------
 
     private static uint Be32(ArrayView<byte> f, int p)
@@ -92,15 +147,12 @@ public sealed class PngKernels : IDisposable
         return ((uint)f[p] << 24) | ((uint)f[p + 1] << 16) | ((uint)f[p + 2] << 8) | f[p + 3];
     }
 
-    private static void ScanKernel(
-        Index1D _, ArrayView<byte> file, int fileLen,
-        ArrayView<int> chunks, ArrayView<int> idat, ArrayView<int> meta, int chunkCap)
+    private static void ScanInitKernel(Index1D _, ArrayView<byte> file, int fileLen, ArrayView<int> meta)
     {
         for (int i = 0; i < PngMeta.Size; i++) meta[i] = 0;
         meta[PngMeta.PlteOffset] = -1;
         meta[PngMeta.TrnsOffset] = -1;
 
-        int err = 0;
         int bad = 0;
         if (fileLen < 8)
         {
@@ -117,13 +169,26 @@ public sealed class PngKernels : IDisposable
             bad |= file[6] ^ 0x1A;
             bad |= file[7] ^ 0x0A;
         }
-        if (bad != 0) err = (int)PngError.BadSignature;
+        if (bad != 0) meta[PngMeta.Error] = (int)PngError.BadSignature;
+        meta[PngMeta.ScanPos] = 8;
+    }
 
-        int pos = 8;
-        int count = 0;
-        int idatCount = 0;
-        int idatTotal = 0;
-        int done = 0;
+    /// <summary>
+    /// Walks up to <see cref="ScanChunks"/> chunks from <see cref="PngMeta.ScanPos"/>; the running counts live in their
+    /// meta slots and the error in <see cref="PngMeta.Error"/>. A launch after IEND or an error does nothing.
+    /// </summary>
+    private static void ScanKernel(
+        Index1D _, ArrayView<byte> file, int fileLen,
+        ArrayView<int> chunks, ArrayView<int> idat, ArrayView<int> meta, int chunkCap)
+    {
+        int err = meta[PngMeta.Error];
+        int done = meta[PngMeta.ScanDone];
+        int pos = meta[PngMeta.ScanPos];
+        int count = meta[PngMeta.ChunkCount];
+        int idatCount = meta[PngMeta.IdatCount];
+        int idatTotal = meta[PngMeta.IdatTotal];
+        int pieces = meta[PngMeta.CrcPieces];
+        int walked = 0;
         bool scanning = (done == 0) & (err == 0);
         while (scanning)
         {
@@ -153,7 +218,9 @@ public sealed class PngKernels : IDisposable
                     chunks[count * 4 + 0] = (int)type;
                     chunks[count * 4 + 1] = dataOff;
                     chunks[count * 4 + 2] = (int)len;
-                    chunks[count * 4 + 3] = 0;
+                    // The CRC covers the 4 type bytes and the data, checksummed in pieces from this index on.
+                    chunks[count * 4 + 3] = pieces;
+                    pieces += Crc32Gpu.PiecesOf((int)len + 4);
                     count++;
 
                     if (count == 1)
@@ -212,37 +279,70 @@ public sealed class PngKernels : IDisposable
                     pos += 12 + (int)len;
                 }
             }
-            scanning = (done == 0) & (err == 0);
+            walked++;
+            scanning = (done == 0) & (err == 0) & (walked < ScanChunks);
         }
 
-        bool missingData = (err == 0) & (idatCount == 0);
-        if (missingData) err = (int)PngError.NoImageData;
         meta[PngMeta.Error] = err;
+        meta[PngMeta.ScanDone] = done;
+        meta[PngMeta.ScanPos] = pos;
         meta[PngMeta.ChunkCount] = count;
         meta[PngMeta.IdatTotal] = idatTotal;
         meta[PngMeta.IdatCount] = idatCount;
+        meta[PngMeta.CrcPieces] = pieces;
+    }
+
+    private static void ScanFinishKernel(Index1D _, ArrayView<int> meta)
+    {
+        bool missingData = (meta[PngMeta.Error] == 0) & (meta[PngMeta.IdatCount] == 0);
+        if (missingData) meta[PngMeta.Error] = (int)PngError.NoImageData;
     }
 
     // ------------------------------------------------------------------
     // 2. CRC verification (critical chunks only; ancillary CRC errors are ignored like libpng's default)
     // ------------------------------------------------------------------
 
-    private static void CrcKernel(
-        Index1D index, ArrayView<byte> file, ArrayView<int> chunks, ArrayView<uint> table, ArrayView<int> meta)
+    /// <summary>Thread <c>g</c>: the CRC of piece g (pieces of all chunks numbered in chunk order, see the scan).</summary>
+    private static void CrcPieceKernel(
+        Index1D index, ArrayView<byte> file, ArrayView<int> chunks, ArrayView<uint> table, ArrayView<uint> pieces,
+        ArrayView<int> meta)
+    {
+        int g = index.X;
+        if (g >= meta[PngMeta.CrcPieces]) return;
+        // Largest chunk k whose first piece is <= g (every chunk has at least one piece).
+        int lo = 0;
+        int hi = meta[PngMeta.ChunkCount] - 1;
+        while (lo < hi)
+        {
+            int mid = (lo + hi + 1) >> 1;
+            if (chunks[mid * 4 + 3] <= g) lo = mid; else hi = mid - 1;
+        }
+        int dataOff = chunks[lo * 4 + 1];
+        int len = chunks[lo * 4 + 2];
+        pieces[g] = Crc32Gpu.PieceOfRange(file, dataOff - 4, len + 4, g - chunks[lo * 4 + 3], table);
+    }
+
+    /// <summary>Thread <c>k</c>, combine launch <paramref name="step"/>: folds chunk k's pieces; the launch that folds its last one verifies it.</summary>
+    private static void CrcCombineKernel(
+        Index1D index, ArrayView<byte> file, ArrayView<int> chunks, ArrayView<uint> table, ArrayView<uint> pieces,
+        ArrayView<int> meta, int step)
     {
         int i = index.X;
         if (i >= meta[PngMeta.ChunkCount]) return;
         uint type = (uint)chunks[i * 4 + 0];
         int dataOff = chunks[i * 4 + 1];
         int len = chunks[i * 4 + 2];
-        // The CRC covers the 4 type bytes and the data.
-        uint c = Compression.Crc32Gpu.Update(Compression.Crc32Gpu.Seed, file, dataOff - 4, len + 4, table);
-        uint crc = Compression.Crc32Gpu.Finish(c);
-        uint stored = Be32(file, dataOff + len);
-        bool critical = ((type >> 24) & 0x20u) == 0;
-        bool mismatch = crc != stored;
-        if (mismatch & critical)
-            meta[PngMeta.BadCrcChunk] = i + 1;
+        int at = chunks[i * 4 + 3];
+        int finished = Crc32Gpu.CombineStep(pieces, at, Crc32Gpu.PiecesOf(len + 4), step, table);
+        if (finished != 0)
+        {
+            uint crc = Crc32Gpu.Finish(pieces[at]);
+            uint stored = Be32(file, dataOff + len);
+            bool critical = ((type >> 24) & 0x20u) == 0;
+            bool mismatch = crc != stored;
+            if (mismatch & critical)
+                meta[PngMeta.BadCrcChunk] = i + 1;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -283,58 +383,82 @@ public sealed class PngKernels : IDisposable
         return r;
     }
 
-    private static void UnfilterKernel(Index1D _, ArrayView<byte> raw, ArrayView<int> meta)
+    /// <summary>
+    /// Lane <c>index</c> (0 .. bpp-1) reverses the filters of the bytes in [<paramref name="start"/>,
+    /// <paramref name="end"/>) of the inflated buffer whose scanline byte index is congruent to the lane mod bpp. Every
+    /// byte a filter reads (left: i - bpp, up: the previous scanline's i, up-left: its i - bpp) is in the same lane, so
+    /// the lanes never read each other, and each lane walks its bytes in scanline order: launches over consecutive
+    /// ranges reproduce the serial unfilter exactly.
+    /// </summary>
+    private static void UnfilterKernel(Index1D index, ArrayView<byte> raw, ArrayView<int> meta, int start, int end)
     {
+        int lane = index.X;
         int passCount = meta[PngMeta.PassCount];
         int bpp = meta[PngMeta.FilterBytesPerPixel];
         int badFilter = 0;
-        for (int pass = 0; pass < passCount; pass++)
+        int pos = start;
+        bool going = pos < end;
+        while (going)
         {
+            // The pass holding pos (passes without pixels own no bytes).
+            int pass = 0;
+            for (int p = 0; p < passCount; p++)
+            {
+                int ep = PngMeta.PassTable + p * PngMeta.PassStride;
+                int poff = meta[ep + PngMeta.PassOffset];
+                int prows = meta[ep + PngMeta.PassHeight];
+                int psize = prows * (meta[ep + PngMeta.PassRowBytes] + 1);
+                bool holds = (prows > 0) & (meta[ep + PngMeta.PassWidth] > 0) & (pos >= poff) & (pos < poff + psize);
+                if (holds) pass = p;
+            }
             int e = PngMeta.PassTable + pass * PngMeta.PassStride;
             int off = meta[e + PngMeta.PassOffset];
-            int rows = meta[e + PngMeta.PassHeight];
-            int width = meta[e + PngMeta.PassWidth];
             int rb = meta[e + PngMeta.PassRowBytes];
-            bool hasPixels = (rows > 0) & (width > 0);
-            if (hasPixels)
+            int stride = rb + 1;
+            int y = (pos - off) / stride;
+            int rowStart = off + y * stride;
+            int segEnd = rowStart + stride;
+            if (segEnd > end) segEnd = end;
+            int i0 = pos - rowStart - 1;
+            if (i0 < 0) i0 = 0;
+            int i1 = segEnd - rowStart - 1;
+
+            int ft = raw[rowStart];
+            int cur = rowStart + 1;
+            int prev = cur - stride;
+            if (ft > 4)
             {
-                int stride = rb + 1;
-                for (int y = 0; y < rows; y++)
+                badFilter = 1;
+            }
+            else if (ft != 0)
+            {
+                // First byte index >= i0 of this lane.
+                int i = i0 + (lane - i0 % bpp + bpp) % bpp;
+                for (; i < i1; i += bpp)
                 {
-                    int rowStart = off + y * stride;
-                    int ft = raw[rowStart];
-                    int cur = rowStart + 1;
-                    int prev = cur - stride;
-                    if (ft > 4)
+                    int x = raw[cur + i];
+                    int a = 0;
+                    int c = 0;
+                    if (i >= bpp)
                     {
-                        badFilter = 1;
+                        a = raw[cur + i - bpp];
+                        if (y > 0) c = raw[prev + i - bpp];
                     }
-                    else if (ft != 0)
-                    {
-                        for (int i = 0; i < rb; i++)
-                        {
-                            int x = raw[cur + i];
-                            int a = 0;
-                            int c = 0;
-                            if (i >= bpp)
-                            {
-                                a = raw[cur + i - bpp];
-                                if (y > 0) c = raw[prev + i - bpp];
-                            }
-                            int b = 0;
-                            if (y > 0) b = raw[prev + i];
-                            int v;
-                            if (ft == 1) v = x + a;
-                            else if (ft == 2) v = x + b;
-                            else if (ft == 3) v = x + ((a + b) >> 1);
-                            else v = x + Paeth(a, b, c);
-                            raw[cur + i] = (byte)v;
-                        }
-                    }
+                    int b = 0;
+                    if (y > 0) b = raw[prev + i];
+                    int v;
+                    if (ft == 1) v = x + a;
+                    else if (ft == 2) v = x + b;
+                    else if (ft == 3) v = x + ((a + b) >> 1);
+                    else v = x + Paeth(a, b, c);
+                    raw[cur + i] = (byte)v;
                 }
             }
+            pos = segEnd;
+            going = pos < end;
         }
-        if (badFilter != 0) meta[PngMeta.Error] = (int)PngError.BadFilter;
+        bool report = (badFilter != 0) & (lane == 0);
+        if (report) meta[PngMeta.Error] = (int)PngError.BadFilter;
     }
 
     // ------------------------------------------------------------------

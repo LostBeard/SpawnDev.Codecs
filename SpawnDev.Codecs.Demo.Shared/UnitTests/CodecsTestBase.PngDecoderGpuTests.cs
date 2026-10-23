@@ -205,4 +205,111 @@ public abstract partial class CodecsTestBase
         var png = ReadEmbedded(PngFixturePrefix + "rgba8.png");
         await AssertPngRejectedAsync(png.AsSpan(0, png.Length - 20).ToArray(), "truncated", "file cut before IEND");
     }
+
+    // ---- bounded launches: files that need many launches of every resumable stage ----
+
+    private static void AppendHostChunk(MemoryStream file, string type, ReadOnlySpan<byte> data)
+    {
+        var body = new byte[4 + data.Length];
+        for (int i = 0; i < 4; i++) body[i] = (byte)type[i];
+        data.CopyTo(body.AsSpan(4));
+        uint len = (uint)data.Length;
+        file.Write(new[] { (byte)(len >> 24), (byte)(len >> 16), (byte)(len >> 8), (byte)len });
+        file.Write(body);
+        uint crc = HostCrc(body);
+        file.Write(new[] { (byte)(crc >> 24), (byte)(crc >> 16), (byte)(crc >> 8), (byte)crc });
+    }
+
+    /// <summary>
+    /// A non-interlaced PNG built on the host: random filtered scanlines whose filter types cycle 0..4 row by row,
+    /// compressed by .NET's zlib, the IDAT stream cut into chunks of <paramref name="idatChunk"/> bytes (0 = one chunk).
+    /// </summary>
+    private static byte[] BuildHostPng(int w, int h, int colorType, int depth, int seed, int idatChunk, System.IO.Compression.CompressionLevel level)
+    {
+        int channels = colorType switch { 0 => 1, 2 => 3, 4 => 2, _ => 4 };
+        int rowBytes = w * channels * depth / 8;
+        var raw = new byte[h * (rowBytes + 1)];
+        new Random(seed).NextBytes(raw);
+        for (int y = 0; y < h; y++) raw[y * (rowBytes + 1)] = (byte)(y % 5);
+        byte[] zlib = ZlibCompress(raw, level);
+
+        var file = new MemoryStream();
+        file.Write(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+        var ihdr = new byte[13];
+        ihdr[0] = (byte)(w >> 24); ihdr[1] = (byte)(w >> 16); ihdr[2] = (byte)(w >> 8); ihdr[3] = (byte)w;
+        ihdr[4] = (byte)(h >> 24); ihdr[5] = (byte)(h >> 16); ihdr[6] = (byte)(h >> 8); ihdr[7] = (byte)h;
+        ihdr[8] = (byte)depth;
+        ihdr[9] = (byte)colorType;
+        AppendHostChunk(file, "IHDR", ihdr);
+        int step = idatChunk > 0 ? idatChunk : zlib.Length;
+        for (int p = 0; p < zlib.Length; p += step)
+            AppendHostChunk(file, "IDAT", zlib.AsSpan(p, Math.Min(step, zlib.Length - p)));
+        AppendHostChunk(file, "IEND", ReadOnlySpan<byte>.Empty);
+        return file.ToArray();
+    }
+
+    private async Task AssertPngMatchesHostReaderAsync(byte[] png, bool sixteen, string what)
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            var host = ReadPngOnHost(png);
+            using var dec = new PngDecoderGpu(acc);
+            if (!sixteen)
+            {
+                var got = await dec.DecodeAsync(png);
+                var diff = ComparePixels(host.Rgba8, got.Pixels, 4, host.Width);
+                True(diff == null, $"{what}: {diff}");
+            }
+            else
+            {
+                var got = await dec.DecodeAsync(png, PixelFormat.Rgba16);
+                var expected = new byte[host.Rgba16.Length * 2];
+                for (int i = 0; i < host.Rgba16.Length; i++) { expected[2 * i] = (byte)host.Rgba16[i]; expected[2 * i + 1] = (byte)(host.Rgba16[i] >> 8); }
+                var diff = ComparePixels(expected, got.Pixels, 8, host.Width);
+                True(diff == null, $"{what}: {diff}");
+            }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    /// <summary>
+    /// 1600x1450 RGBA8 noise in ONE 9.3 MB IDAT chunk: inflate runs thousands of bounded launches, unfilter about 70
+    /// (launch ranges end mid-row), the chunk's CRC is over 1024 pieces so its combine takes two launches.
+    /// </summary>
+    [TestMethod(Timeout = 600000)]
+    public async Task PngDecoderGpu_LargeImage_OneBigIdat_MatchesHostReader() =>
+        await AssertPngMatchesHostReaderAsync(
+            BuildHostPng(1600, 1450, 6, 8, 0x7A01, 0, System.IO.Compression.CompressionLevel.Fastest), false, "1600x1450 RGBA8, one IDAT");
+
+    /// <summary>The CRC of a 1000+-piece chunk is checked after a multi-launch combine: a flipped byte in its last piece must be caught.</summary>
+    [TestMethod(Timeout = 600000)]
+    public async Task PngDecoderGpu_LargeImage_CorruptBigIdat_ReportsBadCrc()
+    {
+        var png = BuildHostPng(1600, 1450, 6, 8, 0x7A02, 0, System.IO.Compression.CompressionLevel.Fastest);
+        // IEND is the last 12 bytes; the IDAT CRC the 4 before them; flip a payload byte just before that.
+        png[png.Length - 12 - 4 - 100] ^= 0x10;
+        await AssertPngRejectedAsync(png, "bad CRC", "corrupt byte in the last CRC piece of a 9 MB IDAT");
+    }
+
+    /// <summary>RGB16 (6 filter-byte lanes), 700x500: unfilter launch ranges of 6 lanes end mid-row; RGBA16 output.</summary>
+    [TestMethod(Timeout = 600000)]
+    public async Task PngDecoderGpu_LargeRgb16_SixLanes_MatchesHostReader() =>
+        await AssertPngMatchesHostReaderAsync(
+            BuildHostPng(700, 500, 2, 16, 0x7A03, 0, System.IO.Compression.CompressionLevel.Optimal), true, "700x500 RGB16");
+
+    /// <summary>Gray8 (one lane), 2000x1000: the single-lane unfilter over many launches.</summary>
+    [TestMethod(Timeout = 600000)]
+    public async Task PngDecoderGpu_LargeGray8_OneLane_MatchesHostReader() =>
+        await AssertPngMatchesHostReaderAsync(
+            BuildHostPng(2000, 1000, 0, 8, 0x7A04, 65536, System.IO.Compression.CompressionLevel.Optimal), false, "2000x1000 gray8");
+
+    /// <summary>The IDAT stream cut into 8-byte chunks: over 9000 chunks, so the chunk scan takes three launches.</summary>
+    [TestMethod(Timeout = 600000)]
+    public async Task PngDecoderGpu_ManySmallIdatChunks_MatchesHostReader()
+    {
+        var png = BuildHostPng(160, 120, 6, 8, 0x7A05, 8, System.IO.Compression.CompressionLevel.Optimal);
+        True(ReadPngOnHost(png).IdatCount > 2 * PngKernels.ScanChunks, "the file must need several scan launches");
+        await AssertPngMatchesHostReaderAsync(png, false, "160x120 RGBA8 in 8-byte IDAT chunks");
+    }
 }

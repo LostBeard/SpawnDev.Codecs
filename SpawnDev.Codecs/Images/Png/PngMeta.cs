@@ -81,6 +81,12 @@ public static class PngMeta
     public const int BadCrcChunk = 18;
     /// <summary>1 when an sRGB chunk is present.</summary>
     public const int HasSrgb = 19;
+    /// <summary>File offset of the next chunk the resumable chunk scan reads.</summary>
+    public const int ScanPos = 20;
+    /// <summary>1 once the chunk scan has reached IEND.</summary>
+    public const int ScanDone = 21;
+    /// <summary>CRC pieces of all recorded chunks (each chunk's first piece index is slot 3 of its chunk-table entry).</summary>
+    public const int CrcPieces = 22;
 
     // ---- written by the host after it has read the scalars above ----
     /// <summary>Total bytes the inflated, filtered scanlines occupy (all Adam7 passes).</summary>
