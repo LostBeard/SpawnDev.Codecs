@@ -468,7 +468,9 @@ public sealed class GifDecoderGpu : IDisposable
         bool anySave = false;
         for (int f = 0; f <= target; f++)
             if (layout.Field(f, GifMeta.FrameDisposal) >= 3) anySave = true;
-        var saved = anySave ? _saved.Ensure((long)pixels * 4) : canvas;
+        // Without a dispose-to-previous frame no step touches the saved canvas, but it must still be a DIFFERENT buffer:
+        // WebGPU rejects two writable bindings of one buffer (the canvas passed twice failed pipeline validation).
+        var saved = _saved.Ensure(anySave ? (long)pixels * 4 : 4);
 
         // Plan the batches first so the index buffer is sized once, before any dispatch reads it.
         var batches = new List<(int First, int Count, long Bytes)>();

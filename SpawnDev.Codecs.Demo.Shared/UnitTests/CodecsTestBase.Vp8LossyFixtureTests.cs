@@ -376,7 +376,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp8FullKeyframeDecoderGpu_RandomCorruption_NeverHangsOrThrowsAnythingElse()
     {
         // Flip bytes, truncate, and splice random data into real frames: every outcome must be a normal decode (garbage

@@ -141,11 +141,11 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public Task GifDecoderGpu_PillowCompositing_EveryFrameOfEveryFixture_MatchesPillow()
         => GifEveryFrameMatchesAsync(GifCompositing.Pillow, "pil", 450);
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public Task GifDecoderGpu_WebCompositing_EveryFrameOfEveryFixture_MatchesSpecTruth()
         => GifEveryFrameMatchesAsync(GifCompositing.Web, "web", 430);
 
@@ -261,7 +261,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task GifDecoderGpu_ReadFrames_ReadInfo_And_LoopCount_ReportTheFileStructure()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

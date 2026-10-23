@@ -149,7 +149,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp9DequantizerComputeKernel_RandomSweep_MatchesCpuReference()
     {
         // Stress sweep: 256 random (baseQ, deltas) tuples across the legal

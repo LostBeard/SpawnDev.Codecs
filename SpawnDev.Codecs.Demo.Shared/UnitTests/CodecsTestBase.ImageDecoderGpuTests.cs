@@ -17,7 +17,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task ImageDecoderGpu_PngAndJpegFixtures_DispatchAndMatchPillow()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

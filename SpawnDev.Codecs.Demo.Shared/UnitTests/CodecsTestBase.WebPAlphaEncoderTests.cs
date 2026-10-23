@@ -266,7 +266,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPLosslessEncoderGpu_Alpha_ArrayViewOverload_WritesOnlyThePayload()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
