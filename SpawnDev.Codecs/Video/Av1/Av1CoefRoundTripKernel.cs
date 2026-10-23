@@ -64,7 +64,7 @@ public sealed class Av1CoefRoundTripKernel : IDisposable
             ArrayView<byte>, ArrayView<byte>, ArrayView<ushort>,
             ArrayView<int>, ArrayView<int>, ArrayView<byte>,
             ArrayView<long>, ArrayView<int>,
-            Av1CoefRoundTripParams>(RoundTripKernel);
+            Av1CoefRoundTripParams>(Av1CoefRoundTripRoundTripKernel);
     }
 
     /// <summary>
@@ -90,7 +90,7 @@ public sealed class Av1CoefRoundTripKernel : IDisposable
             parms);
     }
 
-    private static void RoundTripKernel(
+    private static void Av1CoefRoundTripRoundTripKernel(
         Index1D _,
         ArrayView<byte> scratchBytes,
         ArrayView<byte> constsByte,

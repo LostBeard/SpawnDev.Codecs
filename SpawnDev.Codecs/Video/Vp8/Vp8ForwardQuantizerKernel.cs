@@ -30,7 +30,7 @@ public sealed class Vp8ForwardQuantizerKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<short>, ArrayView<short>, int>(QuantizeKernel);
+            Index1D, ArrayView<short>, ArrayView<short>, ArrayView<short>, int>(Vp8ForwardQuantizerQuantizeKernel);
     }
 
     /// <summary>
@@ -53,7 +53,7 @@ public sealed class Vp8ForwardQuantizerKernel : IDisposable
     }
 
     /// <summary>Kernel body. One thread per 4x4 coef block.</summary>
-    private static void QuantizeKernel(
+    private static void Vp8ForwardQuantizerQuantizeKernel(
         Index1D blockIdx,
         ArrayView<short> coefs,
         ArrayView<short> dcQ,

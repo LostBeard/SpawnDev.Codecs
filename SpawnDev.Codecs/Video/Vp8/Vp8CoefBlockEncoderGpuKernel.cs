@@ -41,7 +41,7 @@ public sealed class Vp8CoefBlockEncoderTestKernel : IDisposable
             ArrayView<short>, ArrayView<int>, ArrayView<int>,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<long>,
-            int, int, int>(EncodeStreamsKernel);
+            int, int, int>(Vp8CoefBlockEncoderGpuEncodeStreamsKernel);
     }
 
     /// <summary>
@@ -68,7 +68,7 @@ public sealed class Vp8CoefBlockEncoderTestKernel : IDisposable
             outBuf, outLens, streamCount, blocksPerStream, outBufStride);
     }
 
-    private static void EncodeStreamsKernel(
+    private static void Vp8CoefBlockEncoderGpuEncodeStreamsKernel(
         Index1D streamIdx,
         ArrayView<short> coefs,
         ArrayView<int> ctxs,

@@ -25,7 +25,7 @@ public sealed class Vp9ForwardQuantizerGpuTestKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, int, int, int>(QuantizeKernel);
+            Index1D, ArrayView<int>, int, int, int>(Vp9ForwardQuantizerGpuQuantizeKernel);
     }
 
     /// <summary>Quantize a single block in place.</summary>
@@ -38,7 +38,7 @@ public sealed class Vp9ForwardQuantizerGpuTestKernel : IDisposable
         _kernel(1, coefs, count, dcQ, acQ);
     }
 
-    private static void QuantizeKernel(
+    private static void Vp9ForwardQuantizerGpuQuantizeKernel(
         Index1D _,
         ArrayView<int> coefs,
         int count,

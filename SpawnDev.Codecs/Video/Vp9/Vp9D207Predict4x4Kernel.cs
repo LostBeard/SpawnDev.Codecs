@@ -40,7 +40,7 @@ public sealed class Vp9D207Predict4x4Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, int, int>(D207Kernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, int, int>(Vp9D207Predict4x4D207Kernel);
     }
 
     /// <summary>Run D207 prediction on <paramref name="blockCount"/> blocks.</summary>
@@ -82,7 +82,7 @@ public sealed class Vp9D207Predict4x4Kernel : IDisposable
     }
 
     /// <summary>Kernel body. One thread per block; cols 0+1 in registers.</summary>
-    private static void D207Kernel(
+    private static void Vp9D207Predict4x4D207Kernel(
         Index1D blockIdx,
         ArrayView<byte> leftFlat,
         ArrayView<byte> dstFlat,

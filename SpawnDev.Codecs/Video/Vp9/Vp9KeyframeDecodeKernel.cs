@@ -1,6 +1,6 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
-// VP9 v1 keyframe decode kernel. Single-thread per frame. Symmetric
+// VP9 v1 keyframe decode kernel. One thread per frame. Symmetric
 // companion to Vp9FrameEntropyKernel + Vp9FrameSequentialEncodeKernel:
 // reads the bool-coded tile bitstream the encoder produced, walks
 // the partition tree in the same z-order, decodes per-MB skip /
@@ -24,7 +24,13 @@
 // Outputs:
 //   - yRecon, uRecon, vRecon planes filled in-place.
 //
-// V1 cap: max miColsAligned = 64 (frame width up to 512 pixels).
+// V1 cap: max miColsAligned = MaxMiColsAligned (frame width up to 4096 pixels).
+//
+// Bounded launches: a launch decodes at most LeavesPerLaunch 16x16 leaf slots of the superblock
+// z-order walk and stops (a whole-frame launch grew with the picture: 14 ms at test sizes on CUDA).
+// The above / left context arrays live in a device region (they were per-thread LocalMemory), the
+// bool decoder and the slot cursor in a small int state region; the host launches
+// ceil(slots / LeavesPerLaunch) steps.
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -34,46 +40,63 @@ using SpawnDev.ILGPU;
 namespace SpawnDev.Codecs.Video.Vp9;
 
 /// <summary>
-/// VP9 v1 keyframe decode kernel. Single thread per frame; reads
-/// the bool-coded tile bitstream and reconstructs the recon planes
-/// entirely on the accelerator.
+/// VP9 v1 keyframe decode kernel. One thread per frame in bounded resumable launches of
+/// <see cref="LeavesPerLaunch"/> leaf slots; reads the bool-coded tile bitstream and reconstructs the
+/// recon planes entirely on the accelerator.
 /// </summary>
+/// <remarks>Not thread-safe: the context and resumable-launch state buffers are owned by the instance.</remarks>
 public sealed class Vp9KeyframeDecodeKernel : IDisposable
 {
     /// <summary>Same v1 cap as the entropy kernel.</summary>
     public const int MaxMiColsAligned = Vp9FrameEntropyKernel.MaxMiColsAligned;
 
+    /// <summary>
+    /// Leaf slots (16x16 blocks of the superblock z-order walk) one launch decodes: token decode, DC prediction,
+    /// dequantize and 16x16 + two 8x8 inverse transforms each.
+    /// </summary>
+    public const int LeavesPerLaunch = 8;
+
+    private const int StStarted = 0;
+    private const int StNextSlot = 1;
+    private const int StDec = 2;
+    private const int StateInts = StDec + Vp8BoolDecoderGpu.StateInts;
+
     private readonly Accelerator _accelerator;
+    private readonly StageBuffer<byte> _ctx;
+    private readonly StageBuffer<int> _state;
     private readonly Action<
         Index1D,
         ArrayView<byte>,
         ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
         ArrayView<int>,
         ArrayView<byte>, ArrayView<ushort>,
-        int, int, int> _kernel;
+        ArrayView<byte>, ArrayView<int>,
+        int, int, int, int> _kernel;
 
     /// <summary>Compile.</summary>
     public Vp9KeyframeDecodeKernel(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
+        _ctx = new StageBuffer<byte>(accelerator);
+        _state = new StageBuffer<int>(accelerator);
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<byte>,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<int>,
             ArrayView<byte>, ArrayView<ushort>,
-            int, int, int>(DecodeFrameKernel);
+            ArrayView<byte>, ArrayView<int>,
+            int, int, int, int>(Vp9KeyframeDecodeStepKernel);
     }
 
     /// <summary>
-    /// Decode a single VP9 v1 keyframe tile. Caller has already
-    /// extracted scalar metadata from the uncompressed header (width,
-    /// height, baseQIndex, firstPartitionSize) and positioned
-    /// <paramref name="tileBytes"/> at the first byte after the
-    /// compressed header.
+    /// Decode a single VP9 v1 keyframe tile (bounded launches, paced with <see cref="LaunchPacer"/>; the work
+    /// is queued, not awaited to completion). Caller has already extracted scalar metadata from the
+    /// uncompressed header (width, height, baseQIndex, firstPartitionSize) and positioned
+    /// <paramref name="tileBytes"/> at the first byte after the compressed header.
     /// </summary>
-    public void Run(
+    public async Task RunAsync(
         ArrayView<byte> tileBytes,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
         ArrayView<int> dequant,
@@ -93,21 +116,34 @@ public sealed class Vp9KeyframeDecodeKernel : IDisposable
             throw new ArgumentException("byteConsts too short.", nameof(byteConsts));
         if (ushortConsts.Length < Vp9KeyframeConstantsGpu.UshortConstsTotalEntries)
             throw new ArgumentException("ushortConsts too short.", nameof(ushortConsts));
-        _kernel(1,
-            tileBytes,
-            yRecon, uRecon, vRecon,
-            dequant,
-            byteConsts, ushortConsts,
-            tileBytesLen, mbCols, mbRows);
+        var ctx = (await _ctx.EnsureDrainedAsync(Vp9FrameEntropyKernel.CtxBytes)).SubView(0, Vp9FrameEntropyKernel.CtxBytes);
+        var state = (await _state.EnsureDrainedAsync(StateInts)).SubView(0, StateInts);
+        ctx.MemSetToZero();
+        state.MemSetToZero();
+        int slots = (mbCols >> 2) * (mbRows >> 2) * 16;
+        int steps = (slots + LeavesPerLaunch - 1) / LeavesPerLaunch;
+        var pacer = new LaunchPacer(_accelerator);
+        for (int s = 0; s < steps; s++)
+        {
+            _kernel(1,
+                tileBytes,
+                yRecon, uRecon, vRecon,
+                dequant,
+                byteConsts, ushortConsts,
+                ctx, state,
+                tileBytesLen, mbCols, mbRows, LeavesPerLaunch);
+            await pacer.LaunchedAsync();
+        }
     }
 
-    private static void DecodeFrameKernel(
+    private static void Vp9KeyframeDecodeStepKernel(
         Index1D _,
         ArrayView<byte> tileBytes,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
         ArrayView<int> dequant,
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
-        int tileBytesLen, int mbCols, int mbRows)
+        ArrayView<byte> ctx, ArrayView<int> st,
+        int tileBytesLen, int mbCols, int mbRows, int leavesPerLaunch)
     {
         int yStride = mbCols * 16;
         int uvStride = mbCols * 8;
@@ -117,22 +153,23 @@ public sealed class Vp9KeyframeDecodeKernel : IDisposable
         int uvDcQ = dequant[2];
         int uvAcQ = dequant[3];
 
-        // Per-thread context arrays (same shape as encoder's entropy kernel).
-        var aboveYMode = LocalMemory.Allocate<byte>(MaxMiColsAligned * 2);
-        var aboveSkip = LocalMemory.Allocate<byte>(MaxMiColsAligned);
-        var abovePartCtx = LocalMemory.Allocate<byte>(MaxMiColsAligned);
-        var aboveTxSize = LocalMemory.Allocate<byte>(MaxMiColsAligned);
-        var aboveYEntropyCtx = LocalMemory.Allocate<byte>(MaxMiColsAligned * 2);
-        var aboveUEntropyCtx = LocalMemory.Allocate<byte>(MaxMiColsAligned);
-        var aboveVEntropyCtx = LocalMemory.Allocate<byte>(MaxMiColsAligned);
+        // Context arrays (same layout and sizes as the encoder's entropy kernel; device memory, carried
+        // between launches, zeroed by the host before the first one).
+        var aboveYMode = ctx.SubView(Vp9FrameEntropyKernel.CtxAboveYMode, MaxMiColsAligned * 2);
+        var aboveSkip = ctx.SubView(Vp9FrameEntropyKernel.CtxAboveSkip, MaxMiColsAligned);
+        var abovePartCtx = ctx.SubView(Vp9FrameEntropyKernel.CtxAbovePart, MaxMiColsAligned);
+        var aboveTxSize = ctx.SubView(Vp9FrameEntropyKernel.CtxAboveTx, MaxMiColsAligned);
+        var aboveYEntropyCtx = ctx.SubView(Vp9FrameEntropyKernel.CtxAboveYEnt, MaxMiColsAligned * 2);
+        var aboveUEntropyCtx = ctx.SubView(Vp9FrameEntropyKernel.CtxAboveUEnt, MaxMiColsAligned);
+        var aboveVEntropyCtx = ctx.SubView(Vp9FrameEntropyKernel.CtxAboveVEnt, MaxMiColsAligned);
 
-        var leftYMode = LocalMemory.Allocate<byte>(16);
-        var leftSkip = LocalMemory.Allocate<byte>(8);
-        var leftPartCtx = LocalMemory.Allocate<byte>(8);
-        var leftTxSize = LocalMemory.Allocate<byte>(8);
-        var leftYEntropyCtx = LocalMemory.Allocate<byte>(16);
-        var leftUEntropyCtx = LocalMemory.Allocate<byte>(8);
-        var leftVEntropyCtx = LocalMemory.Allocate<byte>(8);
+        var leftYMode = ctx.SubView(Vp9FrameEntropyKernel.CtxLeftYMode, 16);
+        var leftSkip = ctx.SubView(Vp9FrameEntropyKernel.CtxLeftSkip, 8);
+        var leftPartCtx = ctx.SubView(Vp9FrameEntropyKernel.CtxLeftPart, 8);
+        var leftTxSize = ctx.SubView(Vp9FrameEntropyKernel.CtxLeftTx, 8);
+        var leftYEntropyCtx = ctx.SubView(Vp9FrameEntropyKernel.CtxLeftYEnt, 16);
+        var leftUEntropyCtx = ctx.SubView(Vp9FrameEntropyKernel.CtxLeftUEnt, 8);
+        var leftVEntropyCtx = ctx.SubView(Vp9FrameEntropyKernel.CtxLeftVEnt, 8);
 
         // Per-block scratch.
         var coefsShort = LocalMemory.Allocate<short>(256);
@@ -143,101 +180,52 @@ public sealed class Vp9KeyframeDecodeKernel : IDisposable
         var aboveChroma = LocalMemory.Allocate<byte>(8);
         var leftChroma = LocalMemory.Allocate<byte>(8);
 
-        // Init above arrays.
-        for (int i = 0; i < MaxMiColsAligned * 2; i++) aboveYMode[i] = 0;
-        for (int i = 0; i < MaxMiColsAligned; i++) { aboveSkip[i] = 0; abovePartCtx[i] = 0; aboveTxSize[i] = 0; }
-        for (int i = 0; i < MaxMiColsAligned * 2; i++) aboveYEntropyCtx[i] = 0;
-        for (int i = 0; i < MaxMiColsAligned; i++) { aboveUEntropyCtx[i] = 0; aboveVEntropyCtx[i] = 0; }
-
-        // Initialize bool decoder + consume VP9 marker bit.
-        var state = Vp8BoolDecoderGpu.Init(tileBytes, 0, tileBytesLen);
-        Vp8BoolDecoderGpu.DecodeBool(ref state, tileBytes, 128);
-
-        int sbRows = mbRows >> 2;
-        int sbCols = mbCols >> 2;
-
-        for (int sbRow = 0; sbRow < sbRows; sbRow++)
+        Vp8BoolDecoderGpuState state;
+        if (st[StStarted] == 0)
         {
-            for (int i = 0; i < 16; i++) { leftYMode[i] = 0; leftYEntropyCtx[i] = 0; }
-            for (int i = 0; i < 8; i++) { leftSkip[i] = 0; leftPartCtx[i] = 0; leftTxSize[i] = 0; leftUEntropyCtx[i] = 0; leftVEntropyCtx[i] = 0; }
-
-            for (int sbCol = 0; sbCol < sbCols; sbCol++)
-            {
-                DecodeSb64(
-                    ref state, tileBytes,
-                    yRecon, uRecon, vRecon,
-                    byteConsts, ushortConsts,
-                    aboveYMode, aboveSkip, abovePartCtx, aboveTxSize,
-                    aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
-                    leftYMode, leftSkip, leftPartCtx, leftTxSize,
-                    leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
-                    coefsShort, idctScratch, tokenCache,
-                    aboveLuma, leftLuma, aboveChroma, leftChroma,
-                    yDcQ, yAcQ, uvDcQ, uvAcQ,
-                    sbRow, sbCol, yStride, uvStride, mbCols);
-            }
+            // Initialize bool decoder + consume VP9 marker bit.
+            state = Vp8BoolDecoderGpu.Init(tileBytes, 0, tileBytesLen);
+            Vp8BoolDecoderGpu.DecodeBool(ref state, tileBytes, 128);
+            st[StStarted] = 1;
         }
-    }
-
-    private static void DecodeSb64(
-        ref Vp8BoolDecoderGpuState state, ArrayView<byte> tileBytes,
-        ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
-        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
-        ArrayView<byte> aboveYMode, ArrayView<byte> aboveSkip,
-        ArrayView<byte> abovePartCtx, ArrayView<byte> aboveTxSize,
-        ArrayView<byte> aboveYEntropyCtx, ArrayView<byte> aboveUEntropyCtx, ArrayView<byte> aboveVEntropyCtx,
-        ArrayView<byte> leftYMode, ArrayView<byte> leftSkip,
-        ArrayView<byte> leftPartCtx, ArrayView<byte> leftTxSize,
-        ArrayView<byte> leftYEntropyCtx, ArrayView<byte> leftUEntropyCtx, ArrayView<byte> leftVEntropyCtx,
-        ArrayView<short> coefsShort, ArrayView<int> idctScratch, ArrayView<byte> tokenCache,
-        ArrayView<byte> aboveLuma, ArrayView<byte> leftLuma, ArrayView<byte> aboveChroma, ArrayView<byte> leftChroma,
-        int yDcQ, int yAcQ, int uvDcQ, int uvAcQ,
-        int sbRow, int sbCol, int yStride, int uvStride, int mbCols)
-    {
-        int miRow64 = sbRow * 8;
-        int miCol64 = sbCol * 8;
-
-        // Block64x64 partition: SPLIT (verify by reading 3 bits).
-        ConsumePartitionSplit(ref state, tileBytes, byteConsts, sizeIdx: 3, bsl: 3, miRow: miRow64, miCol: miCol64, abovePartCtx, leftPartCtx);
-
-        for (int q32 = 0; q32 < 4; q32++)
+        else
         {
+            state = Vp8BoolDecoderGpu.Load(st, StDec);
+        }
+
+        int sbCols = mbCols >> 2;
+        int slotCount = (mbRows >> 2) * sbCols * 16;
+        int slot = st[StNextSlot];
+        int slotEnd = slot + leavesPerLaunch;
+        if (slotEnd > slotCount) slotEnd = slotCount;
+        bool go = slot < slotEnd;
+        while (go)
+        {
+            // slot = sb * 16 + q32 * 4 + q16 (the z-order 16x16 positions of superblock sb).
+            int sb = slot >> 4;
+            int q = slot & 15;
+            int sbRow = sb / sbCols;
+            int sbCol = sb - sbRow * sbCols;
+            int miRow64 = sbRow * 8;
+            int miCol64 = sbCol * 8;
+            if (q == 0)
+            {
+                if (sbCol == 0)
+                {
+                    for (int i = 0; i < 16; i++) { leftYMode[i] = 0; leftYEntropyCtx[i] = 0; }
+                    for (int i = 0; i < 8; i++) { leftSkip[i] = 0; leftPartCtx[i] = 0; leftTxSize[i] = 0; leftUEntropyCtx[i] = 0; leftVEntropyCtx[i] = 0; }
+                }
+                // Block64x64 partition: SPLIT (verify by reading 3 bits).
+                ConsumePartitionSplit(ref state, tileBytes, byteConsts, sizeIdx: 3, bsl: 3, miRow: miRow64, miCol: miCol64, abovePartCtx, leftPartCtx);
+            }
+
+            int q32 = q >> 2;
+            int q16 = q & 3;
             int miRow32 = miRow64 + ((q32 & 2) >> 1) * 4;
             int miCol32 = miCol64 + (q32 & 1) * 4;
-            DecodeBlock32x32(
-                ref state, tileBytes,
-                yRecon, uRecon, vRecon,
-                byteConsts, ushortConsts,
-                aboveYMode, aboveSkip, abovePartCtx, aboveTxSize,
-                aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
-                leftYMode, leftSkip, leftPartCtx, leftTxSize,
-                leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
-                coefsShort, idctScratch, tokenCache,
-                aboveLuma, leftLuma, aboveChroma, leftChroma,
-                yDcQ, yAcQ, uvDcQ, uvAcQ,
-                miRow32, miCol32, yStride, uvStride, mbCols);
-        }
-    }
+            if (q16 == 0)
+                ConsumePartitionSplit(ref state, tileBytes, byteConsts, sizeIdx: 2, bsl: 2, miRow: miRow32, miCol: miCol32, abovePartCtx, leftPartCtx);
 
-    private static void DecodeBlock32x32(
-        ref Vp8BoolDecoderGpuState state, ArrayView<byte> tileBytes,
-        ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
-        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
-        ArrayView<byte> aboveYMode, ArrayView<byte> aboveSkip,
-        ArrayView<byte> abovePartCtx, ArrayView<byte> aboveTxSize,
-        ArrayView<byte> aboveYEntropyCtx, ArrayView<byte> aboveUEntropyCtx, ArrayView<byte> aboveVEntropyCtx,
-        ArrayView<byte> leftYMode, ArrayView<byte> leftSkip,
-        ArrayView<byte> leftPartCtx, ArrayView<byte> leftTxSize,
-        ArrayView<byte> leftYEntropyCtx, ArrayView<byte> leftUEntropyCtx, ArrayView<byte> leftVEntropyCtx,
-        ArrayView<short> coefsShort, ArrayView<int> idctScratch, ArrayView<byte> tokenCache,
-        ArrayView<byte> aboveLuma, ArrayView<byte> leftLuma, ArrayView<byte> aboveChroma, ArrayView<byte> leftChroma,
-        int yDcQ, int yAcQ, int uvDcQ, int uvAcQ,
-        int miRow32, int miCol32, int yStride, int uvStride, int mbCols)
-    {
-        ConsumePartitionSplit(ref state, tileBytes, byteConsts, sizeIdx: 2, bsl: 2, miRow: miRow32, miCol: miCol32, abovePartCtx, leftPartCtx);
-
-        for (int q16 = 0; q16 < 4; q16++)
-        {
             int miRow16 = miRow32 + ((q16 & 2) >> 1) * 2;
             int miCol16 = miCol32 + (q16 & 1) * 2;
             DecodeBlock16x16(
@@ -252,7 +240,13 @@ public sealed class Vp9KeyframeDecodeKernel : IDisposable
                 aboveLuma, leftLuma, aboveChroma, leftChroma,
                 yDcQ, yAcQ, uvDcQ, uvAcQ,
                 miRow16, miCol16, yStride, uvStride, mbCols);
+
+            slot++;
+            go = slot < slotEnd;
         }
+
+        st[StNextSlot] = slot;
+        Vp8BoolDecoderGpu.Save(st, StDec, ref state);
     }
 
     private static void DecodeBlock16x16(
@@ -555,5 +549,9 @@ public sealed class Vp9KeyframeDecodeKernel : IDisposable
     }
 
     /// <summary>Release kernel resources.</summary>
-    public void Dispose() { /* auto-grouped */ }
+    public void Dispose()
+    {
+        _ctx.Dispose();
+        _state.Dispose();
+    }
 }

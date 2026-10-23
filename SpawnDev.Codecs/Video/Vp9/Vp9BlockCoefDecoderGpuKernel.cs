@@ -39,7 +39,7 @@ public sealed class Vp9BlockCoefDecoderTestKernel : IDisposable
             ArrayView<byte>, ArrayView<short>, ArrayView<ushort>, ArrayView<ushort>,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<int>,
-            int, int, int>(DecodeBlockKernel);
+            int, int, int>(Vp9BlockCoefDecoderGpuDecodeBlockKernel);
     }
 
     /// <summary>
@@ -71,7 +71,7 @@ public sealed class Vp9BlockCoefDecoderTestKernel : IDisposable
                 eobOut, inBufLen, maxCoefs, packedFlags);
     }
 
-    private static void DecodeBlockKernel(
+    private static void Vp9BlockCoefDecoderGpuDecodeBlockKernel(
         Index1D _,
         ArrayView<byte> inBuf,
         ArrayView<short> block,

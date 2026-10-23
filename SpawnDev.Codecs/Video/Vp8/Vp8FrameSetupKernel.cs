@@ -59,13 +59,13 @@ public sealed class Vp8FrameSetupKernel : IDisposable
             ArrayView<int>, ArrayView<int>,
             ArrayView<byte>, ArrayView<byte>,
             ArrayView<int>, ArrayView<byte>, ArrayView<int>,
-            int>(SetupFrameKernel);
+            int>(Vp8SetupFrameKernel);
         _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<int>, ArrayView<int>,
             ArrayView<byte>, ArrayView<byte>,
             ArrayView<int>, ArrayView<byte>, ArrayView<int>,
-            int, int, int>(SetupFrameBatchKernel);
+            int, int, int>(Vp8SetupFrameBatchKernel);
     }
 
     /// <summary>Batch setup: extent=N, each thread sets up one frame's slot.</summary>
@@ -80,7 +80,7 @@ public sealed class Vp8FrameSetupKernel : IDisposable
             dequantOut, partition0Out, initialP0StateOut, baseQIndex, dequantStride, p0Stride);
     }
 
-    private static void SetupFrameBatchKernel(
+    private static void Vp8SetupFrameBatchKernel(
         Index1D idx,
         ArrayView<int> dcQLookup, ArrayView<int> acQLookup,
         ArrayView<byte> defaultCoefProbs, ArrayView<byte> updateCoefProbs,
@@ -159,7 +159,7 @@ public sealed class Vp8FrameSetupKernel : IDisposable
         return buf;
     }
 
-    private static void SetupFrameKernel(
+    private static void Vp8SetupFrameKernel(
         Index1D _,
         ArrayView<int> dcQLookup,
         ArrayView<int> acQLookup,

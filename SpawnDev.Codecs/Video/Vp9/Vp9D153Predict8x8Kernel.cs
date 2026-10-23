@@ -32,7 +32,7 @@ public sealed class Vp9D153Predict8x8Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(D153Kernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(Vp9D153Predict8x8D153Kernel);
     }
 
     /// <summary>Run D153 prediction on <paramref name="blockCount"/> blocks.</summary>
@@ -94,7 +94,7 @@ public sealed class Vp9D153Predict8x8Kernel : IDisposable
     }
 
     /// <summary>Kernel body. 22 register cells; rows 1-7 derive from those.</summary>
-    private static void D153Kernel(
+    private static void Vp9D153Predict8x8D153Kernel(
         Index1D blockIdx,
         ArrayView<byte> topLeftFlat,
         ArrayView<byte> aboveFlat,

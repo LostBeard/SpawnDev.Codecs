@@ -31,7 +31,7 @@ public sealed class Vp8BoolDecoderTestKernel : IDisposable
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>,
-            int, int, int, int>(DecodeStreamsKernel);
+            int, int, int, int>(Vp8BoolDecoderGpuDecodeStreamsKernel);
     }
 
     /// <summary>
@@ -56,7 +56,7 @@ public sealed class Vp8BoolDecoderTestKernel : IDisposable
             streamCount, bitsPerStream, inStride, 0);
     }
 
-    private static void DecodeStreamsKernel(
+    private static void Vp8BoolDecoderGpuDecodeStreamsKernel(
         Index1D streamIdx,
         ArrayView<byte> inBuf,
         ArrayView<int> inLens,

@@ -29,7 +29,7 @@ public sealed class Vp8StridedPlanePackKernel : IDisposable
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<byte>, long, int,
-            ArrayView<byte>, long, int>(PackKernel);
+            ArrayView<byte>, long, int>(Vp8StridedPlanePackPackKernel);
     }
 
     /// <summary>
@@ -49,7 +49,7 @@ public sealed class Vp8StridedPlanePackKernel : IDisposable
         _kernel((Index1D)total, strided, stridedBase, stride, packed, packedBase, w);
     }
 
-    private static void PackKernel(
+    private static void Vp8StridedPlanePackPackKernel(
         Index1D idx,
         ArrayView<byte> strided, long stridedBase, int stride,
         ArrayView<byte> packed, long packedBase, int w)

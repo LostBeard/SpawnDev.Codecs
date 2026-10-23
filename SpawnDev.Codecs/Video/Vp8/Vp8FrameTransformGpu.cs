@@ -52,9 +52,9 @@ public sealed class Vp8FrameTransformGpu : IDisposable
         _walshKernel = new Vp8ForwardWalsh4x4Kernel(accelerator);
         _quantKernel = new Vp8ForwardQuantizerKernel(accelerator);
         _gatherY4DcKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<short>, int>(GatherY4DcsKernel);
+            Index1D, ArrayView<short>, ArrayView<short>, int>(Vp8FrameTransformGpuGatherY4DcsKernel);
         _scatterY2DcKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<short>, int>(ScatterY2DcsKernel);
+            Index1D, ArrayView<short>, ArrayView<short>, int>(Vp8FrameTransformGpuScatterY2DcsKernel);
     }
 
     /// <summary>
@@ -185,7 +185,7 @@ public sealed class Vp8FrameTransformGpu : IDisposable
     /// Gather coef[0] of every Y4 block in an MB into a 16-short Y2
     /// pre-Walsh block. One thread per Y4 block.
     /// </summary>
-    private static void GatherY4DcsKernel(
+    private static void Vp8FrameTransformGpuGatherY4DcsKernel(
         Index1D blockIdx,
         ArrayView<short> y4Coefs,
         ArrayView<short> y2PreWalsh,
@@ -206,7 +206,7 @@ public sealed class Vp8FrameTransformGpu : IDisposable
     /// Copy it into the final y2Coefs buffer. Also we DON'T touch Y4
     /// coef[0] here - that's done by ClearY4DcKernelDispatch.
     /// </summary>
-    private static void ScatterY2DcsKernel(
+    private static void Vp8FrameTransformGpuScatterY2DcsKernel(
         Index1D blockIdx,
         ArrayView<short> walshOut,
         ArrayView<short> y2Coefs,
@@ -225,11 +225,11 @@ public sealed class Vp8FrameTransformGpu : IDisposable
     private void ClearY4DcKernelDispatch(ArrayView<short> y4Coefs, int y4BlockCount)
     {
         var k = _accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, int>(ClearY4DcKernel);
+            Index1D, ArrayView<short>, int>(Vp8FrameTransformGpuClearY4DcKernel);
         k((Index1D)y4BlockCount, y4Coefs, y4BlockCount);
     }
 
-    private static void ClearY4DcKernel(
+    private static void Vp8FrameTransformGpuClearY4DcKernel(
         Index1D blockIdx,
         ArrayView<short> y4Coefs,
         int y4BlockCount)
@@ -250,11 +250,11 @@ public sealed class Vp8FrameTransformGpu : IDisposable
         int mbCount, int blocksPerMb)
     {
         var k = _accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<short>, int, int>(ExpandPerMbToPerBlockKernel);
+            Index1D, ArrayView<short>, ArrayView<short>, int, int>(Vp8FrameTransformGpuExpandPerMbToPerBlockKernel);
         k((Index1D)(mbCount * blocksPerMb), perMb, perBlock, mbCount, blocksPerMb);
     }
 
-    private static void ExpandPerMbToPerBlockKernel(
+    private static void Vp8FrameTransformGpuExpandPerMbToPerBlockKernel(
         Index1D blockIdx,
         ArrayView<short> perMb,
         ArrayView<short> perBlock,

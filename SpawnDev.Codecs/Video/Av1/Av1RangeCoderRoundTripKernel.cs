@@ -39,7 +39,7 @@ public sealed class Av1RangeCoderRoundTripKernel : IDisposable
             Index1D,
             ArrayView<int>, ArrayView<uint>, ArrayView<int>,
             ArrayView<byte>, ArrayView<long>,
-            int>(RoundTripKernel);
+            int>(Av1RangeCoderRoundTripRoundTripKernel);
     }
 
     /// <summary>
@@ -71,7 +71,7 @@ public sealed class Av1RangeCoderRoundTripKernel : IDisposable
         _kernel(1, encodeBits, encodeProbs, decodeBitsOut, scratchBytes, outLen, symbolCount);
     }
 
-    private static void RoundTripKernel(
+    private static void Av1RangeCoderRoundTripRoundTripKernel(
         Index1D _,
         ArrayView<int> encodeBits,
         ArrayView<uint> encodeProbs,

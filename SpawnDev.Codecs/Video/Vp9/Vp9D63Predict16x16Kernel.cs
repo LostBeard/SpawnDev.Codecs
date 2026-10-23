@@ -27,7 +27,7 @@ public sealed class Vp9D63Predict16x16Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, int, int>(D63Kernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, int, int>(Vp9D63Predict16x16D63Kernel);
     }
 
     /// <summary>Run D63 prediction on <paramref name="blockCount"/> blocks.</summary>
@@ -69,7 +69,7 @@ public sealed class Vp9D63Predict16x16Kernel : IDisposable
     }
 
     /// <summary>Kernel body. 32 register cells; dispatch on (row, srcIdx).</summary>
-    private static void D63Kernel(
+    private static void Vp9D63Predict16x16D63Kernel(
         Index1D blockIdx,
         ArrayView<byte> aboveFlat,
         ArrayView<byte> dstFlat,

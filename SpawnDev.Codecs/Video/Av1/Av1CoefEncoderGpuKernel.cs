@@ -37,7 +37,7 @@ public sealed class Av1CoefEncoderGpuKernel : IDisposable
             ArrayView<byte>, ArrayView<byte>, ArrayView<ushort>,
             ArrayView<int>, ArrayView<byte>, ArrayView<long>,
             ArrayView<int>, ArrayView<int>,
-            int, int, int, int, int, int>(EncoderKernel);
+            int, int, int, int, int, int>(Av1CoefEncoderGpuEncoderKernel);
     }
 
     /// <summary>
@@ -69,7 +69,7 @@ public sealed class Av1CoefEncoderGpuKernel : IDisposable
             txSize, plane, qctx, txbSkipCtx, dcSignCtx, qindex);
     }
 
-    private static void EncoderKernel(
+    private static void Av1CoefEncoderGpuEncoderKernel(
         Index1D _,
         ArrayView<byte> outBuf,
         ArrayView<byte> constsByte,

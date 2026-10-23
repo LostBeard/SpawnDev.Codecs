@@ -49,9 +49,9 @@ public sealed class Vp8FramePredictorGpu : IDisposable
         _intraY16Kernel = new Vp8IntraPredict16x16Kernel(accelerator);
         _intraUv8Kernel = new Vp8IntraPredict8x8UvKernel(accelerator);
         _gatherY16NeighboursKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int, int>(GatherY16NeighboursKernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int, int>(Vp8FramePredictorGpuGatherY16NeighboursKernel);
         _gatherUv8NeighboursKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int, int>(GatherUv8NeighboursKernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int, int>(Vp8FramePredictorGpuGatherUv8NeighboursKernel);
     }
 
     /// <summary>
@@ -120,7 +120,7 @@ public sealed class Vp8FramePredictorGpu : IDisposable
     /// predictor's haveAbove/haveLeft flags correctly elide the
     /// neighbour at the prediction step.
     /// </summary>
-    private static void GatherY16NeighboursKernel(
+    private static void Vp8FramePredictorGpuGatherY16NeighboursKernel(
         Index1D mbIdx,
         ArrayView<byte> yRecon,
         ArrayView<byte> yAbove,
@@ -162,9 +162,9 @@ public sealed class Vp8FramePredictorGpu : IDisposable
     }
 
     /// <summary>
-    /// Same as GatherY16NeighboursKernel but for an 8x8 UV plane MB.
+    /// Same as Vp8FramePredictorGpuGatherY16NeighboursKernel but for an 8x8 UV plane MB.
     /// </summary>
-    private static void GatherUv8NeighboursKernel(
+    private static void Vp8FramePredictorGpuGatherUv8NeighboursKernel(
         Index1D mbIdx,
         ArrayView<byte> uvRecon,
         ArrayView<byte> uvAbove,

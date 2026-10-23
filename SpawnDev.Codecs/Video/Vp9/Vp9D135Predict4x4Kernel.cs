@@ -47,7 +47,7 @@ public sealed class Vp9D135Predict4x4Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(D135Kernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(Vp9D135Predict4x4D135Kernel);
     }
 
     /// <summary>Run D135 prediction on <paramref name="blockCount"/> blocks.</summary>
@@ -110,7 +110,7 @@ public sealed class Vp9D135Predict4x4Kernel : IDisposable
     }
 
     /// <summary>Kernel body. One thread per block; 7 border cells in registers.</summary>
-    private static void D135Kernel(
+    private static void Vp9D135Predict4x4D135Kernel(
         Index1D blockIdx,
         ArrayView<byte> topLeftFlat,
         ArrayView<byte> aboveFlat,

@@ -28,7 +28,7 @@ public sealed class Vp9ForwardDct16x16GpuTestKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, int>(FdctKernel);
+            Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, int>(Vp9ForwardDct16x16GpuFdctKernel);
     }
 
     /// <summary>Run FDCT on a single 16x16 block. Output is row-major (stride = 16).</summary>
@@ -44,7 +44,7 @@ public sealed class Vp9ForwardDct16x16GpuTestKernel : IDisposable
         _kernel(1, input, output, scratch, inStride);
     }
 
-    private static void FdctKernel(
+    private static void Vp9ForwardDct16x16GpuFdctKernel(
         Index1D _,
         ArrayView<short> input,
         ArrayView<int> output,

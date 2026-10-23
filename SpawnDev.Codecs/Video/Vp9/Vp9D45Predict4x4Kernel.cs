@@ -38,7 +38,7 @@ public sealed class Vp9D45Predict4x4Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, int, int>(D45Kernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, int, int>(Vp9D45Predict4x4D45Kernel);
     }
 
     /// <summary>
@@ -91,7 +91,7 @@ public sealed class Vp9D45Predict4x4Kernel : IDisposable
     /// re-reading dst (which lowers to atomic RMW on byte writes and
     /// hits a read-after-write hazard on WebGPU).
     /// </summary>
-    private static void D45Kernel(
+    private static void Vp9D45Predict4x4D45Kernel(
         Index1D blockIdx,
         ArrayView<byte> aboveFlat,
         ArrayView<byte> dstFlat,

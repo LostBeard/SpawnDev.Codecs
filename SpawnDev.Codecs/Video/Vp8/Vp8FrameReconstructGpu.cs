@@ -60,11 +60,11 @@ public sealed class Vp8FrameReconstructGpu : IDisposable
         _idctKernel = new Vp8InverseDct4x4Kernel(accelerator);
         _dcOnlyKernel = new Vp8DcOnlyIdctAddKernel(accelerator);
         _injectY2DcKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<short>, int>(InjectY2DcKernel);
+            Index1D, ArrayView<short>, ArrayView<short>, int>(Vp8FrameReconstructGpuInjectY2DcKernel);
         _walshDc1OnlyKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<short>, int>(WalshDc1OnlyKernel);
+            Index1D, ArrayView<short>, ArrayView<short>, int>(Vp8FrameReconstructGpuWalshDc1OnlyKernel);
         _detectAcOnlyKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<int>, int>(DetectAcOnlyKernel);
+            Index1D, ArrayView<short>, ArrayView<int>, int>(Vp8FrameReconstructGpuDetectAcOnlyKernel);
     }
 
     /// <summary>
@@ -179,7 +179,7 @@ public sealed class Vp8FrameReconstructGpu : IDisposable
     /// Mirrors libvpx vp8_decode_macroblock's
     ///   xd->dst.y_buffer + qcoeff[0] = mb->dequant_y2_inverse[i].
     /// </summary>
-    private static void InjectY2DcKernel(
+    private static void Vp8FrameReconstructGpuInjectY2DcKernel(
         Index1D blockIdx,
         ArrayView<short> y2Inv,
         ArrayView<short> y4Coefs,
@@ -200,7 +200,7 @@ public sealed class Vp8FrameReconstructGpu : IDisposable
     /// One thread per MB. NOT used directly; superseded by
     /// FusedY2InverseKernelDispatch.
     /// </summary>
-    private static void WalshDc1OnlyKernel(
+    private static void Vp8FrameReconstructGpuWalshDc1OnlyKernel(
         Index1D mbIdx,
         ArrayView<short> y2Coefs,
         ArrayView<short> y2Inv,
@@ -208,7 +208,7 @@ public sealed class Vp8FrameReconstructGpu : IDisposable
     {
         int idx = mbIdx;
         if (idx >= mbCount) return;
-        // Placeholder - real selection is done by FusedY2InverseKernel.
+        // Placeholder - real selection is done by Vp8FrameReconstructGpuFusedY2InverseKernel.
     }
 
     /// <summary>
@@ -223,7 +223,7 @@ public sealed class Vp8FrameReconstructGpu : IDisposable
         int mbCount)
     {
         var k = _accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<short>, ArrayView<byte>, int>(FusedY2InverseKernel);
+            Index1D, ArrayView<short>, ArrayView<short>, ArrayView<byte>, int>(Vp8FrameReconstructGpuFusedY2InverseKernel);
         k((Index1D)(mbCount * 16), y2Coefs, y2Inv, y2HasAc, mbCount);
     }
 
@@ -232,7 +232,7 @@ public sealed class Vp8FrameReconstructGpu : IDisposable
     /// the inverse Walsh output. Otherwise overwrites with
     /// ((y2Coefs[mb*16] + 3) >> 3).
     /// </summary>
-    private static void FusedY2InverseKernel(
+    private static void Vp8FrameReconstructGpuFusedY2InverseKernel(
         Index1D pairIdx,
         ArrayView<short> y2Coefs,
         ArrayView<short> y2Inv,
@@ -265,11 +265,11 @@ public sealed class Vp8FrameReconstructGpu : IDisposable
     {
         if (mbCount == 0) return;
         var k = _accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<byte>, int>(ComputeY2HasAcKernel);
+            Index1D, ArrayView<short>, ArrayView<byte>, int>(Vp8FrameReconstructGpuComputeY2HasAcKernel);
         k((Index1D)mbCount, y2Coefs, y2HasAc, mbCount);
     }
 
-    private static void ComputeY2HasAcKernel(
+    private static void Vp8FrameReconstructGpuComputeY2HasAcKernel(
         Index1D mbIdx,
         ArrayView<short> y2Coefs,
         ArrayView<byte> y2HasAc,
@@ -284,7 +284,7 @@ public sealed class Vp8FrameReconstructGpu : IDisposable
     }
 
     /// <summary>Detect any non-zero AC coef across the Y4 plane. Used internally for the AC-only branch in IDCT future fast paths.</summary>
-    private static void DetectAcOnlyKernel(
+    private static void Vp8FrameReconstructGpuDetectAcOnlyKernel(
         Index1D blockIdx,
         ArrayView<short> coefs,
         ArrayView<int> hasAcMask,
@@ -306,11 +306,11 @@ public sealed class Vp8FrameReconstructGpu : IDisposable
         int mbCount, int blocksPerMb)
     {
         var k = _accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<short>, int, int>(ExpandPerMbKernel);
+            Index1D, ArrayView<short>, ArrayView<short>, int, int>(Vp8FrameReconstructGpuExpandPerMbKernel);
         k((Index1D)(mbCount * blocksPerMb), perMb, perBlock, mbCount, blocksPerMb);
     }
 
-    private static void ExpandPerMbKernel(
+    private static void Vp8FrameReconstructGpuExpandPerMbKernel(
         Index1D blockIdx,
         ArrayView<short> perMb,
         ArrayView<short> perBlock,

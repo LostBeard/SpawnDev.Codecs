@@ -26,10 +26,13 @@
 //                                          quant + dequant + IDCT +
 //                                          recon. Saves quantized
 //                                          coefs to per-plane buffers.
+//                                          Wave-front launches.
 //   4. Vp9FrameEntropyKernel             - walks SBs in z-order,
 //                                          emits partition + skip +
 //                                          mode + coef tokens to the
-//                                          tile bool stream.
+//                                          tile bool stream, in
+//                                          resumable launches of
+//                                          LeavesPerLaunch leaves.
 //   5. Vp9FrameUncompressedHeaderKernel  - emit raw-bit header now
 //                                          that we know firstPartitionSize
 //                                          (compressed header byte count).
@@ -210,7 +213,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         int baseQIndex = 30)
     {
         await EncodeCoreAsync(yPlane, uPlane, vPlane, width, height, output, baseQIndex);
-        return (int)(await _dOutFrameLen!.CopyToHostAsync())[0];
+        return CheckLength((await _dOutFrameLen!.CopyToHostAsync())[0]);
     }
 
     /// <summary>
@@ -280,7 +283,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         int displayMiRows = (height + 7) >> 3;
 
         // ---- 4. Sequential encode (forward + inverse pipeline) ----
-        _sequentialKernel.Run(
+        await _sequentialKernel.RunAsync(
             _dY!.View, _dU!.View, _dV!.View,
             _dYRecon!.View, _dURecon!.View, _dVRecon!.View,
             _dYCoefs!.View, _dUCoefs!.View, _dVCoefs!.View,
@@ -289,7 +292,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             frameMiRows: displayMiRows);
 
         // ---- 5. Entropy ----
-        _entropyKernel.Run(
+        await _entropyKernel.RunAsync(
             _dYCoefs!.View, _dUCoefs!.View, _dVCoefs!.View,
             _dTile!.View, _dTileLen!.View,
             _dByteConsts.View, _dUshortConsts.View,
@@ -332,7 +335,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
     /// <param name="height">Picture height in pixels.</param>
     /// <param name="outputs">Frame f is assembled at <c>f * GetMaxEncodedSize(width, height)</c>; at least
     /// <c>frameCount * GetMaxEncodedSize</c> bytes.</param>
-    /// <param name="lengths">Receives each frame's encoded length; at least <paramref name="frameCount"/> longs.</param>
+    /// <param name="lengths">Receives each frame's encoded length (-1 if the tile outgrew its buffer); at least <paramref name="frameCount"/> longs.</param>
     /// <param name="baseQIndex">VP9 base quantizer index, 1..255.</param>
     public async Task EncodeKeyFramesBatchAsync(
         ArrayView1D<byte, Stride1D.Dense> yPlanes,
@@ -404,14 +407,18 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         // Phase 1a: pad every frame's planes into its working-dim slot on the accelerator. Every
         // working byte of every slot is written (zero pad included): no host staging array, no host
         // row loop.
+        var padPacer = new LaunchPacer(_accelerator);
         for (int f = 0; f < frameCount; f++)
         {
             _pad.Run(yPlanes, f * ySrcPlane, width, width, height,
                 dAllY.View.SubView((long)f * yLen, yLen), workWidth, workHeight);
+            await padPacer.LaunchedAsync();
             _pad.Run(uPlanes, f * uvSrcPlane, uvWidth, uvWidth, uvHeight,
                 dAllU.View.SubView((long)f * uvLen, uvLen), uvWorkWidth, uvWorkHeight);
+            await padPacer.LaunchedAsync();
             _pad.Run(vPlanes, f * uvSrcPlane, uvWidth, uvWidth, uvHeight,
                 dAllV.View.SubView((long)f * uvLen, uvLen), uvWorkWidth, uvWorkHeight);
+            await padPacer.LaunchedAsync();
         }
 
         // Phase 1b: BATCH dequantizer + compressed header.
@@ -427,7 +434,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         // displayMiRows drives boundary forced-split MB encoding (top BLOCK_16X8
         // with 2 Tx8x8 luma + 2 Tx4x4 chroma) at the bottom-edge MB row.
         int seqFrameMiRows = (height + 7) >> 3;
-        bool wavefrontSingleDispatched = _sequentialKernel.TryRunBatchSingleDispatch(
+        bool wavefrontSingleDispatched = await _sequentialKernel.TryRunBatchSingleDispatchAsync(
             dAllY.View, dAllU.View, dAllV.View,
             dAllYR.View, dAllUR.View, dAllVR.View,
             dAllYC.View, dAllUC.View, dAllVC.View,
@@ -438,7 +445,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             seqFrameMiRows);
         if (!wavefrontSingleDispatched)
         {
-            _sequentialKernel.RunBatch(
+            await _sequentialKernel.RunBatchAsync(
                 dAllY.View, dAllU.View, dAllV.View,
                 dAllYR.View, dAllUR.View, dAllVR.View,
                 dAllYC.View, dAllUC.View, dAllVC.View,
@@ -460,7 +467,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             FrameMiCols = (width + 7) >> 3,
             FrameMiRows = (height + 7) >> 3,
         };
-        _entropyKernel.RunBatch(
+        await _entropyKernel.RunBatchAsync(
             dAllYC.View, dAllUC.View, dAllVC.View,
             dAllTile.View, dAllTileLen.View,
             _dByteConsts.View, _dUshortConsts.View,
@@ -538,7 +545,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         _stageOut.Ensure(GetMaxEncodedSize(width, height));
 
         await EncodeCoreAsync(_stageY.View, _stageU.View, _stageV.View, width, height, _stageOut.View, baseQIndex);
-        int len = (int)(await _dOutFrameLen!.CopyToHostAsync())[0];
+        int len = CheckLength((await _dOutFrameLen!.CopyToHostAsync())[0]);
         var bytes = await DeviceTransfer.DownloadAsync(_stageOut.View, len);
         var yRecon = await _dYRecon!.CopyToHostAsync();
         var uRecon = await _dURecon!.CopyToHostAsync();
@@ -593,7 +600,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         var results = new byte[frameCount][];
         for (int f = 0; f < frameCount; f++)
         {
-            int len = (int)lens[f];
+            int len = CheckLength(lens[f]);
             results[f] = len > 0
                 ? await DeviceTransfer.DownloadAsync(_stageOut.View.SubView((long)f * cap, len), len)
                 : System.Array.Empty<byte>();
@@ -679,11 +686,23 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             frameCount, width, height, _stageOut.View, _stageLens.View, baseQIndex);
 
         var lens = await _stageLens.View.SubView(0, frameCount).CopyToHostAsync();
+        foreach (long l in lens) CheckLength(l);
         var results = new Uint8Array[frameCount];
         for (int f = 0; f < frameCount; f++)
             results[f] = await DeviceTransfer.DownloadUint8ArrayAsync(
                 _stageOut.View.SubView((long)f * cap, lens[f]), lens[f]);
         return results;
+    }
+
+    /// <summary>
+    /// The assemble kernel reports -1 for a frame whose tile outgrew its buffer (the bool encoder never writes
+    /// past a buffer).
+    /// </summary>
+    private static int CheckLength(long length)
+    {
+        if (length < 0)
+            throw new InvalidOperationException("VP9 encode: the tile outgrew its buffer; the frame was not assembled.");
+        return (int)length;
     }
 
     // ------------------------------------------------------------------

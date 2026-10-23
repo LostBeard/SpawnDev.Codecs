@@ -51,7 +51,7 @@ public sealed class Vp9ForwardDct16x16Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<int>, int>(FdctKernel);
+            Index1D, ArrayView<short>, ArrayView<int>, int>(Vp9ForwardDct16x16FdctKernel);
     }
 
     /// <summary>
@@ -85,7 +85,7 @@ public sealed class Vp9ForwardDct16x16Kernel : IDisposable
         readBack.AsSpan(0, blockCount * 256).CopyTo(output.Span);
     }
 
-    private static void FdctKernel(
+    private static void Vp9ForwardDct16x16FdctKernel(
         Index1D blockIdx,
         ArrayView<short> input,
         ArrayView<int> output,

@@ -27,7 +27,7 @@ public sealed class Av1ForwardQuantizerGpuKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(QuantizeKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Av1ForwardQuantizerGpuQuantizeKernel);
     }
 
     /// <summary>Run on <paramref name="blockCount"/> coefficient blocks of <paramref name="coefsPerBlock"/> ints each.</summary>
@@ -45,7 +45,7 @@ public sealed class Av1ForwardQuantizerGpuKernel : IDisposable
         _kernel(blockCount, coefs, dcQ, acQ, blockCount, coefsPerBlock);
     }
 
-    private static void QuantizeKernel(
+    private static void Av1ForwardQuantizerGpuQuantizeKernel(
         Index1D blockIdx,
         ArrayView<int> coefs,
         ArrayView<int> dcQ,

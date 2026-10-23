@@ -11,13 +11,13 @@ namespace SpawnDev.Codecs.DemoConsole;
 /// Offline (desktop, no browser) Wasm COMPILE measurement for the VP9 frame-entropy walker.
 /// Mirrors SpawnDev.ILGPU.DemoConsole/WasmCompileDump: a desktop WasmAccelerator runs the
 /// IL→wasm codegen path fully (LoadAutoGroupedStreamKernel compiles eagerly, before any dispatch),
-/// so constructing <see cref="Vp9FrameEntropyKernel"/> compiles <c>BatchEncodeFrameKernel</c> and the
-/// WasmBackend logs (under VerboseLogging) a "[Wasm-Helper] 'EncodeFrameBody' ... locals=N ..." line —
-/// EncodeFrameBody is [NoInlining] so it is emitted as its own function and gets its own locals count.
+/// so constructing <see cref="Vp9FrameEntropyKernel"/> compiles <c>Vp9EntropyStepKernel</c> and the
+/// WasmBackend logs (under VerboseLogging) a "[Wasm-Helper] 'EncodeFrameStep' ... locals=N ..." line -
+/// EncodeFrameStep is [NoInlining] so it is emitted as its own function and gets its own locals count.
 ///
 /// This is the before/after vehicle for Geordi's CumulativeInlinedILBudget fix (ILGPU 4.9.16-local.1):
-///   - budget INERT  → the SB64→leaf→coef tree all inlines into EncodeFrameBody → high locals (~52K)
-///   - budget FIRES  → the deep tree is bounded → EncodeFrameBody locals drop
+///   - budget INERT  → the SB64→leaf→coef tree all inlines into EncodeFrameStep → high locals (~52K)
+///   - budget FIRES  → the deep tree is bounded → EncodeFrameStep locals drop
 /// We never dispatch (that needs Web Workers); we only compile and read the emitted locals + the
 /// Inliner diagnostic counters (read via reflection so this compiles against any ILGPU version).
 ///
@@ -27,11 +27,11 @@ internal static class WasmVp9Dump
 {
     public static async Task<int> Run()
     {
-        Console.WriteLine("=== Wasm offline compile measurement: VP9 EncodeFrameBody locals ===");
+        Console.WriteLine("=== Wasm offline compile measurement: VP9 EncodeFrameStep locals ===");
         Console.WriteLine($"ILGPU: {typeof(Context).Assembly.GetName().Version}");
 
         // Is the tunable budget present (fix build)? If so, sweep it to find the value that splits
-        // EncodeFrameBody under the V8/wabt ~50K-locals-per-function ceiling. On a pre-fix ILGPU the
+        // EncodeFrameStep under the V8/wabt ~50K-locals-per-function ceiling. On a pre-fix ILGPU the
         // field is absent and we just do one default-budget compile.
         var budgetMember = GetInlinerStatic("CumulativeInlinedILBudget");
         var budgets = budgetMember != null
@@ -40,7 +40,7 @@ internal static class WasmVp9Dump
 
         Console.WriteLine($"  tunable CumulativeInlinedILBudget present: {budgetMember != null}");
         Console.WriteLine();
-        Console.WriteLine("  budget   EncodeFrameBody  maxHelper(name)            helpers  skipCount  maxCumIL");
+        Console.WriteLine("  budget   EncodeFrameStep  maxHelper(name)            helpers  skipCount  maxCumIL");
         Console.WriteLine("  -------  ---------------  ------------------------  -------  ---------  --------");
 
         foreach (var budget in budgets)
@@ -51,7 +51,7 @@ internal static class WasmVp9Dump
         }
 
         Console.WriteLine();
-        Console.WriteLine("Note: V8 kV8MaxWasmFunctionLocals / wabt cap ~50000 per emitted function. EncodeFrameBody must land under that.");
+        Console.WriteLine("Note: V8 kV8MaxWasmFunctionLocals / wabt cap ~50000 per emitted function. EncodeFrameStep must land under that.");
         Console.WriteLine("=== wasm-vp9-dump done ===");
         return 0;
     }
@@ -88,7 +88,7 @@ internal static class WasmVp9Dump
             {
                 long locals = long.Parse(hm.Groups[2].Value);
                 if (locals > maxLocals) { maxLocals = locals; maxName = hm.Groups[1].Value; }
-                if (hm.Groups[1].Value.Contains("EncodeFrameBody")) efb = locals;
+                if (hm.Groups[1].Value.Contains("EncodeFrameStep")) efb = locals;
             }
             var km = kernelRx.Match(raw);
             if (km.Success) helpers = long.Parse(km.Groups[2].Value);

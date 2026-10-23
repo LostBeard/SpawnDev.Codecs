@@ -123,6 +123,33 @@ public static class Vp8BoolDecoderGpu
         return z;
     }
 
+    /// <summary>Ints <see cref="Save"/> writes (BufPos, BufEnd, Value low / high, Count, Range).</summary>
+    public const int StateInts = 6;
+
+    /// <summary>
+    /// Store the decoder state in <c>st[off .. off + StateInts)</c> so a later launch can resume it with
+    /// <see cref="Load"/> (resumable decode kernels keep their coder between launches in device memory).
+    /// </summary>
+    public static void Save(ArrayView<int> st, long off, ref Vp8BoolDecoderGpuState state)
+    {
+        st[off] = state.BufPos;
+        st[off + 1] = state.BufEnd;
+        st[off + 2] = (int)(uint)state.Value;
+        st[off + 3] = (int)(uint)(state.Value >> 32);
+        st[off + 4] = state.Count;
+        st[off + 5] = (int)state.Range;
+    }
+
+    /// <summary>The decoder state stored by <see cref="Save"/>.</summary>
+    public static Vp8BoolDecoderGpuState Load(ArrayView<int> st, long off) => new Vp8BoolDecoderGpuState
+    {
+        BufPos = st[off],
+        BufEnd = st[off + 1],
+        Value = (ulong)(uint)st[off + 2] | ((ulong)(uint)st[off + 3] << 32),
+        Count = st[off + 4],
+        Range = (uint)st[off + 5],
+    };
+
     /// <summary>
     /// Refill the value register from the input buffer. Mirrors libvpx
     /// <c>vp8dx_bool_decoder_fill</c>.

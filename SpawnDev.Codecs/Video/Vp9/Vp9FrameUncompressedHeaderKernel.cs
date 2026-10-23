@@ -46,9 +46,9 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int>(EmitKernel);
+            Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int>(Vp9FrameUncompressedHeaderEmitKernel);
         _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int, int>(EmitBatchKernel);
+            Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int, int>(Vp9FrameUncompressedHeaderEmitBatchKernel);
     }
 
     /// <summary>Batch: extent=N, each thread emits one frame's uncompressed header.</summary>
@@ -63,7 +63,7 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
             width, height, baseQIndex, outBufStride);
     }
 
-    private static void EmitBatchKernel(
+    private static void Vp9FrameUncompressedHeaderEmitBatchKernel(
         Index1D idx,
         ArrayView<byte> outBuf, ArrayView<long> outLen,
         ArrayView<long> firstPartitionSizeView,
@@ -115,7 +115,7 @@ public sealed class Vp9FrameUncompressedHeaderKernel : IDisposable
         await _accelerator.SynchronizeAsync();
     }
 
-    private static void EmitKernel(
+    private static void Vp9FrameUncompressedHeaderEmitKernel(
         Index1D _,
         ArrayView<byte> outBuf,
         ArrayView<long> outLenOut,

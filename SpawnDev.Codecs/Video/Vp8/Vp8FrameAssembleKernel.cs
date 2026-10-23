@@ -3,11 +3,13 @@
 // VP8 frame assembly kernel. Writes the 10-byte uncompressed frame
 // tag + start code + size code at output[0..10], then copies
 // partition0[0..p0Len] and tokenP0[0..tp0Len] into output. Computes
-// the final encoded length and stores it in outLen[0].
+// the final encoded length and stores it in outLen[0] (-1 when a partition
+// length exceeds its buffer: the stream overflowed and nothing is assembled).
 //
-// Single-thread per frame. Replaces the CPU-side Buffer.BlockCopy
-// concatenation in the v2 integration class so the entire encoder
-// hot path is GPU-resident.
+// One thread per output byte (the batch form adds a frame dimension): a
+// single thread copying the whole frame grew with the bitstream. Replaces
+// the CPU-side Buffer.BlockCopy concatenation in the v2 integration class
+// so the entire encoder hot path is GPU-resident.
 //
 // VP8 keyframe tag layout (RFC 6386 sec 9.1 / 19.1):
 //   bytes [0..3]   3-byte uncompressed tag (frame_type, version,
@@ -28,7 +30,7 @@ namespace SpawnDev.Codecs.Video.Vp8;
 /// <summary>
 /// VP8 frame assembly kernel. Writes tag + start code + size code +
 /// partition0 + tokenP0 into a single output buffer; stores final
-/// length in outLen[0]. Single thread per frame.
+/// length in outLen[0]. One thread per output byte.
 /// </summary>
 public sealed class Vp8FrameAssembleKernel : IDisposable
 {
@@ -44,7 +46,7 @@ public sealed class Vp8FrameAssembleKernel : IDisposable
         int, int> _kernel;
 
     private readonly Action<
-        Index1D,
+        Index2D,
         ArrayView<byte>, ArrayView<byte>, ArrayView<long>,
         ArrayView<byte>, ArrayView<int>,
         int, int, int, int, int> _batchKernel;
@@ -58,12 +60,12 @@ public sealed class Vp8FrameAssembleKernel : IDisposable
             Index1D,
             ArrayView<byte>, ArrayView<byte>, ArrayView<long>,
             ArrayView<byte>, ArrayView<int>,
-            int, int>(AssembleKernel);
+            int, int>(Vp8AssembleKernel);
         _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D,
+            Index2D,
             ArrayView<byte>, ArrayView<byte>, ArrayView<long>,
             ArrayView<byte>, ArrayView<int>,
-            int, int, int, int, int>(AssembleBatchKernel);
+            int, int, int, int, int>(Vp8AssembleBatchKernel);
     }
 
     /// <summary>Run the assembly. partLens = [partition0Len, tokenP0Len].</summary>
@@ -80,13 +82,14 @@ public sealed class Vp8FrameAssembleKernel : IDisposable
             throw new ArgumentException("partLens must hold 2 longs.", nameof(partLens));
         if (outLen.Length < 1)
             throw new ArgumentException("outLen must hold at least 1 int.", nameof(outLen));
-        _kernel(1, partition0, tokenP0, partLens, output, outLen, width, height);
+        // Upper bound of the frame length: the tag plus both partitions at their capacity.
+        long maxBytes = Math.Min(output.Length, 10 + partition0.Length + tokenP0.Length);
+        _kernel(checked((int)maxBytes), partition0, tokenP0, partLens, output, outLen, width, height);
     }
 
     /// <summary>
-    /// Batch assemble: extent=N, each thread assembles one frame's slot.
-    /// outLens layout: 2 longs per frame (p0Len, tpLen). output layout:
-    /// outputStride bytes per frame.
+    /// Batch assemble: one thread per (output byte, frame). outLens layout: 2 longs per frame (p0Len, tpLen).
+    /// output layout: outputStride bytes per frame.
     /// </summary>
     public void RunBatch(
         ArrayView<byte> partition0,
@@ -98,27 +101,28 @@ public sealed class Vp8FrameAssembleKernel : IDisposable
         int frameCount, int p0Stride, int tp0Stride, int outputStride)
     {
         if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
-        _batchKernel(frameCount, partition0, tokenP0, partLens, output, outLen,
+        int maxBytes = Math.Min(outputStride, 10 + p0Stride + tp0Stride);
+        _batchKernel(new Index2D(maxBytes, frameCount), partition0, tokenP0, partLens, output, outLen,
             width, height, p0Stride, tp0Stride, outputStride);
     }
 
-    private static void AssembleBatchKernel(
-        Index1D idx,
+    private static void Vp8AssembleBatchKernel(
+        Index2D idx,
         ArrayView<byte> partition0, ArrayView<byte> tokenP0, ArrayView<long> partLens,
         ArrayView<byte> output, ArrayView<int> outLen,
         int width, int height, int p0Stride, int tp0Stride, int outputStride)
     {
-        int f = idx.X;
+        int f = idx.Y;
         var fP0 = partition0.SubView((long)f * p0Stride, p0Stride);
         var fTp = tokenP0.SubView((long)f * tp0Stride, tp0Stride);
         var fPartLens = partLens.SubView((long)f * 2, 2);
         var fOut = output.SubView((long)f * outputStride, outputStride);
         var fOutLen = outLen.SubView(f, 1);
-        AssembleBody(fP0, fTp, fPartLens, fOut, fOutLen, width, height);
+        AssembleByte(idx.X, fP0, fTp, fPartLens, fOut, fOutLen, width, height);
     }
 
-    private static void AssembleKernel(
-        Index1D _,
+    private static void Vp8AssembleKernel(
+        Index1D idx,
         ArrayView<byte> partition0,
         ArrayView<byte> tokenP0,
         ArrayView<long> partLens,
@@ -126,10 +130,12 @@ public sealed class Vp8FrameAssembleKernel : IDisposable
         ArrayView<int> outLen,
         int width, int height)
     {
-        AssembleBody(partition0, tokenP0, partLens, output, outLen, width, height);
+        AssembleByte(idx.X, partition0, tokenP0, partLens, output, outLen, width, height);
     }
 
-    private static void AssembleBody(
+    /// <summary>Write output byte <paramref name="i"/> of the frame (thread 0 also writes the length).</summary>
+    private static void AssembleByte(
+        int i,
         ArrayView<byte> partition0,
         ArrayView<byte> tokenP0,
         ArrayView<long> partLens,
@@ -139,6 +145,25 @@ public sealed class Vp8FrameAssembleKernel : IDisposable
     {
         long p0Len = partLens[0];
         long tp0Len = partLens[1];
+        // A partition that outgrew its buffer (the bool encoder counted on but stopped writing): report -1 and
+        // assemble nothing.
+        bool overflow = (p0Len > partition0.Length) | (tp0Len > tokenP0.Length);
+        if (overflow)
+        {
+            if (i == 0) outLen[0] = -1;
+            return;
+        }
+        long total = 10 + p0Len + tp0Len;
+        if (i == 0) outLen[0] = (int)total;
+        if (i >= total) return;
+
+        if (i >= 10)
+        {
+            long j = i - 10;
+            if (j < p0Len) output[i] = partition0[j];
+            else output[i] = tokenP0[j - p0Len];
+            return;
+        }
 
         // Build the 24-bit tag. v1: IsKeyFrame=true (bit 0 = 0),
         // Version=Bicubic=0 (bits 1..3 all zero), ShowFrame=true
@@ -147,35 +172,18 @@ public sealed class Vp8FrameAssembleKernel : IDisposable
         tagBits |= 0x10u;             // show_frame = 1
         tagBits |= ((uint)p0Len & 0x7FFFFu) << 5;
 
-        // Frame tag (3 bytes LE).
-        output[0] = (byte)(tagBits & 0xFF);
-        output[1] = (byte)((tagBits >> 8) & 0xFF);
-        output[2] = (byte)((tagBits >> 16) & 0xFF);
-
-        // Start code (3 bytes).
-        output[3] = StartCode0;
-        output[4] = StartCode1;
-        output[5] = StartCode2;
-
-        // Size codes (2 + 2 bytes LE). v1 horizScale = vertScale = 0.
-        int horizSizeCode = width;
-        int vertSizeCode = height;
-        output[6] = (byte)(horizSizeCode & 0xFF);
-        output[7] = (byte)((horizSizeCode >> 8) & 0xFF);
-        output[8] = (byte)(vertSizeCode & 0xFF);
-        output[9] = (byte)((vertSizeCode >> 8) & 0xFF);
-
-        // Copy partition0 bytes.
-        for (long i = 0; i < p0Len; i++)
-            output[10 + i] = partition0[i];
-
-        // Copy tokenP0 bytes.
-        long tp0Base = 10 + p0Len;
-        for (long i = 0; i < tp0Len; i++)
-            output[tp0Base + i] = tokenP0[i];
-
-        // Final length.
-        outLen[0] = (int)(10 + p0Len + tp0Len);
+        // Frame tag (3 bytes LE), start code (3 bytes), size codes (2 + 2 bytes LE; v1 horizScale =
+        // vertScale = 0).
+        int value;
+        if (i < 3) value = (int)((tagBits >> (8 * i)) & 0xFF);
+        else if (i == 3) value = StartCode0;
+        else if (i == 4) value = StartCode1;
+        else if (i == 5) value = StartCode2;
+        else if (i == 6) value = width & 0xFF;
+        else if (i == 7) value = (width >> 8) & 0xFF;
+        else if (i == 8) value = height & 0xFF;
+        else value = (height >> 8) & 0xFF;
+        output[i] = (byte)value;
     }
 
     /// <summary>Release kernel resources.</summary>

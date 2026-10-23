@@ -29,7 +29,7 @@ public sealed class Vp9D153Predict16x16Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(D153Kernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(Vp9D153Predict16x16D153Kernel);
     }
 
     /// <summary>Run D153 prediction on <paramref name="blockCount"/> blocks.</summary>
@@ -100,7 +100,7 @@ public sealed class Vp9D153Predict16x16Kernel : IDisposable
     /// <item>else: r0c[c - 2*r]</item>
     /// </list>
     /// </summary>
-    private static void D153Kernel(
+    private static void Vp9D153Predict16x16D153Kernel(
         Index1D blockIdx,
         ArrayView<byte> topLeftFlat,
         ArrayView<byte> aboveFlat,

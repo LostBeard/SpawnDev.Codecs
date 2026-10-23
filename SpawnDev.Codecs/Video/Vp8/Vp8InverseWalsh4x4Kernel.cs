@@ -26,7 +26,7 @@ public sealed class Vp8InverseWalsh4x4Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<short>, int>(InvWalshKernel);
+            Index1D, ArrayView<short>, ArrayView<short>, int>(Vp8InverseWalsh4x4InvWalshKernel);
     }
 
     /// <summary>Run on N blocks. 16 shorts in, 16 shorts out per block.</summary>
@@ -41,7 +41,7 @@ public sealed class Vp8InverseWalsh4x4Kernel : IDisposable
         _kernel(blockCount, input, output, blockCount);
     }
 
-    private static void InvWalshKernel(
+    private static void Vp8InverseWalsh4x4InvWalshKernel(
         Index1D blockIdx,
         ArrayView<short> input,
         ArrayView<short> output,

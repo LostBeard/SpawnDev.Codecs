@@ -44,7 +44,7 @@ public sealed class Vp9ForwardDct4x4Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<int>, int>(FdctKernel);
+            Index1D, ArrayView<short>, ArrayView<int>, int>(Vp9ForwardDct4x4FdctKernel);
     }
 
     /// <summary>
@@ -81,7 +81,7 @@ public sealed class Vp9ForwardDct4x4Kernel : IDisposable
     }
 
     /// <summary>Kernel body. One thread per 4x4 block.</summary>
-    private static void FdctKernel(
+    private static void Vp9ForwardDct4x4FdctKernel(
         Index1D blockIdx,
         ArrayView<short> input,
         ArrayView<int> output,

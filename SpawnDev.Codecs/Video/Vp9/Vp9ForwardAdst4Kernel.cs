@@ -37,7 +37,7 @@ public sealed class Vp9ForwardAdst4Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, int>(FadstKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, int>(Vp9ForwardAdst4FadstKernel);
     }
 
     /// <summary>
@@ -71,7 +71,7 @@ public sealed class Vp9ForwardAdst4Kernel : IDisposable
         readBack.AsSpan(0, blockCount * 4).CopyTo(output.Span);
     }
 
-    private static void FadstKernel(
+    private static void Vp9ForwardAdst4FadstKernel(
         Index1D blockIdx,
         ArrayView<int> input,
         ArrayView<int> output,

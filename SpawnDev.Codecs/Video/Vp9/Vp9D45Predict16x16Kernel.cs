@@ -33,7 +33,7 @@ public sealed class Vp9D45Predict16x16Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, int, int>(D45Kernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, int, int>(Vp9D45Predict16x16D45Kernel);
     }
 
     /// <summary>Run D45 prediction on <paramref name="blockCount"/> blocks.</summary>
@@ -79,7 +79,7 @@ public sealed class Vp9D45Predict16x16Kernel : IDisposable
     /// registers; nested loop dispatches each output cell to the
     /// correct register via a switch on (row + col).
     /// </summary>
-    private static void D45Kernel(
+    private static void Vp9D45Predict16x16D45Kernel(
         Index1D blockIdx,
         ArrayView<byte> aboveFlat,
         ArrayView<byte> dstFlat,

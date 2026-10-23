@@ -26,7 +26,7 @@ public sealed class Av1Forward2dTransformGpuKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, int, int>(Forward2dKernel);
+            Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, int, int>(Av1Forward2dTransformGpuForward2dKernel);
     }
 
     /// <summary>
@@ -52,7 +52,7 @@ public sealed class Av1Forward2dTransformGpuKernel : IDisposable
         _kernel(blockCount, input, output, scratch, blockCount, txSize);
     }
 
-    private static void Forward2dKernel(
+    private static void Av1Forward2dTransformGpuForward2dKernel(
         Index1D blockIdx,
         ArrayView<short> input,
         ArrayView<int> output,

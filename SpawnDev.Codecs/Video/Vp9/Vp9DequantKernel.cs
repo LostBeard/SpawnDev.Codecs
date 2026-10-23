@@ -41,7 +41,7 @@ public sealed class Vp9DequantKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, int, int, int>(DequantKernel);
+            Index1D, ArrayView<short>, int, int, int>(Vp9DequantDequantKernel);
     }
 
     /// <summary>
@@ -71,7 +71,7 @@ public sealed class Vp9DequantKernel : IDisposable
         readBack.AsSpan(0, (int)total).CopyTo(coefficients.Span);
     }
 
-    private static void DequantKernel(
+    private static void Vp9DequantDequantKernel(
         Index1D idx,
         ArrayView<short> coeffs,
         int coeffsPerBlock,

@@ -63,13 +63,20 @@ public abstract partial class CodecsTestBase
             seed: 0x60DB);
     }
 
-    private async Task RunEncoderMatchesCpuTest(int width, int height, int seed)
+    [TestMethod]
+    public async Task Vp8KeyframeEncoderGpu_NoiseLowQ_320x176_MatchesCpuEncoder()
+    {
+        // White noise at quantizer 4 needs ~790 token bytes per macroblock: more than the token partition the
+        // encoder used to allocate (64 KB + 256 B per macroblock), which the bool encoder then wrote past.
+        await RunEncoderMatchesCpuTest(width: 320, height: 176, seed: 0x60DC, baseQIndex: 4);
+    }
+
+    private async Task RunEncoderMatchesCpuTest(int width, int height, int seed, int baseQIndex = 30)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
             using var enc = new Vp8KeyframeEncoderGpu(acc);
-            const int baseQIndex = 30;
 
             var rng = new Random(seed);
             var ySrc = new byte[width * height];

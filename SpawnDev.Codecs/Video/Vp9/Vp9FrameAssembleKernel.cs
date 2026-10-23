@@ -1,8 +1,9 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
-// VP9 frame assembly kernel. Single-thread dispatch; concatenates
-// the three pre-computed byte streams of a v1 keyframe into the
-// final output buffer:
+// VP9 frame assembly kernel. One thread per output byte (the batch form
+// adds a frame dimension; a single thread copying the whole frame grew
+// with the bitstream); concatenates the three pre-computed byte streams
+// of a v1 keyframe into the final output buffer:
 //
 //   [uncompressed header bytes]
 //   [compressed header bytes]
@@ -41,7 +42,7 @@ public struct Vp9AssembleBatchStrides
 /// <summary>
 /// VP9 frame assembly kernel. Concatenates the uncompressed header,
 /// compressed header, and tile data byte streams into the final
-/// frame output buffer.
+/// frame output buffer, one thread per output byte.
 /// </summary>
 public sealed class Vp9FrameAssembleKernel : IDisposable
 {
@@ -53,7 +54,7 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         ArrayView<long>, ArrayView<long>, ArrayView<long>> _kernel;
 
     private readonly Action<
-        Index1D,
+        Index2D,
         ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
         ArrayView<long>,
         ArrayView<long>, ArrayView<long>, ArrayView<long>,
@@ -68,16 +69,16 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
             Index1D,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<long>,
-            ArrayView<long>, ArrayView<long>, ArrayView<long>>(AssembleKernel);
+            ArrayView<long>, ArrayView<long>, ArrayView<long>>(Vp9AssembleKernel);
         _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D,
+            Index2D,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<long>,
             ArrayView<long>, ArrayView<long>, ArrayView<long>,
-            Vp9AssembleBatchStrides>(AssembleBatchKernel);
+            Vp9AssembleBatchStrides>(Vp9AssembleBatchKernel);
     }
 
-    /// <summary>Batch assemble: extent=N, one thread per frame.</summary>
+    /// <summary>Batch assemble: one thread per (output byte, frame).</summary>
     public void RunBatch(
         ArrayView<byte> uncompressedHeader, ArrayView<byte> compressedHeader,
         ArrayView<byte> tileBytes, ArrayView<byte> outBuf, ArrayView<long> outLen,
@@ -85,19 +86,20 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         int frameCount, Vp9AssembleBatchStrides strides)
     {
         if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
-        _batchKernel(frameCount,
+        long maxBytes = Math.Min(strides.OutStride, (long)strides.UhStride + strides.ChStride + strides.TileStride);
+        _batchKernel(new Index2D(checked((int)maxBytes), frameCount),
             uncompressedHeader, compressedHeader, tileBytes, outBuf, outLen,
             uhLen, chLen, tileLen, strides);
     }
 
-    private static void AssembleBatchKernel(
-        Index1D idx,
+    private static void Vp9AssembleBatchKernel(
+        Index2D idx,
         ArrayView<byte> uncompressedHeader, ArrayView<byte> compressedHeader,
         ArrayView<byte> tileBytes, ArrayView<byte> outBuf, ArrayView<long> outLenOut,
         ArrayView<long> uhLenView, ArrayView<long> chLenView, ArrayView<long> tileLenView,
         Vp9AssembleBatchStrides s)
     {
-        int f = idx.X;
+        int f = idx.Y;
         var fUH = uncompressedHeader.SubView((long)f * s.UhStride, s.UhStride);
         var fCH = compressedHeader.SubView((long)f * s.ChStride, s.ChStride);
         var fTile = tileBytes.SubView((long)f * s.TileStride, s.TileStride);
@@ -106,7 +108,7 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         var fUhLen = uhLenView.SubView(f, 1);
         var fChLen = chLenView.SubView(f, 1);
         var fTileLen = tileLenView.SubView(f, 1);
-        AssembleBody(fUH, fCH, fTile, fOut, fOutLen, fUhLen, fChLen, fTileLen);
+        AssembleByte(idx.X, fUH, fCH, fTile, fOut, fOutLen, fUhLen, fChLen, fTileLen);
     }
 
     /// <summary>
@@ -128,7 +130,11 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         if (uncompressedLenView.Length < 1) throw new ArgumentException("uncompressedLenView must hold 1 entry.", nameof(uncompressedLenView));
         if (compressedLenView.Length < 1) throw new ArgumentException("compressedLenView must hold 1 entry.", nameof(compressedLenView));
         if (tileLenView.Length < 1) throw new ArgumentException("tileLenView must hold 1 entry.", nameof(tileLenView));
-        _kernel(1, uncompressedHeader, compressedHeader, tileBytes, outBuf, outLen,
+        // Upper bound of the frame length: the three streams at their capacity. At least one thread, which
+        // writes the length even for an empty frame.
+        long maxBytes = Math.Min(outBuf.Length, uncompressedHeader.Length + compressedHeader.Length + tileBytes.Length);
+        if (maxBytes < 1) maxBytes = 1;
+        _kernel(checked((int)maxBytes), uncompressedHeader, compressedHeader, tileBytes, outBuf, outLen,
                 uncompressedLenView, compressedLenView, tileLenView);
     }
 
@@ -166,8 +172,8 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         await _accelerator.SynchronizeAsync();
     }
 
-    private static void AssembleKernel(
-        Index1D _,
+    private static void Vp9AssembleKernel(
+        Index1D idx,
         ArrayView<byte> uncompressedHeader,
         ArrayView<byte> compressedHeader,
         ArrayView<byte> tileBytes,
@@ -177,12 +183,14 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         ArrayView<long> compressedLenView,
         ArrayView<long> tileLenView)
     {
-        AssembleBody(uncompressedHeader, compressedHeader, tileBytes,
+        AssembleByte(idx.X, uncompressedHeader, compressedHeader, tileBytes,
             outBuf, outLenOut,
             uncompressedLenView, compressedLenView, tileLenView);
     }
 
-    private static void AssembleBody(
+    /// <summary>Write output byte <paramref name="i"/> (thread 0 also writes the length).</summary>
+    private static void AssembleByte(
+        int i,
         ArrayView<byte> uncompressedHeader,
         ArrayView<byte> compressedHeader,
         ArrayView<byte> tileBytes,
@@ -195,11 +203,21 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         int uncompressedLen = (int)uncompressedLenView[0];
         int compressedLen = (int)compressedLenView[0];
         int tileLen = (int)tileLenView[0];
-        long pos = 0;
-        for (int i = 0; i < uncompressedLen; i++) outBuf[pos++] = uncompressedHeader[i];
-        for (int i = 0; i < compressedLen; i++)   outBuf[pos++] = compressedHeader[i];
-        for (int i = 0; i < tileLen; i++)         outBuf[pos++] = tileBytes[i];
-        outLenOut[0] = pos;
+        // A stream that outgrew its buffer (the bool encoder counted on but stopped writing): report -1 and
+        // assemble nothing.
+        bool overflow = (uncompressedLen > uncompressedHeader.Length) | (compressedLen > compressedHeader.Length)
+            | (tileLen > tileBytes.Length);
+        if (overflow)
+        {
+            if (i == 0) outLenOut[0] = -1;
+            return;
+        }
+        long total = (long)uncompressedLen + compressedLen + tileLen;
+        if (i == 0) outLenOut[0] = total;
+        if (i >= total) return;
+        if (i < uncompressedLen) outBuf[i] = uncompressedHeader[i];
+        else if (i < uncompressedLen + compressedLen) outBuf[i] = compressedHeader[i - uncompressedLen];
+        else outBuf[i] = tileBytes[i - uncompressedLen - compressedLen];
     }
 
     /// <summary>Release kernel resources.</summary>

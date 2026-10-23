@@ -40,11 +40,11 @@ public sealed class Vp9DequantizerComputeKernel : IDisposable
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<short>, ArrayView<short>, ArrayView<int>,
-            int, int, int, int, int>(ComputeKernel);
+            int, int, int, int, int>(Vp9DequantizerComputeComputeKernel);
         _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<short>, ArrayView<short>, ArrayView<int>,
-            int, int, int, int, int, int>(ComputeBatchKernel);
+            int, int, int, int, int, int>(Vp9DequantizerComputeComputeBatchKernel);
     }
 
     /// <summary>Batch dequantizer: extent=N, each thread fills one frame's slot.</summary>
@@ -59,7 +59,7 @@ public sealed class Vp9DequantizerComputeKernel : IDisposable
             baseQIndex, yDcDelta, yAcDelta, uvDcDelta, uvAcDelta, dequantStride);
     }
 
-    private static void ComputeBatchKernel(
+    private static void Vp9DequantizerComputeComputeBatchKernel(
         Index1D idx,
         ArrayView<short> dcQLookup, ArrayView<short> acQLookup,
         ArrayView<int> dequantOut,
@@ -98,7 +98,7 @@ public sealed class Vp9DequantizerComputeKernel : IDisposable
     /// <summary>Build the 256-short AC quantizer lookup buffer for upload.</summary>
     public static short[] BuildAcQLookup() => (short[])Vp9Dequantizer.AcQLookup8.Clone();
 
-    private static void ComputeKernel(
+    private static void Vp9DequantizerComputeComputeKernel(
         Index1D _,
         ArrayView<short> dcQLookup,
         ArrayView<short> acQLookup,

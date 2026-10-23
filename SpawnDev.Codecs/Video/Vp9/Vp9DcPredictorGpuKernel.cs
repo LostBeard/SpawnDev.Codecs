@@ -34,7 +34,7 @@ public sealed class Vp9DcPredictorGpuTestKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(PredictKernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(Vp9DcPredictorGpuPredictKernel);
     }
 
     /// <summary>
@@ -56,7 +56,7 @@ public sealed class Vp9DcPredictorGpuTestKernel : IDisposable
         _kernel(1, above, left, dst, n, (int)variant);
     }
 
-    private static void PredictKernel(
+    private static void Vp9DcPredictorGpuPredictKernel(
         Index1D _,
         ArrayView<byte> above,
         ArrayView<byte> left,

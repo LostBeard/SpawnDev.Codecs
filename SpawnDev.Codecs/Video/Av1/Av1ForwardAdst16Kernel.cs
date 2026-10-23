@@ -28,7 +28,7 @@ public sealed class Av1ForwardAdst16Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, int, int>(FadstKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, int, int>(Av1ForwardAdst16FadstKernel);
     }
 
     /// <summary>
@@ -48,7 +48,7 @@ public sealed class Av1ForwardAdst16Kernel : IDisposable
     }
 
     /// <summary>Kernel body. One thread per 16-element transform.</summary>
-    private static void FadstKernel(
+    private static void Av1ForwardAdst16FadstKernel(
         Index1D transformIdx,
         ArrayView<int> input,
         ArrayView<int> output,

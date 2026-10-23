@@ -35,7 +35,7 @@ public sealed class Av1CdfRoundTripKernel : IDisposable
             Index1D,
             ArrayView<int>, ArrayView<int>, ArrayView<ushort>,
             ArrayView<byte>, ArrayView<long>,
-            int, int>(RoundTripKernel);
+            int, int>(Av1CdfRoundTripRoundTripKernel);
     }
 
     /// <summary>
@@ -50,7 +50,7 @@ public sealed class Av1CdfRoundTripKernel : IDisposable
         _kernel(1, inputSyms, decodedSyms, icdf, scratch, outLen, symCount, nsyms);
     }
 
-    private static void RoundTripKernel(
+    private static void Av1CdfRoundTripRoundTripKernel(
         Index1D _,
         ArrayView<int> inputSyms, ArrayView<int> decodedSyms,
         ArrayView<ushort> icdf, ArrayView<byte> scratch, ArrayView<long> outLen,

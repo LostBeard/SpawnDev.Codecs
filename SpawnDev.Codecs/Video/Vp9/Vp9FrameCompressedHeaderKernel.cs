@@ -52,9 +52,9 @@ public sealed class Vp9FrameCompressedHeaderKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<long>>(EmitKernel);
+            Index1D, ArrayView<byte>, ArrayView<long>>(Vp9FrameCompressedHeaderEmitKernel);
         _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<long>, int>(EmitBatchKernel);
+            Index1D, ArrayView<byte>, ArrayView<long>, int>(Vp9FrameCompressedHeaderEmitBatchKernel);
     }
 
     /// <summary>
@@ -81,7 +81,7 @@ public sealed class Vp9FrameCompressedHeaderKernel : IDisposable
         _batchKernel(frameCount, outBuf, outLen, outBufStride);
     }
 
-    private static void EmitBatchKernel(
+    private static void Vp9FrameCompressedHeaderEmitBatchKernel(
         Index1D idx,
         ArrayView<byte> outBuf, ArrayView<long> outLen, int outBufStride)
     {
@@ -91,7 +91,7 @@ public sealed class Vp9FrameCompressedHeaderKernel : IDisposable
         EmitBody(fOut, fOutLen);
     }
 
-    private static void EmitKernel(
+    private static void Vp9FrameCompressedHeaderEmitKernel(
         Index1D _,
         ArrayView<byte> outBuf,
         ArrayView<long> outLenOut)
