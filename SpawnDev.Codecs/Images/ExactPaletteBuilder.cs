@@ -104,7 +104,7 @@ internal sealed class ExactPaletteBuilder : IDisposable
     }
 
     /// <summary>Pixels per insert launch (one launch over a whole large picture was 17 ms on CUDA: hash probes contend).</summary>
-    public const int InsertPixelsPerLaunch = 1 << 18;
+    public const int InsertPixelsPerLaunch = 1 << 16;
 
     /// <summary>Add the opaque colours of <paramref name="pixelCount"/> RGBA pixels (alpha &gt;= threshold) to the set.</summary>
     public void Insert(ArrayView<byte> rgba, int pixelCount, int alphaThreshold)

@@ -55,15 +55,15 @@ public static class DeflateGpu
     public const int MaxBlockSize = 1 << 20;
 
     /// <summary>Input positions one <see cref="ParseStep"/> launch parses at most (plus the rest of a match).</summary>
-    public const int ParseChunk = 2048;
+    public const int ParseChunk = 512;
     /// <summary>
     /// Byte compares after which one lazy (level 3) <see cref="ParseStep"/> launch stops even before
     /// <see cref="ParseChunk"/> positions (a few milliseconds of compares on a desktop GPU). Greedy matching needs no such
     /// stop: it makes at most 4 * chain compares per position it advances.
     /// </summary>
-    public const int ParseCompareBudget = 1 << 20;
+    public const int ParseCompareBudget = 1 << 18;
     /// <summary>Tokens (or stored bytes) one <see cref="EmitStep"/> launch writes at most.</summary>
-    public const int EmitChunk = 8192;
+    public const int EmitChunk = 4096;
 
     // ---- tail scratch layout (ints), after the hash heads, prev chain and token array ----
     private const int LitFreqOff = 0;        // [288]
