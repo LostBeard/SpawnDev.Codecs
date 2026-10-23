@@ -1,0 +1,7 @@
+# name	channels	rate	frames	signal	quality
+mono_chirp_48k_q3	1	48000	19200	chirp	3
+mono_clicks_44k_q4	1	44100	17640	clicks	4
+mono_noise_22k_q0	1	22050	8820	noise	0
+stereo_tones_44k_q5	2	44100	17640	tones	5
+stereo_clicks_48k_qm1	2	48000	19200	clicks	-1
+stereo_noise_48k_q10	2	48000	19200	noise	10
