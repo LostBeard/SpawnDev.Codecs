@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
             short[] cur  = { 2200, 5200, 7800, 11400, 14200, 17800, 20800, 24800, 27800, 31200 };
             await InterpolateAndVerify(acc, prev, cur, interpCoefQ2: 1);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
             short[] cur  = { 2400, 4800, 8200, 11500, 14000, 18200, 20500, 25000, 27500, 31500 };
             await InterpolateAndVerify(acc, prev, cur, interpCoefQ2: 2);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
                              17700, 19300, 21700, 23300, 25700, 27300, 29700, 31300 };
             await InterpolateAndVerify(acc, prev, cur, interpCoefQ2: 3);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
             short[] cur  = { 5000, 6000, 9000, 12000, 15000, 18000, 21000, 24000, 27000, 30000 };
             await InterpolateAndVerify(acc, prev, cur, interpCoefQ2: 0);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task InterpolateAndVerify(

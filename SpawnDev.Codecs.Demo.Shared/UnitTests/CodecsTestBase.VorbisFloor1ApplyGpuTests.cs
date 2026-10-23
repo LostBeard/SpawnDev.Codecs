@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
             }
             await ApplyAndVerify(acc, residue, curveIdx);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
             var curveIdx = new[] { -1000, -1, 0, 255, 1000 };
             await ApplyAndVerify(acc, residue, curveIdx);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
             }
             await ApplyAndVerify(acc, residue, curveIdx);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task ApplyAndVerify(Accelerator acc, float[] residue, int[] curveIdx)

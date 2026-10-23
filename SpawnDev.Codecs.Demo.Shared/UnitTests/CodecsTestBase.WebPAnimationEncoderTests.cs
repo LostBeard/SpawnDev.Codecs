@@ -152,7 +152,7 @@ public abstract partial class CodecsTestBase
                 }
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
         True(failures.Count == 0, $"{failures.Count} animation encoder failures:\n" + string.Join("\n", failures));
         var verify = await RunPillowVerifyAsync(dir);
         True(verify.Contains("SUMMARY"), "verification script did not finish");
@@ -178,7 +178,7 @@ public abstract partial class CodecsTestBase
             var loose = await CheckAnimationAsync(enc, dec, src, new WebPAnimationEncodeOptions { Exact = false }, "loose", null);
             True(loose.Count == 0, string.Join("\n", loose));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -228,7 +228,7 @@ public abstract partial class CodecsTestBase
                 }
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
         True(failures.Count == 0, $"{failures.Count} animation metadata failures:\n" + string.Join("\n", failures));
         await RunPillowVerifyAsync(dir);
     }
@@ -268,7 +268,7 @@ public abstract partial class CodecsTestBase
             }
             finally { foreach (var b in inputs) b.Dispose(); }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -307,6 +307,6 @@ public abstract partial class CodecsTestBase
             using var dOut = acc.Allocate1D<byte>(100);
             True(await Throws<ArgumentException>(() => enc.EncodeAnimationAsync(new[] { dIn.View }, ok, 8, 8, dOut.View)), "output smaller than GetMaxAnimationEncodedSize");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

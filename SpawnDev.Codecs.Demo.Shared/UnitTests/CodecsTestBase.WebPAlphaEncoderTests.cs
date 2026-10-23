@@ -227,7 +227,7 @@ public abstract partial class CodecsTestBase
                 }
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
         True(failures.Count == 0, $"{failures.Count} ALPH encoder failures:\n" + string.Join("\n", failures));
         if (dir == null) return; // our decoder checked every payload; the libwebp check needs a desktop with Pillow
         await File.WriteAllLinesAsync(Path.Combine(dir, "autopick.txt"), report);
@@ -263,7 +263,7 @@ public abstract partial class CodecsTestBase
                 }
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -294,7 +294,7 @@ public abstract partial class CodecsTestBase
                 Equal(null, await DeviceVerify.CompareAsync(acc, dOut.View, managed), $"{name}: managed overload bytes");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -320,6 +320,6 @@ public abstract partial class CodecsTestBase
             using var dOut = acc.Allocate1D<byte>(100);
             True(await Throws<ArgumentException>(() => enc.EncodeAlphaAsync(dIn.View, 16, 16, dOut.View)), "output smaller than GetMaxAlphaEncodedSize");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

@@ -68,7 +68,7 @@ public abstract partial class CodecsTestBase
                 }
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -102,7 +102,7 @@ public abstract partial class CodecsTestBase
                         $"expected = {expected}, gpu = {gpu[i]}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -143,7 +143,7 @@ public abstract partial class CodecsTestBase
                         $"expected = {expected}, gpu = {gpu[i]} (diff = {gpu[i] - expected})");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static void DivByTwoKernel(Index1D idx, ArrayView<int> input, ArrayView<int> output)

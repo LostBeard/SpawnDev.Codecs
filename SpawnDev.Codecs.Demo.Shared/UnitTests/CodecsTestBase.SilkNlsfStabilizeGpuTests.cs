@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
 
             await StabilizeAndVerify(acc, nlsf, nDelta);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
 
             await StabilizeAndVerify(acc, nlsf, nDelta);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
 
             await StabilizeAndVerify(acc, nlsf, nDelta);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task StabilizeAndVerify(Accelerator acc, short[] nlsf, short[] nDelta)

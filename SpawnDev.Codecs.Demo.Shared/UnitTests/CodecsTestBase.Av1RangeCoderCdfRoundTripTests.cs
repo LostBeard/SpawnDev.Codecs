@@ -54,6 +54,6 @@ public abstract partial class CodecsTestBase
                 if (inputSyms[i] != decoded[i])
                     throw new Exception($"sym[{i}]: input={inputSyms[i]} decoded={decoded[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

@@ -66,29 +66,31 @@ public abstract partial class CodecsTestBase
         return result;
     }
 
-    /// <summary>Decodes frame k alternately through the managed and the ArrayView1D overload and compares with the truth.</summary>
-    private static async Task<string?> GifCheckFrameAsync(
-        GifDecoderGpu dec, Accelerator acc, string name, byte[] gif, ArrayView1D<byte, Stride1D.Dense> dFile, int k,
-        byte[] expected, int width)
+    /// <summary>The whole-animation truth of the given kind (frame k at k * frameBytes) uploaded to the accelerator, or null.</summary>
+    private static (MemoryBuffer1D<byte, Stride1D.Dense> Truth, int Frames, int FrameBytes)? GifTruthOnDevice(
+        Accelerator acc, string name, string kind, JsonElement meta)
     {
-        byte[] pixels;
-        if (k % 2 == 0)
-        {
-            var img = await dec.DecodeFrameAsync(gif, k);
-            pixels = img.Pixels;
-        }
-        else
-        {
-            using var dOut = acc.Allocate1D<byte>(expected.Length + 7);
-            var fill = new byte[dOut.Length];
-            System.Array.Fill(fill, (byte)0xAB);
-            DeviceTransfer.Upload(dOut.View, fill);
-            await dec.DecodeFrameAsync(dFile, gif.Length, k, dOut.View);
-            pixels = await DeviceTransfer.DownloadAsync(dOut.View, expected.Length);
-            var tail = await dOut.View.SubView(expected.Length, 7).CopyToHostAsync();
-            if (tail.Any(b => b != 0xAB)) return $"{name} frame {k} [ArrayView1D]: wrote past the end of the canvas";
-        }
-        var diff = ComparePixels(expected, pixels, 4, width);
+        string resource = GifFixturePrefix + name + "." + kind + ".rgba8";
+        if (!HasEmbedded(resource)) return null;
+        var all = ReadEmbedded(resource);
+        int frames = GifFrameCount(meta);
+        int size = meta.GetProperty("width").GetInt32() * meta.GetProperty("height").GetInt32() * 4;
+        Equal(frames * size, all.Length, $"{name}.{kind}.rgba8 length");
+        return (DeviceVerify.Upload(acc, all), frames, size);
+    }
+
+    /// <summary>
+    /// Decodes frame k through the ArrayView1D overload into <paramref name="dOut"/> (0xAB-poisoned, 7 bytes longer than
+    /// the canvas) and compares it on the accelerator with frame k of the device truth.
+    /// </summary>
+    private static async Task<string?> GifCheckFrameAsync(
+        GifDecoderGpu dec, Accelerator acc, string name, ArrayView1D<byte, Stride1D.Dense> dFile, int fileLength, int k,
+        ArrayView1D<byte, Stride1D.Dense> dTruth, int frameBytes, ArrayView1D<byte, Stride1D.Dense> dOut, int width)
+    {
+        await dec.DecodeFrameAsync(dFile, fileLength, k, dOut);
+        var tail = await DeviceVerify.AllEqualAsync(acc, dOut.SubView(frameBytes, 7), 7, 0xAB);
+        if (tail != null) return $"{name} frame {k} [ArrayView1D]: wrote past the end of the canvas ({tail})";
+        var diff = await DeviceVerify.CompareAsync(acc, dOut, dTruth.SubView((long)k * frameBytes, frameBytes), frameBytes, 4, width);
         return diff == null ? null : $"{name} frame {k}: {diff}";
     }
 
@@ -103,25 +105,27 @@ public abstract partial class CodecsTestBase
             foreach (var name in GifValidFixtureNames())
             {
                 var meta = GifMetaJson(name);
-                var truth = GifTruth(name, kind, meta);
-                if (truth == null) continue;
+                var truthOnDevice = GifTruthOnDevice(acc, name, kind, meta);
+                if (truthOnDevice == null) continue;
+                var (dTruthBuf, frameCount, frameBytes) = truthOnDevice.Value;
+                using var dTruth = dTruthBuf;
                 byte[] gif = GifFixture(name);
                 try
                 {
-                    var info = await dec.ReadInfoAsync(gif);
-                    if (info.FrameCount != truth.Length) { failures.Add($"{name}: ReadInfo.FrameCount {info.FrameCount} != {truth.Length}"); continue; }
-                    using var dFile = acc.Allocate1D<byte>(gif.Length);
-                    DeviceTransfer.Upload(dFile.View, gif);
+                    using var dFile = DeviceVerify.Upload(acc, gif);
+                    var info = await dec.ReadInfoAsync(dFile.View, gif.Length);
+                    if (info.FrameCount != frameCount) { failures.Add($"{name}: ReadInfo.FrameCount {info.FrameCount} != {frameCount}"); continue; }
+                    using var dOut = DeviceVerify.Poisoned(acc, frameBytes + 7);
                     string? firstFailure = null;
                     int failedFrames = 0;
-                    for (int k = 0; k < truth.Length; k++)
+                    for (int k = 0; k < frameCount; k++)
                     {
-                        var failure = await GifCheckFrameAsync(dec, acc, name, gif, dFile.View, k, truth[k], info.Width);
+                        var failure = await GifCheckFrameAsync(dec, acc, name, dFile.View, gif.Length, k, dTruth.View, frameBytes, dOut.View, info.Width);
                         if (failure != null) { firstFailure ??= failure; failedFrames++; }
                         frameChecks++;
                     }
                     // One line per fixture: the first bad frame and how many frames of that fixture were bad.
-                    if (firstFailure != null) failures.Add($"{firstFailure}  [{failedFrames} of {truth.Length} frames bad]");
+                    if (firstFailure != null) failures.Add($"{firstFailure}  [{failedFrames} of {frameCount} frames bad]");
                     fixtures++;
                 }
                 catch (Exception ex)
@@ -134,7 +138,7 @@ public abstract partial class CodecsTestBase
                 $"{mode}: {failures.Count} frame failures against the {kind} truth ({frameChecks} frames, {fixtures} fixtures checked):\n" +
                 string.Join("\n", failures.Take(60)));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -178,32 +182,30 @@ public abstract partial class CodecsTestBase
             foreach (var name in GifValidFixtureNames())
             {
                 var meta = GifMetaJson(name);
-                var truth = GifTruth(name, "pil", meta);
-                if (truth == null) continue;
+                var truthOnDevice = GifTruthOnDevice(acc, name, "pil", meta);
+                if (truthOnDevice == null) continue;
+                var (dTruthBuf, _, frameBytes) = truthOnDevice.Value;
+                using var dTruth = dTruthBuf;
                 byte[] gif = GifFixture(name);
                 try
                 {
-                    // Managed DecodeAsync.
-                    var managed = await dec.DecodeAsync(gif);
-                    var diff = ComparePixels(truth[0], managed.Pixels, 4, managed.Info.Width);
-                    if (diff != null) failures.Add($"{name} [managed]: {diff}");
-
                     // ArrayView1D DecodeAsync: the file buffer is longer than the file and holds garbage after fileLength.
-                    using var dFile = acc.Allocate1D<byte>(gif.Length + 33);
-                    var padded = new byte[gif.Length + 33];
-                    System.Array.Fill(padded, (byte)0xAB);
-                    gif.CopyTo(padded, 0);
-                    DeviceTransfer.Upload(dFile.View, padded);
-                    using var dOut = acc.Allocate1D<byte>(truth[0].Length + 7);
-                    var fill = new byte[dOut.Length];
-                    System.Array.Fill(fill, (byte)0xAB);
-                    DeviceTransfer.Upload(dOut.View, fill);
+                    using var dFile = DeviceVerify.Upload(acc, gif, slack: 33);
+                    using var dOut = DeviceVerify.Poisoned(acc, frameBytes + 7);
                     var info = await dec.DecodeAsync(dFile.View, gif.Length, dOut.View, PixelFormat.Rgba8);
-                    var viewPixels = await DeviceTransfer.DownloadAsync(dOut.View, truth[0].Length);
-                    diff = ComparePixels(truth[0], viewPixels, 4, info.Width);
+                    var diff = await DeviceVerify.CompareAsync(acc, dOut.View, dTruth.View, frameBytes, 4, info.Width);
                     if (diff != null) failures.Add($"{name} [ArrayView1D]: {diff}");
-                    var tail = await dOut.View.SubView(truth[0].Length, 7).CopyToHostAsync();
-                    if (tail.Any(b => b != 0xAB)) failures.Add($"{name} [ArrayView1D]: wrote past the end of the canvas");
+                    var tail = await DeviceVerify.AllEqualAsync(acc, dOut.View.SubView(frameBytes, 7), 7, 0xAB);
+                    if (tail != null) failures.Add($"{name} [ArrayView1D]: wrote past the end of the canvas");
+
+                    // The managed overload funnels into the same path: checked on every 16th fixture (its pixels come back
+                    // to the host, so the comparison uploads them, it does not walk them here).
+                    if (checkedCount % 16 == 0)
+                    {
+                        var managed = await dec.DecodeAsync(gif);
+                        diff = await DeviceVerify.CompareHostResultAsync(acc, managed.Pixels, dTruth.View, frameBytes, 4, managed.Info.Width);
+                        if (diff != null) failures.Add($"{name} [managed]: {diff}");
+                    }
                     checkedCount++;
                 }
                 catch (Exception ex)
@@ -214,7 +216,7 @@ public abstract partial class CodecsTestBase
             True(checkedCount > 100, $"only {checkedCount} fixtures checked");
             True(failures.Count == 0, $"{failures.Count} of {checkedCount + failures.Count} GIF fixtures failed:\n" + string.Join("\n", failures.Take(40)));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -238,8 +240,12 @@ public abstract partial class CodecsTestBase
                     for (int i = 0; i < truth[last].Length; i++) { expected[i * 2] = truth[last][i]; expected[i * 2 + 1] = truth[last][i]; }
                     try
                     {
-                        var img = await dec.DecodeFrameAsync(GifFixture(name), last, PixelFormat.Rgba16);
-                        var diff = ComparePixels(expected, img.Pixels, 8, img.Info.Width);
+                        // small fixtures (the widened truth is built on the host, a few KB); decode and compare on the device
+                        var gif = GifFixture(name);
+                        using var dFile = DeviceVerify.Upload(acc, gif);
+                        using var dOut = acc.Allocate1D<byte>(expected.Length);
+                        var info = await dec.DecodeFrameAsync(dFile.View, gif.Length, last, dOut.View, PixelFormat.Rgba16);
+                        var diff = await DeviceVerify.CompareAsync(acc, dOut.View, expected, 8, info.Width);
                         if (diff != null) failures.Add($"{mode} {name}: {diff}");
                         checkedCount++;
                     }
@@ -252,7 +258,7 @@ public abstract partial class CodecsTestBase
             True(checkedCount >= 8, $"only {checkedCount} RGBA16 decodes ran");
             True(failures.Count == 0, $"{failures.Count} RGBA16 GIF failures of {checkedCount + failures.Count}:\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -323,7 +329,7 @@ public abstract partial class CodecsTestBase
             True(loops > 100, $"only {loops} fixtures checked");
             True(failures.Count == 0, $"{failures.Count} structure failures:\n" + string.Join("\n", failures.Take(40)));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -340,7 +346,7 @@ public abstract partial class CodecsTestBase
             Equal(-1, await dec.ReadLoopCountAsync(GifFixture("loop_after_first_frame")), "extension after the first image is ignored (Pillow)");
             Equal(0, await dec.ReadLoopCountAsync(GifFixture("extensions_skipped")), "loop extension next to comment / application extensions");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     // ------------------------------------------------------------------
@@ -359,7 +365,7 @@ public abstract partial class CodecsTestBase
             NotNull(caught, $"{what}: expected ImageDecodeException");
             Contains(expectedMessagePart, caught!.Message, what);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -377,9 +383,20 @@ public abstract partial class CodecsTestBase
                 string reject = meta.GetProperty("reject").GetString()!;
                 int frame = meta.GetProperty("frame").GetInt32();
                 byte[] gif = GifFixture(name);
+                // decoded on the device only: the error paths are what is tested, the pixels never come back
+                using var dFile = DeviceVerify.Upload(acc, gif);
+                MemoryBuffer1D<byte, Stride1D.Dense>? dOut = null;
+                async Task DecodeOnDeviceAsync(int k)
+                {
+                    // ReadInfo runs the same scan DecodeFrame starts with, so a scan error surfaces here identically
+                    var info = await dec.ReadInfoAsync(dFile.View, gif.Length);
+                    long need = info.GetPixelBufferSize(PixelFormat.Rgba8);
+                    if (dOut == null || dOut.Length < need) { dOut?.Dispose(); dOut = acc.Allocate1D<byte>(Math.Max(4, need)); }
+                    await dec.DecodeFrameAsync(dFile.View, gif.Length, k, dOut.View);
+                }
                 foreach (var ok in meta.GetProperty("okFrames").EnumerateArray())
                 {
-                    try { await dec.DecodeFrameAsync(gif, ok.GetInt32()); }
+                    try { await DecodeOnDeviceAsync(ok.GetInt32()); }
                     catch (Exception ex) { failures.Add($"{name}: frame {ok.GetInt32()} must decode but threw {ex.GetType().Name}: {ex.Message}"); }
                 }
                 foreach (var compositing in new[] { GifCompositing.Pillow, GifCompositing.Web })
@@ -387,7 +404,7 @@ public abstract partial class CodecsTestBase
                     dec.Compositing = compositing;
                     try
                     {
-                        await dec.DecodeFrameAsync(gif, frame);
+                        await DecodeOnDeviceAsync(frame);
                         failures.Add($"{name}: decoded without an error, expected '{reject}'");
                     }
                     catch (ImageDecodeException ex)
@@ -400,12 +417,13 @@ public abstract partial class CodecsTestBase
                         failures.Add($"{name}: threw {ex.GetType().Name} instead of ImageDecodeException: {ex.Message}");
                     }
                 }
+                dOut?.Dispose();
                 count++;
             }
             True(count >= 30, $"only {count} hostile fixtures");
             True(failures.Count == 0, $"{failures.Count} hostile-stream failures:\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     /// <summary>
@@ -459,7 +477,7 @@ public abstract partial class CodecsTestBase
             var k = await dec.DecodeAsync(TinyGif(LzwBits((4, 3), (1, 3), (6, 3), (2, 3), (5, 3)), w: 4, h: 1));
             EqualBytes(new byte[] { 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 0, 255, 0, 255 }, k.Pixels, "KwKwK 4x1 pixels");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     /// <summary>
@@ -509,7 +527,7 @@ public abstract partial class CodecsTestBase
             True(files > 0, "no fuzz files found in " + dir);
             True(failures.Count == 0, $"{failures.Count} of {files} random animations differ from Pillow:\n" + string.Join("\n", failures.Take(40)));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -547,7 +565,7 @@ public abstract partial class CodecsTestBase
             var last = await dec.DecodeFrameAsync(ok, GifMeta.MaxFrames - 1);
             EqualBytes(new byte[] { 255, 0, 0, 255 }, last.Pixels, "last of 16384 frames");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -565,7 +583,7 @@ public abstract partial class CodecsTestBase
             var last = await dec.DecodeFrameAsync(gif, 4);
             Equal(5, last.Info.FrameCount, "FrameCount");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -585,7 +603,7 @@ public abstract partial class CodecsTestBase
             try { await dec.ReadInfoAsync(dFile.View, 0); } catch (ArgumentOutOfRangeException) { caught++; }
             Equal(3, caught, "too-small output, fileLength beyond the view, fileLength 0");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -600,14 +618,17 @@ public abstract partial class CodecsTestBase
             foreach (var name in new[] { "noise4_deferred", "size_1x1", "anim_70_frames", "pal2_13x9", "noise4_deferred", "anim_dispose3", "anim_dispose3" })
             {
                 var meta = GifMetaJson(name);
-                var truth = GifTruth(name, "pil", meta)!;
-                int last = truth.Length - 1;
-                var img = await dec.DecodeFrameAsync(GifFixture(name), last);
-                var diff = ComparePixels(truth[last], img.Pixels, 4, img.Info.Width);
-                if (diff != null) failures.Add($"{name}: {diff}");
+                var (dTruthBuf, frames, frameBytes) = GifTruthOnDevice(acc, name, "pil", meta)!.Value;
+                using var dTruth = dTruthBuf;
+                var gif = GifFixture(name);
+                using var dFile = DeviceVerify.Upload(acc, gif);
+                using var dOut = DeviceVerify.Poisoned(acc, frameBytes + 7);
+                var info = await dec.ReadInfoAsync(dFile.View, gif.Length);
+                var diff = await GifCheckFrameAsync(dec, acc, name, dFile.View, gif.Length, frames - 1, dTruth.View, frameBytes, dOut.View, info.Width);
+                if (diff != null) failures.Add(diff);
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

@@ -149,7 +149,7 @@ public abstract partial class CodecsTestBase
                 Vp9BlockCoefDecoder.PlaneType.Y, Vp9BlockCoefDecoder.RefType.Intra,
                 block);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -165,7 +165,7 @@ public abstract partial class CodecsTestBase
                 Vp9BlockCoefDecoder.PlaneType.Y, Vp9BlockCoefDecoder.RefType.Intra,
                 block);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -181,7 +181,7 @@ public abstract partial class CodecsTestBase
                 Vp9BlockCoefDecoder.PlaneType.Y, Vp9BlockCoefDecoder.RefType.Intra,
                 block);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -204,7 +204,7 @@ public abstract partial class CodecsTestBase
                 Vp9BlockCoefDecoder.PlaneType.Y, Vp9BlockCoefDecoder.RefType.Intra,
                 block);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -228,7 +228,7 @@ public abstract partial class CodecsTestBase
                     block);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -249,7 +249,7 @@ public abstract partial class CodecsTestBase
                 Vp9BlockCoefDecoder.PlaneType.Uv, Vp9BlockCoefDecoder.RefType.Intra,
                 block);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -272,7 +272,7 @@ public abstract partial class CodecsTestBase
                     block, initialCtx);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -295,6 +295,6 @@ public abstract partial class CodecsTestBase
                     block);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

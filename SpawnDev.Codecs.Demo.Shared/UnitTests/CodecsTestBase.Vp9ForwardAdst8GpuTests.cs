@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < 8; i++) input[i] = rng.Next(-1000, 1000);
             await Fadst8AndVerify(acc, input);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
             int[] input = { 16000, -16000, 16000, -16000, 16000, -16000, 16000, -16000 };
             await Fadst8AndVerify(acc, input);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
             int[] input = new int[8];
             await Fadst8AndVerify(acc, input);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
             int[] input = { 100, 200, 300, 400, 500, 600, 700, 800 };
             await Fadst8AndVerify(acc, input);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task Fadst8AndVerify(Accelerator acc, int[] input)

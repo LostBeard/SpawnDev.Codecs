@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
             var readback = await SpawnDev.ILGPU.SpawnDevContextExtensions.CopyToHostAsync(dOut);
             for (int i = 0; i < 8; i++) Equal(cpuOut[i], readback[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
                 if (cpuOut[i] != readback[i]) mismatches++;
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -98,7 +98,7 @@ public abstract partial class CodecsTestBase
                 Equal(0, mismatches, $"cosBit={cosBit}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -120,7 +120,7 @@ public abstract partial class CodecsTestBase
             var readback = await SpawnDev.ILGPU.SpawnDevContextExtensions.CopyToHostAsync(dOut);
             for (int i = 0; i < 16; i++) Equal(cpuOut[i], readback[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -151,7 +151,7 @@ public abstract partial class CodecsTestBase
                 if (cpuOut[i] != readback[i]) mismatches++;
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -185,6 +185,6 @@ public abstract partial class CodecsTestBase
                 Equal(0, mismatches, $"cosBit={cosBit}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

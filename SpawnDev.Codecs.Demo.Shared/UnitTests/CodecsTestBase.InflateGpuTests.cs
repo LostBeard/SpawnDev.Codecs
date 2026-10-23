@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
             Equal(raw.Length, result, $"{what}: inflated length (negative = -InflateError)");
             EqualBytes(raw, output, $"{what}: inflated bytes");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static byte[] StructuredData(int length, int seed)
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
             Equal(5, result, "fixed-Huffman inflated length");
             EqualBytes(System.Text.Encoding.ASCII.GetBytes("hello"), output, "fixed-Huffman inflated bytes");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -116,7 +116,7 @@ public abstract partial class CodecsTestBase
             var (result, _) = await InflateOnGpuAsync(acc, zlib, 1);
             Equal(0, result, "empty stream inflated length");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -179,7 +179,7 @@ public abstract partial class CodecsTestBase
             Equal(raw.Length, ok, "verifyAdler=false inflated length");
             EqualBytes(raw, output, "verifyAdler=false bytes");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -194,7 +194,7 @@ public abstract partial class CodecsTestBase
             var (result, _) = await InflateOnGpuAsync(acc, cut, raw.Length);
             Equal(-(int)InflateError.InputTruncated, result, "half a stream");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -208,7 +208,7 @@ public abstract partial class CodecsTestBase
             var (result, _) = await InflateOnGpuAsync(acc, zlib, 1_000);
             Equal(-(int)InflateError.BadZlibHeader, result, "bad CM");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -222,6 +222,6 @@ public abstract partial class CodecsTestBase
             var (result, _) = await InflateOnGpuAsync(acc, zlib, raw.Length - 1);
             Equal(-(int)InflateError.OutputOverflow, result, "capacity one byte short");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

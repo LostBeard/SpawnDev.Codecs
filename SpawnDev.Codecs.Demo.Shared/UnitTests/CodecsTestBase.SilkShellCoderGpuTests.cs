@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
             var pulses = new short[16];
             await SilkShellTest_AssertRoundTrip(acc, pulses, 0);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -97,7 +97,7 @@ public abstract partial class CodecsTestBase
             pulses[0] = 1; pulses[3] = 1; pulses[8] = 1; pulses[12] = 1;
             await SilkShellTest_AssertRoundTrip(acc, pulses, 4);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < 16; i++) pulses[i] = 1;
             await SilkShellTest_AssertRoundTrip(acc, pulses, 16);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -128,6 +128,6 @@ public abstract partial class CodecsTestBase
             int total = 0; for (int i = 0; i < 16; i++) total += pulses[i];
             await SilkShellTest_AssertRoundTrip(acc, pulses, total);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

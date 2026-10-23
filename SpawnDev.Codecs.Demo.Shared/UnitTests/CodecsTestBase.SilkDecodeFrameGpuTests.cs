@@ -549,7 +549,7 @@ public abstract partial class CodecsTestBase
             if (cpuParameters.LtpScaleQ14 != gpuLtpScale)
                 throw new Exception($"LtpScaleQ14 mismatch: cpu={cpuParameters.LtpScaleQ14} gpu={gpuLtpScale}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     /// <summary>Drive Phase A+P+C (full bitstream-to-PCM, optionally with finalize)
@@ -941,7 +941,7 @@ public abstract partial class CodecsTestBase
                 if (cpuPcm[i] != gpuPcm[i])
                     throw new Exception($"MB PCM mismatch at sample {i}: cpu={cpuPcm[i]} gpu={gpuPcm[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -1018,7 +1018,7 @@ public abstract partial class CodecsTestBase
                 if (cpuPcm[i] != gpuPcm[i])
                     throw new Exception($"WB PCM mismatch at sample {i}: cpu={cpuPcm[i]} gpu={gpuPcm[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -1139,7 +1139,7 @@ public abstract partial class CodecsTestBase
                 if (cpu2[i] != gpu2[i])
                     throw new Exception($"Frame 2 PCM mismatch at sample {i}: cpu={cpu2[i]} gpu={gpu2[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -1211,7 +1211,7 @@ public abstract partial class CodecsTestBase
                 if (cpuPcm[i] != gpuPcm[i])
                     throw new Exception($"PCM mismatch at sample {i}: cpu={cpuPcm[i]} gpu={gpuPcm[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -1283,7 +1283,7 @@ public abstract partial class CodecsTestBase
                 if (cpuPcm[i] != gpuPcm[i])
                     throw new Exception($"PCM mismatch at sample {i}: cpu={cpuPcm[i]} gpu={gpuPcm[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -1368,7 +1368,7 @@ public abstract partial class CodecsTestBase
                 if (cpuState.OutBuf[i] != gpuOutBuf[i])
                     throw new Exception($"OutBuf[{i}] mismatch: cpu={cpuState.OutBuf[i]} gpu={gpuOutBuf[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -1448,7 +1448,7 @@ public abstract partial class CodecsTestBase
                 if (cpuPcm[i] != gpuPcm[i])
                     throw new Exception($"PCM mismatch at sample {i}: cpu={cpuPcm[i]} gpu={gpuPcm[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -1530,6 +1530,6 @@ public abstract partial class CodecsTestBase
                 if (cpuPulsesDecoded[i] != gpuPulses[i])
                     throw new Exception($"pulses[{i}] mismatch: cpu={cpuPulsesDecoded[i]} gpu={gpuPulses[i]} - cross-kernel range-decoder state must be wrong");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

@@ -22,7 +22,7 @@ public abstract partial class CodecsTestBase
         {
             await GainAdjustVerify(acc, prevGainQ16: 1 << 16, curGainQ16: 1 << 16, seed: 0xCAFE0001u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
             // 2x gain step: prev=1.0, cur=2.0 in Q16.
             await GainAdjustVerify(acc, prevGainQ16: 1 << 16, curGainQ16: 2 << 16, seed: 0xCAFE0002u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
             // when ratio > 1 (gainAdj = 4 << 16 = 262144).
             await GainAdjustVerify(acc, prevGainQ16: 4 << 16, curGainQ16: 1 << 16, seed: 0xCAFE0003u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
             // Non-power-of-two ratio - exercises the silk_DIV32_varQ approximation.
             await GainAdjustVerify(acc, prevGainQ16: 73219, curGainQ16: 91737, seed: 0xCAFE0004u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task GainAdjustVerify(

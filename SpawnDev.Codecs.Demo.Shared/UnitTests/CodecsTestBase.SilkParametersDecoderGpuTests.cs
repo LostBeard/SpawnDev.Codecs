@@ -294,7 +294,7 @@ public abstract partial class CodecsTestBase
             if ((sbyte)gpu.lastGainIdx != cpu.lastGainIdx)
                 throw new Exception($"lastGainIndex (state update): cpu={cpu.lastGainIdx} gpu={(sbyte)gpu.lastGainIdx}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -347,6 +347,6 @@ public abstract partial class CodecsTestBase
             if ((sbyte)gpu.lastGainIdx != cpu.lastGainIdx)
                 throw new Exception($"lastGainIndex (state update): cpu={cpu.lastGainIdx} gpu={(sbyte)gpu.lastGainIdx}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

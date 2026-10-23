@@ -109,7 +109,7 @@ public abstract partial class CodecsTestBase
                 if (cpuBytes[i] != gpuBytes[i])
                     throw new Exception($"byte {i}: cpu=0x{cpuBytes[i]:X2} gpu=0x{gpuBytes[i]:X2}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -139,7 +139,7 @@ public abstract partial class CodecsTestBase
                 if (cpuBytes[i] != gpuBytes[i])
                     throw new Exception($"byte {i}: cpu=0x{cpuBytes[i]:X2} gpu=0x{gpuBytes[i]:X2}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -172,7 +172,7 @@ public abstract partial class CodecsTestBase
                 if (cpuBytes[i] != gpuBytes[i])
                     throw new Exception($"byte {i}: cpu=0x{cpuBytes[i]:X2} gpu=0x{gpuBytes[i]:X2}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -204,7 +204,7 @@ public abstract partial class CodecsTestBase
                 if (cpuBytes[i] != gpuBytes[i])
                     throw new Exception($"byte {i}: cpu=0x{cpuBytes[i]:X2} gpu=0x{gpuBytes[i]:X2}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -243,6 +243,6 @@ public abstract partial class CodecsTestBase
                 if (cpuBytes[i] != gpuBytes[i])
                     throw new Exception($"byte {i}: cpu=0x{cpuBytes[i]:X2} gpu=0x{gpuBytes[i]:X2}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

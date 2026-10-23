@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
                 for (int i = 0; i < 16; i++) Equal((byte)128, dest[i]);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -70,7 +70,7 @@ public abstract partial class CodecsTestBase
                 }
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -114,6 +114,6 @@ public abstract partial class CodecsTestBase
                     Equal(cpuResults[i], gpuResults[i]);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

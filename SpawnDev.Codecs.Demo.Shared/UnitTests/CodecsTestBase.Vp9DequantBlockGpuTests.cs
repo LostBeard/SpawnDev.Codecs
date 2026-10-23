@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
                     await AssertVp9DequantGpuMatchesCpuAsync(acc, input, dcQ, acQ);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
             input[1] = 4096;
             await AssertVp9DequantGpuMatchesCpuAsync(acc, input, dcQ: 16, acQ: 16);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -102,6 +102,6 @@ public abstract partial class CodecsTestBase
             var input = new short[256];
             await AssertVp9DequantGpuMatchesCpuAsync(acc, input, dcQ: 64, acQ: 64);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

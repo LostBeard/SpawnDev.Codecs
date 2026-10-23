@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
             byte[] managed = await enc.EncodeKeyFrameAsync(y, u, v, width, height, baseQIndex);
             EqualBytes(cpu, managed, "VP9 managed overload bytes vs CPU reference");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -127,7 +127,7 @@ public abstract partial class CodecsTestBase
             for (int f = 0; f < frameCount; f++)
                 EqualBytes(singles[f], managed[f], $"VP9 frame {f} managed batch bytes vs single-frame encode");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -169,7 +169,7 @@ public abstract partial class CodecsTestBase
             EqualPlanes(cpuU, managed.UPlane, "VP9 managed U plane vs CPU walker");
             EqualPlanes(cpuV, managed.VPlane, "VP9 managed V plane vs CPU walker");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -184,7 +184,7 @@ public abstract partial class CodecsTestBase
             using var dec = new Vp9KeyframeDecoderGpu(acc);
             await RunVp9TypedArrayMatchesManaged(enc, dec);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("browser")]

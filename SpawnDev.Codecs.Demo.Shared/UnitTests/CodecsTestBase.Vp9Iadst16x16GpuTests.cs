@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
             coefs[0] = 200;
             await Iadst16AndVerify(acc, coefs, predictor: 50);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < 256; i++) coefs[i] = (short)rng.Next(-200, 200);
             await Iadst16AndVerify(acc, coefs, predictor: 128);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
             coefs[16] = -2000;
             await Iadst16AndVerify(acc, coefs, predictor: 200);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
             short[] coefs = new short[256];
             await Iadst16AndVerify(acc, coefs, predictor: 100);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task Iadst16AndVerify(Accelerator acc, short[] coefs, byte predictor)

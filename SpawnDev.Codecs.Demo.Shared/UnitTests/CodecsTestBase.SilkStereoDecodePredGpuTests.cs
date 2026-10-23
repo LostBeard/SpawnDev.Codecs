@@ -22,7 +22,7 @@ public abstract partial class CodecsTestBase
         {
             await DequantAndVerify(acc, new[] { 0, 0, 0 }, new[] { 0, 0, 0 });
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
             // Mid-table index triples from a typical stereo voiced frame.
             await DequantAndVerify(acc, new[] { 1, 2, 3 }, new[] { 2, 3, 2 });
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
             // Near-edge index triples (idx[0]+3*idx[2] = 14 hits the last cell).
             await DequantAndVerify(acc, new[] { 2, 4, 4 }, new[] { 0, 0, 4 });
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
             await DequantAndVerify(acc, new[] { 0, 1, 2 }, new[] { 1, 4, 1 });
             await DequantAndVerify(acc, new[] { 1, 0, 4 }, new[] { 2, 2, 0 });
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task DequantAndVerify(Accelerator acc, int[] ix0, int[] ix1)

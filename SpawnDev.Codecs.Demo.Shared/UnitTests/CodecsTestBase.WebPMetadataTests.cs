@@ -116,7 +116,7 @@ public abstract partial class CodecsTestBase
                 catch (Exception ex) { failures.Add($"{c.Name}: {ex.GetType().Name}: {ex.Message}"); }
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
         True(count > 35, $"only {count} metadata cases were exercised");
         True(failures.Count == 0, $"{failures.Count} metadata mismatches:\n" + string.Join("\n", failures));
     }
@@ -178,7 +178,7 @@ public abstract partial class CodecsTestBase
                 catch (Exception ex) { failures.Add($"{name}: {ex.GetType().Name}: {ex.Message}"); }
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
         True(failures.Count == 0, $"{failures.Count} failures:\n" + string.Join("\n", failures));
         // libwebp's demuxer must report exactly these payloads, with VP8X flags that match, and no stray chunk
         await RunPillowVerifyAsync(dir);

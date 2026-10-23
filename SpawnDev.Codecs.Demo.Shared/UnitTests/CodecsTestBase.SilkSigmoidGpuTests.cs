@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
             };
             await SigmoidAndVerify(acc, input);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
             Array.Copy(input, truncated, idx);
             await SigmoidAndVerify(acc, truncated);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < n; i++) input[i] = rng.Next(-300, 300);
             await SigmoidAndVerify(acc, input);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task SigmoidAndVerify(Accelerator acc, int[] input)

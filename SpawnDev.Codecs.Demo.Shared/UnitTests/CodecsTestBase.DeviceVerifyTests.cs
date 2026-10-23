@@ -45,6 +45,6 @@ public abstract partial class CodecsTestBase
             DeviceTransfer.Upload(p.View.SubView(776, 1), new byte[] { 0 });
             True(await DeviceVerify.AllEqualAsync(acc, p.View, 777, 0xAB) != null, "a changed last byte is found");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

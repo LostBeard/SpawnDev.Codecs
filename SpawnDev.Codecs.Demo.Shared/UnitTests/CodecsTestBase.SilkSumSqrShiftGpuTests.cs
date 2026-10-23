@@ -22,7 +22,7 @@ public abstract partial class CodecsTestBase
             short[] x = { 100, -200, 50, -75, 300, -150, 25, 0 };
             await ComputeAndVerify(acc, x);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < x.Length; i++) x[i] = (short)((i * 1729) & 0x7FFF);
             await ComputeAndVerify(acc, x);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -51,7 +51,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < x.Length; i++) x[i] = (short)rng.Next(-32768, 32768);
             await ComputeAndVerify(acc, x);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task ComputeAndVerify(Accelerator acc, short[] x)

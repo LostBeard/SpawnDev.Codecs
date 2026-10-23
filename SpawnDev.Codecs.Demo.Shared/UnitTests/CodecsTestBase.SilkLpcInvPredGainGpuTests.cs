@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
             short[] aQ12 = { 600, -300, 100, -50, 25, -12, 6, -3, 1, -1 };
             await ComputeAndVerifyLpc(acc, aQ12);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
             short[] aQ12 = { 1000, 1000, 1000, 1000, 200 };
             await ComputeAndVerifyLpc(acc, aQ12);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -51,7 +51,7 @@ public abstract partial class CodecsTestBase
                              3, -1, 1, -1, 1, -1, 1, -1 };
             await ComputeAndVerifyLpc(acc, aQ12);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task ComputeAndVerifyLpc(Accelerator acc, short[] aQ12)

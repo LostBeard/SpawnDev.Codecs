@@ -53,6 +53,6 @@ public abstract partial class CodecsTestBase
                 + "if this fails, ILGPU's kernel-parameter handling for the "
                 + "VorbisPacketDecodeStaticInputs struct (38 ArrayView fields) needs review.");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

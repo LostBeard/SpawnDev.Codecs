@@ -15,7 +15,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// Tests are split into partial files by subject so each subject's coverage is self-contained
 /// and easy to locate. See the matching <c>CodecsTestBase.*.cs</c> files.
 /// </summary>
-public abstract partial class CodecsTestBase
+public abstract partial class CodecsTestBase : IDisposable
 {
     /// <summary>
     /// Create an <see cref="Accelerator"/> for ILGPU kernel tests on this runner's
@@ -80,15 +80,69 @@ public abstract partial class CodecsTestBase
     /// Tests that depend on kernels that may fail eager validation should call
     /// this helper instead of <see cref="CreateKernelAcceleratorAsync"/> directly.
     /// </summary>
+    /// <remarks>
+    /// The accelerator is SHARED by every test of this class instance (the runner reuses one instance per class): a fresh
+    /// context + accelerator per test recompiled every kernel for every test, which in the browser lanes is the .NET Wasm
+    /// interpreter running the ILGPU compiler, test after test. Kernels now compile once per class and stay in the
+    /// accelerator's kernel cache. Before handing it out the shared accelerator is synchronized: a device fault left by the
+    /// previous test (CUDA sticky error, WebGPU device lost) shows up there, and that accelerator is replaced.
+    /// Tests end with <see cref="ReleaseAccelerator"/> instead of disposing it; the class disposes it.
+    /// </remarks>
     protected async ValueTask<(Context, Accelerator)> AcquireAcceleratorOrSkipAsync()
     {
+        if (_sharedAccelerator != null)
+        {
+            try
+            {
+                await _sharedAccelerator.SynchronizeAsync();
+                return (_sharedContext!, _sharedAccelerator);
+            }
+            catch
+            {
+                DiscardAccelerator();
+            }
+        }
         try
         {
-            return await CreateKernelAcceleratorAsync();
+            var (ctx, acc) = await CreateKernelAcceleratorAsync();
+            _sharedContext = ctx;
+            _sharedAccelerator = acc;
+            return (ctx, acc);
         }
         catch (NotSupportedException ex)
         {
             throw new UnsupportedTestException(ex.Message);
         }
+    }
+
+    private Context? _sharedContext;
+    private Accelerator? _sharedAccelerator;
+
+    /// <summary>End of a test's use of the shared accelerator: it stays alive for the next test (see <see cref="AcquireAcceleratorOrSkipAsync"/>).</summary>
+    protected void ReleaseAccelerator(Context ctx, Accelerator acc)
+    {
+        if (!ReferenceEquals(acc, _sharedAccelerator))
+        {
+            acc.Dispose();
+            ctx.Dispose();
+        }
+    }
+
+    /// <summary>Drop the shared accelerator (a test that knows it poisoned the device); the next test creates a fresh one.</summary>
+    protected void DiscardAccelerator()
+    {
+        var acc = _sharedAccelerator;
+        var ctx = _sharedContext;
+        _sharedAccelerator = null;
+        _sharedContext = null;
+        try { acc?.Dispose(); } catch { }
+        try { ctx?.Dispose(); } catch { }
+    }
+
+    /// <summary>Called by the runner after the class's tests: releases the shared accelerator.</summary>
+    public void Dispose()
+    {
+        DiscardAccelerator();
+        GC.SuppressFinalize(this);
     }
 }

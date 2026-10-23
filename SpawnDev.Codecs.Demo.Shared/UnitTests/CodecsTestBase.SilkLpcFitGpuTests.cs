@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
             int[] aQ24 = { 1 << 23, -(1 << 22), 1 << 21, -(1 << 20), 1 << 19, -(1 << 18), 1 << 17, -(1 << 16), 1 << 15, -(1 << 14) };
             await FitAndVerify(acc, aQ24, qIn: 24, qOut: 12);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
             int[] aQ24 = { 1 << 28, -(1 << 22), 1 << 21, -(1 << 20), 1 << 19, -(1 << 18), 1 << 17, -(1 << 16), 1 << 15, -(1 << 14) };
             await FitAndVerify(acc, aQ24, qIn: 24, qOut: 12);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
                 aQ24[i] = rng.Next(-(1 << 28), 1 << 28);
             await FitAndVerify(acc, aQ24, qIn: 24, qOut: 12);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
                 aQ24[i] = (i & 1) == 0 ? int.MaxValue / 2 : -int.MaxValue / 2;
             await FitAndVerify(acc, aQ24, qIn: 24, qOut: 12);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task FitAndVerify(Accelerator acc, int[] aQIn, int qIn, int qOut)

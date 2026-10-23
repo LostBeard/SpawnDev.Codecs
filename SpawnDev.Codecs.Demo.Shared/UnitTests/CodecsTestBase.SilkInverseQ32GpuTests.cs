@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
                     throw new Exception(
                         $"INVERSE32[{i}] (b32={cases[i].b32}, Qres={cases[i].Qres}): cpu={cpuResults[i]} gpu={gpuResults[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static void InverseKernel(

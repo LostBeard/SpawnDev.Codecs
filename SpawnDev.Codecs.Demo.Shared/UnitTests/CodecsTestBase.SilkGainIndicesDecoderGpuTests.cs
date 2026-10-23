@@ -112,7 +112,7 @@ public abstract partial class CodecsTestBase
                 if (gpu[i] != indices[i])
                     throw new Exception($"Gain index mismatch at i={i}: input={indices[i]} gpu={gpu[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -133,7 +133,7 @@ public abstract partial class CodecsTestBase
                 if (gpu[i] != indices[i])
                     throw new Exception($"Gain index mismatch at i={i}: input={indices[i]} gpu={gpu[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -155,6 +155,6 @@ public abstract partial class CodecsTestBase
                 if (gpu[i] != indices[i])
                     throw new Exception($"Gain index mismatch at i={i}: input={indices[i]} gpu={gpu[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

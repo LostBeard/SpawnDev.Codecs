@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
             const int halfBlock = 256;
             await VerifyRender(acc, config, decodedY, halfBlock);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
             const int halfBlock = 512;
             await VerifyRender(acc, config, decodedY, halfBlock);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task VerifyRender(

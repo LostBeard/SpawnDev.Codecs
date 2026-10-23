@@ -164,6 +164,6 @@ public abstract partial class CodecsTestBase
             Equal(0, uMis, "U predictor");
             Equal(0, vMis, "V predictor");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

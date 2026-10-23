@@ -68,7 +68,7 @@ public abstract partial class CodecsTestBase
                     throw new Exception($"FloorY[{i}] mag={mags[i]}: cpu={cpuOut[i]} gpu={gpuOut[i]}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -114,7 +114,7 @@ public abstract partial class CodecsTestBase
                 if (cpuOut[i] != gpuOut[i])
                     throw new Exception($"Quantise[{i}] v={values[i]}: cpu={cpuOut[i]} gpu={gpuOut[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static void MagToYKernel(

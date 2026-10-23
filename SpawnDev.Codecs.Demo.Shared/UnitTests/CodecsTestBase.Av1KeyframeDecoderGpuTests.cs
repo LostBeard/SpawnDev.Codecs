@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
                 if (vDec[i] != 128) throw new Exception($"V[{i}] expected 128, got {vDec[i]}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -116,6 +116,6 @@ public abstract partial class CodecsTestBase
                     throw new Exception($"V recon mismatch at [{i}]: enc={vReconEnc[i]} dec={vDec[i]}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

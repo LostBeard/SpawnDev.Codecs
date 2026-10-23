@@ -22,7 +22,7 @@ public abstract partial class CodecsTestBase
             // Short Vorbis block half = 128.
             await OverlapAndVerify(acc, halfBlockSize: 128, seed: 0xBADC0DEDu);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
             // Long Vorbis block half = 512.
             await OverlapAndVerify(acc, halfBlockSize: 512, seed: 0xC0FFEE00u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
             // Long Vorbis block half = 1024 (max for 2048-sample block).
             await OverlapAndVerify(acc, halfBlockSize: 1024, seed: 0xFEED1024u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task OverlapAndVerify(Accelerator acc, int halfBlockSize, uint seed)

@@ -154,7 +154,7 @@ public abstract partial class CodecsTestBase
             if (gpu[1] != contour)
                 throw new Exception($"contour mismatch: expected {contour} got {gpu[1]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -183,7 +183,7 @@ public abstract partial class CodecsTestBase
             if (gpu[1] != contour)
                 throw new Exception($"contour mismatch: expected {contour} got {gpu[1]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -210,6 +210,6 @@ public abstract partial class CodecsTestBase
             if (gpu[1] != contour)
                 throw new Exception($"contour mismatch: expected {contour} got {gpu[1]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
             int numOutputs = 240;
             await ApplyAndVerify(acc, indexIncrement, numOutputs, 0xC001D00Du);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
             int numOutputs = 360;
             await ApplyAndVerify(acc, indexIncrement, numOutputs, 0x12FACE12u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
             int numOutputs = 600;
             await ApplyAndVerify(acc, indexIncrement, numOutputs, 0xBEEFCAFEu);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task ApplyAndVerify(

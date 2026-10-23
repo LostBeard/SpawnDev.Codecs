@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
                 if (samples[i] != decoded.InterleavedSamples[i])
                     throw new Exception($"sample[{i}]: input={samples[i]} decoded={decoded.InterleavedSamples[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -82,6 +82,6 @@ public abstract partial class CodecsTestBase
             if (mismatches > 0)
                 throw new Exception($"{mismatches} sample mismatches; first at i={firstMismatch} input={samples[firstMismatch]} decoded={decoded.InterleavedSamples[firstMismatch]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

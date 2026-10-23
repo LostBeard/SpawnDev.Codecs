@@ -132,7 +132,7 @@ public abstract partial class CodecsTestBase
                     throw new Exception(
                         $"gainIdx[{k}] mismatch: expected {gainIdx[k]} got {gpu[2 + k]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -156,7 +156,7 @@ public abstract partial class CodecsTestBase
                 if (gpu[2 + k] != gainIdx[k])
                     throw new Exception($"gainIdx[{k}] mismatch: expected {gainIdx[k]} got {gpu[2 + k]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -180,6 +180,6 @@ public abstract partial class CodecsTestBase
                 if (gpu[2 + k] != gainIdx[k])
                     throw new Exception($"gainIdx[{k}] mismatch: expected {gainIdx[k]} got {gpu[2 + k]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

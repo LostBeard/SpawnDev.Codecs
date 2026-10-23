@@ -107,7 +107,7 @@ public abstract partial class CodecsTestBase
             True(failures.Count == 0,
                 $"{failures.Count} of {checkedCount + failures.Count} PNG fixtures failed:\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -140,7 +140,7 @@ public abstract partial class CodecsTestBase
             True(failures.Count == 0,
                 $"{failures.Count} of {checkedCount + failures.Count} RGBA16 PNG fixtures failed:\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -164,7 +164,7 @@ public abstract partial class CodecsTestBase
             var rgb = await dec.ReadInfoAsync(ReadEmbedded(PngFixturePrefix + "rgb8.png"));
             True(!rgb.HasAlpha, "plain RGB has no alpha");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private async Task AssertPngRejectedAsync(byte[] file, string expectedMessagePart, string what)
@@ -179,7 +179,7 @@ public abstract partial class CodecsTestBase
             NotNull(caught, $"{what}: expected ImageDecodeException");
             Contains(expectedMessagePart, caught!.Message, what);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]

@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
                 wastedBits: 0, precision: 12, quantLevel: 12, riceParam: 5,
                 seed: 0xCDFE0008u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
                 wastedBits: 0, precision: 14, quantLevel: 14, riceParam: 6,
                 seed: 0xCDFE0010u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
                 wastedBits: 4, precision: 8, quantLevel: 7, riceParam: 4,
                 seed: 0xCDFE0004u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task EncodeDecodeAndVerify(

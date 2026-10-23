@@ -106,7 +106,7 @@ public abstract partial class CodecsTestBase
             }
             Equal(0, mismatches, $"{width}x{height} first byte mismatch i={firstBad}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private async Task RunEncoderMatchesCpuTestStrided(
@@ -164,6 +164,6 @@ public abstract partial class CodecsTestBase
             Equal(0, mismatches,
                 $"{width}x{height} strided first byte mismatch i={firstBad}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

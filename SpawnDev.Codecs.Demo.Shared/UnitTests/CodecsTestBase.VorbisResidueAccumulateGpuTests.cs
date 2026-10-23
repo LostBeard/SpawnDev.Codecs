@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
                 if (cpuOut[i] != gpuOut[i])
                     throw new Exception($"target[{i}]: cpu={cpuOut[i]} gpu={gpuOut[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static void VorbisCodebookVectorLookupCpu(VorbisCodebook book, int entry, float[] outVec)

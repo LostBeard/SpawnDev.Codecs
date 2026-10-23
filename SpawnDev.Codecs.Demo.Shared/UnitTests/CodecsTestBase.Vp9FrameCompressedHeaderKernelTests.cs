@@ -65,6 +65,6 @@ public abstract partial class CodecsTestBase
                         $"cpu=0x{cpu[i]:X2} gpu=0x{gpu[i]:X2}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

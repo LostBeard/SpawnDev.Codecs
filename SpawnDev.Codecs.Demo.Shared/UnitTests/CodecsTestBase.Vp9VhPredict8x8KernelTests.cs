@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
 
             for (int i = 0; i < 64; i++) Equal(cpuDst[i], gpuDst[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -51,7 +51,7 @@ public abstract partial class CodecsTestBase
 
             for (int i = 0; i < 64; i++) Equal(cpuDst[i], gpuDst[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
                 for (int i = 0; i < 64; i++) Equal(cpuDst[i], gpuDst[i]);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
                 for (int i = 0; i < 64; i++) Equal(cpuDst[i], gpuDst[i]);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -134,6 +134,6 @@ public abstract partial class CodecsTestBase
             await kernel.RunAsync(aboveFlat, leftFlat, gpuH, Vp9VhMode.H, blockCount: n);
             for (int i = 0; i < cpuH.Length; i++) Equal(cpuH[i], gpuH[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
             var smallLens = await RunHuffmanAsync(acc, small, 4);
             CheckHuffman(small, smallLens, hardLimit, "10 Fibonacci symbols, limit 4");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -115,6 +115,6 @@ public abstract partial class CodecsTestBase
             big[0] = 3_000_000; big[7] = 900_000; big[300] = 400_000;
             CheckHuffman(big, await RunHuffmanAsync(acc, big, 15), 15, "2328 symbols");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

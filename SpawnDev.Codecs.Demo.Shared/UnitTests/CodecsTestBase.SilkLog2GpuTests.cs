@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < input.Length; i++) input[i] = i;
             await Log2LinAndVerify(acc, input);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
             var input = new[] { -10000, -1, 0, 1, 2047, 2048, 3966, 3967, 3968, 10000 };
             await Log2LinAndVerify(acc, input);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < n; i++) input[i] = rng.Next(1, int.MaxValue);
             await Lin2LogAndVerify(acc, input);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -93,7 +93,7 @@ public abstract partial class CodecsTestBase
                     throw new Exception($"roundtrip[{i}]: cpu={cpuRT} gpu={roundTrip[i]}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task Log2LinAndVerify(Accelerator acc, int[] input)

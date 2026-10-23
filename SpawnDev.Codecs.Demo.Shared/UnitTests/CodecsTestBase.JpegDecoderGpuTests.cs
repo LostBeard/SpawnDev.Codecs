@@ -86,7 +86,7 @@ public abstract partial class CodecsTestBase
             True(failures.Count == 0,
                 $"{failures.Count} of {checkedCount + failures.Count} JPEG fixtures failed:\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -110,7 +110,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -151,7 +151,7 @@ public abstract partial class CodecsTestBase
             Equal(7, vi.Width, "view width");
             Equal(5, vi.Height, "view height");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -189,7 +189,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -206,7 +206,7 @@ public abstract partial class CodecsTestBase
             var diff = ComparePixels(expected, img.Pixels, 4, img.Info.Width);
             True(diff == null, $"baseline file without EOI: {diff}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static string Sha256Hex(byte[] data) =>
@@ -234,7 +234,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -252,7 +252,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -266,7 +266,7 @@ public abstract partial class CodecsTestBase
             using var dec = new JpegDecoderGpu(acc);
             await RunJpegTypedArrayDecode(dec);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("browser")]
@@ -298,7 +298,7 @@ public abstract partial class CodecsTestBase
             NotNull(caught, $"{fixture}: expected ImageDecodeException");
             Contains(expectedMessagePart, caught!.Message, fixture);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -380,15 +380,18 @@ public abstract partial class CodecsTestBase
                     break;
                 }
             }
-            // A poisoned device context also throws from Dispose; report the checks, not the teardown.
+            // A poisoned device context also throws from Dispose; report the checks, not the teardown. After a failure the
+            // shared accelerator is dropped so the next test does not inherit a faulted device.
             string? teardown = null;
-            try { dec.Dispose(); acc.Dispose(); ctx.Dispose(); }
+            try { dec.Dispose(); }
             catch (Exception ex) { teardown = $"(teardown also failed: {ex.GetType().Name}: {ex.Message.Split('\n')[0]})"; }
+            if (failures.Count > 0 || teardown != null) DiscardAccelerator();
+            else ReleaseAccelerator(ctx, acc);
             True(failures.Count == 0, $"{failures.Count} broken-file checks failed:\n" + string.Join("\n", failures) + (teardown ?? ""));
         }
         catch
         {
-            try { acc.Dispose(); ctx.Dispose(); } catch { }
+            DiscardAccelerator();
             throw;
         }
     }

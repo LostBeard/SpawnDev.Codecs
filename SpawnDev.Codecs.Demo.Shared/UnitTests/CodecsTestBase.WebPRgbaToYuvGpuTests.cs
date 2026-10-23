@@ -144,6 +144,6 @@ public abstract partial class CodecsTestBase
             True(checkedCount >= 70, $"only {checkedCount} fixtures were checked");
             True(hashed == 2, $"expected the 2 production-scale cases, checked {hashed}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

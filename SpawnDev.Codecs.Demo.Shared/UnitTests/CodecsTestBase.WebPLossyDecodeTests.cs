@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
             True(animated >= 6, $"only {animated} animated fixtures");
             True(withAlpha >= 80, $"only {withAlpha} fixtures with alpha");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     /// <summary>Offset of the first VP8 payload byte in a simple lossy file (RIFF header 12 + "VP8 " + size 8).</summary>
@@ -159,6 +159,6 @@ public abstract partial class CodecsTestBase
             var d = await dec.DecodeAsync(WebPLossyFile(small));
             Matches(small, 0, d.Pixels, "small lossy again");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

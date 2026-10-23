@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
             readback.AsSpan(0, 4).CopyTo(output);
             for (int i = 0; i < 4; i++) Equal(0, output[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -57,7 +57,7 @@ public abstract partial class CodecsTestBase
 
             for (int i = 0; i < 4; i++) Equal(cpuOut[i], gpuOut[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -94,6 +94,6 @@ public abstract partial class CodecsTestBase
                 if (cpuOut[i] != gpuOut[i]) mismatches++;
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

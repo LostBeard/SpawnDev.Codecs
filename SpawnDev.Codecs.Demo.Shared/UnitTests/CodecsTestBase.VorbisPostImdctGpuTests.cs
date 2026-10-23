@@ -21,7 +21,7 @@ public abstract partial class CodecsTestBase
         {
             await PostImdctAndVerify(acc, blockSize: 256, seed: 0xC1AC0256u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
         {
             await PostImdctAndVerify(acc, blockSize: 2048, seed: 0xC1AC2048u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
             // Fresh stream: previousRightHalf is all zeros (no overlap yet).
             await PostImdctAndVerify(acc, blockSize: 1024, seed: 0xC1AC1024u, freshStream: true);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task PostImdctAndVerify(

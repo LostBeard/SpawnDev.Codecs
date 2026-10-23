@@ -124,7 +124,7 @@ public abstract partial class CodecsTestBase
             True(count >= 35, $"only {count} fixtures ran");
             True(failures.Count == 0, $"{failures.Count} of {count + failures.Count} GIF encoder fixtures differ from the reference:\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -183,12 +183,13 @@ public abstract partial class CodecsTestBase
             True(frameChecks >= 250, $"only {frameChecks} frames checked");
             True(failures.Count == 0, $"{failures.Count} round-trip failures:\n" + string.Join("\n", failures.Take(40)));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
     public async Task GifEncoderGpu_PillowDecodesOurFiles_ToTheSamePixels()
     {
+        PillowOracle.RequireAvailable();
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
@@ -221,7 +222,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, $"{failures.Count} Pillow disagreements ({count} fixtures ok):\n" + string.Join("\n", failures.Take(40)));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     /// <summary>Squared RGB distance.</summary>
@@ -290,7 +291,7 @@ public abstract partial class CodecsTestBase
             True(failures.Count == 0, string.Join("\n", failures));
             True(checkedCases >= 6, $"only {checkedCases} quantized cases checked");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     // ------------------------------------------------------------------
@@ -374,7 +375,7 @@ public abstract partial class CodecsTestBase
             True(losslessSkipped <= cases / 2, $"{losslessSkipped} of {cases} cases were not lossless: the test would prove too little");
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -409,7 +410,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -454,7 +455,7 @@ public abstract partial class CodecsTestBase
             var ok = await enc.EncodeAsync(px, 4, 4);
             True(ok.Length > 20 && ok[0] == (byte)'G', "usable after rejected calls");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -475,7 +476,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static byte[] MakeLargeRunsPicture(int w, int h)
@@ -504,12 +505,13 @@ public abstract partial class CodecsTestBase
             True(diff == null, "round trip: " + diff);
             True(file.Length <= GifEncoderGpu.GetMaxEncodedSize(w, h), "bound");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
     public async Task GifEncoderGpu_LargePicture_PillowAgrees()
     {
+        PillowOracle.RequireAvailable();
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
@@ -521,6 +523,6 @@ public abstract partial class CodecsTestBase
             var pdiff = ComparePixels(rgba, pillow.FramesRgba[0], 4, w);
             True(pdiff == null, "Pillow: " + pdiff);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

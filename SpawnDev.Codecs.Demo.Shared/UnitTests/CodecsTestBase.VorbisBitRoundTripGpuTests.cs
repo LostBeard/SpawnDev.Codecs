@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < cpuBytes.Length; i++)
                 Equal(cpuBytes[i], gpuBytes[i], $"byte[{i}]");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
                 if (cpuBytes[i] != gpuBytes[i])
                     throw new Exception($"byte[{i}]: cpu=0x{cpuBytes[i]:X2} gpu=0x{gpuBytes[i]:X2}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static byte[] VorbisBitEncodeCpu(uint[] values, int[] bits)

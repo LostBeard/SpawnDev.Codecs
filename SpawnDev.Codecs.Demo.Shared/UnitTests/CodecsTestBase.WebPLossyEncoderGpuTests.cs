@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
             True(failures.Count == 0, $"{identical} of {total} byte-identical; {failures.Count} differ:\n" + string.Join("\n", failures.Take(25)));
             True(total >= 200, $"only {total} fixtures");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -77,6 +77,6 @@ public abstract partial class CodecsTestBase
             catch (NotSupportedException) { alphaThrew = true; }
             True(alphaThrew, "a transparent picture must be refused");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

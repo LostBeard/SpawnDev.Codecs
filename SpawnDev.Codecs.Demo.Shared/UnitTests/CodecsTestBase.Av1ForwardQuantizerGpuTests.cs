@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
 
             for (int i = 0; i < cpuCoefs.Length; i++) Equal(cpuCoefs[i], readback[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
                 if (cpuCoefs[i] != readback[i]) mismatches++;
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -129,6 +129,6 @@ public abstract partial class CodecsTestBase
                 if (cpuCoefs[i] != readback[i]) mismatches++;
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

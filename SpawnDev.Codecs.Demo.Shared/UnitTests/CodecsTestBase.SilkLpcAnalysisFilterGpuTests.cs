@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
                 inSignal[i] = (short)rng.Next(-32768, 32768);
             await ApplyAndVerify(acc, inSignal, bQ12);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
                 inSignal[i] = (short)rng.Next(-32768, 32768);
             await ApplyAndVerify(acc, inSignal, bQ12);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
                 inSignal[i] = (short)((i & 1) == 0 ? short.MaxValue : short.MinValue);
             await ApplyAndVerify(acc, inSignal, bQ12);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task ApplyAndVerify(Accelerator acc, short[] inSignal, short[] bQ12)

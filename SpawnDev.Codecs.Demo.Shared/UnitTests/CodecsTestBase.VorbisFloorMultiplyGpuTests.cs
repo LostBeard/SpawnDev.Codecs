@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
                 if (cpuOut[i] != gpuOut[i])
                     throw new Exception($"product[{i}]: cpu={cpuOut[i]} gpu={gpuOut[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
                 if (gpuOut[i] != 0f)
                     throw new Exception($"zero[{i}]: {gpuOut[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static void MultiplyKernel(

@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
             await LookupAndVerify(acc, ltpScaleIndex: 1, expected: 12288);
             await LookupAndVerify(acc, ltpScaleIndex: 2, expected: 8192);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
             await LookupAndVerify(acc, ltpScaleIndex: 3, expected: 0);
             await LookupAndVerify(acc, ltpScaleIndex: -1, expected: 0);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task LookupAndVerify(Accelerator acc, int ltpScaleIndex, int expected)

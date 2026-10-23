@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
 
             await GpuVerify(acc, input, cpuOut, size: 4, kernelKind: 4);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
 
             await GpuVerify(acc, input, cpuOut, size: 8, kernelKind: 8);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
 
             await GpuVerify(acc, input, cpuOut, size: 16, kernelKind: 16);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
 
             await GpuVerify(acc, input, cpuOut, size: 32, kernelKind: 32);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task GpuVerify(Accelerator acc, int[] input, int[] expected, int size, int kernelKind)

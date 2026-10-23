@@ -109,7 +109,7 @@ public abstract partial class CodecsTestBase
             if (gpu[2] != seed)
                 throw new Exception($"seed mismatch: input={seed} gpu={gpu[2]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -132,7 +132,7 @@ public abstract partial class CodecsTestBase
                     $"VAD unvoiced mismatch: input=({signalType},{quantOffsetType},{seed}) " +
                     $"gpu=({gpu[0]},{gpu[1]},{gpu[2]})");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -155,6 +155,6 @@ public abstract partial class CodecsTestBase
                     $"No-VAD inactive mismatch: input=({signalType},{quantOffsetType},{seed}) " +
                     $"gpu=({gpu[0]},{gpu[1]},{gpu[2]})");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

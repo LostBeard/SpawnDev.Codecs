@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
             sbyte[] ltpIndices = { 0, 3, 5, 7 };
             await LookupAndVerify(acc, perIndex: 0, ltpIndices);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
             sbyte[] ltpIndices = { 0, 5, 10, 15 };
             await LookupAndVerify(acc, perIndex: 1, ltpIndices);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
             sbyte[] ltpIndices = { 0, 10, 20, 31 };
             await LookupAndVerify(acc, perIndex: 2, ltpIndices);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
             sbyte[] ltpIndices = { 4, 7 };
             await LookupAndVerify(acc, perIndex: 1, ltpIndices);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task LookupAndVerify(Accelerator acc, int perIndex, sbyte[] ltpIndices)

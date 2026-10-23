@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
                     throw new Exception($"Windowed[{i}]: cpu={cpuOut[i]} gpu={gpuOut[i]} delta={delta}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static void ApplyWindowKernel(

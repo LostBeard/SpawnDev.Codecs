@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
                 cb: SilkPitchContourTables.Stage2, cbSize: 11,
                 lagIndex: 50, contourIndex: 5);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
                 cb: SilkPitchContourTables.Stage210Ms, cbSize: 3,
                 lagIndex: 30, contourIndex: 1);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
                 cb: SilkPitchContourTables.Stage3, cbSize: 34,
                 lagIndex: 100, contourIndex: 15);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -70,7 +70,7 @@ public abstract partial class CodecsTestBase
                 cb: SilkPitchContourTables.Stage310Ms, cbSize: 12,
                 lagIndex: 250, contourIndex: 11);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task ContourAndVerify(

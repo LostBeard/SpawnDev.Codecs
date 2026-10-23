@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
                 True(Math.Abs(output[i]) <= ImdctTolerance,
                     $"zero-input IMDCT must produce zero (within tolerance); idx {i} = {output[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -113,7 +113,7 @@ public abstract partial class CodecsTestBase
             True(maxAbsDelta <= ImdctTolerance,
                 $"batched IMDCT max abs delta = {maxAbsDelta}, tolerance = {ImdctTolerance}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     /// <summary>
@@ -154,6 +154,6 @@ public abstract partial class CodecsTestBase
                 $"IMDCT N={n} block-count={blockCount}: max abs delta = {maxAbsDelta} at index {worstIdx} " +
                 $"(cpu={cpuOut[Math.Max(worstIdx, 0)]}, gpu={gpuOut[Math.Max(worstIdx, 0)]}); tolerance = {ImdctTolerance}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

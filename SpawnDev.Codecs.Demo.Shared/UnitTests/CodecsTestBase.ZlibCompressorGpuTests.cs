@@ -70,7 +70,7 @@ public abstract partial class CodecsTestBase
             True(zlib.Length <= raw.Length + 5 * (raw.Length / 65535 + 2) + 6 + 10 * (raw.Length / blockSize + 1),
                 $"{what}: expanded to {zlib.Length} bytes from {raw.Length}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -134,6 +134,6 @@ public abstract partial class CodecsTestBase
             byte[] zlib = await DeviceTransfer.DownloadAsync(dOut.View, n);
             EqualBytes(raw, DotNetZlibDecompress(zlib), "ArrayView1D overload round trip");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

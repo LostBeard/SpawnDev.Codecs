@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
             byte[] managed = await enc.EncodeKeyFrameAsync(y, u, v, width, height, baseQIndex);
             EqualBytes(cpu, managed, "AV1 managed overload bytes vs CPU reference");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -116,7 +116,7 @@ public abstract partial class CodecsTestBase
             for (int f = 0; f < frameCount; f++)
                 EqualBytes(cpu[f], managed[f], $"AV1 frame {f} managed batch bytes vs CPU reference");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -136,7 +136,7 @@ public abstract partial class CodecsTestBase
             True(threwSize, "a width that is not a multiple of 64 must throw NotSupportedException");
             True(threwQ, "baseQIndex 0 must throw ArgumentOutOfRangeException");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -150,7 +150,7 @@ public abstract partial class CodecsTestBase
             using var enc = new Av1KeyframeEncoderGpu(acc);
             await RunAv1TypedArrayMatchesManaged(enc);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("browser")]

@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
             }
             Equal(0, mismatches, $"first byte mismatch at i={firstBad}: cpu=0x{(firstBad >= 0 ? cpuBytes[firstBad].ToString("X2") : "")}, gpu=0x{(firstBad >= 0 ? gpuBytes[firstBad].ToString("X2") : "")}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -154,6 +154,6 @@ public abstract partial class CodecsTestBase
             }
             Equal(0, totalMismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
             sbyte[] indices = { 0, 1, -1, 2, 0, -2, 1, 3, -1, 0, 2 };
             await NlsfDecodeAndVerify(acc, codebook, indices);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
             sbyte[] indices = { cb1Index, 0, 1, -1, 2, -2, 0, 3, 1, -3, 2 };
             await NlsfDecodeAndVerify(acc, codebook, indices);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
             sbyte[] indices = { 7, 1, -1, 2, 0, -2, 3, -1, 1, 0, 2, -3, 1, -1, 2, 0, -1 };
             await NlsfDecodeAndVerify(acc, codebook, indices);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -68,7 +68,7 @@ public abstract partial class CodecsTestBase
             for (int i = 1; i < 17; i++) indices[i] = (sbyte)rng.Next(-4, 5);
             await NlsfDecodeAndVerify(acc, codebook, indices);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task NlsfDecodeAndVerify(

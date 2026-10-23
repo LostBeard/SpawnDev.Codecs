@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
             int[] state = new int[6];
             await ResampleAndVerify(acc, input, state);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
             int[] state = { 1 << 20, -1 << 20, 1 << 19, -1 << 19, 1 << 18, -1 << 18 };
             await ResampleAndVerify(acc, input, state);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
             int[] state = new int[6];
             await ResampleAndVerify(acc, input, state);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task ResampleAndVerify(Accelerator acc, short[] input, int[] initialState)

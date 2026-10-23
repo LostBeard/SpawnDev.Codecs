@@ -298,7 +298,7 @@ public abstract partial class CodecsTestBase
             await AssertVp9SequentialEncodeGpuMatchesCpuAsync(
                 acc, y, u, v, mbCols: 1, mbRows: 1, yDcQ, yAcQ, uvDcQ, uvAcQ);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -324,7 +324,7 @@ public abstract partial class CodecsTestBase
             await AssertVp9SequentialEncodeGpuMatchesCpuAsync(
                 acc, y, u, v, mbCols: 1, mbRows: 1, yDcQ, yAcQ, uvDcQ, uvAcQ);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -357,7 +357,7 @@ public abstract partial class CodecsTestBase
             await AssertVp9SequentialEncodeGpuMatchesCpuAsync(
                 acc, y, u, v, mbCols, mbRows, yDcQ, yAcQ, uvDcQ, uvAcQ);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -387,6 +387,6 @@ public abstract partial class CodecsTestBase
                     acc, y, u, v, mbCols: 1, mbRows: 1, yDcQ, yAcQ, uvDcQ, uvAcQ);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

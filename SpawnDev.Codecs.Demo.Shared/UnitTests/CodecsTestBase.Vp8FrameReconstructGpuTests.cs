@@ -187,6 +187,6 @@ public abstract partial class CodecsTestBase
             Equal(0, uMismatches, "U recon");
             Equal(0, vMismatches, "V recon");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

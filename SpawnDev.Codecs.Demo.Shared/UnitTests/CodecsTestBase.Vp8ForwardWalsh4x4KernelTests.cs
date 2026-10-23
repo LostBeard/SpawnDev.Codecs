@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
             var readback = await SpawnDev.ILGPU.SpawnDevContextExtensions.CopyToHostAsync(dOut);
             for (int i = 0; i < 16; i++) Equal((short)0, readback[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -63,6 +63,6 @@ public abstract partial class CodecsTestBase
                 if (cpuOut[i] != gpuOut[i]) mismatches++;
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

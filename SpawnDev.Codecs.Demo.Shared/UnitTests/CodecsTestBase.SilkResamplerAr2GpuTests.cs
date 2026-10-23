@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
             int[] state = new int[2];
             await ApplyAndVerify(acc, input, aQ14, state);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
             int[] state = { 1 << 22, -1 << 22 };
             await ApplyAndVerify(acc, input, aQ14, state);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
             int[] state = new int[2];
             await ApplyAndVerify(acc, input, aQ14, state);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task ApplyAndVerify(Accelerator acc, short[] input, short[] aQ14, int[] initialState)

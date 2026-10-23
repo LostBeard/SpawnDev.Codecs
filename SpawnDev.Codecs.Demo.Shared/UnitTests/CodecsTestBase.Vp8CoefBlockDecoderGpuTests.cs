@@ -102,6 +102,6 @@ public abstract partial class CodecsTestBase
                 acc, dCoefsOut.View, origCoefs, origCoefs.Length);
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

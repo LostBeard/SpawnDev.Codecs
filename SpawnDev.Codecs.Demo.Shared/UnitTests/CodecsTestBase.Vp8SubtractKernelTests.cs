@@ -39,6 +39,6 @@ public abstract partial class CodecsTestBase
                 acc, dRes.View, cpuOut, pixelCount);
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

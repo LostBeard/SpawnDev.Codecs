@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
                 mode: FlacChannelDecorrelationGpu.MODE_LEFT_SIDE,
                 blockSize: 1024, seed: 0xDEC008u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
                 mode: FlacChannelDecorrelationGpu.MODE_RIGHT_SIDE,
                 blockSize: 1024, seed: 0xDEC009u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
                 mode: FlacChannelDecorrelationGpu.MODE_MID_SIDE,
                 blockSize: 1024, seed: 0xDEC00Au);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
                 mode: FlacChannelDecorrelationGpu.MODE_MID_SIDE,
                 blockSize: 4096, seed: 0xDEC04096u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task DecorrelateAndVerify(

@@ -163,7 +163,7 @@ public abstract partial class CodecsTestBase
             True(failures.Count == 0,
                 $"{failures.Count} of {checkedCount + failures.Count} encoder fixtures differ from Pillow:\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -194,7 +194,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -208,7 +208,7 @@ public abstract partial class CodecsTestBase
             using var enc = new JpegEncoderGpu(acc);
             await RunJpegTypedArrayEncode(enc);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("browser")]
@@ -276,7 +276,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -305,7 +305,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -372,7 +372,7 @@ public abstract partial class CodecsTestBase
             if (maxLen != 16) failures.Add($"power-of-two table: longest code {maxLen}, expected the limit 16");
             True(failures.Count == 0, string.Join("\n", failures.Take(20)));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static double Psnr(byte[] rgbaA, byte[] rgbaB)
@@ -431,7 +431,7 @@ public abstract partial class CodecsTestBase
             if (diff != null) failures.Add($"decode(ours) != decode(Pillow file): {diff}");
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -455,7 +455,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -483,6 +483,6 @@ public abstract partial class CodecsTestBase
             await Expect<ArgumentException>("output too small", () => enc.EncodeAsync(dIn.View, 16, 16, tiny.View));
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

@@ -78,7 +78,7 @@ public abstract partial class CodecsTestBase
                 if (vals[i] != gpuDecoded[i])
                     throw new Exception($"uint[{i}] mismatch (ft={fts[i]}): cpu={vals[i]} gpu={gpuDecoded[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -105,7 +105,7 @@ public abstract partial class CodecsTestBase
                 if (vals[i] != gpuDecoded[i])
                     throw new Exception($"uint[{i}] mismatch (ft={fts[i]}): cpu={vals[i]} gpu={gpuDecoded[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     /// <summary>Encode N bits via OpusRangeEncoder.EncodeBitLogP at probability `logp`.</summary>
@@ -157,7 +157,7 @@ public abstract partial class CodecsTestBase
                 if (bits[i] != gpuDecoded[i])
                     throw new Exception($"bit[{i}] mismatch: encoded={bits[i]} gpu={gpuDecoded[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -181,7 +181,7 @@ public abstract partial class CodecsTestBase
                 if (bits[i] != gpuDecoded[i])
                     throw new Exception($"bit[{i}] mismatch: encoded={bits[i]} gpu={gpuDecoded[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task<int[]> OpusDecodeIcdfSequenceGpuAsync(
@@ -270,7 +270,7 @@ public abstract partial class CodecsTestBase
                         $"GPU decode mismatch at {i}: input={symbols[i]} gpu={gpuDecoded[i]}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -304,7 +304,7 @@ public abstract partial class CodecsTestBase
                         $"GPU decode mismatch at {i}: input={symbols[i]} gpu={gpuDecoded[i]}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -361,6 +361,6 @@ public abstract partial class CodecsTestBase
                     $"Encoded byte length: {encoded.Length}.");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

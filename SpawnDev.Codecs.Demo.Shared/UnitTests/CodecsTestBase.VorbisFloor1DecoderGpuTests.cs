@@ -163,7 +163,7 @@ public abstract partial class CodecsTestBase
                 if (cpuY[i] != gpuY[i])
                     throw new Exception($"Y[{i}]: cpu={cpuY[i]} gpu={gpuY[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     public struct Floor1DecoderTestParams

@@ -57,7 +57,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < 256; i++) predictor[i] = 128;
             await AssertVp9Idct16x16GpuMatchesCpuAsync(acc, coefs, predictor);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
                 await AssertVp9Idct16x16GpuMatchesCpuAsync(acc, coefs, predictor);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -98,7 +98,7 @@ public abstract partial class CodecsTestBase
                 await AssertVp9Idct16x16GpuMatchesCpuAsync(acc, coefs, predictor);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -121,6 +121,6 @@ public abstract partial class CodecsTestBase
             await AssertVp9Idct16x16GpuMatchesCpuAsync(acc, coefs, lowPred);
             await AssertVp9Idct16x16GpuMatchesCpuAsync(acc, coefs, highPred);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

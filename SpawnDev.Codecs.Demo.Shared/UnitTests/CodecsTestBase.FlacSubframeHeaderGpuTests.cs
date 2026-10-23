@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
             await EncodeAndVerify(acc, code: 0b000000, wastedBits: 0,
                 expectedKind: FlacSubframeHeaderGpu.KIND_CONSTANT, expectedOrder: 0);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
             await EncodeAndVerify(acc, code: 0b000001, wastedBits: 2,
                 expectedKind: FlacSubframeHeaderGpu.KIND_VERBATIM, expectedOrder: 0);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
             await EncodeAndVerify(acc, code: 0b001011, wastedBits: 0,
                 expectedKind: FlacSubframeHeaderGpu.KIND_FIXED, expectedOrder: 3);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
             await EncodeAndVerify(acc, code: 0b100111, wastedBits: 5,
                 expectedKind: FlacSubframeHeaderGpu.KIND_LPC, expectedOrder: 8);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
             await EncodeAndVerify(acc, code: 0b111111, wastedBits: 16,
                 expectedKind: FlacSubframeHeaderGpu.KIND_LPC, expectedOrder: 32);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task EncodeAndVerify(

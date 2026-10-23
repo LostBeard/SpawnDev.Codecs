@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
                         $"byte mismatch at offset {i}: expected=0x{expected[i]:X2} actual=0x{actual[i]:X2}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -99,6 +99,6 @@ public abstract partial class CodecsTestBase
             Equal((long)expected.Length, outLen);
             for (int i = 0; i < expected.Length; i++) Equal(expected[i], actual[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

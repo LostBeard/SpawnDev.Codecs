@@ -115,6 +115,6 @@ public abstract partial class CodecsTestBase
             Equal(0, totalMismatches,
                 $"first mismatch stream={firstBadStream} byte={firstBadByte}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

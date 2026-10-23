@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
             True(failures.Count == 0,
                 $"{failures.Count} of {checkedCount + failures.Count} BMP fixtures failed:\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -113,7 +113,7 @@ public abstract partial class CodecsTestBase
             True(failures.Count == 0,
                 $"{failures.Count} of {checkedCount + failures.Count} RGBA16 BMP fixtures failed:\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -145,7 +145,7 @@ public abstract partial class CodecsTestBase
             Equal(7, core.Width, "core header width");
             Equal(6, core.Height, "core header height");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private async Task AssertBmpRejectedAsync(byte[] file, string expectedMessagePart, string what)
@@ -160,7 +160,7 @@ public abstract partial class CodecsTestBase
             NotNull(caught, $"{what}: expected ImageDecodeException");
             Contains(expectedMessagePart, caught!.Message, what);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static byte[] BmpFixture(string name) => ReadEmbedded(BmpFixturePrefix + name + ".bmp");

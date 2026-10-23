@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
             var sequenceToEncode = new[] { 0, 1, 2, 3, 0, 2, 1, 3 };
             await VerifyHuffmanRoundTrip(acc, lengths, sequenceToEncode);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
             var sequenceToEncode = new[] { 0, 1, 2, 3, 4, 5, 6, 0, 0, 1, 6 };
             await VerifyHuffmanRoundTrip(acc, lengths, sequenceToEncode);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task VerifyHuffmanRoundTrip(

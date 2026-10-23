@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
             await kernel.RunAsync(coeffs.AsMemory(), dest.AsMemory(), blockCount: 1);
             for (int i = 0; i < 16; i++) Equal((byte)128, dest[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -57,7 +57,7 @@ public abstract partial class CodecsTestBase
                     Equal(cpuDest[i], gpuDest[i]);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -94,6 +94,6 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < n * 16; i++)
                 Equal(cpuResults[i], gpuResults[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

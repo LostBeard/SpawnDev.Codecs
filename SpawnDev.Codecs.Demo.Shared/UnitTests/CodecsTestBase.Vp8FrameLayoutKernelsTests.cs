@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
                 acc, dYOut.View, yIn, yIn.Length);
             Equal(0, mismatches, "Y16 gather->scatter round-trip");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
                 acc, dUOut.View, uIn, uIn.Length);
             Equal(0, mismatches, "UV8 gather->scatter round-trip");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -125,6 +125,6 @@ public abstract partial class CodecsTestBase
                 acc, dY16.View, cpuPacked, cpuPacked.Length);
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

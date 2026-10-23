@@ -81,7 +81,7 @@ public abstract partial class CodecsTestBase
             byte[] managed = await enc.EncodeKeyFrameAsync(y, width, u, width / 2, v, width, height, baseQIndex);
             EqualBytes(cpu, managed, "managed overload bytes vs CPU reference");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -134,7 +134,7 @@ public abstract partial class CodecsTestBase
             Equal(width, signalledW, "frame tag width");
             Equal(height, signalledH, "frame tag height");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -204,7 +204,7 @@ public abstract partial class CodecsTestBase
             for (int f = 0; f < frameCount; f++)
                 EqualBytes(singles[f], managed[f], $"frame {f} managed batch bytes vs single-frame encode");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -218,7 +218,7 @@ public abstract partial class CodecsTestBase
             using var enc = new Vp8KeyframeEncoderGpu(acc);
             await RunTypedArrayMatchesManaged(acc, enc);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("browser")]

@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
             int[] coefs = { 3654, -3210, 2876, -2543, 2210, -1876, 1543, -1210 };
             await ResidualAndVerify(acc, coefs, length: 256, quantLevel: 12, seed: 0xC0FFEE08u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
                               500,   -250,   100,   -50,   25,   -12,    6,    -3 };
             await ResidualAndVerify(acc, coefs, length: 1024, quantLevel: 14, seed: 0xC0FFEE16u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -51,7 +51,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < 32; i++) coefs[i] = rng.Next(-16384, 16384);
             await ResidualAndVerify(acc, coefs, length: 4096, quantLevel: 14, seed: 0xC0FFEEABu);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task ResidualAndVerify(

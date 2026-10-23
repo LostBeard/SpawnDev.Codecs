@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
             var pcm = new float[options.BlockSize];
             await EncodeAndCompare(acc, options, pcm);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
                     Equal(sequential[i][b], batched[i][b], $"packet[{i}] byte[{b}]");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -121,7 +121,7 @@ public abstract partial class CodecsTestBase
             if (oggBytes.Length < 200)
                 throw new Exception($"Output suspiciously short: {oggBytes.Length} bytes");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     // Non-silent (tone, random PCM) bit-exact match deferred. CUDA +

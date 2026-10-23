@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
             Equal(cpu8, gpu8, "crc8");
             Equal(cpu16, gpu16, "crc16");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
             Equal(cpu8, gpu8, "crc8");
             Equal(cpu16, gpu16, "crc16");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
             Equal(cpu8, gpu8, "crc8");
             Equal(cpu16, gpu16, "crc16");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
             Equal(cpu8, gpu8, "crc8");
             Equal(cpu16, gpu16, "crc16");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static (byte crc8, ushort crc16) ComputeCpu(byte[] data)

@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
             using var dec = new WebPDecoderGpu(acc);
             await RunWebPDecoderTypedArrayAsync(dec);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("browser")]
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
             using var enc = new WebPLosslessEncoderGpu(acc);
             await RunWebPEncoderTypedArrayAsync(enc);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("browser")]

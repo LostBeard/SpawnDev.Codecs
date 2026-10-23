@@ -95,7 +95,7 @@ public abstract partial class CodecsTestBase
                 if (decoded[i] != 0)
                     throw new Exception($"decoded[{i}] = {decoded[i]} for all-zero input");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -122,7 +122,7 @@ public abstract partial class CodecsTestBase
                 if (decoded[i] != 0)
                     throw new Exception($"decoded[{i}] = {decoded[i]} for DC-only input");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -148,7 +148,7 @@ public abstract partial class CodecsTestBase
             Equal(-10, decoded[0], "decoded DC");
             Equal(3, decoded[1], "decoded AC[1]");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -176,7 +176,7 @@ public abstract partial class CodecsTestBase
                 if (coefs[i] != decoded[i])
                     throw new Exception($"coef[{i}]: input={coefs[i]} decoded={decoded[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -206,6 +206,6 @@ public abstract partial class CodecsTestBase
                 if (coefs[i] != decoded[i])
                     throw new Exception($"coef[{i}]: input={coefs[i]} decoded={decoded[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

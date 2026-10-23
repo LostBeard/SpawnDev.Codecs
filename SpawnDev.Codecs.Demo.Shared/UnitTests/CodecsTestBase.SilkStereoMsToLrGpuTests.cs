@@ -22,7 +22,7 @@ public abstract partial class CodecsTestBase
             await StereoVerify(acc, fsKHz: 8, frameLength: 160,
                 predPrev: new[] { 1024, -512 }, predCur: new[] { 2048, 256 }, seed: 0xC0DEF00Du);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
             await StereoVerify(acc, fsKHz: 12, frameLength: 240,
                 predPrev: new[] { -2000, 1500 }, predCur: new[] { 3000, -1000 }, seed: 0xCABBA6E0u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
             await StereoVerify(acc, fsKHz: 16, frameLength: 320,
                 predPrev: new[] { 0, 0 }, predCur: new[] { 4096, -2048 }, seed: 0x12345AAAu);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task StereoVerify(

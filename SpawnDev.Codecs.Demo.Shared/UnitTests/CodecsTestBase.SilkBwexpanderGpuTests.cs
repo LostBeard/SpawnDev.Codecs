@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
                 if (cpu[i] != gpu[i])
                     throw new Exception($"ar16[{i}]: cpu={cpu[i]} gpu={gpu[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
                 if (cpu[i] != gpu[i])
                     throw new Exception($"ar32[{i}]: cpu={cpu[i]} gpu={gpu[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -103,6 +103,6 @@ public abstract partial class CodecsTestBase
                         throw new Exception($"ar16[{i}] (chirp={chirp}): cpu={cpu[i]} gpu={gpu[i]}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

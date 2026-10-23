@@ -308,7 +308,7 @@ public abstract partial class CodecsTestBase
                 if (gpu[SilkDecodedIndicesLayout.LtpIndicesOffset + k] != fixture.LtpGainIndices[k])
                     throw new Exception($"ltpGain[{k}]: expected {fixture.LtpGainIndices[k]} got {gpu[SilkDecodedIndicesLayout.LtpIndicesOffset + k]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -368,6 +368,6 @@ public abstract partial class CodecsTestBase
             if (gpu[SilkDecodedIndicesLayout.SeedOffset] != fixture.Seed)
                 throw new Exception($"seed mismatch");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

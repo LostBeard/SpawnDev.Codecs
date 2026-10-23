@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
             int order = 10;
             await SynthAndVerify(acc, aQ12, order, gainQ10, subfrLen, 0xC0DEC0DEu);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
             int order = 16;
             await SynthAndVerify(acc, aQ12, order, gainQ10, subfrLen, 0xFEEDF00Du);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
             int order = 10;
             await SynthAndVerify(acc, aQ12, order, gainQ10, subfrLen, 0xBAADF00Du, residualScale: 1 << 20);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task SynthAndVerify(

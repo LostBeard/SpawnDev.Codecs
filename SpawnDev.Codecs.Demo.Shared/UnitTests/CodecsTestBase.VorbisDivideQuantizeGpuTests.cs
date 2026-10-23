@@ -68,7 +68,7 @@ public abstract partial class CodecsTestBase
                 if (cpuOut[i] != gpuOut[i])
                     throw new Exception($"residueQ[{i}]: cpu={cpuOut[i]} gpu={gpuOut[i]} (s={spectrum[i]} f={floorCurve[i]})");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static void DivideQuantizeKernel(

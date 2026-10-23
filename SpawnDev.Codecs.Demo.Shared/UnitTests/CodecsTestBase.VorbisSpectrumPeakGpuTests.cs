@@ -51,7 +51,7 @@ public abstract partial class CodecsTestBase
             if (cpuLow != gpuPeaks[0]) throw new Exception($"low peak: cpu={cpuLow} gpu={gpuPeaks[0]}");
             if (cpuHigh != gpuPeaks[1]) throw new Exception($"high peak: cpu={cpuHigh} gpu={gpuPeaks[1]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
             if (gpuPeaks[0] != 0f) throw new Exception($"all-zero low peak: {gpuPeaks[0]}");
             if (gpuPeaks[1] != 0f) throw new Exception($"all-zero high peak: {gpuPeaks[1]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static void PeakKernel(

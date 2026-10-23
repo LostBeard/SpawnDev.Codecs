@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
             // Order 0 -> no prediction, samples == residuals.
             await ReconstructAndVerify(acc, order: 0, length: 64, seed: 0xCAFE0000u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         {
             await ReconstructAndVerify(acc, order: 1, length: 64, seed: 0xCAFE0001u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
         {
             await ReconstructAndVerify(acc, order: 2, length: 256, seed: 0xCAFE0002u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         {
             await ReconstructAndVerify(acc, order: 3, length: 512, seed: 0xCAFE0003u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
             // sequential reconstruction path.
             await ReconstructAndVerify(acc, order: 4, length: 4096, seed: 0xCAFE0004u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task ReconstructAndVerify(

@@ -74,6 +74,6 @@ public abstract partial class CodecsTestBase
                 if (cpuOut[i] != gpuOut[i]) mismatches++;
             Equal(0, mismatches, $"coefsPerBlock={coefsPerBlock}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

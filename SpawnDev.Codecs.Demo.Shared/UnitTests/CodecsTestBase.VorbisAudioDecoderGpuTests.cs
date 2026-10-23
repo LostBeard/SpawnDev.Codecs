@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
             CompareSamples(cpuOut2, gpuOut2, cpuFrames2 * options.Channels, "packet2");
             CompareSamples(cpuOut3, gpuOut3, cpuFrames3 * options.Channels, "packet3");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
                     throw new Exception($"sample[{i}] not silent: {gpuOut2[i]:R}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -178,7 +178,7 @@ public abstract partial class CodecsTestBase
             CompareSamples(cpuOut3, gpuOut3, cpuFrames3 * options.Channels,
                 "tone-packet3", absTol: 1e-3f);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static void CompareSamples(

@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
             sbyte[] indices = { 25, 5, -2, 3 };
             await DequantAndVerify(acc, indices, prevInd: 0, conditional: 0);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
             sbyte[] indices = { 0, 5, 8, -2 };
             await DequantAndVerify(acc, indices, prevInd: 30, conditional: 1);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
             sbyte[] indices = { 35, 2 };
             await DequantAndVerify(acc, indices, prevInd: 15, conditional: 1);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
             sbyte[] indices = { 40, 39, 1, 0 };
             await DequantAndVerify(acc, indices, prevInd: 5, conditional: 1);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task DequantAndVerify(

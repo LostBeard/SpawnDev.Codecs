@@ -130,6 +130,19 @@ internal static class DeviceVerify
         return $"{bad} of {length} bytes differ{tol}; first at {where}: got {a[0]}, expected {e[0]}";
     }
 
+    /// <summary>
+    /// Compare a result that came back to the host (a managed overload's return value) with device truth: the result is
+    /// uploaded and compared on the accelerator. Also checks the length.
+    /// </summary>
+    public static async Task<string?> CompareHostResultAsync(Accelerator acc, ReadOnlyMemory<byte> actual,
+        ArrayView1D<byte, Stride1D.Dense> expected, long expectedLength, int bytesPerPixel = 1, int width = 0, int tolerance = 0)
+    {
+        if (actual.Length != expectedLength) return $"length {actual.Length} != expected {expectedLength}";
+        using var dActual = acc.Allocate1D<byte>(Math.Max(1, actual.Length));
+        DeviceTransfer.Upload(dActual.View, actual.Span);
+        return await CompareAsync(acc, dActual.View, expected, expectedLength, bytesPerPixel, width, tolerance);
+    }
+
     /// <summary>Null when every one of <paramref name="length"/> bytes of <paramref name="view"/> is <paramref name="value"/>, else a message.</summary>
     public static async Task<string?> AllEqualAsync(Accelerator acc, ArrayView1D<byte, Stride1D.Dense> view, long length, byte value)
     {

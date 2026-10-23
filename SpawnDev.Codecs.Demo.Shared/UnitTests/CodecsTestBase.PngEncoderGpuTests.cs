@@ -199,7 +199,7 @@ public abstract partial class CodecsTestBase
             DumpPngForPillow(rgba, w, h, options, file);
             return file;
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static int _pngDumpCounter;
@@ -351,7 +351,7 @@ public abstract partial class CodecsTestBase
             Equal(text.Count, read.Count, "text chunk count");
             foreach (var kv in text) Equal(kv.Value, read[kv.Key], $"text chunk '{kv.Key}'");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -384,6 +384,6 @@ public abstract partial class CodecsTestBase
             try { await enc.EncodeAsync(dIn.View, w, h, tiny.View); } catch (ArgumentException ex) { caught = ex; }
             NotNull(caught, "undersized output must throw ArgumentException");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

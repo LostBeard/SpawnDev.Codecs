@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
             short[] nlsf = { 2000, 5000, 8000, 11000, 14500, 17500, 21000, 24500, 28000, 31000 };
             await Nlsf2AAndVerify(acc, nlsf);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
                              17500, 19500, 21500, 23500, 25500, 27500, 29500, 31500 };
             await Nlsf2AAndVerify(acc, nlsf);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
             }
             await Nlsf2AAndVerify(acc, nlsf);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task Nlsf2AAndVerify(Accelerator acc, short[] nlsf)

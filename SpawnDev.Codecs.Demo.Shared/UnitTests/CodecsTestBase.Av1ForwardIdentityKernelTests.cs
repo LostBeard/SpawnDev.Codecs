@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
             readback.AsSpan(0, 4).CopyTo(gpuOut);
             for (int i = 0; i < 4; i++) Equal(cpuOut[i], gpuOut[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
                 if (cpuOut[i] != gpuOut[i]) mismatches++;
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -95,7 +95,7 @@ public abstract partial class CodecsTestBase
             readback.AsSpan(0, 4).CopyTo(gpuOut);
             for (int i = 0; i < 4; i++) Equal(cpuOut[i], gpuOut[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     // -------- Identity 8 --------
@@ -121,7 +121,7 @@ public abstract partial class CodecsTestBase
             readback.AsSpan(0, 8).CopyTo(gpuOut);
             for (int i = 0; i < 8; i++) Equal(cpuOut[i], gpuOut[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -154,7 +154,7 @@ public abstract partial class CodecsTestBase
                 if (cpuOut[i] != gpuOut[i]) mismatches++;
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -179,7 +179,7 @@ public abstract partial class CodecsTestBase
             readback.AsSpan(0, 8).CopyTo(gpuOut);
             for (int i = 0; i < 8; i++) Equal(cpuOut[i], gpuOut[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     // -------- Identity 16 --------
@@ -205,7 +205,7 @@ public abstract partial class CodecsTestBase
             readback.AsSpan(0, 16).CopyTo(gpuOut);
             for (int i = 0; i < 16; i++) Equal(cpuOut[i], gpuOut[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -238,7 +238,7 @@ public abstract partial class CodecsTestBase
                 if (cpuOut[i] != gpuOut[i]) mismatches++;
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -263,7 +263,7 @@ public abstract partial class CodecsTestBase
             readback.AsSpan(0, 16).CopyTo(gpuOut);
             for (int i = 0; i < 16; i++) Equal(cpuOut[i], gpuOut[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     // -------- Identity 32 --------
@@ -289,7 +289,7 @@ public abstract partial class CodecsTestBase
             readback.AsSpan(0, 32).CopyTo(gpuOut);
             for (int i = 0; i < 32; i++) Equal(cpuOut[i], gpuOut[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -322,7 +322,7 @@ public abstract partial class CodecsTestBase
                 if (cpuOut[i] != gpuOut[i]) mismatches++;
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -347,6 +347,6 @@ public abstract partial class CodecsTestBase
             readback.AsSpan(0, 32).CopyTo(gpuOut);
             for (int i = 0; i < 32; i++) Equal(cpuOut[i], gpuOut[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

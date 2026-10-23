@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < 8; i++) input[i] = rng.Next(-2000, 2000);
             await IadstAndVerify(acc, input, cosBit: 12);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
             int[] input = { 100, -200, 300, -400, 500, -600, 700, -800 };
             await IadstAndVerify(acc, input, cosBit: 13);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
             int[] input = { 5000, -3000, 4000, -2000, 1000, -500, 250, -100 };
             await IadstAndVerify(acc, input, cosBit: 10);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
             input[0] = 1000; // DC-only
             await IadstAndVerify(acc, input, cosBit: 12);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task IadstAndVerify(Accelerator acc, int[] input, int cosBit)

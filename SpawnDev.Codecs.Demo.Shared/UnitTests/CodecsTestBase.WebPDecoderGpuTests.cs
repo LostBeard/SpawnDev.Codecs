@@ -120,7 +120,7 @@ public abstract partial class CodecsTestBase
             True(failures.Count == 0,
                 $"{what}: {failures.Count} of {checkedCount + failures.Count} WebP fixtures failed:\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -159,7 +159,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, $"{failures.Count} ReadInfo mismatches:\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -198,7 +198,7 @@ public abstract partial class CodecsTestBase
             True(!lossy.IsLossless, "lossy file reports IsLossless = false");
             Equal(32, lossy.Info.Width, "lossy width");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static List<ImageFrameInfo> WebPExpectedFrames(string name)
@@ -241,7 +241,7 @@ public abstract partial class CodecsTestBase
             True(count >= 5, "animation fixtures were exercised");
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -287,7 +287,7 @@ public abstract partial class CodecsTestBase
             True(frameCount > 20, $"only {frameCount} frames were exercised");
             True(failures.Count == 0, $"{failures.Count} animation mismatches:\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -307,7 +307,7 @@ public abstract partial class CodecsTestBase
             catch (ArgumentOutOfRangeException) { threw = true; }
             True(threw, "frame 1 of a still image");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private async Task AssertWebPRejectedAsync(byte[] file, string expectedMessagePart, string what)
@@ -326,7 +326,7 @@ public abstract partial class CodecsTestBase
             var ok = await dec.DecodeAsync(WebPFile("flat_32x24"));
             Equal(32, ok.Info.Width, what + ": decoder usable after the error");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -394,6 +394,6 @@ public abstract partial class CodecsTestBase
             catch (ArgumentException) { threw = true; }
             True(threw, "WebP has no 16-bit output");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
             input[0] = 1.0f;
             await ImdctRoundTripAndVerify(acc, input, n, blockCount: 1);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < n; i++) input[i] = (float)(rng.NextDouble() * 2 - 1);
             await ImdctRoundTripAndVerify(acc, input, n, blockCount: 1);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
                 input[i] = (float)(rng.NextDouble() * 2 - 1);
             await ImdctRoundTripAndVerify(acc, input, n, blockCount);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task ImdctRoundTripAndVerify(Accelerator acc, float[] input, int n, int blockCount)

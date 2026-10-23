@@ -68,7 +68,7 @@ public abstract partial class CodecsTestBase
                     await AssertVp9QuantizeGpuMatchesCpuAsync(acc, input, dcQ, acQ);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
             // Large q - quantizes most coefficients to zero.
             await AssertVp9QuantizeGpuMatchesCpuAsync(acc, input, dcQ: 200, acQ: 200);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -109,7 +109,7 @@ public abstract partial class CodecsTestBase
             await AssertVp9QuantizeGpuMatchesCpuAsync(acc, input, dcQ: 17, acQ: 23);
             await AssertVp9QuantizeGpuMatchesCpuAsync(acc, input, dcQ: 137, acQ: 219);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -121,6 +121,6 @@ public abstract partial class CodecsTestBase
             var input = new int[256];
             await AssertVp9QuantizeGpuMatchesCpuAsync(acc, input, dcQ: 64, acQ: 64);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

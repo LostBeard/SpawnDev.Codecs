@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
             if (Math.Abs(cpuYHigh - gpuPosteriors[1]) > 1)
                 throw new Exception($"yHigh: cpu={cpuYHigh} gpu={gpuPosteriors[1]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static int CpuMagToFloorY(float magnitude)

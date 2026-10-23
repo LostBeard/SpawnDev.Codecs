@@ -62,7 +62,42 @@ public abstract partial class CodecsTestBase
         return copy;
     }
 
-    /// <summary>Encodes every source at the given qualities, checks our own decoder reproduces it, and optionally keeps the files.</summary>
+    /// <summary>Device buffers for one lossless round trip: the encoded file and the decoded canvas.</summary>
+    private sealed class WebPRoundTripBuffers : IDisposable
+    {
+        public required MemoryBuffer1D<byte, Stride1D.Dense> File;
+        public required MemoryBuffer1D<byte, Stride1D.Dense> Back;
+        public void Dispose() { File.Dispose(); Back.Dispose(); }
+
+        public static WebPRoundTripBuffers For(Accelerator acc, int w, int h, WebPEncodeOptions? options) => new()
+        {
+            File = acc.Allocate1D<byte>(WebPLosslessEncoderGpu.GetMaxEncodedSize(w, h, options)),
+            Back = acc.Allocate1D<byte>(4L * w * h),
+        };
+    }
+
+    /// <summary>
+    /// Encode the device picture <paramref name="dSrc"/> into <paramref name="b"/>.File, decode that into <paramref name="b"/>.Back
+    /// and compare it on the accelerator with <paramref name="dExpected"/>. Adds a failure line on a mismatch; returns the file
+    /// length (the file stays on the device for a caller that keeps it for Pillow).
+    /// </summary>
+    private static async Task<int> WebPRoundTripOnDeviceAsync(Accelerator acc, WebPLosslessEncoderGpu enc, WebPDecoderGpu dec,
+        ArrayView1D<byte, Stride1D.Dense> dSrc, int w, int h, WebPEncodeOptions options, ArrayView1D<byte, Stride1D.Dense> dExpected,
+        WebPRoundTripBuffers b, string tag, List<string> failures)
+    {
+        int length = await enc.EncodeAsync(dSrc, w, h, b.File.View, options);
+        if (length > WebPLosslessEncoderGpu.GetMaxEncodedSize(w, h, options)) failures.Add($"{tag}: {length} bytes exceeds GetMaxEncodedSize");
+        var info = await dec.DecodeAsync(b.File.View, length, b.Back.View);
+        if (info.Width != w || info.Height != h) failures.Add($"{tag}: decoded size {info.Width}x{info.Height}");
+        var diff = await DeviceVerify.CompareAsync(acc, b.Back.View, dExpected, 4L * w * h, 4, w);
+        if (diff != null) failures.Add($"{tag} [our decoder]: {diff}");
+        return length;
+    }
+
+    /// <summary>
+    /// Encodes every source at the given qualities and checks our own decoder reproduces it, all on the accelerator; keeps the
+    /// files in <paramref name="keepDir"/> (downloaded only then) for the Pillow check.
+    /// </summary>
     private async Task<List<string>> EncodeAllSourcesAsync(
         int[] qualities, string? keepDir, bool exact, Func<WebPFixtureRow, WebPEncodeOptions, WebPEncodeOptions>? tweak = null)
     {
@@ -72,31 +107,26 @@ public abstract partial class CodecsTestBase
         {
             using var enc = new WebPLosslessEncoderGpu(acc);
             using var dec = new WebPDecoderGpu(acc);
-            foreach (var q in qualities)
+            foreach (var row in WebPSources())
             {
-                foreach (var row in WebPSources())
+                byte[] source = WebPSource(row.Name);
+                byte[] expected = exact ? source : ZeroRgbUnderAlpha0(source);
+                using var dSrc = DeviceVerify.Upload(acc, source);
+                using var dExpected = exact ? null : DeviceVerify.Upload(acc, expected);
+                foreach (var q in qualities)
                 {
                     string tag = $"{row.Name}_q{q}";
                     try
                     {
-                        byte[] source = WebPSource(row.Name);
                         var options = new WebPEncodeOptions { Quality = q, Exact = exact };
                         if (tweak != null) options = tweak(row, options);
-                        byte[] file = await enc.EncodeAsync(source, row.Width, row.Height, options);
-                        if (file.Length > WebPLosslessEncoderGpu.GetMaxEncodedSize(row.Width, row.Height, options))
-                            failures.Add($"{tag}: {file.Length} bytes exceeds GetMaxEncodedSize");
-
-                        byte[] expected = exact ? source : ZeroRgbUnderAlpha0(source);
-                        var decoded = await dec.DecodeAsync(file);
-                        var diff = ComparePixels(expected, decoded.Pixels, 4, row.Width);
-                        if (diff != null) failures.Add($"{tag} [our decoder]: {diff}");
-                        if (decoded.Info.Width != row.Width || decoded.Info.Height != row.Height)
-                            failures.Add($"{tag}: decoded size {decoded.Info.Width}x{decoded.Info.Height}");
-
+                        using var b = WebPRoundTripBuffers.For(acc, row.Width, row.Height, options);
+                        int length = await WebPRoundTripOnDeviceAsync(acc, enc, dec, dSrc.View, row.Width, row.Height, options,
+                            (dExpected ?? dSrc).View, b, tag, failures);
                         if (keepDir != null)
                         {
                             string stem = Path.Combine(keepDir, tag);
-                            await File.WriteAllBytesAsync(stem + ".webp", file);
+                            await File.WriteAllBytesAsync(stem + ".webp", await DeviceTransfer.DownloadAsync(b.File.View, length));
                             await File.WriteAllBytesAsync(stem + ".rgba8", expected);
                             await File.WriteAllTextAsync(stem + ".size", $"{row.Width} {row.Height}");
                             if (options.IccProfile != null) await File.WriteAllBytesAsync(stem + ".icc", options.IccProfile);
@@ -111,17 +141,23 @@ public abstract partial class CodecsTestBase
                 }
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
         return failures;
+    }
+
+    /// <summary>First statement of a test whose verdict is the libwebp (Pillow) check: skip before encoding anything when it cannot run.</summary>
+    private static void RequirePillowVerify()
+    {
+        if (OperatingSystem.IsBrowser())
+            throw new UnsupportedTestException("Pillow verification needs a desktop process.");
+        if (!PillowAvailable())
+            throw new UnsupportedTestException("Set CODECS_PILLOW_PYTHON to the python.exe of a venv with pillow + numpy.");
     }
 
     private static async Task<string> RunPillowVerifyAsync(string dir)
     {
-        if (OperatingSystem.IsBrowser())
-            throw new UnsupportedTestException("Pillow verification needs a desktop process.");
-        var python = Environment.GetEnvironmentVariable("CODECS_PILLOW_PYTHON");
-        if (string.IsNullOrEmpty(python) || !File.Exists(python))
-            throw new UnsupportedTestException("Set CODECS_PILLOW_PYTHON to the python.exe of a venv with pillow + numpy.");
+        RequirePillowVerify();
+        var python = Environment.GetEnvironmentVariable("CODECS_PILLOW_PYTHON")!;
         var script = FindRepoFile(Path.Combine("scripts", "images", "verify_webp_files.py"))
                      ?? throw new InvalidOperationException("scripts/images/verify_webp_files.py not found above " + AppContext.BaseDirectory);
         var psi = new ProcessStartInfo(python)
@@ -153,6 +189,7 @@ public abstract partial class CodecsTestBase
     [TestMethod(Timeout = 600000)]
     public async Task WebPLosslessEncoderGpu_AllSources_OpenInLibwebp_AndDecodeBitExact()
     {
+        RequirePillowVerify(); // our decoder alone is AllSources_DecodeBitExact_InOurDecoder
         string dir = WebPEncoderOutputDir("pillow");
         var failures = await EncodeAllSourcesAsync(new[] { 0, 40, 75, 100 }, dir, exact: true);
         True(failures.Count == 0, $"{failures.Count} encoder round-trip failures:\n" + string.Join("\n", failures));
@@ -173,15 +210,17 @@ public abstract partial class CodecsTestBase
             for (int i = 3; i < source.Length; i += 4) if (source[i] == 0 && (source[i - 1] | source[i - 2] | source[i - 3]) != 0) transparent++;
             True(transparent > 20, "the source must have transparent pixels with non-zero RGB, else this test proves nothing");
 
-            var exactFile = await enc.EncodeAsync(source, 64, 40, new WebPEncodeOptions { Exact = true });
-            var exactBack = await dec.DecodeAsync(exactFile);
-            Equal(null, ComparePixels(source, exactBack.Pixels, 4, 64), "Exact = true keeps every RGB value");
-
-            var looseFile = await enc.EncodeAsync(source, 64, 40, new WebPEncodeOptions { Exact = false });
-            var looseBack = await dec.DecodeAsync(looseFile);
-            Equal(null, ComparePixels(ZeroRgbUnderAlpha0(source), looseBack.Pixels, 4, 64), "Exact = false clears RGB under alpha 0 and changes nothing else");
+            var failures = new List<string>();
+            using var dSrc = DeviceVerify.Upload(acc, source);
+            using var dCleared = DeviceVerify.Upload(acc, ZeroRgbUnderAlpha0(source));
+            using var b = WebPRoundTripBuffers.For(acc, 64, 40, null);
+            await WebPRoundTripOnDeviceAsync(acc, enc, dec, dSrc.View, 64, 40, new WebPEncodeOptions { Exact = true }, dSrc.View, b,
+                "Exact = true keeps every RGB value", failures);
+            await WebPRoundTripOnDeviceAsync(acc, enc, dec, dSrc.View, 64, 40, new WebPEncodeOptions { Exact = false }, dCleared.View, b,
+                "Exact = false clears RGB under alpha 0 and changes nothing else", failures);
+            True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -191,27 +230,26 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < icc.Length; i++) icc[i] = (byte)(i * 7 + 1);
         byte[] exif = new byte[] { (byte)'I', (byte)'I', 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0 };
         byte[] xmp = System.Text.Encoding.UTF8.GetBytes("<x:xmpmeta xmlns:x='adobe:ns:meta/'><rdf/></x:xmpmeta>");
-        string dir = WebPEncoderOutputDir("metadata");
-        var failures = await EncodeAllSourcesAsync(new[] { 75 }, dir, exact: true, (row, o) =>
+        string? dir = PillowAvailable() ? WebPEncoderOutputDir("metadata") : null;
+        WebPEncodeOptions WithMetadata(WebPFixtureRow row, WebPEncodeOptions o)
         {
             o.IccProfile = icc;
             o.Exif = row.Width % 2 == 0 ? exif : System.Text.Encoding.ASCII.GetBytes("Exif\0\0").Concat(exif).ToArray();
             o.Xmp = xmp;
             return o;
-        });
+        }
+        var failures = await EncodeAllSourcesAsync(new[] { 75 }, dir, exact: true, WithMetadata);
         True(failures.Count == 0, $"{failures.Count} failures:\n" + string.Join("\n", failures));
 
-        // The "Exif\0\0"-prefixed variant must have been stored WITHOUT the prefix: the sidecar holds what the caller passed,
-        // so normalise it for libwebp's comparison.
-        foreach (var f in Directory.GetFiles(dir, "*.exif"))
-            await File.WriteAllBytesAsync(f, exif);
-
-        // Our own decoder reads them back and reports the orientation.
+        // Our own decoder reads them back and reports the orientation (one small file; only the metadata blobs come back).
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
+            using var enc = new WebPLosslessEncoderGpu(acc);
             using var dec = new WebPDecoderGpu(acc);
-            var one = await File.ReadAllBytesAsync(Directory.GetFiles(dir, "enc_photo_80x60_q75.webp").Single());
+            var row = WebPSources().Single(r => r.Name == "enc_photo_80x60");
+            var one = await enc.EncodeAsync(WebPSource(row.Name), row.Width, row.Height,
+                WithMetadata(row, new WebPEncodeOptions { Quality = 75, Exact = true }));
             var md = await dec.ReadMetadataAsync(one);
             EqualBytes(icc, md.IccProfile!, "ICC");
             EqualBytes(exif, md.Exif!, "EXIF");
@@ -220,8 +258,13 @@ public abstract partial class CodecsTestBase
             True(fi.IsExtended && fi.HasIccProfile && fi.HasExif && fi.HasXmp && fi.IsLossless, "VP8X facts");
             Equal(6, fi.Info.Orientation, "orientation from the EXIF we wrote");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
 
+        if (dir == null) return; // libwebp's check of the files needs a desktop with Pillow
+        // The "Exif\0\0"-prefixed variant must have been stored WITHOUT the prefix: the sidecar holds what the caller passed,
+        // so normalise it for libwebp's comparison.
+        foreach (var f in Directory.GetFiles(dir, "*.exif"))
+            await File.WriteAllBytesAsync(f, exif);
         await RunPillowVerifyAsync(dir);
     }
 
@@ -237,23 +280,22 @@ public abstract partial class CodecsTestBase
             {
                 var row = WebPSources().Single(r => r.Name == name);
                 byte[] source = WebPSource(name);
-                using var dIn = acc.Allocate1D<byte>(source.Length + 5);
-                DeviceTransfer.Upload(dIn.View, source);
+                using var dIn = DeviceVerify.Upload(acc, source, slack: 5);
                 int max = WebPLosslessEncoderGpu.GetMaxEncodedSize(row.Width, row.Height);
-                using var dOut = acc.Allocate1D<byte>(max + 64);
-                DeviceTransfer.Upload(dOut.View, Poison(max + 64));
+                using var dOut = DeviceVerify.Poisoned(acc, max + 64);
                 int length = await enc.EncodeAsync(dIn.View, row.Width, row.Height, dOut.View);
                 True(length > 20 && length <= max, $"{name}: length {length} within (20, {max}]");
-
-                var written = await DeviceTransfer.DownloadAsync(dOut.View, length);
-                var tail = await dOut.View.SubView(length, 64).CopyToHostAsync();
-                for (int i = 0; i < tail.Length; i++)
-                    if (tail[i] != 0xAB) throw new Exception($"{name}: byte {length + i} past the end of the file was written");
-                var decoded = await dec.DecodeAsync(written);
-                Equal(null, ComparePixels(source, decoded.Pixels, 4, row.Width), name);
+                Equal(null, await DeviceVerify.AllEqualAsync(acc, dOut.View.SubView(length, 64), 64, 0xAB), $"{name}: bytes past the end of the file");
+                using var dBack = acc.Allocate1D<byte>(source.Length);
+                await dec.DecodeAsync(dOut.View, length, dBack.View);
+                Equal(null, await DeviceVerify.CompareAsync(acc, dBack.View, dIn.View, source.Length, 4, row.Width), name);
+                // the managed overload (a few KB here) must write the same file
+                var managed = await enc.EncodeAsync(source, row.Width, row.Height);
+                Equal(length, managed.Length, $"{name}: managed overload length");
+                Equal(null, await DeviceVerify.CompareAsync(acc, dOut.View, managed), $"{name}: managed overload bytes");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -269,15 +311,14 @@ public abstract partial class CodecsTestBase
             int w = 301, h = 251;
             byte[] noise = new byte[w * h * 4];
             rng.NextBytes(noise);
+            using var dNoise = DeviceVerify.Upload(acc, noise);
+            using var b = WebPRoundTripBuffers.For(acc, w, h, null);
+            var failures = new List<string>();
             foreach (int q in new[] { 0, 50, 100 })
-            {
-                var file = await enc.EncodeAsync(noise, w, h, new WebPEncodeOptions { Quality = q });
-                True(file.Length <= WebPLosslessEncoderGpu.GetMaxEncodedSize(w, h), $"q{q}: {file.Length} bytes");
-                var back = await dec.DecodeAsync(file);
-                Equal(null, ComparePixels(noise, back.Pixels, 4, w), $"q{q} noise");
-            }
+                await WebPRoundTripOnDeviceAsync(acc, enc, dec, dNoise.View, w, h, new WebPEncodeOptions { Quality = q }, dNoise.View, b, $"q{q} noise", failures);
+            True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -301,6 +342,7 @@ public abstract partial class CodecsTestBase
                 "cross colour with non-zero multipliers in every tile (red and blue follow green)"),
             ("enc_meta_groups_128x128", 100, s => GroupCount(s) >= 2, "several prefix groups (meta prefix codes)"),
         };
+        RequirePillowVerify(); // the verdict comes from the Python bitstream parser
         string dir = WebPEncoderOutputDir("features");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
@@ -318,7 +360,7 @@ public abstract partial class CodecsTestBase
                 await File.WriteAllTextAsync(stem + ".stats", "");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
 
         var report = await RunPillowVerifyAsync(dir);
         var stats = report.Split('\n').Where(l => l.StartsWith("STATS ")).ToDictionary(l => l.Split(' ')[1], l => l);
@@ -366,7 +408,8 @@ public abstract partial class CodecsTestBase
     {
         // The VP8L header has 14-bit sizes: 16384 is the largest. Also sizes around the transform block boundaries.
         var shapes = new (int W, int H)[] { (16384, 1), (1, 16384), (16384, 2), (3, 16384), (257, 255), (16, 16), (17, 15), (15, 17), (64, 1), (1, 64) };
-        string dir = WebPEncoderOutputDir("extreme");
+        bool pillow = PillowAvailable();
+        string? dir = pillow ? WebPEncoderOutputDir("extreme") : null;
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         var failures = new List<string>();
         try
@@ -386,18 +429,20 @@ public abstract partial class CodecsTestBase
                         px[o + 2] = (byte)((x ^ y) + rng.Next(3));
                         px[o + 3] = 255;
                     }
+                using var dPx = DeviceVerify.Upload(acc, px);
+                using var b = WebPRoundTripBuffers.For(acc, w, h, null);
                 foreach (int q in new[] { 10, 30, 75 })
                 {
                     string tag = $"extreme_{w}x{h}_q{q}";
                     try
                     {
-                        var file = await enc.EncodeAsync(px, w, h, new WebPEncodeOptions { Quality = q });
-                        var back = await dec.DecodeAsync(file);
-                        var diff = ComparePixels(px, back.Pixels, 4, w);
-                        if (diff != null) failures.Add($"{tag} [our decoder]: {diff}");
-                        await File.WriteAllBytesAsync(Path.Combine(dir, tag + ".webp"), file);
-                        await File.WriteAllBytesAsync(Path.Combine(dir, tag + ".rgba8"), px);
-                        await File.WriteAllTextAsync(Path.Combine(dir, tag + ".size"), $"{w} {h}");
+                        int length = await WebPRoundTripOnDeviceAsync(acc, enc, dec, dPx.View, w, h, new WebPEncodeOptions { Quality = q }, dPx.View, b, tag, failures);
+                        if (dir != null)
+                        {
+                            await File.WriteAllBytesAsync(Path.Combine(dir, tag + ".webp"), await DeviceTransfer.DownloadAsync(b.File.View, length));
+                            await File.WriteAllBytesAsync(Path.Combine(dir, tag + ".rgba8"), px);
+                            await File.WriteAllTextAsync(Path.Combine(dir, tag + ".size"), $"{w} {h}");
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -406,9 +451,9 @@ public abstract partial class CodecsTestBase
                 }
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
         True(failures.Count == 0, $"{failures.Count} failures:\n" + string.Join("\n", failures));
-        await RunPillowVerifyAsync(dir);
+        if (dir != null) await RunPillowVerifyAsync(dir);
     }
 
     [TestMethod]
@@ -434,6 +479,6 @@ public abstract partial class CodecsTestBase
             using var dOut = acc.Allocate1D<byte>(100);
             True(await Throws<ArgumentException>(() => enc.EncodeAsync(dIn.View, 16, 16, dOut.View)), "output smaller than GetMaxEncodedSize");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

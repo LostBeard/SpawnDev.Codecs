@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
             await DequantizeAndVerify(acc, signalType: 2, quantOffsetType: 0,
                 seed: unchecked((int)0xDEAD0001u), frameLength: 320, pulseSeed: 0xDEAD0001u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
             await DequantizeAndVerify(acc, signalType: 2, quantOffsetType: 1,
                 seed: unchecked((int)0xDEAD0002u), frameLength: 320, pulseSeed: 0xDEAD0002u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
             await DequantizeAndVerify(acc, signalType: 1, quantOffsetType: 0,
                 seed: unchecked((int)0xDEAD0003u), frameLength: 240, pulseSeed: 0xDEAD0003u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
             await DequantizeAndVerify(acc, signalType: 0, quantOffsetType: 1,
                 seed: unchecked((int)0xDEAD0004u), frameLength: 160, pulseSeed: 0xDEAD0004u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task DequantizeAndVerify(

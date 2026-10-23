@@ -242,7 +242,7 @@ public abstract partial class CodecsTestBase
             if (cpuState.PrevGainQ16 != gpuPrevGain)
                 throw new Exception($"PrevGainQ16 mismatch: cpu={cpuState.PrevGainQ16} gpu={gpuPrevGain}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -280,7 +280,7 @@ public abstract partial class CodecsTestBase
             if (cpuState.PrevGainQ16 != gpuPrevGain)
                 throw new Exception($"PrevGainQ16 mismatch: cpu={cpuState.PrevGainQ16} gpu={gpuPrevGain}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     /// <summary>Make a deep copy of state so CPU and GPU runs don't interfere.</summary>
@@ -421,7 +421,7 @@ public abstract partial class CodecsTestBase
             if (cpuState.PrevGainQ16 != gpuPrevGain)
                 throw new Exception($"MB PrevGainQ16 mismatch: cpu={cpuState.PrevGainQ16} gpu={gpuPrevGain}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -459,7 +459,7 @@ public abstract partial class CodecsTestBase
             if (cpuState.PrevGainQ16 != gpuPrevGain)
                 throw new Exception($"WB PrevGainQ16 mismatch: cpu={cpuState.PrevGainQ16} gpu={gpuPrevGain}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -501,7 +501,7 @@ public abstract partial class CodecsTestBase
             if (cpuState.PrevGainQ16 != gpuPrevGain)
                 throw new Exception($"NLSF-interp PrevGainQ16 mismatch: cpu={cpuState.PrevGainQ16} gpu={gpuPrevGain}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -564,6 +564,6 @@ public abstract partial class CodecsTestBase
                 state.PrevGainQ16 = cpuState.PrevGainQ16;
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

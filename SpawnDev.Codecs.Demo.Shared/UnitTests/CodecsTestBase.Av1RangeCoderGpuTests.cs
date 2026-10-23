@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
                 if (bits[i] != decoded[i])
                     throw new Exception($"decoded bit mismatch at {i}: input={bits[i]} decoded={decoded[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
                 if (bits[i] != decoded[i])
                     throw new Exception($"decoded bit mismatch at {i}: input={bits[i]} decoded={decoded[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -146,6 +146,6 @@ public abstract partial class CodecsTestBase
                 if (bits[i] != decoded[i])
                     throw new Exception($"decoded bit mismatch at {i}: input={bits[i]} decoded={decoded[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

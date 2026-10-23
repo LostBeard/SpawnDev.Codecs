@@ -22,7 +22,7 @@ public abstract partial class CodecsTestBase
         {
             await InterleaveAndVerify(acc, channels: 1, numFrames: 1024, seed: 0xC1AC0001u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
         {
             await InterleaveAndVerify(acc, channels: 2, numFrames: 1024, seed: 0xC1AC0002u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         {
             await InterleaveAndVerify(acc, channels: 6, numFrames: 1024, seed: 0xC1AC0006u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
             // Long Vorbis frame half = 1024 (2048-block).
             await InterleaveAndVerify(acc, channels: 2, numFrames: 2048, seed: 0xC1AC2048u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task InterleaveAndVerify(

@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
             if (gpu3.PreviousWindowLong != 0) throw new Exception($"asym prev: {gpu3.PreviousWindowLong}");
             if (gpu3.NextWindowLong != 1) throw new Exception($"asym next: {gpu3.NextWindowLong}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task<VorbisAudioPacketHeaderGpuResult> ParseGpu(

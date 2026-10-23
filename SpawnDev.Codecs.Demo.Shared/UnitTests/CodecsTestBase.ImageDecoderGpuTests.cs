@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
             True(checkedJpeg >= 10, $"too few JPEG fixtures went through the facade ({checkedJpeg})");
             True(failures.Count == 0, $"{failures.Count} facade failure(s):\n" + string.Join("\n", failures.Take(15)));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -139,7 +139,7 @@ public abstract partial class CodecsTestBase
             True(counts.GetValueOrDefault(ImageFormat.Gif) >= 5, $"too few GIF fixtures ({counts.GetValueOrDefault(ImageFormat.Gif)})");
             True(counts.GetValueOrDefault(ImageFormat.WebP) >= 60, $"too few WebP fixtures ({counts.GetValueOrDefault(ImageFormat.WebP)})");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -163,6 +163,6 @@ public abstract partial class CodecsTestBase
             catch (ImageDecodeException ex) { infoThrown = ex; }
             True(infoThrown != null, "ReadInfoAsync on random bytes must throw ImageDecodeException");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

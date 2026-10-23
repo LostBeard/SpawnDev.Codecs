@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
                 if (cpuAllBytes[i] != gpuAllBytes[i]) { if (firstBad < 0) firstBad = i; mismatches++; }
             Equal(0, mismatches, $"first byte mismatch i={firstBad}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }
 

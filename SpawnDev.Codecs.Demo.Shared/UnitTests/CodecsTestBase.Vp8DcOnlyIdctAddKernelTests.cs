@@ -52,6 +52,6 @@ public abstract partial class CodecsTestBase
                 if (cpuDst[i] != gpuDst[i]) mismatches++;
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

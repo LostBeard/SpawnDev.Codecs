@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
             True(checkedCount >= 20, $"only {checkedCount} fixtures were checked");
             True(failures.Count == 0, $"{failures.Count} failure(s):\n" + string.Join("\n", failures.Take(15)));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -111,6 +111,6 @@ public abstract partial class CodecsTestBase
             True(zeroW, "width 0 must be rejected");
             True(shortOut, "a short output must be rejected");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

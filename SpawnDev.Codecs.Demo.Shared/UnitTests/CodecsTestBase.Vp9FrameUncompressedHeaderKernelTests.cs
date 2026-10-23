@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
             await AssertVp9UncompressedHeaderGpuMatchesCpuAsync(
                 acc, width: 64, height: 64, baseQIndex: 30, firstPartitionSize: 16);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -106,7 +106,7 @@ public abstract partial class CodecsTestBase
                     acc, width: 128, height: 64, baseQIndex: q, firstPartitionSize: 24);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -131,7 +131,7 @@ public abstract partial class CodecsTestBase
                     acc, w, h, baseQIndex: 30, firstPartitionSize: 16);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -147,6 +147,6 @@ public abstract partial class CodecsTestBase
                     acc, width: 64, height: 64, baseQIndex: 30, firstPartitionSize: fps);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

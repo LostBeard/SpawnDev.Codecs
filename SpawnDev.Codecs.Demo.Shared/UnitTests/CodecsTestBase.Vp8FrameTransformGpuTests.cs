@@ -151,6 +151,6 @@ public abstract partial class CodecsTestBase
             Equal(0, uMismatches, "U plane");
             Equal(0, vMismatches, "V plane");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

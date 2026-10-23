@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
                 Equal((int)uvPlane.Ac, gpu[3]);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
                 Equal((int)uvPlane.Ac, gpu[3]);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -146,7 +146,7 @@ public abstract partial class CodecsTestBase
             Equal((int)Vp9Dequantizer.DcQLookup8[255], gpu[0]);
             Equal((int)Vp9Dequantizer.AcQLookup8[255], gpu[1]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -186,6 +186,6 @@ public abstract partial class CodecsTestBase
                 Equal((int)uvPlane.Ac, gpu[3]);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

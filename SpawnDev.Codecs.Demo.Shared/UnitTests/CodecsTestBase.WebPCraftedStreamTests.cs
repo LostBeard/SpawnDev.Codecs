@@ -108,7 +108,7 @@ public abstract partial class CodecsTestBase
             Equal(2, image.Info.Height, "height");
             EqualBytes(new byte[32], image.Pixels, "all-zero pixels");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]

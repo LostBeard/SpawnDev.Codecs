@@ -86,6 +86,6 @@ public abstract partial class CodecsTestBase
                     throw new Exception($"ang[{i}]: cpu={cpuAng[i]} gpu={gpuAng[i]}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
             True(psnr > 10.0,
                 $"VP8-GPU demo round-trip Y PSNR floor 10 dB; got {psnr:F1} dB");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -99,7 +99,7 @@ public abstract partial class CodecsTestBase
             True(psnr > 10.0,
                 $"VP9-GPU demo round-trip Y PSNR floor 10 dB; got {psnr:F1} dB");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -145,7 +145,7 @@ public abstract partial class CodecsTestBase
             True(psnr > 10.0,
                 $"AV1-GPU demo round-trip Y PSNR floor 10 dB; got {psnr:F1} dB");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static (byte[] y, byte[] u, byte[] v) GenerateGradientYuv420(int width, int height)

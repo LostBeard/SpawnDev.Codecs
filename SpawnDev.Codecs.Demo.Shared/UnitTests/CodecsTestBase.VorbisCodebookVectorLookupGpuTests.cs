@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
             };
             await VerifyAllEntries(acc, book);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
             };
             await VerifyAllEntries(acc, book);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
             };
             await VerifyAllEntries(acc, book);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task VerifyAllEntries(Accelerator acc, VorbisCodebook book)

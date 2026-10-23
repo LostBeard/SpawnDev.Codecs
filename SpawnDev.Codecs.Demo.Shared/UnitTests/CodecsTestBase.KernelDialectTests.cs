@@ -55,6 +55,6 @@ public abstract partial class CodecsTestBase
             }
             True(bad.Count == 0, $"{bad.Count} wrong:\n" + string.Join("\n", bad.Take(12)));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

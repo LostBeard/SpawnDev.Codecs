@@ -125,7 +125,7 @@ public abstract partial class CodecsTestBase
 
             await AssertVp9KeyframeDecoderGpuMatchesCpuAsync(acc, y, u, v, width, height, baseQIndex: 30);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -147,7 +147,7 @@ public abstract partial class CodecsTestBase
 
             await AssertVp9KeyframeDecoderGpuMatchesCpuAsync(acc, y, u, v, width, height, baseQIndex: 30);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -171,7 +171,7 @@ public abstract partial class CodecsTestBase
             foreach (var q in baseQs)
                 await AssertVp9KeyframeDecoderGpuMatchesCpuAsync(acc, y, u, v, width, height, baseQIndex: q);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     /// <summary>
@@ -231,7 +231,7 @@ public abstract partial class CodecsTestBase
 
             await AssertVp9EncoderDecoderSelfConsistentAsync(acc, y, u, v, width, height, baseQIndex: 30);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     // KNOWN INVESTIGATION (2026-04-28): multi-SB decoder vs CPU walker
@@ -256,7 +256,7 @@ public abstract partial class CodecsTestBase
 
             await AssertVp9KeyframeDecoderGpuMatchesCpuAsync(acc, y, u, v, width, height, baseQIndex: 30);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
     */
 }

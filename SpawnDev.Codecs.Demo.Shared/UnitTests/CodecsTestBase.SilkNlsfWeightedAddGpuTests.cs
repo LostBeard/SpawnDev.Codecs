@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
             short[] resQ10 = { 5, -3, 2, -1, 0, 4, -2, 1, -4, 3 };
             await WeightedAddAndVerify(acc, codebook, cb1Index: 0, resQ10);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
             short[] resQ10 = { 0, 1, -1, 2, -2, 3, -3, 4, -4, 0 };
             await WeightedAddAndVerify(acc, codebook, cb1Index, resQ10);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
                                 20,  -20, 10, -10,  5,  -5,  2,  -2 };
             await WeightedAddAndVerify(acc, codebook, cb1Index: 7, resQ10);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < 16; i++) resQ10[i] = (short)rng.Next(-200, 200);
             await WeightedAddAndVerify(acc, codebook, cb1Index, resQ10);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task WeightedAddAndVerify(

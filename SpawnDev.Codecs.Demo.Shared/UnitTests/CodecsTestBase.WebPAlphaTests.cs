@@ -144,7 +144,7 @@ public abstract partial class CodecsTestBase
                 "the fixture set must cover both compression methods and all four filters");
             True(failures.Count == 0, $"{failures.Count} ALPH fixtures failed:\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -174,7 +174,7 @@ public abstract partial class CodecsTestBase
             catch (ArgumentOutOfRangeException) { threw = true; }
             True(threw, "frame index 3 of 3");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private async Task AssertAlphaRejectedAsync(byte[] file, string expectedMessagePart, string what)
@@ -194,7 +194,7 @@ public abstract partial class CodecsTestBase
             var ok = await dec.DecodeAlphaAsync(good);
             Equal(null, ComparePixels(WebPAlphaTruth("alph_smooth_64x48_f0_raw"), ok.Alpha, 1, 64), what + ": decoder usable after the error");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -260,6 +260,6 @@ public abstract partial class CodecsTestBase
             catch (ArgumentException) { threw = true; }
             True(threw, "output one byte short");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

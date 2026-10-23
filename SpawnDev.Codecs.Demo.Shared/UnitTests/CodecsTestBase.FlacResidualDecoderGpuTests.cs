@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
             await EncodeDecodeAndVerify(acc, residual, codingMethod: 0, partitionOrder: 0,
                 riceParam: 3, blockSize: 12, predictorOrder: 4);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
             await EncodeDecodeAndVerify(acc, residual, codingMethod: 0, partitionOrder: 2,
                 riceParam: 4, blockSize: 32, predictorOrder: 4);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
             await EncodeDecodeAndVerify(acc, residual, codingMethod: 1, partitionOrder: 0,
                 riceParam: 10, blockSize: 12, predictorOrder: 4);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task EncodeDecodeAndVerify(

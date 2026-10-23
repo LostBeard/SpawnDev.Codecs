@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
                 if (cpuBytes[i] != gpuBytes[i])
                     throw new Exception($"byte[{i}]: cpu={cpuBytes[i]:X2} gpu={gpuBytes[i]:X2}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static void WriteCodebookKernel(

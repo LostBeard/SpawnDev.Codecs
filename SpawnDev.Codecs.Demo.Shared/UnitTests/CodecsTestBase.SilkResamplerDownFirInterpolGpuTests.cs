@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
             int firOrder = 24;
             await TestFirVariant(acc, coefs, firOrder, firFracs: 1, indexIncrement, FirVariant.Fir1);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
             int firOrder = 36;
             await TestFirVariant(acc, coefs, firOrder, firFracs: 1, indexIncrement, FirVariant.Fir2);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
             int firFracs = 3;
             await TestFirVariant(acc, coefs, firOrder, firFracs, indexIncrement, FirVariant.Fir0);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private enum FirVariant { Fir0, Fir1, Fir2 }

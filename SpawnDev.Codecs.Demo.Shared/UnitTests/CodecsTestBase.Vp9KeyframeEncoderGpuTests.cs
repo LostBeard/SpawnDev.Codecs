@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
 
             await AssertVp9KeyframeEncoderGpuMatchesCpuAsync(acc, y, u, v, width, height, baseQIndex: 30);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
 
             await AssertVp9KeyframeEncoderGpuMatchesCpuAsync(acc, y, u, v, width, height, baseQIndex: 30);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -108,7 +108,7 @@ public abstract partial class CodecsTestBase
             foreach (var q in baseQs)
                 await AssertVp9KeyframeEncoderGpuMatchesCpuAsync(acc, y, u, v, width, height, baseQIndex: q);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -132,6 +132,6 @@ public abstract partial class CodecsTestBase
 
             await AssertVp9KeyframeEncoderGpuMatchesCpuAsync(acc, y, u, v, width, height, baseQIndex: 30);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

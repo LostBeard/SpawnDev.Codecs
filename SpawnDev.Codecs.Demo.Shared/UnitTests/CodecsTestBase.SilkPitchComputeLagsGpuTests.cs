@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
             await SilkPitchTest_AssertMatchesCpu(acc, fsKHz: 16, nbSubfr: 4, lagIndex: 200, contourIndex: 0);
             await SilkPitchTest_AssertMatchesCpu(acc, fsKHz: 16, nbSubfr: 4, lagIndex: 100, contourIndex: 33);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
             await SilkPitchTest_AssertMatchesCpu(acc, fsKHz: 8, nbSubfr: 4, lagIndex: 100, contourIndex: 0);
             await SilkPitchTest_AssertMatchesCpu(acc, fsKHz: 8, nbSubfr: 4, lagIndex: 60, contourIndex: 10);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -116,7 +116,7 @@ public abstract partial class CodecsTestBase
             await SilkPitchTest_AssertMatchesCpu(acc, fsKHz: 12, nbSubfr: 2, lagIndex: 80, contourIndex: 6);
             await SilkPitchTest_AssertMatchesCpu(acc, fsKHz: 12, nbSubfr: 2, lagIndex: 150, contourIndex: 11);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -129,6 +129,6 @@ public abstract partial class CodecsTestBase
             // Pick a large lagIndex that pushes past the bound.
             await SilkPitchTest_AssertMatchesCpu(acc, fsKHz: 16, nbSubfr: 4, lagIndex: 286, contourIndex: 0);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

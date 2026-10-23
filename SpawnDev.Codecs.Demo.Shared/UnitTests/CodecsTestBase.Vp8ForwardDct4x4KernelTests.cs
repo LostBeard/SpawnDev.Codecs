@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
                 acc, dOut.View, cpuOut, 16);
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
                 acc, dOut.View, cpuOut, total);
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -105,6 +105,6 @@ public abstract partial class CodecsTestBase
                 acc, dOut.View, cpuOut, 16);
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

@@ -207,6 +207,6 @@ public abstract partial class CodecsTestBase
             Equal(0, p0Mismatches, $"partition0 first bad byte i={firstP0}");
             Equal(0, tpMismatches, $"tokenP0 first bad byte i={firstTp}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

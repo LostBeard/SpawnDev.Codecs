@@ -77,6 +77,6 @@ public abstract partial class CodecsTestBase
                 throw new Exception(
                     $"order={order} {mismatches} mismatches; first at i={firstMismatch} cpu={cpuResidual[firstMismatch]} gpu={gpuResidual[firstMismatch]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

@@ -169,7 +169,7 @@ public abstract partial class CodecsTestBase
                 throw new Exception(
                     $"Interpolation factor mismatch: input={interpFactorQ2} gpu={gpu[order + 1]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -201,7 +201,7 @@ public abstract partial class CodecsTestBase
                 throw new Exception(
                     $"Expected interp factor 4 (default for nbSubfr != MAX_NB_SUBFR); got {gpu[order + 1]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -234,6 +234,6 @@ public abstract partial class CodecsTestBase
                 throw new Exception(
                     $"Interpolation factor mismatch: input={interpFactorQ2} gpu={gpu[order + 1]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

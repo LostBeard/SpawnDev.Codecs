@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
                     await AssertDcPredictGpuMatchesCpuAsync(acc, above, left, n, v);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -123,7 +123,7 @@ public abstract partial class CodecsTestBase
                 await AssertDcPredictGpuMatchesCpuAsync(acc, above, left, n, v);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -146,6 +146,6 @@ public abstract partial class CodecsTestBase
                 await AssertDcPredictGpuMatchesCpuAsync(acc, zeros, ones, n, Vp9DcVariant.Both);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

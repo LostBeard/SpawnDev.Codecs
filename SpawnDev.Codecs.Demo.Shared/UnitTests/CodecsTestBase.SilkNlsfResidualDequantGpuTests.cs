@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
             sbyte[] indices = { 0, 1, -1, 2, 0, -2, 1, 3, -1, 0 };
             await DequantAndVerify(acc, indices, predQ8, codebook.QuantStepSizeQ16, codebook.Order);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
             sbyte[] indices = { 1, -1, 2, 0, -2, 3, -1, 1, 0, 2, -3, 1, -1, 2, 0, -1 };
             await DequantAndVerify(acc, indices, predQ8, codebook.QuantStepSizeQ16, codebook.Order);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
             sbyte[] indices = new sbyte[10];
             await DequantAndVerify(acc, indices, predQ8, codebook.QuantStepSizeQ16, codebook.Order);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
             sbyte[] indices = { 8, -8, 7, -7, 6, -6, 5, -5, 4, -4, 3, -3, 2, -2, 1, -1 };
             await DequantAndVerify(acc, indices, predQ8, codebook.QuantStepSizeQ16, codebook.Order);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task DequantAndVerify(

@@ -117,7 +117,7 @@ public abstract partial class CodecsTestBase
             if (gpuDecoded[1] != 0) throw new Exception($"book1 entry: {gpuDecoded[1]}");
             if (gpuDecoded[2] != 4) throw new Exception($"book2 entry: {gpuDecoded[2]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static void WriteCanonical(VorbisBitWriter bw, VorbisHuffmanTable t, int entry)

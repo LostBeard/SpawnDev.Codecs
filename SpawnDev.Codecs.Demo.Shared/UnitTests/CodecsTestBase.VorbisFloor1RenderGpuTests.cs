@@ -57,7 +57,7 @@ public abstract partial class CodecsTestBase
                     throw new Exception($"RenderPoint case[{i}]: cpu={cpu} gpu={gpuOut[i]}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -93,7 +93,7 @@ public abstract partial class CodecsTestBase
                 if (cpuOut[i] != gpuOut[i])
                     throw new Exception($"RenderLine[{i}]: cpu={cpuOut[i]} gpu={gpuOut[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static void RenderPointKernel(

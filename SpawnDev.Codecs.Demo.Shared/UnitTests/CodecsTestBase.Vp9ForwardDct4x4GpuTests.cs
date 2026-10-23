@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < 16; i++) input[i] = (short)rng.Next(-256, 256);
             await FdctAndVerify(acc, input, rowStride: 4);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < 16; i++) input[i] = 100;
             await FdctAndVerify(acc, input, rowStride: 4);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
             short[] input = new short[16];
             await FdctAndVerify(acc, input, rowStride: 4);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
                     input[j * 8 + i] = (short)rng.Next(-256, 256);
             await FdctAndVerify(acc, input, rowStride: 8);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task FdctAndVerify(Accelerator acc, short[] input, int rowStride)

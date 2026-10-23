@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
             var readback = await SpawnDev.ILGPU.SpawnDevContextExtensions.CopyToHostAsync(dOut);
             for (int i = 0; i < n; i++) Equal(cpuOut[i], readback[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
             var readback = await SpawnDev.ILGPU.SpawnDevContextExtensions.CopyToHostAsync(dOut);
             for (int i = 0; i < n; i++) Equal(cpuOut[i], readback[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -100,7 +100,7 @@ public abstract partial class CodecsTestBase
             if (mismatches > 0)
                 throw new Exception($"{mismatches} mismatches; first at i={firstMismatch} cpu={cpuOut[firstMismatch]} gpu={readback[firstMismatch]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -124,7 +124,7 @@ public abstract partial class CodecsTestBase
             var readback = await SpawnDev.ILGPU.SpawnDevContextExtensions.CopyToHostAsync(dOut);
             for (int i = 0; i < n; i++) Equal(cpuOut[i], readback[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -149,7 +149,7 @@ public abstract partial class CodecsTestBase
             var readback = await SpawnDev.ILGPU.SpawnDevContextExtensions.CopyToHostAsync(dOut);
             for (int i = 0; i < n; i++) Equal(cpuOut[i], readback[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -189,7 +189,7 @@ public abstract partial class CodecsTestBase
             if (mismatches > 0)
                 throw new Exception($"{mismatches} mismatches; first at i={firstMismatch} cpu={cpuOut[firstMismatch]} gpu={readback[firstMismatch]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -213,7 +213,7 @@ public abstract partial class CodecsTestBase
             var readback = await SpawnDev.ILGPU.SpawnDevContextExtensions.CopyToHostAsync(dOut);
             for (int i = 0; i < n; i++) Equal(cpuOut[i], readback[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -238,7 +238,7 @@ public abstract partial class CodecsTestBase
             var readback = await SpawnDev.ILGPU.SpawnDevContextExtensions.CopyToHostAsync(dOut);
             for (int i = 0; i < n; i++) Equal(cpuOut[i], readback[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -278,6 +278,6 @@ public abstract partial class CodecsTestBase
             if (mismatches > 0)
                 throw new Exception($"{mismatches} mismatches; first at i={firstMismatch} cpu={cpuOut[firstMismatch]} gpu={readback[firstMismatch]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

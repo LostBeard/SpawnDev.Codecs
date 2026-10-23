@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -128,7 +128,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -164,7 +164,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -193,7 +193,7 @@ public abstract partial class CodecsTestBase
             var file = await enc.EncodeAsync(ok, 16, 16, options);
             Equal(256u, Le32At(file, 46), "256 colours fit");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -228,12 +228,13 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
     public async Task BmpEncoderGpu_PillowDecodesOurFiles_ToTheSamePixels()
     {
+        PillowOracle.RequireAvailable();
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
@@ -254,6 +255,6 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

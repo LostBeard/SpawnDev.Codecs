@@ -147,7 +147,7 @@ public abstract partial class CodecsTestBase
             True(count >= 150, $"only {count} fixtures were exercised");
             True(failures.Count == 0, $"{failures.Count} of {Vp8LossyFixtureNames().Length} VP8 fixtures failed on the accelerator:\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -206,7 +206,7 @@ public abstract partial class CodecsTestBase
             True(count >= 150, $"only {count} fixtures were exercised");
             True(failures.Count == 0, $"{failures.Count} of {Vp8LossyFixtureNames().Length} VP8 fixtures failed (ArrayView1D overload):\n" + string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static int Vp8FirstPartSize(byte[] frame) => (frame[0] | (frame[1] << 8) | (frame[2] << 16)) >> 5;
@@ -232,7 +232,7 @@ public abstract partial class CodecsTestBase
             using var dec = new Vp8FullKeyframeDecoderGpu(acc);
             await RunVp8FullTypedArrayDecode(dec);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("browser")]
@@ -373,7 +373,7 @@ public abstract partial class CodecsTestBase
             if (diff != null) failures.Add($"decode after the errors: {diff}");
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -428,7 +428,7 @@ public abstract partial class CodecsTestBase
             True(ok > 0 && errors > 0, $"the corruption set should produce both outcomes (ok {ok}, errors {errors})");
             True(failures.Count == 0, string.Join("\n", failures));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]

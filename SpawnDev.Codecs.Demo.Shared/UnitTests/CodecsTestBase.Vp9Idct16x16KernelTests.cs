@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
                 acc, dActual.View, dExpected.View, 256);
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -99,7 +99,7 @@ public abstract partial class CodecsTestBase
                 acc, dActual.View, dExpected.View, 256);
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -137,7 +137,7 @@ public abstract partial class CodecsTestBase
                 Equal(0, mismatches);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -182,6 +182,6 @@ public abstract partial class CodecsTestBase
                 acc, dActual.View, dExpected.View, total);
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

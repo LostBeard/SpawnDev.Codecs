@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
             await UnpackAndVerify(acc, SilkNlsfCodebookTables.NbMb,
                 cb1Index: SilkNlsfCodebookTables.NbMb.NVectors - 1);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
             await UnpackAndVerify(acc, SilkNlsfCodebookTables.Wb,
                 cb1Index: SilkNlsfCodebookTables.Wb.NVectors - 1);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task UnpackAndVerify(

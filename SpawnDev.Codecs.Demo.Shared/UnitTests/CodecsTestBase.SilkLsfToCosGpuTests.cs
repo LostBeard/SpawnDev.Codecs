@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
                 if (cpuResults[i] != gpuResults[i])
                     throw new Exception($"LsfToCos[{i}] (nlsf={nlsfValues[i]}): cpu={cpuResults[i]} gpu={gpuResults[i]}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static void LsfToCosKernel(

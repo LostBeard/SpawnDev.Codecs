@@ -117,7 +117,7 @@ public abstract partial class CodecsTestBase
                 acc, pulses, signalType: 1, quantOffsetType: 0,
                 frameLength: frameLength, rateLevelIndex: 0);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -140,7 +140,7 @@ public abstract partial class CodecsTestBase
                 acc, pulses, signalType: 2, quantOffsetType: 1,
                 frameLength: frameLength, rateLevelIndex: 4);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -161,6 +161,6 @@ public abstract partial class CodecsTestBase
                 acc, pulses, signalType: 0, quantOffsetType: 0,
                 frameLength: frameLength, rateLevelIndex: 1);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

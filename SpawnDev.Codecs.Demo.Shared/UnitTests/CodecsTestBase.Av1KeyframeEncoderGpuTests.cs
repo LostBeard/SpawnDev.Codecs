@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
             var (yPlane, uPlane, vPlane) = MakeConstYuv420(width, height, 128, 128, 128);
             await EncodeAndCompare(acc, yPlane, uPlane, vPlane, width, height, qIdx);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
             var (yPlane, uPlane, vPlane) = MakeRandomYuv420(width, height, rng);
             await EncodeAndCompare(acc, yPlane, uPlane, vPlane, width, height, qIdx);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
             var (yPlane, uPlane, vPlane) = MakeConstYuv420(width, height, 100, 120, 140);
             await EncodeAndCompare(acc, yPlane, uPlane, vPlane, width, height, qIdx);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -102,7 +102,7 @@ public abstract partial class CodecsTestBase
                 if (cpuFull[i] != gpuFull[i])
                     throw new Exception($"keyframe byte {i}: cpu={cpuFull[i]:X2} gpu={gpuFull[i]:X2}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task EncodeAndCompare(

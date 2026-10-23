@@ -100,7 +100,7 @@ public abstract partial class CodecsTestBase
             EqualPlanes(cpu.U, managed.UPlane, "managed U plane vs CPU walker");
             EqualPlanes(cpu.V, managed.VPlane, "managed V plane vs CPU walker");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000)]
@@ -138,7 +138,7 @@ public abstract partial class CodecsTestBase
             EqualPlanes(cpu.U, gpu.UPlane, $"{width}x{height} U plane vs cropped CPU walker");
             EqualPlanes(cpu.V, gpu.VPlane, $"{width}x{height} V plane vs cropped CPU walker");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -153,7 +153,7 @@ public abstract partial class CodecsTestBase
             using var dec = new Vp8KeyframeDecoderGpu(acc);
             await RunTypedArrayDecodeMatchesManaged(enc, dec);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("browser")]

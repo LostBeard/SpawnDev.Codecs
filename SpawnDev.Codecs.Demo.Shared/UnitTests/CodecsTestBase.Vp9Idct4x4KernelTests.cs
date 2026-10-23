@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
             await kernel.RunAsync(coeffs, dest, blockCount: 1);
             for (int i = 0; i < 16; i++) Equal((byte)128, dest[i]);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
             True(cpuDest.AsSpan().SequenceEqual(gpuDest),
                 $"kernel DC-only output must match CPU reference on {acc.AcceleratorType}");
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
                 }
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -134,6 +134,6 @@ public abstract partial class CodecsTestBase
                 Equal(cpuResults[i], gpuResults[i]);
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

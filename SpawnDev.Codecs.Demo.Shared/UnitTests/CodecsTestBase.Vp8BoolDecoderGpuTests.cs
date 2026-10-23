@@ -64,6 +64,6 @@ public abstract partial class CodecsTestBase
                 acc, dOut.View, origBits, origBits.Length);
             Equal(0, mismatches);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }

@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < n; i++) samples[i] = 1234; // constant value
             await VerbatimRoundTripAndVerify(acc, samples, bps);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < n; i++) samples[i] = rng.Next(-32768, 32768);
             await VerbatimRoundTripAndVerify(acc, samples, bps);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < n; i++) samples[i] = rng.Next(-max, max);
             await VerbatimRoundTripAndVerify(acc, samples, bps);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < n; i++) samples[i] = rng.Next(-128, 128);
             await VerbatimRoundTripAndVerify(acc, samples, bps);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task VerbatimRoundTripAndVerify(Accelerator acc, int[] samples, int bps)

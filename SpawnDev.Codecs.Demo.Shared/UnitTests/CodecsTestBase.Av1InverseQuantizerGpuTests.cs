@@ -22,7 +22,7 @@ public abstract partial class CodecsTestBase
         {
             await DequantAndVerify(acc, blockSize: 16, dcQ: 8, acQ: 12, seed: 0xAA01_4404u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
         {
             await DequantAndVerify(acc, blockSize: 64, dcQ: 50, acQ: 100, seed: 0xAA01_8808u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         {
             await DequantAndVerify(acc, blockSize: 256, dcQ: 1200, acQ: 1800, seed: 0xAA01_1616u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod]
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         {
             await DequantAndVerify(acc, blockSize: 1024, dcQ: 5000, acQ: 7500, seed: 0xAA01_3232u);
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static async Task DequantAndVerify(

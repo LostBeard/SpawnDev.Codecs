@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
                     throw new Exception($"spectrum[{i}]: cpu={cpuSpectrum[i]} gpu={gpuSpectrum[i]} delta={delta}");
             }
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     private static void FwdMdctKernel(
