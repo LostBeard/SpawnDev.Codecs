@@ -1,8 +1,9 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
 // The GIF decode pipeline shares ONE int buffer ("meta") between its kernels: a small header block followed by
-// the frame table. The scan kernel fills both; the host reads them back (a few dozen ints plus 16 ints per
-// frame), validates them with 64-bit arithmetic, and the LZW / compositing kernels read them.
+// the frame table. The scan kernels fill both (the header block also holds the resumable walk state); the host
+// reads them back (a few dozen ints plus 16 ints per frame), validates them with 64-bit arithmetic, and the LZW /
+// compositing kernels read them.
 
 namespace SpawnDev.Codecs.Images.Gif;
 
@@ -50,6 +51,20 @@ public static class GifMeta
     public const int FileLength = 8;
     /// <summary>File offset of the byte that made the scan fail.</summary>
     public const int ErrorOffset = 9;
+
+    // ---- block walk state of the resumable scan (GifKernels.ScanStepKernel); ScanDone = 1 once the walk ended ----
+    internal const int ScanPhase = 16;
+    internal const int ScanPos = 17;
+    internal const int ScanChainPos = 18;
+    internal const int ScanPayload = 19;
+    internal const int ScanHasGce = 20;
+    internal const int ScanGceDisposal = 21;
+    internal const int ScanGceTransFlag = 22;
+    internal const int ScanGceTransIndex = 23;
+    internal const int ScanGceDelay = 24;
+    internal const int ScanFrames = 25;
+    internal const int ScanErr = 26;
+    internal const int ScanDone = 27;
 
     /// <summary>First slot of the frame table.</summary>
     public const int FrameTable = Size;

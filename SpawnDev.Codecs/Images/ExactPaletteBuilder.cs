@@ -8,7 +8,9 @@
 //   2. SetLimit   (1 thread)            limit = maxColors - (transparent ? 1 : 0)  (one index is reserved).
 //   3. Insert     (1 thread per pixel)  lock-free open-addressing hash set of 24-bit colours (CAS insert,
 //                                       gives up as soon as more than `limit` distinct colours exist).
-//   4. Finish     (1 thread)            compacts the set into a sorted palette, writes Exact / PaletteCount.
+//   4. Finish     (1 thread)            counts the set (1024 slots), writes Exact / PaletteCount;
+//                 (1 thread per slot)   when exact, every colour goes to its rank (number of smaller colours):
+//                                       the sorted palette, without a serial sort.
 //
 // The set has 1024 slots, so it never fills while it holds at most 256 colours; the insert loop is bounded.
 // Colours are accumulated across several Insert calls (multi-frame global palette) until the next Reset.
@@ -45,7 +47,8 @@ internal sealed class ExactPaletteBuilder : IDisposable
     private readonly Action<Index1D, ArrayView<int>, int> _setLimit;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _setLimitFrom;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _insert;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>> _finish;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _finishCount;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>> _finishRank;
 
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _table;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _palette;
@@ -58,7 +61,8 @@ internal sealed class ExactPaletteBuilder : IDisposable
         _setLimit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, int>(SetLimitKernel);
         _setLimitFrom = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int>(SetLimitFromKernel);
         _insert = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(InsertKernel);
-        _finish = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(FinishKernel);
+        _finishCount = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(FinishCountKernel);
+        _finishRank = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(FinishRankKernel);
         _table = accelerator.Allocate1D<int>(TableSlots);
         _palette = accelerator.Allocate1D<int>(MaxPalette);
         _state = accelerator.Allocate1D<int>(ExactPaletteState.Size);
@@ -108,7 +112,8 @@ internal sealed class ExactPaletteBuilder : IDisposable
     /// <summary>Produce the sorted palette and the Exact / PaletteCount verdict.</summary>
     public void Finish()
     {
-        _finish(1, _table.View, _palette.View, _state.View);
+        _finishCount(1, _table.View, _state.View);
+        _finishRank(TableSlots, _table.View, _palette.View, _state.View);
     }
 
     private static void ScanAlphaKernel(Index1D index, ArrayView<byte> rgba, ArrayView<int> state, int threshold)
@@ -172,57 +177,38 @@ internal sealed class ExactPaletteBuilder : IDisposable
         }
     }
 
-    private static void FinishKernel(Index1D _, ArrayView<int> table, ArrayView<int> palette, ArrayView<int> state)
+    private static void FinishCountKernel(Index1D _, ArrayView<int> table, ArrayView<int> state)
     {
         int limit = state[ExactPaletteState.Limit];
         int n = 0;
         for (int s = 0; s < TableSlots; s++)
         {
-            int k = table[s];
-            if (k != 0)
-            {
-                if (n < MaxPalette) palette[n] = k & 0xFFFFFF;
-                n++;
-            }
+            if (table[s] != 0) n++;
         }
         bool exact = (state[ExactPaletteState.Overflow] == 0) & (n <= limit) & (n <= MaxPalette);
-        if (exact)
+        state[ExactPaletteState.Exact] = exact ? 1 : 0;
+        state[ExactPaletteState.PaletteCount] = exact ? n : 0;
+    }
+
+    /// <summary>
+    /// Slot <c>index</c>: when the set is exact, its colour goes to palette[number of smaller colours] (the colours are
+    /// distinct): the palette sorted ascending, whatever the thread schedule. Nothing is written when it is not exact.
+    /// </summary>
+    private static void FinishRankKernel(Index1D index, ArrayView<int> table, ArrayView<int> palette, ArrayView<int> state)
+    {
+        int k = table[index.X];
+        bool live = (state[ExactPaletteState.Exact] != 0) & (k != 0);
+        if (live)
         {
-            // Insertion sort ascending: deterministic palette order whatever the thread schedule.
-            for (int i = 1; i < n; i++)
+            int rank = 0;
+            for (int s = 0; s < TableSlots; s++)
             {
-                int v = palette[i];
-                int j = i - 1;
-                bool moving = true;
-                while (moving)
-                {
-                    // Nested ifs, not &&: palette[-1] must never be evaluated.
-                    if (j >= 0)
-                    {
-                        if (palette[j] > v)
-                        {
-                            palette[j + 1] = palette[j];
-                            j--;
-                        }
-                        else
-                        {
-                            moving = false;
-                        }
-                    }
-                    else
-                    {
-                        moving = false;
-                    }
-                }
-                palette[j + 1] = v;
+                int o = table[s];
+                // Bit 24 marks every key, so comparing keys compares colours; 0 (empty) is below every key.
+                bool smaller = (o != 0) & (o < k);
+                if (smaller) rank++;
             }
-            state[ExactPaletteState.Exact] = 1;
-            state[ExactPaletteState.PaletteCount] = n;
-        }
-        else
-        {
-            state[ExactPaletteState.Exact] = 0;
-            state[ExactPaletteState.PaletteCount] = 0;
+            palette[rank] = k & 0xFFFFFF;
         }
     }
 

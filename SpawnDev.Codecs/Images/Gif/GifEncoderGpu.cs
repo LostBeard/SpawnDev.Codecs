@@ -3,8 +3,12 @@
 // GIF encoder (89a, still and animated), 100% accelerator-resident: palette discovery, quantization, dithering,
 // LZW, sub-blocking and file assembly are kernels (see GifEncoderKernels for the kernel chain). The host is a pure
 // coordinator: it uploads the pixels (necessary I/O), uploads a few parameter ints once, enqueues the kernels in
-// order, and reads back the file length (plus, for Floyd-Steinberg, one small block to learn which frames need
-// error diffusion).
+// order, and reads back the file length (plus, when the animation has no shared exact palette, one bit per frame to
+// learn which frames need a median cut palette and error diffusion).
+//
+// No GPU launch grows with the input: the median cut and the LZW segments are chains of bounded launches whose count
+// the host knows in advance (MaxColors - 1 split rounds; GifEncoderKernels.LzwSteps per segment chunk), every other
+// kernel is parallel or bounded by a constant (see GifEncoderKernels).
 //
 // What it writes
 //   * Every frame covers the whole canvas (no delta rectangles). A pixel with alpha < AlphaThreshold is transparent.
@@ -90,6 +94,8 @@ public sealed class GifEncoderGpu : IDisposable
     private readonly StageBuffer<int> _segInfo;
     private readonly StageBuffer<int> _segOff;
     private readonly StageBuffer<int> _hash;
+    private readonly StageBuffer<int> _lzwState;
+    private readonly StageBuffer<int> _flags;
     private readonly StageBuffer<int> _payload;
     private readonly StageBuffer<int> _err;
     private readonly StageBuffer<byte> _stageIn;
@@ -115,6 +121,8 @@ public sealed class GifEncoderGpu : IDisposable
         _segInfo = new StageBuffer<int>(accelerator);
         _segOff = new StageBuffer<int>(accelerator);
         _hash = new StageBuffer<int>(accelerator);
+        _lzwState = new StageBuffer<int>(accelerator);
+        _flags = new StageBuffer<int>(accelerator);
         _payload = new StageBuffer<int>(accelerator);
         _err = new StageBuffer<int>(accelerator);
         _stageIn = new StageBuffer<byte>(accelerator);
@@ -276,6 +284,7 @@ public sealed class GifEncoderGpu : IDisposable
         bool globalExact = g0[GifEncGlobal.Exact] != 0;
 
         // ---- not exact: every frame gets its own exact-or-quantized palette ----
+        bool[]? quantized = null;
         if (!globalExact)
         {
             var fb = _frameBuilder;
@@ -287,23 +296,29 @@ public sealed class GifEncoderGpu : IDisposable
                 fb.Insert(frameView, pixels, o.AlphaThreshold);
                 fb.Finish();
                 _kernels.FramePalette(fb.State, fb.Palette, _gstate.View, fpal, finfo, f);
+            }
+            // Which frames are not exact (one bit each): only they get the median cut, and Floyd-Steinberg only touches them.
+            int words = (frames + 31) / 32;
+            var flagView = _flags.Ensure(words);
+            _kernels.QuantFlags(finfo, flagView, frames);
+            await _accelerator.SynchronizeAsync();
+            var flags = await flagView.SubView(0, words).CopyToHostAsync();
+            quantized = new bool[frames];
+            for (int f = 0; f < frames; f++) quantized[f] = (flags[f >> 5] & (1 << (f & 31))) != 0;
+            for (int f = 0; f < frames; f++)
+            {
+                if (!quantized[f]) continue;
+                var frameView = rgba.SubView(f * frameBytes, frameBytes);
                 _quant.View.SubView(GifEncoderKernels.HistOff, GifEncoderKernels.HistInts).MemSetToZero();
                 _kernels.Hist(frameView, _quant.View, finfo, _gstate.View, _prm.View, f, pixels);
-                _kernels.MedianCut(_quant.View, finfo, _gstate.View, fpal, _prm.View, f);
+                _kernels.MedianCut(_quant.View, finfo, _gstate.View, fpal, _prm.View, f, o.MaxColors);
             }
         }
-        _kernels.Layout(_gstate.View, finfo, _prm.View, dispView);
+        _kernels.Layout(_gstate.View, finfo, _prm.View, dispView, frames);
         _kernels.Header(output, _gstate.View, finfo, fpal, _prm.View);
 
-        // Floyd-Steinberg only touches frames whose palette is quantized: learn which ones (a few ints).
-        bool[]? fsFrames = null;
-        if (o.Dither == GifDither.FloydSteinberg && !globalExact)
-        {
-            await _accelerator.SynchronizeAsync();
-            var info = await finfo.SubView(0, (long)frames * GifEncFrame.Stride).CopyToHostAsync();
-            fsFrames = new bool[frames];
-            for (int f = 0; f < frames; f++) fsFrames[f] = info[f * GifEncFrame.Stride + GifEncFrame.Exact] == 0;
-        }
+        // Floyd-Steinberg only touches frames whose palette is quantized.
+        bool[]? fsFrames = o.Dither == GifDither.FloydSteinberg ? quantized : null;
 
         // ---- frames, in batches that bound the scratch memory ----
         int perBatch = Math.Max(1, Math.Min(MaxFramesPerBatch, PixelsPerBatch / pixels));
@@ -315,6 +330,8 @@ public sealed class GifEncoderGpu : IDisposable
         var segOff = _segOff.Ensure((long)perBatch * segs);
         int chunk = Math.Min(MaxLzwThreads, perBatch * segs);
         var hash = _hash.Ensure((long)chunk * GifEncoderKernels.HashSlots);
+        var lzwState = _lzwState.Ensure((long)chunk * GifEncoderKernels.LzwStateInts);
+        int lzwSteps = GifEncoderKernels.LzwSteps(pixels);
         var payload = _payload.Ensure((long)perBatch * geo.PayloadWords);
         ArrayView1D<int, Stride1D.Dense> err = default;
         if (fsFrames != null) err = _err.Ensure((long)pixels * 3);
@@ -338,7 +355,14 @@ public sealed class GifEncoderGpu : IDisposable
             payload.SubView(0, (long)n * geo.PayloadWords).MemSetToZero();
             int totalSegs = n * segs;
             for (int s = 0; s < totalSegs; s += chunk)
-                _kernels.LzwSegments(idx, seg, segInfo, hash, finfo, _prm.View, f0, s, geo.SegBound, Math.Min(chunk, totalSegs - s));
+            {
+                // Resumable LZW: the hash tables are cleared in parallel, then bounded launches of LzwChunk pixels each.
+                int threads = Math.Min(chunk, totalSegs - s);
+                hash.SubView(0, (long)threads * GifEncoderKernels.HashSlots).MemSetToZero();
+                _kernels.LzwInit(idx, seg, lzwState, finfo, _prm.View, f0, s, geo.SegBound, threads);
+                for (int step = 0; step < lzwSteps; step++)
+                    _kernels.LzwStep(idx, seg, segInfo, hash, finfo, _prm.View, lzwState, f0, s, geo.SegBound, threads);
+            }
             _kernels.SegOffsets(segInfo, segOff, finfo, _prm.View, f0, n);
             _kernels.FrameOffsets(_gstate.View, finfo, f0, n);
             _kernels.Gather(seg, segInfo, segOff, payload, _prm.View, geo.SegBound, geo.PayloadWords, totalSegs);
@@ -427,6 +451,8 @@ public sealed class GifEncoderGpu : IDisposable
         _segInfo.Dispose();
         _segOff.Dispose();
         _hash.Dispose();
+        _lzwState.Dispose();
+        _flags.Dispose();
         _payload.Dispose();
         _err.Dispose();
         _stageIn.Dispose();
