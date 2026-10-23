@@ -24,13 +24,14 @@ internal static class VorbisFloor1Decoder
         VorbisFloor1Config config,
         VorbisHuffmanDecoder[] decoders)
     {
-        bool nonzero = reader.ReadBit() != 0;
-        if (!nonzero) return null;
+        // End of packet anywhere in the floor makes the floor unused (libvorbis floor1_inverse1 'eop').
+        if (!reader.TryReadBit(out uint nonzero) || nonzero == 0) return null;
 
         int endpointBits = EndpointBits[config.Multiplier];
         var y = new int[config.XList.Length];
-        y[0] = (int)reader.ReadBits(endpointBits);
-        y[1] = (int)reader.ReadBits(endpointBits);
+        if (!reader.TryReadBits(endpointBits, out uint y0) || !reader.TryReadBits(endpointBits, out uint y1)) return null;
+        y[0] = (int)y0;
+        y[1] = (int)y1;
 
         int yIndex = 2;
         for (int partition = 0; partition < config.Partitions; partition++)
@@ -47,7 +48,8 @@ internal static class VorbisFloor1Decoder
                 if (masterbook < 0 || masterbook >= decoders.Length)
                     throw new InvalidDataException(
                         $"Floor 1 class {cls} masterbook index {masterbook} out of range.");
-                cval = decoders[masterbook].Decode(ref reader);
+                cval = decoders[masterbook].TryDecode(ref reader);
+                if (cval < 0) return null;
             }
 
             for (int j = 0; j < cdim; j++)
@@ -59,7 +61,9 @@ internal static class VorbisFloor1Decoder
                     if (book >= decoders.Length)
                         throw new InvalidDataException(
                             $"Floor 1 subclass book index {book} out of range.");
-                    y[yIndex++] = decoders[book].Decode(ref reader);
+                    int v = decoders[book].TryDecode(ref reader);
+                    if (v < 0) return null;
+                    y[yIndex++] = v;
                 }
                 else
                 {

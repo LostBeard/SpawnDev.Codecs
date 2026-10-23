@@ -81,29 +81,34 @@ public abstract partial class CodecsTestBase
     public void VorbisWindow_Transition_LeftShort_HasZeroPrefix()
     {
         CpuOnlyTest();
-        // prev=short -> the first (halfLong - halfShort) samples are zero,
-        // then the short-window rise, then ones up to the center.
+        // prev=short (Vorbis I sec 4.3.1): zeros before n/4 - short/4, the short
+        // window's rise over [n/4 - short/4, n/4 + short/4), then ones up to the center.
         var w = VorbisWindow.GenerateTransition(64, 16, prevLong: false, nextLong: true);
-        int halfLong = 32;
+        var shortWindow = VorbisWindow.GenerateCanonical(16);
+        int zeroEnd = 64 / 4 - 16 / 4; // 12
         int halfShort = 8;
-        int zeroEnd = halfLong - halfShort; // 24
         for (int i = 0; i < zeroEnd; i++) Equal(0f, w[i]);
-        // Short window rise over samples [zeroEnd, zeroEnd + halfShort).
         for (int j = 0; j < halfShort; j++)
         {
             int i = zeroEnd + j;
-            True(w[i] > 0f, $"rise sample {i} = {w[i]} should be > 0");
+            True(Math.Abs(w[i] - shortWindow[j]) < 1e-6f, $"rise sample {i} = {w[i]} != short window {shortWindow[j]}");
         }
+        for (int i = zeroEnd + halfShort; i < 32; i++) Equal(1f, w[i]);
     }
 
     [TestMethod]
     public void VorbisWindow_Transition_RightShort_HasZeroSuffix()
     {
         CpuOnlyTest();
+        // next=short: ones from the center to 3n/4 - short/4, the short window's
+        // fall over [3n/4 - short/4, 3n/4 + short/4), then zeros.
         var w = VorbisWindow.GenerateTransition(64, 16, prevLong: true, nextLong: false);
-        int halfLong = 32;
-        int halfShort = 8;
-        int fallEnd = halfLong + halfShort; // 40
+        var shortWindow = VorbisWindow.GenerateCanonical(16);
+        int fallStart = 3 * 64 / 4 - 16 / 4; // 44
+        int fallEnd = 3 * 64 / 4 + 16 / 4; // 52
+        for (int i = 32; i < fallStart; i++) Equal(1f, w[i]);
+        for (int i = fallStart; i < fallEnd; i++)
+            True(Math.Abs(w[i] - shortWindow[8 + i - fallStart]) < 1e-6f, $"fall sample {i} = {w[i]}");
         for (int i = fallEnd; i < 64; i++) Equal(0f, w[i]);
     }
 

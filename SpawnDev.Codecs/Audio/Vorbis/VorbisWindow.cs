@@ -33,11 +33,10 @@ public static class VorbisWindow
 
     /// <summary>
     /// Generate a Vorbis transition window for a long block whose left and/or
-    /// right half overlaps with short-sized neighbours. Per Vorbis I Section
-    /// 1.3.2, when a long block is adjacent to a short block, the long block's
-    /// overlap region uses the short-block window shape within its first or
-    /// last <c>shortBlockSize/2</c> samples; the rest is either zeros (before
-    /// the rise) or ones (after the ramp completes).
+    /// right half overlaps with short-sized neighbours (Vorbis I Section 4.3.1,
+    /// see <see cref="Generate"/>): a short neighbour's slope is centred on the
+    /// long block's quarter point, with zeros outside it and ones between it and
+    /// the block centre.
     /// </summary>
     /// <param name="longSize">Long block size.</param>
     /// <param name="shortSize">Short block size.</param>
@@ -46,56 +45,34 @@ public static class VorbisWindow
     public static float[] GenerateTransition(int longSize, int shortSize, bool prevLong, bool nextLong)
     {
         if (shortSize > longSize) throw new ArgumentException("shortSize must be <= longSize.");
-        if ((longSize & 1) != 0 || (shortSize & 1) != 0)
-            throw new ArgumentException("Block sizes must be even.");
-        var w = new float[longSize];
-        int halfLong = longSize / 2;
-        int halfShort = shortSize / 2;
-        double shortFactor = Math.PI / shortSize;
-        double longFactor = Math.PI / longSize;
+        return Generate(longSize, prevLong ? longSize : shortSize, nextLong ? longSize : shortSize);
+    }
 
-        // Left half.
-        if (prevLong)
+    /// <summary>
+    /// The synthesis window of a block of size <paramref name="n"/> per Vorbis I Section 4.3.1: the left slope
+    /// spans <paramref name="leftN"/>/2 samples centred on n/4 (leftN = the size of the block it overlaps:
+    /// the short size when a long block follows a short one, else n), the right slope spans
+    /// <paramref name="rightN"/>/2 samples centred on 3n/4, zeros outside the slopes and ones between them.
+    /// <c>Generate(n, n, n)</c> equals <see cref="GenerateCanonical"/>.
+    /// </summary>
+    public static float[] Generate(int n, int leftN, int rightN)
+    {
+        if (n < 2) throw new ArgumentException("Window length must be >= 2.", nameof(n));
+        if ((n & 3) != 0 || (leftN & 3) != 0 || (rightN & 3) != 0 || leftN > n || rightN > n || leftN < 4 || rightN < 4)
+            throw new ArgumentException("Block sizes must be multiples of 4 and the neighbours no larger than the block.");
+        var w = new float[n];
+        int leftStart = n / 4 - leftN / 4, leftEnd = n / 4 + leftN / 4, leftHalf = leftN / 2;
+        int rightStart = 3 * n / 4 - rightN / 4, rightEnd = 3 * n / 4 + rightN / 4, rightHalf = rightN / 2;
+        for (int i = leftStart; i < leftEnd; i++)
         {
-            for (int i = 0; i < halfLong; i++)
-            {
-                double s = Math.Sin(longFactor * (i + 0.5));
-                w[i] = (float)Math.Sin(0.5 * Math.PI * s * s);
-            }
+            double s = Math.Sin((i - leftStart + 0.5) / leftHalf * (Math.PI / 2));
+            w[i] = (float)Math.Sin(0.5 * Math.PI * s * s);
         }
-        else
+        for (int i = leftEnd; i < rightStart; i++) w[i] = 1f;
+        for (int i = rightStart; i < rightEnd; i++)
         {
-            // Zeros until the short window would start rising, then the short
-            // window's rising half, then ones up to the center.
-            int riseStart = halfLong - halfShort;
-            for (int i = 0; i < riseStart; i++) w[i] = 0f;
-            for (int j = 0; j < halfShort; j++)
-            {
-                int i = riseStart + j;
-                double s = Math.Sin(shortFactor * (j + 0.5));
-                w[i] = (float)Math.Sin(0.5 * Math.PI * s * s);
-            }
-        }
-
-        // Right half (mirror logic).
-        if (nextLong)
-        {
-            for (int i = halfLong; i < longSize; i++)
-            {
-                double s = Math.Sin(longFactor * (i + 0.5));
-                w[i] = (float)Math.Sin(0.5 * Math.PI * s * s);
-            }
-        }
-        else
-        {
-            int fallEnd = halfLong + halfShort;
-            for (int j = 0; j < halfShort; j++)
-            {
-                int i = halfLong + j;
-                double s = Math.Sin(shortFactor * (halfShort + j + 0.5));
-                w[i] = (float)Math.Sin(0.5 * Math.PI * s * s);
-            }
-            for (int i = fallEnd; i < longSize; i++) w[i] = 0f;
+            double s = Math.Sin((i - rightStart + 0.5) / rightHalf * (Math.PI / 2) + Math.PI / 2);
+            w[i] = (float)Math.Sin(0.5 * Math.PI * s * s);
         }
         return w;
     }

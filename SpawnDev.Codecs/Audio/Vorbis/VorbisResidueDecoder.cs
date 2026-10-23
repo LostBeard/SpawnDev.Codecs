@@ -214,14 +214,13 @@ internal static class VorbisResidueDecoder
             interleavedArr,
             interleavedDoNotDecode,
             interleavedLen);
-        // De-interleave back into per-channel outputs.
+        // De-interleave back into per-channel outputs: element j of the interleaved vector belongs to channel
+        // j % channels at position j / channels, for EVERY channel of the submap (Vorbis I sec 8.6.4; libvorbis
+        // res2_inverse writes them all - a do-not-decode channel's floor is unused, so its output is zero anyway).
         for (int i = 0; i < n; i++)
         {
             for (int ch = 0; ch < channels; ch++)
-            {
-                if (!doNotDecode[ch])
-                    residueOut[ch][i] += interleaved[i * channels + ch];
-            }
+                residueOut[ch][i] += interleaved[i * channels + ch];
         }
     }
 }

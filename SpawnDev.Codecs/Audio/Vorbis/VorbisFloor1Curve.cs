@@ -246,23 +246,25 @@ public static class VorbisFloor1Curve
     /// <summary>
     /// <c>render_line</c> per Vorbis I Section 7.2.4: rasterise a line segment
     /// (x0,y0)-(x1,y1) into <paramref name="outBuf"/> using the inverse-dB
-    /// lookup, stopping at <paramref name="halfBlock"/>.
+    /// lookup, stopping at <paramref name="halfBlock"/>. Element x0 gets y0 itself; each later element
+    /// steps first (spec: v[x0] = y0, then for x in x0+1 .. x1-1 advance err / y and store).
     /// </summary>
     internal static void RenderLine(int x0, int y0, int x1, int y1, Span<float> outBuf, int halfBlock)
     {
         int dy = y1 - y0;
         int adx = x1 - x0;
-        int ady = Math.Abs(dy);
         int baseStep = dy / adx;
-        int sign = dy < 0 ? -1 : 1;
+        int sy = dy < 0 ? baseStep - 1 : baseStep + 1;
+        int ady = Math.Abs(dy) - Math.Abs(baseStep) * adx;
         int err = 0;
         int y = y0;
         int xEnd = Math.Min(x1, halfBlock);
-        for (int x = x0; x < xEnd; x++)
+        if (x0 < xEnd) outBuf[x0] = InverseDbTable[Clamp255(y)];
+        for (int x = x0 + 1; x < xEnd; x++)
         {
-            err += ady - adx * Math.Abs(baseStep);
-            if (err >= adx) { err -= adx; y += sign; }
-            y += baseStep;
+            err += ady;
+            if (err >= adx) { err -= adx; y += sy; }
+            else y += baseStep;
             outBuf[x] = InverseDbTable[Clamp255(y)];
         }
     }

@@ -1,17 +1,17 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
-// Stateful Vorbis audio-packet decoder. Composes:
+// Stateful Vorbis audio-packet decoder (Vorbis I sec 4.3). Composes:
 //   1. VorbisAudioPacketHeaderParser (mode + block size + window flags)
-//   2. VorbisFloor1Decoder per channel (Y posteriors)
-//   3. VorbisFloor1Curve per channel (posterior -> spectral envelope)
+//   2. VorbisFloor1Decoder per channel (Y posteriors; null = floor unused)
+//   3. Nonzero vector propagate: a coupling step with one used floor decodes both residues (sec 4.3.4)
 //   4. VorbisResidueDecoder per submap (residue vectors per channel)
-//   5. Multiply floor curve x residue -> spectral coefficients
-//   6. VorbisInverseCoupling (undoes M/S-like decorrelation)
-//   7. ImdctReference per channel -> 2N time-domain samples
-//   8. VorbisWindow.GenerateCanonical x the IMDCT output (elementwise)
-//   9. VorbisWindow.OverlapAdd with the previous packet's right half
-// The first packet produces NO audio output (no previous right half);
-// subsequent packets emit blockSize/2 samples interleaved across channels.
+//   5. VorbisInverseCoupling on the RESIDUE vectors (sec 4.3.6)
+//   6. Floor curve x residue -> spectral coefficients (an unused floor gives zeros) (sec 4.3.7)
+//   7. ImdctReference per channel -> blockSize time-domain samples
+//   8. VorbisWindow.Generate (the block's window, shaped by its neighbours' sizes) x the IMDCT output
+//   9. Overlap-add with the previous block (sec 4.3.8): a packet returns the samples from the previous
+//      block's centre to this block's centre, prevBlock/4 + curBlock/4 frames.
+// The first packet produces NO audio output (no previous block).
 
 using SpawnDev.Codecs.Audio.Transforms;
 
@@ -28,6 +28,7 @@ public sealed class VorbisAudioDecoder
     private readonly VorbisIdentificationHeader _ident;
     private readonly VorbisSetupHeader _setup;
     private readonly VorbisHuffmanDecoder[] _huffmanDecoders;
+    // Windowed right half of the previous block per channel ([blockSize/2, blockSize) of its output).
     private readonly float[]?[] _previousRightHalf;
     private int _previousBlockSize = 0;
 
@@ -46,10 +47,13 @@ public sealed class VorbisAudioDecoder
         _previousRightHalf = new float[ident.AudioChannels][];
     }
 
+    /// <summary>Most sample frames one packet can return (two long blocks: blockSize1 / 2).</summary>
+    public int MaxFramesPerPacket => _ident.BlockSize1 / 2;
+
     /// <summary>
     /// Decode one audio packet into interleaved float PCM samples. Returns
-    /// the number of sample frames written (the first packet returns 0 since
-    /// it only primes the overlap-add state).
+    /// the number of sample frames written: 0 for the first packet (it only
+    /// primes the overlap-add state), else previousBlockSize / 4 + blockSize / 4.
     /// </summary>
     public int DecodePacket(ReadOnlySpan<byte> packet, Span<float> interleavedOut)
     {
@@ -78,35 +82,32 @@ public sealed class VorbisAudioDecoder
                 VorbisFloor1Curve.Render(floorCfg, posterior!, halfBlock, curve);
                 floorCurves[ch] = curve;
             }
-            else
-            {
-                floorCurves[ch] = new float[halfBlock]; // zeros
-            }
         }
 
-        // ----- Residue decode -----
-        // do_not_decode flag: true when both channels in a coupling pair have
-        // silent floors. Simplified: per-channel doNotDecode == !floorOk.
+        // ----- Nonzero vector propagate (sec 4.3.4) -----
+        // A channel's residue is decoded unless its floor is unused; a coupling step whose magnitude OR angle
+        // floor is used decodes BOTH residues (the inverse coupling needs both vectors).
         var doNotDecode = new bool[channels];
         for (int ch = 0; ch < channels; ch++) doNotDecode[ch] = !floorOk[ch];
+        for (int i = 0; i < mapping.CouplingMagnitudeChannels.Length; i++)
+        {
+            int mag = mapping.CouplingMagnitudeChannels[i], ang = mapping.CouplingAngleChannels[i];
+            if (!doNotDecode[mag] || !doNotDecode[ang]) { doNotDecode[mag] = false; doNotDecode[ang] = false; }
+        }
 
         var residueBuffers = new float[channels][];
         for (int ch = 0; ch < channels; ch++) residueBuffers[ch] = new float[halfBlock];
 
-        // One residue call per submap; each submap's residue covers the channels
-        // whose mux points to it. For simplicity we run one residue pass for
-        // submap 0 across all channels (the common single-submap case).
+        // ----- Residue decode: one pass per submap over the channels whose mux points to it -----
         for (int s = 0; s < mapping.Submaps; s++)
         {
             int residueIdx = mapping.SubmapResidue[s];
             var residueCfg = _setup.Residues[residueIdx];
-            // Collect the per-channel slices that belong to this submap.
             int membersInSubmap = 0;
             for (int ch = 0; ch < channels; ch++) if (mapping.Mux[ch] == s) membersInSubmap++;
             if (membersInSubmap == 0) continue;
             var subBuffers = new float[membersInSubmap][];
             var subSkip = new bool[membersInSubmap];
-            var channelMap = new int[membersInSubmap];
             int k = 0;
             for (int ch = 0; ch < channels; ch++)
             {
@@ -114,7 +115,6 @@ public sealed class VorbisAudioDecoder
                 {
                     subBuffers[k] = residueBuffers[ch];
                     subSkip[k] = doNotDecode[ch];
-                    channelMap[k] = ch;
                     k++;
                 }
             }
@@ -123,7 +123,10 @@ public sealed class VorbisAudioDecoder
                 subBuffers, subSkip, halfBlock);
         }
 
-        // ----- Multiply floor curve by residue per channel -----
+        // ----- Inverse channel coupling on the residue vectors (sec 4.3.6) -----
+        VorbisInverseCoupling.Apply(residueBuffers, mapping);
+
+        // ----- Floor curve x residue per channel (sec 4.3.7); an unused floor zeroes the channel -----
         var spectra = new float[channels][];
         for (int ch = 0; ch < channels; ch++)
         {
@@ -136,24 +139,19 @@ public sealed class VorbisAudioDecoder
             spectra[ch] = spec;
         }
 
-        // ----- Inverse channel coupling -----
-        VorbisInverseCoupling.Apply(spectra, mapping);
-
         // ----- IMDCT + window per channel -----
         // Per libvorbis convention (lib/mdct.c), the 4/N normalisation lives
         // on the FORWARD MDCT (encoder side), and mdct_backward is unscaled.
         // We follow that convention: VorbisAudioEncoder applies 4/N to its
         // MdctReference output, and here we feed that libvorbis-scaled
-        // spectrum directly into ImdctReference with no extra scale. This
-        // makes our decoder produce correct amplitudes from any libvorbis-
-        // convention bitstream (libvorbis, ffmpeg/libavcodec, our encoder).
-        // Earlier versions applied 4/N here and left the encoder unscaled;
-        // that produced ~256x amplitude error on third-party-decoded streams
-        // (ffmpeg-decoded our-ogg) AND ~512x undershoot on libvorbis-encoded
-        // streams decoded by us. Both are fixed by this single convention
-        // alignment.
+        // spectrum directly into ImdctReference with no extra scale.
+        // The window's slopes follow the overlapping neighbours (sec 4.3.1): a long block's left / right slope is
+        // short when the previous / next window flag says so; a short block always overlaps with short slopes.
+        int bs0 = _ident.BlockSize0;
+        int leftN = header.IsLongBlock && !header.PreviousWindowLong ? bs0 : blockSize;
+        int rightN = header.IsLongBlock && !header.NextWindowLong ? bs0 : blockSize;
+        var window = VorbisWindow.Generate(blockSize, leftN, rightN);
         var timeDomain = new float[channels][];
-        var window = VorbisWindow.GenerateCanonical(blockSize);
         for (int ch = 0; ch < channels; ch++)
         {
             var td = new float[blockSize];
@@ -162,37 +160,44 @@ public sealed class VorbisAudioDecoder
             timeDomain[ch] = td;
         }
 
-        // ----- Overlap-add against previous packet's right halves -----
-        bool havePrevious = _previousBlockSize == blockSize
-            && _previousRightHalf[0] is not null;
+        // ----- Overlap-add with the previous block (sec 4.3.8) -----
+        // The packet returns [previous centre, current centre): prevN/4 + n/4 frames. Output frame t is the
+        // previous block's sample prevN/2 + t plus the current block's sample t - prevN/4 + n/4 (the blocks are
+        // placed so the previous block's 3/4 point meets the current block's 1/4 point); outside a block's
+        // range its contribution is zero (its window is zero there).
         int outFrames = 0;
-        if (havePrevious)
+        if (_previousRightHalf[0] is not null)
         {
-            outFrames = halfBlock;
+            int prevN = _previousBlockSize;
+            int prevHalf = prevN / 2;
+            int curShift = prevN / 4 - blockSize / 4;
+            outFrames = prevN / 4 + blockSize / 4;
             if (interleavedOut.Length < outFrames * channels)
                 throw new ArgumentException(
                     $"Output buffer too small: {interleavedOut.Length} < {outFrames * channels}.");
-            for (int n = 0; n < outFrames; n++)
+            for (int ch = 0; ch < channels; ch++)
             {
-                for (int ch = 0; ch < channels; ch++)
+                var prev = _previousRightHalf[ch]!;
+                var td = timeDomain[ch];
+                for (int t = 0; t < outFrames; t++)
                 {
-                    interleavedOut[n * channels + ch] =
-                        _previousRightHalf[ch]![n] + timeDomain[ch][n];
+                    int c = t - curShift;
+                    float v = t < prevHalf ? prev[t] : 0f;
+                    if (c >= 0) v += td[c];
+                    interleavedOut[t * channels + ch] = v;
                 }
             }
         }
 
-        // Save current packet's right half for next time.
+        // Save current block's right half for next time.
         for (int ch = 0; ch < channels; ch++)
         {
             if (_previousRightHalf[ch] is null || _previousRightHalf[ch]!.Length != halfBlock)
                 _previousRightHalf[ch] = new float[halfBlock];
-            for (int n = 0; n < halfBlock; n++)
-                _previousRightHalf[ch]![n] = timeDomain[ch][halfBlock + n];
+            Array.Copy(timeDomain[ch], halfBlock, _previousRightHalf[ch]!, 0, halfBlock);
         }
         _previousBlockSize = blockSize;
 
         return outFrames;
     }
 }
-

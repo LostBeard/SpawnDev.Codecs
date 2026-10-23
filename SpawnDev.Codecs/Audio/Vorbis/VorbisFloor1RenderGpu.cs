@@ -47,20 +47,24 @@ public static class VorbisFloor1RenderGpu
         ArrayView<float> inverseDbTable, long inverseDbBase,
         int halfBlock)
     {
+        // Vorbis I sec 9.2.7: v[x0] = y0, then each later element steps first.
         int dy = y1 - y0;
         int adx = x1 - x0;
-        int ady = dy < 0 ? -dy : dy;
         int baseStep = dy / adx;
-        int sign = dy < 0 ? -1 : 1;
+        int sy = dy < 0 ? baseStep - 1 : baseStep + 1;
+        int absBaseStep = baseStep < 0 ? -baseStep : baseStep;
+        int ady = (dy < 0 ? -dy : dy) - absBaseStep * adx;
         int err = 0;
         int y = y0;
-        int absBaseStep = baseStep < 0 ? -baseStep : baseStep;
         int xEnd = x1 < halfBlock ? x1 : halfBlock;
         for (int x = x0; x < xEnd; x++)
         {
-            err += ady - adx * absBaseStep;
-            if (err >= adx) { err -= adx; y += sign; }
-            y += baseStep;
+            if (x > x0)
+            {
+                err += ady;
+                if (err >= adx) { err -= adx; y += sy; }
+                else y += baseStep;
+            }
             int yClamp = y < 0 ? 0 : (y > 255 ? 255 : y);
             outBuf[outBase + x] = inverseDbTable[inverseDbBase + yClamp];
         }
