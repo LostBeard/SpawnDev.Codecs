@@ -34,7 +34,7 @@ public sealed class Vp8InverseDct4x4Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<byte>, int>(IdctKernel);
+            Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<byte>, int>(Vp8InverseDct4x4IdctKernel);
     }
 
     /// <summary>
@@ -55,7 +55,7 @@ public sealed class Vp8InverseDct4x4Kernel : IDisposable
         _kernel(blockCount, coefs, pred, dst, blockCount);
     }
 
-    private static void IdctKernel(
+    private static void Vp8InverseDct4x4IdctKernel(
         Index1D blockIdx,
         ArrayView<short> coefs,
         ArrayView<byte> pred,

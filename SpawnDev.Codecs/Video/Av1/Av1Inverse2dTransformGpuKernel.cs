@@ -24,7 +24,7 @@ public sealed class Av1Inverse2dTransformGpuKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Inverse2dKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Av1Inverse2dTransformGpuInverse2dKernel);
     }
 
     /// <summary>
@@ -52,7 +52,7 @@ public sealed class Av1Inverse2dTransformGpuKernel : IDisposable
         _kernel(blockCount, coefs, residual, scratch, blockCount, txSize);
     }
 
-    private static void Inverse2dKernel(
+    private static void Av1Inverse2dTransformGpuInverse2dKernel(
         Index1D blockIdx,
         ArrayView<int> coefs,
         ArrayView<int> residual,

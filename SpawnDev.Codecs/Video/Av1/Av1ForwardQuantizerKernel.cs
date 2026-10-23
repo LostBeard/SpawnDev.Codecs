@@ -32,7 +32,7 @@ public sealed class Av1ForwardQuantizerKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(QuantizeKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Av1ForwardQuantizerQuantizeKernel);
     }
 
     /// <summary>
@@ -60,7 +60,7 @@ public sealed class Av1ForwardQuantizerKernel : IDisposable
     }
 
     /// <summary>Kernel body. One thread per coefficient block.</summary>
-    private static void QuantizeKernel(
+    private static void Av1ForwardQuantizerQuantizeKernel(
         Index1D blockIdx,
         ArrayView<int> coefs,
         ArrayView<int> dcQ,

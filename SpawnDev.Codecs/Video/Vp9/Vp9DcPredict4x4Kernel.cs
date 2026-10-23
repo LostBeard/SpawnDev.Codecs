@@ -57,7 +57,7 @@ public sealed class Vp9DcPredict4x4Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int, int>(DcKernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int, int>(Vp9DcPredict4x4DcKernel);
     }
 
     /// <summary>
@@ -121,7 +121,7 @@ public sealed class Vp9DcPredict4x4Kernel : IDisposable
     }
 
     /// <summary>Kernel body. One thread per block.</summary>
-    private static void DcKernel(
+    private static void Vp9DcPredict4x4DcKernel(
         Index1D blockIdx,
         ArrayView<byte> aboveFlat,
         ArrayView<byte> leftFlat,

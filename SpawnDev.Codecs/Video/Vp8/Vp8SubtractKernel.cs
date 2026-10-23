@@ -27,7 +27,7 @@ public sealed class Vp8SubtractKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<short>, int>(SubtractKernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<short>, int>(Vp8SubtractSubtractKernel);
     }
 
     /// <summary>Run on N pixels. residual = (short)(src - pred).</summary>
@@ -41,7 +41,7 @@ public sealed class Vp8SubtractKernel : IDisposable
         _kernel(pixelCount, src, pred, residual, pixelCount);
     }
 
-    private static void SubtractKernel(
+    private static void Vp8SubtractSubtractKernel(
         Index1D idx,
         ArrayView<byte> src,
         ArrayView<byte> pred,

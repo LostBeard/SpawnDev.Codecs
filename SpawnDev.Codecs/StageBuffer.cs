@@ -40,6 +40,23 @@ internal sealed class StageBuffer<T> : IDisposable where T : unmanaged
         return _buffer.View;
     }
 
+    /// <summary>
+    /// Like <see cref="Ensure"/>, for a buffer a kernel class owns across calls (e.g. the resumable-launch state of
+    /// an entropy kernel): when the buffer must grow it first drains the accelerator, so dispatches of an earlier
+    /// call that were never awaited cannot read the freed buffer.
+    /// </summary>
+    public async ValueTask<ArrayView1D<T, Stride1D.Dense>> EnsureDrainedAsync(long length)
+    {
+        if (length <= 0) length = 1;
+        if (_buffer is null || _buffer.Length < length)
+        {
+            if (_buffer is not null) await _accelerator.SynchronizeAsync();
+            _buffer?.Dispose();
+            _buffer = _accelerator.Allocate1D<T>(length);
+        }
+        return _buffer.View;
+    }
+
     public void Dispose()
     {
         _buffer?.Dispose();

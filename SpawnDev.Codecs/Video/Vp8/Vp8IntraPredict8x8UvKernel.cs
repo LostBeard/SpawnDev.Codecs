@@ -37,7 +37,7 @@ public sealed class Vp8IntraPredict8x8UvKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int>(PredictKernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int>(Vp8IntraPredict8x8UvPredictKernel);
     }
 
     /// <summary>Run on N blocks. above=8b, left=8b, topLeft=1b, modeAndFlags=1b, dst=64b.</summary>
@@ -61,7 +61,7 @@ public sealed class Vp8IntraPredict8x8UvKernel : IDisposable
 
     private static int Clamp255(int v) => v < 0 ? 0 : v > 255 ? 255 : v;
 
-    private static void PredictKernel(
+    private static void Vp8IntraPredict8x8UvPredictKernel(
         Index1D blockIdx,
         ArrayView<byte> above,
         ArrayView<byte> left,

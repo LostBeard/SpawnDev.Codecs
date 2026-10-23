@@ -30,7 +30,7 @@ public sealed class Av1ForwardIdentity16Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, int>(IdentityKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, int>(Av1ForwardIdentity16IdentityKernel);
     }
 
     /// <summary>
@@ -49,7 +49,7 @@ public sealed class Av1ForwardIdentity16Kernel : IDisposable
     }
 
     /// <summary>Kernel body. One thread per 16-element transform.</summary>
-    private static void IdentityKernel(
+    private static void Av1ForwardIdentity16IdentityKernel(
         Index1D transformIdx,
         ArrayView<int> input,
         ArrayView<int> output,

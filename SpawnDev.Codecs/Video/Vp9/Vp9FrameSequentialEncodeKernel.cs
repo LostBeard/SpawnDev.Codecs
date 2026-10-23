@@ -19,6 +19,10 @@
 // min(mbCols, mbRows); for typical 1920x1080 that's 67 (with mbCols=120,
 // mbRows=68).
 //
+// Bounded launches: the single-dispatch (Group.Barrier) form walks at most DiagonalsPerLaunch
+// diagonals per launch (one launch over every diagonal grew with the picture); the recon planes
+// carry the wave-front between launches, and every host loop of launches is paced with LaunchPacer.
+//
 // v1 simplifications (mirror Vp9KeyframeEncoder.EncodeKeyFrame):
 //   - Profile 0, YUV 4:2:0, width + height multiples of 16
 //   - Y intra mode = DC_PRED for every block, transform = Tx16x16
@@ -117,13 +121,13 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<int>,
-            Vp9FrameSeqEncodeBatchParams>(EncodeWavefrontBatchKernel);
+            Vp9FrameSeqEncodeBatchParams>(Vp9EncodeWavefrontBatchKernel);
         _singleDispatchBatchKernel = accelerator.LoadStreamKernel<
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<int>,
-            Vp9FrameSeqEncodeBatchParams, int, int>(EncodeWavefrontSingleDispatchKernel);
+            Vp9FrameSeqEncodeBatchParams, int, int>(Vp9EncodeWavefrontGroupKernel);
     }
 
     /// <summary>
@@ -141,7 +145,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
     /// <param name="dequant">4 ints: [Y_DC, Y_AC, UV_DC, UV_AC] - the libvpx dequantizer values that drive both the forward quantizer and the dequantizer step.</param>
     /// <param name="mbCols">Macroblock columns = width / 16.</param>
     /// <param name="mbRows">Macroblock rows = height / 16.</param>
-    public void Run(
+    public async Task RunAsync(
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
@@ -162,7 +166,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         // separate single-frame kernel; it lacked the boundary-superblock handling (frameMiRows), so a
         // picture whose height is not a multiple of 64 encoded differently from the same picture in a
         // batch. One kernel, one behaviour (same collapse the VP8 entropy kernels got).
-        RunBatch(
+        await RunBatchAsync(
             yPlane, uPlane, vPlane,
             yRecon, uRecon, vRecon,
             yCoefs, uCoefs, vCoefs,
@@ -177,7 +181,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
     /// Batch wave-front: encode N frames concurrently. 47 dispatches each
     /// at extent = numFrames * diagCount; thread = (frame, mb-on-diagonal).
     /// </summary>
-    public void RunBatch(
+    public async Task RunBatchAsync(
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
@@ -191,6 +195,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         // Default frameMiRows = mbRows*2 (no boundary).
         if (frameMiRows == 0) frameMiRows = mbRows * 2;
         int totalDiagonals = mbCols + mbRows - 1;
+        var pacer = new LaunchPacer(_accelerator);
         for (int d = 0; d < totalDiagonals; d++)
         {
             int rMin = d - (mbCols - 1); if (rMin < 0) rMin = 0;
@@ -215,6 +220,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
                 yRecon, uRecon, vRecon,
                 yCoefs, uCoefs, vCoefs,
                 dequant, p);
+            await pacer.LaunchedAsync();
         }
     }
 
@@ -223,7 +229,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
     /// threads per block, all 47 diagonals folded into one kernel via
     /// Group.Barrier.
     /// </summary>
-    public bool TryRunBatchSingleDispatch(
+    public async Task<bool> TryRunBatchSingleDispatchAsync(
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
@@ -252,21 +258,35 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             DiagCount = peakDiag,
             FrameMiRows = frameMiRows,
         };
-        _singleDispatchBatchKernel(
-            new KernelConfig(frameCount, peakDiag),
-            yPlane, uPlane, vPlane,
-            yRecon, uRecon, vRecon,
-            yCoefs, uCoefs, vCoefs,
-            dequant, p, frameCount, totalDiagonals);
+        // diagonals [dStart, dEnd) per launch (dStart rides in DiagAndRMin).
+        var pacer = new LaunchPacer(_accelerator);
+        for (int dStart = 0; dStart < totalDiagonals; dStart += DiagonalsPerLaunch)
+        {
+            int dEnd = Math.Min(dStart + DiagonalsPerLaunch, totalDiagonals);
+            p.DiagAndRMin = dStart;
+            _singleDispatchBatchKernel(
+                new KernelConfig(frameCount, peakDiag),
+                yPlane, uPlane, vPlane,
+                yRecon, uRecon, vRecon,
+                yCoefs, uCoefs, vCoefs,
+                dequant, p, frameCount, dEnd);
+            await pacer.LaunchedAsync();
+        }
         return true;
     }
 
-    private static void EncodeWavefrontSingleDispatchKernel(
+    /// <summary>
+    /// Wave-front diagonals one single-dispatch launch walks. A diagonal costs one macroblock encode per thread
+    /// (a 16x16 and two 8x8 FDCT / quantize / IDCT passes), so a launch stays at a few milliseconds.
+    /// </summary>
+    public const int DiagonalsPerLaunch = 8;
+
+    private static void Vp9EncodeWavefrontGroupKernel(
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<int> dequant,
-        Vp9FrameSeqEncodeBatchParams p, int frameCount, int totalDiagonals)
+        Vp9FrameSeqEncodeBatchParams p, int frameCount, int diagEnd)
     {
         int frameIdx = Grid.IdxX;
         int posInDiag = Group.IdxX;
@@ -300,7 +320,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         var aboveChroma = LocalMemory.Allocate<byte>(8);
         var leftChroma = LocalMemory.Allocate<byte>(8);
 
-        for (int d = 0; d < totalDiagonals; d++)
+        for (int d = p.DiagAndRMin; d < diagEnd; d++)
         {
             int rMin = d - (mbCols - 1); if (rMin < 0) rMin = 0;
             int rMax = d; if (rMax > mbRows - 1) rMax = mbRows - 1;
@@ -339,7 +359,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
     }
 
     /// <summary>Batch wave-front kernel: thread = (frame, mb-on-diag).</summary>
-    private static void EncodeWavefrontBatchKernel(
+    private static void Vp9EncodeWavefrontBatchKernel(
         Index1D idx,
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,

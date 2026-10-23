@@ -28,7 +28,7 @@ public sealed class Vp9D63Predict8x8Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, int, int>(D63Kernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, int, int>(Vp9D63Predict8x8D63Kernel);
     }
 
     /// <summary>Run D63 prediction on <paramref name="blockCount"/> blocks.</summary>
@@ -70,7 +70,7 @@ public sealed class Vp9D63Predict8x8Kernel : IDisposable
     }
 
     /// <summary>Kernel body. Rows 0+1 in 16 registers, rows 2-7 derived.</summary>
-    private static void D63Kernel(
+    private static void Vp9D63Predict8x8D63Kernel(
         Index1D blockIdx,
         ArrayView<byte> aboveFlat,
         ArrayView<byte> dstFlat,

@@ -185,6 +185,36 @@ public static class Av1RangeDecoderGpu
         return result;
     }
 
+    /// <summary>Ints <see cref="Save"/> writes (Bptr, BufStart, BufEnd, TellOffs, Dif, Rng, Cnt).</summary>
+    public const int StateInts = 7;
+
+    /// <summary>
+    /// Store the decoder state in <c>st[off .. off + StateInts)</c> so a later launch can resume it with
+    /// <see cref="Load"/> (resumable walkers keep their coder between launches in device memory).
+    /// </summary>
+    public static void Save(ArrayView<int> st, long off, ref Av1RangeDecoderGpuState state)
+    {
+        st[off] = state.Bptr;
+        st[off + 1] = state.BufStart;
+        st[off + 2] = state.BufEnd;
+        st[off + 3] = state.TellOffs;
+        st[off + 4] = (int)state.Dif;
+        st[off + 5] = (int)state.Rng;
+        st[off + 6] = state.Cnt;
+    }
+
+    /// <summary>The decoder state stored by <see cref="Save"/>.</summary>
+    public static Av1RangeDecoderGpuState Load(ArrayView<int> st, long off) => new Av1RangeDecoderGpuState
+    {
+        Bptr = st[off],
+        BufStart = st[off + 1],
+        BufEnd = st[off + 2],
+        TellOffs = st[off + 3],
+        Dif = (uint)st[off + 4],
+        Rng = (uint)st[off + 5],
+        Cnt = st[off + 6],
+    };
+
     private static void Refill(ref Av1RangeDecoderGpuState state, ArrayView<byte> buf)
     {
         int s = OdEcWindowSize - 9 - (state.Cnt + 15);

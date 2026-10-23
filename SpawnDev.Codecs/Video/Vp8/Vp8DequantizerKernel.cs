@@ -30,7 +30,7 @@ public sealed class Vp8DequantizerKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<short>, ArrayView<short>, int>(DequantizeKernel);
+            Index1D, ArrayView<short>, ArrayView<short>, ArrayView<short>, int>(Vp8DequantizerDequantizeKernel);
     }
 
     /// <summary>
@@ -52,7 +52,7 @@ public sealed class Vp8DequantizerKernel : IDisposable
         _kernel(blockCount, coefs, dcQ, acQ, blockCount);
     }
 
-    private static void DequantizeKernel(
+    private static void Vp8DequantizerDequantizeKernel(
         Index1D blockIdx,
         ArrayView<short> coefs,
         ArrayView<short> dcQ,

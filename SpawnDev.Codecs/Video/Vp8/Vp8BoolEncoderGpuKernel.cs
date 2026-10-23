@@ -29,7 +29,7 @@ public sealed class Vp8BoolEncoderTestKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<long>, int, int, int>(EncodeStreamsKernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<long>, int, int, int>(Vp8BoolEncoderGpuEncodeStreamsKernel);
     }
 
     /// <summary>
@@ -59,7 +59,7 @@ public sealed class Vp8BoolEncoderTestKernel : IDisposable
         _kernel(streamCount, bits, probs, outBuf, outLens, streamCount, bitsPerStream, outBufStride);
     }
 
-    private static void EncodeStreamsKernel(
+    private static void Vp8BoolEncoderGpuEncodeStreamsKernel(
         Index1D streamIdx,
         ArrayView<byte> bits,
         ArrayView<byte> probs,

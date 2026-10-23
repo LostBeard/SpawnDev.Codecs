@@ -225,7 +225,7 @@ public abstract partial class CodecsTestBase
         dDequant.View.CopyFromCPU(new[] { yDcQ, yAcQ, uvDcQ, uvAcQ });
 
         using var kernel = new Vp9FrameSequentialEncodeKernel(acc);
-        kernel.Run(
+        await kernel.RunAsync(
             dY.View, dU.View, dV.View,
             dYRecon.View, dURecon.View, dVRecon.View,
             dYCoefs.View, dUCoefs.View, dVCoefs.View,

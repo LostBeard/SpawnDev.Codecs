@@ -28,7 +28,7 @@ public sealed class Av1ObuAssembleKernel : IDisposable
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<long>, ArrayView<byte>, ArrayView<int>, int, int>(AssembleKernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<long>, ArrayView<byte>, ArrayView<int>, int, int>(Av1ObuAssembleByteKernel);
     }
 
     /// <summary>
@@ -54,7 +54,7 @@ public sealed class Av1ObuAssembleKernel : IDisposable
         _kernel(maxBytes, blob, tile, tileLen, output, outLen, aLen, bLen);
     }
 
-    private static void AssembleKernel(
+    private static void Av1ObuAssembleByteKernel(
         Index1D idx, ArrayView<byte> blob, ArrayView<byte> tile, ArrayView<long> tileLenView,
         ArrayView<byte> output, ArrayView<int> outLen, int aLen, int bLen)
     {

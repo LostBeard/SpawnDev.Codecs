@@ -25,7 +25,7 @@ public sealed class Vp9DequantBlockGpuTestKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, int, int, int>(DequantizeKernel);
+            Index1D, ArrayView<short>, int, int, int>(Vp9DequantBlockGpuDequantizeKernel);
     }
 
     /// <summary>Dequantize a single block in place.</summary>
@@ -36,7 +36,7 @@ public sealed class Vp9DequantBlockGpuTestKernel : IDisposable
         _kernel(1, coefs, count, dcQ, acQ);
     }
 
-    private static void DequantizeKernel(
+    private static void Vp9DequantBlockGpuDequantizeKernel(
         Index1D _,
         ArrayView<short> coefs,
         int count,

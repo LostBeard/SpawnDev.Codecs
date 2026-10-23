@@ -24,7 +24,7 @@ public sealed class Av1InverseDct16GpuKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, int, int>(IdctKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, int, int>(Av1InverseDct16GpuIdctKernel);
     }
 
     /// <summary>Run on <paramref name="transformCount"/> 16-element transforms.</summary>
@@ -40,7 +40,7 @@ public sealed class Av1InverseDct16GpuKernel : IDisposable
         _kernel(transformCount, input, output, transformCount, cosBit);
     }
 
-    private static void IdctKernel(
+    private static void Av1InverseDct16GpuIdctKernel(
         Index1D transformIdx,
         ArrayView<int> input,
         ArrayView<int> output,

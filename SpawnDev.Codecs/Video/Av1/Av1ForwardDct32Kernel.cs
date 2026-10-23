@@ -35,7 +35,7 @@ public sealed class Av1ForwardDct32Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, int, int>(FdctKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, int, int>(Av1ForwardDct32FdctKernel);
     }
 
     /// <summary>
@@ -55,7 +55,7 @@ public sealed class Av1ForwardDct32Kernel : IDisposable
     }
 
     /// <summary>Kernel body. One thread per 32-element transform.</summary>
-    private static void FdctKernel(
+    private static void Av1ForwardDct32FdctKernel(
         Index1D transformIdx,
         ArrayView<int> input,
         ArrayView<int> output,

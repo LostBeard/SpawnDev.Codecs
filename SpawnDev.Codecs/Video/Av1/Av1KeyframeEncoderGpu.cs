@@ -3,8 +3,9 @@
 // AV1 v1 keyframe encoder, GPU integration class. Symmetric to Vp8KeyframeEncoderGpu / Vp9KeyframeEncoderGpu. The
 // host is a pure coordinator: alloc + upload + dispatch + readback.
 //
-//   Av1FrameSequentialEncodeKernel : one GPU thread runs the entire EncodeSingleTile pipeline (predict, transform,
-//                                    quantize, entropy code) bit-exact vs the CPU Av1KeyframeEncoder reference.
+//   Av1FrameSequentialEncodeKernel : one GPU thread per frame runs the EncodeSingleTile pipeline (predict, transform,
+//                                    quantize, entropy code) bit-exact vs the CPU Av1KeyframeEncoder reference, in
+//                                    bounded resumable launches of LeavesPerLaunch 16x16 leaves.
 //   Av1ObuAssembleKernel           : writes the Temporal Delimiter + Sequence Header OBUs, the Frame OBU header, the
 //                                    leb128 size (which depends on the GPU-produced tile length), the uncompressed
 //                                    frame header and the tile bytes into the caller's output. The only host-built
@@ -242,15 +243,14 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         _dSrc.View.SubView(yLen, uvLen).CopyFrom(uPlane.SubView(0, uvLen));
         _dSrc.View.SubView(yLen + uvLen, uvLen).CopyFrom(vPlane.SubView(0, uvLen));
 
-        // Pre-zero output + scratch buffers per frame (kernel reads them as carry-back state). Recon is fully
+        // Pre-zero output buffers per frame (kernel reads them as carry-back state; the walker zeroes its own
+        // scratchByte / scratchInt). Recon is fully
         // overwritten per pixel so skip its zero-fill.
         _dTile!.View.MemSetToZero();
         _dTileLen!.View.MemSetToZero();
-        _dScratchByte!.View.MemSetToZero();
-        _dScratchInt!.View.MemSetToZero();
         _dScratchShort!.View.MemSetToZero();
 
-        _frameKernel.Run(
+        await _frameKernel.RunAsync(
             _dSrc.View, _dRecon!.View,
             _dTile.View, _dTileLen.View,
             _dByteConsts.View, _dUshortConsts.View,
@@ -307,8 +307,6 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
 
         dAllTile.View.MemSetToZero();
         dAllTileLen.View.MemSetToZero();
-        dAllScratchByte.View.MemSetToZero();
-        dAllScratchInt.View.MemSetToZero();
         dAllScratchShort.View.MemSetToZero();
 
         // Planes -> per-frame Y|U|V slots, device to device.
@@ -330,17 +328,18 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
             ScratchShortStride = scratchShortLen,
         };
 
-        // Single batch dispatch encodes all N frames in parallel.
-        _frameKernel.RunBatch(
+        // Batch launches encode all N frames in parallel (LeavesPerLaunch leaves of every frame per launch).
+        await _frameKernel.RunBatchAsync(
             dAllSrc.View, dAllRecon.View,
             dAllTile.View, dAllTileLen.View,
             _dByteConsts.View, _dUshortConsts.View, _dDcAcQuant.View,
             dAllScratchByte.View, dAllScratchInt.View, dAllScratchShort.View,
             p, frameCount, strides);
 
-        // One shared framing blob; one assemble dispatch per frame straight into the caller's slot.
+        // One shared framing blob; one assemble dispatch per frame straight into the caller's slot (paced).
         byte[] blob = Av1KeyframeEncoder.BuildFramingBlob(width, height, baseQIndex, out int aLen, out int bLen);
         DeviceTransfer.Upload(_blob.View, blob);
+        var obuPacer = new LaunchPacer(_accelerator);
         for (int f = 0; f < frameCount; f++)
         {
             _obu.Run(
@@ -350,6 +349,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
                 outputs.SubView((long)f * cap, cap),
                 lengths.SubView(f, 1),
                 aLen, bLen, aLen + 1 + 5 + bLen + worstCaseTile);
+            await obuPacer.LaunchedAsync();
         }
 
         // Drain before the using-scoped slot buffers dispose: on the browser backends a dispatch that still

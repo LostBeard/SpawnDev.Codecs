@@ -1,9 +1,17 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
-// AV1 v1 keyframe per-frame walker, 100% ILGPU. Single GPU thread runs
-// the entire EncodeSingleTile pipeline bit-exact vs the CPU
+// AV1 v1 keyframe per-frame walker, 100% ILGPU. One GPU thread per frame runs
+// the EncodeSingleTile pipeline bit-exact vs the CPU
 // Av1KeyframeEncoder.EncodeSingleTile reference. The host is a pure
 // coordinator: alloc buffers + upload constants + dispatch + read back.
+//
+// Bounded launches: the walk is linearized into leaf slots (the 16 z-order
+// 16x16 positions of each superblock) and a launch encodes at most
+// LeavesPerLaunch of them (a whole-frame launch was 15 ms at 64x64 on
+// CUDA and grows with the picture). The contexts were already in
+// scratchByte; the range encoder and the slot cursor are kept in
+// scratchInt[StStarted ..] between launches. The host launches
+// ceil(slots / LeavesPerLaunch) steps (a bound it knows; no readback).
 //
 // Pipeline (mirrors Av1KeyframeEncoder.cs lines 388-438):
 //   - For each 64x64 superblock in raster order:
@@ -54,6 +62,7 @@
 //     [3N..3N+N+16)        : inverse transform scratch (272 max for Tx16x16)
 //     [EobSlot=1024]       : eob output from WriteCoeffsTxb (Tx16x16 N=256, max 3*256+272=1040)
 //     [CulLevelSlot=1025]  : culLevel output
+//     [1102..)             : resumable state (started, done, next slot, range encoder)
 //   scratchShort (per-block, reused):
 //     [0..N)               : residual (short)
 
@@ -137,11 +146,13 @@ public struct Av1FrameBatchStrides
 }
 
 /// <summary>
-/// AV1 v1 keyframe per-frame walker kernel. Single GPU thread runs the
-/// entire EncodeSingleTile bit-exact vs Av1KeyframeEncoder.EncodeSingleTile.
+/// AV1 v1 keyframe per-frame walker kernel. One GPU thread per frame runs EncodeSingleTile bit-exact vs
+/// Av1KeyframeEncoder.EncodeSingleTile, in bounded resumable launches of <see cref="LeavesPerLaunch"/> leaf slots.
 /// </summary>
 public sealed class Av1FrameSequentialEncodeKernel : IDisposable
 {
+    private readonly Accelerator _accelerator;
+
     private readonly Action<
         Index1D,
         ArrayView<byte>,    // src (Y + U + V planes)
@@ -152,9 +163,9 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         ArrayView<ushort>,  // constsUshort (Av1KeyframeConstantsGpu ushort buffer)
         ArrayView<short>,   // dcAcQuant (DC[0..256) + AC[256..512))
         ArrayView<byte>,    // scratchByte (state + edge + predict + levels)
-        ArrayView<int>,     // scratchInt (per-block working area)
+        ArrayView<int>,     // scratchInt (per-block working area + resumable state)
         ArrayView<short>,   // scratchShort (residual)
-        Av1FrameSeqEncodeParams> _kernel;
+        Av1FrameSeqEncodeParams, int> _kernel;
 
     private readonly Action<
         Index1D,
@@ -162,42 +173,66 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         ArrayView<byte>, ArrayView<long>,
         ArrayView<byte>, ArrayView<ushort>, ArrayView<short>,
         ArrayView<byte>, ArrayView<int>, ArrayView<short>,
-        Av1FrameSeqEncodeParams, Av1FrameBatchStrides> _batchKernel;
+        Av1FrameSeqEncodeParams, Av1FrameBatchStrides, int> _batchKernel;
 
     /// <summary>Slot in scratchInt where WriteCoeffsTxb writes eob (per call).</summary>
     public const int EobSlot = 1100;
     /// <summary>Slot in scratchInt where WriteCoeffsTxb writes culLevel (per call).</summary>
     public const int CulLevelSlot = 1101;
-    /// <summary>Minimum scratchInt length (per-frame; reused across blocks).</summary>
-    public const int MinScratchIntLength = 1102;
+
+    // Resumable state in scratchInt (after the per-block area): carried between launches.
+    private const int StStarted = 1102;
+    private const int StDone = 1103;
+    private const int StNextSlot = 1104;
+    private const int StEnc = 1105;   // Av1RangeEncoderGpu.StateInts
+
+    /// <summary>Minimum scratchInt length (per-frame; per-block area reused across blocks + the resumable state).</summary>
+    public const int MinScratchIntLength = StEnc + Av1RangeEncoderGpu.StateInts;
+
+    /// <summary>
+    /// Leaf slots (16x16 positions of the superblock z-order walk, 16 per superblock) one launch encodes per
+    /// frame. A leaf is the full predict / 16x16 + two 8x8 forward transforms / quantize / coefficient coding /
+    /// reconstruction pipeline (about a millisecond for a busy one on a desktop GPU), so a launch stays at a
+    /// few milliseconds whatever the picture size.
+    /// </summary>
+    public const int LeavesPerLaunch = 4;
 
     /// <summary>Compile the kernel.</summary>
     public Av1FrameSequentialEncodeKernel(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<byte>, ArrayView<byte>,
             ArrayView<byte>, ArrayView<long>,
             ArrayView<byte>, ArrayView<ushort>, ArrayView<short>,
             ArrayView<byte>, ArrayView<int>, ArrayView<short>,
-            Av1FrameSeqEncodeParams>(EncodeFrameKernel);
+            Av1FrameSeqEncodeParams, int>(Av1EncodeFrameStepKernel);
         _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<byte>, ArrayView<byte>,
             ArrayView<byte>, ArrayView<long>,
             ArrayView<byte>, ArrayView<ushort>, ArrayView<short>,
             ArrayView<byte>, ArrayView<int>, ArrayView<short>,
-            Av1FrameSeqEncodeParams, Av1FrameBatchStrides>(BatchEncodeFrameKernel);
+            Av1FrameSeqEncodeParams, Av1FrameBatchStrides, int>(Av1EncodeFrameBatchStepKernel);
+    }
+
+    /// <summary>Launches one frame of <paramref name="p"/> takes (ceil(leaf slots / LeavesPerLaunch)).</summary>
+    private static int StepCount(Av1FrameSeqEncodeParams p)
+    {
+        int sbRows = (p.FrameMiRows + 15) >> 4;
+        int sbCols = (p.FrameMiCols + 15) >> 4;
+        return (sbRows * sbCols * 16 + LeavesPerLaunch - 1) / LeavesPerLaunch;
     }
 
     /// <summary>
-    /// Batch dispatch: extent=frameCount, each thread runs one full
-    /// AV1 EncodeSingleTile on its frame slot. Each thread has its own
-    /// range encoder state, its own scratch slots, and writes to its
-    /// own output slot.
+    /// Batch dispatch: extent=frameCount, each thread runs one AV1 EncodeSingleTile on its frame slot,
+    /// <see cref="LeavesPerLaunch"/> leaves per launch. Each thread has its own range encoder state, its own
+    /// scratch slots, and writes to its own output slot. Zeroes the scratch buffers first (the walker's
+    /// contexts start at zero). The work is queued (paced with <see cref="LaunchPacer"/>), not awaited.
     /// </summary>
-    public void RunBatch(
+    public async Task RunBatchAsync(
         ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> tileBytes, ArrayView<long> tileLen,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
@@ -208,14 +243,27 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         Av1FrameBatchStrides strides)
     {
         if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
-        _batchKernel(new Index1D(frameCount),
-            src, recon, tileBytes, tileLen,
-            constsByte, constsUshort, dcAcQuant,
-            scratchByte, scratchInt, scratchShort, p, strides);
+        if (strides.ScratchIntStride < MinScratchIntLength)
+            throw new ArgumentException($"ScratchIntStride must be at least {MinScratchIntLength}.", nameof(strides));
+        scratchByte.MemSetToZero();
+        scratchInt.MemSetToZero();
+        int steps = StepCount(p);
+        var pacer = new LaunchPacer(_accelerator);
+        for (int s = 0; s < steps; s++)
+        {
+            _batchKernel(new Index1D(frameCount),
+                src, recon, tileBytes, tileLen,
+                constsByte, constsUshort, dcAcQuant,
+                scratchByte, scratchInt, scratchShort, p, strides, LeavesPerLaunch);
+            await pacer.LaunchedAsync();
+        }
     }
 
-    /// <summary>Dispatch the walker (single-thread; one GPU invocation per frame).</summary>
-    public void Run(
+    /// <summary>
+    /// Dispatch the walker on one frame (one GPU thread, <see cref="LeavesPerLaunch"/> leaves per launch). Zeroes
+    /// the scratch buffers first. The work is queued (paced with <see cref="LaunchPacer"/>), not awaited.
+    /// </summary>
+    public async Task RunAsync(
         ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> tileBytes, ArrayView<long> tileLen,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
@@ -225,20 +273,30 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         ArrayView<short> scratchShort,
         Av1FrameSeqEncodeParams p)
     {
-        _kernel(new Index1D(1),
-            src, recon, tileBytes, tileLen,
-            constsByte, constsUshort, dcAcQuant,
-            scratchByte, scratchInt, scratchShort, p);
+        if (scratchInt.Length < MinScratchIntLength)
+            throw new ArgumentException($"scratchInt must hold at least {MinScratchIntLength} ints.", nameof(scratchInt));
+        scratchByte.MemSetToZero();
+        scratchInt.MemSetToZero();
+        int steps = StepCount(p);
+        var pacer = new LaunchPacer(_accelerator);
+        for (int s = 0; s < steps; s++)
+        {
+            _kernel(new Index1D(1),
+                src, recon, tileBytes, tileLen,
+                constsByte, constsUshort, dcAcQuant,
+                scratchByte, scratchInt, scratchShort, p, LeavesPerLaunch);
+            await pacer.LaunchedAsync();
+        }
     }
 
     /// <summary>Release the kernel.</summary>
     public void Dispose() { /* delegate is a value type; nothing to release */ }
 
     // ===========================================================================
-    // Kernel entry point
+    // Kernel entry points
     // ===========================================================================
 
-    private static void EncodeFrameKernel(
+    private static void Av1EncodeFrameStepKernel(
         Index1D _,
         ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> tileBytes, ArrayView<long> tileLen,
@@ -247,11 +305,12 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         ArrayView<byte> scratchByte,
         ArrayView<int> scratchInt,
         ArrayView<short> scratchShort,
-        Av1FrameSeqEncodeParams p)
+        Av1FrameSeqEncodeParams p,
+        int leavesPerLaunch)
     {
-        EncodeFrameBody(src, recon, tileBytes, tileLen,
+        EncodeFrameStep(src, recon, tileBytes, tileLen,
             constsByte, constsUshort, dcAcQuant,
-            scratchByte, scratchInt, scratchShort, p);
+            scratchByte, scratchInt, scratchShort, p, leavesPerLaunch);
     }
 
     /// <summary>
@@ -259,7 +318,7 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
     /// at kernel head; body unchanged. Each thread has its own range
     /// encoder state and writes to its own output slot.
     /// </summary>
-    private static void BatchEncodeFrameKernel(
+    private static void Av1EncodeFrameBatchStepKernel(
         Index1D idx,
         ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> tileBytes, ArrayView<long> tileLen,
@@ -269,7 +328,8 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         ArrayView<int> scratchInt,
         ArrayView<short> scratchShort,
         Av1FrameSeqEncodeParams p,
-        Av1FrameBatchStrides s)
+        Av1FrameBatchStrides s,
+        int leavesPerLaunch)
     {
         int f = idx.X;
         var fSrc = src.SubView((long)f * s.SrcStride, s.SrcStride);
@@ -279,13 +339,18 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         var fScratchByte = scratchByte.SubView((long)f * s.ScratchByteStride, s.ScratchByteStride);
         var fScratchInt = scratchInt.SubView((long)f * s.ScratchIntStride, s.ScratchIntStride);
         var fScratchShort = scratchShort.SubView((long)f * s.ScratchShortStride, s.ScratchShortStride);
-        EncodeFrameBody(fSrc, fRecon, fTile, fTileLen,
+        EncodeFrameStep(fSrc, fRecon, fTile, fTileLen,
             constsByte, constsUshort, dcAcQuant,
-            fScratchByte, fScratchInt, fScratchShort, p);
+            fScratchByte, fScratchInt, fScratchShort, p, leavesPerLaunch);
     }
 
+    /// <summary>
+    /// One bounded step: the next <paramref name="leavesPerLaunch"/> leaf slots of the superblock walk. The
+    /// above contexts start at zero (the host zeroes scratchByte); the range encoder and the slot cursor live in
+    /// scratchInt[StStarted ..]. The step that encodes the last slot finishes the range coder and writes tileLen.
+    /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void EncodeFrameBody(
+    private static void EncodeFrameStep(
         ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> tileBytes, ArrayView<long> tileLen,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
@@ -293,9 +358,21 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         ArrayView<byte> scratchByte,
         ArrayView<int> scratchInt,
         ArrayView<short> scratchShort,
-        Av1FrameSeqEncodeParams p)
+        Av1FrameSeqEncodeParams p,
+        int leavesPerLaunch)
     {
-        var re = Av1RangeEncoderGpu.Init();
+        if (scratchInt[StDone] != 0) return;
+
+        Av1RangeEncoderGpuState re;
+        if (scratchInt[StStarted] == 0)
+        {
+            re = Av1RangeEncoderGpu.Init();
+            scratchInt[StStarted] = 1;
+        }
+        else
+        {
+            re = Av1RangeEncoderGpu.Load(scratchInt, StEnc);
+        }
 
         int frameMiCols = p.FrameMiCols;
         int frameMiRows = p.FrameMiRows;
@@ -304,98 +381,110 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         int qDc = (int)dcAcQuant[p.BaseQIndex];
         int qAc = (int)dcAcQuant[256 + p.BaseQIndex];
 
-        // Initialize above contexts to zero across the entire frame.
-        for (int i = 0; i < frameMiCols; i++)
+        int sbCols = (frameMiCols + sbMi - 1) / sbMi;
+        int sbRows = (frameMiRows + sbMi - 1) / sbMi;
+        int slotCount = sbRows * sbCols * 16;
+        int slot = scratchInt[StNextSlot];
+        int slotEnd = slot + leavesPerLaunch;
+        if (slotEnd > slotCount) slotEnd = slotCount;
+        bool go = slot < slotEnd;
+        while (go)
         {
-            scratchByte[p.AboveEntropyOff + 0 * frameMiCols + i] = 0;
-            scratchByte[p.AboveEntropyOff + 1 * frameMiCols + i] = 0;
-            scratchByte[p.AboveEntropyOff + 2 * frameMiCols + i] = 0;
-            scratchByte[p.AbovePartOff + i] = 0;
-            scratchByte[p.AboveYModeOff + i] = 0;
-            scratchByte[p.AboveSkipOff + i] = 0;
+            EncodeLeafSlot(
+                ref re, tileBytes,
+                src, recon,
+                constsByte, constsUshort,
+                qDc, qAc,
+                scratchByte, scratchInt, scratchShort,
+                slot, sbCols,
+                frameMiRows, frameMiCols,
+                p);
+            slot++;
+            go = slot < slotEnd;
         }
 
-        for (int sbRow = 0; sbRow * sbMi < frameMiRows; sbRow++)
+        if (slot >= slotCount)
         {
-            // Reset left context arrays at start of each SB row.
-            for (int i = 0; i < 32; i++)
-            {
-                scratchByte[p.LeftEntropyOff + 0 * 32 + i] = 0;
-                scratchByte[p.LeftEntropyOff + 1 * 32 + i] = 0;
-                scratchByte[p.LeftEntropyOff + 2 * 32 + i] = 0;
-                scratchByte[p.LeftPartOff + i] = 0;
-                scratchByte[p.LeftYModeOff + i] = 0;
-                scratchByte[p.LeftSkipOff + i] = 0;
-            }
-
-            for (int sbCol = 0; sbCol * sbMi < frameMiCols; sbCol++)
-            {
-                int sbMiRow = sbRow * sbMi;
-                int sbMiCol = sbCol * sbMi;
-                EncodeSuperblock(
-                    ref re, tileBytes,
-                    src, recon,
-                    constsByte, constsUshort,
-                    qDc, qAc,
-                    scratchByte, scratchInt, scratchShort,
-                    sbMiRow, sbMiCol,
-                    frameMiRows, frameMiCols,
-                    p);
-            }
+            Av1RangeEncoderGpu.Done(ref re, tileBytes);
+            tileLen[0] = re.OutLen;
+            scratchInt[StDone] = 1;
         }
-
-        Av1RangeEncoderGpu.Done(ref re, tileBytes);
-        tileLen[0] = re.OutLen;
+        scratchInt[StNextSlot] = slot;
+        Av1RangeEncoderGpu.Save(scratchInt, StEnc, ref re);
     }
 
     // ===========================================================================
-    // Partition recursion (unrolled - 64x64 -> 32x32 -> 16x16 -> NONE)
+    // Partition walk (64x64 -> 32x32 -> 16x16 -> NONE), one 16x16 slot at a time
     // ===========================================================================
 
-    private static void EncodeSuperblock(
+    /// <summary>
+    /// One 16x16 position of the superblock z-order walk (slot = sb * 16 + q32 * 4 + q16): the left-context
+    /// reset at the start of a superblock row, the partition symbols that precede the block (64x64 SPLIT at the
+    /// superblock's first slot, 32x32 SPLIT at a 32x32 block's first slot), then the 16x16 NONE leaf. Out-of-frame
+    /// blocks are skipped exactly as the recursive walk skipped them.
+    /// </summary>
+    private static void EncodeLeafSlot(
         ref Av1RangeEncoderGpuState re, ArrayView<byte> outBuf,
         ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
         int qDc, int qAc,
         ArrayView<byte> scratchByte, ArrayView<int> scratchInt, ArrayView<short> scratchShort,
-        int sbMiRow, int sbMiCol,
+        int slot, int sbCols,
         int frameMiRows, int frameMiCols,
         Av1FrameSeqEncodeParams p)
     {
-        EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
-            sbMiRow, sbMiCol, BsizeBlock64x64, PartitionSplit);
+        int sb = slot >> 4;
+        int q = slot & 15;
+        int sbRow = sb / sbCols;
+        int sbCol = sb - sbRow * sbCols;
+        int sbMiRow = sbRow * 16;
+        int sbMiCol = sbCol * 16;
 
-        for (int q32 = 0; q32 < 4; q32++)
+        if (q == 0)
         {
-            int qr32 = q32 >> 1;
-            int qc32 = q32 & 1;
-            int miRow32 = sbMiRow + qr32 * 8;
-            int miCol32 = sbMiCol + qc32 * 8;
-            if (miRow32 >= frameMiRows || miCol32 >= frameMiCols) continue;
+            if (sbCol == 0)
+            {
+                // Reset left context arrays at start of each SB row.
+                for (int i = 0; i < 32; i++)
+                {
+                    scratchByte[p.LeftEntropyOff + 0 * 32 + i] = 0;
+                    scratchByte[p.LeftEntropyOff + 1 * 32 + i] = 0;
+                    scratchByte[p.LeftEntropyOff + 2 * 32 + i] = 0;
+                    scratchByte[p.LeftPartOff + i] = 0;
+                    scratchByte[p.LeftYModeOff + i] = 0;
+                    scratchByte[p.LeftSkipOff + i] = 0;
+                }
+            }
+            EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
+                sbMiRow, sbMiCol, BsizeBlock64x64, PartitionSplit);
+        }
 
+        int q32 = q >> 2;
+        int q16 = q & 3;
+        int miRow32 = sbMiRow + (q32 >> 1) * 8;
+        int miCol32 = sbMiCol + (q32 & 1) * 8;
+        bool in32 = (miRow32 < frameMiRows) & (miCol32 < frameMiCols);
+        if (!in32) return;
+
+        if (q16 == 0)
             EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
                 miRow32, miCol32, BsizeBlock32x32, PartitionSplit);
 
-            for (int q16 = 0; q16 < 4; q16++)
-            {
-                int qr16 = q16 >> 1;
-                int qc16 = q16 & 1;
-                int miRow16 = miRow32 + qr16 * 4;
-                int miCol16 = miCol32 + qc16 * 4;
-                if (miRow16 >= frameMiRows || miCol16 >= frameMiCols) continue;
+        int miRow16 = miRow32 + (q16 >> 1) * 4;
+        int miCol16 = miCol32 + (q16 & 1) * 4;
+        bool in16 = (miRow16 < frameMiRows) & (miCol16 < frameMiCols);
+        if (!in16) return;
 
-                EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
-                    miRow16, miCol16, BsizeBlock16x16, PartitionNone);
+        EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
+            miRow16, miCol16, BsizeBlock16x16, PartitionNone);
 
-                EncodeLeafBlock(ref re, outBuf,
-                    src, recon, constsByte, constsUshort,
-                    qDc, qAc,
-                    scratchByte, scratchInt, scratchShort,
-                    miRow16, miCol16, p);
+        EncodeLeafBlock(ref re, outBuf,
+            src, recon, constsByte, constsUshort,
+            qDc, qAc,
+            scratchByte, scratchInt, scratchShort,
+            miRow16, miCol16, p);
 
-                UpdatePartitionContext(scratchByte, p, miRow16, miCol16, BsizeBlock16x16);
-            }
-        }
+        UpdatePartitionContext(scratchByte, p, miRow16, miCol16, BsizeBlock16x16);
     }
 
     // ===========================================================================

@@ -29,7 +29,7 @@ public sealed class Vp9Iadst4x4Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<byte>, int, int>(IadstKernel);
+            Index1D, ArrayView<short>, ArrayView<byte>, int, int>(Vp9Iadst4x4IadstKernel);
     }
 
     /// <summary>
@@ -58,7 +58,7 @@ public sealed class Vp9Iadst4x4Kernel : IDisposable
         readBack.AsSpan(0, predAndDest.Length).CopyTo(predAndDest.Span);
     }
 
-    private static void IadstKernel(
+    private static void Vp9Iadst4x4IadstKernel(
         Index1D blockIdx,
         ArrayView<short> coeffs,
         ArrayView<byte> dest,

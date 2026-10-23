@@ -25,13 +25,14 @@
 //          - computes 6 dequantizers from baseQIndex
 //          - writes frame header bits to partition0Out
 //          - saves bool encoder state to initialP0State
-//   [host] dispatch Vp8FrameSequentialEncodeKernel
+//   [host] dispatch Vp8FrameSequentialEncodeKernel (one launch per wave-front diagonal, or the
+//          Group.Barrier form in launches of DiagonalsPerLaunch diagonals)
 //          - per-MB predict + transform + quant + recon
 //          - reads dequantizers from buffer, writes recon back
-//   [host] dispatch Vp8FrameEntropyKernel
+//   [host] dispatch Vp8FrameEntropyKernel (resumable launches of MbsPerLaunch macroblocks)
 //          - resumes partition0 from initialP0State
 //          - writes per-MB modes + coef tokens
-//   [host] dispatch Vp8FrameAssembleKernel
+//   [host] dispatch Vp8FrameAssembleKernel (one thread per output byte)
 //          - writes 10-byte tag + start code + size code
 //          - concatenates partition0 + tokenP0 into the caller's output
 //          - writes final length to outLen[0]
@@ -159,8 +160,13 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         workHeight = (height + 15) & ~15;
     }
 
+    // Partition capacities. Partition 0 holds 4 mode bools per macroblock after the ~1100-bool header. The token
+    // partition of white noise at quantizer 0 measured ~890 bytes per macroblock on the CPU reference (the old
+    // 256 bytes per macroblock overflowed for detailed content at low quantizers, e.g. 320x180 noise at q 4);
+    // a stream that still outgrows its buffer is reported (length -1, an exception from the managed overloads)
+    // instead of being written past the end.
     private static int P0Capacity(int mbCount) => 64 * 1024 + mbCount * 32;
-    private static int TokenCapacity(int mbCount) => 64 * 1024 + mbCount * 256;
+    private static int TokenCapacity(int mbCount) => 64 * 1024 + mbCount * 1024;
 
     /// <summary>
     /// Size in bytes of the output buffer one encoded keyframe needs for a
@@ -244,7 +250,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
             baseQIndex);
 
         // 2. Sequential encode: per-MB math + recon.
-        _sequentialEncode.Run(
+        await _sequentialEncode.RunAsync(
             _dY!.View, _dU!.View, _dV!.View,
             _dYRecon!.View, _dURecon!.View, _dVRecon!.View,
             _dY4Coefs!.View, _dY2Coefs!.View, _dUCoefs!.View, _dVCoefs!.View,
@@ -253,7 +259,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
 
         // 3. Entropy: continues partition0 from setup state, writes
         // per-MB modes + coefs.
-        _entropy.Run(
+        await _entropy.RunAsync(
             _dY4Coefs!.View, _dY2Coefs!.View, _dUCoefs!.View, _dVCoefs!.View,
             _coefProbsByType.View, _constsExtended.View,
             _dP0!.View, _dTp!.View, _dPartLens!.View,
@@ -271,7 +277,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         await _accelerator.SynchronizeAsync();
 
         // The only readback: the 4-byte length scalar.
-        return (await _dOutLen!.CopyToHostAsync())[0];
+        return CheckLength((await _dOutLen!.CopyToHostAsync())[0]);
     }
 
     /// <summary>
@@ -288,7 +294,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
     /// <param name="vSrc">Frame-major tightly packed Cr planes, same layout as <paramref name="uSrc"/>.</param>
     /// <param name="outputs">Frame f's bitstream is written at <c>f * GetMaxEncodedSize(width, height)</c>;
     /// at least <c>frameCount * GetMaxEncodedSize</c> bytes.</param>
-    /// <param name="lengths">Receives each frame's encoded length; at least <paramref name="frameCount"/> ints.</param>
+    /// <param name="lengths">Receives each frame's encoded length (-1 if a partition outgrew its buffer); at least <paramref name="frameCount"/> ints.</param>
     /// <param name="frameCount">Number of frames.</param>
     /// <param name="width">Picture width in pixels.</param>
     /// <param name="height">Picture height in pixels.</param>
@@ -370,14 +376,18 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         // Phase 1a: pad every frame's planes into its working-dim slot on the accelerator. Every
         // working byte of every slot is written (zero pad included), so there is no host staging
         // array and no host row loop.
+        var padPacer = new LaunchPacer(_accelerator);
         for (int f = 0; f < frameCount; f++)
         {
             _pad.Run(ySrc, f * ySrcPlane, width, width, height,
                 dAllY.View.SubView((long)f * yPlaneStride, yPlaneStride), workWidth, workHeight);
+            await padPacer.LaunchedAsync();
             _pad.Run(uSrc, f * uvSrcPlane, uvWidth, uvWidth, uvHeight,
                 dAllU.View.SubView((long)f * uvPlaneStride, uvPlaneStride), uvWorkWidth, uvWorkHeight);
+            await padPacer.LaunchedAsync();
             _pad.Run(vSrc, f * uvSrcPlane, uvWidth, uvWidth, uvHeight,
                 dAllV.View.SubView((long)f * uvPlaneStride, uvPlaneStride), uvWorkWidth, uvWorkHeight);
+            await padPacer.LaunchedAsync();
         }
 
         // Batch setup: one dispatch with extent=N, each thread sets up its frame slot.
@@ -391,7 +401,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         // path (one kernel with internal Group.Barrier between diagonals);
         // fall back to per-diagonal multi-dispatch if the thread budget
         // exceeds CUDA's 1024-per-block cap.
-        bool singleDispatched = _sequentialEncode.TryRunBatchSingleDispatch(
+        bool singleDispatched = await _sequentialEncode.TryRunBatchSingleDispatchAsync(
             dAllY.View, dAllU.View, dAllV.View,
             dAllYR.View, dAllUR.View, dAllVR.View,
             dAllY4.View, dAllY2.View, dAllUC.View, dAllVC.View,
@@ -402,7 +412,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
             dequantStride);
         if (!singleDispatched)
         {
-            _sequentialEncode.RunBatch(
+            await _sequentialEncode.RunBatchAsync(
                 dAllY.View, dAllU.View, dAllV.View,
                 dAllYR.View, dAllUR.View, dAllVR.View,
                 dAllY4.View, dAllY2.View, dAllUC.View, dAllVC.View,
@@ -426,7 +436,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
             MbCols = mbCols,
             MbRows = mbRows,
         };
-        _entropy.RunBatch(
+        await _entropy.RunBatchAsync(
             dAllY4.View, dAllY2.View, dAllUC.View, dAllVC.View,
             _coefProbsByType.View, _constsExtended.View,
             dAllP0.View, dAllTp.View, dAllOutLens.View,
@@ -527,7 +537,7 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
         var results = new byte[frameCount][];
         for (int f = 0; f < frameCount; f++)
         {
-            int len = allLens[f];
+            int len = CheckLength(allLens[f]);
             results[f] = len > 0
                 ? await DeviceTransfer.DownloadAsync(_stageOut.View.SubView((long)f * cap, len), len)
                 : System.Array.Empty<byte>();
@@ -616,11 +626,23 @@ public sealed class Vp8KeyframeEncoderGpu : IDisposable
             frameCount, width, height, _stageOut.View, _stageLens.View, baseQIndex);
 
         var allLens = await _stageLens.View.SubView(0, frameCount).CopyToHostAsync();
+        foreach (int l in allLens) CheckLength(l);
         var results = new Uint8Array[frameCount];
         for (int f = 0; f < frameCount; f++)
             results[f] = await DeviceTransfer.DownloadUint8ArrayAsync(
                 _stageOut.View.SubView((long)f * cap, allLens[f]), allLens[f]);
         return results;
+    }
+
+    /// <summary>
+    /// The assemble kernel reports -1 for a frame whose partition outgrew its buffer (the bool encoder never
+    /// writes past a buffer; see <see cref="TokenCapacity"/>).
+    /// </summary>
+    private static int CheckLength(int length)
+    {
+        if (length < 0)
+            throw new InvalidOperationException("VP8 encode: a partition outgrew its buffer; the frame was not assembled.");
+        return length;
     }
 
     // ------------------------------------------------------------------

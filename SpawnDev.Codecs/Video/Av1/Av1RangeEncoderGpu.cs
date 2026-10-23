@@ -169,6 +169,31 @@ public static class Av1RangeEncoderGpu
         }
     }
 
+    /// <summary>Ints <see cref="Save"/> writes (Low low / high, Rng, Cnt, OutLen).</summary>
+    public const int StateInts = 5;
+
+    /// <summary>
+    /// Store the encoder state in <c>st[off .. off + StateInts)</c> so a later launch can resume it with
+    /// <see cref="Load"/> (resumable walkers keep their coder between launches in device memory).
+    /// </summary>
+    public static void Save(ArrayView<int> st, long off, ref Av1RangeEncoderGpuState state)
+    {
+        st[off] = (int)(uint)state.Low;
+        st[off + 1] = (int)(uint)(state.Low >> 32);
+        st[off + 2] = (int)state.Rng;
+        st[off + 3] = state.Cnt;
+        st[off + 4] = (int)state.OutLen;
+    }
+
+    /// <summary>The encoder state stored by <see cref="Save"/>.</summary>
+    public static Av1RangeEncoderGpuState Load(ArrayView<int> st, long off) => new Av1RangeEncoderGpuState
+    {
+        Low = (ulong)(uint)st[off] | ((ulong)(uint)st[off + 1] << 32),
+        Rng = (uint)st[off + 2],
+        Cnt = st[off + 3],
+        OutLen = st[off + 4],
+    };
+
     private static void EncodeQ15(
         ref Av1RangeEncoderGpuState state,
         ArrayView<byte> outBuf,

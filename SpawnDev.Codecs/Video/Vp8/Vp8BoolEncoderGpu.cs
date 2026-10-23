@@ -93,18 +93,31 @@ public static class Vp8BoolEncoderGpu
             // Carry propagation. The bit just shifted out (top bit of
             // (lowvalue << (offset-1))) is 1 -> propagate carry backward
             // through 0xFF bytes in the already-written output buffer.
+            // Writes are bounded by the buffer: a stream that outgrows it keeps counting OutLen (so the
+            // caller sees OutLen > buffer length and reports the overflow) but never writes past the end.
             if ((((ulong)lowvalue) << (offset - 1) & 0x80000000UL) != 0)
             {
                 long x = state.OutLen - 1;
-                while (x >= 0 && outBuf[x] == 0xFF)
+                if (x >= outBuf.Length) x = outBuf.Length - 1;
+                bool carrying = x >= 0;
+                while (carrying)
                 {
-                    outBuf[x] = 0;
-                    x--;
+                    if (outBuf[x] == 0xFF)
+                    {
+                        outBuf[x] = 0;
+                        x--;
+                        carrying = x >= 0;
+                    }
+                    else
+                    {
+                        outBuf[x] = (byte)(outBuf[x] + 1);
+                        carrying = false;
+                    }
                 }
-                if (x >= 0) outBuf[x] = (byte)(outBuf[x] + 1);
             }
 
-            outBuf[state.OutLen] = (byte)((lowvalue >> (24 - offset)) & 0xFF);
+            if (state.OutLen < outBuf.Length)
+                outBuf[state.OutLen] = (byte)((lowvalue >> (24 - offset)) & 0xFF);
             state.OutLen += 1;
 
             shift = count;
@@ -144,6 +157,30 @@ public static class Vp8BoolEncoderGpu
     {
         for (int i = 0; i < 32; i++) EncodeBool(ref state, outBuf, 0, 128);
     }
+
+    /// <summary>Ints <see cref="Save"/> writes (LowValue, Range, Count, OutLen).</summary>
+    public const int StateInts = 4;
+
+    /// <summary>
+    /// Store the encoder state in <c>st[off .. off + StateInts)</c> so a later launch can resume it with
+    /// <see cref="Load"/> (resumable entropy kernels keep their coder between launches in device memory).
+    /// </summary>
+    public static void Save(ArrayView<int> st, long off, ref Vp8BoolEncoderGpuState state)
+    {
+        st[off] = (int)state.LowValue;
+        st[off + 1] = (int)state.Range;
+        st[off + 2] = state.Count;
+        st[off + 3] = (int)state.OutLen;
+    }
+
+    /// <summary>The encoder state stored by <see cref="Save"/>.</summary>
+    public static Vp8BoolEncoderGpuState Load(ArrayView<int> st, long off) => new Vp8BoolEncoderGpuState
+    {
+        LowValue = (uint)st[off],
+        Range = (uint)st[off + 1],
+        Count = st[off + 2],
+        OutLen = st[off + 3],
+    };
 
     /// <summary>
     /// Count leading zeros of a byte's value. Returns 0 for a zero

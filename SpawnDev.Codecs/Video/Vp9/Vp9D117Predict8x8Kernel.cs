@@ -28,7 +28,7 @@ public sealed class Vp9D117Predict8x8Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(D117Kernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(Vp9D117Predict8x8D117Kernel);
     }
 
     /// <summary>Run D117 prediction on <paramref name="blockCount"/> blocks.</summary>
@@ -90,7 +90,7 @@ public sealed class Vp9D117Predict8x8Kernel : IDisposable
     }
 
     /// <summary>Kernel body. 22 register cells; rows 2-7 derive from those.</summary>
-    private static void D117Kernel(
+    private static void Vp9D117Predict8x8D117Kernel(
         Index1D blockIdx,
         ArrayView<byte> topLeftFlat,
         ArrayView<byte> aboveFlat,

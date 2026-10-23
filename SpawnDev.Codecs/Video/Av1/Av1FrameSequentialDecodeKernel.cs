@@ -2,9 +2,12 @@
 //
 // AV1 v1 keyframe per-frame decode walker, 100% ILGPU. Mirror of
 // Av1FrameSequentialEncodeKernel but uses Av1RangeDecoderGpu and
-// Av1CoefDecoderGpu. Single GPU thread runs the entire keyframe
-// decode pipeline bit-exact vs the CPU Av1KeyframeWalker reference
-// (for the v1 walker config).
+// Av1CoefDecoderGpu. One GPU thread runs the keyframe decode
+// pipeline bit-exact vs the CPU Av1KeyframeWalker reference
+// (for the v1 walker config), in bounded resumable launches of
+// LeavesPerLaunch 16x16 leaf slots (a whole-frame launch was 14 ms at
+// test sizes on CUDA); the range decoder and the slot cursor are kept in
+// scratchInt between launches, the contexts were already in scratchByte.
 //
 // Pipeline (mirrors Av1KeyframeWalker for v1):
 //   - For each 64x64 superblock in raster order:
@@ -93,10 +96,12 @@ public struct Av1FrameSeqDecodeParams
 
 /// <summary>
 /// AV1 v1 keyframe per-frame decode walker kernel. Mirror of
-/// Av1FrameSequentialEncodeKernel.
+/// Av1FrameSequentialEncodeKernel: one GPU thread, bounded resumable launches of
+/// <see cref="LeavesPerLaunch"/> leaf slots.
 /// </summary>
 public sealed class Av1FrameSequentialDecodeKernel : IDisposable
 {
+    private readonly Accelerator _accelerator;
     private readonly Action<
         Index1D,
         ArrayView<byte>,    // tileBytes (input)
@@ -105,30 +110,46 @@ public sealed class Av1FrameSequentialDecodeKernel : IDisposable
         ArrayView<ushort>,  // constsUshort
         ArrayView<short>,   // dcAcQuant (DC[0..256) + AC[256..512))
         ArrayView<byte>,    // scratchByte (state + edge + predict + levels)
-        ArrayView<int>,     // scratchInt (per-block working area)
-        Av1FrameSeqDecodeParams> _kernel;
+        ArrayView<int>,     // scratchInt (per-block working area + resumable state)
+        Av1FrameSeqDecodeParams, int> _kernel;
 
     /// <summary>Slot in scratchInt where ReadCoeffsTxb writes eob.</summary>
     public const int EobSlot = 1100;
     /// <summary>Slot in scratchInt where ReadCoeffsTxb writes culLevel.</summary>
     public const int CulLevelSlot = 1101;
+
+    // Resumable state in scratchInt (after the per-block area): carried between launches.
+    private const int StStarted = 1102;
+    private const int StNextSlot = 1103;
+    private const int StDec = 1104;   // Av1RangeDecoderGpu.StateInts
+
     /// <summary>Minimum scratchInt length.</summary>
-    public const int MinScratchIntLength = 1102;
+    public const int MinScratchIntLength = StDec + Av1RangeDecoderGpu.StateInts;
+
+    /// <summary>
+    /// Leaf slots (16x16 positions of the superblock z-order walk) one launch decodes: coefficient decode, DC
+    /// prediction, 16x16 + two 8x8 inverse transforms and reconstruction each.
+    /// </summary>
+    public const int LeavesPerLaunch = 4;
 
     /// <summary>Compile the kernel.</summary>
     public Av1FrameSequentialDecodeKernel(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<byte>, ArrayView<byte>,
             ArrayView<byte>, ArrayView<ushort>, ArrayView<short>,
             ArrayView<byte>, ArrayView<int>,
-            Av1FrameSeqDecodeParams>(DecodeFrameKernel);
+            Av1FrameSeqDecodeParams, int>(Av1DecodeFrameStepKernel);
     }
 
-    /// <summary>Dispatch the walker.</summary>
-    public void Run(
+    /// <summary>
+    /// Dispatch the walker (bounded launches, paced with <see cref="LaunchPacer"/>). Zeroes the scratch buffers
+    /// first (the walker's contexts start at zero). The work is queued, not awaited to completion.
+    /// </summary>
+    public async Task RunAsync(
         ArrayView<byte> tileBytes,
         ArrayView<byte> recon,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
@@ -137,10 +158,22 @@ public sealed class Av1FrameSequentialDecodeKernel : IDisposable
         ArrayView<int> scratchInt,
         Av1FrameSeqDecodeParams p)
     {
-        _kernel(new Index1D(1),
-            tileBytes, recon,
-            constsByte, constsUshort, dcAcQuant,
-            scratchByte, scratchInt, p);
+        if (scratchInt.Length < MinScratchIntLength)
+            throw new ArgumentException($"scratchInt must hold at least {MinScratchIntLength} ints.", nameof(scratchInt));
+        scratchByte.MemSetToZero();
+        scratchInt.MemSetToZero();
+        int sbRows = (p.FrameMiRows + 15) >> 4;
+        int sbCols = (p.FrameMiCols + 15) >> 4;
+        int steps = (sbRows * sbCols * 16 + LeavesPerLaunch - 1) / LeavesPerLaunch;
+        var pacer = new LaunchPacer(_accelerator);
+        for (int s = 0; s < steps; s++)
+        {
+            _kernel(new Index1D(1),
+                tileBytes, recon,
+                constsByte, constsUshort, dcAcQuant,
+                scratchByte, scratchInt, p, LeavesPerLaunch);
+            await pacer.LaunchedAsync();
+        }
     }
 
     /// <summary>Release resources.</summary>
@@ -148,7 +181,11 @@ public sealed class Av1FrameSequentialDecodeKernel : IDisposable
 
     // ===========================================================================
 
-    private static void DecodeFrameKernel(
+    /// <summary>
+    /// One bounded step: the next <paramref name="leavesPerLaunch"/> leaf slots (slot = sb * 16 + q32 * 4 + q16)
+    /// of the superblock walk. The range decoder and the slot cursor live in scratchInt[StStarted ..].
+    /// </summary>
+    private static void Av1DecodeFrameStepKernel(
         Index1D _,
         ArrayView<byte> tileBytes,
         ArrayView<byte> recon,
@@ -156,9 +193,19 @@ public sealed class Av1FrameSequentialDecodeKernel : IDisposable
         ArrayView<short> dcAcQuant,
         ArrayView<byte> scratchByte,
         ArrayView<int> scratchInt,
-        Av1FrameSeqDecodeParams p)
+        Av1FrameSeqDecodeParams p,
+        int leavesPerLaunch)
     {
-        var rd = Av1RangeDecoderGpu.Init(tileBytes, p.TileBytesOffset, p.TileBytesLength);
+        Av1RangeDecoderGpuState rd;
+        if (scratchInt[StStarted] == 0)
+        {
+            rd = Av1RangeDecoderGpu.Init(tileBytes, p.TileBytesOffset, p.TileBytesLength);
+            scratchInt[StStarted] = 1;
+        }
+        else
+        {
+            rd = Av1RangeDecoderGpu.Load(scratchInt, StDec);
+        }
 
         int frameMiCols = p.FrameMiCols;
         int frameMiRows = p.FrameMiRows;
@@ -167,81 +214,93 @@ public sealed class Av1FrameSequentialDecodeKernel : IDisposable
         int qDc = (int)dcAcQuant[p.BaseQIndex];
         int qAc = (int)dcAcQuant[256 + p.BaseQIndex];
 
-        // Initialize above contexts to zero.
-        for (int i = 0; i < frameMiCols; i++)
+        int sbCols = (frameMiCols + sbMi - 1) / sbMi;
+        int sbRows = (frameMiRows + sbMi - 1) / sbMi;
+        int slotCount = sbRows * sbCols * 16;
+        int slot = scratchInt[StNextSlot];
+        int slotEnd = slot + leavesPerLaunch;
+        if (slotEnd > slotCount) slotEnd = slotCount;
+        bool go = slot < slotEnd;
+        while (go)
         {
-            scratchByte[p.AboveEntropyOff + 0 * frameMiCols + i] = 0;
-            scratchByte[p.AboveEntropyOff + 1 * frameMiCols + i] = 0;
-            scratchByte[p.AboveEntropyOff + 2 * frameMiCols + i] = 0;
-            scratchByte[p.AbovePartOff + i] = 0;
-            scratchByte[p.AboveYModeOff + i] = 0;
-            scratchByte[p.AboveSkipOff + i] = 0;
+            DecodeLeafSlot(
+                ref rd, tileBytes, recon,
+                constsByte, constsUshort, qDc, qAc,
+                scratchByte, scratchInt,
+                slot, sbCols, frameMiRows, frameMiCols, p);
+            slot++;
+            go = slot < slotEnd;
         }
 
-        for (int sbRow = 0; sbRow * sbMi < frameMiRows; sbRow++)
-        {
-            for (int i = 0; i < 32; i++)
-            {
-                scratchByte[p.LeftEntropyOff + 0 * 32 + i] = 0;
-                scratchByte[p.LeftEntropyOff + 1 * 32 + i] = 0;
-                scratchByte[p.LeftEntropyOff + 2 * 32 + i] = 0;
-                scratchByte[p.LeftPartOff + i] = 0;
-                scratchByte[p.LeftYModeOff + i] = 0;
-                scratchByte[p.LeftSkipOff + i] = 0;
-            }
-
-            for (int sbCol = 0; sbCol * sbMi < frameMiCols; sbCol++)
-            {
-                int sbMiRow = sbRow * sbMi;
-                int sbMiCol = sbCol * sbMi;
-                DecodeSuperblock(
-                    ref rd, tileBytes, recon,
-                    constsByte, constsUshort, qDc, qAc,
-                    scratchByte, scratchInt,
-                    sbMiRow, sbMiCol, frameMiRows, frameMiCols, p);
-            }
-        }
+        scratchInt[StNextSlot] = slot;
+        Av1RangeDecoderGpu.Save(scratchInt, StDec, ref rd);
     }
 
-    private static void DecodeSuperblock(
+    /// <summary>
+    /// One 16x16 position of the superblock z-order walk: the left-context reset at the start of a superblock
+    /// row, the partition symbols that precede the block (64x64 at the superblock's first slot, 32x32 at a 32x32
+    /// block's first slot), then the 16x16 leaf. Out-of-frame blocks are skipped as the recursive walk did.
+    /// </summary>
+    private static void DecodeLeafSlot(
         ref Av1RangeDecoderGpuState rd, ArrayView<byte> inBuf, ArrayView<byte> recon,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
         int qDc, int qAc,
         ArrayView<byte> scratchByte, ArrayView<int> scratchInt,
-        int sbMiRow, int sbMiCol,
+        int slot, int sbCols,
         int frameMiRows, int frameMiCols,
         Av1FrameSeqDecodeParams p)
     {
-        // 64x64 partition (decode + discard - we know it's SPLIT for v1).
-        DecodePartitionCdf(ref rd, inBuf, constsUshort, scratchByte, p,
-            sbMiRow, sbMiCol, BsizeBlock64x64);
+        int sb = slot >> 4;
+        int q = slot & 15;
+        int sbRow = sb / sbCols;
+        int sbCol = sb - sbRow * sbCols;
+        int sbMiRow = sbRow * 16;
+        int sbMiCol = sbCol * 16;
 
-        for (int q32 = 0; q32 < 4; q32++)
+        if (q == 0)
         {
-            int miRow32 = sbMiRow + (q32 >> 1) * 8;
-            int miCol32 = sbMiCol + (q32 & 1) * 8;
-            if (miRow32 >= frameMiRows || miCol32 >= frameMiCols) continue;
+            if (sbCol == 0)
+            {
+                for (int i = 0; i < 32; i++)
+                {
+                    scratchByte[p.LeftEntropyOff + 0 * 32 + i] = 0;
+                    scratchByte[p.LeftEntropyOff + 1 * 32 + i] = 0;
+                    scratchByte[p.LeftEntropyOff + 2 * 32 + i] = 0;
+                    scratchByte[p.LeftPartOff + i] = 0;
+                    scratchByte[p.LeftYModeOff + i] = 0;
+                    scratchByte[p.LeftSkipOff + i] = 0;
+                }
+            }
+            // 64x64 partition (decode + discard - we know it's SPLIT for v1).
+            DecodePartitionCdf(ref rd, inBuf, constsUshort, scratchByte, p,
+                sbMiRow, sbMiCol, BsizeBlock64x64);
+        }
 
+        int q32 = q >> 2;
+        int q16 = q & 3;
+        int miRow32 = sbMiRow + (q32 >> 1) * 8;
+        int miCol32 = sbMiCol + (q32 & 1) * 8;
+        bool in32 = (miRow32 < frameMiRows) & (miCol32 < frameMiCols);
+        if (!in32) return;
+
+        if (q16 == 0)
             DecodePartitionCdf(ref rd, inBuf, constsUshort, scratchByte, p,
                 miRow32, miCol32, BsizeBlock32x32);
 
-            for (int q16 = 0; q16 < 4; q16++)
-            {
-                int miRow16 = miRow32 + (q16 >> 1) * 4;
-                int miCol16 = miCol32 + (q16 & 1) * 4;
-                if (miRow16 >= frameMiRows || miCol16 >= frameMiCols) continue;
+        int miRow16 = miRow32 + (q16 >> 1) * 4;
+        int miCol16 = miCol32 + (q16 & 1) * 4;
+        bool in16 = (miRow16 < frameMiRows) & (miCol16 < frameMiCols);
+        if (!in16) return;
 
-                DecodePartitionCdf(ref rd, inBuf, constsUshort, scratchByte, p,
-                    miRow16, miCol16, BsizeBlock16x16);
+        DecodePartitionCdf(ref rd, inBuf, constsUshort, scratchByte, p,
+            miRow16, miCol16, BsizeBlock16x16);
 
-                DecodeLeafBlock(ref rd, inBuf, recon,
-                    constsByte, constsUshort, qDc, qAc,
-                    scratchByte, scratchInt,
-                    miRow16, miCol16, p);
+        DecodeLeafBlock(ref rd, inBuf, recon,
+            constsByte, constsUshort, qDc, qAc,
+            scratchByte, scratchInt,
+            miRow16, miCol16, p);
 
-                UpdatePartitionContext(scratchByte, p, miRow16, miCol16);
-            }
-        }
+        UpdatePartitionContext(scratchByte, p, miRow16, miCol16);
     }
 
     private static void DecodeLeafBlock(

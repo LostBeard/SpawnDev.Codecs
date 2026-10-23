@@ -29,7 +29,7 @@ public sealed class Vp8ForwardWalsh4x4Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<short>, int>(WalshKernel);
+            Index1D, ArrayView<short>, ArrayView<short>, int>(Vp8ForwardWalsh4x4WalshKernel);
     }
 
     /// <summary>
@@ -48,7 +48,7 @@ public sealed class Vp8ForwardWalsh4x4Kernel : IDisposable
     }
 
     /// <summary>Kernel body. One thread per 4x4 block.</summary>
-    private static void WalshKernel(
+    private static void Vp8ForwardWalsh4x4WalshKernel(
         Index1D blockIdx,
         ArrayView<short> input,
         ArrayView<short> output,

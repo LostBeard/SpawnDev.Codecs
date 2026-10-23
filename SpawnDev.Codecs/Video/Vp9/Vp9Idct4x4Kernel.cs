@@ -39,7 +39,7 @@ public sealed class Vp9Idct4x4Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<byte>, int, int>(IdctKernel);
+            Index1D, ArrayView<short>, ArrayView<byte>, int, int>(Vp9Idct4x4IdctKernel);
     }
 
     /// <summary>
@@ -96,7 +96,7 @@ public sealed class Vp9Idct4x4Kernel : IDisposable
     }
 
     /// <summary>Kernel body. One thread per block.</summary>
-    private static void IdctKernel(
+    private static void Vp9Idct4x4IdctKernel(
         Index1D blockIdx,
         ArrayView<short> coeffs,
         ArrayView<byte> dest,

@@ -25,7 +25,7 @@ public sealed class Vp9Idct8x8GpuTestKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<int>, int>(IdctKernel);
+            Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<int>, int>(Vp9Idct8x8GpuIdctKernel);
     }
 
     /// <summary>iDCT-add a single 8x8 block in place.</summary>
@@ -41,7 +41,7 @@ public sealed class Vp9Idct8x8GpuTestKernel : IDisposable
         _kernel(1, coefs, dest, scratch, destStride);
     }
 
-    private static void IdctKernel(
+    private static void Vp9Idct8x8GpuIdctKernel(
         Index1D _,
         ArrayView<short> coefs,
         ArrayView<byte> dest,

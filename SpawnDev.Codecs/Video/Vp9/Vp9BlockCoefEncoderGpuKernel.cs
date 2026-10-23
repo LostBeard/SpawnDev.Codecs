@@ -52,7 +52,7 @@ public sealed class Vp9BlockCoefEncoderTestKernel : IDisposable
             ArrayView<byte>, ArrayView<short>, ArrayView<ushort>, ArrayView<ushort>,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<long>, ArrayView<int>,
-            int, int>(EncodeBlockKernel);
+            int, int>(Vp9BlockCoefEncoderGpuEncodeBlockKernel);
     }
 
     /// <summary>
@@ -92,7 +92,7 @@ public sealed class Vp9BlockCoefEncoderTestKernel : IDisposable
                 outLen, eobOut, maxCoefs, packedFlags);
     }
 
-    private static void EncodeBlockKernel(
+    private static void Vp9BlockCoefEncoderGpuEncodeBlockKernel(
         Index1D _,
         ArrayView<byte> outBuf,
         ArrayView<short> coefs,

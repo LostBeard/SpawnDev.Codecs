@@ -237,7 +237,7 @@ public sealed class Vp9KeyframeDecoderGpu : IDisposable
         // SubView passes the tile slice without copy - the kernel sees an ArrayView<byte> of
         // length tileLength starting at the tile's first byte, so it never reads the
         // uncompressed/compressed header bytes at [0..tileStartOffset).
-        _decodeKernel.Run(
+        await _decodeKernel.RunAsync(
             encoded.SubView(tileStartOffset, tileLength),
             yTarget, uTarget, vTarget,
             dDequant.View,

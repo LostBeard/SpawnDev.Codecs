@@ -271,7 +271,7 @@ public sealed class Vp8KeyframeDecoderGpu : IDisposable
                 baseQIndex);
 
             // Step 2: Decode the frame.
-            _decode.Run(
+            await _decode.RunAsync(
                 encoded, encoded,
                 _coefProbsByType.View, _constsExtended.View,
                 yTarget, uTarget, vTarget,

@@ -24,7 +24,7 @@ public sealed class Av1ForwardAdst16GpuKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, int, int>(FadstKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, int, int>(Av1ForwardAdst16GpuFadstKernel);
     }
 
     /// <summary>Run on <paramref name="transformCount"/> 16-element transforms.</summary>
@@ -40,7 +40,7 @@ public sealed class Av1ForwardAdst16GpuKernel : IDisposable
         _kernel(transformCount, input, output, transformCount, cosBit);
     }
 
-    private static void FadstKernel(
+    private static void Av1ForwardAdst16GpuFadstKernel(
         Index1D transformIdx,
         ArrayView<int> input,
         ArrayView<int> output,

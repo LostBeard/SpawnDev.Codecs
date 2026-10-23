@@ -31,7 +31,7 @@ public sealed class Vp8DcOnlyIdctAddKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<byte>, int>(DcOnlyKernel);
+            Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<byte>, int>(Vp8DcOnlyIdctAddDcOnlyKernel);
     }
 
     /// <summary>
@@ -53,7 +53,7 @@ public sealed class Vp8DcOnlyIdctAddKernel : IDisposable
         _kernel(blockCount, inputDc, pred, dst, blockCount);
     }
 
-    private static void DcOnlyKernel(
+    private static void Vp8DcOnlyIdctAddDcOnlyKernel(
         Index1D blockIdx,
         ArrayView<short> inputDc,
         ArrayView<byte> pred,

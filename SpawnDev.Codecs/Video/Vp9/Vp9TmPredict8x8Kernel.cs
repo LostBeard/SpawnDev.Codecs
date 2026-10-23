@@ -26,7 +26,7 @@ public sealed class Vp9TmPredict8x8Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(TmKernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(Vp9TmPredict8x8TmKernel);
     }
 
     /// <summary>Run TM prediction on <paramref name="blockCount"/> blocks.</summary>
@@ -89,7 +89,7 @@ public sealed class Vp9TmPredict8x8Kernel : IDisposable
     }
 
     /// <summary>Kernel body. One thread per block.</summary>
-    private static void TmKernel(
+    private static void Vp9TmPredict8x8TmKernel(
         Index1D blockIdx,
         ArrayView<byte> topLeftFlat,
         ArrayView<byte> aboveFlat,

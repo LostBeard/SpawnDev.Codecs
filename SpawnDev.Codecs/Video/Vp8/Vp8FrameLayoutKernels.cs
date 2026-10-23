@@ -44,13 +44,13 @@ public sealed class Vp8FrameLayoutKernels : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _gatherY16Kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int>(GatherY16Kernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int>(Vp8FrameLayoutGatherY16Kernel);
         _scatterY16Kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int>(ScatterY16Kernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int>(Vp8FrameLayoutScatterY16Kernel);
         _gatherUv8Kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int>(GatherUv8Kernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int>(Vp8FrameLayoutGatherUv8Kernel);
         _scatterUv8Kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int>(ScatterUv8Kernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int>(Vp8FrameLayoutScatterUv8Kernel);
     }
 
     /// <summary>
@@ -108,7 +108,7 @@ public sealed class Vp8FrameLayoutKernels : IDisposable
         _scatterUv8Kernel(mbCount, uv8Packed, uvPlane, mbCols, mbRows, uvStride);
     }
 
-    private static void GatherY16Kernel(
+    private static void Vp8FrameLayoutGatherY16Kernel(
         Index1D mbIdx,
         ArrayView<byte> yPlane,
         ArrayView<byte> y16Packed,
@@ -128,7 +128,7 @@ public sealed class Vp8FrameLayoutKernels : IDisposable
         }
     }
 
-    private static void ScatterY16Kernel(
+    private static void Vp8FrameLayoutScatterY16Kernel(
         Index1D mbIdx,
         ArrayView<byte> y16Packed,
         ArrayView<byte> yPlane,
@@ -148,7 +148,7 @@ public sealed class Vp8FrameLayoutKernels : IDisposable
         }
     }
 
-    private static void GatherUv8Kernel(
+    private static void Vp8FrameLayoutGatherUv8Kernel(
         Index1D mbIdx,
         ArrayView<byte> uvPlane,
         ArrayView<byte> uv8Packed,
@@ -168,7 +168,7 @@ public sealed class Vp8FrameLayoutKernels : IDisposable
         }
     }
 
-    private static void ScatterUv8Kernel(
+    private static void Vp8FrameLayoutScatterUv8Kernel(
         Index1D mbIdx,
         ArrayView<byte> uv8Packed,
         ArrayView<byte> uvPlane,

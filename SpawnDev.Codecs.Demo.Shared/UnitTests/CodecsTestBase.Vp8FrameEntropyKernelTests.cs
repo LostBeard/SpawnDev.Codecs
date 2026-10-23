@@ -185,7 +185,7 @@ public abstract partial class CodecsTestBase
             // Fresh state: lowvalue=0, range=255, count=-24, outLen=0.
             dInitialState.View.CopyFromCPU(new int[] { 0, 255, -24, 0, 0 });
 
-            kernel.Run(dY4.View, dY2.View, dU.View, dV.View,
+            await kernel.RunAsync(dY4.View, dY2.View, dU.View, dV.View,
                 dProbs.View, dConsts.View, dP0.View, dTp.View, dLens.View,
                 dAbove.View, dInitialState.View, mbCols, mbRows);
             await acc.SynchronizeAsync();

@@ -12,6 +12,12 @@
 // average diagonal width is ~11, so the speedup over the single-thread
 // path is ~10x for the per-MB transform/quant/IDCT/recon stage.
 //
+// Bounded launches: a per-diagonal launch encodes one macroblock per thread. The single-dispatch
+// (Group.Barrier) form walks at most DiagonalsPerLaunch diagonals per launch - one launch over every
+// diagonal of a frame grew with the picture (mbCols + mbRows serial macroblock encodes per thread) - so
+// the host launches ceil(diagonals / DiagonalsPerLaunch) of them; the recon planes carry the wave-front
+// between launches. Every host loop of launches is paced with LaunchPacer.
+//
 // Kernel saves quantized coefs to global buffers (y4Coefs, y2Coefs,
 // uCoefs, vCoefs). After this kernel runs, Vp8FrameEntropyKernel
 // processes those coefs into the bool-coded bitstream.
@@ -50,7 +56,10 @@ public struct Vp8FrameSeqEncodeBatchParams
     public int MbCols;
     /// <summary>mbRows.</summary>
     public int MbRows;
-    /// <summary>diagD packed in high 16 bits, rMin in low 16 (matches single-frame layout).</summary>
+    /// <summary>
+    /// diagD packed in high 16 bits, rMin in low 16 (matches single-frame layout). The single-dispatch kernel
+    /// reads it as the first diagonal of its launch instead.
+    /// </summary>
     public int DiagAndRMin;
     /// <summary>Number of MBs on this diagonal (used to extract frameIdx from idx.X).</summary>
     public int DiagCount;
@@ -111,20 +120,20 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<int>,
-            int, int, int>(EncodeWavefrontKernel);
+            int, int, int>(Vp8EncodeWavefrontKernel);
         _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<int>,
-            Vp8FrameSeqEncodeBatchParams>(EncodeWavefrontBatchKernel);
+            Vp8FrameSeqEncodeBatchParams>(Vp8EncodeWavefrontBatchKernel);
         _singleDispatchBatchKernel = accelerator.LoadStreamKernel<
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<short>, ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<int>,
-            Vp8FrameSeqEncodeBatchParams, int, int>(EncodeWavefrontSingleDispatchKernel);
+            Vp8FrameSeqEncodeBatchParams, int, int>(Vp8EncodeWavefrontGroupKernel);
     }
 
     /// <summary>
@@ -134,7 +143,7 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
     /// from diagonal d-1), so a kernel dispatched at extent = diagonal-MB-count
     /// runs every MB on that diagonal in parallel.
     /// </summary>
-    public void Run(
+    public async Task RunAsync(
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
         ArrayView<short> y4Coefs, ArrayView<short> y2Coefs,
@@ -145,6 +154,7 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
         if (mbCols <= 0 || mbRows <= 0) throw new ArgumentOutOfRangeException();
         if (dequant.Length < 6) throw new ArgumentException("dequant must hold 6 ints.", nameof(dequant));
         int totalDiagonals = mbCols + mbRows - 1;
+        var pacer = new LaunchPacer(_accelerator);
         for (int d = 0; d < totalDiagonals; d++)
         {
             // Range of valid (r,c) on diagonal d (r + c = d, 0<=r<mbRows, 0<=c<mbCols):
@@ -160,6 +170,7 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
                 yRecon, uRecon, vRecon,
                 y4Coefs, y2Coefs, uCoefs, vCoefs,
                 dequant, mbCols, mbRows, diagAndRMin);
+            await pacer.LaunchedAsync();
         }
     }
 
@@ -169,7 +180,7 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
     /// thread is one (frame, MB-on-diagonal) pair. All N frames execute
     /// their diagonal-d work in parallel on independent CUDA cores.
     /// </summary>
-    public void RunBatch(
+    public async Task RunBatchAsync(
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
         ArrayView<short> y4Coefs, ArrayView<short> y2Coefs,
@@ -182,6 +193,7 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
     {
         if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
         int totalDiagonals = mbCols + mbRows - 1;
+        var pacer = new LaunchPacer(_accelerator);
         for (int d = 0; d < totalDiagonals; d++)
         {
             int rMin = d - (mbCols - 1); if (rMin < 0) rMin = 0;
@@ -206,6 +218,7 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
                 yRecon, uRecon, vRecon,
                 y4Coefs, y2Coefs, uCoefs, vCoefs,
                 dequant, p);
+            await pacer.LaunchedAsync();
         }
     }
 
@@ -214,7 +227,7 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
     /// diagonal. Thread index t maps to (row=rMin+t, col=d-row). All
     /// threads on the same diagonal are independent.
     /// </summary>
-    private static void EncodeWavefrontKernel(
+    private static void Vp8EncodeWavefrontKernel(
         Index1D idx,
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
@@ -245,14 +258,15 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
 
     /// <summary>
     /// Try to use the single-dispatch kernel: gridSize = numFrames blocks,
-    /// each block has peakDiag threads. Each block does ONE frame's full
-    /// wave-front internally with Group.Barrier between diagonals; blocks
+    /// each block has peakDiag threads. Each block walks its frame's
+    /// wave-front with Group.Barrier between diagonals, at most
+    /// <see cref="DiagonalsPerLaunch"/> diagonals per launch; blocks
     /// run in parallel on different SMs. CUDA caps block at 1024 threads
     /// AND has register-file pressure - peakDiag rarely exceeds ~64 for
     /// typical resolutions, so register pressure is fine per block.
     /// Returns false only if a hard limit is hit (peakDiag > 1024).
     /// </summary>
-    public bool TryRunBatchSingleDispatch(
+    public async Task<bool> TryRunBatchSingleDispatchAsync(
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
         ArrayView<short> y4Coefs, ArrayView<short> y2Coefs,
@@ -281,29 +295,43 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
             DiagAndRMin = 0,
             DiagCount = peakDiag,
         };
-        // gridSize = numFrames, blockSize = peakDiag.
-        _singleDispatchBatchKernel(
-            new KernelConfig(frameCount, peakDiag),
-            yPlane, uPlane, vPlane,
-            yRecon, uRecon, vRecon,
-            y4Coefs, y2Coefs, uCoefs, vCoefs,
-            dequant, p, frameCount, totalDiagonals);
+        // gridSize = numFrames, blockSize = peakDiag; diagonals [dStart, dEnd) per launch (dStart rides in
+        // DiagAndRMin).
+        var pacer = new LaunchPacer(_accelerator);
+        for (int dStart = 0; dStart < totalDiagonals; dStart += DiagonalsPerLaunch)
+        {
+            int dEnd = Math.Min(dStart + DiagonalsPerLaunch, totalDiagonals);
+            p.DiagAndRMin = dStart;
+            _singleDispatchBatchKernel(
+                new KernelConfig(frameCount, peakDiag),
+                yPlane, uPlane, vPlane,
+                yRecon, uRecon, vRecon,
+                y4Coefs, y2Coefs, uCoefs, vCoefs,
+                dequant, p, frameCount, dEnd);
+            await pacer.LaunchedAsync();
+        }
         return true;
     }
 
     /// <summary>
-    /// Single-dispatch wave-front kernel. Each block (Grid.IdxX = frame
-    /// index) processes one full frame's wave-front; threads within a block
-    /// (Group.IdxX = MB position on diagonal) handle parallel MBs per
-    /// diagonal with Group.Barrier between diagonals.
+    /// Wave-front diagonals one single-dispatch launch walks. A diagonal costs one macroblock encode per thread
+    /// (24 4x4 FDCT / quantize / IDCT blocks), so a launch stays well under a few milliseconds.
     /// </summary>
-    private static void EncodeWavefrontSingleDispatchKernel(
+    public const int DiagonalsPerLaunch = 16;
+
+    /// <summary>
+    /// Single-dispatch wave-front kernel. Each block (Grid.IdxX = frame
+    /// index) processes diagonals [p.DiagAndRMin, diagEnd) of its frame's wave-front;
+    /// threads within a block (Group.IdxX = MB position on diagonal) handle parallel
+    /// MBs per diagonal with Group.Barrier between diagonals.
+    /// </summary>
+    private static void Vp8EncodeWavefrontGroupKernel(
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
         ArrayView<short> y4Coefs, ArrayView<short> y2Coefs,
         ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<int> dequant,
-        Vp8FrameSeqEncodeBatchParams p, int frameCount, int totalDiagonals)
+        Vp8FrameSeqEncodeBatchParams p, int frameCount, int diagEnd)
     {
         int frameIdx = Grid.IdxX;
         int posInDiag = Group.IdxX;
@@ -330,7 +358,7 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
         int y2Dc = fDQ[2]; int y2Ac = fDQ[3];
         int uvDc = fDQ[4]; int uvAc = fDQ[5];
 
-        for (int d = 0; d < totalDiagonals; d++)
+        for (int d = p.DiagAndRMin; d < diagEnd; d++)
         {
             int rMin = d - (mbCols - 1); if (rMin < 0) rMin = 0;
             int rMax = d; if (rMax > mbRows - 1) rMax = mbRows - 1;
@@ -356,7 +384,7 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
     /// Per-frame buffer slots are SubView'd at the kernel head; MB encode
     /// helper sees a single-frame view and runs unchanged.
     /// </summary>
-    private static void EncodeWavefrontBatchKernel(
+    private static void Vp8EncodeWavefrontBatchKernel(
         Index1D idx,
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,

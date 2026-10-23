@@ -32,7 +32,7 @@ public sealed class Vp9ForwardWht4x4Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<int>, int>(WhtKernel);
+            Index1D, ArrayView<short>, ArrayView<int>, int>(Vp9ForwardWht4x4WhtKernel);
     }
 
     /// <summary>Run on N blocks. 16 shorts in, 16 ints out per block.</summary>
@@ -47,7 +47,7 @@ public sealed class Vp9ForwardWht4x4Kernel : IDisposable
         _kernel(blockCount, input, output, blockCount);
     }
 
-    private static void WhtKernel(
+    private static void Vp9ForwardWht4x4WhtKernel(
         Index1D blockIdx,
         ArrayView<short> input,
         ArrayView<int> output,

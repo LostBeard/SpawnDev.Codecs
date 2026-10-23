@@ -51,7 +51,7 @@ public sealed class Vp9Idct16x16Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<byte>, int, int>(IdctKernel);
+            Index1D, ArrayView<short>, ArrayView<byte>, int, int>(Vp9Idct16x16IdctKernel);
     }
 
     /// <summary>
@@ -107,7 +107,7 @@ public sealed class Vp9Idct16x16Kernel : IDisposable
         readBack.AsSpan(0, predAndDest.Length).CopyTo(predAndDest.Span);
     }
 
-    private static void IdctKernel(
+    private static void Vp9Idct16x16IdctKernel(
         Index1D blockIdx,
         ArrayView<short> coeffs,
         ArrayView<byte> dest,
@@ -190,7 +190,7 @@ public sealed class Vp9Idct16x16Kernel : IDisposable
     /// through the function-definition path Geordi added in
     /// SpawnDev.ILGPU rc.14 commit <c>1cb4f6c</c>. Without this
     /// attribute the WebGPU shader inlines the 7-stage 16-point
-    /// butterfly at all 32 call sites in <see cref="IdctKernel"/>,
+    /// butterfly at all 32 call sites in <see cref="Vp9Idct16x16IdctKernel"/>,
     /// producing ~3800 lines of straight-line WGSL that hits Chrome's
     /// validator compile cliff (~30s+ per kernel instance, every
     /// test method timing out). With the attribute, WGSL emits one

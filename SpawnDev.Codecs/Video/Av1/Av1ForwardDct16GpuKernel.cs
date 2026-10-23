@@ -29,7 +29,7 @@ public sealed class Av1ForwardDct16GpuKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, int, int>(FdctKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, int, int>(Av1ForwardDct16GpuFdctKernel);
     }
 
     /// <summary>
@@ -48,7 +48,7 @@ public sealed class Av1ForwardDct16GpuKernel : IDisposable
         _kernel(transformCount, input, output, transformCount, cosBit);
     }
 
-    private static void FdctKernel(
+    private static void Av1ForwardDct16GpuFdctKernel(
         Index1D transformIdx,
         ArrayView<int> input,
         ArrayView<int> output,

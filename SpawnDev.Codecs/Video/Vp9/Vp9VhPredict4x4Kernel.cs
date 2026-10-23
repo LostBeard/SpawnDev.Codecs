@@ -47,7 +47,7 @@ public sealed class Vp9VhPredict4x4Kernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int, int>(VhKernel);
+            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int, int>(Vp9VhPredict4x4VhKernel);
     }
 
     /// <summary>Run the V/H predictor on <paramref name="blockCount"/> blocks.</summary>
@@ -99,7 +99,7 @@ public sealed class Vp9VhPredict4x4Kernel : IDisposable
     }
 
     /// <summary>Kernel body. One thread per block.</summary>
-    private static void VhKernel(
+    private static void Vp9VhPredict4x4VhKernel(
         Index1D blockIdx,
         ArrayView<byte> aboveFlat,
         ArrayView<byte> leftFlat,
