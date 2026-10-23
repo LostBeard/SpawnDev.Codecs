@@ -74,28 +74,30 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod]
-    public void VorbisHuffman_MixedLengths_SortsByLengthThenIndex()
+    public void VorbisHuffman_MixedLengths_AssignLowestFreeCodewordInEntryOrder()
     {
-        // Entry order irrelevant to canonical form - sorting is by (length, entry idx).
-        // Entries: idx 0 = len 3, idx 1 = len 1, idx 2 = len 3, idx 3 = len 2.
-        // Sorted: idx 1 (len 1), idx 3 (len 2), idx 0 (len 3), idx 2 (len 3).
-        // Canonical codes:
-        //   idx 1: code 0 at length 1.
-        //   idx 3: code 10 = 2 at length 2. (nextCode[2] = (0 + 1) << 1 = 2)
-        //   idx 0: code 110 = 6 at length 3. (nextCode[3] = (2 + 1) << 1 = 6)
-        //   idx 2: code 111 = 7 at length 3.
-        // BUT our Build assigns in entry-index order, not sorted order.
-        // Entry-index order with per-length counters:
-        //   i=0 (len 3): counter[3] starts at 6. code = 6. counter[3]++.
-        //   i=1 (len 1): counter[1] starts at 0. code = 0. counter[1]++.
-        //   i=2 (len 3): counter[3] now 7. code = 7.
-        //   i=3 (len 2): counter[2] starts at 2. code = 2.
+        // Vorbis I spec 3.2.1: Vorbis codebooks are NOT canonical Huffman codes. Entries are taken in ENTRY order and each one
+        // gets the numerically lowest codeword of its length that is still free (not a prefix of, and not prefixed by, a
+        // codeword already assigned) - libvorbis sharedbook.c _make_words. (This test used to expect canonical codes 6/0/7/2,
+        // which no Vorbis decoder produces; it had failed since it was written.)
+        // lengths {3, 1, 3, 2}: entry 0 takes 000; entry 1 the lowest free 1-bit code is 1 (0 is a prefix of 000);
+        // entry 2 takes 001; entry 3 takes 01.
         var lengths = new[] { 3, 1, 3, 2 };
         var tbl = VorbisHuffman.Build(lengths);
-        Equal(6u, tbl.Codewords[0]);
-        Equal(0u, tbl.Codewords[1]);
-        Equal(7u, tbl.Codewords[2]);
-        Equal(2u, tbl.Codewords[3]);
+        Equal(0b000u, tbl.Codewords[0]);
+        Equal(0b1u, tbl.Codewords[1]);
+        Equal(0b001u, tbl.Codewords[2]);
+        Equal(0b01u, tbl.Codewords[3]);
+    }
+
+    [TestMethod]
+    public void VorbisHuffman_SpecExample_Section3_2_1()
+    {
+        // The worked example of the Vorbis I specification, section 3.2.1: lengths 2 4 4 4 4 2 3 3 give the codewords
+        // 00, 0100, 0101, 0110, 0111, 10, 110, 111.
+        var tbl = VorbisHuffman.Build(new[] { 2, 4, 4, 4, 4, 2, 3, 3 });
+        uint[] expected = { 0b00, 0b0100, 0b0101, 0b0110, 0b0111, 0b10, 0b110, 0b111 };
+        for (int i = 0; i < expected.Length; i++) Equal(expected[i], tbl.Codewords[i], $"entry {i}");
     }
 
     [TestMethod]

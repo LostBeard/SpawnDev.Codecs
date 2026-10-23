@@ -884,6 +884,14 @@ public sealed class JpegKernels : IDisposable
             if (err != 0)
             {
                 if (meta[JpegMeta.Error] == 0) meta[JpegMeta.Error] = err;
+                // The segments after the bad marker were never located: their slots still hold the ranges of an EARLIER
+                // file. Make every segment empty so no decode thread can read outside this file (a CUDA illegal memory
+                // access on bad_restart_order before this).
+                for (int j = 0; j < segmentCount; j++)
+                {
+                    segs[2 * j] = end;
+                    segs[2 * j + 1] = end;
+                }
             }
         }
     }
@@ -901,6 +909,9 @@ public sealed class JpegKernels : IDisposable
         Index1D index, ArrayView<byte> file, ArrayView<short> coef, ArrayView<int> meta, ArrayView<int> huff,
         ArrayView<int> segs, ArrayView<int> consts, ArrayView<int> state, int scan, int budget, int round)
     {
+        // A structural error found earlier in the file (marker scan, restart markers) means the segment table cannot be
+        // trusted: decode nothing. The host reports the error after the pipeline.
+        if (meta[JpegMeta.Error] != 0) return;
         int seg = index.X;
         int sb = JpegMeta.Scans + scan * JpegMeta.ScanStride;
         int ns = meta[sb + JpegMeta.ScNs];

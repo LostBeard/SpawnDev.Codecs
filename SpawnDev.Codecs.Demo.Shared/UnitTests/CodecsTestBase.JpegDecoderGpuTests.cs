@@ -346,7 +346,7 @@ public abstract partial class CodecsTestBase
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
         {
-            using var dec = new JpegDecoderGpu(acc);
+            var dec = new JpegDecoderGpu(acc);
             var failures = new List<string>();
             foreach (var (fixture, reason) in expectations)
             {
@@ -365,13 +365,31 @@ public abstract partial class CodecsTestBase
                     failures.Add($"{fixture}: {ex.GetType().Name}: {ex.Message}");
                 }
 
-                // The decoder must stay usable after an error: a good file decodes next.
-                var good = await dec.DecodeAsync(ReadEmbedded(JpegFixturePrefix + "gray_7x5.jpg"));
-                var diff = ComparePixels(ReadEmbedded(JpegFixturePrefix + "gray_7x5.rgba8"), good.Pixels, 4, 7);
-                if (diff != null) failures.Add($"{fixture}: decoder unusable after the error: {diff}");
+                // The decoder must stay usable after an error: a good file decodes next. A device fault (e.g. a CUDA illegal
+                // memory access from an out-of-bounds read on the broken file) surfaces here at the latest; name the fixture
+                // and stop, since the context is poisoned and every later check would report the same fault.
+                try
+                {
+                    var good = await dec.DecodeAsync(ReadEmbedded(JpegFixturePrefix + "gray_7x5.jpg"));
+                    var diff = ComparePixels(ReadEmbedded(JpegFixturePrefix + "gray_7x5.rgba8"), good.Pixels, 4, 7);
+                    if (diff != null) failures.Add($"{fixture}: decoder unusable after the error: {diff}");
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"{fixture}: the good file after it failed (device fault from this broken file?): {ex.GetType().Name}: {ex.Message}");
+                    break;
+                }
             }
-            True(failures.Count == 0, $"{failures.Count} broken-file checks failed:\n" + string.Join("\n", failures));
+            // A poisoned device context also throws from Dispose; report the checks, not the teardown.
+            string? teardown = null;
+            try { dec.Dispose(); acc.Dispose(); ctx.Dispose(); }
+            catch (Exception ex) { teardown = $"(teardown also failed: {ex.GetType().Name}: {ex.Message.Split('\n')[0]})"; }
+            True(failures.Count == 0, $"{failures.Count} broken-file checks failed:\n" + string.Join("\n", failures) + (teardown ?? ""));
         }
-        finally { acc.Dispose(); ctx.Dispose(); }
+        catch
+        {
+            try { acc.Dispose(); ctx.Dispose(); } catch { }
+            throw;
+        }
     }
 }
