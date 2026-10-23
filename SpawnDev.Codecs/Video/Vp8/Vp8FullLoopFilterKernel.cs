@@ -61,6 +61,9 @@ internal static class Vp8FullLoopFilterKernel
             if (interior > 9 - sharp) interior = 9 - sharp;
         }
         if (interior < 1) interior = 1;
+        // Nested on purpose: ILGPU before 5.4.3-local.2 typed this phi as bool and stored 1 for level 40..63 on every IR backend
+        // (24 of 182 VP8 fixtures wrong on the GPU lanes); this line keeps exercising the fix. Canary:
+        // KernelDialect_NestedThresholdTernary_MatchesIfChain.
         int hev = level >= 40 ? 2 : (level >= 15 ? 1 : 0);
         int mbLimit = (level + 2) * 2 + interior;
         int subLimit = level * 2 + interior;

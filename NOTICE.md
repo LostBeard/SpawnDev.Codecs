@@ -134,6 +134,53 @@ VP8 and VP9 are released under the Google WebM patent pledge - patent-clean for 
 
 ---
 
+## libwebp - WebP reference implementation
+
+**Copyright:** © 2010, Google Inc.
+**License:** BSD 3-Clause
+**Source:** https://github.com/webmproject/libwebp (version 1.6.0)
+
+Ported portions: `SpawnDev.Codecs.References/Images/WebP/Lossy/*` (the lossy VP8 encoder: webp_enc.c, analysis_enc.c,
+quant_enc.c, iterator_enc.c, cost_enc.c, frame_enc.c, token_enc.c, tree_enc.c, filter_enc.c, syntax_enc.c, dsp/enc.c,
+dsp/cost.c, utils/bit_writer_utils.c, and the constant tables extracted by `scripts/images/gen_vp8enc_tables.py`),
+`SpawnDev.Codecs/Images/Yuv/WebPRgbaToYuvGpu.cs` (picture_csp_enc.c import, picture_tools_enc.c cleanup) and
+`SpawnDev.Codecs/Images/Yuv/WebPYuvToRgbaGpu.cs` (upsampling.c, yuv.h). The WebP decoders follow the WebP specification and are
+checked against libwebp's output.
+
+```
+Copyright (c) 2010, Google Inc. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+  * Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+  * Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in
+    the documentation and/or other materials provided with the
+    distribution.
+
+  * Neither the name of Google nor the names of its contributors may
+    be used to endorse or promote products derived from this software
+    without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+---
+
 ## libaom - reference AV1 implementation (planned for later phase)
 
 **Copyright:** © 2018-present, Alliance for Open Media

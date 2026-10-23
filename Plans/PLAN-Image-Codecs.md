@@ -95,6 +95,45 @@ Task<byte[]> EncodeAsync(ReadOnlyMemory<byte> rgba, int width, int height, <Form
   CUDA/OpenCL/WebGPU/WebGL/Wasm lanes (PlaywrightMultiTest) are run by the coordinator, one at a time, when the
   shared GPU is free.
 
+## WebP lossy ENCODE (next; Lore/SpawnGen priority 2)
+
+State 2026-10-22: lossy DECODE is done (VP8 full decoder + libwebp-exact YUV->RGBA + ALPH, bit-exact with libwebp on 168
+fixtures). The existing `Vp8KeyframeEncoderGpu` is a v1 (every macroblock DC_PRED, no loop filter, default probabilities,
+one partition): valid VP8, far from libwebp in size at equal quality. Wrapping it in RIFF alone would ship a encoder that
+loses to every generator, so the encoder is upgraded first. Parity target: libwebp `-m 4` (Pillow `method=4`, the default).
+
+- [~] E1 RGBA -> YUV 4:2:0 kernel = libwebp's default import (picture_csp_enc.c: Y from linear coefficients, U/V from the
+      gamma-corrected 2x2 average, `USE_GAMMA_COMPRESSION`) + `WebPCleanupTransparentArea`: `WebPRgbaToYuvGpu`, equal to
+      libwebp's own planes on 74 fixtures on the CPU lane; GPU / browser lanes still to run.
+- [x] E0 CPU reference: `Vp8LossyEncoderReference` (References) byte-identical with libwebp on 552 files, methods 0..4.
+      The accelerator encoder (E2..E6) is checked against it stage by stage (same YUV in -> same bytes out).
+  Accelerator design (from the port): (a) analysis is per-macroblock independent (libwebp imports the boundary from the SOURCE),
+  so it is one thread per macroblock; (b) k-means + segment parameters are one thread; the quality -> quantizer power law
+  (`pow` in doubles, which WGSL lacks and which must round like libwebp's) becomes a host-built table indexed by the segment
+  alpha: the host computes it from the CONFIG only (quality, sns), never from pixels; (c) the RD loop is serial across
+  macroblocks by construction (the token probabilities are refreshed every mb_count/8 macroblocks from the statistics of all
+  earlier ones, and every decision uses them), so it runs as ONE work-group walking the macroblocks in raster order, chunked
+  per macroblock row per launch, with the parallelism INSIDE a macroblock: the 4 I16, 10 I4 (per 4x4 block) and 4 UV candidate
+  reconstructions are evaluated by separate threads and reduced to libwebp's choice (first index of the minimum score; the
+  I4 early-out never changes that result; the I16 flatness flag is a prefix-AND over the modes); (d) token emission, header and
+  RIFF assembly are single threads.
+- [ ] E2 intra mode decision: I16 (DC/V/H/TM), I4 (10 modes) and UV (4 modes) chosen by distortion + lambda * rate like
+      libwebp method 4 (`VP8Decimate`: score = SSE * RD_DISTO_MULT + lambda * bits, with the spectral-distortion term
+      `tlambda` for I4/I16); per-macroblock recon stays on the accelerator (wavefront, like the decoder).
+- [ ] E3 segmentation (4 segments from the per-macroblock alpha = DCT-histogram "complexity", k-means like
+      `VP8SegmentMap`), per-segment quantizer and filter strength; the quality -> quantizer mapping of `VP8SetSegmentParams`.
+- [ ] E4 token statistics pass + coefficient probability updates (`VP8WriteProbas` decisions by savings), skip probability,
+      `mb_no_skip_coeff`; partitions 1/2/4/8.
+- [ ] E5 loop filter strength (`VP8AdjustFilterStrength` default: from quantizer and sharpness 0), simple/normal filter.
+- [ ] E6 container on the accelerator: RIFF + `VP8 ` (simple) or VP8X + `ALPH` (alpha via `WebPLosslessEncoderGpu.EncodeAlphaAsync`)
+      + ICCP/EXIF/XMP; animation of lossy frames.
+- [ ] Gate (the JPEG encoder's bar): libwebp's lossy encoder is deterministic, so for Pillow's defaults (method 4 =
+      RD_OPT_BASIC, no trellis, sns 50, filter strength 60, sharpness 0, 4 segments, 1 partition, pass 1) our file is
+      BYTE-IDENTICAL to libwebp's for the same pixels and quality, on a corpus of photos / graphics / text / alpha at
+      quality 0..100, including 1920x1080 and 4000x3000. Intermediate checks while porting: our CPU reference decoder parses
+      both files, so segment map, quantizers, filter level, per-macroblock modes and probabilities can be diffed field by
+      field before the bytes match. Other methods (0..3, 5, 6) after method 4 is byte-identical.
+
 ## Animation API (APNG / GIF / WebP share it)
 
 `ImageFrameInfo` (Images/ImageTypes.cs) describes a frame's rectangle, duration, disposal and blend. Every animated format
