@@ -4,7 +4,9 @@
 // Specification (RFC 9649). The bitstream is one sequential dependency chain (variable-length prefix codes,
 // LZ77 copies that read earlier output, a colour cache updated per pixel), so per the library's cardinal rule
 // it runs as ONE GPU thread: still accelerator-resident, the compressed bytes and the decoded pixels never
-// touch the host. The inverse transforms that follow are separate kernels (Vp8lInverseKernels).
+// touch the host. That thread's work is cut into bounded launches (DecodeStep: a resumable state machine with a
+// per-launch budget), so no launch holds the GPU long whatever the image size. The inverse transforms that
+// follow are separate kernels.
 //
 // Shape: the same as InflateGpu - a state struct passed by ref into static helpers, no managed allocations,
 // no static tables (the constant tables are an int buffer the host uploads once), loops that need an early
@@ -71,8 +73,14 @@ public static class Vp8lLayout
     /// <summary>Start of the scratch region.</summary>
     public static int ScratchBase(int width, int height) => MapBase(width, height) + MapSize;
 
+    /// <summary>Ints of the resumable decode state (see Vp8lDecodeGpu.DecodeStep).</summary>
+    public const int StepInts = 32;
+
+    /// <summary>Start of the resumable decode state.</summary>
+    public static int StepBase(int width, int height) => ScratchBase(width, height) + ScratchInts;
+
     /// <summary>Total ints of the work buffer.</summary>
-    public static long WorkSize(int width, int height) => (long)ScratchBase(width, height) + ScratchInts;
+    public static long WorkSize(int width, int height) => (long)StepBase(width, height) + StepInts;
 }
 
 /// <summary>Constant tables the VP8L decoder reads (uploaded once by the host).</summary>
@@ -489,27 +497,20 @@ public static class Vp8lDecodeGpu
     }
 
     /// <summary>
-    /// Decodes <paramref name="xsize"/> x <paramref name="ysize"/> pixels with the groups at
-    /// <paramref name="groupTab"/>. The destination is <paramref name="pix"/> (the main image) when
-    /// <paramref name="toMain"/> is set, otherwise <c>work[dstBase ..]</c> (a sub-image).
+    /// Decodes pixels <paramref name="pos"/> .. of an <paramref name="xsize"/> x <paramref name="ysize"/> image with the groups
+    /// at <paramref name="groupTab"/> until the image is complete, an error is raised or <paramref name="budget"/> is spent
+    /// (one unit per pixel written). <paramref name="pos"/>, <paramref name="x"/>, <paramref name="y"/> carry over to the next
+    /// launch. The destination is <paramref name="pix"/> (the main image) when <paramref name="toMain"/> is set, otherwise
+    /// <c>work[dstBase ..]</c> (a sub-image). The colour cache is cleared by the caller before the first pixel.
     /// </summary>
     private static void DecodePixels(
         ref Vp8lBitState st, ArrayView<byte> file, ArrayView<int> work, ArrayView<int> pool, ArrayView<uint> pix,
         ArrayView<int> tables, int toMain, int dstBase, int xsize, int ysize, int cacheBits, int cacheBase,
-        int metaBits, int entBase, int tilesPerRow, int groupTab)
+        int metaBits, int entBase, int tilesPerRow, int groupTab, ref int pos, ref int x, ref int y, ref int budget)
     {
         int n = xsize * ysize;
         int cacheShift = 32 - cacheBits;
-        if (cacheBits > 0)
-        {
-            int cacheSize = 1 << cacheBits;
-            for (int i = 0; i < cacheSize; i++) work[cacheBase + i] = 0;
-        }
-
-        int pos = 0;
-        int x = 0;
-        int y = 0;
-        bool running = n > 0;
+        bool running = (pos < n) & (budget > 0) & (st.Err == 0);
         while (running)
         {
             int g = 0;
@@ -533,6 +534,7 @@ public static class Vp8lDecodeGpu
                     else work[dstBase + pos] = (int)px;
                     if (cacheBits > 0) work[cacheBase + (int)CacheHash(px, cacheShift)] = (int)px;
                     pos++;
+                    budget--;
                     x++;
                     if (x == xsize)
                     {
@@ -584,6 +586,7 @@ public static class Vp8lDecodeGpu
                             if (cacheBits > 0) work[cacheBase + (int)CacheHash(px, cacheShift)] = (int)px;
                             pos++;
                         }
+                        budget -= length;
                         int nx = x + length;
                         y += nx / xsize;
                         x = nx - (nx / xsize) * xsize;
@@ -604,6 +607,7 @@ public static class Vp8lDecodeGpu
                     else work[dstBase + pos] = (int)px;
                     work[cacheBase + (int)CacheHash(px, cacheShift)] = (int)px;
                     pos++;
+                    budget--;
                     x++;
                     if (x == xsize)
                     {
@@ -612,251 +616,447 @@ public static class Vp8lDecodeGpu
                     }
                 }
             }
-            running = (pos < n) & (st.Err == 0);
+            running = (pos < n) & (budget > 0) & (st.Err == 0);
         }
     }
 
-    /// <summary>
-    /// An entropy-coded image without meta prefix codes (transform data, palette, entropy image): colour cache
-    /// info, one group of prefix codes, the pixels into <c>work[dstBase ..]</c>. Its prefix codes live in the pool
-    /// only while it decodes.
-    /// </summary>
-    private static void DecodeSubImage(
-        ref Vp8lBitState st, ArrayView<byte> file, ArrayView<int> meta, ArrayView<int> work, ArrayView<int> pool,
-        ArrayView<uint> pix, ArrayView<int> tables, int sb, int w, int h, int dstBase, int cacheBase, int poolCap)
+    // ------------------------------------------------------------------
+    // Whole image: a resumable state machine
+    // ------------------------------------------------------------------
+    //
+    // The decode runs as a chain of launches. Each launch continues from the state in work[Vp8lLayout.StepBase ..] and
+    // stops when it has spent StepBudget units (a decoded pixel = 1, a prefix-code group = GroupCost, a step of the entropy
+    // map = 1), so no launch holds the GPU long whatever the image size; a launch after the end does nothing. The phases:
+    //   Start -> Transform* (each predictor / cross-colour / colour-indexing transform decodes a sub-image:
+    //   SubBegin -> SubPixels -> SubEnd) -> Cache (colour cache bits, meta prefix codes: the entropy sub-image, then the
+    //   group map in EntMax / EntClear / EntMark / EntCompact / EntRemap) -> GroupsBegin -> Groups -> MainBegin ->
+    //   MainPixels -> Done -> Finished.
+    // An error (st.Err) jumps to Done. The host zeroes the state before the first launch (Phase 0 = Start).
+
+    /// <summary>Work units one launch of <see cref="DecodeStep"/> may spend.</summary>
+    public const int StepBudget = 4096;
+    /// <summary>Units a prefix-code group costs (five code definitions, up to 2328 code lengths, table builds).</summary>
+    private const int GroupCost = 512;
+
+    private const int PhStart = 0, PhTransform = 1, PhSubBegin = 2, PhSubPixels = 3, PhSubEnd = 4, PhCache = 5,
+        PhEntMax = 6, PhEntClear = 7, PhEntMark = 8, PhEntCompact = 9, PhEntRemap = 10, PhGroupsBegin = 11, PhGroups = 12,
+        PhMainBegin = 13, PhMainPixels = 14, PhDone = 15;
+
+    /// <summary>Phase value once the decode (or its error) is final.</summary>
+    public const int PhaseFinished = 16;
+
+    // state slots, relative to Vp8lLayout.StepBase
+    /// <summary>Slot of the phase in the step state (the host polls it: <see cref="PhaseFinished"/> = done).</summary>
+    public const int SPhase = 0;
+    private const int SPos = 1, SEnd = 2, SBuf = 3, SCnt = 4, SVirt = 5, SErr = 6,
+        SXsize = 7, SXfPos = 8, SNx = 9, SSeen = 10,
+        SSubKind = 11, SSubW = 12, SSubH = 13, SSubDst = 14, SSubCacheBits = 15, SSubGroupTab = 16, SSubMark = 17, SSubRec = 18,
+        SPixPos = 19, SPixX = 20, SPixY = 21,
+        SCacheBits = 22, SMetaBits = 23, SGroups = 24, SGroupsUsed = 25, STilesPerRow = 26, SGroupTab = 27, SGi = 28,
+        SEntI = 29, SEntMax = 30;
+
+    private const int SubBlockTransform = 0, SubPalette = 1, SubEntropy = 2;
+
+    private static Vp8lBitState LoadBits(ArrayView<int> work, int b) => new Vp8lBitState
     {
-        int cacheBits = 0;
-        if (ReadBits(ref st, file, 1) == 1)
-        {
-            cacheBits = ReadBits(ref st, file, 4);
-            bool badBits = ((cacheBits < 1) | (cacheBits > 11)) & (st.Err == 0);
-            if (badBits)
-                st.Err = (int)WebPError.BadCacheBits;
-        }
-        if (st.Err == 0)
-        {
-            int cacheSize = cacheBits > 0 ? 1 << cacheBits : 0;
-            int mark = meta[WebPMeta.PoolUsed];
-            int groupTab = mark;
-            int after = mark + 5;
-            meta[WebPMeta.PoolUsed] = after;
-            if (after > meta[WebPMeta.PoolNeeded]) meta[WebPMeta.PoolNeeded] = after;
-            if (after > poolCap)
-            {
-                st.Err = (int)WebPError.PoolTooSmall;
-            }
-            else
-            {
-                ReadGroup(ref st, file, work, pool, meta, tables, sb, cacheSize, 1, groupTab, poolCap);
-                if (st.Err == 0)
-                    DecodePixels(ref st, file, work, pool, pix, tables, 0, dstBase, w, h, cacheBits, cacheBase, 0, 0, 0, groupTab);
-            }
-            meta[WebPMeta.PoolUsed] = mark;
-        }
+        Pos = work[b + SPos],
+        End = work[b + SEnd],
+        Buf = (uint)work[b + SBuf],
+        Cnt = work[b + SCnt],
+        Virt = work[b + SVirt],
+        Err = work[b + SErr],
+    };
+
+    private static void SaveBits(ArrayView<int> work, int b, ref Vp8lBitState st)
+    {
+        work[b + SPos] = st.Pos;
+        work[b + SEnd] = st.End;
+        work[b + SBuf] = (int)st.Buf;
+        work[b + SCnt] = st.Cnt;
+        work[b + SVirt] = st.Virt;
+        work[b + SErr] = st.Err;
     }
 
-    // ------------------------------------------------------------------
-    // Whole image
-    // ------------------------------------------------------------------
+    /// <summary>Starts decoding a sub-image (colour cache bits + its one group of prefix codes) into work[dst ..].</summary>
+    private static void BeginSubImage(ArrayView<int> work, int b, int kind, int w, int h, int dst, int rec)
+    {
+        work[b + SSubKind] = kind;
+        work[b + SSubW] = w;
+        work[b + SSubH] = h;
+        work[b + SSubDst] = dst;
+        work[b + SSubRec] = rec;
+        work[b + SPhase] = PhSubBegin;
+    }
 
     private static int CeilDiv(int a, int b) => (a + b - 1) / b;
 
     /// <summary>
-    /// Decodes the VP8L stream at <c>file[payOff .. payOff + payLen)</c> (the 5-byte header included, already
-    /// validated by the container scan). Writes the main image to <paramref name="pix"/> and the facts the host
-    /// needs (transform list, errors, pool use) to <paramref name="meta"/>.
+    /// One launch of the VP8L decode of <c>file[payOff .. payOff + payLen)</c> (the 5-byte header included, already
+    /// validated by the container scan): continues the state machine for up to <see cref="StepBudget"/> units. Writes the
+    /// main image to <paramref name="pix"/> and, once finished, the facts the host needs (transform list, errors, pool use)
+    /// to <paramref name="meta"/>.
     /// </summary>
-    public static void Decode(
+    public static void DecodeStep(
         ArrayView<byte> file, int payOff, int payLen, int width, int height, int poolCap,
         ArrayView<int> meta, ArrayView<int> work, ArrayView<int> pool, ArrayView<uint> pix, ArrayView<int> tables)
     {
-        for (int i = WebPMeta.DecodeError; i < WebPMeta.Size; i++) meta[i] = 0;
-
-        var st = new Vp8lBitState
-        {
-            Pos = payOff + 5,
-            End = payOff + payLen,
-            Buf = 0,
-            Cnt = 0,
-            Virt = 0,
-            Err = 0,
-        };
-
+        int b = Vp8lLayout.StepBase(width, height);
         int entBase = Vp8lLayout.EntropyBase(width, height);
         int cacheBase = Vp8lLayout.CacheBase(width, height);
         int mapBase = Vp8lLayout.MapBase(width, height);
         int sb = Vp8lLayout.ScratchBase(width, height);
 
-        // ---- transforms ----
-        int xsize = width;
-        int xfPos = 0;
-        int nx = 0;
-        int seen = 0;
-        int more = 1;
-        bool tloop = true;
-        while (tloop)
+        int phase = work[b + SPhase];
+        if (phase == PhStart)
         {
-            if (ReadBits(ref st, file, 1) == 0)
+            for (int i = WebPMeta.DecodeError; i < WebPMeta.Size; i++) meta[i] = 0;
+            work[b + SPos] = payOff + 5;
+            work[b + SEnd] = payOff + payLen;
+            work[b + SBuf] = 0;
+            work[b + SCnt] = 0;
+            work[b + SVirt] = 0;
+            work[b + SErr] = 0;
+            work[b + SXsize] = width;
+            work[b + SXfPos] = 0;
+            work[b + SNx] = 0;
+            work[b + SSeen] = 0;
+            phase = PhTransform;
+            work[b + SPhase] = phase;
+        }
+        var st = LoadBits(work, b);
+        int budget = StepBudget;
+        bool go = (phase != PhaseFinished) & (budget > 0);
+        while (go)
+        {
+            if (phase == PhTransform)
             {
-                more = 0;
-            }
-            else
-            {
-                int type = ReadBits(ref st, file, 2);
-                if (((seen >> type) & 1) != 0)
+                budget--;
+                if (ReadBits(ref st, file, 1) == 0)
                 {
-                    if (st.Err == 0) st.Err = (int)WebPError.BadTransform;
+                    work[b + SPhase] = PhCache;
                 }
                 else
                 {
-                    seen |= 1 << type;
-                    int rec = WebPMeta.Transforms + nx * WebPMeta.TransformStride;
-                    meta[rec + WebPMeta.TrKind] = type;
-                    meta[rec + WebPMeta.TrWidth] = xsize;
-                    bool blockTransform = (type == WebPMeta.KindPredictor) | (type == WebPMeta.KindCrossColor);
-                    if (blockTransform)
+                    int type = ReadBits(ref st, file, 2);
+                    int seen = work[b + SSeen];
+                    int nx = work[b + SNx];
+                    int xsize = work[b + SXsize];
+                    if (((seen >> type) & 1) != 0)
                     {
-                        int bits = ReadBits(ref st, file, 3) + 2;
-                        int bw = CeilDiv(xsize, 1 << bits);
-                        int bh = CeilDiv(height, 1 << bits);
-                        meta[rec + WebPMeta.TrBits] = bits;
-                        meta[rec + WebPMeta.TrData] = xfPos;
-                        if (st.Err == 0)
+                        if (st.Err == 0) st.Err = (int)WebPError.BadTransform;
+                    }
+                    else
+                    {
+                        work[b + SSeen] = seen | (1 << type);
+                        int rec = WebPMeta.Transforms + nx * WebPMeta.TransformStride;
+                        meta[rec + WebPMeta.TrKind] = type;
+                        meta[rec + WebPMeta.TrWidth] = xsize;
+                        bool blockTransform = (type == WebPMeta.KindPredictor) | (type == WebPMeta.KindCrossColor);
+                        if (blockTransform)
                         {
-                            DecodeSubImage(ref st, file, meta, work, pool, pix, tables, sb, bw, bh, xfPos, cacheBase, poolCap);
-                            xfPos += bw * bh;
+                            int bits = ReadBits(ref st, file, 3) + 2;
+                            meta[rec + WebPMeta.TrBits] = bits;
+                            meta[rec + WebPMeta.TrData] = work[b + SXfPos];
+                            BeginSubImage(work, b, SubBlockTransform, CeilDiv(xsize, 1 << bits), CeilDiv(height, 1 << bits), work[b + SXfPos], rec);
+                        }
+                        else if (type == WebPMeta.KindColorIndexing)
+                        {
+                            int count = ReadBits(ref st, file, 8) + 1;
+                            meta[rec + WebPMeta.TrData] = work[b + SXfPos];
+                            meta[rec + WebPMeta.TrCount] = count;
+                            BeginSubImage(work, b, SubPalette, count, 1, work[b + SXfPos], rec);
+                        }
+                        else
+                        {
+                            work[b + SNx] = nx + 1; // subtract green: no data
                         }
                     }
-                    else if (type == WebPMeta.KindColorIndexing)
-                    {
-                        int count = ReadBits(ref st, file, 8) + 1;
-                        meta[rec + WebPMeta.TrData] = xfPos;
-                        meta[rec + WebPMeta.TrCount] = count;
-                        if (st.Err == 0)
-                        {
-                            DecodeSubImage(ref st, file, meta, work, pool, pix, tables, sb, count, 1, xfPos, cacheBase, poolCap);
-                            if (st.Err == 0)
-                            {
-                                // The palette is delta coded: each entry adds to the previous one, channel by channel.
-                                for (int i = 1; i < count; i++)
-                                {
-                                    uint cur = (uint)work[xfPos + i];
-                                    uint prv = (uint)work[xfPos + i - 1];
-                                    uint ag = (cur & 0xff00ff00u) + (prv & 0xff00ff00u);
-                                    uint rb = (cur & 0x00ff00ffu) + (prv & 0x00ff00ffu);
-                                    work[xfPos + i] = (int)((ag & 0xff00ff00u) | (rb & 0x00ff00ffu));
-                                }
-                            }
-                            int wbits = 0;
-                            if (count <= 2) wbits = 3;
-                            else if (count <= 4) wbits = 2;
-                            else if (count <= 16) wbits = 1;
-                            meta[rec + WebPMeta.TrBits] = wbits;
-                            xsize = CeilDiv(xsize, 1 << wbits);
-                            xfPos += count;
-                        }
-                    }
-                    nx++;
                 }
             }
-            tloop = (more == 1) & (st.Err == 0);
-        }
-        meta[WebPMeta.TransformCount] = nx;
-        meta[WebPMeta.PackedWidth] = xsize;
-
-        // ---- colour cache + meta prefix codes ----
-        int cacheBits = 0;
-        if (st.Err == 0)
-        {
-            if (ReadBits(ref st, file, 1) == 1)
+            else if (phase == PhSubBegin)
             {
-                cacheBits = ReadBits(ref st, file, 4);
-                bool badBits = ((cacheBits < 1) | (cacheBits > 11)) & (st.Err == 0);
-                if (badBits)
-                    st.Err = (int)WebPError.BadCacheBits;
-            }
-        }
-        meta[WebPMeta.CacheBits] = cacheBits;
-        int cacheSizeMain = cacheBits > 0 ? 1 << cacheBits : 0;
-
-        int metaBits = 0;
-        int groups = 1;
-        int groupsUsed = 1;
-        int tilesPerRow = 0;
-        if (st.Err == 0)
-        {
-            if (ReadBits(ref st, file, 1) == 1)
-            {
-                metaBits = ReadBits(ref st, file, 3) + 2;
-                int ew = CeilDiv(xsize, 1 << metaBits);
-                int eh = CeilDiv(height, 1 << metaBits);
-                tilesPerRow = ew;
-                if (st.Err == 0)
+                budget--;
+                int cacheBits = 0;
+                if (ReadBits(ref st, file, 1) == 1)
                 {
-                    DecodeSubImage(ref st, file, meta, work, pool, pix, tables, sb, ew, eh, entBase, cacheBase, poolCap);
+                    cacheBits = ReadBits(ref st, file, 4);
+                    bool badBits = ((cacheBits < 1) | (cacheBits > 11)) & (st.Err == 0);
+                    if (badBits)
+                        st.Err = (int)WebPError.BadCacheBits;
                 }
                 if (st.Err == 0)
                 {
-                    // The group index is red + green of each entropy pixel. Only referenced groups get tables; the others
-                    // are parsed (they take bits) and validated but not stored.
-                    int maxIdx = 0;
-                    int entN = ew * eh;
-                    for (int i = 0; i < entN; i++)
+                    int cacheSize = cacheBits > 0 ? 1 << cacheBits : 0;
+                    int mark = meta[WebPMeta.PoolUsed];
+                    int after = mark + 5;
+                    meta[WebPMeta.PoolUsed] = after;
+                    if (after > meta[WebPMeta.PoolNeeded]) meta[WebPMeta.PoolNeeded] = after;
+                    work[b + SSubCacheBits] = cacheBits;
+                    work[b + SSubGroupTab] = mark;
+                    work[b + SSubMark] = mark;
+                    if (after > poolCap)
                     {
-                        int gi = (work[entBase + i] >> 8) & 0xFFFF;
-                        if (gi > maxIdx) maxIdx = gi;
+                        st.Err = (int)WebPError.PoolTooSmall;
                     }
-                    groups = maxIdx + 1;
-                    for (int i = 0; i < groups; i++) work[mapBase + i] = -1;
-                    for (int i = 0; i < entN; i++)
-                        work[mapBase + ((work[entBase + i] >> 8) & 0xFFFF)] = -2;
-                    groupsUsed = 0;
-                    for (int i = 0; i < groups; i++)
+                    else
                     {
-                        if (work[mapBase + i] == -2)
-                        {
-                            work[mapBase + i] = groupsUsed;
-                            groupsUsed++;
-                        }
+                        ReadGroup(ref st, file, work, pool, meta, tables, sb, cacheSize, 1, mark, poolCap);
+                        budget -= GroupCost;
+                        for (int i = 0; i < cacheSize; i++) work[cacheBase + i] = 0;
+                        work[b + SPixPos] = 0;
+                        work[b + SPixX] = 0;
+                        work[b + SPixY] = 0;
+                        work[b + SPhase] = PhSubPixels;
                     }
-                    for (int i = 0; i < entN; i++)
-                        work[entBase + i] = work[mapBase + ((work[entBase + i] >> 8) & 0xFFFF)];
                 }
             }
-        }
-        meta[WebPMeta.MetaBits] = metaBits;
-        meta[WebPMeta.Groups] = groups;
-        meta[WebPMeta.GroupsUsed] = groupsUsed;
-
-        // ---- prefix codes of every group, then the pixels ----
-        if (st.Err == 0)
-        {
-            int groupTab = meta[WebPMeta.PoolUsed];
-            int after = groupTab + 5 * groupsUsed;
-            meta[WebPMeta.PoolUsed] = after;
-            if (after > meta[WebPMeta.PoolNeeded]) meta[WebPMeta.PoolNeeded] = after;
-            if (after > poolCap) st.Err = (int)WebPError.PoolTooSmall;
-
-            int gi = 0;
-            bool gloop = (groups > 0) & (st.Err == 0);
-            while (gloop)
+            else if (phase == PhSubPixels)
             {
+                int pos = work[b + SPixPos];
+                int x = work[b + SPixX];
+                int y = work[b + SPixY];
+                int w = work[b + SSubW];
+                int h = work[b + SSubH];
+                DecodePixels(ref st, file, work, pool, pix, tables, 0, work[b + SSubDst], w, h, work[b + SSubCacheBits], cacheBase,
+                    0, 0, 0, work[b + SSubGroupTab], ref pos, ref x, ref y, ref budget);
+                work[b + SPixPos] = pos;
+                work[b + SPixX] = x;
+                work[b + SPixY] = y;
+                if (pos >= w * h) work[b + SPhase] = PhSubEnd;
+            }
+            else if (phase == PhSubEnd)
+            {
+                budget--;
+                // the sub-image's prefix codes live in the pool only while it decodes
+                meta[WebPMeta.PoolUsed] = work[b + SSubMark];
+                int kind = work[b + SSubKind];
+                int w = work[b + SSubW];
+                int h = work[b + SSubH];
+                if (kind == SubEntropy)
+                {
+                    work[b + SEntI] = 0;
+                    work[b + SEntMax] = 0;
+                    work[b + SPhase] = PhEntMax;
+                }
+                else
+                {
+                    int xfPos = work[b + SXfPos];
+                    if (kind == SubPalette)
+                    {
+                        int count = w;
+                        // The palette is delta coded: each entry adds to the previous one, channel by channel.
+                        for (int i = 1; i < count; i++)
+                        {
+                            uint cur = (uint)work[xfPos + i];
+                            uint prv = (uint)work[xfPos + i - 1];
+                            uint ag = (cur & 0xff00ff00u) + (prv & 0xff00ff00u);
+                            uint rb = (cur & 0x00ff00ffu) + (prv & 0x00ff00ffu);
+                            work[xfPos + i] = (int)((ag & 0xff00ff00u) | (rb & 0x00ff00ffu));
+                        }
+                        int wbits = 0;
+                        if (count <= 2) wbits = 3;
+                        else if (count <= 4) wbits = 2;
+                        else if (count <= 16) wbits = 1;
+                        meta[work[b + SSubRec] + WebPMeta.TrBits] = wbits;
+                        work[b + SXsize] = CeilDiv(work[b + SXsize], 1 << wbits);
+                    }
+                    work[b + SXfPos] = xfPos + w * h;
+                    work[b + SNx] = work[b + SNx] + 1;
+                    work[b + SPhase] = PhTransform;
+                }
+            }
+            else if (phase == PhCache)
+            {
+                budget--;
+                int xsize = work[b + SXsize];
+                meta[WebPMeta.TransformCount] = work[b + SNx];
+                meta[WebPMeta.PackedWidth] = xsize;
+                int cacheBits = 0;
+                if (ReadBits(ref st, file, 1) == 1)
+                {
+                    cacheBits = ReadBits(ref st, file, 4);
+                    bool badBits = ((cacheBits < 1) | (cacheBits > 11)) & (st.Err == 0);
+                    if (badBits)
+                        st.Err = (int)WebPError.BadCacheBits;
+                }
+                meta[WebPMeta.CacheBits] = cacheBits;
+                work[b + SCacheBits] = cacheBits;
+                work[b + SMetaBits] = 0;
+                work[b + SGroups] = 1;
+                work[b + SGroupsUsed] = 1;
+                work[b + STilesPerRow] = 0;
+                if (st.Err == 0)
+                {
+                    if (ReadBits(ref st, file, 1) == 1)
+                    {
+                        int metaBits = ReadBits(ref st, file, 3) + 2;
+                        int ew = CeilDiv(xsize, 1 << metaBits);
+                        work[b + SMetaBits] = metaBits;
+                        work[b + STilesPerRow] = ew;
+                        BeginSubImage(work, b, SubEntropy, ew, CeilDiv(height, 1 << metaBits), entBase, 0);
+                    }
+                    else
+                    {
+                        work[b + SPhase] = PhGroupsBegin;
+                    }
+                }
+            }
+            else if (phase == PhEntMax)
+            {
+                // The group index is red + green of each entropy pixel. Only referenced groups get tables; the others
+                // are parsed (they take bits) and validated but not stored.
+                int entN = work[b + SSubW] * work[b + SSubH];
+                int i = work[b + SEntI];
+                int maxIdx = work[b + SEntMax];
+                int end = i + budget;
+                if (end > entN) end = entN;
+                budget -= end - i;
+                for (; i < end; i++)
+                {
+                    int gi = (work[entBase + i] >> 8) & 0xFFFF;
+                    if (gi > maxIdx) maxIdx = gi;
+                }
+                work[b + SEntMax] = maxIdx;
+                work[b + SEntI] = i;
+                if (i >= entN)
+                {
+                    work[b + SGroups] = maxIdx + 1;
+                    work[b + SEntI] = 0;
+                    work[b + SPhase] = PhEntClear;
+                }
+            }
+            else if (phase == PhEntClear)
+            {
+                int groups = work[b + SGroups];
+                int i = work[b + SEntI];
+                int end = i + budget;
+                if (end > groups) end = groups;
+                budget -= end - i;
+                for (; i < end; i++) work[mapBase + i] = -1;
+                work[b + SEntI] = i;
+                if (i >= groups)
+                {
+                    work[b + SEntI] = 0;
+                    work[b + SPhase] = PhEntMark;
+                }
+            }
+            else if (phase == PhEntMark)
+            {
+                int entN = work[b + SSubW] * work[b + SSubH];
+                int i = work[b + SEntI];
+                int end = i + budget;
+                if (end > entN) end = entN;
+                budget -= end - i;
+                for (; i < end; i++) work[mapBase + ((work[entBase + i] >> 8) & 0xFFFF)] = -2;
+                work[b + SEntI] = i;
+                if (i >= entN)
+                {
+                    work[b + SEntI] = 0;
+                    work[b + SGroupsUsed] = 0;
+                    work[b + SPhase] = PhEntCompact;
+                }
+            }
+            else if (phase == PhEntCompact)
+            {
+                int groups = work[b + SGroups];
+                int used = work[b + SGroupsUsed];
+                int i = work[b + SEntI];
+                int end = i + budget;
+                if (end > groups) end = groups;
+                budget -= end - i;
+                for (; i < end; i++)
+                {
+                    if (work[mapBase + i] == -2)
+                    {
+                        work[mapBase + i] = used;
+                        used++;
+                    }
+                }
+                work[b + SGroupsUsed] = used;
+                work[b + SEntI] = i;
+                if (i >= groups)
+                {
+                    work[b + SEntI] = 0;
+                    work[b + SPhase] = PhEntRemap;
+                }
+            }
+            else if (phase == PhEntRemap)
+            {
+                int entN = work[b + SSubW] * work[b + SSubH];
+                int i = work[b + SEntI];
+                int end = i + budget;
+                if (end > entN) end = entN;
+                budget -= end - i;
+                for (; i < end; i++) work[entBase + i] = work[mapBase + ((work[entBase + i] >> 8) & 0xFFFF)];
+                work[b + SEntI] = i;
+                if (i >= entN) work[b + SPhase] = PhGroupsBegin;
+            }
+            else if (phase == PhGroupsBegin)
+            {
+                budget--;
+                meta[WebPMeta.MetaBits] = work[b + SMetaBits];
+                meta[WebPMeta.Groups] = work[b + SGroups];
+                meta[WebPMeta.GroupsUsed] = work[b + SGroupsUsed];
+                int groupTab = meta[WebPMeta.PoolUsed];
+                int after = groupTab + 5 * work[b + SGroupsUsed];
+                meta[WebPMeta.PoolUsed] = after;
+                if (after > meta[WebPMeta.PoolNeeded]) meta[WebPMeta.PoolNeeded] = after;
+                if (after > poolCap) st.Err = (int)WebPError.PoolTooSmall;
+                work[b + SGroupTab] = groupTab;
+                work[b + SGi] = 0;
+                work[b + SPhase] = work[b + SGroups] > 0 ? PhGroups : PhMainBegin;
+            }
+            else if (phase == PhGroups)
+            {
+                int gi = work[b + SGi];
                 int id = 0;
-                if (metaBits > 0) id = work[mapBase + gi];
+                if (work[b + SMetaBits] > 0) id = work[mapBase + gi];
                 int store = id >= 0 ? 1 : 0;
-                int tab = groupTab + (id >= 0 ? id : 0) * 5;
+                int tab = work[b + SGroupTab] + (id >= 0 ? id : 0) * 5;
+                int cacheSizeMain = work[b + SCacheBits] > 0 ? 1 << work[b + SCacheBits] : 0;
                 ReadGroup(ref st, file, work, pool, meta, tables, sb, cacheSizeMain, store, tab, poolCap);
+                budget -= GroupCost;
                 gi++;
-                gloop = (gi < groups) & (st.Err == 0);
+                work[b + SGi] = gi;
+                if (gi >= work[b + SGroups]) work[b + SPhase] = PhMainBegin;
             }
-            if (st.Err == 0)
+            else if (phase == PhMainBegin)
             {
-                DecodePixels(ref st, file, work, pool, pix, tables, 1, 0, xsize, height, cacheBits, cacheBase,
-                    metaBits, entBase, tilesPerRow, groupTab);
+                budget--;
+                int cacheBits = work[b + SCacheBits];
+                int cacheSize = cacheBits > 0 ? 1 << cacheBits : 0;
+                for (int i = 0; i < cacheSize; i++) work[cacheBase + i] = 0;
+                work[b + SPixPos] = 0;
+                work[b + SPixX] = 0;
+                work[b + SPixY] = 0;
+                work[b + SPhase] = PhMainPixels;
             }
+            else if (phase == PhMainPixels)
+            {
+                int pos = work[b + SPixPos];
+                int x = work[b + SPixX];
+                int y = work[b + SPixY];
+                int xsize = work[b + SXsize];
+                DecodePixels(ref st, file, work, pool, pix, tables, 1, 0, xsize, height, work[b + SCacheBits], cacheBase,
+                    work[b + SMetaBits], entBase, work[b + STilesPerRow], work[b + SGroupTab], ref pos, ref x, ref y, ref budget);
+                work[b + SPixPos] = pos;
+                work[b + SPixX] = x;
+                work[b + SPixY] = y;
+                if (pos >= xsize * height) work[b + SPhase] = PhDone;
+            }
+            else if (phase == PhDone)
+            {
+                budget--;
+                meta[WebPMeta.BitsConsumed] = (st.Pos - payOff) * 8 - st.Cnt + st.Virt;
+                meta[WebPMeta.DecodeError] = st.Err;
+                work[b + SPhase] = PhaseFinished;
+            }
+            // an error ends the decode (Done records it), from whatever phase raised it
+            bool failed = (st.Err != 0) & (work[b + SPhase] != PhaseFinished);
+            if (failed) work[b + SPhase] = PhDone;
+            phase = work[b + SPhase];
+            go = (phase != PhaseFinished) & (budget > 0);
         }
-
-        meta[WebPMeta.BitsConsumed] = (st.Pos - payOff) * 8 - st.Cnt + st.Virt;
-        meta[WebPMeta.DecodeError] = st.Err;
+        SaveBits(work, b, ref st);
     }
 }

@@ -5,7 +5,7 @@
 //
 //   1. ScanKernel       (1 thread)  RIFF walk: VP8X flags, canvas, ICCP / EXIF / XMP locations, EXIF orientation,
 //                                   ANIM, the ANMF frame table, the image chunk, and the VP8L header facts.
-//   2. DecodeKernel     (1 thread)  VP8L bitstream -> ARGB main image + transform list (Vp8lDecodeGpu).
+//   2. DecodeKernel     (1 thread, resumable)  VP8L bitstream -> ARGB main image + transform list (Vp8lDecodeGpu.DecodeStep).
 //   3. Inverse transforms           subtract green (parallel), cross colour (parallel), colour indexing with pixel
 //                                   unbundling (parallel), predictor (sequential in raster order, see below).
 //   4. ToRgbaKernel     (1 thread per pixel)  ARGB -> RGBA8 bytes.
@@ -14,7 +14,8 @@
 //                                   bit-exact with libwebp's WebPAnimDecoder.
 //
 // The predictor inverse is a dependency chain in raster order (each pixel reads its left, top, top-left and
-// top-right neighbours AFTER they were reconstructed), so it is one GPU thread - still accelerator-resident.
+// top-right neighbours AFTER they were reconstructed), so it is one GPU thread - still accelerator-resident - cut into
+// launches of whole rows (PredictorPixelsPerLaunch) so no launch holds the GPU long.
 // Pixels on one anti-diagonal x + 2y = const are independent, so it can become a wavefront later.
 
 using ILGPU;
@@ -40,12 +41,12 @@ public sealed class WebPKernels : IDisposable
         ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<uint>, ArrayView<int>> _decode;
     private readonly Action<Index1D, ArrayView<uint>> _subtractGreen;
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, int, int, int> _crossColor;
-    private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, int, int, int, int> _predictor;
+    private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, int, int, int, int, int, int> _predictor;
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, int, int, int, int, int> _colorIndex;
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<byte>> _toRgba;
     private readonly Action<Index1D, ArrayView<uint>> _alphaGreen;
     private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<uint>> _alphaCopy;
-    private readonly Action<Index1D, ArrayView<uint>, int, int, int, int> _alphaUnfilter;
+    private readonly Action<Index1D, ArrayView<uint>, int, int, int, int, int> _alphaUnfilter;
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<byte>> _alphaPack;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>> _applyAlpha;
     private readonly Action<Index1D, ArrayView<byte>, int, int, int, int, int> _clearRect;
@@ -65,7 +66,7 @@ public sealed class WebPKernels : IDisposable
         _crossColor = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<uint>, ArrayView<int>, int, int, int>(CrossColorKernel);
         _predictor = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<uint>, ArrayView<int>, int, int, int, int>(PredictorKernel);
+            Index1D, ArrayView<uint>, ArrayView<int>, int, int, int, int, int, int>(PredictorKernel);
         _colorIndex = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, int, int, int, int, int>(ColorIndexKernel);
         _toRgba = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<uint>, ArrayView<byte>>(ToRgbaKernel);
@@ -73,7 +74,7 @@ public sealed class WebPKernels : IDisposable
         _alphaCopy = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, int, ArrayView<uint>>(AlphaCopyKernel);
         _alphaUnfilter = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<uint>, int, int, int, int>(AlphaUnfilterKernel);
+            Index1D, ArrayView<uint>, int, int, int, int, int>(AlphaUnfilterKernel);
         _alphaPack = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<uint>, ArrayView<byte>>(AlphaPackKernel);
         _applyAlpha = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>>(ApplyAlphaKernel);
         _clearRect = accelerator.LoadAutoGroupedStreamKernel<
@@ -93,8 +94,12 @@ public sealed class WebPKernels : IDisposable
         _scan(1, file, fileLength, meta, frames, frameCapacity);
     }
 
-    /// <summary>Decode the VP8L stream at <c>file[payloadOffset ..]</c> into <paramref name="pix"/>.</summary>
-    public void Decode(
+    /// <summary>
+    /// One bounded launch of the VP8L decode of the stream at <c>file[payloadOffset ..]</c> into <paramref name="pix"/>
+    /// (Vp8lDecodeGpu.DecodeStep: it continues the resumable state machine; the caller zeroes the state first and launches
+    /// until the phase reads <see cref="Vp8lDecodeGpu.PhaseFinished"/>).
+    /// </summary>
+    public void DecodeStep(
         ArrayView<byte> file, int payloadOffset, int payloadLength, int width, int height, int poolCapacity,
         ArrayView<int> meta, ArrayView<int> work, ArrayView<int> pool, ArrayView<uint> pix, ArrayView<int> tables)
     {
@@ -108,9 +113,16 @@ public sealed class WebPKernels : IDisposable
     public void CrossColor(ArrayView<uint> pix, ArrayView<int> work, int dataBase, int bits, int width, int count)
         => _crossColor(count, pix, work, dataBase, bits, width);
 
-    /// <summary>Inverse predictor transform, in place (one thread, raster order).</summary>
+    /// <summary>Pixels the inverse predictor reconstructs per launch (it is a raster-order dependency chain: one thread).</summary>
+    public const int PredictorPixelsPerLaunch = 16384;
+
+    /// <summary>Inverse predictor transform, in place: one thread in raster order, cut into launches of whole rows.</summary>
     public void Predictor(ArrayView<uint> pix, ArrayView<int> work, int dataBase, int bits, int width, int height)
-        => _predictor(1, pix, work, dataBase, bits, width, height);
+    {
+        int rows = Math.Max(1, PredictorPixelsPerLaunch / Math.Max(1, width));
+        for (int y = 0; y < height; y += rows)
+            _predictor(1, pix, work, dataBase, bits, width, height, y, Math.Min(rows, height - y));
+    }
 
     /// <summary>Inverse colour indexing: <paramref name="src"/> (packed, width <paramref name="srcWidth"/>) to <paramref name="dst"/> (width <paramref name="width"/>).</summary>
     public void ColorIndex(
@@ -131,14 +143,22 @@ public sealed class WebPKernels : IDisposable
     /// Undo the ALPH prediction filter (1 horizontal, 2 vertical, 3 gradient; 0 = nothing) of a <paramref name="width"/> x
     /// <paramref name="height"/> plane held one sample per uint, in place. Two dispatches for the separable filters (a short
     /// serial edge pass, then every row / column in parallel); the gradient filter depends on its three causal neighbours in
-    /// both directions, so it is one thread in raster order (an anti-diagonal wavefront can replace it later).
+    /// both directions, so it is one thread in raster order (an anti-diagonal wavefront can replace it later), cut into
+    /// launches of whole rows (<see cref="PredictorPixelsPerLaunch"/> samples) so no launch holds the GPU long.
     /// </summary>
     public void AlphaUnfilter(ArrayView<uint> plane, int width, int height, int filter)
     {
         if (filter == 0) return;
-        _alphaUnfilter(1, plane, width, height, filter, 0);
-        if (filter == 1) _alphaUnfilter(height, plane, width, height, filter, 1);
-        else if (filter == 2) _alphaUnfilter(width, plane, width, height, filter, 1);
+        if (filter == 3)
+        {
+            int rows = Math.Max(1, PredictorPixelsPerLaunch / Math.Max(1, width));
+            for (int y = 0; y < height; y += rows)
+                _alphaUnfilter(1, plane, width, height, filter, y, Math.Min(rows, height - y));
+            return;
+        }
+        _alphaUnfilter(1, plane, width, height, filter, 0, 0);
+        if (filter == 1) _alphaUnfilter(height, plane, width, height, filter, 1, 0);
+        else if (filter == 2) _alphaUnfilter(width, plane, width, height, filter, 1, 0);
     }
 
     /// <summary>One sample per uint to bytes.</summary>
@@ -613,7 +633,7 @@ public sealed class WebPKernels : IDisposable
         Index1D _, ArrayView<byte> file, int payloadOffset, int payloadLength, int width, int height, int poolCapacity,
         ArrayView<int> meta, ArrayView<int> work, ArrayView<int> pool, ArrayView<uint> pix, ArrayView<int> tables)
     {
-        Vp8lDecodeGpu.Decode(file, payloadOffset, payloadLength, width, height, poolCapacity, meta, work, pool, pix, tables);
+        Vp8lDecodeGpu.DecodeStep(file, payloadOffset, payloadLength, width, height, poolCapacity, meta, work, pool, pix, tables);
     }
 
     // ------------------------------------------------------------------
@@ -737,16 +757,23 @@ public sealed class WebPKernels : IDisposable
         return r;
     }
 
+    /// <summary>Rows <paramref name="rowStart"/> .. + <paramref name="rows"/> of the inverse predictor (rows above are done).</summary>
     private static void PredictorKernel(
-        Index1D _, ArrayView<uint> pix, ArrayView<int> work, int dataBase, int bits, int width, int height)
+        Index1D _, ArrayView<uint> pix, ArrayView<int> work, int dataBase, int bits, int width, int height, int rowStart, int rows)
     {
         int tilesPerRow = (width + (1 << bits) - 1) >> bits;
-        // First row: the very first pixel predicts from opaque black, the others from their left neighbour.
-        pix[0] = AddPixels(pix[0], 0xff000000u);
-        for (int x = 1; x < width; x++)
-            pix[x] = AddPixels(pix[x], pix[x - 1]);
-
-        for (int y = 1; y < height; y++)
+        int first = rowStart;
+        if (rowStart == 0)
+        {
+            // First row: the very first pixel predicts from opaque black, the others from their left neighbour.
+            pix[0] = AddPixels(pix[0], 0xff000000u);
+            for (int x = 1; x < width; x++)
+                pix[x] = AddPixels(pix[x], pix[x - 1]);
+            first = 1;
+        }
+        int end = rowStart + rows;
+        if (end > height) end = height;
+        for (int y = first; y < end; y++)
         {
             int row = y * width;
             // Leftmost column predicts from the pixel above.
@@ -828,7 +855,11 @@ public sealed class WebPKernels : IDisposable
     /// and (0, 0) from 0. Phase 0 is the serial edge pass (column 0 for horizontal, row 0 for vertical, everything for
     /// gradient), phase 1 runs one thread per row (horizontal) or per column (vertical).
     /// </summary>
-    private static void AlphaUnfilterKernel(Index1D index, ArrayView<uint> p, int width, int height, int filter, int phase)
+    /// <summary>
+    /// Filters 1 / 2: <paramref name="phase"/> 0 = the serial edge, 1 = one row / column per thread. Filter 3 (gradient):
+    /// rows <paramref name="phase"/> .. + <paramref name="rows"/> in raster order (the rows above are done).
+    /// </summary>
+    private static void AlphaUnfilterKernel(Index1D index, ArrayView<uint> p, int width, int height, int filter, int phase, int rows)
     {
         int t = index.X;
         if (filter == 1)
@@ -860,9 +891,16 @@ public sealed class WebPKernels : IDisposable
         }
         else if (filter == 3)
         {
-            for (int x = 1; x < width; x++)
-                p[x] = (p[x] + p[x - 1]) & 0xFFu;
-            for (int y = 1; y < height; y++)
+            int first = phase;
+            if (phase == 0)
+            {
+                for (int x = 1; x < width; x++)
+                    p[x] = (p[x] + p[x - 1]) & 0xFFu;
+                first = 1;
+            }
+            int end = phase + rows;
+            if (end > height) end = height;
+            for (int y = first; y < end; y++)
             {
                 int row = y * width;
                 p[row] = (p[row] + p[row - width]) & 0xFFu;

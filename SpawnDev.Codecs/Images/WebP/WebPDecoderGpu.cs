@@ -490,10 +490,23 @@ public sealed class WebPDecoderGpu : IDisposable
     {
         int[] m;
         int poolCap = (int)Math.Min(_pool.View.Length, int.MaxValue);
+        int stepBase = Vp8lLayout.StepBase(w, h);
         while (true)
         {
-            _kernels.Decode(file, payloadOffset, payloadLength, w, h, poolCap, _meta.View, _work.View, _pool.View, _pixA.View, _tables.View);
-            await _accelerator.SynchronizeAsync();
+            // Bounded launches of the resumable decode: the first batch covers the pixels (plus a margin for the headers,
+            // the sub-images and the prefix codes), then one int of the state tells whether more are needed.
+            _work.View.SubView(stepBase, Vp8lLayout.StepInts).MemSetToZero();
+            long batch = (long)w * h / Vp8lDecodeGpu.StepBudget + 4;
+            bool finished = false;
+            while (!finished)
+            {
+                for (long i = 0; i < batch; i++)
+                    _kernels.DecodeStep(file, payloadOffset, payloadLength, w, h, poolCap, _meta.View, _work.View, _pool.View, _pixA.View, _tables.View);
+                await _accelerator.SynchronizeAsync();
+                var phase = await _work.View.SubView(stepBase + Vp8lDecodeGpu.SPhase, 1).CopyToHostAsync();
+                finished = phase[0] == Vp8lDecodeGpu.PhaseFinished;
+                batch = 16;
+            }
             m = await _meta.View.CopyToHostAsync();
             var err = (WebPError)m[WebPMeta.DecodeError];
             if (err == WebPError.PoolTooSmall)
