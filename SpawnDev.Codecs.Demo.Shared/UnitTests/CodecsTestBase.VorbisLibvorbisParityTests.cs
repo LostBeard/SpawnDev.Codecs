@@ -85,7 +85,8 @@ public abstract partial class CodecsTestBase
         {
             var decoded = VorbisOggDecoder.Decode(fx.Ogg);
             string? diff = CompareVorbisPcm(fx, decoded.InterleavedSamples, out float err);
-            Console.WriteLine($"{fx.Name}: {DescribeVorbisSetup(decoded.Identification, decoded.Setup)}, max |error| {err:G4}");
+            Console.WriteLine($"{fx.Name}: {DescribeVorbisSetup(decoded.Identification, decoded.Setup)}, " +
+                $"{decoded.InterleavedSamples.Length / fx.Channels} frames (libvorbis {fx.Frames}), max |error| {err:G4}");
             if (diff != null) failures.Add(diff);
         }
         True(failures.Count == 0, string.Join("\n", failures));
@@ -103,7 +104,8 @@ public abstract partial class CodecsTestBase
             var ours = new List<float>(fx.Frames * fx.Channels + ident.BlockSize1 * fx.Channels);
             foreach (var packet in audio) ours.AddRange(await dec.DecodePacketAsync(packet));
             string? diff = CompareVorbisPcm(fx, ours.ToArray(), out float err);
-            Console.WriteLine($"{fx.Name}: {DescribeVorbisSetup(ident, setup)}, max |error| {err:G4}");
+            Console.WriteLine($"{fx.Name}: {DescribeVorbisSetup(ident, setup)}, " +
+                $"{ours.Count / fx.Channels} frames (libvorbis {fx.Frames}), max |error| {err:G4}");
             if (diff != null) failures.Add(diff);
         }
         True(failures.Count == 0, string.Join("\n", failures));

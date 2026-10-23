@@ -4,9 +4,9 @@
 // OpusOggDecoder: parse the three Vorbis header packets from the BOS pages,
 // then feed every subsequent audio packet through VorbisAudioDecoder.
 //
-// This is the structural glue. Bit-accuracy against real libvorbis-encoded
-// Ogg-Vorbis files requires test vectors that are not yet bundled; the
-// decoder runs end-to-end but downstream validation work is pending.
+// Validated against libvorbis on real libvorbis streams (TestData/Vorbis, the
+// VorbisAudioDecoder_LibvorbisStreams_MatchLibvorbis test). The output is not
+// trimmed to the last granule position.
 
 using SpawnDev.Codecs.Container.Ogg;
 
