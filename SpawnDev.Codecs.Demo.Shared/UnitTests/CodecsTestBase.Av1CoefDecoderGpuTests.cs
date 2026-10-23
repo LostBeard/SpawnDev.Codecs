@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
         return (decodedSlice, encLen, info[0], info[1]);
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Av1CoefDecoderGpu_RoundTrip_AllZero_Tx16x16()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -98,7 +98,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Av1CoefDecoderGpu_RoundTrip_DcOnly_Tx8x8()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

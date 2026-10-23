@@ -274,7 +274,7 @@ public abstract partial class CodecsTestBase
                 throw new Exception($"vCoefs mismatch at {i}: cpu={cpuVCoefs[i]} gpu={gpuVCoefs[i]}");
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp9FrameSequentialEncodeKernel_SingleMB_FlatGray_MatchesCpu()
     {
         // 1x1 MB frame: 16x16 luma + 8x8 U + 8x8 V. Top-left corner -

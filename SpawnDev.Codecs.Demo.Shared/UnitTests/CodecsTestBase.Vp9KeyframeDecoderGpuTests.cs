@@ -209,7 +209,7 @@ public abstract partial class CodecsTestBase
                 throw new Exception($"V self-consistency mismatch at {i}: encoder={encVRecon[i]} decoder={decFrame.VPlane[i]}");
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp9KeyframeEncoderDecoderGpu_128x128_SelfConsistent()
     {
         // Self-consistency test that bypasses the CPU walker oracle.

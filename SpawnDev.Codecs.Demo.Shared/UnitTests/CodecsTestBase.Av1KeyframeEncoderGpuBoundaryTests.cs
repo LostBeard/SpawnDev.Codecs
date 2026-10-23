@@ -24,7 +24,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Av1KeyframeEncoderGpu_ArrayViewOverload_WritesCallerBufferAndMatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Av1KeyframeEncoderGpu_Batch_ArrayViewOverload_EqualsSingleFrameEncodes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -119,7 +119,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Av1KeyframeEncoderGpu_Rejects_UnalignedSizeAndBadQuantizer()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

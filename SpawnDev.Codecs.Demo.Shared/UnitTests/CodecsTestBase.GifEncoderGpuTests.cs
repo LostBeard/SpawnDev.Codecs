@@ -377,7 +377,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task GifEncoderGpu_WorstCaseNoise_StaysInsideGetMaxEncodedSize_AndDecodesExactly()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp9KeyframeEncoderGpu_64x64_FlatGray_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp9KeyframeEncoderGpu_64x64_RandomContent_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp9KeyframeEncoderGpu_64x64_BaseQSweep_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp9KeyframeEncoderGpu_128x128_MatchesCpu()
     {
         // Multi-SB frame (4 SBs total) - exercises the SB row-major

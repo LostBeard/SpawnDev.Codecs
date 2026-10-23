@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task ImageDecoderGpu_GifBmpWebPFixtures_DispatchAndMatchTruth()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

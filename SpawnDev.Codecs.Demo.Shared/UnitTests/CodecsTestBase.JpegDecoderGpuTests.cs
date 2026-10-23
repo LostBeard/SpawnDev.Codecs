@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         return names;
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task JpegDecoderGpu_AllFixtures_Rgba8_MatchPillow_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -215,7 +215,7 @@ public abstract partial class CodecsTestBase
     private static string ReadEmbeddedText(string resourceName) =>
         System.Text.Encoding.ASCII.GetString(ReadEmbedded(resourceName)).Trim();
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task JpegDecoderGpu_ProductionScale_1024x768_MatchesPillowSha256()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

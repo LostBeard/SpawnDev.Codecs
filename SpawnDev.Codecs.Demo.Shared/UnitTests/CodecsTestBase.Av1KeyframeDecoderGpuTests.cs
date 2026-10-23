@@ -19,7 +19,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Av1KeyframeDecoderGpu_ConstGray64x64_RoundTrip()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Av1KeyframeDecoderGpu_Random64x64_MatchesEncoderRecon()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

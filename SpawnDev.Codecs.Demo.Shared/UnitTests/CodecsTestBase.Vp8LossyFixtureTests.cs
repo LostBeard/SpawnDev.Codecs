@@ -118,7 +118,7 @@ public abstract partial class CodecsTestBase
         True(rows.Any(r => r.Width >= 640 && r.Height >= 480), "640x480");
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp8FullKeyframeDecoderGpu_AllFixtures_MatchFfmpeg_ManagedOverload()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -148,7 +148,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp8FullKeyframeDecoderGpu_AllFixtures_MatchFfmpeg_ArrayViewOverload_IntoPoisonedBuffers()
     {
         // The accelerator-resident overload: frame already on the device (the buffer longer than the frame, garbage after it),

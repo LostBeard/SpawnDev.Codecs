@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
 
     private static byte[] WebPChunkPayload(byte[] file, string fcc) => WebPChunksOf(file).First(c => c.Fcc == fcc).Payload;
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPDecoderGpu_Alpha_AllFixtures_MatchLibwebp_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -197,7 +197,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPDecoderGpu_Alpha_InvalidHeaders_AreRejected_LikeLibwebp()
     {
         // libwebp rejects each of these (the fixture generator asserts it, section 4): compression method 2 and 3,
@@ -216,7 +216,7 @@ public abstract partial class CodecsTestBase
         await AssertAlphaRejectedAsync(WebPWithChunk(raw, "ALPH", new byte[] { 0 }), "invalid ALPH", "header byte only");
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPDecoderGpu_Alpha_TruncatedData_IsRejected()
     {
         var raw = ReadEmbedded(WebPFixturePrefix + "alph_smooth_64x48_f0_raw.webp");
@@ -232,7 +232,7 @@ public abstract partial class CodecsTestBase
             "truncated", "VP8L alpha stream cut after 1 byte");
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPDecoderGpu_Alpha_ImageWithoutAlphChunk_IsRejected()
     {
         await AssertAlphaRejectedAsync(WebPFile("flat_32x24"), "no ALPH chunk", "lossless image");

@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
         return null;
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task JpegEncoderGpu_AllFixtures_ByteIdenticalToPillow_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -166,7 +166,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task JpegEncoderGpu_ProductionScale_1024x768_ByteIdenticalToPillowSha256()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -227,7 +227,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task JpegEncoderGpu_WorstCaseNoise_FitsGetMaxEncodedSize_AndEveryModeDecodesToTheSamePixels()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -279,7 +279,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task JpegEncoderGpu_FlatPicture_LongEobRuns_ByteIdenticalToPillowSha256()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

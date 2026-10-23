@@ -143,14 +143,14 @@ public abstract partial class CodecsTestBase
         return stdout;
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPLosslessEncoderGpu_AllSources_DecodeBitExact_InOurDecoder_AtEveryQuality()
     {
         var failures = await EncodeAllSourcesAsync(new[] { 0, 30, 55, 75, 95 }, null, exact: true);
         True(failures.Count == 0, $"{failures.Count} encoder round-trip failures:\n" + string.Join("\n", failures));
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPLosslessEncoderGpu_AllSources_OpenInLibwebp_AndDecodeBitExact()
     {
         string dir = WebPEncoderOutputDir("pillow");
@@ -256,7 +256,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPLosslessEncoderGpu_IncompressibleNoise_StaysWithinGetMaxEncodedSize()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

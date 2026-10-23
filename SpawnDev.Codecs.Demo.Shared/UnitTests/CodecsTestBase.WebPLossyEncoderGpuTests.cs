@@ -14,7 +14,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPLossyEncoderGpu_Methods3And4_ByteIdenticalWithLibwebp()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

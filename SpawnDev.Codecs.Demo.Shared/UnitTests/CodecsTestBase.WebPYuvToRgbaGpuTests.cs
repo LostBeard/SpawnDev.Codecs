@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         return (int.Parse(size[0]), int.Parse(size[1]));
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPYuvToRgbaGpu_AllFixtures_MatchLibwebpDecode()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

@@ -123,7 +123,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPDecoderGpu_AllStillFixtures_MatchTruth_ManagedAndArrayView()
         => await CheckWebPStillFixturesAsync(1 << 18, "default pool");
 
@@ -244,7 +244,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPDecoderGpu_Animations_EveryCanvasMatchesLibwebp_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -329,7 +329,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPDecoderGpu_BadRiffSignature_IsRejected()
     {
         var file = WebPFile("photo_80x60_m4");
@@ -341,7 +341,7 @@ public abstract partial class CodecsTestBase
         await AssertWebPRejectedAsync(new byte[] { 1, 2, 3 }, "not a WebP file", "3 bytes");
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPDecoderGpu_TruncatedFile_IsRejected()
     {
         var file = WebPFile("photo_80x60_m4");

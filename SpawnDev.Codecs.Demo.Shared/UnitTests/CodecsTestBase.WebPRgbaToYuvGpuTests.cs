@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
         return null;
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPRgbaToYuvGpu_AllFixtures_MatchLibwebpImport_WithAndWithoutCleanup()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

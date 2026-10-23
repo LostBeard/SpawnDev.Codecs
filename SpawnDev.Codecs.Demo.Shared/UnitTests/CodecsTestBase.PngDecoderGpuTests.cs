@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
         return null;
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task PngDecoderGpu_AllFixtures_Rgba8_MatchTruth_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -110,7 +110,7 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task PngDecoderGpu_AllFixtures_Rgba16_MatchTruth()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

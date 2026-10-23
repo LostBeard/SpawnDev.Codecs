@@ -123,7 +123,7 @@ public abstract partial class CodecsTestBase
         return failures;
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPLosslessEncoderGpu_Animation_AllSources_MatchLibwebpAndOurDecoder_AtSeveralQualities()
     {
         string dir = WebPEncoderOutputDir("animation");

@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         Equal(0, mismatches, $"{what}: first mismatch at {firstBad}");
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp8KeyframeDecoderGpu_ArrayViewOverload_WritesCallerPlanesAndMatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -103,13 +103,13 @@ public abstract partial class CodecsTestBase
         finally { acc.Dispose(); ctx.Dispose(); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp8KeyframeDecoderGpu_Unaligned_33x17_MatchesCroppedCpuWalker()
     {
         await RunUnalignedDecodeMatchesCpu(width: 33, height: 17, seed: 0x71C2);
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp8KeyframeDecoderGpu_Unaligned_47x32_MatchesCroppedCpuWalker()
     {
         await RunUnalignedDecodeMatchesCpu(width: 47, height: 32, seed: 0x71C3);

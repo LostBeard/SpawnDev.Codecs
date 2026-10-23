@@ -127,7 +127,7 @@ public abstract partial class CodecsTestBase
         True(verify.Contains("SUMMARY"), "verification script did not finish");
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task WebPLosslessEncoderGpu_Alpha_IncompressiblePlane_FallsBackToRaw_WithinTheBound()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
