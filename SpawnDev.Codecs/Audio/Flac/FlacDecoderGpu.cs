@@ -13,7 +13,8 @@
 //      Extract: blockSize, sampleRateHz, channels, bps, totalSamples
 //   3. Skip any non-STREAMINFO metadata blocks (until isLast=1)
 // Frame decode (GPU - codec-data math):
-//   For each frame: dispatch FlacFrameReaderGpuKernel
+//   For each frame: FlacFrameReaderGpuKernel's bounded parallel launches
+//   (header parse, one thread per sample, CRC-16 pieces), then the interleave
 //
 // V1 simplifications match FlacEncoderGpu.
 
@@ -42,7 +43,7 @@ public sealed class FlacDecoderGpu : IDisposable
         _accelerator = accelerator;
         _frameKernel = new FlacFrameReaderGpuKernel(accelerator);
         _interleaveKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, int, int, long, long>(InterleaveKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, int, int, long, long>(FlacDecodeInterleaveKernel);
     }
 
     /// <summary>
@@ -50,7 +51,7 @@ public sealed class FlacDecoderGpu : IDisposable
     /// Reads from channel-major dSamples, writes to interleaved dOutput at
     /// the per-frame offset.
     /// </summary>
-    private static void InterleaveKernel(
+    private static void FlacDecodeInterleaveKernel(
         Index1D index,
         ArrayView<int> channelMajor, ArrayView<int> interleavedOut,
         int channels, int numFrames, long cmBase, long outBase)
@@ -139,9 +140,8 @@ public sealed class FlacDecoderGpu : IDisposable
             int fLen = (int)EstimateFrameLength((ulong)frameIdx, blockSize, channels, bps);
             long actualFLen = ScanFrameLength(flacBytes, (int)frameBase, fLen);
 
-            _frameKernel.Run(dData.View, dSamples.View, dStatus.View, dFrameLen.View,
+            await _frameKernel.RunAsync(dData.View, dSamples.View, dStatus.View, dFrameLen.View,
                 frameBase, (int)actualFLen, blockSize, channels, bps);
-            await _accelerator.SynchronizeAsync();
 
             int status = (await dStatus.CopyToHostAsync())[0];
             long consumed = (await dFrameLen.CopyToHostAsync())[0];

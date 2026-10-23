@@ -23,7 +23,7 @@ public sealed class VorbisFloor1ApplyGpuKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<float>, int>(ApplyKernel);
+            Index1D, ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<float>, int>(VorbisFloor1ApplyKernel);
     }
 
     /// <summary>
@@ -43,7 +43,7 @@ public sealed class VorbisFloor1ApplyGpuKernel : IDisposable
         _kernel(halfBlock, residue, curveIdx, table, output, halfBlock);
     }
 
-    private static void ApplyKernel(
+    private static void VorbisFloor1ApplyKernel(
         Index1D threadIdx,
         ArrayView<float> residue,
         ArrayView<int> curveIdx,

@@ -33,47 +33,16 @@ public abstract partial class CodecsTestBase
         int alignedLen = (frameLength + 15) & ~15;
 
         using var dPacket = acc.Allocate1D<byte>(packet.Length);
-        using var dRateLevels = acc.Allocate1D<byte>(SilkIcdfTables.RateLevels.Length);
-        using var dPulsesPerBlock = acc.Allocate1D<byte>(SilkIcdfTables.PulsesPerBlock.Length);
-        using var dLsb = acc.Allocate1D<byte>(SilkIcdfTables.Lsb.Length);
-        using var dSign = acc.Allocate1D<byte>(SilkIcdfTables.Sign.Length);
-        using var dShellOffsets = acc.Allocate1D<byte>(SilkShellCodeTables.Offsets.Length);
-        using var dShellTable0 = acc.Allocate1D<byte>(SilkShellCodeTables.Table0.Length);
-        using var dShellTable1 = acc.Allocate1D<byte>(SilkShellCodeTables.Table1.Length);
-        using var dShellTable2 = acc.Allocate1D<byte>(SilkShellCodeTables.Table2.Length);
-        using var dShellTable3 = acc.Allocate1D<byte>(SilkShellCodeTables.Table3.Length);
-        using var dSumPulses = acc.Allocate1D<int>(20);
-        using var dNLshifts = acc.Allocate1D<int>(20);
         using var dPulsesOut = acc.Allocate1D<short>(alignedLen);
 
         dPacket.View.CopyFromCPU(packet);
-        dRateLevels.View.CopyFromCPU(SilkIcdfTables.RateLevels);
-        dPulsesPerBlock.View.CopyFromCPU(SilkIcdfTables.PulsesPerBlock);
-        dLsb.View.CopyFromCPU(SilkIcdfTables.Lsb);
-        dSign.View.CopyFromCPU(SilkIcdfTables.Sign);
-        dShellOffsets.View.CopyFromCPU(SilkShellCodeTables.Offsets);
-        dShellTable0.View.CopyFromCPU(SilkShellCodeTables.Table0);
-        dShellTable1.View.CopyFromCPU(SilkShellCodeTables.Table1);
-        dShellTable2.View.CopyFromCPU(SilkShellCodeTables.Table2);
-        dShellTable3.View.CopyFromCPU(SilkShellCodeTables.Table3);
 
-        var inputs = new SilkPulsesInputs
-        {
-            RateLevelsIcdf = dRateLevels.View,
-            PulsesPerBlockIcdf = dPulsesPerBlock.View,
-            LsbIcdf = dLsb.View,
-            SignIcdf = dSign.View,
-            ShellTables = new SilkShellCoderTables
-            {
-                Offsets = dShellOffsets.View,
-                Table0 = dShellTable0.View,
-                Table1 = dShellTable1.View,
-                Table2 = dShellTable2.View,
-                Table3 = dShellTable3.View,
-            },
-            SumPulsesScratch = dSumPulses.View,
-            NLshiftsScratch = dNLshifts.View,
-        };
+        var inputsBytes = new PackedDeviceBuffer<byte>();
+        var inputsInts = new PackedDeviceBuffer<int>();
+        var inputs = SilkPulsesInputs.AddStandard(inputsBytes, inputsInts);
+        using var dInputsBytes = inputsBytes.Upload(acc);
+        using var dInputsInts = inputsInts.Upload(acc);
+        inputs.Bind(dInputsBytes.View, dInputsInts.View);
 
         using var kernel = new SilkPulsesDecoderGpuTestKernel(acc);
         kernel.Run(dPacket.View, 0, packet.Length, inputs,

@@ -102,35 +102,31 @@ public abstract partial class CodecsTestBase
                 for (int s = 0; s < (1 << config.ClassSubclasses[c]); s++)
                     subBooksFlat[subBooksOffsets[c] + s] = config.ClassSubclassBooks[c][s];
 
+            // Every int table in ONE pool (one storage binding instead of nine); the codebook params hold
+            // ABSOLUTE pool offsets of the book's children / leaf tables.
+            var pool = new PackedDeviceBuffer<int>();
+            int partClsAt = pool.Add(config.PartitionClassList);
+            int dimsAt = pool.Add(config.ClassDimensions);
+            int subclsAt = pool.Add(config.ClassSubclasses);
+            int masterAt = pool.Add(config.ClassMasterbooks);
+            int subBooksAt = pool.Add(subBooksFlat);
+            int subBooksOffAt = pool.Add(subBooksOffsets);
+            int childrenAt = pool.Add(flatSet.AllChildren);
+            int leafAt = pool.Add(flatSet.AllLeafToEntry);
             // Codebook params: 3 ints per book [childOff, leafOff, depth].
-            var codebookParams = new int[3];
-            codebookParams[0] = flatSet.ChildrenOffsets[0];
-            codebookParams[1] = flatSet.LeafOffsets[0];
-            codebookParams[2] = flatSet.MaxDepths[0];
+            int cbParamsAt = pool.Add(new int[]
+            {
+                childrenAt + flatSet.ChildrenOffsets[0],
+                leafAt + flatSet.LeafOffsets[0],
+                flatSet.MaxDepths[0],
+            });
 
             using var dPacket = acc.Allocate1D<byte>(packet.Length);
-            using var dPartCls = acc.Allocate1D<int>(config.PartitionClassList.Length);
-            using var dDims = acc.Allocate1D<int>(config.ClassDimensions.Length);
-            using var dSubcls = acc.Allocate1D<int>(config.ClassSubclasses.Length);
-            using var dMaster = acc.Allocate1D<int>(config.ClassMasterbooks.Length);
-            using var dSubBooks = acc.Allocate1D<int>(subBooksFlat.Length);
-            using var dSubBooksOff = acc.Allocate1D<int>(subBooksOffsets.Length);
-            using var dHuffChildren = acc.Allocate1D<int>(flatSet.AllChildren.Length);
-            using var dHuffLeaf = acc.Allocate1D<int>(flatSet.AllLeafToEntry.Length);
-            using var dCbParams = acc.Allocate1D<int>(codebookParams.Length);
+            using var dPool = pool.Upload(acc);
             using var dY = acc.Allocate1D<int>(config.XList.Length);
             using var dYLen = acc.Allocate1D<int>(1);
 
             dPacket.View.CopyFromCPU(packet);
-            dPartCls.View.CopyFromCPU(config.PartitionClassList);
-            dDims.View.CopyFromCPU(config.ClassDimensions);
-            dSubcls.View.CopyFromCPU(config.ClassSubclasses);
-            dMaster.View.CopyFromCPU(config.ClassMasterbooks);
-            dSubBooks.View.CopyFromCPU(subBooksFlat);
-            dSubBooksOff.View.CopyFromCPU(subBooksOffsets);
-            dHuffChildren.View.CopyFromCPU(flatSet.AllChildren);
-            dHuffLeaf.View.CopyFromCPU(flatSet.AllLeafToEntry);
-            dCbParams.View.CopyFromCPU(codebookParams);
             dY.View.CopyFromCPU(new int[config.XList.Length]);
 
             // Pack scalars + offsets into a struct to fit ILGPU's 14-arg limit.
@@ -140,19 +136,15 @@ public abstract partial class CodecsTestBase
                 Partitions = config.Partitions,
                 Multiplier = config.Multiplier,
                 XListLen = config.XList.Length,
+                PartClsAt = partClsAt, DimsAt = dimsAt, SubclsAt = subclsAt, MasterAt = masterAt,
+                SubBooksAt = subBooksAt, SubBooksOffAt = subBooksOffAt, CbParamsAt = cbParamsAt,
             };
 
             var kernel = acc.LoadAutoGroupedStreamKernel<
-                Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
-                ArrayView<int>, ArrayView<int>, ArrayView<int>,
-                ArrayView<int>, ArrayView<int>, ArrayView<int>,
+                Index1D, ArrayView<byte>, ArrayView<int>,
                 ArrayView<int>, ArrayView<int>,
                 Floor1DecoderTestParams>(Floor1DecodeKernel);
-            kernel(new Index1D(1),
-                dPacket.View, dPartCls.View, dDims.View, dSubcls.View,
-                dMaster.View, dSubBooks.View, dSubBooksOff.View,
-                dHuffChildren.View, dHuffLeaf.View, dCbParams.View,
-                dY.View, dYLen.View, p);
+            kernel(new Index1D(1), dPacket.View, dPool.View, dY.View, dYLen.View, p);
             await acc.SynchronizeAsync();
 
             int gpuYLen = (await dYLen.CopyToHostAsync())[0];
@@ -172,14 +164,13 @@ public abstract partial class CodecsTestBase
         public int Partitions;
         public int Multiplier;
         public int XListLen;
+        public int PartClsAt, DimsAt, SubclsAt, MasterAt, SubBooksAt, SubBooksOffAt, CbParamsAt;
     }
 
     private static void Floor1DecodeKernel(
         Index1D _,
         ArrayView<byte> packet,
-        ArrayView<int> partCls, ArrayView<int> dims, ArrayView<int> subcls,
-        ArrayView<int> master, ArrayView<int> subBooks, ArrayView<int> subBooksOff,
-        ArrayView<int> huffChildren, ArrayView<int> huffLeaf, ArrayView<int> cbParams,
+        ArrayView<int> pool,
         ArrayView<int> yOut, ArrayView<int> yLenOut,
         Floor1DecoderTestParams p)
     {
@@ -189,9 +180,9 @@ public abstract partial class CodecsTestBase
         int yLen = VorbisFloor1DecoderGpu.Decode(
             ref state, packet,
             p.Partitions, p.Multiplier, p.XListLen,
-            partCls, 0, dims, 0, subcls, 0, master, 0,
-            subBooks, 0, subBooksOff, 0,
-            huffChildren, huffLeaf, cbParams, 0,
+            pool, p.PartClsAt, pool, p.DimsAt, pool, p.SubclsAt, pool, p.MasterAt,
+            pool, p.SubBooksAt, pool, p.SubBooksOffAt,
+            pool, pool, pool, p.CbParamsAt,
             yOut, 0);
         yLenOut[0] = yLen;
     }

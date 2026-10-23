@@ -8,10 +8,13 @@
 //
 //   1. Window apply           (per-sample parallel)
 //   2. Forward MDCT + 4/N     (per-bin parallel)
-//   3. Floor fit (peak + Y)   (single thread)
-//   4. Floor curve render     (single thread)
+//   3. Floor fit (peak + Y)   (single thread, halfBlock bins)
+//   4. Floor curve render     (single thread, 2-point floor over halfBlock bins)
 //   5. Divide + quantize      (per-bin parallel)
-//   6. Bitstream emit         (single thread)
+//   6. Bitstream emit         (single thread, halfBlock codewords)
+//
+// The single-thread stages are bounded by one packet (BlockSize / 2 bins or codewords, at most 4096 for a
+// Vorbis block), never by the stream: every packet is its own launch chain.
 //
 // Each stage is one of the Vorbis GPU primitives shipped previously.
 // The integration class only orchestrates dispatches + buffer mgmt.
@@ -59,6 +62,11 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         ArgumentNullException.ThrowIfNull(options);
+        // Same rule as the CPU VorbisAudioEncoder (Vorbis I: 64..8192, power of 2); it also bounds the
+        // single-thread floor fit / emit stages at 4096 bins per launch.
+        if (options.BlockSize < 64 || options.BlockSize > 8192 || (options.BlockSize & (options.BlockSize - 1)) != 0)
+            throw new ArgumentException(
+                $"BlockSize must be a power of 2 in [64, 8192], got {options.BlockSize}.", nameof(options));
         _accelerator = accelerator;
         _opts = options;
         // Resolve the identification + setup headers once, at construction
@@ -99,22 +107,22 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
 
         // Compile kernels.
         _inputWindowKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<float>, int, int, ArrayView<float>>(InputWindowKernel);
+            Index1D, ArrayView<float>, int, int, ArrayView<float>>(VorbisEncodeInputWindowKernel);
         _windowKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<float>, ArrayView<float>, int>(WindowKernel);
+            Index1D, ArrayView<float>, ArrayView<float>, int>(VorbisEncodeWindowKernel);
         _mdctKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<float>, ArrayView<float>, int>(MdctKernel);
+            Index1D, ArrayView<float>, ArrayView<float>, int>(VorbisEncodeMdctKernel);
         _floorFitKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, float>(FloorFitKernel);
+            Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, float>(VorbisEncodeFloorFitKernel);
         _floorRenderKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>,
-            ArrayView<int>, ArrayView<byte>, int, int, int>(FloorRenderKernel);
+            ArrayView<int>, ArrayView<byte>, int, int, int>(VorbisEncodeFloorRenderKernel);
         _divQuantKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, float, int>(DivQuantKernel);
+            Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, float, int>(VorbisEncodeDivQuantKernel);
         _emitKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<int>,
             ArrayView<uint>, ArrayView<int>, ArrayView<uint>, ArrayView<int>,
-            ArrayView<int>, EmitPacketParams>(EmitKernel);
+            ArrayView<int>, EmitPacketParams>(VorbisEncodeEmitKernel);
     }
 
     /// <summary>Identification header (resolved once at construction).</summary>
@@ -304,6 +312,9 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
             EndpointBits = _endpointBits,
             ModeBits = _modeBits,
         };
+        // 6 launches per packet before the one wait: pace them (the browser's
+        // command encoder must not collect a long queue).
+        var pacer = new LaunchPacer(_accelerator);
         for (int p = 0; p < N; p++)
         {
             var dInputP = dInput.View.SubView((long)p * n, n);
@@ -318,21 +329,27 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
             var dOutLenP = dOutLen.View.SubView(p, 1);
 
             _windowKernel(new Index1D(n), dInputP, dWindowedP, n);
+            await pacer.LaunchedAsync();
             _mdctKernel(new Index1D(half), dWindowedP, dSpectrumP, half);
+            await pacer.LaunchedAsync();
             _floorFitKernel(new Index1D(1), dSpectrumP, _dInverseDb.View, dPosteriorsP, half, headroom);
+            await pacer.LaunchedAsync();
             _floorRenderKernel(new Index1D(1),
                 _dXList.View, dPosteriorsP,
                 dFloorCurveP, _dInverseDb.View,
                 dScratchIntP, dScratchByteP,
                 /*values*/ 2, floorCfg.Multiplier, half);
+            await pacer.LaunchedAsync();
             _divQuantKernel(new Index1D(half),
                 dSpectrumP, dFloorCurveP, dResidueQP,
                 half, residueRange, residueBookEntries);
+            await pacer.LaunchedAsync();
             _emitKernel(new Index1D(1),
                 dOutBytesP, dOutLenP, dResidueQP,
                 _dClassbookCodes.View, _dClassbookLengths.View,
                 _dResidueBookCodes.View, _dResidueBookLengths.View,
                 dPosteriorsP, emitParams);
+            await pacer.LaunchedAsync();
         }
 
         await _accelerator.SynchronizeAsync();
@@ -440,7 +457,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
     /// Per-sample windowed input copy with zero-pad for the
     /// EncodeStreamAsync per-packet input prep.
     /// </summary>
-    private static void InputWindowKernel(
+    private static void VorbisEncodeInputWindowKernel(
         Index1D idx, ArrayView<float> srcMono, int totalSamples, int srcStart,
         ArrayView<float> dst)
     {
@@ -448,21 +465,21 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
             srcMono, 0, totalSamples, srcStart, dst, 0, idx.X);
     }
 
-    private static void WindowKernel(
+    private static void VorbisEncodeWindowKernel(
         Index1D idx, ArrayView<float> input, ArrayView<float> output, int n)
     {
         if (idx >= n) return;
         VorbisWindowGpu.ApplyWindowAt(input, 0, output, 0, idx, n);
     }
 
-    private static void MdctKernel(
+    private static void VorbisEncodeMdctKernel(
         Index1D idx, ArrayView<float> input, ArrayView<float> output, int n)
     {
         if (idx >= n) return;
         VorbisFwdMdctScaledGpu.ForwardScaledAt(input, 0, output, 0, n, idx);
     }
 
-    private static void FloorFitKernel(
+    private static void VorbisEncodeFloorFitKernel(
         Index1D _, ArrayView<float> spectrum, ArrayView<float> inverseDb,
         ArrayView<int> posteriors, int halfBlock, float headroom)
     {
@@ -471,7 +488,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
             inverseDb, 0, posteriors, 0);
     }
 
-    private static void FloorRenderKernel(
+    private static void VorbisEncodeFloorRenderKernel(
         Index1D _,
         ArrayView<int> xList, ArrayView<int> decodedY,
         ArrayView<float> curveOut, ArrayView<float> inverseDb,
@@ -488,7 +505,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
             scratchByte, 0);
     }
 
-    private static void DivQuantKernel(
+    private static void VorbisEncodeDivQuantKernel(
         Index1D idx,
         ArrayView<float> spectrum, ArrayView<float> floor, ArrayView<int> output,
         int count, float residueRange, int bookEntries)
@@ -499,7 +516,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
             idx, residueRange, bookEntries);
     }
 
-    private static void EmitKernel(
+    private static void VorbisEncodeEmitKernel(
         Index1D _,
         ArrayView<byte> outBuf, ArrayView<long> outLen, ArrayView<int> residueQ,
         ArrayView<uint> classCodes, ArrayView<int> classLens,

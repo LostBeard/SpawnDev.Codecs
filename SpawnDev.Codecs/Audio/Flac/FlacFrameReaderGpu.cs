@@ -22,39 +22,34 @@ using ILGPU;
 namespace SpawnDev.Codecs.Audio.Flac;
 
 /// <summary>
-/// GPU-callable FLAC v1 frame reader. Single-frame helper - parses
-/// header, decodes VERBATIM subframes, verifies CRC-8 + CRC-16.
+/// GPU-callable FLAC v1 frame reader pieces: <see cref="ParseHeader"/> parses + verifies the header (sync code,
+/// CRC-8, the VERBATIM subframe headers); FlacFrameReaderGpuKernel unpacks the samples in parallel
+/// (FlacVerbatimSubframeGpu.UnpackSampleAt) and verifies the CRC-16 in parallel pieces (FlacCrcGpu). No thread walks
+/// a whole frame.
 /// </summary>
 public static class FlacFrameReaderGpu
 {
+    /// <summary>Largest frame header (sync bits + 7-byte UTF-8 frame number) plus its CRC-8.</summary>
+    public const int MaxSubframesStart = 4 + 7 + 1;
+
     /// <summary>
-    /// Parse one FLAC frame starting at <paramref name="frameBase"/>
-    /// in <paramref name="data"/>. Returns the byte length of the
-    /// frame (or 0 if header sync mismatch / CRC failure).
-    /// Decoded samples written to <paramref name="samples"/> in
-    /// channel-major layout (channel 0 first, then channel 1, etc.)
-    /// starting at <paramref name="samplesBase"/>.
+    /// Parse + verify the header of the frame at <paramref name="frameBase"/> in <paramref name="data"/>.
+    /// Returns the frame-relative offset of the first subframe byte, or 0 on failure with
+    /// <paramref name="statusOut"/>[0] set: 1 = sync mismatch, 2 = CRC-8 fail, 4 = a subframe that is not
+    /// VERBATIM-only, 3 = the frame runs past the data (0 = success; the CRC-16 check, also status 3, follows the
+    /// sample unpack). frameLength is the
+    /// caller-known total frame length (bit reader bound).
     /// </summary>
-    /// <param name="frameLength">Total frame length in bytes (caller-known
-    /// from the encoder's output, or computed via successive parsing).
-    /// Used for the CRC-16 range.</param>
-    public static long DecodeFrame(
+    public static int ParseHeader(
         ArrayView<byte> data, long frameBase, int frameLength,
         int blockSize, int channels, int bps,
-        ArrayView<int> samples, long samplesBase,
         ArrayView<int> statusOut)
     {
-        // statusOut[0]: 0 = success, 1 = sync mismatch, 2 = CRC8 fail, 3 = CRC16 fail.
         statusOut[0] = 0;
 
         // ---- Parse + verify header bits ----
         var r = FlacBitReaderGpu.Init(frameLength);
-        // Skip to frameBase by re-init with adjusted base. The reader
-        // doesn't take a base offset, so we read from frameBase via
-        // explicit byte indexing in the helpers. Simpler: SubView the
-        // input data so reader sees a buffer starting at frameBase.
-        // Since SubView isn't kernel-callable cleanly, we use the
-        // reader on the raw view and set BytePos = frameBase as int.
+        // The reader has no base offset: set BytePos = frameBase.
         r.BytePos = (int)frameBase;
 
         // Sync code: 14 bits = 0x3FFE.
@@ -82,37 +77,28 @@ public static class FlacFrameReaderGpu
             statusOut[0] = 2;
             return 0;
         }
-        // Skip CRC-8 byte.
-        r.BytePos++;
+        int subStart = headerBytes + 1;
 
-        // ---- Decode per-channel VERBATIM subframes ----
+        // A frame that does not fit in the data (a truncated stream) cannot pass its CRC-16; say so before any
+        // read past the buffer.
+        long frameEnd = frameBase + subStart + FlacVerbatimSubframeGpu.SubframesBytes(blockSize, channels, bps) + 2;
+        if (frameEnd > data.Length)
+        {
+            statusOut[0] = 3;
+            return 0;
+        }
+
+        // ---- Per-channel VERBATIM subframe headers (at known bit offsets) ----
         for (int ch = 0; ch < channels; ch++)
         {
-            int status = FlacVerbatimSubframeGpu.Decode(
-                ref r, data,
-                samples, samplesBase + (long)ch * blockSize,
-                blockSize, bps);
-            if (status != 1)
+            if (FlacVerbatimSubframeGpu.HeaderOkAt(data, frameBase + subStart, blockSize, bps, ch) == 0)
             {
                 // Subframe header mismatch (not VERBATIM-only).
                 statusOut[0] = 4;
                 return 0;
             }
         }
-        FlacBitReaderGpu.AlignToByte(ref r);
-
-        // ---- Verify CRC-16 over full frame (excluding the CRC-16 bytes) ----
-        int preFooterLen = r.BytePos - (int)frameBase;
-        ushort expectedCrc16 = FlacCrcGpu.Compute16(data, frameBase, preFooterLen);
-        ushort actualCrc16 = (ushort)((data[frameBase + preFooterLen] << 8)
-            | data[frameBase + preFooterLen + 1]);
-        if (expectedCrc16 != actualCrc16)
-        {
-            statusOut[0] = 3;
-            return 0;
-        }
-
-        return preFooterLen + 2;
+        return subStart;
     }
 
     /// <summary>

@@ -27,7 +27,7 @@ public sealed class SilkPitchComputeLagsGpuTestKernel : IDisposable
             Index1D,
             ArrayView<sbyte>, int,
             int, int, int, int,
-            ArrayView<int>>(ComputeLagsKernel);
+            ArrayView<int>>(SilkPitchComputeLagsTestKernel);
     }
 
     /// <summary>Run the kernel.</summary>
@@ -41,7 +41,7 @@ public sealed class SilkPitchComputeLagsGpuTestKernel : IDisposable
         _kernel(1, contourCb, cbSize, lagIndex, contourIndex, fsKHz, nbSubfr, pitchLagsOut);
     }
 
-    private static void ComputeLagsKernel(
+    private static void SilkPitchComputeLagsTestKernel(
         Index1D _,
         ArrayView<sbyte> contourCb, int cbSize,
         int lagIndex, int contourIndex, int fsKHz, int nbSubfr,

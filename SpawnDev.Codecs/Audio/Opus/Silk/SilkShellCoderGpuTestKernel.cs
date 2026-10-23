@@ -27,7 +27,7 @@ public sealed class SilkShellCoderGpuTestKernel : IDisposable
             ArrayView<byte>, int, int,
             SilkShellCoderTables,
             int,
-            ArrayView<short>>(ShellCoderKernel);
+            ArrayView<short>>(SilkShellCoderTestKernel);
     }
 
     /// <summary>Decode 16 pulse magnitudes from the packet.</summary>
@@ -42,7 +42,7 @@ public sealed class SilkShellCoderGpuTestKernel : IDisposable
         _kernel(1, packet, packetStart, packetStorage, tables, pulsesTotal, pulsesOut);
     }
 
-    private static void ShellCoderKernel(
+    private static void SilkShellCoderTestKernel(
         Index1D _,
         ArrayView<byte> packet, int packetStart, int packetStorage,
         SilkShellCoderTables tables,

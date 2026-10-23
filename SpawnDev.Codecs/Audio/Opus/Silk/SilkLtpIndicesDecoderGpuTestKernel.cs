@@ -42,7 +42,7 @@ public sealed class SilkLtpIndicesDecoderGpuTestKernel : IDisposable
             ArrayView<byte>, int, int,
             SilkLtpIndicesInputs,
             int, int,
-            ArrayView<int>>(LtpIndicesKernel);
+            ArrayView<int>>(SilkLtpIndicesTestKernel);
     }
 
     /// <summary>Decode the LTP index block. Output: [0]=perIndex, [1]=ltpScaleIndex, [2..2+nbSubfr]=gain indices.</summary>
@@ -61,7 +61,7 @@ public sealed class SilkLtpIndicesDecoderGpuTestKernel : IDisposable
             output);
     }
 
-    private static void LtpIndicesKernel(
+    private static void SilkLtpIndicesTestKernel(
         Index1D _,
         ArrayView<byte> packet, int packetStart, int packetStorage,
         SilkLtpIndicesInputs inputs,

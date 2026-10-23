@@ -4,9 +4,9 @@
 // on the accelerator. Decodes the NLSF index block + writes (order+1) ints
 // + the interpolation factor to caller-allocated output.
 //
-// Uses a body-struct kernel parameter (`SilkNlsfIndicesInputs`) to pack
-// all per-stream codebook + iCDF table ArrayViews into one logical parameter -
-// keeps the kernel under ILGPU's Action<...> generic ceiling. Caller pre-
+// Uses a body-struct kernel parameter (`SilkNlsfIndicesInputs`): the byte
+// tables + scratch live in one byte buffer (offsets in the struct), so the
+// kernel binds 4 storage buffers. Caller pre-
 // computes the cb1IcdfBaseOffset = (signalType >> 1) * nVectors so the
 // struct stays free of derived signal-type / nVectors ints.
 
@@ -23,22 +23,24 @@ namespace SpawnDev.Codecs.Audio.Opus.Silk;
 /// </summary>
 public struct SilkNlsfIndicesInputs
 {
-    /// <summary>Codebook Cb1Icdf, length 2 * NVectors.</summary>
-    public ArrayView<byte> Cb1Icdf;
-    /// <summary>Codebook EcIcdf (9 entries per ecIx slot).</summary>
-    public ArrayView<byte> EcIcdf;
-    /// <summary>Codebook EcSel bytes (length nVectors * order / 2).</summary>
-    public ArrayView<byte> EcSel;
-    /// <summary>Codebook PredQ8 source (length 2 * (order - 1)).</summary>
-    public ArrayView<byte> PredQ8Source;
-    /// <summary>silk_NLSF_EXT_iCDF (7 entries).</summary>
-    public ArrayView<byte> NlsfExtIcdf;
-    /// <summary>silk_NLSF_interpolation_factor_iCDF (5 entries).</summary>
-    public ArrayView<byte> NlsfInterpolationFactorIcdf;
-    /// <summary>Scratch buffer for ecIx[order] (length >= MaxLpcOrder).</summary>
+    /// <summary>The six byte tables and the predQ8 scratch, packed (offsets below; <see cref="PackedDeviceBuffer{T}"/>).</summary>
+    public ArrayView<byte> Bytes;
+    /// <summary>Scratch for ecIx[order].</summary>
     public ArrayView<short> EcIxScratch;
-    /// <summary>Scratch buffer for predQ8[order] (length >= MaxLpcOrder).</summary>
-    public ArrayView<byte> PredQ8Scratch;
+    /// <summary>NLSF codebook Cb1Icdf offset in <see cref="Bytes"/>.</summary>
+    public int Cb1IcdfAt;
+    /// <summary>NLSF codebook EcIcdf offset.</summary>
+    public int EcIcdfAt;
+    /// <summary>NLSF codebook EcSel offset.</summary>
+    public int EcSelAt;
+    /// <summary>NLSF codebook PredQ8 source offset.</summary>
+    public int PredQ8SourceAt;
+    /// <summary>silk_NLSF_EXT_iCDF offset.</summary>
+    public int NlsfExtIcdfAt;
+    /// <summary>silk_NLSF_interpolation_factor_iCDF offset.</summary>
+    public int NlsfInterpolationFactorIcdfAt;
+    /// <summary>predQ8[order] scratch offset.</summary>
+    public int PredQ8ScratchAt;
 }
 
 /// <summary>
@@ -62,7 +64,7 @@ public sealed class SilkNlsfIndicesDecoderGpuTestKernel : IDisposable
             ArrayView<byte>, int, int,
             SilkNlsfIndicesInputs,
             int, int, int,
-            ArrayView<int>>(NlsfIndicesKernel);
+            ArrayView<int>>(SilkNlsfIndicesTestKernel);
     }
 
     /// <summary>
@@ -88,7 +90,7 @@ public sealed class SilkNlsfIndicesDecoderGpuTestKernel : IDisposable
             output);
     }
 
-    private static void NlsfIndicesKernel(
+    private static void SilkNlsfIndicesTestKernel(
         Index1D _,
         ArrayView<byte> packet, int packetStart, int packetStorage,
         SilkNlsfIndicesInputs inputs,
@@ -98,14 +100,14 @@ public sealed class SilkNlsfIndicesDecoderGpuTestKernel : IDisposable
         var state = OpusRangeDecoderGpu.Init(packet, packetStart, (uint)packetStorage);
         int interp = SilkNlsfIndicesDecoderGpu.DecodeIndices(
             ref state, packet, packetStart, (uint)packetStorage,
-            inputs.Cb1Icdf, cb1IcdfBaseOffset,
-            inputs.EcIcdf, 0,
-            inputs.EcSel, 0,
-            inputs.PredQ8Source, 0,
-            inputs.NlsfExtIcdf, 0,
-            inputs.NlsfInterpolationFactorIcdf, 0,
+            inputs.Bytes, inputs.Cb1IcdfAt + cb1IcdfBaseOffset,
+            inputs.Bytes, inputs.EcIcdfAt,
+            inputs.Bytes, inputs.EcSelAt,
+            inputs.Bytes, inputs.PredQ8SourceAt,
+            inputs.Bytes, inputs.NlsfExtIcdfAt,
+            inputs.Bytes, inputs.NlsfInterpolationFactorIcdfAt,
             inputs.EcIxScratch, 0,
-            inputs.PredQ8Scratch, 0,
+            inputs.Bytes, inputs.PredQ8ScratchAt,
             order, nbSubfr,
             output, 0);
         output[order + 1] = interp;

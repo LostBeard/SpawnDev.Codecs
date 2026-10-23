@@ -24,7 +24,7 @@ public sealed class FlacFixedResidualGpuKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, int, int>(ResidualKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, int, int>(FlacFixedResidualKernel);
     }
 
     /// <summary>
@@ -43,7 +43,7 @@ public sealed class FlacFixedResidualGpuKernel : IDisposable
         _kernel(residualCount, samples, residual, residualCount, order);
     }
 
-    private static void ResidualKernel(
+    private static void FlacFixedResidualKernel(
         Index1D threadIdx,
         ArrayView<int> samples,
         ArrayView<int> residual,

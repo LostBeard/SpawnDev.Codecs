@@ -90,35 +90,25 @@ public abstract partial class CodecsTestBase
         int nVectors = codebook.NVectors;
 
         using var dPacket = acc.Allocate1D<byte>(packet.Length);
-        using var dCb1Icdf = acc.Allocate1D<byte>(codebook.Cb1Icdf.Length);
-        using var dEcIcdf = acc.Allocate1D<byte>(codebook.EcIcdf.Length);
-        using var dEcSel = acc.Allocate1D<byte>(codebook.EcSel.Length);
-        using var dPredQ8Source = acc.Allocate1D<byte>(codebook.PredQ8.Length);
-        using var dNlsfExt = acc.Allocate1D<byte>(SilkNlsfTestHelpers_NlsfExt.Length);
-        using var dNlsfInterp = acc.Allocate1D<byte>(SilkNlsfTestHelpers_NlsfInterpFactor.Length);
         using var dEcIxScratch = acc.Allocate1D<short>(16);
-        using var dPredQ8Scratch = acc.Allocate1D<byte>(16);
         using var dOutput = acc.Allocate1D<int>(order + 2);
 
         dPacket.View.CopyFromCPU(packet);
-        dCb1Icdf.View.CopyFromCPU(codebook.Cb1Icdf);
-        dEcIcdf.View.CopyFromCPU(codebook.EcIcdf);
-        dEcSel.View.CopyFromCPU(codebook.EcSel);
-        dPredQ8Source.View.CopyFromCPU(codebook.PredQ8);
-        dNlsfExt.View.CopyFromCPU(SilkNlsfTestHelpers_NlsfExt);
-        dNlsfInterp.View.CopyFromCPU(SilkNlsfTestHelpers_NlsfInterpFactor);
 
+        var inputsBytes = new PackedDeviceBuffer<byte>();
         var inputs = new SilkNlsfIndicesInputs
         {
-            Cb1Icdf = dCb1Icdf.View,
-            EcIcdf = dEcIcdf.View,
-            EcSel = dEcSel.View,
-            PredQ8Source = dPredQ8Source.View,
-            NlsfExtIcdf = dNlsfExt.View,
-            NlsfInterpolationFactorIcdf = dNlsfInterp.View,
+            Cb1IcdfAt = inputsBytes.Add(codebook.Cb1Icdf, codebook.Cb1Icdf.Length),
+            EcIcdfAt = inputsBytes.Add(codebook.EcIcdf, codebook.EcIcdf.Length),
+            EcSelAt = inputsBytes.Add(codebook.EcSel, codebook.EcSel.Length),
+            PredQ8SourceAt = inputsBytes.Add(codebook.PredQ8, codebook.PredQ8.Length),
+            NlsfExtIcdfAt = inputsBytes.Add(SilkNlsfTestHelpers_NlsfExt, SilkNlsfTestHelpers_NlsfExt.Length),
+            NlsfInterpolationFactorIcdfAt = inputsBytes.Add(SilkNlsfTestHelpers_NlsfInterpFactor, SilkNlsfTestHelpers_NlsfInterpFactor.Length),
             EcIxScratch = dEcIxScratch.View,
-            PredQ8Scratch = dPredQ8Scratch.View,
+            PredQ8ScratchAt = inputsBytes.Reserve(16),
         };
+        using var dInputsBytes = inputsBytes.Upload(acc);
+        inputs.Bytes = dInputsBytes.View;
 
         int cb1IcdfBaseOffset = (signalType >> 1) * nVectors;
 

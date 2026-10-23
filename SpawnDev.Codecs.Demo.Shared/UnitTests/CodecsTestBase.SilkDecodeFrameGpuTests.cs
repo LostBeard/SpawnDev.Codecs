@@ -34,25 +34,8 @@ public abstract partial class CodecsTestBase
 
         // Indices iCDF tables.
         using var dPacket = acc.Allocate1D<byte>(packet.Length);
-        using var dTypeOffsetVad = acc.Allocate1D<byte>(SilkIcdfTables.TypeOffsetVad.Length);
-        using var dTypeOffsetNoVad = acc.Allocate1D<byte>(SilkIcdfTables.TypeOffsetNoVad.Length);
-        using var dUniform4 = acc.Allocate1D<byte>(SilkIcdfTables.Uniform4.Length);
-        using var dGain = acc.Allocate1D<byte>(SilkIcdfTables.Gain.Length);
-        using var dDeltaGain = acc.Allocate1D<byte>(SilkIcdfTables.DeltaGain.Length);
-        using var dUniform8 = acc.Allocate1D<byte>(SilkIcdfTables.Uniform8.Length);
-        using var dCb1 = acc.Allocate1D<byte>(codebook.Cb1Icdf.Length);
-        using var dEc = acc.Allocate1D<byte>(codebook.EcIcdf.Length);
-        using var dEcSel = acc.Allocate1D<byte>(codebook.EcSel.Length);
-        using var dPredQ8 = acc.Allocate1D<byte>(codebook.PredQ8.Length);
-        using var dNlsfExt = acc.Allocate1D<byte>(SilkIcdfTables.NlsfExt.Length);
-        using var dNlsfInterp = acc.Allocate1D<byte>(SilkIcdfTables.NlsfInterpolationFactor.Length);
-        using var dPitchDelta = acc.Allocate1D<byte>(SilkIcdfTables.PitchDelta.Length);
-        using var dPitchLag = acc.Allocate1D<byte>(SilkIcdfTables.PitchLag.Length);
         var lagLowBits = SilkIcdfTables.SelectPitchLagLowBits(fsKHz);
-        using var dLagLowBits = acc.Allocate1D<byte>(lagLowBits.Length);
         var contour = SilkIcdfTables.SelectPitchContour(fsKHz, nbSubfr);
-        using var dContour = acc.Allocate1D<byte>(contour.Length);
-        using var dLtpPerIndex = acc.Allocate1D<byte>(SilkIcdfTables.LtpPerIndex.Length);
 
         // LTP gain flat-pack.
         var ltpFlat = new byte[SilkIcdfTables.LtpGain0.Length
@@ -63,26 +46,12 @@ public abstract partial class CodecsTestBase
         Array.Copy(SilkIcdfTables.LtpGain2, 0, ltpFlat,
             SilkIcdfTables.LtpGain0.Length + SilkIcdfTables.LtpGain1.Length,
             SilkIcdfTables.LtpGain2.Length);
-        using var dLtpFlat = acc.Allocate1D<byte>(ltpFlat.Length);
         using var dLtpOffsets = acc.Allocate1D<int>(3);
-        using var dLtpScale = acc.Allocate1D<byte>(SilkIcdfTables.LtpScale.Length);
 
         // Indices scratch.
         using var dEcIxScratch = acc.Allocate1D<short>(codebook.Order);
-        using var dPredQ8Scratch = acc.Allocate1D<byte>(codebook.Order);
 
         // Pulses iCDFs + shell tables + scratches.
-        using var dRateLevels = acc.Allocate1D<byte>(SilkIcdfTables.RateLevels.Length);
-        using var dPulsesPerBlock = acc.Allocate1D<byte>(SilkIcdfTables.PulsesPerBlock.Length);
-        using var dLsb = acc.Allocate1D<byte>(SilkIcdfTables.Lsb.Length);
-        using var dSign = acc.Allocate1D<byte>(SilkIcdfTables.Sign.Length);
-        using var dShellOffsets = acc.Allocate1D<byte>(SilkShellCodeTables.Offsets.Length);
-        using var dShellTable0 = acc.Allocate1D<byte>(SilkShellCodeTables.Table0.Length);
-        using var dShellTable1 = acc.Allocate1D<byte>(SilkShellCodeTables.Table1.Length);
-        using var dShellTable2 = acc.Allocate1D<byte>(SilkShellCodeTables.Table2.Length);
-        using var dShellTable3 = acc.Allocate1D<byte>(SilkShellCodeTables.Table3.Length);
-        using var dSumPulses = acc.Allocate1D<int>(20);
-        using var dNLshifts = acc.Allocate1D<int>(20);
 
         // Outputs + state buffer.
         using var dStateBuf = acc.Allocate1D<OpusRangeDecoderGpuState>(1);
@@ -91,66 +60,41 @@ public abstract partial class CodecsTestBase
 
         // Upload static data.
         dPacket.View.CopyFromCPU(packet);
-        dTypeOffsetVad.View.CopyFromCPU(SilkIcdfTables.TypeOffsetVad);
-        dTypeOffsetNoVad.View.CopyFromCPU(SilkIcdfTables.TypeOffsetNoVad);
-        dUniform4.View.CopyFromCPU(SilkIcdfTables.Uniform4);
-        dGain.View.CopyFromCPU(SilkIcdfTables.Gain);
-        dDeltaGain.View.CopyFromCPU(SilkIcdfTables.DeltaGain);
-        dUniform8.View.CopyFromCPU(SilkIcdfTables.Uniform8);
-        dCb1.View.CopyFromCPU(codebook.Cb1Icdf);
-        dEc.View.CopyFromCPU(codebook.EcIcdf);
-        dEcSel.View.CopyFromCPU(codebook.EcSel);
-        dPredQ8.View.CopyFromCPU(codebook.PredQ8);
-        dNlsfExt.View.CopyFromCPU(SilkIcdfTables.NlsfExt);
-        dNlsfInterp.View.CopyFromCPU(SilkIcdfTables.NlsfInterpolationFactor);
-        dPitchDelta.View.CopyFromCPU(SilkIcdfTables.PitchDelta);
-        dPitchLag.View.CopyFromCPU(SilkIcdfTables.PitchLag);
-        dLagLowBits.View.CopyFromCPU(lagLowBits);
-        dContour.View.CopyFromCPU(contour);
-        dLtpPerIndex.View.CopyFromCPU(SilkIcdfTables.LtpPerIndex);
-        dLtpFlat.View.CopyFromCPU(ltpFlat);
         dLtpOffsets.View.CopyFromCPU(new int[]
         {
             0,
             SilkIcdfTables.LtpGain0.Length,
             SilkIcdfTables.LtpGain0.Length + SilkIcdfTables.LtpGain1.Length,
         });
-        dLtpScale.View.CopyFromCPU(SilkIcdfTables.LtpScale);
-        dRateLevels.View.CopyFromCPU(SilkIcdfTables.RateLevels);
-        dPulsesPerBlock.View.CopyFromCPU(SilkIcdfTables.PulsesPerBlock);
-        dLsb.View.CopyFromCPU(SilkIcdfTables.Lsb);
-        dSign.View.CopyFromCPU(SilkIcdfTables.Sign);
-        dShellOffsets.View.CopyFromCPU(SilkShellCodeTables.Offsets);
-        dShellTable0.View.CopyFromCPU(SilkShellCodeTables.Table0);
-        dShellTable1.View.CopyFromCPU(SilkShellCodeTables.Table1);
-        dShellTable2.View.CopyFromCPU(SilkShellCodeTables.Table2);
-        dShellTable3.View.CopyFromCPU(SilkShellCodeTables.Table3);
 
+        var indicesInputsBytes = new PackedDeviceBuffer<byte>();
         var indicesInputs = new SilkIndicesInputs
         {
-            TypeOffsetVadIcdf = dTypeOffsetVad.View,
-            TypeOffsetNoVadIcdf = dTypeOffsetNoVad.View,
-            Uniform4Icdf = dUniform4.View,
-            GainIcdf = dGain.View,
-            DeltaGainIcdf = dDeltaGain.View,
-            Uniform8Icdf = dUniform8.View,
-            Cb1Icdf = dCb1.View,
-            EcIcdf = dEc.View,
-            EcSel = dEcSel.View,
-            PredQ8Source = dPredQ8.View,
-            NlsfExtIcdf = dNlsfExt.View,
-            NlsfInterpolationFactorIcdf = dNlsfInterp.View,
-            PitchDeltaIcdf = dPitchDelta.View,
-            PitchLagIcdf = dPitchLag.View,
-            LagLowBitsIcdf = dLagLowBits.View,
-            ContourIcdf = dContour.View,
-            LtpPerIndexIcdf = dLtpPerIndex.View,
-            LtpGainIcdfFlat = dLtpFlat.View,
+            TypeOffsetVadIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.TypeOffsetVad, SilkIcdfTables.TypeOffsetVad.Length),
+            TypeOffsetNoVadIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.TypeOffsetNoVad, SilkIcdfTables.TypeOffsetNoVad.Length),
+            Uniform4IcdfAt = indicesInputsBytes.Add(SilkIcdfTables.Uniform4, SilkIcdfTables.Uniform4.Length),
+            GainIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.Gain, SilkIcdfTables.Gain.Length),
+            DeltaGainIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.DeltaGain, SilkIcdfTables.DeltaGain.Length),
+            Uniform8IcdfAt = indicesInputsBytes.Add(SilkIcdfTables.Uniform8, SilkIcdfTables.Uniform8.Length),
+            Cb1IcdfAt = indicesInputsBytes.Add(codebook.Cb1Icdf, codebook.Cb1Icdf.Length),
+            EcIcdfAt = indicesInputsBytes.Add(codebook.EcIcdf, codebook.EcIcdf.Length),
+            EcSelAt = indicesInputsBytes.Add(codebook.EcSel, codebook.EcSel.Length),
+            PredQ8SourceAt = indicesInputsBytes.Add(codebook.PredQ8, codebook.PredQ8.Length),
+            NlsfExtIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.NlsfExt, SilkIcdfTables.NlsfExt.Length),
+            NlsfInterpolationFactorIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.NlsfInterpolationFactor, SilkIcdfTables.NlsfInterpolationFactor.Length),
+            PitchDeltaIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.PitchDelta, SilkIcdfTables.PitchDelta.Length),
+            PitchLagIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.PitchLag, SilkIcdfTables.PitchLag.Length),
+            LagLowBitsIcdfAt = indicesInputsBytes.Add(lagLowBits, lagLowBits.Length),
+            ContourIcdfAt = indicesInputsBytes.Add(contour, contour.Length),
+            LtpPerIndexIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.LtpPerIndex, SilkIcdfTables.LtpPerIndex.Length),
+            LtpGainIcdfFlatAt = indicesInputsBytes.Add(ltpFlat, ltpFlat.Length),
             LtpGainOffsets = dLtpOffsets.View,
-            LtpScaleIcdf = dLtpScale.View,
+            LtpScaleIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.LtpScale, SilkIcdfTables.LtpScale.Length),
             EcIxScratch = dEcIxScratch.View,
-            PredQ8Scratch = dPredQ8Scratch.View,
+            PredQ8ScratchAt = indicesInputsBytes.Reserve(codebook.Order),
         };
+        using var dIndicesInputsBytes = indicesInputsBytes.Upload(acc);
+        indicesInputs.Bytes = dIndicesInputsBytes.View;
 
         var indicesScalars = new SilkIndicesScalars
         {
@@ -166,23 +110,12 @@ public abstract partial class CodecsTestBase
             FirstFrameAfterReset = firstFrameAfterReset,
         };
 
-        var pulsesInputs = new SilkPulsesInputs
-        {
-            RateLevelsIcdf = dRateLevels.View,
-            PulsesPerBlockIcdf = dPulsesPerBlock.View,
-            LsbIcdf = dLsb.View,
-            SignIcdf = dSign.View,
-            ShellTables = new SilkShellCoderTables
-            {
-                Offsets = dShellOffsets.View,
-                Table0 = dShellTable0.View,
-                Table1 = dShellTable1.View,
-                Table2 = dShellTable2.View,
-                Table3 = dShellTable3.View,
-            },
-            SumPulsesScratch = dSumPulses.View,
-            NLshiftsScratch = dNLshifts.View,
-        };
+        var pulsesInputsBytes = new PackedDeviceBuffer<byte>();
+        var pulsesInputsInts = new PackedDeviceBuffer<int>();
+        var pulsesInputs = SilkPulsesInputs.AddStandard(pulsesInputsBytes, pulsesInputsInts);
+        using var dPulsesInputsBytes = pulsesInputsBytes.Upload(acc);
+        using var dPulsesInputsInts = pulsesInputsInts.Upload(acc);
+        pulsesInputs.Bind(dPulsesInputsBytes.View, dPulsesInputsInts.View);
 
         using var orchestrator = new SilkDecodeFrameGpuOrchestrator(acc);
         orchestrator.DecodeIndicesAndPulses(
@@ -217,25 +150,8 @@ public abstract partial class CodecsTestBase
 
         // Indices iCDF tables.
         using var dPacket = acc.Allocate1D<byte>(packet.Length);
-        using var dTypeOffsetVad = acc.Allocate1D<byte>(SilkIcdfTables.TypeOffsetVad.Length);
-        using var dTypeOffsetNoVad = acc.Allocate1D<byte>(SilkIcdfTables.TypeOffsetNoVad.Length);
-        using var dUniform4 = acc.Allocate1D<byte>(SilkIcdfTables.Uniform4.Length);
-        using var dGain = acc.Allocate1D<byte>(SilkIcdfTables.Gain.Length);
-        using var dDeltaGain = acc.Allocate1D<byte>(SilkIcdfTables.DeltaGain.Length);
-        using var dUniform8 = acc.Allocate1D<byte>(SilkIcdfTables.Uniform8.Length);
-        using var dCb1 = acc.Allocate1D<byte>(codebook.Cb1Icdf.Length);
-        using var dEc = acc.Allocate1D<byte>(codebook.EcIcdf.Length);
-        using var dEcSel = acc.Allocate1D<byte>(codebook.EcSel.Length);
-        using var dPredQ8 = acc.Allocate1D<byte>(codebook.PredQ8.Length);
-        using var dNlsfExt = acc.Allocate1D<byte>(SilkIcdfTables.NlsfExt.Length);
-        using var dNlsfInterp = acc.Allocate1D<byte>(SilkIcdfTables.NlsfInterpolationFactor.Length);
-        using var dPitchDelta = acc.Allocate1D<byte>(SilkIcdfTables.PitchDelta.Length);
-        using var dPitchLag = acc.Allocate1D<byte>(SilkIcdfTables.PitchLag.Length);
         var lagLowBits = SilkIcdfTables.SelectPitchLagLowBits(fsKHz);
-        using var dLagLowBits = acc.Allocate1D<byte>(lagLowBits.Length);
         var contour = SilkIcdfTables.SelectPitchContour(fsKHz, nbSubfr);
-        using var dContour = acc.Allocate1D<byte>(contour.Length);
-        using var dLtpPerIndex = acc.Allocate1D<byte>(SilkIcdfTables.LtpPerIndex.Length);
 
         var ltpFlat = new byte[SilkIcdfTables.LtpGain0.Length
                               + SilkIcdfTables.LtpGain1.Length
@@ -245,45 +161,16 @@ public abstract partial class CodecsTestBase
         Array.Copy(SilkIcdfTables.LtpGain2, 0, ltpFlat,
             SilkIcdfTables.LtpGain0.Length + SilkIcdfTables.LtpGain1.Length,
             SilkIcdfTables.LtpGain2.Length);
-        using var dLtpFlat = acc.Allocate1D<byte>(ltpFlat.Length);
         using var dLtpOffsets = acc.Allocate1D<int>(3);
-        using var dLtpScale = acc.Allocate1D<byte>(SilkIcdfTables.LtpScale.Length);
 
         using var dEcIxScratch = acc.Allocate1D<short>(order);
-        using var dPredQ8Scratch = acc.Allocate1D<byte>(order);
 
-        using var dRateLevels = acc.Allocate1D<byte>(SilkIcdfTables.RateLevels.Length);
-        using var dPulsesPerBlock = acc.Allocate1D<byte>(SilkIcdfTables.PulsesPerBlock.Length);
-        using var dLsb = acc.Allocate1D<byte>(SilkIcdfTables.Lsb.Length);
-        using var dSign = acc.Allocate1D<byte>(SilkIcdfTables.Sign.Length);
-        using var dShellOffsets = acc.Allocate1D<byte>(SilkShellCodeTables.Offsets.Length);
-        using var dShellTable0 = acc.Allocate1D<byte>(SilkShellCodeTables.Table0.Length);
-        using var dShellTable1 = acc.Allocate1D<byte>(SilkShellCodeTables.Table1.Length);
-        using var dShellTable2 = acc.Allocate1D<byte>(SilkShellCodeTables.Table2.Length);
-        using var dShellTable3 = acc.Allocate1D<byte>(SilkShellCodeTables.Table3.Length);
-        using var dSumPulses = acc.Allocate1D<int>(20);
-        using var dNLshifts = acc.Allocate1D<int>(20);
 
         // Parameters codebook + scratches.
-        using var dCb1NlsfQ8 = acc.Allocate1D<byte>(codebook.Cb1NlsfQ8.Length);
-        using var dCb1WghtQ9 = acc.Allocate1D<short>(codebook.Cb1WghtQ9.Length);
-        using var dDeltaMinQ15 = acc.Allocate1D<short>(codebook.DeltaMinQ15.Length);
-        using var dLsfCosTab = acc.Allocate1D<short>(SilkLsfCosTab.Q12.Length);
 
         var (ltpGainsFlat, ltpGainsOffsets) = SilkParamsTest_FlatLtpGains();
-        using var dParLtpGainsFlat = acc.Allocate1D<sbyte>(ltpGainsFlat.Length);
-        using var dParLtpGainsOffsets = acc.Allocate1D<int>(3);
-        using var dParLtpScaleQ14 = acc.Allocate1D<short>(SilkParamsTest_LtpScalesQ14.Length);
         var (contourCb, contourCbSize) = SilkParamsTest_SelectContourCb(fsKHz, nbSubfr);
-        using var dParContourCb = acc.Allocate1D<sbyte>(contourCb.Length);
 
-        using var dPrevNlsfQ15 = acc.Allocate1D<short>(order);
-        using var dLastGainIndex = acc.Allocate1D<int>(1);
-        using var dNlsfDecodeScratch = acc.Allocate1D<short>(3 * 16);
-        using var dNlsfDecodePredScratch = acc.Allocate1D<byte>(16);
-        using var dNlsf2aScratch = acc.Allocate1D<int>(66);
-        using var dNlsfIndicesScratch = acc.Allocate1D<sbyte>(order + 1);
-        using var dGainIndicesScratch = acc.Allocate1D<sbyte>(nbSubfr);
 
         // Outputs + state buffer.
         using var dStateBuf = acc.Allocate1D<OpusRangeDecoderGpuState>(1);
@@ -294,77 +181,42 @@ public abstract partial class CodecsTestBase
 
         // Upload static data.
         dPacket.View.CopyFromCPU(packet);
-        dTypeOffsetVad.View.CopyFromCPU(SilkIcdfTables.TypeOffsetVad);
-        dTypeOffsetNoVad.View.CopyFromCPU(SilkIcdfTables.TypeOffsetNoVad);
-        dUniform4.View.CopyFromCPU(SilkIcdfTables.Uniform4);
-        dGain.View.CopyFromCPU(SilkIcdfTables.Gain);
-        dDeltaGain.View.CopyFromCPU(SilkIcdfTables.DeltaGain);
-        dUniform8.View.CopyFromCPU(SilkIcdfTables.Uniform8);
-        dCb1.View.CopyFromCPU(codebook.Cb1Icdf);
-        dEc.View.CopyFromCPU(codebook.EcIcdf);
-        dEcSel.View.CopyFromCPU(codebook.EcSel);
-        dPredQ8.View.CopyFromCPU(codebook.PredQ8);
-        dNlsfExt.View.CopyFromCPU(SilkIcdfTables.NlsfExt);
-        dNlsfInterp.View.CopyFromCPU(SilkIcdfTables.NlsfInterpolationFactor);
-        dPitchDelta.View.CopyFromCPU(SilkIcdfTables.PitchDelta);
-        dPitchLag.View.CopyFromCPU(SilkIcdfTables.PitchLag);
-        dLagLowBits.View.CopyFromCPU(lagLowBits);
-        dContour.View.CopyFromCPU(contour);
-        dLtpPerIndex.View.CopyFromCPU(SilkIcdfTables.LtpPerIndex);
-        dLtpFlat.View.CopyFromCPU(ltpFlat);
         dLtpOffsets.View.CopyFromCPU(new int[]
         {
             0,
             SilkIcdfTables.LtpGain0.Length,
             SilkIcdfTables.LtpGain0.Length + SilkIcdfTables.LtpGain1.Length,
         });
-        dLtpScale.View.CopyFromCPU(SilkIcdfTables.LtpScale);
-        dRateLevels.View.CopyFromCPU(SilkIcdfTables.RateLevels);
-        dPulsesPerBlock.View.CopyFromCPU(SilkIcdfTables.PulsesPerBlock);
-        dLsb.View.CopyFromCPU(SilkIcdfTables.Lsb);
-        dSign.View.CopyFromCPU(SilkIcdfTables.Sign);
-        dShellOffsets.View.CopyFromCPU(SilkShellCodeTables.Offsets);
-        dShellTable0.View.CopyFromCPU(SilkShellCodeTables.Table0);
-        dShellTable1.View.CopyFromCPU(SilkShellCodeTables.Table1);
-        dShellTable2.View.CopyFromCPU(SilkShellCodeTables.Table2);
-        dShellTable3.View.CopyFromCPU(SilkShellCodeTables.Table3);
 
-        dCb1NlsfQ8.View.CopyFromCPU(codebook.Cb1NlsfQ8);
-        dCb1WghtQ9.View.CopyFromCPU(codebook.Cb1WghtQ9);
-        dDeltaMinQ15.View.CopyFromCPU(codebook.DeltaMinQ15);
-        dLsfCosTab.View.CopyFromCPU(SilkLsfCosTab.Q12);
-        dParLtpGainsFlat.View.CopyFromCPU(ltpGainsFlat);
-        dParLtpGainsOffsets.View.CopyFromCPU(ltpGainsOffsets);
-        dParLtpScaleQ14.View.CopyFromCPU(SilkParamsTest_LtpScalesQ14);
-        dParContourCb.View.CopyFromCPU(contourCb);
-        dPrevNlsfQ15.View.CopyFromCPU(prevNlsfQ15In);
-        dLastGainIndex.View.CopyFromCPU(new int[] { lastGainIndexIn });
 
+        var indicesInputsBytes = new PackedDeviceBuffer<byte>();
         var indicesInputs = new SilkIndicesInputs
         {
-            TypeOffsetVadIcdf = dTypeOffsetVad.View,
-            TypeOffsetNoVadIcdf = dTypeOffsetNoVad.View,
-            Uniform4Icdf = dUniform4.View,
-            GainIcdf = dGain.View,
-            DeltaGainIcdf = dDeltaGain.View,
-            Uniform8Icdf = dUniform8.View,
-            Cb1Icdf = dCb1.View,
-            EcIcdf = dEc.View,
-            EcSel = dEcSel.View,
-            PredQ8Source = dPredQ8.View,
-            NlsfExtIcdf = dNlsfExt.View,
-            NlsfInterpolationFactorIcdf = dNlsfInterp.View,
-            PitchDeltaIcdf = dPitchDelta.View,
-            PitchLagIcdf = dPitchLag.View,
-            LagLowBitsIcdf = dLagLowBits.View,
-            ContourIcdf = dContour.View,
-            LtpPerIndexIcdf = dLtpPerIndex.View,
-            LtpGainIcdfFlat = dLtpFlat.View,
+            TypeOffsetVadIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.TypeOffsetVad, SilkIcdfTables.TypeOffsetVad.Length),
+            TypeOffsetNoVadIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.TypeOffsetNoVad, SilkIcdfTables.TypeOffsetNoVad.Length),
+            Uniform4IcdfAt = indicesInputsBytes.Add(SilkIcdfTables.Uniform4, SilkIcdfTables.Uniform4.Length),
+            GainIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.Gain, SilkIcdfTables.Gain.Length),
+            DeltaGainIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.DeltaGain, SilkIcdfTables.DeltaGain.Length),
+            Uniform8IcdfAt = indicesInputsBytes.Add(SilkIcdfTables.Uniform8, SilkIcdfTables.Uniform8.Length),
+            Cb1IcdfAt = indicesInputsBytes.Add(codebook.Cb1Icdf, codebook.Cb1Icdf.Length),
+            EcIcdfAt = indicesInputsBytes.Add(codebook.EcIcdf, codebook.EcIcdf.Length),
+            EcSelAt = indicesInputsBytes.Add(codebook.EcSel, codebook.EcSel.Length),
+            PredQ8SourceAt = indicesInputsBytes.Add(codebook.PredQ8, codebook.PredQ8.Length),
+            NlsfExtIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.NlsfExt, SilkIcdfTables.NlsfExt.Length),
+            NlsfInterpolationFactorIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.NlsfInterpolationFactor, SilkIcdfTables.NlsfInterpolationFactor.Length),
+            PitchDeltaIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.PitchDelta, SilkIcdfTables.PitchDelta.Length),
+            PitchLagIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.PitchLag, SilkIcdfTables.PitchLag.Length),
+            LagLowBitsIcdfAt = indicesInputsBytes.Add(lagLowBits, lagLowBits.Length),
+            ContourIcdfAt = indicesInputsBytes.Add(contour, contour.Length),
+            LtpPerIndexIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.LtpPerIndex, SilkIcdfTables.LtpPerIndex.Length),
+            LtpGainIcdfFlatAt = indicesInputsBytes.Add(ltpFlat, ltpFlat.Length),
             LtpGainOffsets = dLtpOffsets.View,
-            LtpScaleIcdf = dLtpScale.View,
+            LtpScaleIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.LtpScale, SilkIcdfTables.LtpScale.Length),
             EcIxScratch = dEcIxScratch.View,
-            PredQ8Scratch = dPredQ8Scratch.View,
+            PredQ8ScratchAt = indicesInputsBytes.Reserve(order),
         };
+        using var dIndicesInputsBytes = indicesInputsBytes.Upload(acc);
+        indicesInputs.Bytes = dIndicesInputsBytes.View;
 
         var indicesScalars = new SilkIndicesScalars
         {
@@ -380,48 +232,49 @@ public abstract partial class CodecsTestBase
             FirstFrameAfterReset = firstFrameAfterReset,
         };
 
-        var pulsesInputs = new SilkPulsesInputs
-        {
-            RateLevelsIcdf = dRateLevels.View,
-            PulsesPerBlockIcdf = dPulsesPerBlock.View,
-            LsbIcdf = dLsb.View,
-            SignIcdf = dSign.View,
-            ShellTables = new SilkShellCoderTables
-            {
-                Offsets = dShellOffsets.View,
-                Table0 = dShellTable0.View,
-                Table1 = dShellTable1.View,
-                Table2 = dShellTable2.View,
-                Table3 = dShellTable3.View,
-            },
-            SumPulsesScratch = dSumPulses.View,
-            NLshiftsScratch = dNLshifts.View,
-        };
+        var pulsesInputsBytes = new PackedDeviceBuffer<byte>();
+        var pulsesInputsInts = new PackedDeviceBuffer<int>();
+        var pulsesInputs = SilkPulsesInputs.AddStandard(pulsesInputsBytes, pulsesInputsInts);
+        using var dPulsesInputsBytes = pulsesInputsBytes.Upload(acc);
+        using var dPulsesInputsInts = pulsesInputsInts.Upload(acc);
+        pulsesInputs.Bind(dPulsesInputsBytes.View, dPulsesInputsInts.View);
 
+        var parametersInputsBytes = new PackedDeviceBuffer<byte>();
+        var parametersInputsShorts = new PackedDeviceBuffer<short>();
+        var parametersInputsSBytes = new PackedDeviceBuffer<sbyte>();
+        var parametersInputsInts = new PackedDeviceBuffer<int>();
         var parametersInputs = new SilkParametersInputs
         {
-            Cb1NlsfQ8 = dCb1NlsfQ8.View,
-            Cb1WghtQ9 = dCb1WghtQ9.View,
-            EcSel = dEcSel.View,
-            PredQ8Source = dPredQ8.View,
-            DeltaMinQ15 = dDeltaMinQ15.View,
-            LsfCosTabQ12 = dLsfCosTab.View,
-            ContourCb = dParContourCb.View,
-            LtpGainTablesFlat = dParLtpGainsFlat.View,
-            LtpGainOffsets = dParLtpGainsOffsets.View,
-            LtpScaleQ14Table = dParLtpScaleQ14.View,
+            Cb1NlsfQ8At = parametersInputsBytes.Add(codebook.Cb1NlsfQ8, codebook.Cb1NlsfQ8.Length),
+            Cb1WghtQ9At = parametersInputsShorts.Add(codebook.Cb1WghtQ9, codebook.Cb1WghtQ9.Length),
+            EcSelAt = parametersInputsBytes.Add(codebook.EcSel, codebook.EcSel.Length),
+            PredQ8SourceAt = parametersInputsBytes.Add(codebook.PredQ8, codebook.PredQ8.Length),
+            DeltaMinQ15At = parametersInputsShorts.Add(codebook.DeltaMinQ15, codebook.DeltaMinQ15.Length),
+            LsfCosTabQ12At = parametersInputsShorts.Add(SilkLsfCosTab.Q12, SilkLsfCosTab.Q12.Length),
+            ContourCbAt = parametersInputsSBytes.Add(contourCb, contourCb.Length),
+            LtpGainTablesFlatAt = parametersInputsSBytes.Add(ltpGainsFlat, ltpGainsFlat.Length),
+            LtpGainOffsetsAt = parametersInputsInts.Add(ltpGainsOffsets, 3),
+            LtpScaleQ14TableAt = parametersInputsShorts.Add(SilkParamsTest_LtpScalesQ14, SilkParamsTest_LtpScalesQ14.Length),
         };
 
         var parametersState = new SilkParametersState
         {
-            PrevNlsfQ15 = dPrevNlsfQ15.View,
-            LastGainIndex = dLastGainIndex.View,
-            NlsfDecodeScratch = dNlsfDecodeScratch.View,
-            NlsfDecodePredScratch = dNlsfDecodePredScratch.View,
-            Nlsf2aScratch = dNlsf2aScratch.View,
-            NlsfIndicesScratch = dNlsfIndicesScratch.View,
-            GainIndicesScratch = dGainIndicesScratch.View,
+            PrevNlsfQ15At = parametersInputsShorts.Add(prevNlsfQ15In, order),
+            LastGainIndexAt = parametersInputsInts.Add(new int[] { lastGainIndexIn }, 1),
+            NlsfDecodeScratchAt = parametersInputsShorts.Reserve(3 * 16),
+            NlsfDecodePredScratchAt = parametersInputsBytes.Reserve(16),
+            Nlsf2aScratchAt = parametersInputsInts.Reserve(66),
+            NlsfIndicesScratchAt = parametersInputsSBytes.Reserve(order + 1),
+            GainIndicesScratchAt = parametersInputsSBytes.Reserve(nbSubfr),
         };
+        using var dParametersInputsBytes = parametersInputsBytes.Upload(acc);
+        parametersInputs.Bytes = dParametersInputsBytes.View;
+        using var dParametersInputsShorts = parametersInputsShorts.Upload(acc);
+        parametersInputs.Shorts = dParametersInputsShorts.View;
+        using var dParametersInputsSBytes = parametersInputsSBytes.Upload(acc);
+        parametersInputs.SBytes = dParametersInputsSBytes.View;
+        using var dParametersInputsInts = parametersInputsInts.Upload(acc);
+        parametersInputs.Ints = dParametersInputsInts.View;
 
         var parametersScalars = new SilkParametersScalars
         {
@@ -585,25 +438,8 @@ public abstract partial class CodecsTestBase
 
         // Indices iCDF tables (same as Phase A+P).
         using var dPacket = acc.Allocate1D<byte>(packet.Length);
-        using var dTypeOffsetVad = acc.Allocate1D<byte>(SilkIcdfTables.TypeOffsetVad.Length);
-        using var dTypeOffsetNoVad = acc.Allocate1D<byte>(SilkIcdfTables.TypeOffsetNoVad.Length);
-        using var dUniform4 = acc.Allocate1D<byte>(SilkIcdfTables.Uniform4.Length);
-        using var dGain = acc.Allocate1D<byte>(SilkIcdfTables.Gain.Length);
-        using var dDeltaGain = acc.Allocate1D<byte>(SilkIcdfTables.DeltaGain.Length);
-        using var dUniform8 = acc.Allocate1D<byte>(SilkIcdfTables.Uniform8.Length);
-        using var dCb1 = acc.Allocate1D<byte>(codebook.Cb1Icdf.Length);
-        using var dEc = acc.Allocate1D<byte>(codebook.EcIcdf.Length);
-        using var dEcSel = acc.Allocate1D<byte>(codebook.EcSel.Length);
-        using var dPredQ8 = acc.Allocate1D<byte>(codebook.PredQ8.Length);
-        using var dNlsfExt = acc.Allocate1D<byte>(SilkIcdfTables.NlsfExt.Length);
-        using var dNlsfInterp = acc.Allocate1D<byte>(SilkIcdfTables.NlsfInterpolationFactor.Length);
-        using var dPitchDelta = acc.Allocate1D<byte>(SilkIcdfTables.PitchDelta.Length);
-        using var dPitchLag = acc.Allocate1D<byte>(SilkIcdfTables.PitchLag.Length);
         var lagLowBits = SilkIcdfTables.SelectPitchLagLowBits(fsKHz);
-        using var dLagLowBits = acc.Allocate1D<byte>(lagLowBits.Length);
         var contour = SilkIcdfTables.SelectPitchContour(fsKHz, nbSubfr);
-        using var dContour = acc.Allocate1D<byte>(contour.Length);
-        using var dLtpPerIndex = acc.Allocate1D<byte>(SilkIcdfTables.LtpPerIndex.Length);
         var ltpFlat = new byte[SilkIcdfTables.LtpGain0.Length
                               + SilkIcdfTables.LtpGain1.Length
                               + SilkIcdfTables.LtpGain2.Length];
@@ -612,41 +448,12 @@ public abstract partial class CodecsTestBase
         Array.Copy(SilkIcdfTables.LtpGain2, 0, ltpFlat,
             SilkIcdfTables.LtpGain0.Length + SilkIcdfTables.LtpGain1.Length,
             SilkIcdfTables.LtpGain2.Length);
-        using var dLtpFlat = acc.Allocate1D<byte>(ltpFlat.Length);
         using var dLtpOffsets = acc.Allocate1D<int>(3);
-        using var dLtpScale = acc.Allocate1D<byte>(SilkIcdfTables.LtpScale.Length);
         using var dEcIxScratch = acc.Allocate1D<short>(order);
-        using var dPredQ8Scratch = acc.Allocate1D<byte>(order);
 
-        using var dRateLevels = acc.Allocate1D<byte>(SilkIcdfTables.RateLevels.Length);
-        using var dPulsesPerBlock = acc.Allocate1D<byte>(SilkIcdfTables.PulsesPerBlock.Length);
-        using var dLsb = acc.Allocate1D<byte>(SilkIcdfTables.Lsb.Length);
-        using var dSign = acc.Allocate1D<byte>(SilkIcdfTables.Sign.Length);
-        using var dShellOffsets = acc.Allocate1D<byte>(SilkShellCodeTables.Offsets.Length);
-        using var dShellTable0 = acc.Allocate1D<byte>(SilkShellCodeTables.Table0.Length);
-        using var dShellTable1 = acc.Allocate1D<byte>(SilkShellCodeTables.Table1.Length);
-        using var dShellTable2 = acc.Allocate1D<byte>(SilkShellCodeTables.Table2.Length);
-        using var dShellTable3 = acc.Allocate1D<byte>(SilkShellCodeTables.Table3.Length);
-        using var dSumPulses = acc.Allocate1D<int>(20);
-        using var dNLshifts = acc.Allocate1D<int>(20);
 
-        using var dCb1NlsfQ8 = acc.Allocate1D<byte>(codebook.Cb1NlsfQ8.Length);
-        using var dCb1WghtQ9 = acc.Allocate1D<short>(codebook.Cb1WghtQ9.Length);
-        using var dDeltaMinQ15 = acc.Allocate1D<short>(codebook.DeltaMinQ15.Length);
-        using var dLsfCosTab = acc.Allocate1D<short>(SilkLsfCosTab.Q12.Length);
         var (ltpGainsFlat, ltpGainsOffsets) = SilkParamsTest_FlatLtpGains();
-        using var dParLtpGainsFlat = acc.Allocate1D<sbyte>(ltpGainsFlat.Length);
-        using var dParLtpGainsOffsets = acc.Allocate1D<int>(3);
-        using var dParLtpScaleQ14 = acc.Allocate1D<short>(SilkParamsTest_LtpScalesQ14.Length);
         var (contourCb, contourCbSize) = SilkParamsTest_SelectContourCb(fsKHz, nbSubfr);
-        using var dParContourCb = acc.Allocate1D<sbyte>(contourCb.Length);
-        using var dPrevNlsfQ15 = acc.Allocate1D<short>(order);
-        using var dLastGainIndex = acc.Allocate1D<int>(1);
-        using var dNlsfDecodeScratch = acc.Allocate1D<short>(3 * 16);
-        using var dNlsfDecodePredScratch = acc.Allocate1D<byte>(16);
-        using var dNlsf2aScratch = acc.Allocate1D<int>(66);
-        using var dNlsfIndicesScratch = acc.Allocate1D<sbyte>(order + 1);
-        using var dGainIndicesScratch = acc.Allocate1D<sbyte>(nbSubfr);
 
         // DecodeCore state + scratches + output.
         using var dStateBuf = acc.Allocate1D<OpusRangeDecoderGpuState>(1);
@@ -655,92 +462,44 @@ public abstract partial class CodecsTestBase
         using var dParamsIntOut = acc.Allocate1D<int>(SilkDecodedParametersLayout.IntTotalSlots);
         using var dParamsShortOut = acc.Allocate1D<short>(SilkDecodedParametersLayout.ShortTotalSlots);
 
-        using var dOutBuf = acc.Allocate1D<short>(MaxLtpMemLength + MaxFrameLength);
-        using var dSLpcQ14Buf = acc.Allocate1D<int>(MaxLpcOrder);
-        using var dExcQ14 = acc.Allocate1D<int>(MaxFrameLength);
-        using var dPrevGain = acc.Allocate1D<int>(1);
-        using var dSLpcScratch = acc.Allocate1D<int>(MaxLpcOrder + MaxSubfrLength);
-        using var dSLtpQ15Scratch = acc.Allocate1D<int>(MaxLtpMemLength + MaxFrameLength);
-        using var dSLtpScratch = acc.Allocate1D<short>(MaxLtpMemLength);
-        using var dPresQ14Scratch = acc.Allocate1D<int>(MaxSubfrLength);
-        using var dGainAdjScratch = acc.Allocate1D<int>(1);
-        using var dXqOut = acc.Allocate1D<short>(MaxFrameLength);
 
         // Upload static data + initial state.
         dPacket.View.CopyFromCPU(packet);
-        dTypeOffsetVad.View.CopyFromCPU(SilkIcdfTables.TypeOffsetVad);
-        dTypeOffsetNoVad.View.CopyFromCPU(SilkIcdfTables.TypeOffsetNoVad);
-        dUniform4.View.CopyFromCPU(SilkIcdfTables.Uniform4);
-        dGain.View.CopyFromCPU(SilkIcdfTables.Gain);
-        dDeltaGain.View.CopyFromCPU(SilkIcdfTables.DeltaGain);
-        dUniform8.View.CopyFromCPU(SilkIcdfTables.Uniform8);
-        dCb1.View.CopyFromCPU(codebook.Cb1Icdf);
-        dEc.View.CopyFromCPU(codebook.EcIcdf);
-        dEcSel.View.CopyFromCPU(codebook.EcSel);
-        dPredQ8.View.CopyFromCPU(codebook.PredQ8);
-        dNlsfExt.View.CopyFromCPU(SilkIcdfTables.NlsfExt);
-        dNlsfInterp.View.CopyFromCPU(SilkIcdfTables.NlsfInterpolationFactor);
-        dPitchDelta.View.CopyFromCPU(SilkIcdfTables.PitchDelta);
-        dPitchLag.View.CopyFromCPU(SilkIcdfTables.PitchLag);
-        dLagLowBits.View.CopyFromCPU(lagLowBits);
-        dContour.View.CopyFromCPU(contour);
-        dLtpPerIndex.View.CopyFromCPU(SilkIcdfTables.LtpPerIndex);
-        dLtpFlat.View.CopyFromCPU(ltpFlat);
         dLtpOffsets.View.CopyFromCPU(new int[]
         {
             0,
             SilkIcdfTables.LtpGain0.Length,
             SilkIcdfTables.LtpGain0.Length + SilkIcdfTables.LtpGain1.Length,
         });
-        dLtpScale.View.CopyFromCPU(SilkIcdfTables.LtpScale);
-        dRateLevels.View.CopyFromCPU(SilkIcdfTables.RateLevels);
-        dPulsesPerBlock.View.CopyFromCPU(SilkIcdfTables.PulsesPerBlock);
-        dLsb.View.CopyFromCPU(SilkIcdfTables.Lsb);
-        dSign.View.CopyFromCPU(SilkIcdfTables.Sign);
-        dShellOffsets.View.CopyFromCPU(SilkShellCodeTables.Offsets);
-        dShellTable0.View.CopyFromCPU(SilkShellCodeTables.Table0);
-        dShellTable1.View.CopyFromCPU(SilkShellCodeTables.Table1);
-        dShellTable2.View.CopyFromCPU(SilkShellCodeTables.Table2);
-        dShellTable3.View.CopyFromCPU(SilkShellCodeTables.Table3);
-        dCb1NlsfQ8.View.CopyFromCPU(codebook.Cb1NlsfQ8);
-        dCb1WghtQ9.View.CopyFromCPU(codebook.Cb1WghtQ9);
-        dDeltaMinQ15.View.CopyFromCPU(codebook.DeltaMinQ15);
-        dLsfCosTab.View.CopyFromCPU(SilkLsfCosTab.Q12);
-        dParLtpGainsFlat.View.CopyFromCPU(ltpGainsFlat);
-        dParLtpGainsOffsets.View.CopyFromCPU(ltpGainsOffsets);
-        dParLtpScaleQ14.View.CopyFromCPU(SilkParamsTest_LtpScalesQ14);
-        dParContourCb.View.CopyFromCPU(contourCb);
-        dPrevNlsfQ15.View.CopyFromCPU(prevNlsfQ15In);
-        dLastGainIndex.View.CopyFromCPU(new int[] { lastGainIndexIn });
-        dOutBuf.View.CopyFromCPU(initialOutBuf);
-        dSLpcQ14Buf.View.CopyFromCPU(initialSLpcQ14Buf);
-        dPrevGain.View.CopyFromCPU(new int[] { initialPrevGainQ16 });
 
+        var indicesInputsBytes = new PackedDeviceBuffer<byte>();
         var indicesInputs = new SilkIndicesInputs
         {
-            TypeOffsetVadIcdf = dTypeOffsetVad.View,
-            TypeOffsetNoVadIcdf = dTypeOffsetNoVad.View,
-            Uniform4Icdf = dUniform4.View,
-            GainIcdf = dGain.View,
-            DeltaGainIcdf = dDeltaGain.View,
-            Uniform8Icdf = dUniform8.View,
-            Cb1Icdf = dCb1.View,
-            EcIcdf = dEc.View,
-            EcSel = dEcSel.View,
-            PredQ8Source = dPredQ8.View,
-            NlsfExtIcdf = dNlsfExt.View,
-            NlsfInterpolationFactorIcdf = dNlsfInterp.View,
-            PitchDeltaIcdf = dPitchDelta.View,
-            PitchLagIcdf = dPitchLag.View,
-            LagLowBitsIcdf = dLagLowBits.View,
-            ContourIcdf = dContour.View,
-            LtpPerIndexIcdf = dLtpPerIndex.View,
-            LtpGainIcdfFlat = dLtpFlat.View,
+            TypeOffsetVadIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.TypeOffsetVad, SilkIcdfTables.TypeOffsetVad.Length),
+            TypeOffsetNoVadIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.TypeOffsetNoVad, SilkIcdfTables.TypeOffsetNoVad.Length),
+            Uniform4IcdfAt = indicesInputsBytes.Add(SilkIcdfTables.Uniform4, SilkIcdfTables.Uniform4.Length),
+            GainIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.Gain, SilkIcdfTables.Gain.Length),
+            DeltaGainIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.DeltaGain, SilkIcdfTables.DeltaGain.Length),
+            Uniform8IcdfAt = indicesInputsBytes.Add(SilkIcdfTables.Uniform8, SilkIcdfTables.Uniform8.Length),
+            Cb1IcdfAt = indicesInputsBytes.Add(codebook.Cb1Icdf, codebook.Cb1Icdf.Length),
+            EcIcdfAt = indicesInputsBytes.Add(codebook.EcIcdf, codebook.EcIcdf.Length),
+            EcSelAt = indicesInputsBytes.Add(codebook.EcSel, codebook.EcSel.Length),
+            PredQ8SourceAt = indicesInputsBytes.Add(codebook.PredQ8, codebook.PredQ8.Length),
+            NlsfExtIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.NlsfExt, SilkIcdfTables.NlsfExt.Length),
+            NlsfInterpolationFactorIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.NlsfInterpolationFactor, SilkIcdfTables.NlsfInterpolationFactor.Length),
+            PitchDeltaIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.PitchDelta, SilkIcdfTables.PitchDelta.Length),
+            PitchLagIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.PitchLag, SilkIcdfTables.PitchLag.Length),
+            LagLowBitsIcdfAt = indicesInputsBytes.Add(lagLowBits, lagLowBits.Length),
+            ContourIcdfAt = indicesInputsBytes.Add(contour, contour.Length),
+            LtpPerIndexIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.LtpPerIndex, SilkIcdfTables.LtpPerIndex.Length),
+            LtpGainIcdfFlatAt = indicesInputsBytes.Add(ltpFlat, ltpFlat.Length),
             LtpGainOffsets = dLtpOffsets.View,
-            LtpScaleIcdf = dLtpScale.View,
+            LtpScaleIcdfAt = indicesInputsBytes.Add(SilkIcdfTables.LtpScale, SilkIcdfTables.LtpScale.Length),
             EcIxScratch = dEcIxScratch.View,
-            PredQ8Scratch = dPredQ8Scratch.View,
+            PredQ8ScratchAt = indicesInputsBytes.Reserve(order),
         };
+        using var dIndicesInputsBytes = indicesInputsBytes.Upload(acc);
+        indicesInputs.Bytes = dIndicesInputsBytes.View;
         var indicesScalars = new SilkIndicesScalars
         {
             NVectors = codebook.NVectors,
@@ -754,46 +513,47 @@ public abstract partial class CodecsTestBase
             PrevSignalTypeWasVoiced = prevSignalTypeWasVoiced,
             FirstFrameAfterReset = firstFrameAfterReset,
         };
-        var pulsesInputs = new SilkPulsesInputs
-        {
-            RateLevelsIcdf = dRateLevels.View,
-            PulsesPerBlockIcdf = dPulsesPerBlock.View,
-            LsbIcdf = dLsb.View,
-            SignIcdf = dSign.View,
-            ShellTables = new SilkShellCoderTables
-            {
-                Offsets = dShellOffsets.View,
-                Table0 = dShellTable0.View,
-                Table1 = dShellTable1.View,
-                Table2 = dShellTable2.View,
-                Table3 = dShellTable3.View,
-            },
-            SumPulsesScratch = dSumPulses.View,
-            NLshiftsScratch = dNLshifts.View,
-        };
+        var pulsesInputsBytes = new PackedDeviceBuffer<byte>();
+        var pulsesInputsInts = new PackedDeviceBuffer<int>();
+        var pulsesInputs = SilkPulsesInputs.AddStandard(pulsesInputsBytes, pulsesInputsInts);
+        using var dPulsesInputsBytes = pulsesInputsBytes.Upload(acc);
+        using var dPulsesInputsInts = pulsesInputsInts.Upload(acc);
+        pulsesInputs.Bind(dPulsesInputsBytes.View, dPulsesInputsInts.View);
+        var parametersInputsBytes = new PackedDeviceBuffer<byte>();
+        var parametersInputsShorts = new PackedDeviceBuffer<short>();
+        var parametersInputsSBytes = new PackedDeviceBuffer<sbyte>();
+        var parametersInputsInts = new PackedDeviceBuffer<int>();
         var parametersInputs = new SilkParametersInputs
         {
-            Cb1NlsfQ8 = dCb1NlsfQ8.View,
-            Cb1WghtQ9 = dCb1WghtQ9.View,
-            EcSel = dEcSel.View,
-            PredQ8Source = dPredQ8.View,
-            DeltaMinQ15 = dDeltaMinQ15.View,
-            LsfCosTabQ12 = dLsfCosTab.View,
-            ContourCb = dParContourCb.View,
-            LtpGainTablesFlat = dParLtpGainsFlat.View,
-            LtpGainOffsets = dParLtpGainsOffsets.View,
-            LtpScaleQ14Table = dParLtpScaleQ14.View,
+            Cb1NlsfQ8At = parametersInputsBytes.Add(codebook.Cb1NlsfQ8, codebook.Cb1NlsfQ8.Length),
+            Cb1WghtQ9At = parametersInputsShorts.Add(codebook.Cb1WghtQ9, codebook.Cb1WghtQ9.Length),
+            EcSelAt = parametersInputsBytes.Add(codebook.EcSel, codebook.EcSel.Length),
+            PredQ8SourceAt = parametersInputsBytes.Add(codebook.PredQ8, codebook.PredQ8.Length),
+            DeltaMinQ15At = parametersInputsShorts.Add(codebook.DeltaMinQ15, codebook.DeltaMinQ15.Length),
+            LsfCosTabQ12At = parametersInputsShorts.Add(SilkLsfCosTab.Q12, SilkLsfCosTab.Q12.Length),
+            ContourCbAt = parametersInputsSBytes.Add(contourCb, contourCb.Length),
+            LtpGainTablesFlatAt = parametersInputsSBytes.Add(ltpGainsFlat, ltpGainsFlat.Length),
+            LtpGainOffsetsAt = parametersInputsInts.Add(ltpGainsOffsets, 3),
+            LtpScaleQ14TableAt = parametersInputsShorts.Add(SilkParamsTest_LtpScalesQ14, SilkParamsTest_LtpScalesQ14.Length),
         };
         var parametersState = new SilkParametersState
         {
-            PrevNlsfQ15 = dPrevNlsfQ15.View,
-            LastGainIndex = dLastGainIndex.View,
-            NlsfDecodeScratch = dNlsfDecodeScratch.View,
-            NlsfDecodePredScratch = dNlsfDecodePredScratch.View,
-            Nlsf2aScratch = dNlsf2aScratch.View,
-            NlsfIndicesScratch = dNlsfIndicesScratch.View,
-            GainIndicesScratch = dGainIndicesScratch.View,
+            PrevNlsfQ15At = parametersInputsShorts.Add(prevNlsfQ15In, order),
+            LastGainIndexAt = parametersInputsInts.Add(new int[] { lastGainIndexIn }, 1),
+            NlsfDecodeScratchAt = parametersInputsShorts.Reserve(3 * 16),
+            NlsfDecodePredScratchAt = parametersInputsBytes.Reserve(16),
+            Nlsf2aScratchAt = parametersInputsInts.Reserve(66),
+            NlsfIndicesScratchAt = parametersInputsSBytes.Reserve(order + 1),
+            GainIndicesScratchAt = parametersInputsSBytes.Reserve(nbSubfr),
         };
+        using var dParametersInputsBytes = parametersInputsBytes.Upload(acc);
+        parametersInputs.Bytes = dParametersInputsBytes.View;
+        using var dParametersInputsShorts = parametersInputsShorts.Upload(acc);
+        parametersInputs.Shorts = dParametersInputsShorts.View;
+        using var dParametersInputsSBytes = parametersInputsSBytes.Upload(acc);
+        parametersInputs.SBytes = dParametersInputsSBytes.View;
+        using var dParametersInputsInts = parametersInputsInts.Upload(acc);
+        parametersInputs.Ints = dParametersInputsInts.View;
         var parametersScalars = new SilkParametersScalars
         {
             QuantStepSizeQ16 = codebook.QuantStepSizeQ16,
@@ -807,24 +567,32 @@ public abstract partial class CodecsTestBase
         // SilkDecodeCoreInputs: PredCoefQ12 / GainsQ16 / PitchL / LtpCoefQ14
         // are SubViews into the parameter output buffers per
         // SilkDecodedParametersLayout.
+        var decodeCoreInputsShorts = new PackedDeviceBuffer<short>();
+        var decodeCoreInputsInts = new PackedDeviceBuffer<int>();
         var decodeCoreInputs = new SilkDecodeCoreInputs
         {
-            PredCoefQ12 = dParamsShortOut.View.SubView(SilkDecodedParametersLayout.ShortPredCoefQ12Half1Offset, 32),
-            GainsQ16 = dParamsIntOut.View.SubView(SilkDecodedParametersLayout.IntGainsQ16Offset, 4),
-            PitchL = dParamsIntOut.View.SubView(SilkDecodedParametersLayout.IntPitchLOffset, 4),
-            LtpCoefQ14 = dParamsShortOut.View.SubView(SilkDecodedParametersLayout.ShortLtpCoefQ14Offset, 20),
+            ParamsShort = dParamsShortOut.View,
+            ParamsInt = dParamsIntOut.View,
+            PredCoefQ12At = SilkDecodedParametersLayout.ShortPredCoefQ12Half1Offset,
+            GainsQ16At = SilkDecodedParametersLayout.IntGainsQ16Offset,
+            PitchLAt = SilkDecodedParametersLayout.IntPitchLOffset,
+            LtpCoefQ14At = SilkDecodedParametersLayout.ShortLtpCoefQ14Offset,
             Pulses = dPulsesOut.View,
-            OutBufInOut = dOutBuf.View,
-            SLpcQ14BufInOut = dSLpcQ14Buf.View,
-            ExcQ14Out = dExcQ14.View,
-            PrevGainQ16InOut = dPrevGain.View,
-            SLpcScratch = dSLpcScratch.View,
-            SLtpQ15Scratch = dSLtpQ15Scratch.View,
-            SLtpScratch = dSLtpScratch.View,
-            PresQ14Scratch = dPresQ14Scratch.View,
-            GainAdjScratch = dGainAdjScratch.View,
-            XqOut = dXqOut.View,
+            OutBufInOutAt = decodeCoreInputsShorts.Add(initialOutBuf, MaxLtpMemLength + MaxFrameLength),
+            SLpcQ14BufInOutAt = decodeCoreInputsInts.Add(initialSLpcQ14Buf, MaxLpcOrder),
+            ExcQ14OutAt = decodeCoreInputsInts.Reserve(MaxFrameLength),
+            PrevGainQ16InOutAt = decodeCoreInputsInts.Add(new int[] { initialPrevGainQ16 }, 1),
+            SLpcScratchAt = decodeCoreInputsInts.Reserve(MaxLpcOrder + MaxSubfrLength),
+            SLtpQ15ScratchAt = decodeCoreInputsInts.Reserve(MaxLtpMemLength + MaxFrameLength),
+            SLtpScratchAt = decodeCoreInputsShorts.Reserve(MaxLtpMemLength),
+            PresQ14ScratchAt = decodeCoreInputsInts.Reserve(MaxSubfrLength),
+            GainAdjScratchAt = decodeCoreInputsInts.Reserve(1),
+            XqOutAt = decodeCoreInputsShorts.Reserve(MaxFrameLength),
         };
+        using var dDecodeCoreInputsShorts = decodeCoreInputsShorts.Upload(acc);
+        decodeCoreInputs.Shorts = dDecodeCoreInputsShorts.View;
+        using var dDecodeCoreInputsInts = decodeCoreInputsInts.Upload(acc);
+        decodeCoreInputs.Ints = dDecodeCoreInputsInts.View;
 
         using var orchestrator = new SilkDecodeFrameGpuOrchestrator(acc);
         if (withFinalize)
@@ -859,10 +627,10 @@ public abstract partial class CodecsTestBase
         }
         await acc.SynchronizeAsync();
 
-        var pcmFull = await dXqOut.CopyToHostAsync();
-        var sLpcOut = await dSLpcQ14Buf.CopyToHostAsync();
-        var prevGainOut = await dPrevGain.CopyToHostAsync();
-        var outBufFull = await dOutBuf.CopyToHostAsync();
+        var pcmFull = await dDecodeCoreInputsShorts.View.SubView(decodeCoreInputs.XqOutAt, MaxFrameLength).CopyToHostAsync();
+        var sLpcOut = await dDecodeCoreInputsInts.View.SubView(decodeCoreInputs.SLpcQ14BufInOutAt, MaxLpcOrder).CopyToHostAsync();
+        var prevGainOut = await dDecodeCoreInputsInts.View.SubView(decodeCoreInputs.PrevGainQ16InOutAt, 1).CopyToHostAsync();
+        var outBufFull = await dDecodeCoreInputsShorts.View.SubView(decodeCoreInputs.OutBufInOutAt, MaxLtpMemLength + MaxFrameLength).CopyToHostAsync();
         var pcm = new short[frameLength];
         Array.Copy(pcmFull, pcm, frameLength);
         return (pcm, sLpcOut, prevGainOut[0], outBufFull);

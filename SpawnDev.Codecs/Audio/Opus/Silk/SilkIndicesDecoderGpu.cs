@@ -79,33 +79,7 @@ public static class SilkIndicesDecoderGpu
     /// <param name="buf">Encoded packet buffer.</param>
     /// <param name="bufStart">Offset of the packet in <paramref name="buf"/>.</param>
     /// <param name="storage">Length of the packet in bytes.</param>
-    /// <param name="typeOffsetVadIcdf">silk_type_offset_VAD_iCDF (4 entries).</param>
-    /// <param name="typeOffsetNoVadIcdf">silk_type_offset_no_VAD_iCDF (2 entries).</param>
-    /// <param name="uniform4Icdf">silk_uniform4_iCDF (4 entries; used for seed).</param>
-    /// <param name="gainIcdf">silk_gain_iCDF flat (24 entries: 3 signal types × 8).</param>
-    /// <param name="deltaGainIcdf">silk_delta_gain_iCDF (41 entries).</param>
-    /// <param name="uniform8Icdf">silk_uniform8_iCDF (8 entries; used for first-subframe gain LSB).</param>
-    /// <param name="cb1Icdf">NLSF codebook Cb1Icdf, length 2 * NVectors.</param>
-    /// <param name="ecIcdf">NLSF codebook EcIcdf.</param>
-    /// <param name="ecSel">NLSF codebook EcSel bytes.</param>
-    /// <param name="predQ8Source">NLSF codebook PredQ8 source.</param>
-    /// <param name="nlsfExtIcdf">silk_NLSF_EXT_iCDF (7 entries).</param>
-    /// <param name="nlsfInterpolationFactorIcdf">silk_NLSF_interpolation_factor_iCDF (5 entries).</param>
-    /// <param name="pitchDeltaIcdf">silk_pitch_delta_iCDF (21 entries).</param>
-    /// <param name="pitchLagIcdf">silk_pitch_lag_iCDF (32 entries).</param>
-    /// <param name="lagLowBitsIcdf">fs_kHz-resolved Uniform4/6/8.</param>
-    /// <param name="contourIcdf">(fs_kHz, nbSubfr)-resolved contour iCDF.</param>
-    /// <param name="ltpPerIndexIcdf">silk_LTP_per_index_iCDF (3 entries).</param>
-    /// <param name="ltpGainIcdfFlat">Flat-packed LtpGain0+1+2 (56 entries).</param>
-    /// <param name="ltpGainOffsets">[0, 8, 24] - offsets into ltpGainIcdfFlat per perIndex.</param>
-    /// <param name="ltpScaleIcdf">silk_LTP_scale_iCDF (3 entries).</param>
-    /// <param name="ecIxScratch">Scratch buffer (length >= MaxLpcOrder=16).</param>
-    /// <param name="predQ8Scratch">Scratch buffer (length >= MaxLpcOrder=16).</param>
-    /// <param name="cb1IcdfBaseOffset">Pre-computed (signalType >> 1) * nVectors offset for the NLSF
-    /// step. For SILK, signalType is the OUTPUT of step 1 not an input — but the offset is computed
-    /// AFTER step 1 inside the kernel. So this parameter is unused here; included for parity with
-    /// the standalone NLSF decoder where the host pre-computes it. Kernel computes it dynamically.
-    /// Unused.</param>
+    /// <param name="inputs">The iCDF tables + scratch, packed (see <see cref="SilkIndicesInputs"/>).</param>
     /// <param name="nVectors">codebook.NVectors.</param>
     /// <param name="order">codebook.Order.</param>
     /// <param name="nbSubfr">Subframe count (2 or 4).</param>
@@ -121,28 +95,7 @@ public static class SilkIndicesDecoderGpu
     public static void Decode(
         ref OpusRangeDecoderGpuState state,
         ArrayView<byte> buf, int bufStart, uint storage,
-        ArrayView<byte> typeOffsetVadIcdf,
-        ArrayView<byte> typeOffsetNoVadIcdf,
-        ArrayView<byte> uniform4Icdf,
-        ArrayView<byte> gainIcdf,
-        ArrayView<byte> deltaGainIcdf,
-        ArrayView<byte> uniform8Icdf,
-        ArrayView<byte> cb1Icdf,
-        ArrayView<byte> ecIcdf,
-        ArrayView<byte> ecSel,
-        ArrayView<byte> predQ8Source,
-        ArrayView<byte> nlsfExtIcdf,
-        ArrayView<byte> nlsfInterpolationFactorIcdf,
-        ArrayView<byte> pitchDeltaIcdf,
-        ArrayView<byte> pitchLagIcdf,
-        ArrayView<byte> lagLowBitsIcdf,
-        ArrayView<byte> contourIcdf,
-        ArrayView<byte> ltpPerIndexIcdf,
-        ArrayView<byte> ltpGainIcdfFlat,
-        ArrayView<int> ltpGainOffsets,
-        ArrayView<byte> ltpScaleIcdf,
-        ArrayView<short> ecIxScratch,
-        ArrayView<byte> predQ8Scratch,
+        SilkIndicesInputs inputs,
         int nVectors, int order, int nbSubfr, int fsKHz,
         int vadFlag, int decodeLbrr, int conditional,
         int prevLagIndex, int prevSignalTypeWasVoiced,
@@ -153,8 +106,8 @@ public static class SilkIndicesDecoderGpu
         bool useVadTable = (vadFlag != 0) || (decodeLbrr != 0);
         SilkSideInfoDecoderGpu.DecodeSignalType(
             ref state, buf, bufStart, storage,
-            typeOffsetVadIcdf, 0,
-            typeOffsetNoVadIcdf, 0,
+            inputs.Bytes, inputs.TypeOffsetVadIcdfAt,
+            inputs.Bytes, inputs.TypeOffsetNoVadIcdfAt,
             useVadTable,
             out int signalType, out int quantOffsetType);
         output[outputBase + SilkDecodedIndicesLayout.SignalTypeOffset] = signalType;
@@ -163,9 +116,9 @@ public static class SilkIndicesDecoderGpu
         // Step 2: Gain indices.
         SilkGainIndicesDecoderGpu.DecodeIndices(
             ref state, buf, bufStart, storage,
-            gainIcdf, 0,
-            deltaGainIcdf, 0,
-            uniform8Icdf, 0,
+            inputs.Bytes, inputs.GainIcdfAt,
+            inputs.Bytes, inputs.DeltaGainIcdfAt,
+            inputs.Bytes, inputs.Uniform8IcdfAt,
             signalType, conditional, nbSubfr,
             output, outputBase + SilkDecodedIndicesLayout.GainsIndicesOffset);
 
@@ -174,14 +127,14 @@ public static class SilkIndicesDecoderGpu
         int dynamicCb1IcdfBaseOffset = (signalType >> 1) * nVectors;
         int interp = SilkNlsfIndicesDecoderGpu.DecodeIndices(
             ref state, buf, bufStart, storage,
-            cb1Icdf, dynamicCb1IcdfBaseOffset,
-            ecIcdf, 0,
-            ecSel, 0,
-            predQ8Source, 0,
-            nlsfExtIcdf, 0,
-            nlsfInterpolationFactorIcdf, 0,
-            ecIxScratch, 0,
-            predQ8Scratch, 0,
+            inputs.Bytes, inputs.Cb1IcdfAt + dynamicCb1IcdfBaseOffset,
+            inputs.Bytes, inputs.EcIcdfAt,
+            inputs.Bytes, inputs.EcSelAt,
+            inputs.Bytes, inputs.PredQ8SourceAt,
+            inputs.Bytes, inputs.NlsfExtIcdfAt,
+            inputs.Bytes, inputs.NlsfInterpolationFactorIcdfAt,
+            inputs.EcIxScratch, 0,
+            inputs.Bytes, inputs.PredQ8ScratchAt,
             order, nbSubfr,
             output, outputBase + SilkDecodedIndicesLayout.NlsfIndicesOffset);
         // First-frame-after-reset suppresses NLSF interpolation (prev NLSFs are garbage).
@@ -199,10 +152,10 @@ public static class SilkIndicesDecoderGpu
             // by routing through output's LagIndex/ContourIndex pair directly.
             SilkPitchIndicesDecoderGpu.DecodeIndices(
                 ref state, buf, bufStart, storage,
-                pitchDeltaIcdf, 0,
-                pitchLagIcdf, 0,
-                lagLowBitsIcdf, 0,
-                contourIcdf, 0,
+                inputs.Bytes, inputs.PitchDeltaIcdfAt,
+                inputs.Bytes, inputs.PitchLagIcdfAt,
+                inputs.Bytes, inputs.LagLowBitsIcdfAt,
+                inputs.Bytes, inputs.ContourIcdfAt,
                 fsKHz, prevLagIndex, prevSignalTypeWasVoiced, conditional,
                 output, outputBase + SilkDecodedIndicesLayout.LagIndexOffset);
 
@@ -219,10 +172,10 @@ public static class SilkIndicesDecoderGpu
             int ltpTempBase = (int)(outputBase + SilkDecodedIndicesLayout.LtpIndicesOffset - 2);
             SilkLtpIndicesDecoderGpu.DecodeIndices(
                 ref state, buf, bufStart, storage,
-                ltpPerIndexIcdf, 0,
-                ltpGainIcdfFlat, 0,
-                ltpGainOffsets, 0,
-                ltpScaleIcdf, 0,
+                inputs.Bytes, inputs.LtpPerIndexIcdfAt,
+                inputs.Bytes, inputs.LtpGainIcdfFlatAt,
+                inputs.LtpGainOffsets, 0,
+                inputs.Bytes, inputs.LtpScaleIcdfAt,
                 conditional, nbSubfr,
                 output, ltpTempBase);
             int perIndex = output[ltpTempBase + 0];
@@ -245,7 +198,7 @@ public static class SilkIndicesDecoderGpu
         // Step 5: PRNG seed.
         int seed = SilkSideInfoDecoderGpu.DecodeSeed(
             ref state, buf, bufStart, storage,
-            uniform4Icdf, 0);
+            inputs.Bytes, inputs.Uniform4IcdfAt);
         output[outputBase + SilkDecodedIndicesLayout.SeedOffset] = seed;
     }
 }

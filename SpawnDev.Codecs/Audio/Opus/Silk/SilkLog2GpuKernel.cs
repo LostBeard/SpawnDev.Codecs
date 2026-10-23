@@ -20,7 +20,7 @@ public sealed class SilkLog2GpuKernel : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, int, int>(LogKernel);
+            Index1D, ArrayView<int>, ArrayView<int>, int, int>(SilkLog2Kernel);
     }
 
     /// <summary>
@@ -36,7 +36,7 @@ public sealed class SilkLog2GpuKernel : IDisposable
         _kernel(count, input, output, count, mode);
     }
 
-    private static void LogKernel(
+    private static void SilkLog2Kernel(
         Index1D threadIdx,
         ArrayView<int> input,
         ArrayView<int> output,

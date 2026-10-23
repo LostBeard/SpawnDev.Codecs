@@ -131,64 +131,47 @@ public abstract partial class CodecsTestBase
         indicesBuf[SilkDecodedIndicesLayout.LagIndexOffset] = simulatedLagIndex;
 
         using var dIndices = acc.Allocate1D<int>(indicesBuf.Length);
-        using var dCb1Nlsf = acc.Allocate1D<byte>(codebook.Cb1NlsfQ8.Length);
-        using var dCb1Wght = acc.Allocate1D<short>(codebook.Cb1WghtQ9.Length);
-        using var dEcSel = acc.Allocate1D<byte>(codebook.EcSel.Length);
-        using var dPredQ8 = acc.Allocate1D<byte>(codebook.PredQ8.Length);
-        using var dDeltaMin = acc.Allocate1D<short>(codebook.DeltaMinQ15.Length);
-        using var dLsfCos = acc.Allocate1D<short>(SilkLsfCosTab.Q12.Length);
-        using var dContour = acc.Allocate1D<sbyte>(contourCb.Length);
-        using var dLtpFlat = acc.Allocate1D<sbyte>(ltpFlat.Length);
-        using var dLtpOffsets = acc.Allocate1D<int>(ltpOffsets.Length);
-        using var dLtpScales = acc.Allocate1D<short>(SilkParamsTest_LtpScalesQ14.Length);
-        using var dPrevNlsf = acc.Allocate1D<short>(order);
-        using var dLastGain = acc.Allocate1D<int>(1);
-        using var dNlsfDecScratch = acc.Allocate1D<short>(3 * 16);
-        using var dNlsfDecPredScratch = acc.Allocate1D<byte>(16);
-        using var dNlsf2aScratch = acc.Allocate1D<int>(66);
-        using var dNlsfIdxScratch = acc.Allocate1D<sbyte>(order + 1);
-        using var dGainIdxScratch = acc.Allocate1D<sbyte>(nbSubfr);
         using var dIntOut = acc.Allocate1D<int>(SilkDecodedParametersLayout.IntTotalSlots);
         using var dShortOut = acc.Allocate1D<short>(SilkDecodedParametersLayout.ShortTotalSlots);
 
         dIndices.View.CopyFromCPU(indicesBuf);
-        dCb1Nlsf.View.CopyFromCPU(codebook.Cb1NlsfQ8);
-        dCb1Wght.View.CopyFromCPU(codebook.Cb1WghtQ9);
-        dEcSel.View.CopyFromCPU(codebook.EcSel);
-        dPredQ8.View.CopyFromCPU(codebook.PredQ8);
-        dDeltaMin.View.CopyFromCPU(codebook.DeltaMinQ15);
-        dLsfCos.View.CopyFromCPU(SilkLsfCosTab.Q12);
-        dContour.View.CopyFromCPU(contourCb);
-        dLtpFlat.View.CopyFromCPU(ltpFlat);
-        dLtpOffsets.View.CopyFromCPU(ltpOffsets);
-        dLtpScales.View.CopyFromCPU(SilkParamsTest_LtpScalesQ14);
-        dPrevNlsf.View.CopyFromCPU(prevNlsfQ15In);
-        dLastGain.View.CopyFromCPU(new int[] { lastGainIndexIn });
 
+        var inputsBytes = new PackedDeviceBuffer<byte>();
+        var inputsShorts = new PackedDeviceBuffer<short>();
+        var inputsSBytes = new PackedDeviceBuffer<sbyte>();
+        var inputsInts = new PackedDeviceBuffer<int>();
         var inputs = new SilkParametersInputs
         {
-            Cb1NlsfQ8 = dCb1Nlsf.View,
-            Cb1WghtQ9 = dCb1Wght.View,
-            EcSel = dEcSel.View,
-            PredQ8Source = dPredQ8.View,
-            DeltaMinQ15 = dDeltaMin.View,
-            LsfCosTabQ12 = dLsfCos.View,
-            ContourCb = dContour.View,
-            LtpGainTablesFlat = dLtpFlat.View,
-            LtpGainOffsets = dLtpOffsets.View,
-            LtpScaleQ14Table = dLtpScales.View,
+            Cb1NlsfQ8At = inputsBytes.Add(codebook.Cb1NlsfQ8, codebook.Cb1NlsfQ8.Length),
+            Cb1WghtQ9At = inputsShorts.Add(codebook.Cb1WghtQ9, codebook.Cb1WghtQ9.Length),
+            EcSelAt = inputsBytes.Add(codebook.EcSel, codebook.EcSel.Length),
+            PredQ8SourceAt = inputsBytes.Add(codebook.PredQ8, codebook.PredQ8.Length),
+            DeltaMinQ15At = inputsShorts.Add(codebook.DeltaMinQ15, codebook.DeltaMinQ15.Length),
+            LsfCosTabQ12At = inputsShorts.Add(SilkLsfCosTab.Q12, SilkLsfCosTab.Q12.Length),
+            ContourCbAt = inputsSBytes.Add(contourCb, contourCb.Length),
+            LtpGainTablesFlatAt = inputsSBytes.Add(ltpFlat, ltpFlat.Length),
+            LtpGainOffsetsAt = inputsInts.Add(ltpOffsets, ltpOffsets.Length),
+            LtpScaleQ14TableAt = inputsShorts.Add(SilkParamsTest_LtpScalesQ14, SilkParamsTest_LtpScalesQ14.Length),
         };
 
         var state = new SilkParametersState
         {
-            PrevNlsfQ15 = dPrevNlsf.View,
-            LastGainIndex = dLastGain.View,
-            NlsfDecodeScratch = dNlsfDecScratch.View,
-            NlsfDecodePredScratch = dNlsfDecPredScratch.View,
-            Nlsf2aScratch = dNlsf2aScratch.View,
-            NlsfIndicesScratch = dNlsfIdxScratch.View,
-            GainIndicesScratch = dGainIdxScratch.View,
+            PrevNlsfQ15At = inputsShorts.Add(prevNlsfQ15In, order),
+            LastGainIndexAt = inputsInts.Add(new int[] { lastGainIndexIn }, 1),
+            NlsfDecodeScratchAt = inputsShorts.Reserve(3 * 16),
+            NlsfDecodePredScratchAt = inputsBytes.Reserve(16),
+            Nlsf2aScratchAt = inputsInts.Reserve(66),
+            NlsfIndicesScratchAt = inputsSBytes.Reserve(order + 1),
+            GainIndicesScratchAt = inputsSBytes.Reserve(nbSubfr),
         };
+        using var dInputsBytes = inputsBytes.Upload(acc);
+        inputs.Bytes = dInputsBytes.View;
+        using var dInputsShorts = inputsShorts.Upload(acc);
+        inputs.Shorts = dInputsShorts.View;
+        using var dInputsSBytes = inputsSBytes.Upload(acc);
+        inputs.SBytes = dInputsSBytes.View;
+        using var dInputsInts = inputsInts.Upload(acc);
+        inputs.Ints = dInputsInts.View;
 
         var scalars = new SilkParametersScalars
         {
@@ -206,8 +189,8 @@ public abstract partial class CodecsTestBase
 
         var intOut = await dIntOut.CopyToHostAsync();
         var shortOut = await dShortOut.CopyToHostAsync();
-        var prevNlsfOut = await dPrevNlsf.CopyToHostAsync();
-        var lastGainOut = await dLastGain.CopyToHostAsync();
+        var prevNlsfOut = await dInputsShorts.View.SubView(state.PrevNlsfQ15At, order).CopyToHostAsync();
+        var lastGainOut = await dInputsInts.View.SubView(state.LastGainIndexAt, 1).CopyToHostAsync();
 
         var gains = new int[nbSubfr];
         Array.Copy(intOut, SilkDecodedParametersLayout.IntGainsQ16Offset, gains, 0, nbSubfr);

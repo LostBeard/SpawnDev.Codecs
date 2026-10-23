@@ -74,6 +74,32 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
+    /// <summary>
+    /// Ranges around the piece size and past one combine launch (more than FlacCrcGpu.CombinePieces pieces):
+    /// the piece-parallel CRCs must equal the serial CPU ones at every cut.
+    /// </summary>
+    [TestMethod]
+    public async Task FlacCrcGpu_LongRanges_PieceCombine_MatchesCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            var rng = new Random(unchecked((int)0xF1AC10C5u));
+            int p = FlacCrcGpu.PieceBytes;
+            int[] lengths = { p - 1, p, p + 1, 2 * p, 2 * p + 7, 3 * p - 1, 50_000, (FlacCrcGpu.CombinePieces + 2) * p + 123 };
+            foreach (int length in lengths)
+            {
+                byte[] data = new byte[length];
+                rng.NextBytes(data);
+                var (cpu8, cpu16) = ComputeCpu(data);
+                var (gpu8, gpu16) = await ComputeGpuAsync(acc, data);
+                Equal(cpu8, gpu8, $"crc8 len={length}");
+                Equal(cpu16, gpu16, $"crc16 len={length}");
+            }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
     private static (byte crc8, ushort crc16) ComputeCpu(byte[] data)
     {
         return (FlacCrc.Compute8(data), FlacCrc.Compute16(data));
@@ -93,8 +119,7 @@ public abstract partial class CodecsTestBase
         dData.View.CopyFromCPU(padded);
 
         using var kernel = new FlacCrcGpuKernel(acc);
-        kernel.Run(dData.View, dOut8.View, dOut16.View, data.Length);
-        await acc.SynchronizeAsync();
+        await kernel.RunAsync(dData.View, dOut8.View, dOut16.View, data.Length);
 
         byte crc8 = (await dOut8.CopyToHostAsync())[0];
         ushort crc16 = (await dOut16.CopyToHostAsync())[0];

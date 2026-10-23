@@ -41,17 +41,18 @@ public abstract partial class CodecsTestBase
             var kernel = acc.LoadAutoGroupedStreamKernel<
                 Index1D,
                 ArrayView<byte>,
-                int, int, int, int, int, int,
-                VorbisPacketDecodeStaticInputs,
+                ArrayView<int>,
+                ArrayView<double>,
                 ArrayView<int>,
                 ArrayView<float>,
                 ArrayView<int>,
-                ArrayView<float>>(VorbisPacketDecodeKernel.Run);
+                ArrayView<float>,
+                ArrayView<int>,
+                VorbisPacketDecodeScalars>(VorbisPacketDecodeKernel.Step);
 
             True(kernel is not null,
-                "VorbisPacketDecodeKernel.Run must load via LoadAutoGroupedStreamKernel; "
-                + "if this fails, ILGPU's kernel-parameter handling for the "
-                + "VorbisPacketDecodeStaticInputs struct (38 ArrayView fields) needs review.");
+                "VorbisPacketDecodeKernel.Step must load via LoadAutoGroupedStreamKernel "
+                + "(8 storage buffers: packet, the two setup pools, outputs, scratch, state).");
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }

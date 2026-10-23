@@ -22,7 +22,7 @@ public sealed class SilkDecodeCoreGpuTestKernel : IDisposable
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, SilkDecodeCoreInputs, SilkDecodeCoreScalars>(DecodeCoreKernel);
+            Index1D, SilkDecodeCoreInputs, SilkDecodeCoreScalars>(SilkDecodeCoreTestKernel);
     }
 
     /// <summary>Run the synthesis chain for one frame.</summary>
@@ -31,7 +31,7 @@ public sealed class SilkDecodeCoreGpuTestKernel : IDisposable
         _kernel(1, inputs, scalars);
     }
 
-    private static void DecodeCoreKernel(
+    private static void SilkDecodeCoreTestKernel(
         Index1D _,
         SilkDecodeCoreInputs inputs,
         SilkDecodeCoreScalars scalars)

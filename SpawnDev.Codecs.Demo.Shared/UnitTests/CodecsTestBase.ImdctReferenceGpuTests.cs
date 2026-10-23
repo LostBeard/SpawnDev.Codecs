@@ -73,8 +73,7 @@ public abstract partial class CodecsTestBase
         dInput.View.CopyFromCPU(input);
 
         using var kernel = new ImdctReferenceGpuKernel(acc);
-        kernel.Run(dInput.View, dOutput.View, blockCount, n);
-        await acc.SynchronizeAsync();
+        await kernel.RunAsync(dInput.View, dOutput.View, blockCount, n);
 
         var gpuOut = await dOutput.CopyToHostAsync();
 
