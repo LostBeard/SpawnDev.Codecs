@@ -224,4 +224,30 @@ public abstract partial class CodecsTestBase
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
+
+    // ---- bounded launches: streams that need many resumable Step launches ----
+
+    [TestMethod(Timeout = 600000)]
+    public async Task InflateGpu_LargeStoredBlocks_SplitAcrossLaunches() =>
+        await AssertInflateMatchesAsync(StructuredData(3_000_000, 0x1F0B), CompressionLevel.NoCompression, "3 MB stored blocks");
+
+    [TestMethod(Timeout = 600000)]
+    public async Task InflateGpu_LargeDynamic_ManyLaunches() =>
+        await AssertInflateMatchesAsync(StructuredData(4_000_000, 0x1F0C), CompressionLevel.Optimal, "4 MB dynamic blocks");
+
+    /// <summary>The Adler-32 is folded launch by launch: a corrupted trailer on a many-launch stream must still be caught.</summary>
+    [TestMethod(Timeout = 600000)]
+    public async Task InflateGpu_LargeStream_BadAdlerTrailer_ReportsAdlerMismatch()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            byte[] raw = StructuredData(1_500_000, 0x1F0D);
+            byte[] zlib = ZlibCompress(raw, CompressionLevel.Optimal);
+            zlib[^2] ^= 0x01;
+            var (result, _) = await InflateOnGpuAsync(acc, zlib, raw.Length);
+            Equal(-(int)InflateError.AdlerMismatch, result, "corrupted trailer of a 1.5 MB stream");
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
 }

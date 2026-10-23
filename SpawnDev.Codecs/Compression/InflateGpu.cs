@@ -6,9 +6,16 @@
 // all scratch lives in an ArrayView<int> the caller owns.
 //
 // A DEFLATE stream is one sequential bit-serial dependency chain, so per the library's cardinal
-// rule it runs as ONE GPU thread (still accelerator-resident: the compressed bytes and the
+// rule it runs on ONE GPU thread (still accelerator-resident: the compressed bytes and the
 // inflated bytes never cross to the host). Streams that the container splits into independent
 // pieces (PNG has one; some formats have many) are parallel across streams.
+//
+// The decode is RESUMABLE: InitZlib / InitRaw prepare it, and each Step continues from the state kept
+// in the scratch (bit reader, block phase, the current block's Huffman tables, stored-block remainder,
+// output cursor, running Adler-32) for at most StepInputBytes compressed / StepOutputBytes inflated
+// bytes, so no launch holds the GPU long however big the stream is (a long launch stalls the desktop
+// compositor and trips the OS GPU watchdog). MaxSteps is an upper bound of the launches a stream needs,
+// known on the host from the two sizes: no readback is needed to drive it.
 //
 // State is a struct passed by ref into static helpers, the same shape as Vp8BoolDecoderGpu, which
 // is proven bit-exact on all six backends. Loops that need an early exit use a flag in the loop
@@ -87,43 +94,62 @@ public static class InflateGpu
     private const int LcSymOff = LcCountOff + 16;         // [24]  (19 symbols)
     private const int LengthsOff = LcSymOff + 24;         // [320] (286 + 30 + slack)
     private const int OffsOff = LengthsOff + 320;         // [16]  construct() working offsets
+    private const int FixLitCountOff = OffsOff + 16;      // [16]  fixed literal/length code, built once per stream
+    private const int FixLitSymOff = FixLitCountOff + 16; // [288]
+    private const int FixDistCountOff = FixLitSymOff + 288; // [16] fixed distance code
+    private const int FixDistSymOff = FixDistCountOff + 16; // [32]
+    private const int StateOff = FixDistSymOff + 32;      // [24]  resumable decode state (slots below)
 
     /// <summary>Number of <c>int</c>s of scratch one inflate needs.</summary>
-    public const int ScratchInts = OffsOff + 16;
+    public const int ScratchInts = StateOff + 24;
+
+    // Slots of the resumable state (relative to StateOff).
+    private const int SInPos = 0, SInEnd = 1, SBitBuf = 2, SBitCnt = 3, SOutBase = 4, SOutPos = 5, SOutEnd = 6,
+        SErr = 7, SPhase = 8, SLast = 9, SStored = 10, STables = 11, SMode = 12, SAdlerA = 13, SAdlerB = 14,
+        SAdlerPos = 15, SResult = 16;
+
+    // Decode phases: next block header, inside a stored block, inside a Huffman block, after the last block, done.
+    private const int PhaseHeader = 0, PhaseStored = 1, PhaseCodes = 2, PhaseEnd = 3, PhaseFinished = 4;
+    // Stream modes: raw DEFLATE, zlib, zlib with the Adler-32 trailer verified.
+    private const int ModeRaw = 0, ModeZlib = 1, ModeZlibVerify = 2;
+
+    /// <summary>
+    /// Compressed bytes one <see cref="Step"/> launch consumes at most (it stops at the first symbol boundary past this).
+    /// One GPU thread decodes bit by bit; with the dynamic block headers an adversarial stream can pack, 2048 bytes
+    /// stay a few milliseconds on a desktop GPU.
+    /// </summary>
+    public const int StepInputBytes = 2048;
+
+    /// <summary>Inflated bytes one <see cref="Step"/> launch produces at most (plus one back-reference, at most 258 bytes).</summary>
+    public const int StepOutputBytes = 32768;
+
+    /// <summary>
+    /// Launches of <see cref="Step"/> that always suffice for a stream of <paramref name="srcLen"/> compressed bytes
+    /// inflating into at most <paramref name="dstCap"/> bytes: every launch but the last stops only after consuming
+    /// <see cref="StepInputBytes"/> or producing <see cref="StepOutputBytes"/>. Launches after the end do nothing.
+    /// </summary>
+    public static int MaxSteps(long srcLen, long dstCap) =>
+        (int)Math.Min(int.MaxValue, srcLen / StepInputBytes + dstCap / StepOutputBytes + 2);
 
     /// <summary>
     /// Inflate a raw DEFLATE stream. Returns the number of bytes written to <paramref name="dst"/>
-    /// (&gt;= 0) or the negated <see cref="InflateError"/>.
+    /// (&gt;= 0) or the negated <see cref="InflateError"/>. The whole stream in one call (one thread, unbounded);
+    /// launch <see cref="InitRaw"/> + <see cref="Step"/> to bound the work per launch.
     /// </summary>
     public static int InflateRaw(
         ArrayView<byte> src, int srcOff, int srcLen,
         ArrayView<byte> dst, int dstOff, int dstCap,
         ArrayView<int> scratch, int scratchBase)
     {
-        var st = NewState(srcOff, srcLen, dstOff, dstCap);
-        InflateStream(ref st, src, dst, scratch, scratchBase);
-        if (st.Err != 0) return -st.Err;
-        return st.OutPos - dstOff;
-    }
-
-    private static InflateState NewState(int srcOff, int srcLen, int dstOff, int dstCap)
-    {
-        return new InflateState
-        {
-            InPos = srcOff,
-            InEnd = srcOff + srcLen,
-            BitBuf = 0,
-            BitCnt = 0,
-            OutBase = dstOff,
-            OutPos = dstOff,
-            OutEnd = dstOff + dstCap,
-            Err = 0,
-        };
+        InitRaw(srcOff, srcLen, dstOff, dstCap, scratch, scratchBase);
+        Step(src, dst, scratch, scratchBase, int.MaxValue, int.MaxValue);
+        return Result(scratch, scratchBase);
     }
 
     /// <summary>
     /// Inflate a zlib (RFC 1950) stream: 2-byte header, DEFLATE data, big-endian Adler-32 trailer.
-    /// Returns the inflated length or the negated <see cref="InflateError"/>.
+    /// Returns the inflated length or the negated <see cref="InflateError"/>. The whole stream in one call (one
+    /// thread, unbounded); launch <see cref="InitZlib"/> + <see cref="Step"/> to bound the work per launch.
     /// </summary>
     public static int InflateZlib(
         ArrayView<byte> src, int srcOff, int srcLen,
@@ -131,32 +157,76 @@ public static class InflateGpu
         ArrayView<int> scratch, int scratchBase,
         bool verifyAdler)
     {
-        if (srcLen < 6) return -(int)InflateError.InputTruncated;
+        InitZlib(src, srcOff, srcLen, dstOff, dstCap, scratch, scratchBase, verifyAdler);
+        Step(src, dst, scratch, scratchBase, int.MaxValue, int.MaxValue);
+        return Result(scratch, scratchBase);
+    }
+
+    /// <summary>
+    /// Prepares the resumable decode of a raw DEFLATE stream in <paramref name="scratch"/> (builds the fixed codes,
+    /// resets the state); <see cref="Step"/> then decodes it.
+    /// </summary>
+    public static void InitRaw(int srcOff, int srcLen, int dstOff, int dstCap, ArrayView<int> scratch, int scratchBase)
+    {
+        BuildFixed(scratch, scratchBase);
+        SetState(scratch, scratchBase, srcOff, srcOff + srcLen, dstOff, dstCap, ModeRaw);
+    }
+
+    /// <summary>
+    /// Prepares the resumable decode of a zlib stream: checks the 2-byte header (a bad one finishes the decode at once
+    /// with its error), builds the fixed codes and resets the state; <see cref="Step"/> then decodes it.
+    /// </summary>
+    public static void InitZlib(
+        ArrayView<byte> src, int srcOff, int srcLen, int dstOff, int dstCap,
+        ArrayView<int> scratch, int scratchBase, bool verifyAdler)
+    {
+        int so = scratchBase + StateOff;
+        if (srcLen < 6)
+        {
+            scratch[so + SPhase] = PhaseFinished;
+            scratch[so + SResult] = -(int)InflateError.InputTruncated;
+            return;
+        }
         int cmf = src[srcOff];
         int flg = src[srcOff + 1];
         // CM must be 8 (deflate), CINFO <= 7, header checksum, no preset dictionary.
-        bool badHeader = (cmf & 0x0F) != 8;
-        badHeader = badHeader || ((cmf >> 4) > 7);
-        badHeader = badHeader || (((cmf << 8) | flg) % 31 != 0);
-        badHeader = badHeader || ((flg & 0x20) != 0);
-        if (badHeader) return -(int)InflateError.BadZlibHeader;
-
-        var st = NewState(srcOff + 2, srcLen - 2, dstOff, dstCap);
-        InflateStream(ref st, src, dst, scratch, scratchBase);
-        if (st.Err != 0) return -st.Err;
-        int outLen = st.OutPos - dstOff;
-
-        if (verifyAdler)
+        bool badHeader = ((cmf & 0x0F) != 8) | ((cmf >> 4) > 7) | ((((cmf << 8) | flg) % 31) != 0) | ((flg & 0x20) != 0);
+        if (badHeader)
         {
-            // The bit reader loads a byte only when it needs one, so InPos is exactly the byte
-            // boundary after the last (possibly partially used) deflate byte.
-            int trailer = st.InPos;
-            if (trailer + 4 > srcOff + srcLen) return -(int)InflateError.InputTruncated;
-            uint expected = ((uint)src[trailer] << 24) | ((uint)src[trailer + 1] << 16)
-                          | ((uint)src[trailer + 2] << 8) | src[trailer + 3];
-            if (Adler32(dst, dstOff, outLen) != expected) return -(int)InflateError.AdlerMismatch;
+            scratch[so + SPhase] = PhaseFinished;
+            scratch[so + SResult] = -(int)InflateError.BadZlibHeader;
+            return;
         }
-        return outLen;
+        BuildFixed(scratch, scratchBase);
+        SetState(scratch, scratchBase, srcOff + 2, srcOff + srcLen, dstOff, dstCap, verifyAdler ? ModeZlibVerify : ModeZlib);
+    }
+
+    /// <summary>
+    /// The decode's result: the inflated length (&gt;= 0) or the negated <see cref="InflateError"/> once it has finished;
+    /// <see cref="InflateError.InputTruncated"/> (negated) while it has not.
+    /// </summary>
+    public static int Result(ArrayView<int> scratch, int scratchBase) => scratch[scratchBase + StateOff + SResult];
+
+    private static void SetState(ArrayView<int> scratch, int sb, int inPos, int inEnd, int dstOff, int dstCap, int mode)
+    {
+        int so = sb + StateOff;
+        scratch[so + SInPos] = inPos;
+        scratch[so + SInEnd] = inEnd;
+        scratch[so + SBitBuf] = 0;
+        scratch[so + SBitCnt] = 0;
+        scratch[so + SOutBase] = dstOff;
+        scratch[so + SOutPos] = dstOff;
+        scratch[so + SOutEnd] = dstOff + dstCap;
+        scratch[so + SErr] = 0;
+        scratch[so + SPhase] = PhaseHeader;
+        scratch[so + SLast] = 0;
+        scratch[so + SStored] = 0;
+        scratch[so + STables] = 0;
+        scratch[so + SMode] = mode;
+        scratch[so + SAdlerA] = 1;
+        scratch[so + SAdlerB] = 0;
+        scratch[so + SAdlerPos] = dstOff;
+        scratch[so + SResult] = -(int)InflateError.InputTruncated;
     }
 
     /// <summary>Adler-32 of <paramref name="length"/> bytes at <paramref name="offset"/>.</summary>
@@ -164,12 +234,20 @@ public static class InflateGpu
     {
         uint a = 1;
         uint b = 0;
-        int pos = offset;
-        int remaining = length;
-        while (remaining > 0)
+        AdlerFold(data, offset, offset + length, ref a, ref b);
+        return (b << 16) | a;
+    }
+
+    /// <summary>Folds bytes [<paramref name="from"/>, <paramref name="to"/>) into the Adler-32 sums (both kept &lt; 65521).</summary>
+    private static void AdlerFold(ArrayView<byte> data, int from, int to, ref uint a, ref uint b)
+    {
+        int pos = from;
+        bool more = pos < to;
+        while (more)
         {
             // 5552 is the largest block for which the sums cannot overflow 32 bits.
-            int n = remaining < 5552 ? remaining : 5552;
+            int n = to - pos;
+            if (n > 5552) n = 5552;
             for (int i = 0; i < n; i++)
             {
                 a += data[pos + i];
@@ -178,54 +256,186 @@ public static class InflateGpu
             a %= 65521u;
             b %= 65521u;
             pos += n;
-            remaining -= n;
+            more = pos < to;
         }
-        return (b << 16) | a;
     }
 
     // ------------------------------------------------------------------
-    // Stream / block level
+    // Resumable stream decode
     // ------------------------------------------------------------------
 
-    private static void InflateStream(
-        ref InflateState st, ArrayView<byte> src, ArrayView<byte> dst,
-        ArrayView<int> scratch, int sb)
+    /// <summary>
+    /// Continues the decode prepared by <see cref="InitZlib"/> / <see cref="InitRaw"/> from the state in
+    /// <paramref name="scratch"/>: decodes symbols until <paramref name="inputBudget"/> compressed bytes were consumed or
+    /// <paramref name="outputBudget"/> bytes produced (checked at symbol boundaries; a stored block is copied in pieces of
+    /// at most <paramref name="outputBudget"/> bytes), the stream ended, or an error occurred, then saves the state. The
+    /// Adler-32 of the produced bytes is folded as they are produced, so verifying it adds no pass over the output.
+    /// A call after the end does nothing.
+    /// </summary>
+    public static void Step(
+        ArrayView<byte> src, ArrayView<byte> dst, ArrayView<int> scratch, int sb, int inputBudget, int outputBudget)
     {
+        int so = sb + StateOff;
+        int phase = scratch[so + SPhase];
+        if (phase >= PhaseFinished) return;
+
+        var st = new InflateState
+        {
+            InPos = scratch[so + SInPos],
+            InEnd = scratch[so + SInEnd],
+            BitBuf = (uint)scratch[so + SBitBuf],
+            BitCnt = scratch[so + SBitCnt],
+            OutBase = scratch[so + SOutBase],
+            OutPos = scratch[so + SOutPos],
+            OutEnd = scratch[so + SOutEnd],
+            Err = scratch[so + SErr],
+        };
+        int last = scratch[so + SLast];
+        int stored = scratch[so + SStored];
+        int tables = scratch[so + STables];
+        int mode = scratch[so + SMode];
+        uint adlerA = (uint)scratch[so + SAdlerA];
+        uint adlerB = (uint)scratch[so + SAdlerB];
+        int adlerPos = scratch[so + SAdlerPos];
+        int result = scratch[so + SResult];
+        int inStart = st.InPos;
+        int outStart = st.OutPos;
+
         // Loop conditions are single bool locals built with non-short-circuit &: compound && / || in a
         // loop header has hung the WebGPU device (the WGSL structurizer never leaves the loop).
-        int last = 0;
-        bool more = true;
-        while (more)
+        bool going = true;
+        while (going)
         {
-            last = Bits(ref st, src, 1);
-            int type = Bits(ref st, src, 2);
-            if (st.Err == 0)
+            if (phase == PhaseHeader)
             {
-                if (type == 0)
-                    Stored(ref st, src, dst);
-                else if (type == 1)
-                    Fixed(ref st, src, dst, scratch, sb);
-                else if (type == 2)
-                    Dynamic(ref st, src, dst, scratch, sb);
-                else
-                    st.Err = (int)InflateError.BadBlockType;
+                last = Bits(ref st, src, 1);
+                int type = Bits(ref st, src, 2);
+                if (st.Err == 0)
+                {
+                    if (type == 0)
+                    {
+                        stored = StoredHeader(ref st, src);
+                        if (st.Err == 0) phase = PhaseStored;
+                    }
+                    else if (type == 1)
+                    {
+                        tables = 1;
+                        phase = PhaseCodes;
+                    }
+                    else if (type == 2)
+                    {
+                        Dynamic(ref st, src, scratch, sb);
+                        if (st.Err == 0)
+                        {
+                            tables = 0;
+                            phase = PhaseCodes;
+                        }
+                    }
+                    else
+                    {
+                        st.Err = (int)InflateError.BadBlockType;
+                    }
+                }
             }
-            more = (last == 0) & (st.Err == 0);
+            else if (phase == PhaseStored)
+            {
+                int n = stored < outputBudget ? stored : outputBudget;
+                for (int i = 0; i < n; i++)
+                    dst[st.OutPos + i] = src[st.InPos + i];
+                st.InPos += n;
+                st.OutPos += n;
+                stored -= n;
+                if (stored == 0) phase = last != 0 ? PhaseEnd : PhaseHeader;
+            }
+            else if (phase == PhaseCodes)
+            {
+                int litCount = sb + LitCountOff;
+                int litSym = sb + LitSymOff;
+                int distCount = sb + DistCountOff;
+                int distSym = sb + DistSymOff;
+                if (tables != 0)
+                {
+                    litCount = sb + FixLitCountOff;
+                    litSym = sb + FixLitSymOff;
+                    distCount = sb + FixDistCountOff;
+                    distSym = sb + FixDistSymOff;
+                }
+                int endOfBlock = CodeSymbol(ref st, src, dst, scratch, litCount, litSym, distCount, distSym);
+                bool blockDone = (endOfBlock != 0) & (st.Err == 0);
+                if (blockDone) phase = last != 0 ? PhaseEnd : PhaseHeader;
+            }
+            else
+            {
+                // After the last block: the result, and for a verified zlib stream the Adler-32 trailer. The bit
+                // reader loads a byte only when it needs one, so InPos is exactly the byte boundary after the last
+                // (possibly partially used) deflate byte.
+                result = st.OutPos - st.OutBase;
+                if (mode == ModeZlibVerify)
+                {
+                    AdlerFold(dst, adlerPos, st.OutPos, ref adlerA, ref adlerB);
+                    adlerPos = st.OutPos;
+                    int trailer = st.InPos;
+                    if (trailer + 4 > st.InEnd)
+                    {
+                        result = -(int)InflateError.InputTruncated;
+                    }
+                    else
+                    {
+                        uint expected = ((uint)src[trailer] << 24) | ((uint)src[trailer + 1] << 16)
+                                      | ((uint)src[trailer + 2] << 8) | src[trailer + 3];
+                        if (((adlerB << 16) | adlerA) != expected) result = -(int)InflateError.AdlerMismatch;
+                    }
+                }
+                phase = PhaseFinished;
+            }
+            if (st.Err != 0)
+            {
+                result = -st.Err;
+                phase = PhaseFinished;
+            }
+            going = (phase < PhaseFinished) & (st.InPos - inStart < inputBudget) & (st.OutPos - outStart < outputBudget);
         }
+
+        bool fold = (mode == ModeZlibVerify) & (phase < PhaseFinished);
+        if (fold)
+        {
+            AdlerFold(dst, adlerPos, st.OutPos, ref adlerA, ref adlerB);
+            adlerPos = st.OutPos;
+        }
+
+        scratch[so + SInPos] = st.InPos;
+        scratch[so + SBitBuf] = (int)st.BitBuf;
+        scratch[so + SBitCnt] = st.BitCnt;
+        scratch[so + SOutPos] = st.OutPos;
+        scratch[so + SErr] = st.Err;
+        scratch[so + SPhase] = phase;
+        scratch[so + SLast] = last;
+        scratch[so + SStored] = stored;
+        scratch[so + STables] = tables;
+        scratch[so + SAdlerA] = (int)adlerA;
+        scratch[so + SAdlerB] = (int)adlerB;
+        scratch[so + SAdlerPos] = adlerPos;
+        scratch[so + SResult] = result;
     }
 
-    private static void Stored(ref InflateState st, ArrayView<byte> src, ArrayView<byte> dst)
+    // ------------------------------------------------------------------
+    // Block level
+    // ------------------------------------------------------------------
+
+    /// <summary>Stored block header: returns LEN after checking it (the bytes are copied by the stored phase).</summary>
+    private static int StoredHeader(ref InflateState st, ArrayView<byte> src)
     {
         // Discard the rest of the current byte.
         st.BitBuf = 0;
         st.BitCnt = 0;
+        int len = 0;
         if (st.InPos + 4 > st.InEnd)
         {
             st.Err = (int)InflateError.InputTruncated;
         }
         else
         {
-            int len = src[st.InPos] | (src[st.InPos + 1] << 8);
+            len = src[st.InPos] | (src[st.InPos + 1] << 8);
             int nlen = src[st.InPos + 2] | (src[st.InPos + 3] << 8);
             st.InPos += 4;
             if (len != (~nlen & 0xFFFF))
@@ -240,33 +450,25 @@ public static class InflateGpu
             {
                 st.Err = (int)InflateError.OutputOverflow;
             }
-            else
-            {
-                for (int i = 0; i < len; i++)
-                    dst[st.OutPos + i] = src[st.InPos + i];
-                st.InPos += len;
-                st.OutPos += len;
-            }
         }
+        return len;
     }
 
-    private static void Fixed(
-        ref InflateState st, ArrayView<byte> src, ArrayView<byte> dst, ArrayView<int> scratch, int sb)
+    /// <summary>Builds the fixed literal/length and distance codes (once per stream, in their own scratch region).</summary>
+    private static void BuildFixed(ArrayView<int> scratch, int sb)
     {
         for (int sym = 0; sym < 144; sym++) scratch[sb + LengthsOff + sym] = 8;
         for (int sym = 144; sym < 256; sym++) scratch[sb + LengthsOff + sym] = 9;
         for (int sym = 256; sym < 280; sym++) scratch[sb + LengthsOff + sym] = 7;
         for (int sym = 280; sym < 288; sym++) scratch[sb + LengthsOff + sym] = 8;
-        Construct(scratch, sb, sb + LengthsOff, 288, sb + LitCountOff, sb + LitSymOff);
+        Construct(scratch, sb, sb + LengthsOff, 288, sb + FixLitCountOff, sb + FixLitSymOff);
 
         for (int sym = 0; sym < 30; sym++) scratch[sb + LengthsOff + sym] = 5;
-        Construct(scratch, sb, sb + LengthsOff, 30, sb + DistCountOff, sb + DistSymOff);
-
-        Codes(ref st, src, dst, scratch, sb);
+        Construct(scratch, sb, sb + LengthsOff, 30, sb + FixDistCountOff, sb + FixDistSymOff);
     }
 
-    private static void Dynamic(
-        ref InflateState st, ArrayView<byte> src, ArrayView<byte> dst, ArrayView<int> scratch, int sb)
+    /// <summary>Dynamic block header: reads the code lengths and builds the block's codes into the dynamic tables.</summary>
+    private static void Dynamic(ref InflateState st, ArrayView<byte> src, ArrayView<int> scratch, int sb)
     {
         int nlen = Bits(ref st, src, 5) + 257;
         int ndist = Bits(ref st, src, 5) + 1;
@@ -360,8 +562,7 @@ public static class InflateGpu
 
         // Literal/length code: complete, or incomplete only when it has a single code.
         left = Construct(scratch, sb, lengthsAt, nlen, sb + LitCountOff, sb + LitSymOff);
-        bool litBad = left < 0;
-        litBad = litBad || (left > 0 && nlen != scratch[sb + LitCountOff + 0] + scratch[sb + LitCountOff + 1]);
+        bool litBad = (left < 0) | ((left > 0) & (nlen != scratch[sb + LitCountOff + 0] + scratch[sb + LitCountOff + 1]));
         if (litBad)
         {
             st.Err = (int)InflateError.BadHuffmanCode;
@@ -369,114 +570,112 @@ public static class InflateGpu
         }
 
         left = Construct(scratch, sb, lengthsAt + nlen, ndist, sb + DistCountOff, sb + DistSymOff);
-        bool distBad = left < 0;
-        distBad = distBad || (left > 0 && ndist != scratch[sb + DistCountOff + 0] + scratch[sb + DistCountOff + 1]);
+        bool distBad = (left < 0) | ((left > 0) & (ndist != scratch[sb + DistCountOff + 0] + scratch[sb + DistCountOff + 1]));
         if (distBad)
         {
             st.Err = (int)InflateError.BadHuffmanCode;
             return;
         }
-
-        Codes(ref st, src, dst, scratch, sb);
     }
 
-    private static void Codes(
-        ref InflateState st, ArrayView<byte> src, ArrayView<byte> dst, ArrayView<int> scratch, int sb)
+    /// <summary>
+    /// Decodes one literal/length symbol of a Huffman block and writes its bytes (a literal, or a whole back-reference
+    /// of at most 258 bytes). Returns 1 at the end-of-block symbol, else 0.
+    /// </summary>
+    private static int CodeSymbol(
+        ref InflateState st, ArrayView<byte> src, ArrayView<byte> dst, ArrayView<int> scratch,
+        int litCount, int litSym, int distCount, int distSym)
     {
-        bool done = false;
-        bool running = true;
-        while (running)
+        int endOfBlock = 0;
+        int sym = Decode(ref st, src, scratch, litCount, litSym);
+        if (st.Err != 0)
         {
-            int sym = Decode(ref st, src, scratch, sb + LitCountOff, sb + LitSymOff);
-            if (st.Err != 0)
+            endOfBlock = 0;
+        }
+        else if (sym < 256)
+        {
+            if (st.OutPos >= st.OutEnd)
             {
-                done = true;
-            }
-            else if (sym < 256)
-            {
-                if (st.OutPos >= st.OutEnd)
-                {
-                    st.Err = (int)InflateError.OutputOverflow;
-                }
-                else
-                {
-                    dst[st.OutPos] = (byte)sym;
-                    st.OutPos++;
-                }
-            }
-            else if (sym == 256)
-            {
-                done = true;
+                st.Err = (int)InflateError.OutputOverflow;
             }
             else
             {
-                int ls = sym - 257;
-                if (ls >= 29)
+                dst[st.OutPos] = (byte)sym;
+                st.OutPos++;
+            }
+        }
+        else if (sym == 256)
+        {
+            endOfBlock = 1;
+        }
+        else
+        {
+            int ls = sym - 257;
+            if (ls >= 29)
+            {
+                st.Err = (int)InflateError.BadDistance;
+            }
+            else
+            {
+                int len;
+                if (ls < 8)
                 {
-                    st.Err = (int)InflateError.BadDistance;
+                    len = 3 + ls;
+                }
+                else if (ls == 28)
+                {
+                    len = 258;
                 }
                 else
                 {
-                    int len;
-                    if (ls < 8)
+                    int e = ((ls - 8) >> 2) + 1;
+                    len = 3 + ((4 + ((ls - 8) & 3)) << e) + Bits(ref st, src, e);
+                }
+
+                int dsym = Decode(ref st, src, scratch, distCount, distSym);
+                if (st.Err == 0)
+                {
+                    if (dsym >= 30)
                     {
-                        len = 3 + ls;
-                    }
-                    else if (ls == 28)
-                    {
-                        len = 258;
+                        st.Err = (int)InflateError.BadDistance;
                     }
                     else
                     {
-                        int e = ((ls - 8) >> 2) + 1;
-                        len = 3 + ((4 + ((ls - 8) & 3)) << e) + Bits(ref st, src, e);
-                    }
-
-                    int dsym = Decode(ref st, src, scratch, sb + DistCountOff, sb + DistSymOff);
-                    if (st.Err == 0)
-                    {
-                        if (dsym >= 30)
+                        int dist;
+                        if (dsym < 4)
                         {
-                            st.Err = (int)InflateError.BadDistance;
+                            dist = dsym + 1;
                         }
                         else
                         {
-                            int dist;
-                            if (dsym < 4)
+                            int de = (dsym >> 1) - 1;
+                            dist = (((2 + (dsym & 1)) << de) + 1) + Bits(ref st, src, de);
+                        }
+                        if (st.Err == 0)
+                        {
+                            if (dist > st.OutPos - st.OutBase)
                             {
-                                dist = dsym + 1;
+                                st.Err = (int)InflateError.BadDistance;
+                            }
+                            else if (st.OutPos + len > st.OutEnd)
+                            {
+                                st.Err = (int)InflateError.OutputOverflow;
                             }
                             else
                             {
-                                int de = (dsym >> 1) - 1;
-                                dist = (((2 + (dsym & 1)) << de) + 1) + Bits(ref st, src, de);
-                            }
-                            if (st.Err == 0)
-                            {
-                                if (dist > st.OutPos - st.OutBase)
+                                // Byte-wise: the source and destination ranges may overlap (dist < len).
+                                for (int i = 0; i < len; i++)
                                 {
-                                    st.Err = (int)InflateError.BadDistance;
-                                }
-                                else if (st.OutPos + len > st.OutEnd)
-                                {
-                                    st.Err = (int)InflateError.OutputOverflow;
-                                }
-                                else
-                                {
-                                    // Byte-wise: the source and destination ranges may overlap (dist < len).
-                                    for (int i = 0; i < len; i++)
-                                    {
-                                        dst[st.OutPos] = dst[st.OutPos - dist];
-                                        st.OutPos++;
-                                    }
+                                    dst[st.OutPos] = dst[st.OutPos - dist];
+                                    st.OutPos++;
                                 }
                             }
                         }
                     }
                 }
             }
-            running = (!done) & (st.Err == 0);
         }
+        return endOfBlock;
     }
 
     // ------------------------------------------------------------------

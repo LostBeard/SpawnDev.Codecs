@@ -136,4 +136,38 @@ public abstract partial class CodecsTestBase
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
+
+    // ---- bounded launches: inputs that need many launches of every resumable stage ----
+
+    [TestMethod(Timeout = 600000)]
+    public async Task ZlibCompressorGpu_LargeInput_ManyWaves() =>
+        await AssertZlibRoundTripAsync(TextData(3_000_000, 11), 2, 65536, "3 MB text, 46 blocks in waves of 4", 0.40);
+
+    [TestMethod(Timeout = 600000)]
+    public async Task ZlibCompressorGpu_LargeBlocks_Level3_ManyParseAndEmitLaunches() =>
+        await AssertZlibRoundTripAsync(StructuredData(2_500_000, 0x2B05), 3, 1 << 20, "2.5 MB structured, 1 MiB blocks, lazy");
+
+    /// <summary>
+    /// A lazy parse launch stops on its compare budget; the host then checks for unfinished parses and launches more.
+    /// With a budget far below what the blocks need, the parse finishes only through that loop, and the stream must be
+    /// byte-identical to the one made with the default budget.
+    /// </summary>
+    [TestMethod(Timeout = 600000)]
+    public async Task ZlibCompressorGpu_Level3_SmallCompareBudget_SameBytes()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            foreach (var (name, raw) in new[] { ("text", TextData(400_000, 12)), ("structured", StructuredData(300_000, 0x2B06)) })
+            {
+                using var normal = new ZlibCompressorGpu(acc, 65536, threadsPerWave: 4);
+                using var starved = new ZlibCompressorGpu(acc, 65536, threadsPerWave: 4) { ParseCompareBudget = 4096 };
+                byte[] a = await normal.CompressAsync(raw, 3);
+                byte[] b = await starved.CompressAsync(raw, 3);
+                EqualBytes(a, b, $"{name}: level 3 with a 4096-compare budget vs the default budget");
+                EqualBytes(raw, DotNetZlibDecompress(b), $"{name}: .NET inflates the starved-budget stream");
+            }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
 }

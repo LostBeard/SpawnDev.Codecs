@@ -3,7 +3,8 @@
 // PNG decoder, 100% accelerator-resident. The host is a pure coordinator: it uploads the file (necessary
 // I/O), dispatches the PngKernels chain, and reads back a few scalars (the metadata block and the inflate
 // result). The compressed bytes, the inflated scanlines and the RGBA pixels never touch the host unless the
-// caller asks for managed output.
+// caller asks for managed output. Every serial stage (chunk scan, CRC combine, inflate, unfilter) is a chain of
+// bounded launches whose count the host derives from sizes it already knows, so no launch holds the GPU long.
 //
 // API shape (same as the video codecs): three overloads per entry point, all funnelling into the
 // ArrayView1D one.
@@ -44,6 +45,7 @@ public sealed class PngDecoderGpu : IDisposable
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _inflateScratch;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _inflateResult;
 
+    private readonly StageBuffer<uint> _crcPieces;
     private readonly StageBuffer<byte> _stageIn;
     private readonly StageBuffer<byte> _zlib;
     private readonly StageBuffer<byte> _raw;
@@ -60,11 +62,14 @@ public sealed class PngDecoderGpu : IDisposable
         _chunkTable = accelerator.Allocate1D<int>((long)ChunkCapacity * 4);
         _idatTable = accelerator.Allocate1D<int>((long)ChunkCapacity * 3);
         _meta = accelerator.Allocate1D<int>(PngMeta.Size);
-        _crcTable = accelerator.Allocate1D<uint>(256);
-        _crcTable.View.CopyFromCPU(Crc32Gpu.BuildTable());
+        // CRC table + the zero-byte shift of one CRC piece (chunks are checksummed in parallel pieces).
+        uint[] crcTable = Crc32Gpu.BuildTableWithShift();
+        _crcTable = accelerator.Allocate1D<uint>(crcTable.Length);
+        _crcTable.View.CopyFromCPU(crcTable);
         _inflateScratch = accelerator.Allocate1D<int>(InflateGpu.ScratchInts);
         _inflateResult = accelerator.Allocate1D<int>(1);
 
+        _crcPieces = new StageBuffer<uint>(accelerator);
         _stageIn = new StageBuffer<byte>(accelerator);
         _zlib = new StageBuffer<byte>(accelerator);
         _raw = new StageBuffer<byte>(accelerator);
@@ -206,8 +211,9 @@ public sealed class PngDecoderGpu : IDisposable
     private async Task<int[]> ScanAsync(ArrayView1D<byte, Stride1D.Dense> file, int fileLength)
     {
         if (fileLength <= 0 || fileLength > file.Length) throw new ArgumentOutOfRangeException(nameof(fileLength));
+        _crcPieces.Ensure(PngKernels.MaxCrcPieces(fileLength, ChunkCapacity));
         _kernels.Scan(file, fileLength, _chunkTable.View, _idatTable.View, _meta.View, ChunkCapacity);
-        _kernels.CheckCrc(file, _chunkTable.View, _crcTable.View, _meta.View, ChunkCapacity);
+        _kernels.CheckCrc(file, fileLength, _chunkTable.View, _crcTable.View, _crcPieces.View, _meta.View, ChunkCapacity);
         await _accelerator.SynchronizeAsync();
         return await _meta.View.CopyToHostAsync();
     }
@@ -274,7 +280,7 @@ public sealed class PngDecoderGpu : IDisposable
         _kernels.GatherIdat(file, _idatTable.View, _zlib.View, _meta.View, layout.IdatTotal);
         _inflate.Run(_zlib.View, layout.IdatTotal, _raw.View, (int)layout.RawSize,
             _inflateScratch.View, _inflateResult.View, verifyAdler: true);
-        _kernels.Unfilter(_raw.View, _meta.View);
+        _kernels.Unfilter(_raw.View, _meta.View, layout.RawSize, layout.FilterBpp);
         _kernels.ToRgba(file, _raw.View, output, _meta.View, info.Width * info.Height);
         await _accelerator.SynchronizeAsync();
 
@@ -460,6 +466,7 @@ public sealed class PngDecoderGpu : IDisposable
         _crcTable.Dispose();
         _inflateScratch.Dispose();
         _inflateResult.Dispose();
+        _crcPieces.Dispose();
         _stageIn.Dispose();
         _zlib.Dispose();
         _raw.Dispose();

@@ -6,6 +6,17 @@
 // number of them compress in parallel, one thread each; a non-final block ends with an empty stored block
 // (a "sync flush"), which leaves the stream byte-aligned so the blocks concatenate with a plain byte copy.
 //
+// A block is compressed in RESUMABLE phases whose state lives in the block's scratch (see the St* slots), so no
+// launch holds the GPU long whatever the block size (a long launch stalls the desktop compositor and trips the
+// OS GPU watchdog):
+//   InitBlockThread  (1 thread per hash slot)  clears the hash heads and the frequencies.
+//   ParseStep        (resumable)  the LZ77 parse, ParseChunk positions per launch; greedy matching (levels 1-2) costs
+//                    at most 4 * chain compares per position, lazy matching (level 3) also stops a launch after
+//                    ParseCompareBudget compares (its host loop then checks for unfinished blocks).
+//   PlanBlock        (1 thread per block)  Huffman code lengths, the stored-or-dynamic decision, the block header.
+//   EmitStep         (resumable)  EmitChunk tokens (or stored bytes) per launch, then the end of the block.
+// CompressBlock runs the same phases in one call. The bytes produced are the same either way.
+//
 // The Huffman tree builder is a two-queue merge with a Kraft-sum repair to cap code lengths (15 for the
 // literal/length and distance alphabets, 7 for the code-length alphabet). No managed allocations, no tables
 // as static arrays: length / distance symbol arithmetic is computed, all scratch is an ArrayView<int> the
@@ -43,6 +54,17 @@ public static class DeflateGpu
     /// <summary>Largest allowed block size in input bytes (distances must fit the window).</summary>
     public const int MaxBlockSize = 1 << 20;
 
+    /// <summary>Input positions one <see cref="ParseStep"/> launch parses at most (plus the rest of a match).</summary>
+    public const int ParseChunk = 2048;
+    /// <summary>
+    /// Byte compares after which one lazy (level 3) <see cref="ParseStep"/> launch stops even before
+    /// <see cref="ParseChunk"/> positions (a few milliseconds of compares on a desktop GPU). Greedy matching needs no such
+    /// stop: it makes at most 4 * chain compares per position it advances.
+    /// </summary>
+    public const int ParseCompareBudget = 1 << 20;
+    /// <summary>Tokens (or stored bytes) one <see cref="EmitStep"/> launch writes at most.</summary>
+    public const int EmitChunk = 8192;
+
     // ---- tail scratch layout (ints), after the hash heads, prev chain and token array ----
     private const int LitFreqOff = 0;        // [288]
     private const int DistFreqOff = 288;     // [32]
@@ -60,13 +82,26 @@ public static class DeflateGpu
     private const int TreeDepthOff = 2792;   // [576]
     private const int TreeCountOff = 3368;   // [16]
     private const int TreeNextOff = 3384;    // [16]
-    private const int TailInts = 3400;
+    private const int StateOff = 3400;       // [24]  resumable block state (St* slots)
+    private const int TailInts = 3424;
+
+    // Slots of the resumable block state (relative to the tail's StateOff).
+    private const int StPos = 0, StTokens = 1, StPendLen = 2, StPendDist = 3, StExtra = 4, StPhase = 5, StSeq = 6,
+        StCursor = 7, StAcc = 8, StCount = 9, StWPos = 10, StOverflow = 11, StOutLen = 12, StWEnd = 13;
+    // Block phases: parsing, parsed (codes not built yet), emitting tokens, emitting stored bytes, done.
+    private const int PhaseParse = 0, PhaseParsed = 1, PhaseEmitTokens = 2, PhaseEmitStored = 3, PhaseDone = 4;
 
     /// <summary>Ints of scratch one block compression needs for blocks of <paramref name="blockSize"/> input bytes.</summary>
     public static int ScratchInts(int blockSize) => HashSize + 2 * blockSize + TailInts;
 
     /// <summary>Upper bound of the output bytes of one block of <paramref name="blockSize"/> input bytes.</summary>
     public static int MaxBlockOutput(int blockSize) => blockSize + 5 * (blockSize / 65535 + 2) + 16;
+
+    /// <summary>Launches of <see cref="ParseStep"/> that finish every greedy (level 1-2) parse of blocks of <paramref name="blockSize"/> bytes.</summary>
+    public static int ParseSteps(int blockSize) => (blockSize + ParseChunk - 1) / ParseChunk;
+
+    /// <summary>Launches of <see cref="EmitStep"/> that finish every block of <paramref name="blockSize"/> bytes.</summary>
+    public static int EmitSteps(int blockSize) => (blockSize + EmitChunk - 1) / EmitChunk;
 
     // ------------------------------------------------------------------
     // Bit writer
@@ -382,12 +417,164 @@ public static class DeflateGpu
     /// <paramref name="data"/> into <paramref name="o"/> at <paramref name="outStart"/> (at most
     /// <paramref name="outCap"/> bytes). Returns the output byte count, or -1 when the slot was too small.
     /// <paramref name="level"/>: 0 = stored only, 1 = greedy (chain 8), 2 = greedy (chain 32), 3 = lazy (chain 64).
+    /// The whole block in one call (one thread); the kernels run the same phases as bounded launches.
     /// </summary>
     public static int CompressBlock(
         ArrayView<byte> data, int start, int len, bool isFinal, int level,
         ArrayView<byte> o, int outStart, int outCap,
         ArrayView<int> s, int sb, int blockSize)
     {
+        for (int k = 0; k < HashSize; k++) InitBlockThread(k, len, level, s, sb, blockSize);
+        ParseStep(data, start, len, level, s, sb, blockSize, int.MaxValue, int.MaxValue);
+        PlanBlock(data, start, len, isFinal, level, o, outStart, outCap, s, sb, blockSize);
+        EmitStep(data, start, len, isFinal, o, outStart, s, sb, blockSize, int.MaxValue);
+        return BlockOutput(s, sb, blockSize);
+    }
+
+    /// <summary>The block's output byte count (or -1 when the slot was too small) once <see cref="EmitStep"/> has finished it.</summary>
+    public static int BlockOutput(ArrayView<int> s, int sb, int blockSize) => s[sb + HashSize + 2 * blockSize + StateOff + StOutLen];
+
+    /// <summary>
+    /// Thread <paramref name="k"/> (0 .. <see cref="HashSize"/> - 1) of the block set-up: clears hash head k and the
+    /// frequencies, and (thread 0) resets the resumable state. Levels &lt;= 0 and empty blocks skip the parse.
+    /// </summary>
+    public static void InitBlockThread(int k, int len, int level, ArrayView<int> s, int sb, int blockSize)
+    {
+        int tail = sb + HashSize + 2 * blockSize;
+        s[sb + k] = -1;
+        if (k < 288) s[tail + LitFreqOff + k] = 0;
+        if (k < 32) s[tail + DistFreqOff + k] = 0;
+        if (k == 0)
+        {
+            int st = tail + StateOff;
+            s[st + StPos] = 0;
+            s[st + StTokens] = 0;
+            s[st + StPendLen] = 0;
+            s[st + StPendDist] = 0;
+            s[st + StExtra] = 0;
+            bool skipParse = (level <= 0) | (len == 0);
+            s[st + StPhase] = skipParse ? PhaseParsed : PhaseParse;
+            s[st + StOutLen] = -1;
+        }
+    }
+
+    /// <summary>
+    /// Continues the LZ77 parse of the block from its saved state: at most <paramref name="positionBudget"/> positions
+    /// (plus the rest of the match it is in) or until <paramref name="compareBudget"/> byte compares, then saves the state.
+    /// Tokens go to the token array (literal = value &lt; 256, match = (length &lt;&lt; 16) | distance) and the
+    /// literal/length and distance frequencies are counted. A call after the parse ended does nothing.
+    /// </summary>
+    public static void ParseStep(
+        ArrayView<byte> data, int start, int len, int level, ArrayView<int> s, int sb, int blockSize,
+        int positionBudget, int compareBudget)
+    {
+        int headAt = sb;
+        int prevAt = sb + HashSize;
+        int tokAt = prevAt + blockSize;
+        int tail = tokAt + blockSize;
+        int st = tail + StateOff;
+        if (s[st + StPhase] != PhaseParse) return;
+
+        int maxChain = level == 1 ? 8 : (level == 2 ? 32 : 64);
+        bool lazy = level >= 3;
+        int niceLen = level == 1 ? 32 : (level == 2 ? 128 : 258);
+
+        int pos = s[st + StPos];
+        int n = s[st + StTokens];
+        int pendingLen = s[st + StPendLen];   // lazy: a match found at pos - 1 that has not been emitted yet
+        int pendingDist = s[st + StPendDist];
+        int extraBits = s[st + StExtra];
+        int posLimit = len;
+        if (positionBudget < len - pos) posLimit = pos + positionBudget;
+        int compares = 0;
+        bool going = pos < posLimit;
+        while (going)
+        {
+            int found = FindMatch(data, start, pos, len, s, headAt, prevAt, maxChain, niceLen, ref compares);
+            int bestLen = found >> 16;
+            int bestDist = found & 0xFFFF;
+            if (!lazy)
+            {
+                if (bestLen >= 3)
+                {
+                    n = AddMatch(s, tokAt, tail, n, bestLen, bestDist, ref extraBits);
+                    for (int p = pos; p < pos + bestLen; p++) InsertHash(data, start, p, len, s, headAt, prevAt);
+                    pos += bestLen;
+                }
+                else
+                {
+                    n = AddLiteral(s, tokAt, tail, n, data[start + pos]);
+                    InsertHash(data, start, pos, len, s, headAt, prevAt);
+                    pos++;
+                }
+            }
+            else if (pendingLen > 0)
+            {
+                if (bestLen > pendingLen)
+                {
+                    // A longer match starts here: the previous byte becomes a literal.
+                    n = AddLiteral(s, tokAt, tail, n, data[start + pos - 1]);
+                    pendingLen = bestLen;
+                    pendingDist = bestDist;
+                    InsertHash(data, start, pos, len, s, headAt, prevAt);
+                    pos++;
+                }
+                else
+                {
+                    // Take the pending match (it started at pos - 1).
+                    n = AddMatch(s, tokAt, tail, n, pendingLen, pendingDist, ref extraBits);
+                    int matchEnd = pos - 1 + pendingLen;
+                    for (int p = pos; p < matchEnd; p++) InsertHash(data, start, p, len, s, headAt, prevAt);
+                    pos = matchEnd;
+                    pendingLen = 0;
+                }
+            }
+            else if (bestLen >= 3)
+            {
+                pendingLen = bestLen;
+                pendingDist = bestDist;
+                InsertHash(data, start, pos, len, s, headAt, prevAt);
+                pos++;
+            }
+            else
+            {
+                n = AddLiteral(s, tokAt, tail, n, data[start + pos]);
+                InsertHash(data, start, pos, len, s, headAt, prevAt);
+                pos++;
+            }
+            going = (pos < posLimit) & (compares < compareBudget);
+        }
+        if (pos >= len)
+        {
+            if (pendingLen > 0)
+                n = AddMatch(s, tokAt, tail, n, pendingLen, pendingDist, ref extraBits);
+            pendingLen = 0;
+            s[st + StPhase] = PhaseParsed;
+        }
+        s[st + StPos] = pos;
+        s[st + StTokens] = n;
+        s[st + StPendLen] = pendingLen;
+        s[st + StPendDist] = pendingDist;
+        s[st + StExtra] = extraBits;
+    }
+
+    /// <summary>1 while the block's parse has not finished (a lazy parse can stop a launch on its compare budget).</summary>
+    public static int ParsePending(ArrayView<int> s, int sb, int blockSize) =>
+        s[sb + HashSize + 2 * blockSize + StateOff + StPhase] == PhaseParse ? 1 : 0;
+
+    /// <summary>
+    /// After the parse: builds the Huffman codes, decides between a dynamic and a stored block (exact sizes) and writes
+    /// the block header (an empty block is written whole). The tokens / stored bytes follow in <see cref="EmitStep"/>.
+    /// </summary>
+    public static void PlanBlock(
+        ArrayView<byte> data, int start, int len, bool isFinal, int level,
+        ArrayView<byte> o, int outStart, int outCap,
+        ArrayView<int> s, int sb, int blockSize)
+    {
+        int tokAt = sb + HashSize + blockSize;
+        int tail = tokAt + blockSize;
+        int st = tail + StateOff;
+        if (s[st + StPhase] != PhaseParsed) return;
         var w = new DeflateBitWriter { Acc = 0, Count = 0, Pos = outStart, End = outStart + outCap, Overflow = 0 };
 
         if (len == 0)
@@ -397,15 +584,13 @@ public static class DeflateGpu
             PutBits(ref w, o, 1, 2);
             PutBits(ref w, o, 0, 7);
             if (isFinal) AlignToByte(ref w, o); else EmitSyncFlush(ref w, o);
-            return w.Overflow != 0 ? -1 : w.Pos - outStart;
+            s[st + StOutLen] = w.Overflow != 0 ? -1 : w.Pos - outStart;
+            s[st + StPhase] = PhaseDone;
+            return;
         }
 
         bool stored = level <= 0;
-        int headAt = sb;
-        int prevAt = sb + HashSize;
-        int tokAt = prevAt + blockSize;
-        int tail = tokAt + blockSize;
-        int tokCount = 0;
+        int tokCount = s[st + StTokens];
         long dynBits = 0;
         int hlit = 257;
         int hdist = 1;
@@ -414,14 +599,7 @@ public static class DeflateGpu
 
         if (!stored)
         {
-            tokCount = Lz77Parse(data, start, len, level, s, headAt, prevAt, tokAt, tail);
-            long extraBits = 0;
-            for (int t = 0; t < tokCount; t++)
-            {
-                int tok = s[tokAt + t];
-                if (tok >= 256)
-                    extraBits += LengthExtraBits(tok >> 16) + DistExtraBits(tok & 0xFFFF);
-            }
+            long extraBits = s[st + StExtra];
             s[tail + LitFreqOff + 256] = 1;
 
             // ---- code lengths ----
@@ -543,67 +721,146 @@ public static class DeflateGpu
 
         if (stored)
         {
-            int done = 0;
-            while (done < len)
-            {
-                int chunk = len - done;
-                if (chunk > 65535) chunk = 65535;
-                bool last = (done + chunk == len);
-                PutBits(ref w, o, (isFinal & last) ? 1u : 0u, 1);
-                PutBits(ref w, o, 0, 2);
-                AlignToByte(ref w, o);
-                PutByte(ref w, o, chunk & 0xFF);
-                PutByte(ref w, o, chunk >> 8);
-                PutByte(ref w, o, ~chunk & 0xFF);
-                PutByte(ref w, o, (~chunk >> 8) & 0xFF);
-                for (int i = 0; i < chunk; i++) PutByte(ref w, o, data[start + done + i]);
-                done += chunk;
-            }
-            // A stored block already ends byte-aligned; nothing more is needed to concatenate.
-            return w.Overflow != 0 ? -1 : w.Pos - outStart;
+            // The stored sub-blocks (header + bytes) are written by EmitStep.
+            s[st + StPhase] = PhaseEmitStored;
         }
+        else
+        {
+            // ---- the dynamic block header ----
+            PutBits(ref w, o, isFinal ? 1u : 0u, 1);
+            PutBits(ref w, o, 2, 2);
+            PutBits(ref w, o, (uint)(hlit - 257), 5);
+            PutBits(ref w, o, (uint)(hdist - 1), 5);
+            PutBits(ref w, o, (uint)(hclen - 4), 4);
+            for (int i = 0; i < hclen; i++)
+                PutBits(ref w, o, (uint)s[tail + ClLenOff + InflateGpu.CodeLengthOrder(i)], 3);
+            for (int i = 0; i < seqCount; i++)
+            {
+                int packed = s[tail + ClSeqOff + i];
+                int sym = packed & 31;
+                PutBits(ref w, o, (uint)s[tail + ClCodeOff + sym], s[tail + ClLenOff + sym]);
+                int eb = (packed >> 12) & 7;
+                if (eb > 0) PutBits(ref w, o, (uint)((packed >> 5) & 127), eb);
+            }
+            s[st + StPhase] = PhaseEmitTokens;
+        }
+        s[st + StSeq] = seqCount;
+        s[st + StCursor] = 0;
+        SaveWriter(ref w, s, st);
+    }
 
-        // ---- emit the dynamic block ----
-        PutBits(ref w, o, isFinal ? 1u : 0u, 1);
-        PutBits(ref w, o, 2, 2);
-        PutBits(ref w, o, (uint)(hlit - 257), 5);
-        PutBits(ref w, o, (uint)(hdist - 1), 5);
-        PutBits(ref w, o, (uint)(hclen - 4), 4);
-        for (int i = 0; i < hclen; i++)
-            PutBits(ref w, o, (uint)s[tail + ClLenOff + InflateGpu.CodeLengthOrder(i)], 3);
-        for (int i = 0; i < seqCount; i++)
+    /// <summary>
+    /// Continues writing the block from its saved state: at most <paramref name="budget"/> tokens (dynamic block) or
+    /// stored bytes (stored sub-blocks of at most 65535 bytes, each with its header), then the end of the block when
+    /// they are all out (end-of-block code + byte alignment or sync flush). A call after the end does nothing.
+    /// </summary>
+    public static void EmitStep(
+        ArrayView<byte> data, int start, int len, bool isFinal,
+        ArrayView<byte> o, int outStart,
+        ArrayView<int> s, int sb, int blockSize, int budget)
+    {
+        int tokAt = sb + HashSize + blockSize;
+        int tail = tokAt + blockSize;
+        int st = tail + StateOff;
+        int phase = s[st + StPhase];
+        bool emitting = (phase == PhaseEmitTokens) | (phase == PhaseEmitStored);
+        if (!emitting) return;
+
+        var w = new DeflateBitWriter
         {
-            int packed = s[tail + ClSeqOff + i];
-            int sym = packed & 31;
-            PutBits(ref w, o, (uint)s[tail + ClCodeOff + sym], s[tail + ClLenOff + sym]);
-            int eb = (packed >> 12) & 7;
-            if (eb > 0) PutBits(ref w, o, (uint)((packed >> 5) & 127), eb);
-        }
-        for (int t = 0; t < tokCount; t++)
+            Acc = (ulong)(uint)s[st + StAcc],
+            Count = s[st + StCount],
+            Pos = s[st + StWPos],
+            End = s[st + StWEnd],
+            Overflow = s[st + StOverflow],
+        };
+        int cursor = s[st + StCursor];
+
+        if (phase == PhaseEmitTokens)
         {
-            int tok = s[tokAt + t];
-            if (tok < 256)
+            int tokCount = s[st + StTokens];
+            int end = tokCount;
+            if (budget < tokCount - cursor) end = cursor + budget;
+            for (int t = cursor; t < end; t++)
             {
-                PutBits(ref w, o, (uint)s[tail + LitCodeOff + tok], s[tail + LitLenOff + tok]);
+                int tok = s[tokAt + t];
+                if (tok < 256)
+                {
+                    PutBits(ref w, o, (uint)s[tail + LitCodeOff + tok], s[tail + LitLenOff + tok]);
+                }
+                else
+                {
+                    int ml = tok >> 16;
+                    int md = tok & 0xFFFF;
+                    int ls = LengthSymbol(ml);
+                    PutBits(ref w, o, (uint)s[tail + LitCodeOff + ls], s[tail + LitLenOff + ls]);
+                    int leb = LengthExtraBits(ml);
+                    if (leb > 0) PutBits(ref w, o, (uint)LengthExtraValue(ml), leb);
+                    int ds = DistSymbol(md);
+                    PutBits(ref w, o, (uint)s[tail + DistCodeOff + ds], s[tail + DistLenOff + ds]);
+                    int deb = DistExtraBits(md);
+                    if (deb > 0) PutBits(ref w, o, (uint)DistExtraValue(md), deb);
+                }
             }
-            else
+            cursor = end;
+            if (cursor == tokCount)
             {
-                int ml = tok >> 16;
-                int md = tok & 0xFFFF;
-                int ls = LengthSymbol(ml);
-                PutBits(ref w, o, (uint)s[tail + LitCodeOff + ls], s[tail + LitLenOff + ls]);
-                int leb = LengthExtraBits(ml);
-                if (leb > 0) PutBits(ref w, o, (uint)LengthExtraValue(ml), leb);
-                int ds = DistSymbol(md);
-                PutBits(ref w, o, (uint)s[tail + DistCodeOff + ds], s[tail + DistLenOff + ds]);
-                int deb = DistExtraBits(md);
-                if (deb > 0) PutBits(ref w, o, (uint)DistExtraValue(md), deb);
+                PutBits(ref w, o, (uint)s[tail + LitCodeOff + 256], s[tail + LitLenOff + 256]);
+                if (isFinal) AlignToByte(ref w, o);
+                else EmitSyncFlush(ref w, o);
+                s[st + StOutLen] = w.Overflow != 0 ? -1 : w.Pos - outStart;
+                s[st + StPhase] = PhaseDone;
             }
         }
-        PutBits(ref w, o, (uint)s[tail + LitCodeOff + 256], s[tail + LitLenOff + 256]);
-        if (isFinal) AlignToByte(ref w, o);
-        else EmitSyncFlush(ref w, o);
-        return w.Overflow != 0 ? -1 : w.Pos - outStart;
+        else
+        {
+            int done = cursor;
+            int limit = len;
+            if (budget < len - done) limit = done + budget;
+            bool going = done < limit;
+            while (going)
+            {
+                // Stored sub-blocks of at most 65535 bytes; each starts with its header.
+                int chunkStart = (done / 65535) * 65535;
+                int chunk = len - chunkStart;
+                if (chunk > 65535) chunk = 65535;
+                if (done == chunkStart)
+                {
+                    bool last = chunkStart + chunk == len;
+                    PutBits(ref w, o, (isFinal & last) ? 1u : 0u, 1);
+                    PutBits(ref w, o, 0, 2);
+                    AlignToByte(ref w, o);
+                    PutByte(ref w, o, chunk & 0xFF);
+                    PutByte(ref w, o, chunk >> 8);
+                    PutByte(ref w, o, ~chunk & 0xFF);
+                    PutByte(ref w, o, (~chunk >> 8) & 0xFF);
+                }
+                int stop = chunkStart + chunk;
+                if (stop > limit) stop = limit;
+                for (int i = done; i < stop; i++) PutByte(ref w, o, data[start + i]);
+                done = stop;
+                going = done < limit;
+            }
+            cursor = done;
+            if (done == len)
+            {
+                // A stored block already ends byte-aligned; nothing more is needed to concatenate.
+                s[st + StOutLen] = w.Overflow != 0 ? -1 : w.Pos - outStart;
+                s[st + StPhase] = PhaseDone;
+            }
+        }
+        s[st + StCursor] = cursor;
+        SaveWriter(ref w, s, st);
+    }
+
+    /// <summary>Saves the bit writer (pending bits &lt; 8, so the accumulator fits an int) into the block state.</summary>
+    private static void SaveWriter(ref DeflateBitWriter w, ArrayView<int> s, int st)
+    {
+        s[st + StAcc] = (int)(uint)w.Acc;
+        s[st + StCount] = w.Count;
+        s[st + StWPos] = w.Pos;
+        s[st + StWEnd] = w.End;
+        s[st + StOverflow] = w.Overflow;
     }
 
     // ------------------------------------------------------------------
@@ -620,10 +877,13 @@ public static class DeflateGpu
         }
     }
 
-    /// <summary>Best match at <paramref name="pos"/>: (length &lt;&lt; 16) | distance, or 0 when none (length &lt; 3).</summary>
+    /// <summary>
+    /// Best match at <paramref name="pos"/>: (length &lt;&lt; 16) | distance, or 0 when none (length &lt; 3).
+    /// Adds the byte compares it made to <paramref name="compares"/>.
+    /// </summary>
     private static int FindMatch(
         ArrayView<byte> data, int start, int pos, int len, ArrayView<int> s, int headAt, int prevAt,
-        int maxChain, int niceLen)
+        int maxChain, int niceLen, ref int compares)
     {
         int bestLen = 0;
         int bestDist = 0;
@@ -658,6 +918,7 @@ public static class DeflateGpu
                             else if (data[start + cand + ml] != data[start + pos + ml]) go = 0;
                             else ml++;
                         }
+                        compares += ml + 1;
                         // A 3-byte match from far away costs more bits than three literals.
                         bool worthIt = (ml > bestLen) & !((ml == 3) & (dist > 4096));
                         if (worthIt)
@@ -683,94 +944,16 @@ public static class DeflateGpu
         return n + 1;
     }
 
-    private static int AddMatch(ArrayView<int> s, int tokAt, int tail, int n, int length, int dist)
+    private static int AddMatch(ArrayView<int> s, int tokAt, int tail, int n, int length, int dist, ref int extraBits)
     {
         s[tokAt + n] = (length << 16) | dist;
         int ls = LengthSymbol(length);
         int ds = DistSymbol(dist);
         s[tail + LitFreqOff + ls] = s[tail + LitFreqOff + ls] + 1;
         s[tail + DistFreqOff + ds] = s[tail + DistFreqOff + ds] + 1;
+        // Extra bits of the block's matches (for the exact dynamic-block size).
+        extraBits += LengthExtraBits(length) + DistExtraBits(dist);
         return n + 1;
-    }
-
-    /// <summary>
-    /// LZ77-parses the block into the token array (literal = value &lt; 256, match = (length &lt;&lt; 16) | distance)
-    /// and counts the literal/length and distance symbol frequencies. Returns the token count.
-    /// </summary>
-    private static int Lz77Parse(
-        ArrayView<byte> data, int start, int len, int level, ArrayView<int> s,
-        int headAt, int prevAt, int tokAt, int tail)
-    {
-        int maxChain = level == 1 ? 8 : (level == 2 ? 32 : 64);
-        bool lazy = level >= 3;
-        int niceLen = level == 1 ? 32 : (level == 2 ? 128 : 258);
-
-        for (int i = 0; i < HashSize; i++) s[headAt + i] = -1;
-        for (int i = 0; i < 288; i++) s[tail + LitFreqOff + i] = 0;
-        for (int i = 0; i < 32; i++) s[tail + DistFreqOff + i] = 0;
-
-        int n = 0;
-        int pos = 0;
-        int pendingLen = 0;   // lazy: a match found at pos - 1 that has not been emitted yet
-        int pendingDist = 0;
-        while (pos < len)
-        {
-            int found = FindMatch(data, start, pos, len, s, headAt, prevAt, maxChain, niceLen);
-            int bestLen = found >> 16;
-            int bestDist = found & 0xFFFF;
-            if (!lazy)
-            {
-                if (bestLen >= 3)
-                {
-                    n = AddMatch(s, tokAt, tail, n, bestLen, bestDist);
-                    for (int p = pos; p < pos + bestLen; p++) InsertHash(data, start, p, len, s, headAt, prevAt);
-                    pos += bestLen;
-                }
-                else
-                {
-                    n = AddLiteral(s, tokAt, tail, n, data[start + pos]);
-                    InsertHash(data, start, pos, len, s, headAt, prevAt);
-                    pos++;
-                }
-            }
-            else if (pendingLen > 0)
-            {
-                if (bestLen > pendingLen)
-                {
-                    // A longer match starts here: the previous byte becomes a literal.
-                    n = AddLiteral(s, tokAt, tail, n, data[start + pos - 1]);
-                    pendingLen = bestLen;
-                    pendingDist = bestDist;
-                    InsertHash(data, start, pos, len, s, headAt, prevAt);
-                    pos++;
-                }
-                else
-                {
-                    // Take the pending match (it started at pos - 1).
-                    n = AddMatch(s, tokAt, tail, n, pendingLen, pendingDist);
-                    int matchEnd = pos - 1 + pendingLen;
-                    for (int p = pos; p < matchEnd; p++) InsertHash(data, start, p, len, s, headAt, prevAt);
-                    pos = matchEnd;
-                    pendingLen = 0;
-                }
-            }
-            else if (bestLen >= 3)
-            {
-                pendingLen = bestLen;
-                pendingDist = bestDist;
-                InsertHash(data, start, pos, len, s, headAt, prevAt);
-                pos++;
-            }
-            else
-            {
-                n = AddLiteral(s, tokAt, tail, n, data[start + pos]);
-                InsertHash(data, start, pos, len, s, headAt, prevAt);
-                pos++;
-            }
-        }
-        if (pendingLen > 0)
-            n = AddMatch(s, tokAt, tail, n, pendingLen, pendingDist);
-        return n;
     }
 
     /// <summary>Empty stored block: byte-aligns the stream so the next block can be appended by a byte copy.</summary>
