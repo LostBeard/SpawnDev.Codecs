@@ -253,7 +253,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
 
         // ---- colour analysis, once, on the untouched pixels ----
         job.ToArgb(a);
-        _kernels.Analyze(a, work, meta);
+        _kernels.Analyze(a, work, meta, pixels);
         await _accelerator.SynchronizeAsync();
         var analysis = await meta.CopyToHostAsync();
         int paletteColors = analysis[WebPEncMeta.PaletteAvailable];
@@ -314,7 +314,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
         // Entropy-codes the main image with a colour cache size and returns the estimated size in bits.
         async Task<long> CostAsync(ArrayView<uint> main, int cacheBits, bool readBack)
         {
-            _kernels.Tokenize(main, work, tok, meta, _tables.View, cacheBits);
+            _kernels.Tokenize(main, work, tok, meta, _tables.View, cacheBits, (long)hostMeta[WebPEncMeta.PackedWidth] * height);
             _kernels.BuildCodes(work, meta);
             if (!readBack) return 0;
             await _accelerator.SynchronizeAsync();
@@ -385,14 +385,14 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
 
             int tileCount = Vp8lEncLayout.Tiles(hostMeta[WebPEncMeta.PackedWidth], height, plan.MetaBits);
             int costBase = hostMeta[WebPEncMeta.RegionGroupMisc] + Vp8lEncodeGroups.CostTableOffset;
-            _kernels.TileHistograms(work, tok, meta, _tables.View);
+            _kernels.TileHistograms(work, tok, meta, _tables.View, tileCount, (long)hostMeta[WebPEncMeta.PackedWidth] * height);
             long bestGroupsCost = long.MaxValue;
             int bestGroups = 0;
             int lastTried = 0;
             foreach (int k in new[] { 2, 4, 8 })
             {
                 if (k > tileCount * 2) break;
-                _kernels.Cluster(work, meta, k);
+                _kernels.Cluster(work, meta, k, tileCount);
                 _kernels.BuildGroupCodes(work, meta);
                 await _accelerator.SynchronizeAsync();
                 var m = await meta.CopyToHostAsync();
@@ -412,7 +412,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
             {
                 if (lastTried != bestGroups)
                 {
-                    _kernels.Cluster(work, meta, bestGroups);
+                    _kernels.Cluster(work, meta, bestGroups, tileCount);
                     _kernels.BuildGroupCodes(work, meta);
                 }
             }
@@ -421,7 +421,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
                 meta.SubView(WebPEncMeta.Groups, 1).CopyFromCPU(new[] { 1 });
             }
         }
-        _kernels.Emit(output, work, tok, meta, _tables.View);
+        _kernels.Emit(output, work, tok, meta, _tables.View, (long)hostMeta[WebPEncMeta.PackedWidth] * height);
     }
 
     /// <summary>The ICC / EXIF / XMP payloads uploaded to one device buffer (small host blobs), in that order.</summary>

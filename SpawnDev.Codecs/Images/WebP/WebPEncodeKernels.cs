@@ -4,21 +4,25 @@
 // and reads back a few scalars (the output length, the cost of a colour-cache variant).
 //
 //   1. ToArgbKernel          (1 thread per pixel)   RGBA8 -> ARGB, optionally clearing RGB under alpha 0.
-//   2. AnalyzeKernel         (1 thread)             alpha, distinct colours (palette when <= 256, sorted), delta-coded palette.
+//   2. Analyze               (resumable, 1 thread per launch)  alpha, distinct colours (palette when <= 256, sorted), delta-coded palette.
 //   3. PaletteIndexKernel    (1 thread per packed pixel)   colour -> palette index, 2/4/8 pixels bundled per word.
 //   4. SubtractGreenKernel   (1 thread per pixel)   forward subtract green.
 //   5. PredictorModeKernel   (1 thread per tile)    picks the predictor mode per tile by minimum residual magnitude.
 //   6. PredictorResidualKernel (1 thread per pixel) residuals against the ORIGINAL neighbours (fully parallel).
 //   7. CrossColorModeKernel / CrossColorKernel      per-tile multipliers and the forward cross-colour transform.
-//   8. TokenizeKernel        (1 thread)             LZ77 hash chain + colour cache -> tokens + histograms.
+//   8. Tokenize              (resumable, 1 thread per launch)  LZ77 hash chain + colour cache -> tokens + histograms.
 //   9. BuildCodesKernel      (1 thread per code)    length-limited Huffman codes of the five prefix codes.
-//  10. EmitKernel            (1 thread)             header, transforms (sub-images), prefix codes, tokens -> bits.
+//  10. Emit                  (head + resumable tokens + tail)  header, transforms (sub-images), prefix codes, tokens -> bits.
 //  11. FinalizeKernel + CopyBlobKernel              RIFF / VP8X / chunk headers, ICCP / EXIF / XMP payloads.
 //  12. AlphaCost / AlphaPick / AlphaToArgb / AlphaRaw / FinalizeAlpha   ALPH chunk: filter choice, filtered plane, header byte.
 //  13. FinalizeFrame / FinalizeAnim                 ANMF + VP8L chunk headers per frame; RIFF / VP8X / ICCP / ANIM / EXIF / XMP of an animation.
 //
 // The transforms read only ORIGINAL pixels, so they are parallel; the bitstream (variable-length codes in one
-// stream) is a sequential dependency chain, hence the single-thread kernels - still accelerator-resident.
+// stream) is a sequential dependency chain, hence the single-thread kernels - still accelerator-resident. Every serial
+// stage whose work grows with the image (analysis, tokenisation, tile histograms, token emission) is RESUMABLE: it runs as
+// a chain of launches of Vp8lEncLayout.StepChunk pixels / tokens each, continuing from state kept in the work buffer, so
+// no launch holds the GPU long (a long launch stalls the desktop compositor and trips the OS GPU watchdog). The meta
+// prefix clustering is parallel per tile / per (cluster, symbol).
 // Stages that do not apply to the image (palette decided on the accelerator) return at once, so the host
 // needs no mid-pipeline readback.
 
@@ -31,6 +35,7 @@ namespace SpawnDev.Codecs.Images.WebP;
 public sealed class WebPEncodeKernels : IDisposable
 {
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<uint>, int> _toArgb;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _analyzeInit, _analyzeFinish;
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _analyze;
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _paletteIndex;
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>> _subtractGreen;
@@ -38,13 +43,17 @@ public sealed class WebPEncodeKernels : IDisposable
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _predictorResidual;
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _crossMode;
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _crossForward;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _tokenizeInit;
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _tokenize;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _buildCodes;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _emit;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _emitHead, _emitTokens;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _emitTail;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _finalize;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int> _copyBlob;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _tileHistInit;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _tileHist;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _cluster;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _clusterSeedFirst, _clusterTileMin, _clusterSeedNext,
+        _clusterLengths, _clusterAssign, _clusterAccumulate, _clusterFinish;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _buildGroupCodes;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _alphaCost;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _alphaPick;
@@ -59,8 +68,10 @@ public sealed class WebPEncodeKernels : IDisposable
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _toArgb = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<uint>, int>(ToArgbKernel);
+        _analyzeInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(AnalyzeInitKernel);
         _analyze = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>>(AnalyzeKernel);
+        _analyzeFinish = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(AnalyzeFinishKernel);
         _paletteIndex = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, ArrayView<int>>(PaletteIndexKernel);
         _subtractGreen = accelerator.LoadAutoGroupedStreamKernel<
@@ -73,17 +84,28 @@ public sealed class WebPEncodeKernels : IDisposable
             Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>>(CrossColorModeKernel);
         _crossForward = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>>(CrossColorKernel);
+        _tokenizeInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(TokenizeInitKernel);
         _tokenize = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(TokenizeKernel);
         _buildCodes = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(BuildCodesKernel);
-        _emit = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(EmitKernel);
+        _emitHead = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(EmitHeadKernel);
+        _emitTokens = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(EmitTokensKernel);
+        _emitTail = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(EmitTailKernel);
         _finalize = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(FinalizeKernel);
         _copyBlob = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int>(CopyBlobKernel);
+        _tileHistInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(TileHistInitKernel);
         _tileHist = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(TileHistKernel);
-        _cluster = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(ClusterKernel);
+        _clusterSeedFirst = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClusterSeedFirstKernel);
+        _clusterTileMin = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClusterTileMinKernel);
+        _clusterSeedNext = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClusterSeedNextKernel);
+        _clusterLengths = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClusterLengthsKernel);
+        _clusterAssign = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClusterAssignKernel);
+        _clusterAccumulate = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClusterAccumulateKernel);
+        _clusterFinish = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClusterFinishKernel);
         _buildGroupCodes = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(BuildGroupCodesKernel);
         _alphaCost = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(AlphaCostKernel);
@@ -104,8 +126,13 @@ public sealed class WebPEncodeKernels : IDisposable
     /// <summary>RGBA8 to ARGB over <paramref name="pixels"/> pixels; <paramref name="exact"/> 0 clears RGB where alpha is 0.</summary>
     public void ToArgb(ArrayView<byte> rgba, ArrayView<uint> argb, int pixels, int exact) => _toArgb(pixels, rgba, argb, exact);
 
-    /// <summary>Colour analysis (alpha, palette).</summary>
-    public void Analyze(ArrayView<uint> argb, ArrayView<int> work, ArrayView<int> meta) => _analyze(1, argb, work, meta);
+    /// <summary>Colour analysis (alpha, palette) of <paramref name="pixels"/> pixels: set-up, bounded resumable scan launches, finish.</summary>
+    public void Analyze(ArrayView<uint> argb, ArrayView<int> work, ArrayView<int> meta, long pixels)
+    {
+        _analyzeInit(1024, work, meta);
+        for (int i = Vp8lEncLayout.Steps(pixels); i > 0; i--) _analyze(1, argb, work, meta);
+        _analyzeFinish(1, work, meta);
+    }
 
     /// <summary>Palette indices (bundled) from <paramref name="src"/> into <paramref name="dst"/>; extent = the pixel count (surplus threads return).</summary>
     public void PaletteIndex(ArrayView<uint> src, ArrayView<uint> dst, ArrayView<int> work, ArrayView<int> meta, int pixels)
@@ -130,26 +157,55 @@ public sealed class WebPEncodeKernels : IDisposable
     public void CrossColor(ArrayView<uint> argb, ArrayView<int> work, ArrayView<int> meta, int pixels)
         => _crossForward(pixels, argb, work, meta);
 
-    /// <summary>LZ77 + colour cache tokenisation of the main image.</summary>
-    public void Tokenize(ArrayView<uint> main, ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables, int cacheBits)
-        => _tokenize(1, main, work, tok, meta, tables, cacheBits);
+    /// <summary>
+    /// LZ77 + colour cache tokenisation of the main image of <paramref name="pixels"/> (packed) pixels: a parallel set-up, then
+    /// bounded launches that each continue the serial walk where the previous one stopped.
+    /// </summary>
+    public void Tokenize(ArrayView<uint> main, ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables, int cacheBits, long pixels)
+    {
+        _tokenizeInit(1 << Vp8lEncLayout.HashBits, work, meta, cacheBits);
+        for (int i = Vp8lEncLayout.Steps(pixels, Vp8lEncLayout.TokenizeChunk); i > 0; i--) _tokenize(1, main, work, tok, meta, tables, cacheBits);
+    }
 
     /// <summary>Huffman codes of the five main prefix codes (one thread each).</summary>
     public void BuildCodes(ArrayView<int> work, ArrayView<int> meta) => _buildCodes(5, work, meta);
 
-    /// <summary>Per-tile histograms of the main token stream (for the meta prefix codes).</summary>
-    public void TileHistograms(ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables)
-        => _tileHist(1, work, tok, meta, tables);
+    /// <summary>Per-tile histograms of the main token stream (for the meta prefix codes); <paramref name="pixels"/> bounds the token count.</summary>
+    public void TileHistograms(ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables, int tiles, long pixels)
+    {
+        _tileHistInit(tiles * Vp8lEncLayout.SetAlphaMax, work, meta);
+        for (int i = Vp8lEncLayout.Steps(pixels); i > 0; i--) _tileHist(1, work, tok, meta, tables);
+    }
 
-    /// <summary>Clusters the tiles into at most <paramref name="groups"/> prefix groups.</summary>
-    public void Cluster(ArrayView<int> work, ArrayView<int> meta, int groups) => _cluster(1, work, meta, groups);
+    /// <summary>Clusters the <paramref name="tiles"/> tiles into at most <paramref name="groups"/> prefix groups (see Vp8lEncodeGroups).</summary>
+    public void Cluster(ArrayView<int> work, ArrayView<int> meta, int groups, int tiles)
+    {
+        _clusterSeedFirst(1, work, meta);
+        _clusterTileMin(tiles, work, meta);
+        for (int s = 1; s < groups; s++)
+        {
+            _clusterSeedNext(1, work, meta);
+            _clusterTileMin(tiles, work, meta);
+        }
+        for (int round = 0; round < 4; round++)
+        {
+            _clusterLengths(Vp8lEncodeGroups.MaxGroups, work, meta);
+            _clusterAssign(tiles, work, meta);
+            _clusterAccumulate(Vp8lEncodeGroups.MaxGroups * Vp8lEncLayout.SetAlphaMax, work, meta);
+        }
+        _clusterFinish(1, work, meta);
+    }
 
     /// <summary>Huffman codes of every code of every group (one thread each).</summary>
     public void BuildGroupCodes(ArrayView<int> work, ArrayView<int> meta) => _buildGroupCodes(Vp8lEncodeGroups.MaxGroups * 5, work, meta);
 
-    /// <summary>Bitstream: header, transforms, codes, tokens.</summary>
-    public void Emit(ArrayView<byte> output, ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables)
-        => _emit(1, output, work, tok, meta, tables);
+    /// <summary>Bitstream: header, transforms, codes (one launch), the tokens (bounded resumable launches), the last byte.</summary>
+    public void Emit(ArrayView<byte> output, ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables, long pixels)
+    {
+        _emitHead(1, output, work, tok, meta, tables);
+        for (int i = Vp8lEncLayout.Steps(pixels); i > 0; i--) _emitTokens(1, output, work, tok, meta, tables);
+        _emitTail(1, output, work, meta);
+    }
 
     /// <summary>RIFF / VP8X / chunk headers and the total length.</summary>
     public void FinalizeFile(ArrayView<byte> output, ArrayView<int> meta) => _finalize(1, output, meta);
@@ -219,6 +275,21 @@ public sealed class WebPEncodeKernels : IDisposable
         return (ag & 0xff00ff00u) | (rb & 0x00ff00ffu);
     }
 
+    /// <summary>1024 threads: clear the colour hash; thread 0 resets the resumable analysis state.</summary>
+    private static void AnalyzeInitKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta)
+    {
+        w[Vp8lEncLayout.Analysis + 1024 + index.X] = 0;
+        if (index.X == 0)
+        {
+            int s = Vp8lEncLayout.StepState;
+            w[s + Vp8lEncLayout.SAnalyzeI] = 0;
+            w[s + Vp8lEncLayout.SAnalyzeCount] = 0;
+            w[s + Vp8lEncLayout.SAnalyzeAlpha] = 0;
+            w[s + Vp8lEncLayout.SAnalyzeCollecting] = meta[WebPEncMeta.AllowPalette] == 1 ? 1 : 0;
+        }
+    }
+
+    /// <summary>The next <see cref="Vp8lEncLayout.StepChunk"/> pixels of the alpha / distinct-colour scan (resumable).</summary>
     private static void AnalyzeKernel(Index1D _, ArrayView<uint> argb, ArrayView<int> w, ArrayView<int> meta)
     {
         int width = meta[WebPEncMeta.Width];
@@ -226,12 +297,15 @@ public sealed class WebPEncodeKernels : IDisposable
         int n = width * height;
         int keys = Vp8lEncLayout.Analysis;
         int flags = Vp8lEncLayout.Analysis + 1024;
-        for (int i = 0; i < 1024; i++) w[flags + i] = 0;
+        int s = Vp8lEncLayout.StepState;
 
-        int count = 0;
-        int hasAlpha = 0;
-        bool collecting = meta[WebPEncMeta.AllowPalette] == 1;
-        for (int i = 0; i < n; i++)
+        int start = w[s + Vp8lEncLayout.SAnalyzeI];
+        int count = w[s + Vp8lEncLayout.SAnalyzeCount];
+        int hasAlpha = w[s + Vp8lEncLayout.SAnalyzeAlpha];
+        bool collecting = w[s + Vp8lEncLayout.SAnalyzeCollecting] == 1;
+        int end = start + Vp8lEncLayout.StepChunk;
+        if (end > n) end = n;
+        for (int i = start; i < end; i++)
         {
             uint px = argb[i];
             if ((px >> 24) != 255u) hasAlpha = 1;
@@ -266,7 +340,24 @@ public sealed class WebPEncodeKernels : IDisposable
                 }
             }
         }
-        meta[WebPEncMeta.HasAlpha] = hasAlpha;
+        if (start < n)
+        {
+            w[s + Vp8lEncLayout.SAnalyzeI] = end;
+            w[s + Vp8lEncLayout.SAnalyzeCount] = count;
+            w[s + Vp8lEncLayout.SAnalyzeAlpha] = hasAlpha;
+            w[s + Vp8lEncLayout.SAnalyzeCollecting] = collecting ? 1 : 0;
+        }
+    }
+
+    /// <summary>After the scan: HasAlpha, and the sorted (and delta-coded) palette when there are at most 256 colours.</summary>
+    private static void AnalyzeFinishKernel(Index1D _, ArrayView<int> w, ArrayView<int> meta)
+    {
+        int keys = Vp8lEncLayout.Analysis;
+        int flags = Vp8lEncLayout.Analysis + 1024;
+        int s = Vp8lEncLayout.StepState;
+        int count = w[s + Vp8lEncLayout.SAnalyzeCount];
+        bool collecting = w[s + Vp8lEncLayout.SAnalyzeCollecting] == 1;
+        meta[WebPEncMeta.HasAlpha] = w[s + Vp8lEncLayout.SAnalyzeAlpha];
 
         int palette = 0;
         if (collecting)
@@ -596,22 +687,62 @@ public sealed class WebPEncodeKernels : IDisposable
     // 8-10. Entropy coding
     // ------------------------------------------------------------------
 
+    private static void TokenizeInitKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta, int cacheBits)
+    {
+        Vp8lEncodeGpu.TokenizeInit(index.X, w, meta, cacheBits);
+    }
+
     private static void TokenizeKernel(
         Index1D _, ArrayView<uint> main, ArrayView<int> w, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables, int cacheBits)
     {
         int height = meta[WebPEncMeta.Height];
         int xsize = meta[WebPEncMeta.PackedWidth];
-        Vp8lEncodeGpu.Tokenize(main, xsize, height, w, tok, meta, tables, cacheBits);
+        Vp8lEncodeGpu.TokenizeStep(main, xsize, height, w, tok, meta, tables, cacheBits);
+    }
+
+    private static void TileHistInitKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta)
+    {
+        Vp8lEncodeGroups.TileHistogramsInit(index.X, w, meta);
     }
 
     private static void TileHistKernel(Index1D _, ArrayView<int> w, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables)
     {
-        Vp8lEncodeGroups.TileHistograms(w, tok, meta, tables);
+        Vp8lEncodeGroups.TileHistogramsStep(w, tok, meta, tables);
     }
 
-    private static void ClusterKernel(Index1D _, ArrayView<int> w, ArrayView<int> meta, int groups)
+    private static void ClusterSeedFirstKernel(Index1D _, ArrayView<int> w, ArrayView<int> meta)
     {
-        Vp8lEncodeGroups.Cluster(w, meta, groups);
+        Vp8lEncodeGroups.ClusterSeedFirst(w, meta);
+    }
+
+    private static void ClusterTileMinKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta)
+    {
+        Vp8lEncodeGroups.ClusterTileMin(index.X, w, meta);
+    }
+
+    private static void ClusterSeedNextKernel(Index1D _, ArrayView<int> w, ArrayView<int> meta)
+    {
+        Vp8lEncodeGroups.ClusterSeedNext(w, meta);
+    }
+
+    private static void ClusterLengthsKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta)
+    {
+        Vp8lEncodeGroups.ClusterLengths(index.X, w, meta);
+    }
+
+    private static void ClusterAssignKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta)
+    {
+        Vp8lEncodeGroups.ClusterAssign(index.X, w, meta);
+    }
+
+    private static void ClusterAccumulateKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta)
+    {
+        Vp8lEncodeGroups.ClusterAccumulate(index.X, w, meta);
+    }
+
+    private static void ClusterFinishKernel(Index1D _, ArrayView<int> w, ArrayView<int> meta)
+    {
+        Vp8lEncodeGroups.ClusterFinish(w, meta);
     }
 
     private static void BuildGroupCodesKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta)
@@ -630,7 +761,8 @@ public sealed class WebPEncodeKernels : IDisposable
         meta[WebPEncMeta.CodeCost + k] = Vp8lEncodeGpu.CodeCostBits(w, set, cacheSize, k);
     }
 
-    private static void EmitKernel(
+    /// <summary>Everything in front of the tokens: header, transforms (sub-images), the prefix codes.</summary>
+    private static void EmitHeadKernel(
         Index1D _, ArrayView<byte> output, ArrayView<int> w, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables)
     {
         int start = meta[WebPEncMeta.PayloadStart];
@@ -713,9 +845,62 @@ public sealed class WebPEncodeKernels : IDisposable
             Vp8lEncodeGpu.PutBits(ref bw, output, 0, 1); // no meta prefix codes: one group
             Vp8lEncodeGpu.WriteCodeSet(ref bw, output, w, meta[WebPEncMeta.RegionMain], cacheSize, ws);
         }
-        Vp8lEncodeGpu.WriteTokens(ref bw, output, w, tok, meta, tables, meta[WebPEncMeta.PackedWidth], cacheBits);
+        // The tokens follow in bounded EmitTokens launches; the bit writer state carries over in the step state.
+        SaveWriter(w, ref bw);
+        int s = Vp8lEncLayout.StepState;
+        w[s + Vp8lEncLayout.SEmitT] = 0;
+        w[s + Vp8lEncLayout.SEmitX] = 0;
+        w[s + Vp8lEncLayout.SEmitY] = 0;
+    }
+
+    private static void SaveWriter(ArrayView<int> w, ref Vp8lBitWriter bw)
+    {
+        int s = Vp8lEncLayout.StepState;
+        w[s + Vp8lEncLayout.SEmitPos] = bw.Pos;
+        w[s + Vp8lEncLayout.SEmitAcc] = (int)bw.Acc;
+        w[s + Vp8lEncLayout.SEmitNbits] = bw.Nbits;
+        w[s + Vp8lEncLayout.SEmitOverflow] = bw.Overflow;
+    }
+
+    private static Vp8lBitWriter LoadWriter(ArrayView<int> w, ArrayView<int> meta)
+    {
+        int s = Vp8lEncLayout.StepState;
+        return new Vp8lBitWriter
+        {
+            Pos = w[s + Vp8lEncLayout.SEmitPos],
+            Acc = (uint)w[s + Vp8lEncLayout.SEmitAcc],
+            Nbits = w[s + Vp8lEncLayout.SEmitNbits],
+            Cap = meta[WebPEncMeta.OutputCapacity],
+            Overflow = w[s + Vp8lEncLayout.SEmitOverflow],
+        };
+    }
+
+    /// <summary>The next <see cref="Vp8lEncLayout.StepChunk"/> tokens (a launch after the last token does nothing).</summary>
+    private static void EmitTokensKernel(
+        Index1D _, ArrayView<byte> output, ArrayView<int> w, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables)
+    {
+        int s = Vp8lEncLayout.StepState;
+        int t = w[s + Vp8lEncLayout.SEmitT];
+        if (t < meta[WebPEncMeta.TokenCount])
+        {
+            var bw = LoadWriter(w, meta);
+            int x = w[s + Vp8lEncLayout.SEmitX];
+            int y = w[s + Vp8lEncLayout.SEmitY];
+            Vp8lEncodeGpu.WriteTokens(ref bw, output, w, tok, meta, tables, meta[WebPEncMeta.PackedWidth], meta[WebPEncMeta.CacheBits],
+                ref t, ref x, ref y);
+            SaveWriter(w, ref bw);
+            w[s + Vp8lEncLayout.SEmitT] = t;
+            w[s + Vp8lEncLayout.SEmitX] = x;
+            w[s + Vp8lEncLayout.SEmitY] = y;
+        }
+    }
+
+    /// <summary>Flush the last partial byte; the payload length and the overflow flag.</summary>
+    private static void EmitTailKernel(Index1D _, ArrayView<byte> output, ArrayView<int> w, ArrayView<int> meta)
+    {
+        var bw = LoadWriter(w, meta);
         Vp8lEncodeGpu.Flush(ref bw, output);
-        meta[WebPEncMeta.PayloadLength] = bw.Pos - start;
+        meta[WebPEncMeta.PayloadLength] = bw.Pos - meta[WebPEncMeta.PayloadStart];
         meta[WebPEncMeta.Error] = bw.Overflow;
     }
 

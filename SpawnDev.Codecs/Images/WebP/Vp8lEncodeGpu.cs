@@ -139,8 +139,35 @@ public static class Vp8lEncLayout
     public const int Palette = 0, PaletteDelta = 256;
     /// <summary>Hash table of the colour analysis (1024 keys + 1024 occupied flags).</summary>
     public const int Analysis = 512;
+    /// <summary>
+    /// State of the resumable serial stages (analysis, tokenisation, tile histograms, token emission, clustering): every
+    /// one of them runs as a chain of bounded launches that continue where the previous launch stopped, so no single
+    /// launch holds the GPU for long (a long launch stalls the desktop and trips the OS GPU watchdog).
+    /// </summary>
+    public const int StepState = 512 + 2048;
+    /// <summary>Ints of <see cref="StepState"/>.</summary>
+    public const int StepStateInts = 32;
     /// <summary>First region after the fixed ones.</summary>
-    public const int FirstDynamic = 512 + 2048;
+    public const int FirstDynamic = StepState + StepStateInts;
+
+    /// <summary>Slots of <see cref="StepState"/> (each stage owns its own, they never overlap in time but stay apart anyway).</summary>
+    public const int SAnalyzeI = 0, SAnalyzeCount = 1, SAnalyzeAlpha = 2, SAnalyzeCollecting = 3,
+        STokPos = 4, STokCount = 5, STokExtra = 6,
+        SHistT = 7, SHistX = 8, SHistY = 9,
+        SEmitPos = 10, SEmitAcc = 11, SEmitNbits = 12, SEmitOverflow = 13, SEmitT = 14, SEmitX = 15, SEmitY = 16,
+        SClusterSeeds = 17;
+
+    /// <summary>Pixels per launch of the analysis and the tokenisation; tokens per launch of the tile histograms and the emission.</summary>
+    public const int StepChunk = 8192;
+
+    /// <summary>
+    /// Pixels per launch of the tokenisation: smaller than <see cref="StepChunk"/>, a pixel costs it up to ChainDepth match
+    /// attempts of dependent loads (one GPU thread: 2048 pixels of incompressible noise are about 8 ms on a desktop GPU).
+    /// </summary>
+    public const int TokenizeChunk = 2048;
+
+    /// <summary>Launches a resumable stage needs for <paramref name="items"/> pixels or tokens (tokens never outnumber pixels).</summary>
+    public static int Steps(long items, int chunk = StepChunk) => (int)Math.Max(1, (items + chunk - 1) / chunk);
 
     /// <summary>Tiles of a transform with block size 2^bits.</summary>
     public static int Tiles(int width, int height, int bits) => ((width + (1 << bits) - 1) >> bits) * ((height + (1 << bits) - 1) >> bits);
@@ -815,10 +842,35 @@ public static class Vp8lEncodeGpu
     }
 
     /// <summary>
-    /// Tokenises the <paramref name="n"/> pixels (<paramref name="xsize"/> wide): literals, colour cache hits and LZ77 copies,
-    /// into <paramref name="tok"/> (two ints per token) and the histograms of the main code set.
+    /// Thread <paramref name="i"/> of the tokenisation set-up (launch <c>1 &lt;&lt; HashBits</c> threads): clears the main
+    /// histograms, the colour cache and the hash heads, and (thread 0) resets the resumable state.
     /// </summary>
-    public static void Tokenize(
+    public static void TokenizeInit(int i, ArrayView<int> w, ArrayView<int> meta, int cacheBits)
+    {
+        int cacheSize = cacheBits > 0 ? 1 << cacheBits : 0;
+        if (i < SetAlpha(cacheSize)) w[meta[WebPEncMeta.RegionMain] + i] = 0;
+        if (i < cacheSize) w[meta[WebPEncMeta.RegionCache] + i] = 0;
+        if (i < (1 << Vp8lEncLayout.HashBits)) w[meta[WebPEncMeta.RegionHead] + i] = -1;
+        if (i == 0)
+        {
+            int s = Vp8lEncLayout.StepState;
+            w[s + Vp8lEncLayout.STokPos] = 0;
+            w[s + Vp8lEncLayout.STokCount] = 0;
+            w[s + Vp8lEncLayout.STokExtra] = 0;
+            meta[WebPEncMeta.TokenCount] = 0;
+            meta[WebPEncMeta.ExtraBits] = 0;
+            meta[WebPEncMeta.CacheBits] = cacheBits;
+        }
+    }
+
+    /// <summary>
+    /// Tokenises the next <see cref="Vp8lEncLayout.TokenizeChunk"/> (or more, to finish a copy) of the <c>xsize * ysize</c>
+    /// pixels: literals, colour cache hits and LZ77 copies, into <paramref name="tok"/> (two ints per token) and the histograms
+    /// of the main code set. Continues from the state the previous launch left in <see cref="Vp8lEncLayout.StepState"/>
+    /// (<see cref="TokenizeInit"/> first); a launch after the last pixel does nothing. The work of one launch is bounded:
+    /// every compared pixel of a copy candidate is at most chainDepth compares per pixel the copy advances.
+    /// </summary>
+    public static void TokenizeStep(
         ArrayView<uint> pix, int xsize, int ysize, ArrayView<int> w, ArrayView<int> tok, ArrayView<int> meta,
         ArrayView<int> tables, int cacheBits)
     {
@@ -832,12 +884,7 @@ public static class Vp8lEncodeGpu
         int cache = meta[WebPEncMeta.RegionCache];
         int head = meta[WebPEncMeta.RegionHead];
         int prev = meta[WebPEncMeta.RegionPrev];
-
-        int setAlpha = SetAlpha(cacheSize);
-        for (int i = 0; i < setAlpha; i++) w[set + i] = 0;
-        for (int i = 0; i < cacheSize; i++) w[cache + i] = 0;
-        int hashSize = 1 << Vp8lEncLayout.HashBits;
-        for (int i = 0; i < hashSize; i++) w[head + i] = -1;
+        int st = Vp8lEncLayout.StepState;
 
         int gOff = set + AlphaOff(0, cacheSize);
         int rOff = set + AlphaOff(1, cacheSize);
@@ -845,10 +892,13 @@ public static class Vp8lEncodeGpu
         int aOff = set + AlphaOff(3, cacheSize);
         int dOff = set + AlphaOff(4, cacheSize);
 
-        int pos = 0;
-        int tcount = 0;
-        int extraTotal = 0;
-        while (pos < n)
+        int pos = w[st + Vp8lEncLayout.STokPos];
+        int tcount = w[st + Vp8lEncLayout.STokCount];
+        int extraTotal = w[st + Vp8lEncLayout.STokExtra];
+        int limit = pos + Vp8lEncLayout.TokenizeChunk;
+        if (limit > n) limit = n;
+        bool going = pos < limit;
+        while (going)
         {
             uint px = pix[pos];
             int maxLen = n - pos;
@@ -955,19 +1005,24 @@ public static class Vp8lEncodeGpu
                 HashInsert(pix, w, head, prev, pos, n);
                 pos++;
             }
+            going = pos < limit;
         }
+        w[st + Vp8lEncLayout.STokPos] = pos;
+        w[st + Vp8lEncLayout.STokCount] = tcount;
+        w[st + Vp8lEncLayout.STokExtra] = extraTotal;
         meta[WebPEncMeta.TokenCount] = tcount;
         meta[WebPEncMeta.ExtraBits] = extraTotal;
-        meta[WebPEncMeta.CacheBits] = cacheBits;
     }
 
     /// <summary>
-    /// Writes the tokens of the main image. With one prefix group every token uses the main code set; with several, each
-    /// token uses the group of the tile its first pixel lies in (the same rule the decoder applies).
+    /// Writes tokens <paramref name="t"/> .. up to <see cref="Vp8lEncLayout.StepChunk"/> of them of the main image, from
+    /// pixel (<paramref name="x"/>, <paramref name="y"/>); the three are advanced for the next launch. With one prefix group
+    /// every token uses the main code set; with several, each token uses the group of the tile its first pixel lies in (the
+    /// same rule the decoder applies).
     /// </summary>
     public static void WriteTokens(
         ref Vp8lBitWriter bw, ArrayView<byte> output, ArrayView<int> w, ArrayView<int> tok, ArrayView<int> meta,
-        ArrayView<int> tables, int xsize, int cacheBits)
+        ArrayView<int> tables, int xsize, int cacheBits, ref int t, ref int x, ref int y)
     {
         int cacheSize = cacheBits > 0 ? 1 << cacheBits : 0;
         int setAlpha = SetAlpha(cacheSize);
@@ -978,9 +1033,9 @@ public static class Vp8lEncodeGpu
         int groupSets = meta[WebPEncMeta.RegionGroupSets];
         int mainSet = meta[WebPEncMeta.RegionMain];
         int count = meta[WebPEncMeta.TokenCount];
-        int x = 0;
-        int y = 0;
-        for (int t = 0; t < count; t++)
+        int end = t + Vp8lEncLayout.StepChunk;
+        if (end > count) end = count;
+        for (; t < end; t++)
         {
             int set = mainSet;
             if (groups > 1) set = groupSets + w[assign + (y >> metaBits) * tilesPerRow + (x >> metaBits)] * Vp8lEncLayout.SetInts;

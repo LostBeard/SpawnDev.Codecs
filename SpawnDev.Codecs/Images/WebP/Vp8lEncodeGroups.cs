@@ -6,8 +6,8 @@
 // The tile -> group map is written as the "entropy image" (group index in red + green) in front of the codes, and a token
 // is coded with the group of the tile its FIRST pixel lies in - the same rule the decoder applies.
 //
-// Both steps run as one GPU thread (they walk the token stream / do a small k-means over per-tile histograms, a
-// dependency chain over little data); the code construction afterwards is one thread per code, in parallel.
+// The token walk is resumable (bounded launches of StepChunk tokens); the k-means is per-tile / per-(cluster, symbol)
+// parallel launches; the code construction afterwards is one thread per code, in parallel.
 
 using ILGPU;
 
@@ -46,20 +46,47 @@ public static class Vp8lEncodeGroups
         return n;
     }
 
-    /// <summary>Per-tile histograms of the five codes, from the main token stream.</summary>
-    public static void TileHistograms(ArrayView<int> w, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables)
+    private static int TileCount(ArrayView<int> meta, out int tilesPerRow)
+    {
+        int xsize = meta[WebPEncMeta.PackedWidth];
+        int height = meta[WebPEncMeta.Height];
+        int bits = meta[WebPEncMeta.MetaBits];
+        tilesPerRow = (xsize + (1 << bits) - 1) >> bits;
+        return tilesPerRow * ((height + (1 << bits) - 1) >> bits);
+    }
+
+    /// <summary>
+    /// Thread <paramref name="i"/> of the tile-histogram set-up (launch tiles x <see cref="Vp8lEncLayout.SetAlphaMax"/>
+    /// threads): clears the per-tile histograms; thread 0 resets the resumable walk.
+    /// </summary>
+    public static void TileHistogramsInit(int i, ArrayView<int> w, ArrayView<int> meta)
+    {
+        int cacheBits = meta[WebPEncMeta.CacheBits];
+        int setAlpha = Vp8lEncodeGpu.SetAlpha(cacheBits > 0 ? 1 << cacheBits : 0);
+        int tiles = TileCount(meta, out _);
+        if (i < tiles * setAlpha) w[meta[WebPEncMeta.RegionTileHist] + i] = 0;
+        if (i == 0)
+        {
+            int s = Vp8lEncLayout.StepState;
+            w[s + Vp8lEncLayout.SHistT] = 0;
+            w[s + Vp8lEncLayout.SHistX] = 0;
+            w[s + Vp8lEncLayout.SHistY] = 0;
+        }
+    }
+
+    /// <summary>
+    /// Per-tile histograms of the five codes, from the next <see cref="Vp8lEncLayout.StepChunk"/> tokens of the main
+    /// token stream (resumable: <see cref="TileHistogramsInit"/> first; a launch after the last token does nothing).
+    /// </summary>
+    public static void TileHistogramsStep(ArrayView<int> w, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables)
     {
         int cacheBits = meta[WebPEncMeta.CacheBits];
         int cacheSize = cacheBits > 0 ? 1 << cacheBits : 0;
         int setAlpha = Vp8lEncodeGpu.SetAlpha(cacheSize);
         int xsize = meta[WebPEncMeta.PackedWidth];
-        int height = meta[WebPEncMeta.Height];
         int bits = meta[WebPEncMeta.MetaBits];
-        int tilesPerRow = (xsize + (1 << bits) - 1) >> bits;
-        int tiles = tilesPerRow * ((height + (1 << bits) - 1) >> bits);
+        TileCount(meta, out int tilesPerRow);
         int th = meta[WebPEncMeta.RegionTileHist];
-        int total = tiles * setAlpha;
-        for (int i = 0; i < total; i++) w[th + i] = 0;
 
         int gOff = Vp8lEncodeGpu.AlphaOff(0, cacheSize);
         int rOff = Vp8lEncodeGpu.AlphaOff(1, cacheSize);
@@ -67,10 +94,14 @@ public static class Vp8lEncodeGroups
         int aOff = Vp8lEncodeGpu.AlphaOff(3, cacheSize);
         int dOff = Vp8lEncodeGpu.AlphaOff(4, cacheSize);
 
+        int s = Vp8lEncLayout.StepState;
         int count = meta[WebPEncMeta.TokenCount];
-        int x = 0;
-        int y = 0;
-        for (int t = 0; t < count; t++)
+        int start = w[s + Vp8lEncLayout.SHistT];
+        int x = w[s + Vp8lEncLayout.SHistX];
+        int y = w[s + Vp8lEncLayout.SHistY];
+        int end = start + Vp8lEncLayout.StepChunk;
+        if (end > count) end = count;
+        for (int t = start; t < end; t++)
         {
             int hb = th + ((y >> bits) * tilesPerRow + (x >> bits)) * setAlpha;
             int t0 = tok[t * 2];
@@ -110,6 +141,12 @@ public static class Vp8lEncodeGroups
             y += rows;
             x = nx - rows * xsize;
         }
+        if (start < end)
+        {
+            w[s + Vp8lEncLayout.SHistT] = end;
+            w[s + Vp8lEncLayout.SHistX] = x;
+            w[s + Vp8lEncLayout.SHistY] = y;
+        }
     }
 
     /// <summary>Approximate code length of every symbol of a cluster histogram (an unseen symbol gets a long one).</summary>
@@ -136,89 +173,145 @@ public static class Vp8lEncodeGroups
         return cost;
     }
 
-    /// <summary>
-    /// Groups the tiles into at most <paramref name="k"/> clusters of similar histograms (farthest-point seeding, then a few
-    /// k-means rounds with estimated code lengths as the distance). Writes the tile -> group map, the entropy image, the
-    /// histograms of the groups (at the head of each group set) and the number of groups to <c>meta[Groups]</c>.
-    /// </summary>
-    public static void Cluster(ArrayView<int> w, ArrayView<int> meta, int k)
+    // Clustering: the tiles are grouped into at most k clusters of similar histograms (farthest-point seeding, then four
+    // k-means rounds with estimated code lengths as the distance). The steps are separate launches: the per-tile and the
+    // per-(cluster, symbol) work is one thread each, only the argmax of the seeding and the final renumbering are one thread
+    // (over at most MaxTiles tiles / MaxGroups clusters). The host sequence is
+    //   SeedFirst, TileMin, (k - 1) x [SeedNext, TileMin], 4 x [Lengths, Assign, Accumulate], Finish
+    // and the result is the same as walking it in one thread (ties break the same way: first max, first min).
+
+    private static int SetAlphaOf(ArrayView<int> meta)
     {
         int cacheBits = meta[WebPEncMeta.CacheBits];
-        int cacheSize = cacheBits > 0 ? 1 << cacheBits : 0;
-        int setAlpha = Vp8lEncodeGpu.SetAlpha(cacheSize);
-        int xsize = meta[WebPEncMeta.PackedWidth];
-        int height = meta[WebPEncMeta.Height];
-        int bits = meta[WebPEncMeta.MetaBits];
-        int tilesPerRow = (xsize + (1 << bits) - 1) >> bits;
-        int tiles = tilesPerRow * ((height + (1 << bits) - 1) >> bits);
+        return Vp8lEncodeGpu.SetAlpha(cacheBits > 0 ? 1 << cacheBits : 0);
+    }
+
+    private static int TileMinBase(ArrayView<int> meta) => meta[WebPEncMeta.RegionGroupMisc] + CostTableOffset + 64;
+
+    /// <summary>Seed 0 = tile 0's histogram, with its code length estimates.</summary>
+    public static void ClusterSeedFirst(ArrayView<int> w, ArrayView<int> meta)
+    {
+        int setAlpha = SetAlphaOf(meta);
         int th = meta[WebPEncMeta.RegionTileHist];
+        int sets = meta[WebPEncMeta.RegionGroupSets];
+        for (int i = 0; i < setAlpha; i++) w[sets + i] = w[th + i];
+        LengthEstimates(w, sets, setAlpha, meta[WebPEncMeta.RegionGroupMisc]);
+        w[Vp8lEncLayout.StepState + Vp8lEncLayout.SClusterSeeds] = 1;
+    }
+
+    /// <summary>Tile <paramref name="t"/>: its cost under the newest seed, kept as the minimum over the seeds so far.</summary>
+    public static void ClusterTileMin(int t, ArrayView<int> w, ArrayView<int> meta)
+    {
+        int tiles = TileCount(meta, out _);
+        if (t < tiles)
+        {
+            int setAlpha = SetAlphaOf(meta);
+            int seeds = w[Vp8lEncLayout.StepState + Vp8lEncLayout.SClusterSeeds];
+            int lenBase = meta[WebPEncMeta.RegionGroupMisc] + (seeds - 1) * Vp8lEncLayout.SetAlphaMax;
+            int c = TileCost(w, meta[WebPEncMeta.RegionTileHist] + t * setAlpha, setAlpha, lenBase);
+            int slot = TileMinBase(meta) + t;
+            bool replace = (seeds == 1) | (c < w[slot]);
+            if (replace) w[slot] = c;
+        }
+    }
+
+    /// <summary>The next seed: the tile the current seeds serve worst (first one on a tie).</summary>
+    public static void ClusterSeedNext(ArrayView<int> w, ArrayView<int> meta)
+    {
+        int setAlpha = SetAlphaOf(meta);
+        int tiles = TileCount(meta, out _);
+        int th = meta[WebPEncMeta.RegionTileHist];
+        int tileMin = TileMinBase(meta);
+        int stateSlot = Vp8lEncLayout.StepState + Vp8lEncLayout.SClusterSeeds;
+        int seeds = w[stateSlot];
+        int worst = 0;
+        int worstCost = -1;
+        for (int t = 0; t < tiles; t++)
+        {
+            if (w[tileMin + t] > worstCost)
+            {
+                worstCost = w[tileMin + t];
+                worst = t;
+            }
+        }
+        int cb = meta[WebPEncMeta.RegionGroupSets] + seeds * Vp8lEncLayout.SetInts;
+        for (int i = 0; i < setAlpha; i++) w[cb + i] = w[th + worst * setAlpha + i];
+        LengthEstimates(w, cb, setAlpha, meta[WebPEncMeta.RegionGroupMisc] + seeds * Vp8lEncLayout.SetAlphaMax);
+        w[stateSlot] = seeds + 1;
+    }
+
+    /// <summary>Cluster <paramref name="c"/> (launch <see cref="MaxGroups"/>): code length estimates of its histogram.</summary>
+    public static void ClusterLengths(int c, ArrayView<int> w, ArrayView<int> meta)
+    {
+        int seeds = w[Vp8lEncLayout.StepState + Vp8lEncLayout.SClusterSeeds];
+        if (c < seeds)
+            LengthEstimates(w, meta[WebPEncMeta.RegionGroupSets] + c * Vp8lEncLayout.SetInts, SetAlphaOf(meta),
+                meta[WebPEncMeta.RegionGroupMisc] + c * Vp8lEncLayout.SetAlphaMax);
+    }
+
+    /// <summary>Tile <paramref name="t"/>: the cluster whose estimated code lengths code it cheapest (first one on a tie).</summary>
+    public static void ClusterAssign(int t, ArrayView<int> w, ArrayView<int> meta)
+    {
+        int tiles = TileCount(meta, out _);
+        if (t < tiles)
+        {
+            int setAlpha = SetAlphaOf(meta);
+            int seeds = w[Vp8lEncLayout.StepState + Vp8lEncLayout.SClusterSeeds];
+            int misc = meta[WebPEncMeta.RegionGroupMisc];
+            int hist = meta[WebPEncMeta.RegionTileHist] + t * setAlpha;
+            int best = 0;
+            int bestCost = Inf;
+            for (int c = 0; c < seeds; c++)
+            {
+                int cost = TileCost(w, hist, setAlpha, misc + c * Vp8lEncLayout.SetAlphaMax);
+                if (cost < bestCost)
+                {
+                    bestCost = cost;
+                    best = c;
+                }
+            }
+            w[meta[WebPEncMeta.RegionAssign] + t] = best;
+        }
+    }
+
+    /// <summary>
+    /// Thread <paramref name="idx"/> = (cluster, symbol) (launch <see cref="MaxGroups"/> x <see cref="Vp8lEncLayout.SetAlphaMax"/>):
+    /// the cluster's histogram entry = the sum over its member tiles.
+    /// </summary>
+    public static void ClusterAccumulate(int idx, ArrayView<int> w, ArrayView<int> meta)
+    {
+        int c = idx / Vp8lEncLayout.SetAlphaMax;
+        int i = idx - c * Vp8lEncLayout.SetAlphaMax;
+        int setAlpha = SetAlphaOf(meta);
+        int seeds = w[Vp8lEncLayout.StepState + Vp8lEncLayout.SClusterSeeds];
+        bool active = (c < seeds) & (i < setAlpha);
+        if (active)
+        {
+            int tiles = TileCount(meta, out _);
+            int th = meta[WebPEncMeta.RegionTileHist];
+            int assign = meta[WebPEncMeta.RegionAssign];
+            int sum = 0;
+            for (int t = 0; t < tiles; t++)
+                if (w[assign + t] == c) sum += w[th + t * setAlpha + i];
+            w[meta[WebPEncMeta.RegionGroupSets] + c * Vp8lEncLayout.SetInts + i] = sum;
+        }
+    }
+
+    /// <summary>
+    /// Drops empty clusters and renumbers the rest 0..n-1: writes the tile -> group map, the entropy image, the histograms
+    /// of the groups (at the head of each group set) and the number of groups to <c>meta[Groups]</c>.
+    /// </summary>
+    public static void ClusterFinish(ArrayView<int> w, ArrayView<int> meta)
+    {
+        int setAlpha = SetAlphaOf(meta);
+        int tiles = TileCount(meta, out _);
         int assign = meta[WebPEncMeta.RegionAssign];
         int entropy = meta[WebPEncMeta.RegionEntropy];
         int sets = meta[WebPEncMeta.RegionGroupSets];
         int misc = meta[WebPEncMeta.RegionGroupMisc];
-        int tileMin = misc + CostTableOffset + 64;
         int stride = Vp8lEncLayout.SetInts;
+        int seeds = w[Vp8lEncLayout.StepState + Vp8lEncLayout.SClusterSeeds];
 
-        // ---- seeds: tile 0, then repeatedly the tile the current seeds serve worst ----
-        for (int i = 0; i < setAlpha; i++) w[sets + i] = w[th + i];
-        LengthEstimates(w, sets, setAlpha, misc);
-        for (int t = 0; t < tiles; t++) w[tileMin + t] = TileCost(w, th + t * setAlpha, setAlpha, misc);
-        int seeds = 1;
-        bool more = k > 1;
-        while (more)
-        {
-            int worst = 0;
-            int worstCost = -1;
-            for (int t = 0; t < tiles; t++)
-            {
-                if (w[tileMin + t] > worstCost)
-                {
-                    worstCost = w[tileMin + t];
-                    worst = t;
-                }
-            }
-            int cb = sets + seeds * stride;
-            for (int i = 0; i < setAlpha; i++) w[cb + i] = w[th + worst * setAlpha + i];
-            LengthEstimates(w, cb, setAlpha, misc + seeds * Vp8lEncLayout.SetAlphaMax);
-            for (int t = 0; t < tiles; t++)
-            {
-                int c = TileCost(w, th + t * setAlpha, setAlpha, misc + seeds * Vp8lEncLayout.SetAlphaMax);
-                if (c < w[tileMin + t]) w[tileMin + t] = c;
-            }
-            seeds++;
-            more = seeds < k;
-        }
-
-        // ---- k-means rounds ----
-        for (int round = 0; round < 4; round++)
-        {
-            for (int c = 0; c < seeds; c++)
-                LengthEstimates(w, sets + c * stride, setAlpha, misc + c * Vp8lEncLayout.SetAlphaMax);
-            for (int t = 0; t < tiles; t++)
-            {
-                int best = 0;
-                int bestCost = Inf;
-                for (int c = 0; c < seeds; c++)
-                {
-                    int cost = TileCost(w, th + t * setAlpha, setAlpha, misc + c * Vp8lEncLayout.SetAlphaMax);
-                    if (cost < bestCost)
-                    {
-                        bestCost = cost;
-                        best = c;
-                    }
-                }
-                w[assign + t] = best;
-            }
-            for (int c = 0; c < seeds; c++)
-                for (int i = 0; i < setAlpha; i++) w[sets + c * stride + i] = 0;
-            for (int t = 0; t < tiles; t++)
-            {
-                int cb = sets + w[assign + t] * stride;
-                for (int i = 0; i < setAlpha; i++) w[cb + i] = w[cb + i] + w[th + t * setAlpha + i];
-            }
-        }
-
-        // ---- drop empty clusters, renumber the rest 0..n-1 ----
         for (int c = 0; c < seeds; c++) w[misc + CostTableOffset + c] = 0; // member counts
         for (int t = 0; t < tiles; t++)
         {
