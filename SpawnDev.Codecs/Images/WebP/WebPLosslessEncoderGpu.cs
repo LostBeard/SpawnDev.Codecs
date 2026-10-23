@@ -421,7 +421,11 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
                 meta.SubView(WebPEncMeta.Groups, 1).CopyFromCPU(new[] { 1 });
             }
         }
-        await _kernels.EmitAsync(output, work, tok, meta, _tables.View, (long)hostMeta[WebPEncMeta.PackedWidth] * height);
+        // pixels of the largest transform / entropy image the stream can have (the sub-image steps of the emit)
+        int emitWidth = hostMeta[WebPEncMeta.PackedWidth];
+        long subImageItems = Math.Max(Vp8lEncLayout.Tiles(emitWidth, height, plan.PredictorBits), Vp8lEncLayout.Tiles(emitWidth, height, plan.CrossBits));
+        if (plan.MetaBits > 0) subImageItems = Math.Max(subImageItems, Vp8lEncLayout.Tiles(emitWidth, height, plan.MetaBits));
+        await _kernels.EmitAsync(output, work, tok, meta, _tables.View, (long)emitWidth * height, subImageItems);
     }
 
     /// <summary>The ICC / EXIF / XMP payloads uploaded to one device buffer (small host blobs), in that order.</summary>

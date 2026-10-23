@@ -12,7 +12,8 @@
 //   7. CrossColorModeKernel / CrossColorKernel      per-tile multipliers and the forward cross-colour transform.
 //   8. Tokenize              (resumable, 1 thread per launch)  LZ77 hash chain + colour cache -> tokens + histograms.
 //   9. BuildCodesKernel      (1 thread per code)    length-limited Huffman codes of the five prefix codes.
-//  10. Emit                  (head + resumable tokens + tail)  header, transforms (sub-images), prefix codes, tokens -> bits.
+//  10. Emit                  (small pieces in stream order, each continuing the bit writer)  header, transform bits,
+//                            sub-images (histograms + codes + pixels, chunked), prefix code definitions, tokens (resumable), last byte.
 //  11. FinalizeKernel + CopyBlobKernel              RIFF / VP8X / chunk headers, ICCP / EXIF / XMP payloads.
 //  12. AlphaCost / AlphaPick / AlphaToArgb / AlphaRaw / FinalizeAlpha   ALPH chunk: filter choice, filtered plane, header byte.
 //  13. FinalizeFrame / FinalizeAnim                 ANMF + VP8L chunk headers per frame; RIFF / VP8X / ICCP / ANIM / EXIF / XMP of an animation.
@@ -46,8 +47,13 @@ public sealed class WebPEncodeKernels : IDisposable
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _tokenizeInit;
     private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _tokenize;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _buildCodes;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _emitHead, _emitTokens;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _emitTail;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _emitHeader, _emitTail;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _emitBits;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _subImageBegin, _subImageBuild;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _subImageHist;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _subImageSymbols;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int> _emitCode;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _emitTokens;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _finalize;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int> _copyBlob;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _tileHistInit;
@@ -91,8 +97,15 @@ public sealed class WebPEncodeKernels : IDisposable
         _tokenize = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(TokenizeKernel);
         _buildCodes = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(BuildCodesKernel);
-        _emitHead = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(EmitHeadKernel);
+        _emitHeader = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(EmitHeaderKernel);
+        _emitBits = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(EmitBitsKernel);
+        _subImageBegin = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(SubImageBeginKernel);
+        _subImageHist = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int>(SubImageHistKernel);
+        _subImageBuild = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(SubImageBuildKernel);
+        _subImageSymbols = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(SubImageSymbolsKernel);
+        _emitCode = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int>(EmitCodeKernel);
         _emitTokens = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(EmitTokensKernel);
         _emitTail = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(EmitTailKernel);
@@ -214,16 +227,65 @@ public sealed class WebPEncodeKernels : IDisposable
     /// <summary>Huffman codes of every code of every group (one thread each).</summary>
     public void BuildGroupCodes(ArrayView<int> work, ArrayView<int> meta) => _buildGroupCodes(Vp8lEncodeGroups.MaxGroups * 5, work, meta);
 
-    /// <summary>Bitstream: header, transforms, codes (one launch), the tokens (bounded resumable launches), the last byte.</summary>
-    public async ValueTask EmitAsync(ArrayView<byte> output, ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables, long pixels)
+    /// <summary>
+    /// Bitstream, in stream order: header and first transform bits, the palette image, predictor bits + image, cross-colour
+    /// bits + image, cache / meta-code bits, the entropy image, the prefix codes (one launch per code), the tokens, the last
+    /// byte. Every piece is its own small kernel continuing the bit writer kept in the step state (one kernel writing all
+    /// of it was ~42k lines of WGSL that Dawn took minutes to compile, and walked every transform tile in one launch); a
+    /// piece the stream does not have returns at once. <paramref name="pixels"/> bounds the tokens, <paramref name="subImageItems"/>
+    /// the pixels of the predictor, cross-colour and entropy images.
+    /// </summary>
+    public async ValueTask EmitAsync(ArrayView<byte> output, ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables,
+        long pixels, long subImageItems)
     {
-        _emitHead(1, output, work, tok, meta, tables);
+        _emitHeader(1, output, work, meta);
+        await SubImageAsync(output, work, meta, SubPalette, 256);
+        _emitBits(1, output, work, meta, 1);
+        await SubImageAsync(output, work, meta, SubPredictor, subImageItems);
+        _emitBits(1, output, work, meta, 2);
+        await SubImageAsync(output, work, meta, SubCross, subImageItems);
+        _emitBits(1, output, work, meta, 3);
+        await SubImageAsync(output, work, meta, SubEntropy, subImageItems);
+        for (int g = 0; g < Vp8lEncodeGroups.MaxGroups; g++)
+        {
+            for (int k = 0; k < 5; k++)
+            {
+                _emitCode(1, output, work, meta, g, k, 0);
+                await _pacer.LaunchedAsync();
+            }
+        }
         for (int i = Vp8lEncLayout.Steps(pixels); i > 0; i--)
         {
             _emitTokens(1, output, work, tok, meta, tables);
             await _pacer.LaunchedAsync();
         }
         _emitTail(1, output, work, meta);
+    }
+
+    /// <summary>
+    /// Sub-image <paramref name="which"/> of at most <paramref name="items"/> pixels (a transform image or the entropy image):
+    /// histograms, its five codes, their definitions and the pixels. Nothing is written when the stream does not have it.
+    /// </summary>
+    private async ValueTask SubImageAsync(ArrayView<byte> output, ArrayView<int> work, ArrayView<int> meta, int which, long items)
+    {
+        int steps = Vp8lEncLayout.Steps(items);
+        _subImageBegin(Vp8lEncodeGpu.SetAlpha(0), work, meta, which);
+        for (int s = 0; s < steps; s++)
+        {
+            _subImageHist(4, work, meta, which, s);
+            await _pacer.LaunchedAsync();
+        }
+        _subImageBuild(5, work, meta, which);
+        for (int k = 0; k < 5; k++)
+        {
+            _emitCode(1, output, work, meta, -1, k, which);
+            await _pacer.LaunchedAsync();
+        }
+        for (int s = 0; s < steps; s++)
+        {
+            _subImageSymbols(1, output, work, meta, which, s);
+            await _pacer.LaunchedAsync();
+        }
     }
 
     /// <summary>RIFF / VP8X / chunk headers and the total length.</summary>
@@ -780,96 +842,237 @@ public sealed class WebPEncodeKernels : IDisposable
         meta[WebPEncMeta.CodeCost + k] = Vp8lEncodeGpu.CodeCostBits(w, set, cacheSize, k);
     }
 
-    /// <summary>Everything in front of the tokens: header, transforms (sub-images), the prefix codes.</summary>
-    private static void EmitHeadKernel(
-        Index1D _, ArrayView<byte> output, ArrayView<int> w, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables)
-    {
-        int start = meta[WebPEncMeta.PayloadStart];
-        var bw = new Vp8lBitWriter { Pos = start, Acc = 0, Nbits = 0, Cap = meta[WebPEncMeta.OutputCapacity], Overflow = 0 };
-        int width = meta[WebPEncMeta.Width];
-        int height = meta[WebPEncMeta.Height];
-        int palette = meta[WebPEncMeta.PaletteCount];
-        int sub = meta[WebPEncMeta.RegionSub];
-        int build = meta[WebPEncMeta.RegionBuild];
-        int ws = meta[WebPEncMeta.RegionWriter];
+    // Sub-images of the stream, in bitstream order (EmitAsync).
+    private const int SubPalette = 0, SubPredictor = 1, SubCross = 2, SubEntropy = 3;
 
+    /// <summary>Pixels of sub-image <paramref name="which"/>; 0 when the stream does not have it.</summary>
+    private static int SubImageCount(ArrayView<int> meta, int which)
+    {
+        int packedWidth = meta[WebPEncMeta.PackedWidth];
+        int height = meta[WebPEncMeta.Height];
+        int count = 0;
+        if (which == SubPalette)
+        {
+            count = meta[WebPEncMeta.PaletteCount];
+        }
+        else if (which == SubPredictor)
+        {
+            if (meta[WebPEncMeta.UsePredictor] == 1) count = Vp8lEncLayout.Tiles(packedWidth, height, meta[WebPEncMeta.PredictorBits]);
+        }
+        else if (which == SubCross)
+        {
+            if (meta[WebPEncMeta.UseCrossColor] == 1) count = Vp8lEncLayout.Tiles(packedWidth, height, meta[WebPEncMeta.CrossColorBits]);
+        }
+        else
+        {
+            if (meta[WebPEncMeta.Groups] > 1) count = Vp8lEncLayout.Tiles(packedWidth, height, meta[WebPEncMeta.MetaBits]);
+        }
+        return count;
+    }
+
+    /// <summary>Work-buffer offset of the pixels of sub-image <paramref name="which"/>.</summary>
+    private static int SubImageSource(ArrayView<int> meta, int which)
+    {
+        int src = meta[WebPEncMeta.RegionEntropy];
+        if (which == SubPalette) src = Vp8lEncLayout.PaletteDelta;
+        else if (which == SubPredictor) src = meta[WebPEncMeta.RegionPredictor];
+        else if (which == SubCross) src = meta[WebPEncMeta.RegionCross];
+        return src;
+    }
+
+    /// <summary>The VP8L header (not for an ALPH stream) and the bits of the first transform when it is a palette or subtract green.</summary>
+    private static void EmitHeaderKernel(Index1D _, ArrayView<byte> output, ArrayView<int> w, ArrayView<int> meta)
+    {
+        var bw = new Vp8lBitWriter { Pos = meta[WebPEncMeta.PayloadStart], Acc = 0, Nbits = 0, Cap = meta[WebPEncMeta.OutputCapacity], Overflow = 0 };
         // The 5-byte VP8L header (40 bits: byte aligned) is omitted for an ALPH stream, whose size comes from the VP8 frame.
         if (meta[WebPEncMeta.Headerless] == 0)
         {
             Vp8lEncodeGpu.PutBits(ref bw, output, 0x2Fu, 8);
-            Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(width - 1), 14);
-            Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(height - 1), 14);
+            Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(meta[WebPEncMeta.Width] - 1), 14);
+            Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(meta[WebPEncMeta.Height] - 1), 14);
             Vp8lEncodeGpu.PutBits(ref bw, output, (uint)meta[WebPEncMeta.HasAlpha], 1);
             Vp8lEncodeGpu.PutBits(ref bw, output, 0, 3);
         }
-
-        int packedWidth = meta[WebPEncMeta.PackedWidth];
+        int palette = meta[WebPEncMeta.PaletteCount];
         if (palette > 0)
         {
+            // colour indexing; its palette image follows
             Vp8lEncodeGpu.PutBits(ref bw, output, 1, 1);
             Vp8lEncodeGpu.PutBits(ref bw, output, 3, 2);
             Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(palette - 1), 8);
-            Vp8lEncodeGpu.WriteSubImage(ref bw, output, w, Vp8lEncLayout.PaletteDelta, palette, sub, build, ws);
         }
         else if (meta[WebPEncMeta.UseSubtractGreen] == 1)
         {
             Vp8lEncodeGpu.PutBits(ref bw, output, 1, 1);
             Vp8lEncodeGpu.PutBits(ref bw, output, 2, 2);
         }
-        if (meta[WebPEncMeta.UsePredictor] == 1)
-        {
-            int bits = meta[WebPEncMeta.PredictorBits];
-            Vp8lEncodeGpu.PutBits(ref bw, output, 1, 1);
-            Vp8lEncodeGpu.PutBits(ref bw, output, 0, 2);
-            Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(bits - 2), 3);
-            Vp8lEncodeGpu.WriteSubImage(ref bw, output, w, meta[WebPEncMeta.RegionPredictor],
-                Vp8lEncLayout.Tiles(packedWidth, height, bits), sub, build, ws);
-        }
-        if (meta[WebPEncMeta.UseCrossColor] == 1)
-        {
-            int bits = meta[WebPEncMeta.CrossColorBits];
-            Vp8lEncodeGpu.PutBits(ref bw, output, 1, 1);
-            Vp8lEncodeGpu.PutBits(ref bw, output, 1, 2);
-            Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(bits - 2), 3);
-            Vp8lEncodeGpu.WriteSubImage(ref bw, output, w, meta[WebPEncMeta.RegionCross],
-                Vp8lEncLayout.Tiles(packedWidth, height, bits), sub, build, ws);
-        }
-        Vp8lEncodeGpu.PutBits(ref bw, output, 0, 1); // no more transforms
-
-        int cacheBits = meta[WebPEncMeta.CacheBits];
-        if (cacheBits > 0)
-        {
-            Vp8lEncodeGpu.PutBits(ref bw, output, 1, 1);
-            Vp8lEncodeGpu.PutBits(ref bw, output, (uint)cacheBits, 4);
-        }
-        else
-        {
-            Vp8lEncodeGpu.PutBits(ref bw, output, 0, 1);
-        }
-        int cacheSize = cacheBits > 0 ? 1 << cacheBits : 0;
-        int groups = meta[WebPEncMeta.Groups];
-        if (groups > 1)
-        {
-            // meta prefix codes: tile size, the entropy image (group per tile), then every group's five codes
-            int metaBits = meta[WebPEncMeta.MetaBits];
-            Vp8lEncodeGpu.PutBits(ref bw, output, 1, 1);
-            Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(metaBits - 2), 3);
-            Vp8lEncodeGpu.WriteSubImage(ref bw, output, w, meta[WebPEncMeta.RegionEntropy],
-                Vp8lEncLayout.Tiles(packedWidth, height, metaBits), sub, build, ws);
-            for (int g = 0; g < groups; g++)
-                Vp8lEncodeGpu.WriteCodeSet(ref bw, output, w, meta[WebPEncMeta.RegionGroupSets] + g * Vp8lEncLayout.SetInts, cacheSize, ws);
-        }
-        else
-        {
-            Vp8lEncodeGpu.PutBits(ref bw, output, 0, 1); // no meta prefix codes: one group
-            Vp8lEncodeGpu.WriteCodeSet(ref bw, output, w, meta[WebPEncMeta.RegionMain], cacheSize, ws);
-        }
-        // The tokens follow in bounded EmitTokens launches; the bit writer state carries over in the step state.
         SaveWriter(w, ref bw);
-        int s = Vp8lEncLayout.StepState;
-        w[s + Vp8lEncLayout.SEmitT] = 0;
-        w[s + Vp8lEncLayout.SEmitX] = 0;
-        w[s + Vp8lEncLayout.SEmitY] = 0;
+    }
+
+    /// <summary>
+    /// The bits between the sub-images: <paramref name="step"/> 1 = the predictor transform header, 2 = the cross-colour
+    /// transform header, 3 = end of transforms, colour cache and meta prefix code flags (and the token position reset).
+    /// </summary>
+    private static void EmitBitsKernel(Index1D _, ArrayView<byte> output, ArrayView<int> w, ArrayView<int> meta, int step)
+    {
+        var bw = LoadWriter(w, meta);
+        if (step == 1)
+        {
+            if (meta[WebPEncMeta.UsePredictor] == 1)
+            {
+                Vp8lEncodeGpu.PutBits(ref bw, output, 1, 1);
+                Vp8lEncodeGpu.PutBits(ref bw, output, 0, 2);
+                Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(meta[WebPEncMeta.PredictorBits] - 2), 3);
+            }
+        }
+        else if (step == 2)
+        {
+            if (meta[WebPEncMeta.UseCrossColor] == 1)
+            {
+                Vp8lEncodeGpu.PutBits(ref bw, output, 1, 1);
+                Vp8lEncodeGpu.PutBits(ref bw, output, 1, 2);
+                Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(meta[WebPEncMeta.CrossColorBits] - 2), 3);
+            }
+        }
+        else
+        {
+            Vp8lEncodeGpu.PutBits(ref bw, output, 0, 1); // no more transforms
+            int cacheBits = meta[WebPEncMeta.CacheBits];
+            if (cacheBits > 0)
+            {
+                Vp8lEncodeGpu.PutBits(ref bw, output, 1, 1);
+                Vp8lEncodeGpu.PutBits(ref bw, output, (uint)cacheBits, 4);
+            }
+            else
+            {
+                Vp8lEncodeGpu.PutBits(ref bw, output, 0, 1);
+            }
+            if (meta[WebPEncMeta.Groups] > 1)
+            {
+                // meta prefix codes: the tile size; the entropy image (group per tile) and every group's codes follow
+                Vp8lEncodeGpu.PutBits(ref bw, output, 1, 1);
+                Vp8lEncodeGpu.PutBits(ref bw, output, (uint)(meta[WebPEncMeta.MetaBits] - 2), 3);
+            }
+            else
+            {
+                Vp8lEncodeGpu.PutBits(ref bw, output, 0, 1); // one group
+            }
+            int s = Vp8lEncLayout.StepState;
+            w[s + Vp8lEncLayout.SEmitT] = 0;
+            w[s + Vp8lEncLayout.SEmitX] = 0;
+            w[s + Vp8lEncLayout.SEmitY] = 0;
+        }
+        SaveWriter(w, ref bw);
+    }
+
+    /// <summary>One thread per histogram slot of the sub-image code set (SetAlpha(0) threads): clears it.</summary>
+    private static void SubImageBeginKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta, int which)
+    {
+        if (SubImageCount(meta, which) > 0) w[meta[WebPEncMeta.RegionSub] + index.X] = 0;
+    }
+
+    /// <summary>
+    /// Four threads (green, red, blue, alpha): histogram of chunk <paramref name="step"/> (StepChunk pixels) of the sub-image.
+    /// Each thread owns one histogram, so the threads never write the same slot.
+    /// </summary>
+    private static void SubImageHistKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta, int which, int step)
+    {
+        int count = SubImageCount(meta, which);
+        int first = step * Vp8lEncLayout.StepChunk;
+        int end = first + Vp8lEncLayout.StepChunk;
+        if (end > count) end = count;
+        int src = SubImageSource(meta, which);
+        int k = index.X;
+        int shift = 8;
+        if (k == 1) shift = 16;
+        else if (k == 2) shift = 0;
+        else if (k == 3) shift = 24;
+        int hist = meta[WebPEncMeta.RegionSub] + Vp8lEncodeGpu.AlphaOff(k, 0);
+        for (int i = first; i < end; i++)
+        {
+            int v = (int)(((uint)w[src + i] >> shift) & 0xFFu);
+            w[hist + v] = w[hist + v] + 1;
+        }
+    }
+
+    /// <summary>Five threads: the Huffman code of each of the sub-image's five codes (each in its own scratch).</summary>
+    private static void SubImageBuildKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta, int which)
+    {
+        if (SubImageCount(meta, which) > 0)
+        {
+            int k = index.X;
+            Vp8lEncodeGpu.BuildOneCode(w, meta[WebPEncMeta.RegionSub], 0, k, meta[WebPEncMeta.RegionBuild] + k * Vp8lEncLayout.BuildScratch);
+        }
+    }
+
+    /// <summary>
+    /// Writes the definition of code <paramref name="k"/> of one code set: <paramref name="set"/> -1 = the sub-image
+    /// <paramref name="which"/> (preceded by its "no colour cache" bit at k = 0), otherwise prefix group <paramref name="set"/>
+    /// of the main image (the main code set when there is a single group). A set the stream does not have writes nothing.
+    /// </summary>
+    private static void EmitCodeKernel(Index1D _, ArrayView<byte> output, ArrayView<int> w, ArrayView<int> meta, int set, int k, int which)
+    {
+        bool active;
+        int setBase;
+        int cacheSize = 0;
+        if (set < 0)
+        {
+            active = SubImageCount(meta, which) > 0;
+            setBase = meta[WebPEncMeta.RegionSub];
+        }
+        else
+        {
+            int cacheBits = meta[WebPEncMeta.CacheBits];
+            cacheSize = cacheBits > 0 ? 1 << cacheBits : 0;
+            int groups = meta[WebPEncMeta.Groups];
+            if (groups > 1)
+            {
+                active = set < groups;
+                setBase = meta[WebPEncMeta.RegionGroupSets] + set * Vp8lEncLayout.SetInts;
+            }
+            else
+            {
+                active = set == 0;
+                setBase = meta[WebPEncMeta.RegionMain];
+            }
+        }
+        if (active)
+        {
+            var bw = LoadWriter(w, meta);
+            if ((set < 0) & (k == 0)) Vp8lEncodeGpu.PutBits(ref bw, output, 0, 1); // a sub-image has no colour cache
+            int setAlpha = Vp8lEncodeGpu.SetAlpha(cacheSize);
+            Vp8lEncodeGpu.WriteCodeDefinition(ref bw, output, w, setBase + setAlpha + Vp8lEncodeGpu.AlphaOff(k, cacheSize),
+                Vp8lEncodeGpu.Alpha(k, cacheSize), meta[WebPEncMeta.RegionWriter]);
+            SaveWriter(w, ref bw);
+        }
+    }
+
+    /// <summary>Writes the pixels of chunk <paramref name="step"/> (StepChunk pixels) of the sub-image with its codes.</summary>
+    private static void SubImageSymbolsKernel(Index1D _, ArrayView<byte> output, ArrayView<int> w, ArrayView<int> meta, int which, int step)
+    {
+        int count = SubImageCount(meta, which);
+        int first = step * Vp8lEncLayout.StepChunk;
+        if (first < count)
+        {
+            int end = first + Vp8lEncLayout.StepChunk;
+            if (end > count) end = count;
+            int src = SubImageSource(meta, which);
+            int codes = meta[WebPEncMeta.RegionSub] + 2 * Vp8lEncodeGpu.SetAlpha(0);
+            int cg = codes + Vp8lEncodeGpu.AlphaOff(0, 0);
+            int cr = codes + Vp8lEncodeGpu.AlphaOff(1, 0);
+            int cb = codes + Vp8lEncodeGpu.AlphaOff(2, 0);
+            int ca = codes + Vp8lEncodeGpu.AlphaOff(3, 0);
+            var bw = LoadWriter(w, meta);
+            for (int i = first; i < end; i++)
+            {
+                uint px = (uint)w[src + i];
+                Vp8lEncodeGpu.WriteSymbol(ref bw, output, w, cg, (int)((px >> 8) & 0xFFu));
+                Vp8lEncodeGpu.WriteSymbol(ref bw, output, w, cr, (int)((px >> 16) & 0xFFu));
+                Vp8lEncodeGpu.WriteSymbol(ref bw, output, w, cb, (int)(px & 0xFFu));
+                Vp8lEncodeGpu.WriteSymbol(ref bw, output, w, ca, (int)(px >> 24));
+            }
+            SaveWriter(w, ref bw);
+        }
     }
 
     private static void SaveWriter(ArrayView<int> w, ref Vp8lBitWriter bw)

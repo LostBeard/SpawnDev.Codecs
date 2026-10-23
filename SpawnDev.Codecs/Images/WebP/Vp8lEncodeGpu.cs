@@ -703,52 +703,6 @@ public static class Vp8lEncodeGpu
         return v;
     }
 
-    /// <summary>Writes the five code definitions of a built set.</summary>
-    public static void WriteCodeSet(ref Vp8lBitWriter bw, ArrayView<byte> output, ArrayView<int> w, int set, int cacheSize, int ws)
-    {
-        int setAlpha = SetAlpha(cacheSize);
-        for (int k = 0; k < 5; k++)
-            WriteCodeDefinition(ref bw, output, w, set + setAlpha + AlphaOff(k, cacheSize), Alpha(k, cacheSize), ws);
-    }
-
-    /// <summary>
-    /// Writes the entropy-coded image of <paramref name="count"/> pixels at <c>w[src ..]</c> (literals only, no colour cache,
-    /// one prefix group): the form of every transform sub-image.
-    /// </summary>
-    public static void WriteSubImage(
-        ref Vp8lBitWriter bw, ArrayView<byte> output, ArrayView<int> w, int src, int count, int sub, int build, int ws)
-    {
-        int setAlpha = SetAlpha(0);
-        for (int i = 0; i < setAlpha; i++) w[sub + i] = 0;
-        for (int i = 0; i < count; i++)
-        {
-            uint px = (uint)w[src + i];
-            int g = sub + AlphaOff(0, 0) + (int)((px >> 8) & 0xFFu);
-            int r = sub + AlphaOff(1, 0) + (int)((px >> 16) & 0xFFu);
-            int b = sub + AlphaOff(2, 0) + (int)(px & 0xFFu);
-            int a = sub + AlphaOff(3, 0) + (int)(px >> 24);
-            w[g] = w[g] + 1;
-            w[r] = w[r] + 1;
-            w[b] = w[b] + 1;
-            w[a] = w[a] + 1;
-        }
-        for (int k = 0; k < 5; k++) BuildOneCode(w, sub, 0, k, build);
-        PutBits(ref bw, output, 0, 1); // no colour cache
-        WriteCodeSet(ref bw, output, w, sub, 0, ws);
-        int cg = sub + 2 * setAlpha + AlphaOff(0, 0);
-        int cr = sub + 2 * setAlpha + AlphaOff(1, 0);
-        int cb = sub + 2 * setAlpha + AlphaOff(2, 0);
-        int ca = sub + 2 * setAlpha + AlphaOff(3, 0);
-        for (int i = 0; i < count; i++)
-        {
-            uint px = (uint)w[src + i];
-            WriteSymbol(ref bw, output, w, cg, (int)((px >> 8) & 0xFFu));
-            WriteSymbol(ref bw, output, w, cr, (int)((px >> 16) & 0xFFu));
-            WriteSymbol(ref bw, output, w, cb, (int)(px & 0xFFu));
-            WriteSymbol(ref bw, output, w, ca, (int)(px >> 24));
-        }
-    }
-
     // ------------------------------------------------------------------
     // LZ77 prefix coding
     // ------------------------------------------------------------------
