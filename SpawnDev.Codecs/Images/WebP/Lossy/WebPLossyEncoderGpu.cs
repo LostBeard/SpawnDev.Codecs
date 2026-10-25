@@ -16,8 +16,13 @@
 // serial stages resume from state kept in meta[WebPLossyEncMeta.Step ..] and the device buffers.
 //   AssembleKernel            one thread per output byte: RIFF / VP8 chunk / frame tag / partitions
 //
-// Not yet: methods 0..2 (distortion-only refinement) and 5..6 (trellis), pictures with transparency (ALPH chunk), multiple
-// token partitions. Those throw NotSupportedException rather than produce a different file.
+// A picture with transparency is written in libwebp's extended layout: RIFF + VP8X (alpha flag) + ALPH + VP8. The alpha
+// plane (the one WebPRgbaToYuvGpu imported) is coded by WebPLosslessEncoderGpu.EncodeAlphaAsync on the accelerator, exactly
+// (libwebp's alpha_quality 100: no level reduction), and AssembleExtendedKernel writes the file, one thread per byte. The
+// VP8 chunk is the same as libwebp's; the ALPH bytes are ours (our VP8L coder is not libwebp's), they decode to the same plane.
+//
+// Not yet: methods 0..2 (distortion-only refinement) and 5..6 (trellis), multiple token partitions. Those throw
+// NotSupportedException rather than produce a different file.
 
 using System.Runtime.Versioning;
 using ILGPU;
@@ -40,6 +45,12 @@ public sealed record WebPLossyEncodeOptions
 
     /// <summary>Keep the RGB under fully transparent pixels (libwebp `exact`); false runs libwebp's transparent-area cleanup.</summary>
     public bool Exact { get; init; }
+
+    /// <summary>
+    /// How the ALPH chunk of a picture with transparency is coded (filter, compression, effort of the lossless coder). The
+    /// alpha is always kept exactly (libwebp's alpha_quality 100). Null = <see cref="WebPAlphaEncodeOptions"/> defaults.
+    /// </summary>
+    public WebPAlphaEncodeOptions? Alpha { get; init; }
 }
 
 /// <summary>Lossy (VP8) WebP encoder running on an ILGPU accelerator, byte-identical with libwebp.</summary>
@@ -54,6 +65,9 @@ public sealed class WebPLossyEncoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>>
         _finishProbas, _finishTokens, _finishHeader, _finishModes, _finishEnd;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>> _assemble;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int> _assembleExtended;
+    private WebPLosslessEncoderGpu? _alphaEncoder;   // created on the first picture with transparency
+    private readonly StageBuffer<byte> _alphaPayload;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _meta;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _qTable;
@@ -78,6 +92,9 @@ public sealed class WebPLossyEncoderGpu : IDisposable
         _finishModes = LoadFinish(accelerator, WebPLossyFinishKernel.FinishModesKernel);
         _finishEnd = LoadFinish(accelerator, WebPLossyFinishKernel.FinishEndKernel);
         _assemble = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>>(WebPLossyFinishKernel.AssembleKernel);
+        _assembleExtended = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int>(
+            WebPLossyFinishKernel.AssembleExtendedKernel);
+        _alphaPayload = new StageBuffer<byte>(accelerator);
         _tables = accelerator.Allocate1D<int>(WebPLossyEncTables.Size);
         _tables.View.CopyFromCPU(WebPLossyEncTables.Build());
         _meta = accelerator.Allocate1D<int>(M.Size);
@@ -171,11 +188,35 @@ public sealed class WebPLossyEncoderGpu : IDisposable
     public async Task<int> EncodeAsync(ArrayView1D<byte, Stride1D.Dense> rgba, int width, int height,
         ArrayView1D<byte, Stride1D.Dense> output, WebPLossyEncodeOptions? options = null)
     {
-        int length = await EncodeToScratchAsync(rgba, width, height, options ?? new WebPLossyEncodeOptions());
+        var o = options ?? new WebPLossyEncodeOptions();
+        var (simpleLength, alphaLength) = await EncodeToScratchAsync(rgba, width, height, o);
+        int length = FileLength(simpleLength, alphaLength);
         if (output.Length < length) throw new ArgumentException($"output must hold {length} bytes.", nameof(output));
-        _assemble(length, _meta.View, _scratch.View, output);
+        Assemble(output, length, alphaLength);
         await _accelerator.SynchronizeAsync();
         return length;
+    }
+
+    /// <summary>Length of the file: the simple layout, or the extended one when the picture has an ALPH payload (alphaLength &gt;= 0).</summary>
+    private static int FileLength(int simpleLength, int alphaLength) =>
+        alphaLength < 0 ? simpleLength : WebPLossyFinishKernel.ExtendedFileLength(simpleLength, alphaLength);
+
+    /// <summary>Writes the file (<paramref name="length"/> bytes) into <paramref name="output"/>, one thread per byte.</summary>
+    private void Assemble(ArrayView1D<byte, Stride1D.Dense> output, int length, int alphaLength)
+    {
+        if (alphaLength < 0) _assemble(length, _meta.View, _scratch.View, output);
+        else _assembleExtended(length, _meta.View, _scratch.View, _alphaPayload.View, output, alphaLength);
+    }
+
+    /// <summary>
+    /// The ALPH payload of the imported alpha plane, into <see cref="_alphaPayload"/> (lossless: the plane is reproduced exactly).
+    /// </summary>
+    private async Task<int> EncodeAlphaPlaneAsync(int width, int height, WebPLossyEncodeOptions o)
+    {
+        _alphaEncoder ??= new WebPLosslessEncoderGpu(_accelerator);
+        var l = MakeLayout(width, height, _tokenCapacity);
+        var payload = _alphaPayload.Ensure(WebPLosslessEncoderGpu.GetMaxAlphaEncodedSize(width, height));
+        return await _alphaEncoder.EncodeAlphaAsync(_yuv.View.SubView(l.YuvA, (long)width * height), width, height, payload, o.Alpha);
     }
 
     private Layout PrepareBuffers(int width, int height, WebPLossyEncodeOptions o)
@@ -192,15 +233,20 @@ public sealed class WebPLossyEncoderGpu : IDisposable
         return l0;
     }
 
-    /// <summary>Run every stage up to the partitions from RGBA8; returns the file length (the assemble step is the caller's).</summary>
-    private async Task<int> EncodeToScratchAsync(ArrayView1D<byte, Stride1D.Dense> rgba, int width, int height, WebPLossyEncodeOptions o)
+    /// <summary>
+    /// Run every stage up to the partitions from RGBA8 (and the ALPH payload when the picture has transparency); returns the
+    /// length of the simple-layout file and of the ALPH payload (-1: opaque picture). The assemble step is the caller's.
+    /// </summary>
+    private async Task<(int SimpleLength, int AlphaLength)> EncodeToScratchAsync(ArrayView1D<byte, Stride1D.Dense> rgba, int width, int height, WebPLossyEncodeOptions o)
     {
         if (rgba.Length < (long)width * height * 4) throw new ArgumentException("rgba too short.", nameof(rgba));
         var l0 = PrepareBuffers(width, height, o);
         var yuv = _yuv.View;
         _toYuv.Convert(rgba, width, height, yuv.SubView(0, (long)width * height), yuv.SubView(l0.YuvU, (long)l0.Cw * l0.Ch),
             yuv.SubView(l0.YuvV, (long)l0.Cw * l0.Ch), yuv.SubView(l0.YuvA, (long)width * height), cleanupTransparent: !o.Exact);
-        return await EncodePlanesToScratchAsync(width, height, o, alphaPlanePresent: true);
+        var (simpleLength, hasAlpha) = await EncodePlanesToScratchAsync(width, height, o, alphaPlanePresent: true);
+        int alphaLength = hasAlpha ? await EncodeAlphaPlaneAsync(width, height, o) : -1;
+        return (simpleLength, alphaLength);
     }
 
     /// <summary>
@@ -216,14 +262,14 @@ public sealed class WebPLossyEncoderGpu : IDisposable
         DeviceTransfer.Upload(_yuv.View.SubView(0, n), yuvPlanes.Span.Slice(0, n));
         DeviceTransfer.Upload(_yuv.View.SubView(l0.YuvU, c), yuvPlanes.Span.Slice(n, c));
         DeviceTransfer.Upload(_yuv.View.SubView(l0.YuvV, c), yuvPlanes.Span.Slice(n + c, c));
-        int length = await EncodePlanesToScratchAsync(width, height, o, alphaPlanePresent: false);
+        var (length, _) = await EncodePlanesToScratchAsync(width, height, o, alphaPlanePresent: false);
         _stageOut.Ensure(length);
         _assemble(length, _meta.View, _scratch.View, _stageOut.View);
         await _accelerator.SynchronizeAsync();
         return await DeviceTransfer.DownloadAsync(_stageOut.View, length);
     }
 
-    private async Task<int> EncodePlanesToScratchAsync(int width, int height, WebPLossyEncodeOptions o, bool alphaPlanePresent)
+    private async Task<(int Length, bool HasAlpha)> EncodePlanesToScratchAsync(int width, int height, WebPLossyEncodeOptions o, bool alphaPlanePresent)
     {
         var yuv = _yuv.View;
         int maxI4 = 256 * 16 * 16;
@@ -259,8 +305,7 @@ public sealed class WebPLossyEncoderGpu : IDisposable
                 continue;
             }
             if (err != WebPLossyEncError.None) throw new InvalidOperationException($"lossy WebP encode failed: {err}");
-            if (m[M.HasAlpha] != 0)
-                throw new NotSupportedException("The picture has transparency: lossy WebP with an ALPH chunk is not ported yet (use WebPLosslessEncoderGpu).");
+            bool hasAlpha = alphaPlanePresent && m[M.HasAlpha] != 0;
             ulong sizeP0 = ((ulong)(uint)m[M.SizeP0Hi] << 32) | (uint)m[M.SizeP0Lo];
             if (maxI4 > 0 && sizeP0 > Partition0SizeLimit)
             {
@@ -286,7 +331,7 @@ public sealed class WebPLossyEncoderGpu : IDisposable
             var f = await _meta.View.SubView(0, M.Seg).CopyToHostAsync();
             var ferr = (WebPLossyEncError)f[M.Error];
             if (ferr != WebPLossyEncError.None) throw new InvalidOperationException($"lossy WebP encode failed: {ferr}");
-            return f[M.OutLength];
+            return (f[M.OutLength], hasAlpha);
         }
     }
 
@@ -295,9 +340,9 @@ public sealed class WebPLossyEncoderGpu : IDisposable
     {
         _stageIn.Ensure(rgba.Length);
         DeviceTransfer.Upload(_stageIn.View, rgba.Span);
-        int length = await EncodeToScratchAsync(_stageIn.View, width, height, options ?? new WebPLossyEncodeOptions());
-        _stageOut.Ensure(length);
-        _assemble(length, _meta.View, _scratch.View, _stageOut.View);
+        var (simpleLength, alphaLength) = await EncodeToScratchAsync(_stageIn.View, width, height, options ?? new WebPLossyEncodeOptions());
+        int length = FileLength(simpleLength, alphaLength);
+        Assemble(_stageOut.Ensure(length), length, alphaLength);
         await _accelerator.SynchronizeAsync();
         return await DeviceTransfer.DownloadAsync(_stageOut.View, length);
     }
@@ -309,9 +354,9 @@ public sealed class WebPLossyEncoderGpu : IDisposable
         ArgumentNullException.ThrowIfNull(rgba);
         _stageIn.Ensure(rgba.ByteLength);
         DeviceTransfer.Upload(_stageIn.View, rgba);
-        int length = await EncodeToScratchAsync(_stageIn.View, width, height, options ?? new WebPLossyEncodeOptions());
-        _stageOut.Ensure(length);
-        _assemble(length, _meta.View, _scratch.View, _stageOut.View);
+        var (simpleLength, alphaLength) = await EncodeToScratchAsync(_stageIn.View, width, height, options ?? new WebPLossyEncodeOptions());
+        int length = FileLength(simpleLength, alphaLength);
+        Assemble(_stageOut.Ensure(length), length, alphaLength);
         await _accelerator.SynchronizeAsync();
         return await DeviceTransfer.DownloadUint8ArrayAsync(_stageOut.View, length);
     }
@@ -323,5 +368,6 @@ public sealed class WebPLossyEncoderGpu : IDisposable
         _tables.Dispose(); _meta.Dispose(); _qTable.Dispose();
         _yuv.Dispose(); _work.Dispose(); _scratch.Dispose(); _stageIn.Dispose(); _stageOut.Dispose();
         _mbRecs.Dispose(); _state.Dispose(); _tokens.Dispose();
+        _alphaEncoder?.Dispose(); _alphaPayload.Dispose();
     }
 }

@@ -362,7 +362,57 @@ internal static class WebPLossyFinishKernel
     /// </summary>
     public static void AssembleKernel(Index1D index, ArrayView<int> meta, ArrayView<byte> scratch, ArrayView<byte> output)
     {
+        output[index.X] = SimpleFileByte(meta, scratch, index.X);
+    }
+
+    /// <summary>
+    /// The extended layout of a picture with transparency (VP8EncWrite + VP8X / ALPH of libwebp's syntax_enc.c), ONE THREAD
+    /// PER OUTPUT BYTE: "RIFF" size "WEBP", "VP8X" 10 (flags = ALPHA_FLAG 0x10, canvas width - 1 and height - 1 as 24-bit
+    /// little-endian), "ALPH" <paramref name="alphaLength"/> + the payload + a pad byte when it is odd, then the "VP8 " chunk
+    /// exactly as the simple layout has it (its bytes 12 ..). Launch with <see cref="ExtendedFileLength"/> threads.
+    /// </summary>
+    public static void AssembleExtendedKernel(Index1D index, ArrayView<int> meta, ArrayView<byte> scratch, ArrayView<byte> alpha,
+        ArrayView<byte> output, int alphaLength)
+    {
         int i = index.X;
+        int vp8Start = 38 + alphaLength + (alphaLength & 1);
+        int v;
+        if (i < 12)
+        {
+            int riffSize = vp8Start + meta[M.OutLength] - 12 - 8;
+            if (i < 4) v = i == 0 ? 'R' : (i == 1 ? 'I' : 'F');
+            else if (i < 8) v = (riffSize >> (8 * (i - 4))) & 0xff;
+            else v = i == 8 ? 'W' : (i == 9 ? 'E' : (i == 10 ? 'B' : 'P'));
+        }
+        else if (i < 30)
+        {
+            int j = i - 12;
+            int w1 = meta[M.Width] - 1, h1 = meta[M.Height] - 1;
+            if (j < 4) v = j == 0 ? 'V' : (j == 1 ? 'P' : (j == 2 ? '8' : 'X'));
+            else if (j < 8) v = j == 4 ? 10 : 0;
+            else if (j == 8) v = 0x10;
+            else if (j < 12) v = 0;
+            else if (j < 15) v = (w1 >> (8 * (j - 12))) & 0xff;
+            else v = (h1 >> (8 * (j - 15))) & 0xff;
+        }
+        else if (i < 38)
+        {
+            int j = i - 30;
+            if (j < 4) v = j == 0 ? 'A' : (j == 1 ? 'L' : (j == 2 ? 'P' : 'H'));
+            else v = (alphaLength >> (8 * (j - 4))) & 0xff;
+        }
+        else if (i < 38 + alphaLength) v = alpha[i - 38];
+        else if (i < vp8Start) v = 0;   // pad of an odd ALPH payload (not counted in its size)
+        else v = SimpleFileByte(meta, scratch, i - vp8Start + 12);
+        output[i] = (byte)v;
+    }
+
+    /// <summary>Length of the <see cref="AssembleExtendedKernel"/> file for a simple file of <paramref name="simpleLength"/> bytes.</summary>
+    public static int ExtendedFileLength(int simpleLength, int alphaLength) => 38 + alphaLength + (alphaLength & 1) + simpleLength - 12;
+
+    /// <summary>Byte <paramref name="i"/> of the simple layout (see <see cref="AssembleKernel"/>).</summary>
+    private static byte SimpleFileByte(ArrayView<int> meta, ArrayView<byte> scratch, int i)
+    {
         int size0 = meta[M.Partition0Size];
         int size1 = meta[M.Token1Size];
         int total = meta[M.OutLength];
@@ -397,6 +447,6 @@ internal static class WebPLossyFinishKernel
         else if (i < 30 + size0) v = scratch[i - 30];
         else if (i < 30 + size0 + size1) v = scratch[p0Cap + i - 30 - size0];
         else v = 0;   // pad
-        output[i] = (byte)v;
+        return (byte)v;
     }
 }

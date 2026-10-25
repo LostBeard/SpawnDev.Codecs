@@ -118,19 +118,20 @@ loses to every generator, so the encoder is upgraded first. Parity target: libwe
   I4 early-out never changes that result; the I16 flatness flag is a prefix-AND over the modes); (d) token emission, header and
   RIFF assembly are single threads.
 - [x] E2..E6 (opaque pictures, methods 3 / 4, one partition): `WebPLossyEncoderGpu` byte-identical with libwebp on CPU,
-      CUDA, OpenCL (222 fixtures). Open: browser lanes; ALPH (transparency); methods 0..2, 5..6 (trellis); 2/4/8 partitions;
+      CUDA, OpenCL (222 fixtures). Open: browser lanes; methods 0..2, 5..6 (trellis); 2/4/8 partitions;
       parallel candidate evaluation inside a macroblock (performance).
-- [ ] E2 intra mode decision: I16 (DC/V/H/TM), I4 (10 modes) and UV (4 modes) chosen by distortion + lambda * rate like
+- [x] ALPH (transparency, 2026-10-25): VP8X + ALPH + VP8, VP8 chunk byte-identical with libwebp, alpha exact (145 fixtures, CPU).
+- (superseded by the summary above; kept for the design notes) E2 intra mode decision: I16 (DC/V/H/TM), I4 (10 modes) and UV (4 modes) chosen by distortion + lambda * rate like
       libwebp method 4 (`VP8Decimate`: score = SSE * RD_DISTO_MULT + lambda * bits, with the spectral-distortion term
       `tlambda` for I4/I16); per-macroblock recon stays on the accelerator (wavefront, like the decoder).
-- [ ] E3 segmentation (4 segments from the per-macroblock alpha = DCT-histogram "complexity", k-means like
+- (superseded) E3 segmentation (4 segments from the per-macroblock alpha = DCT-histogram "complexity", k-means like
       `VP8SegmentMap`), per-segment quantizer and filter strength; the quality -> quantizer mapping of `VP8SetSegmentParams`.
-- [ ] E4 token statistics pass + coefficient probability updates (`VP8WriteProbas` decisions by savings), skip probability,
+- (superseded) E4 token statistics pass + coefficient probability updates (`VP8WriteProbas` decisions by savings), skip probability,
       `mb_no_skip_coeff`; partitions 1/2/4/8.
-- [ ] E5 loop filter strength (`VP8AdjustFilterStrength` default: from quantizer and sharpness 0), simple/normal filter.
-- [ ] E6 container on the accelerator: RIFF + `VP8 ` (simple) or VP8X + `ALPH` (alpha via `WebPLosslessEncoderGpu.EncodeAlphaAsync`)
+- (superseded) E5 loop filter strength (`VP8AdjustFilterStrength` default: from quantizer and sharpness 0), simple/normal filter.
+- (superseded) E6 container on the accelerator: RIFF + `VP8 ` (simple) or VP8X + `ALPH` (alpha via `WebPLosslessEncoderGpu.EncodeAlphaAsync`)
       + ICCP/EXIF/XMP; animation of lossy frames.
-- [ ] Gate (the JPEG encoder's bar): libwebp's lossy encoder is deterministic, so for Pillow's defaults (method 4 =
+- [ ] Gate (the JPEG encoder's bar; methods 3 / 4 opaque + alpha met at up to 640x480 - 1920x1080 / 4000x3000 and methods 0..2, 5, 6 open): libwebp's lossy encoder is deterministic, so for Pillow's defaults (method 4 =
       RD_OPT_BASIC, no trellis, sns 50, filter strength 60, sharpness 0, 4 segments, 1 partition, pass 1) our file is
       BYTE-IDENTICAL to libwebp's for the same pixels and quality, on a corpus of photos / graphics / text / alpha at
       quality 0..100, including 1920x1080 and 4000x3000. Intermediate checks while porting: our CPU reference decoder parses
