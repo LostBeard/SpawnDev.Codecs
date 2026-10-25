@@ -24,8 +24,9 @@
 // The window of a block depends on its size and window flags (a long block next to a short one has short
 // slopes): the five windows of a stream are a table uploaded once at construction.
 //
-// The v1 hybrid path (CPU bit-stream decode, DecodeSpectrumOnCpu) is kept as
-// the reference shape behind useV2Path.
+// Every per-packet buffer is sized for the longest block at construction (Vorbis bounds a packet by
+// BlockSize1 and the channel count), so a packet allocates nothing on the device. The bit-stream decode
+// is the GPU step kernel only: the CPU reference decoder lives in SpawnDev.Codecs.References.
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -43,10 +44,6 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     private readonly Accelerator _accelerator;
     private readonly VorbisIdentificationHeader _ident;
     private readonly VorbisSetupHeader _setup;
-    // Pre-built Huffman decoders, one per codebook in the setup header.
-    // Construction-time metadata setup per CLAUDE.md cardinal rule's
-    // "metadata struct setup" carve-out. No CPU decoder INSTANCE needed.
-    private readonly VorbisHuffmanDecoder[] _huffman;
 
     // Windowed right halves of the previous block, [channels * BlockSize1 / 2] each (row stride BlockSize1 / 2).
     // The packet reads _dRightHalf[_prevRight] and writes the other one.
@@ -71,12 +68,25 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     // one double pool (VorbisPacketDecodeSetup), uploaded once at
     // construction time (CARDINAL rule "metadata struct setup" carve-out).
     // The resumable v2 kernel reads from them to do the bit-stream decode
-    // on GPU - replacing the CPU work in DecodeSpectrumOnCpu.
+    // on GPU.
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2SetupInts;
     private readonly MemoryBuffer1D<double, Stride1D.Dense> _dV2SetupDoubles;
     private readonly int _v2CodebookCount;
     // Resumable decode state (VorbisPacketDecodeKernel.StateInts ints, zeroed per packet).
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _dV2State;
+
+    // Per-packet work buffers, sized for the longest block (BlockSize1) at construction and reused.
+    private readonly StageBuffer<byte> _dPacket;                       // the packet bytes (grow-only)
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dAllIntOut;  // header + floor flags + posteriors
+    private readonly MemoryBuffer1D<float, Stride1D.Dense> _dResidue;  // channels rows of BlockSize1 / 2 (row stride = halfBlock)
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dIntScratch;
+    private readonly MemoryBuffer1D<float, Stride1D.Dense> _dEntryVecScratch;
+    private readonly MemoryBuffer1D<float, Stride1D.Dense> _dFloor;    // channels * BlockSize1 / 2
+    private readonly MemoryBuffer1D<float, Stride1D.Dense> _dSpec;     // channels * BlockSize1 / 2
+    private readonly MemoryBuffer1D<float, Stride1D.Dense> _dTd;       // channels * BlockSize1
+    private readonly MemoryBuffer1D<float, Stride1D.Dense> _dPcm;      // channels * BlockSize1 / 2 (the most frames a packet returns)
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _dScratchInt;
+    private readonly MemoryBuffer1D<byte, Stride1D.Dense> _dScratchByte;
 
     /// <summary>Step launches between two reads of the done flag (most packets finish in the first).</summary>
     private const int V2StepsPerCheck = 4;
@@ -121,15 +131,6 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         _accelerator = accelerator ?? throw new ArgumentNullException(nameof(accelerator));
         _ident = ident ?? throw new ArgumentNullException(nameof(ident));
         _setup = setup ?? throw new ArgumentNullException(nameof(setup));
-        // Build Huffman decoders directly from the setup codebooks - same
-        // expression VorbisAudioDecoder uses, but here we own them so the
-        // GPU decoder needs no CPU decoder instance.
-        _huffman = new VorbisHuffmanDecoder[setup.Codebooks.Length];
-        for (int i = 0; i < setup.Codebooks.Length; i++)
-        {
-            var cb = setup.Codebooks[i];
-            _huffman[i] = new VorbisHuffmanDecoder(VorbisHuffman.Build(cb.Lengths));
-        }
 
         // Pre-flatten + upload static floor data: xLists per floor + 256-entry inverse-dB lookup.
         int totalXList = 0, maxXList = 0;
@@ -174,6 +175,20 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         _dV2SetupDoubles = AllocAndUpload(accelerator, v2Setup.Doubles);
         _dV2State = accelerator.Allocate1D<int>(VorbisPacketDecodeKernel.StateInts);
 
+        int channels = ident.AudioChannels;
+        long halfMax = (long)channels * (bs1 / 2);
+        _dPacket = new StageBuffer<byte>(accelerator);
+        _dAllIntOut = accelerator.Allocate1D<int>(VorbisPacketDecodeKernel.ComputeAllIntOutLength(channels, _maxXListLength));
+        _dResidue = accelerator.Allocate1D<float>(halfMax);
+        _dIntScratch = accelerator.Allocate1D<int>(VorbisPacketDecodeKernel.ComputeIntScratchLength(channels, bs1));
+        _dEntryVecScratch = accelerator.Allocate1D<float>(MaxCodebookDimensions(setup));
+        _dFloor = accelerator.Allocate1D<float>(halfMax);
+        _dSpec = accelerator.Allocate1D<float>(halfMax);
+        _dTd = accelerator.Allocate1D<float>((long)channels * bs1);
+        _dPcm = accelerator.Allocate1D<float>(halfMax);
+        _dScratchInt = accelerator.Allocate1D<int>(Math.Max(1L, (long)channels * 2 * _maxXListLength));
+        _dScratchByte = accelerator.Allocate1D<byte>(Math.Max(1L, (long)channels * _maxXListLength));
+
         _v2DecodeKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<byte>,
@@ -211,161 +226,82 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         if (packet.Length == 0) return Array.Empty<float>();
         int channels = _ident.AudioChannels;
 
-        // v2 (GPU bit-stream decode) ships on every backend. The step kernel
-        // binds 8 storage buffers (the setup + codebook tables live in two
-        // pools), within WebGPU's per-stage limit; the v1 hybrid CPU path
-        // below stays as the reference shape.
-        bool useV2Path = true;
+        // ---- bit-stream decode on the accelerator: the resumable step kernel ----
+        int modeBits = VorbisMath.Ilog(_setup.Modes.Length - 1);
+        var dPacket = _dPacket.Ensure(packet.Length);
+        DeviceTransfer.Upload(dPacket, packet.Span);
 
-        int blockSize;
-        int halfBlock;
-        int residueStride;
-        bool[] floorOk;
-        int[] floorIndex;
-        int windowOffset;
-        VorbisMappingConfig mapping;
+        _dAllIntOut.View.MemSetToZero();
+        _dResidue.View.MemSetToZero();
+        _dV2State.View.MemSetToZero();
 
-        // Persistent buffers allocated conditionally per path. Disposed in
-        // the finally block at function exit.
-        MemoryBuffer1D<int, Stride1D.Dense>? dV2AllIntOut = null;
-        MemoryBuffer1D<float, Stride1D.Dense>? dV2Residue = null;
-        MemoryBuffer1D<int, Stride1D.Dense>? dV1Posteriors = null;
-        MemoryBuffer1D<float, Stride1D.Dense>? dV1Residue = null;
-
-        try
+        var scalars = new VorbisPacketDecodeScalars
         {
-
-        if (useV2Path)
+            ModeBits = modeBits,
+            Channels = channels,
+            BlockSize0 = _ident.BlockSize0,
+            BlockSize1 = _ident.BlockSize1,
+            MaxXListLength = _maxXListLength,
+            CodebookCount = _v2CodebookCount,
+        };
+        // The work is content-dependent: launch the steps in batches,
+        // read one done flag per batch (a launch after the end is a no-op).
+        var pacer = new LaunchPacer(_accelerator);
+        while (true)
         {
-            // v2: run the resumable decode kernel, read back the small header
-            // info, leave posteriors + residues GPU-resident. The residue
-            // buffer holds the longest block; rows are halfBlock apart.
-            int modeBits = VorbisMath.Ilog(_setup.Modes.Length - 1);
-
-            var packetBytes = packet.ToArray();
-            using var dPacket = _accelerator.Allocate1D<byte>(packetBytes.Length);
-            dPacket.View.CopyFromCPU(packetBytes);
-
-            long allIntOutLen = VorbisPacketDecodeKernel.ComputeAllIntOutLength(channels, _maxXListLength);
-            dV2AllIntOut = _accelerator.Allocate1D<int>(allIntOutLen);
-            dV2Residue = _accelerator.Allocate1D<float>((long)channels * (_ident.BlockSize1 / 2));
-            long intScratchLen = VorbisPacketDecodeKernel.ComputeIntScratchLength(channels, _ident.BlockSize1);
-            using var dIntScratch = _accelerator.Allocate1D<int>(intScratchLen);
-            using var dEntryVecScratch = _accelerator.Allocate1D<float>(MaxCodebookDimensions(_setup));
-
-            dV2AllIntOut.View.MemSetToZero();
-            dV2Residue.View.MemSetToZero();
-            _dV2State.View.MemSetToZero();
-
-            var scalars = new VorbisPacketDecodeScalars
+            for (int k = 0; k < V2StepsPerCheck; k++)
             {
-                ModeBits = modeBits,
-                Channels = channels,
-                BlockSize0 = _ident.BlockSize0,
-                BlockSize1 = _ident.BlockSize1,
-                MaxXListLength = _maxXListLength,
-                CodebookCount = _v2CodebookCount,
-            };
-            // The work is content-dependent: launch the steps in batches,
-            // read one done flag per batch (a launch after the end is a no-op).
-            var pacer = new LaunchPacer(_accelerator);
-            while (true)
-            {
-                for (int k = 0; k < V2StepsPerCheck; k++)
-                {
-                    _v2DecodeKernel(
-                        new Index1D(1),
-                        dPacket.View,
-                        _dV2SetupInts.View, _dV2SetupDoubles.View,
-                        dV2AllIntOut.View, dV2Residue.View,
-                        dIntScratch.View, dEntryVecScratch.View,
-                        _dV2State.View, scalars);
-                    await pacer.LaunchedAsync();
-                }
-                await _accelerator.SynchronizeAsync();
-                var phase = await _dV2State.View.SubView(VorbisPacketDecodeKernel.SPhase, 1).CopyToHostAsync();
-                if (phase[0] == VorbisPacketDecodeKernel.PhaseDone) break;
+                _v2DecodeKernel(
+                    new Index1D(1),
+                    dPacket.SubView(0, packet.Length),
+                    _dV2SetupInts.View, _dV2SetupDoubles.View,
+                    _dAllIntOut.View, _dResidue.View,
+                    _dIntScratch.View, _dEntryVecScratch.View,
+                    _dV2State.View, scalars);
+                await pacer.LaunchedAsync();
             }
-
-            // Header + floorOk + floorIndex are contiguous: one async readback
-            // (browser backends have no synchronous GPU -> CPU copy).
-            var head = await dV2AllIntOut.View.SubView(0, VorbisPacketDecodeKernel.PacketHeaderLength + 2L * channels).CopyToHostAsync();
-            blockSize = head[1];
-            halfBlock = blockSize / 2;
-            residueStride = halfBlock;
-            windowOffset = head[2] != 0 ? _ident.BlockSize0 + (head[3] * 2 + head[4]) * _ident.BlockSize1 : 0;
-
-            floorOk = new bool[channels];
-            floorIndex = new int[channels];
-            for (int i = 0; i < channels; i++)
-            {
-                floorOk[i] = head[VorbisPacketDecodeKernel.PacketHeaderLength + i] != 0;
-                floorIndex[i] = head[VorbisPacketDecodeKernel.PacketHeaderLength + channels + i];
-            }
-            mapping = _setup.Mappings[_setup.Modes[head[0]].Mapping];
-        }
-        else
-        {
-            // v1: CPU bit-stream decode + per-channel uploads.
-            var bitstream = DecodeSpectrumOnCpu(packet);
-            blockSize = bitstream.BlockSize;
-            halfBlock = blockSize / 2;
-            residueStride = halfBlock;
-            floorOk = bitstream.FloorOk;
-            floorIndex = bitstream.FloorIndexPerChannel;
-            mapping = bitstream.Mapping;
-            windowOffset = bitstream.WindowOffset;
-
-            dV1Posteriors = _accelerator.Allocate1D<int>((long)channels * _maxXListLength);
-            dV1Residue = _accelerator.Allocate1D<float>((long)channels * halfBlock);
-
-            dV1Posteriors.View.MemSetToZero();
-            for (int ch = 0; ch < channels; ch++)
-            {
-                if (floorOk[ch] && bitstream.FloorPosteriors[ch] is { } yArr)
-                    dV1Posteriors.View.SubView((long)ch * _maxXListLength, yArr.Length).CopyFromCPU(yArr);
-                dV1Residue.View.SubView((long)ch * halfBlock, halfBlock).CopyFromCPU(bitstream.Residues[ch]);
-            }
+            await _accelerator.SynchronizeAsync();
+            var phase = await _dV2State.View.SubView(VorbisPacketDecodeKernel.SPhase, 1).CopyToHostAsync();
+            if (phase[0] == VorbisPacketDecodeKernel.PhaseDone) break;
         }
 
-        // Common views for post-spectrum chain (uses dPosteriorsView +
-        // dResidueView regardless of which path produced them).
-        ArrayView<int> dPosteriorsView = useV2Path
-            ? dV2AllIntOut!.View.SubView(
-                VorbisPacketDecodeKernel.PacketHeaderLength + 2L * channels,
-                (long)channels * _maxXListLength)
-            : dV1Posteriors!.View;
-        ArrayView<float> dResidueView = useV2Path ? dV2Residue!.View : dV1Residue!.View;
+        // Header + floorOk + floorIndex are contiguous: one async readback
+        // (browser backends have no synchronous GPU -> CPU copy).
+        var head = await _dAllIntOut.View.SubView(0, VorbisPacketDecodeKernel.PacketHeaderLength + 2L * channels).CopyToHostAsync();
+        int blockSize = head[1];
+        int halfBlock = blockSize / 2;
+        int residueStride = halfBlock;
+        int windowOffset = head[2] != 0 ? _ident.BlockSize0 + (head[3] * 2 + head[4]) * _ident.BlockSize1 : 0;
+        var floorOk = new bool[channels];
+        var floorIndex = new int[channels];
+        for (int i = 0; i < channels; i++)
+        {
+            floorOk[i] = head[VorbisPacketDecodeKernel.PacketHeaderLength + i] != 0;
+            floorIndex[i] = head[VorbisPacketDecodeKernel.PacketHeaderLength + channels + i];
+        }
+        var mapping = _setup.Mappings[_setup.Modes[head[0]].Mapping];
+
+        ArrayView<int> dPosteriorsView = _dAllIntOut.View.SubView(
+            VorbisPacketDecodeKernel.PacketHeaderLength + 2L * channels,
+            (long)channels * _maxXListLength);
+        ArrayView<float> dResidueView = _dResidue.View;
 
         // Overlap-add geometry (Vorbis I sec 4.3.8): this packet returns prevN / 4 + n / 4 frames, none for the first.
         int prevBlockSize = _previousBlockSize;
         int outFrames = prevBlockSize > 0 ? prevBlockSize / 4 + blockSize / 4 : 0;
 
-        // Allocate per-call GPU buffers.
-        long tdBufferLen = (long)channels * blockSize;
-        long specBufferLen = (long)channels * halfBlock;
-        using var dFloor = _accelerator.Allocate1D<float>(specBufferLen);
-        using var dSpec = _accelerator.Allocate1D<float>(specBufferLen);
-        using var dTd = _accelerator.Allocate1D<float>(tdBufferLen);
-        using var dPcmInterleaved = _accelerator.Allocate1D<float>(Math.Max(1L, (long)channels * outFrames));
-
-        // Floor render scratch buffers (sized for the largest possible xList).
-        using var dScratchInt = _accelerator.Allocate1D<int>((long)channels * 2 * _maxXListLength);
-        using var dScratchByte = _accelerator.Allocate1D<byte>((long)channels * _maxXListLength);
-
-        dFloor.View.MemSetToZero();
+        long specLen = (long)channels * halfBlock;
+        var dFloor = _dFloor.View.SubView(0, specLen);
+        var dSpec = _dSpec.View.SubView(0, specLen);
+        // Unused-floor channels stay zero: their floor render and multiply are not dispatched.
+        dFloor.MemSetToZero();
+        dSpec.MemSetToZero();
         // Per-channel launches below: pace them (the browser's command encoder
         // must not collect a long queue for many-channel streams).
         var chainPacer = new LaunchPacer(_accelerator);
 
-        // Spec must start zeroed - unused-floor channels are left as zero
-        // (the GPU multiply only runs for floorOk channels).
-        dSpec.View.MemSetToZero();
-
-        // Step 1.5: GPU floor curve render per non-silent channel. Single-
-        // thread kernel orchestrating the per-channel render via
-        // VorbisFloor1RenderCurveGpu.Render. dFloor was pre-zeroed for the
-        // silent channels above so we can skip their dispatches entirely.
+        // Step 1: GPU floor curve render per non-silent channel (single-thread
+        // kernel per channel via VorbisFloor1RenderCurveGpu.Render).
         for (int ch = 0; ch < channels; ch++)
         {
             if (!floorOk[ch]) continue;
@@ -374,15 +310,10 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
             int xListBase = _xListOffsets[floorIdx];
             int multiplier = _setup.Floors[floorIdx].Multiplier;
 
-            long posteriorOffs = (long)ch * _maxXListLength;
-            long scratchIntOffs = (long)ch * 2 * _maxXListLength;
-            long scratchByteOffs = (long)ch * _maxXListLength;
-            long floorOffs = (long)ch * halfBlock;
-
-            var posteriorView = dPosteriorsView.SubView(posteriorOffs, values);
-            var scratchIntView = dScratchInt.View.SubView(scratchIntOffs, 2 * values);
-            var scratchByteView = dScratchByte.View.SubView(scratchByteOffs, values);
-            var floorView = dFloor.View.SubView(floorOffs, halfBlock);
+            var posteriorView = dPosteriorsView.SubView((long)ch * _maxXListLength, values);
+            var scratchIntView = _dScratchInt.View.SubView((long)ch * 2 * _maxXListLength, 2 * values);
+            var scratchByteView = _dScratchByte.View.SubView((long)ch * _maxXListLength, values);
+            var floorView = dFloor.SubView((long)ch * halfBlock, halfBlock);
 
             _floorRenderKernel(
                 new Index1D(1),
@@ -404,30 +335,24 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
             await chainPacer.LaunchedAsync();
         }
 
-        // Step 3: GPU floor x residue multiply (per-bin parallel, sec 4.3.7). Unused-
-        // floor channels stay zero (we don't dispatch their multiply).
+        // Step 3: GPU floor x residue multiply (per-bin parallel, sec 4.3.7).
         for (int ch = 0; ch < channels; ch++)
         {
             if (!floorOk[ch]) continue;
             long offs = (long)ch * halfBlock;
-            var floorView = dFloor.View.SubView(offs, halfBlock);
+            var floorView = dFloor.SubView(offs, halfBlock);
             var residueView = dResidueView.SubView((long)ch * residueStride, halfBlock);
-            var specView = dSpec.View.SubView(offs, halfBlock);
+            var specView = dSpec.SubView(offs, halfBlock);
             _multiplyKernel(new Index1D(halfBlock), floorView, residueView, specView);
             await chainPacer.LaunchedAsync();
         }
 
-        // Step 4: GPU IMDCT per channel (one thread per output sample).
-        // Reads from dSpec (halfBlock floats / channel), writes 2N=blockSize
-        // samples / channel to dTd. Bit-near-exact mirror of CPU
-        // ImdctReference.Transform via the GPU helper.
+        // Step 4: GPU IMDCT per channel (one thread per output sample): halfBlock
+        // coefficients -> blockSize samples (ImdctReferenceGpu.Sample).
         for (int ch = 0; ch < channels; ch++)
         {
-            long specBase = (long)ch * halfBlock;
-            long tdBase = (long)ch * blockSize;
-            var specView = dSpec.View.SubView(specBase, halfBlock);
-            var tdView = dTd.View.SubView(tdBase, blockSize);
-
+            var specView = dSpec.SubView((long)ch * halfBlock, halfBlock);
+            var tdView = _dTd.View.SubView((long)ch * blockSize, blockSize);
             _imdctKernel(new Index1D(blockSize), specView, tdView, halfBlock);
             await chainPacer.LaunchedAsync();
         }
@@ -437,8 +362,8 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         var dPrev = _dRightHalf[_prevRight];
         var dNext = _dRightHalf[1 - _prevRight];
         _overlapKernel(new Index1D(channels * Math.Max(outFrames, halfBlock)),
-            dTd.View, _dWindows.View.SubView(windowOffset, blockSize), dPrev.View, dNext.View,
-            dPcmInterleaved.View, channels, blockSize, prevBlockSize, rowStride);
+            _dTd.View.SubView(0, (long)channels * blockSize), _dWindows.View.SubView(windowOffset, blockSize),
+            dPrev.View, dNext.View, _dPcm.View, channels, blockSize, prevBlockSize, rowStride);
 
         await _accelerator.SynchronizeAsync();
 
@@ -450,107 +375,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         if (outFrames == 0) return Array.Empty<float>();
 
         // Read back interleaved PCM.
-        return await dPcmInterleaved.View.SubView(0, (long)channels * outFrames).CopyToHostAsync();
-
-        } // end try
-        finally
-        {
-            // Dispose the conditionally-allocated path-specific buffers.
-            dV2AllIntOut?.Dispose();
-            dV2Residue?.Dispose();
-            dV1Posteriors?.Dispose();
-            dV1Residue?.Dispose();
-        }
-    }
-
-    /// <summary>Result of the v1 CPU bit-stream parse. Floor curves are
-    /// rendered on GPU, so we hand back the per-channel posterior Y values
-    /// + the floor index for each channel + the residue buffers.</summary>
-    private readonly record struct CpuBitstream(
-        int[]?[] FloorPosteriors, int[] FloorIndexPerChannel,
-        float[][] Residues, bool[] FloorOk,
-        VorbisMappingConfig Mapping, int BlockSize, int WindowOffset);
-
-    /// <summary>
-    /// CPU helper for v1: parse packet via the existing CPU decoder + return
-    /// per-channel floor curves + residue buffers + floor flags + mapping
-    /// (for inverse coupling steps). The inverse coupling + multiply + IMDCT
-    /// + post-IMDCT steps all run on GPU. The hot path moves to
-    /// GPU as the Vorbis-Huffman GPU bit-reader keystone primitive lands.
-    /// </summary>
-    private CpuBitstream DecodeSpectrumOnCpu(ReadOnlyMemory<byte> packet)
-    {
-        // Parse packet header on CPU to learn blockSize.
-        var bitReader = new VorbisBitReader(packet.Span);
-        var header = VorbisAudioPacketHeaderParser.ParseFromReader(ref bitReader, _setup, _ident);
-        int blockSize = header.BlockSize;
-        int halfBlock = blockSize / 2;
-        int channels = _ident.AudioChannels;
-        int windowOffset = header.IsLongBlock
-            ? _ident.BlockSize0 + ((header.PreviousWindowLong ? 2 : 0) + (header.NextWindowLong ? 1 : 0)) * _ident.BlockSize1
-            : 0;
-
-        // Per-channel floor decode (CPU bit-stream + Huffman). The
-        // posterior int[] is handed to the GPU floor render kernel below.
-        var mapping = _setup.Mappings[_setup.Modes[header.ModeNumber].Mapping];
-        var floorOk = new bool[channels];
-        var posteriors = new int[]?[channels];
-        var floorIndexPerChannel = new int[channels];
-        // Use our own pre-built Huffman decoders (no reflection / no CPU
-        // decoder instance dependency).
-        var huffman = _huffman;
-
-        for (int ch = 0; ch < channels; ch++)
-        {
-            int submap = mapping.Mux[ch];
-            int floorIdx = mapping.SubmapFloor[submap];
-            floorIndexPerChannel[ch] = floorIdx;
-            var floorCfg = _setup.Floors[floorIdx];
-            int[]? posterior = VorbisFloor1Decoder.Decode(ref bitReader, floorCfg, huffman);
-            floorOk[ch] = posterior is not null;
-            posteriors[ch] = posterior;
-        }
-
-        // Residue decode per submap, after the nonzero vector propagate (sec 4.3.4).
-        var doNotDecode = new bool[channels];
-        for (int ch = 0; ch < channels; ch++) doNotDecode[ch] = !floorOk[ch];
-        for (int i = 0; i < mapping.CouplingMagnitudeChannels.Length; i++)
-        {
-            int mag = mapping.CouplingMagnitudeChannels[i], ang = mapping.CouplingAngleChannels[i];
-            if (!doNotDecode[mag] || !doNotDecode[ang]) { doNotDecode[mag] = false; doNotDecode[ang] = false; }
-        }
-        var residueBuffers = new float[channels][];
-        for (int ch = 0; ch < channels; ch++) residueBuffers[ch] = new float[halfBlock];
-
-        for (int s = 0; s < mapping.Submaps; s++)
-        {
-            int residueIdx = mapping.SubmapResidue[s];
-            var residueCfg = _setup.Residues[residueIdx];
-            int membersInSubmap = 0;
-            for (int ch = 0; ch < channels; ch++) if (mapping.Mux[ch] == s) membersInSubmap++;
-            if (membersInSubmap == 0) continue;
-            var subBuffers = new float[membersInSubmap][];
-            var subSkip = new bool[membersInSubmap];
-            int k = 0;
-            for (int ch = 0; ch < channels; ch++)
-            {
-                if (mapping.Mux[ch] == s)
-                {
-                    subBuffers[k] = residueBuffers[ch];
-                    subSkip[k] = doNotDecode[ch];
-                    k++;
-                }
-            }
-            VorbisResidueDecoder.Decode(
-                ref bitReader, residueCfg, huffman, _setup.Codebooks,
-                subBuffers, subSkip, halfBlock);
-        }
-
-        // Floor render, inverse coupling, multiply, IMDCT, and the rest of
-        // the chain now all run on GPU - we hand the raw posteriors +
-        // residues + flags + mapping to the caller.
-        return new CpuBitstream(
-            posteriors, floorIndexPerChannel, residueBuffers, floorOk, mapping, blockSize, windowOffset);
+        return await _dPcm.View.SubView(0, (long)channels * outFrames).CopyToHostAsync();
     }
 
     /// <summary>Largest codebook dimension count (the residue entry-vector scratch size, at least 1).</summary>
@@ -657,5 +482,16 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         _dV2SetupInts.Dispose();
         _dV2SetupDoubles.Dispose();
         _dV2State.Dispose();
+        _dPacket.Dispose();
+        _dAllIntOut.Dispose();
+        _dResidue.Dispose();
+        _dIntScratch.Dispose();
+        _dEntryVecScratch.Dispose();
+        _dFloor.Dispose();
+        _dSpec.Dispose();
+        _dTd.Dispose();
+        _dPcm.Dispose();
+        _dScratchInt.Dispose();
+        _dScratchByte.Dispose();
     }
 }
