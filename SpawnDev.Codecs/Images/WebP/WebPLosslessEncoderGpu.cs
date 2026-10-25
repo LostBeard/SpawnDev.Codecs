@@ -49,6 +49,9 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
     private readonly StageBuffer<byte> _blobs;
     private readonly StageBuffer<int> _rowCost;
 
+    /// <summary>Diagnostics: stage names of EncodeStreamAsync as they complete (tests time a browser lane with it). Null = off.</summary>
+    internal static Action<string>? Trace;
+
     /// <summary>Compile the kernels and upload the constant tables.</summary>
     public WebPLosslessEncoderGpu(Accelerator accelerator)
     {
@@ -256,6 +259,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
         await _kernels.AnalyzeAsync(a, work, meta, pixels);
         await _accelerator.SynchronizeAsync();
         var analysis = await meta.CopyToHostAsync();
+        Trace?.Invoke("analyze");
         int paletteColors = analysis[WebPEncMeta.PaletteAvailable];
 
         // Applies a strategy: writes the host-side choices and runs the (parallel) transform kernels; returns the main image.
@@ -341,6 +345,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
             {
                 var cur = Apply(s);
                 long cost = await CostAsync(cur, plan.TrialCache, true);
+                Trace?.Invoke($"trial {s}");
                 // side information the transforms add to the stream
                 if (s.Palette) cost += paletteColors * 10L + 200;
                 if (s.Predictor) cost += Vp8lEncLayout.Tiles(hostMeta[WebPEncMeta.PackedWidth], height, plan.PredictorBits) * 4L + 400;
@@ -364,6 +369,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
             foreach (int cb in plan.CacheCandidates)
             {
                 long cost = await CostAsync(main, cb, true);
+                Trace?.Invoke($"cache {cb}");
                 // a bigger cache widens the green alphabet: its code definition costs more to describe
                 if (cb > 0) cost += 64L << Math.Min(cb - 4, 6);
                 if (cost < bestCost)
@@ -374,6 +380,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
             }
         }
         await CostAsync(main, bestCache, false);
+        Trace?.Invoke("final tokenize queued");
 
         // ---- several prefix groups (meta prefix codes), when the tiles of the image differ enough to pay for them ----
         if (plan.MetaBits > 0)
@@ -426,6 +433,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
         long subImageItems = Math.Max(Vp8lEncLayout.Tiles(emitWidth, height, plan.PredictorBits), Vp8lEncLayout.Tiles(emitWidth, height, plan.CrossBits));
         if (plan.MetaBits > 0) subImageItems = Math.Max(subImageItems, Vp8lEncLayout.Tiles(emitWidth, height, plan.MetaBits));
         await _kernels.EmitAsync(output, work, tok, meta, _tables.View, (long)emitWidth * height, subImageItems);
+        Trace?.Invoke("emit queued");
     }
 
     /// <summary>The ICC / EXIF / XMP payloads uploaded to one device buffer (small host blobs), in that order.</summary>
@@ -519,6 +527,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
         _kernels.FinalizeFile(output, _meta.View);
         CopyBlobs(blobs, output, icc, exif, xmp);
         await _accelerator.SynchronizeAsync();
+        Trace?.Invoke("file done");
 
         var result = await _meta.View.CopyToHostAsync();
         if (result[WebPEncMeta.Error] != 0 || result[WebPEncMeta.Total] > output.Length)

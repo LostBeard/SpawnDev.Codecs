@@ -1,4 +1,4 @@
-// Tests for WebPLosslessEncoderGpu (Images/WebP).
+﻿// Tests for WebPLosslessEncoderGpu (Images/WebP).
 //
 // The encoder is asked to compress the SOURCE images of TestData/WebP/sources (flat, 2/4/16/256-colour palettes with
 // bundling, photographic gradient + noise, incompressible noise, horizontal gradients, a 14-mode mosaic, alpha with
@@ -272,10 +272,17 @@ public abstract partial class CodecsTestBase
     public async Task WebPLosslessEncoderGpu_ArrayViewOverload_WritesOnlyTheFile()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        // stage timings on the console (PMT copies CODEC_TRACE lines to WGSLDumps/browser_console.log)
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        void Mark(string what) => Console.WriteLine($"CODEC_TRACE {sw.ElapsedMilliseconds} ms {what}");
+        WebPLosslessEncoderGpu.Trace = Mark;
+        WebPEncodeKernels.Trace = Mark;
         try
         {
             using var enc = new WebPLosslessEncoderGpu(acc);
+            Mark("encoder kernels loaded");
             using var dec = new WebPDecoderGpu(acc);
+            Mark("decoder kernels loaded");
             foreach (var name in new[] { "enc_photo_80x60", "enc_pal4_64x40", "enc_one_pixel_1x1" })
             {
                 var row = WebPSources().Single(r => r.Name == name);
@@ -283,19 +290,28 @@ public abstract partial class CodecsTestBase
                 using var dIn = DeviceVerify.Upload(acc, source, slack: 5);
                 int max = WebPLosslessEncoderGpu.GetMaxEncodedSize(row.Width, row.Height);
                 using var dOut = DeviceVerify.Poisoned(acc, max + 64);
+                Mark($"{name}: encode");
                 int length = await enc.EncodeAsync(dIn.View, row.Width, row.Height, dOut.View);
+                Mark($"{name}: encoded {length} bytes");
                 True(length > 20 && length <= max, $"{name}: length {length} within (20, {max}]");
                 Equal(null, await DeviceVerify.AllEqualAsync(acc, dOut.View.SubView(length, 64), 64, 0xAB), $"{name}: bytes past the end of the file");
                 using var dBack = acc.Allocate1D<byte>(source.Length);
                 await dec.DecodeAsync(dOut.View, length, dBack.View);
                 Equal(null, await DeviceVerify.CompareAsync(acc, dBack.View, dIn.View, source.Length, 4, row.Width), name);
+                Mark($"{name}: decoded + compared");
                 // the managed overload (a few KB here) must write the same file
                 var managed = await enc.EncodeAsync(source, row.Width, row.Height);
                 Equal(length, managed.Length, $"{name}: managed overload length");
                 Equal(null, await DeviceVerify.CompareAsync(acc, dOut.View, managed), $"{name}: managed overload bytes");
+                Mark($"{name}: managed overload matches");
             }
         }
-        finally { ReleaseAccelerator(ctx, acc); }
+        finally
+        {
+            WebPLosslessEncoderGpu.Trace = null;
+            WebPEncodeKernels.Trace = null;
+            ReleaseAccelerator(ctx, acc);
+        }
     }
 
     [TestMethod(Timeout = 600000)]

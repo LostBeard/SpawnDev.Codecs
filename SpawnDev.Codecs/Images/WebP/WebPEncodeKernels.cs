@@ -70,11 +70,27 @@ public sealed class WebPEncodeKernels : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _finalizeAnim;
 
     private readonly LaunchPacer _pacer;
+    private readonly Accelerator _accelerator;
+
+    /// <summary>
+    /// Diagnostics: when set, every emit launch is awaited on its own and then named here, so a launch that never returns is
+    /// the one after the last name printed. Null = off (no extra synchronisation).
+    /// </summary>
+    internal static Action<string>? Trace;
+
+    private ValueTask TraceAsync(string name) => Trace is null ? ValueTask.CompletedTask : TraceSlowAsync(name);
+
+    private async ValueTask TraceSlowAsync(string name)
+    {
+        await _accelerator.SynchronizeAsync();
+        Trace?.Invoke(name);
+    }
 
     /// <summary>Compile the kernels.</summary>
     public WebPEncodeKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        _accelerator = accelerator;
         _pacer = new LaunchPacer(accelerator);
         _toArgb = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<uint>, int>(ToArgbKernel);
         _analyzeInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(AnalyzeInitKernel);
@@ -239,12 +255,16 @@ public sealed class WebPEncodeKernels : IDisposable
         long pixels, long subImageItems)
     {
         _emitHeader(1, output, work, meta);
+        await TraceAsync("emit header");
         await SubImageAsync(output, work, meta, SubPalette, 256);
         _emitBits(1, output, work, meta, 1);
+        await TraceAsync("emit bits 1");
         await SubImageAsync(output, work, meta, SubPredictor, subImageItems);
         _emitBits(1, output, work, meta, 2);
+        await TraceAsync("emit bits 2");
         await SubImageAsync(output, work, meta, SubCross, subImageItems);
         _emitBits(1, output, work, meta, 3);
+        await TraceAsync("emit bits 3");
         await SubImageAsync(output, work, meta, SubEntropy, subImageItems);
         for (int g = 0; g < Vp8lEncodeGroups.MaxGroups; g++)
         {
@@ -252,14 +272,17 @@ public sealed class WebPEncodeKernels : IDisposable
             {
                 _emitCode(1, output, work, meta, g, k, 0);
                 await _pacer.LaunchedAsync();
+                await TraceAsync($"emit code g{g} k{k}");
             }
         }
         for (int i = Vp8lEncLayout.Steps(pixels); i > 0; i--)
         {
             _emitTokens(1, output, work, tok, meta, tables);
             await _pacer.LaunchedAsync();
+            await TraceAsync($"emit tokens, {i - 1} steps left");
         }
         _emitTail(1, output, work, meta);
+        await TraceAsync("emit tail");
     }
 
     /// <summary>
@@ -270,21 +293,26 @@ public sealed class WebPEncodeKernels : IDisposable
     {
         int steps = Vp8lEncLayout.Steps(items);
         _subImageBegin(Vp8lEncodeGpu.SetAlpha(0), work, meta, which);
+        await TraceAsync($"sub-image {which} begin");
         for (int s = 0; s < steps; s++)
         {
             _subImageHist(4, work, meta, which, s);
             await _pacer.LaunchedAsync();
+            await TraceAsync($"sub-image {which} histogram step {s}");
         }
         _subImageBuild(5, work, meta, which);
+        await TraceAsync($"sub-image {which} build");
         for (int k = 0; k < 5; k++)
         {
             _emitCode(1, output, work, meta, -1, k, which);
             await _pacer.LaunchedAsync();
+            await TraceAsync($"sub-image {which} code {k}");
         }
         for (int s = 0; s < steps; s++)
         {
             _subImageSymbols(1, output, work, meta, which, s);
             await _pacer.LaunchedAsync();
+            await TraceAsync($"sub-image {which} symbols step {s}");
         }
     }
 
