@@ -4,23 +4,25 @@
 // GPU. Pairs with VorbisAudioEncoderGpu - closes the v1 Vorbis
 // encoder/decoder pair.
 //
-// Scope: mono + stereo audio; the whole packet decode runs on the GPU.
+// Scope: any channel count; the whole packet decode runs on the GPU.
 //
 // State maintained per-stream (across packets):
-//   - Previous block's right-half samples per channel, for overlap-add
-//     into the next packet's left half.
-//   - Previous block size (Vorbis can switch between long/short blocks).
+//   - Previous block's windowed right half per channel (two device buffers used in turn: one is read
+//     while the next packet's right half is written to the other), for the overlap-add.
+//   - Previous block size (Vorbis switches between short and long blocks).
 //
-// Per-packet flow (every launch bounded; per-channel launches paced with LaunchPacer):
-//   1. Bit-stream decode (header + floors + residues): VorbisPacketDecodeKernel.Step, a resumable
-//      single-thread state machine of at most StepBudget work units per launch, launched in batches
-//      with one done-flag readback per batch (the work is content-dependent).
+// Per-packet flow (every launch bounded; per-channel launches paced with LaunchPacer), Vorbis I sec 4.3:
+//   1. Bit-stream decode (header + floors + nonzero propagate + residues): VorbisPacketDecodeKernel.Step,
+//      a resumable single-thread state machine of at most StepBudget work units per launch, launched in
+//      batches with one done-flag readback per batch (the work is content-dependent).
 //   2. Floor curve render per channel (one thread: one floor's points over halfBlock bins).
-//   3. Floor x residue multiply (per-bin parallel).
-//   4. Inverse channel coupling (per-coefficient parallel).
+//   3. Inverse channel coupling of the residue vectors (per-coefficient parallel).
+//   4. Floor x residue multiply (per-bin parallel); an unused floor leaves the channel zero.
 //   5. IMDCT per channel (one thread per output sample, halfBlock terms each).
-//   6. PostImdct: window + overlap-add + new-right-half save (per-sample parallel).
-//   7. Interleave channel-major -> sample-major, readback PCM.
+//   6. Window + block-switching overlap-add + new-right-half save, all channels in one launch (per-sample
+//      parallel), written interleaved; readback PCM.
+// The window of a block depends on its size and window flags (a long block next to a short one has short
+// slopes): the five windows of a stream are a table uploaded once at construction.
 //
 // The v1 hybrid path (CPU bit-stream decode, DecodeSpectrumOnCpu) is kept as
 // the reference shape behind useV2Path.
@@ -46,11 +48,16 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     // "metadata struct setup" carve-out. No CPU decoder INSTANCE needed.
     private readonly VorbisHuffmanDecoder[] _huffman;
 
-    // GPU per-channel previous-right-half buffers (lifetime = decoder lifetime).
-    // null until the first packet has been decoded; sized to halfBlock at that point.
-    private MemoryBuffer1D<float, Stride1D.Dense>? _dPrevRightHalf;
+    // Windowed right halves of the previous block, [channels * BlockSize1 / 2] each (row stride BlockSize1 / 2).
+    // The packet reads _dRightHalf[_prevRight] and writes the other one.
+    private readonly MemoryBuffer1D<float, Stride1D.Dense>[] _dRightHalf;
+    private int _prevRight;
+    // Size of the previous block; 0 before the first packet (it only primes the overlap-add).
     private int _previousBlockSize = 0;
-    private int _previousHalfBlock = 0;
+
+    // The stream's windows (VorbisWindow.Generate): [0, BlockSize0) the short block's, then four long-block
+    // windows of BlockSize1 at BlockSize0 + (prevLong * 2 + nextLong) * BlockSize1.
+    private readonly MemoryBuffer1D<float, Stride1D.Dense> _dWindows;
 
     // Pre-uploaded static lookups (lifetime = decoder lifetime).
     private readonly MemoryBuffer1D<float, Stride1D.Dense> _dInverseDb;
@@ -97,8 +104,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>> _inverseCouplingKernel;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, int> _imdctKernel;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>,
-        ArrayView<float>, ArrayView<float>, int> _postImdctKernel;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, int, int> _interleaveKernel;
+        ArrayView<float>, ArrayView<float>, int, int, int, int> _overlapKernel;
 
     /// <summary>Identification header (sample rate, channels, etc.).</summary>
     public VorbisIdentificationHeader Identification => _ident;
@@ -148,6 +154,18 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         _dInverseDb = accelerator.Allocate1D<float>(256);
         _dInverseDb.View.CopyFromCPU(VorbisFloor1InverseDbGpu.BuildInverseDbTable());
 
+        // The stream's five windows (static table, like the inverse-dB lookup).
+        int bs0 = ident.BlockSize0, bs1 = ident.BlockSize1;
+        var windows = new float[bs0 + 4 * bs1];
+        VorbisWindow.Generate(bs0, bs0, bs0).CopyTo(windows, 0);
+        for (int v = 0; v < 4; v++)
+            VorbisWindow.Generate(bs1, (v & 2) != 0 ? bs1 : bs0, (v & 1) != 0 ? bs1 : bs0).CopyTo(windows, bs0 + v * bs1);
+        _dWindows = accelerator.Allocate1D<float>(windows.Length);
+        _dWindows.View.CopyFromCPU(windows);
+
+        long rightLen = (long)ident.AudioChannels * (bs1 / 2);
+        _dRightHalf = new[] { accelerator.Allocate1D<float>(rightLen), accelerator.Allocate1D<float>(rightLen) };
+
         // Vorbis v2 infrastructure: flatten the setup + codebook tables into
         // the two pools, upload once, compile the resumable step kernel.
         var v2Setup = VorbisPacketDecodeSetup.Build(setup);
@@ -177,18 +195,16 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
             Index1D, ArrayView<float>, ArrayView<float>>(VorbisDecodeInverseCouplingKernel);
         _imdctKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<float>, ArrayView<float>, int>(VorbisDecodeImdctKernel);
-        _postImdctKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _overlapKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>,
-            ArrayView<float>, ArrayView<float>, int>(VorbisDecodePostImdctKernel);
-        _interleaveKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<float>, ArrayView<float>, int, int>(VorbisDecodeInterleaveKernel);
+            ArrayView<float>, ArrayView<float>, int, int, int, int>(VorbisDecodeOverlapKernel);
     }
 
     /// <summary>
     /// Decode one audio packet. Returns the interleaved float PCM samples
     /// emitted by this packet. The first packet returns an empty array
-    /// (priming the overlap-add state); subsequent packets return
-    /// blockSize/2 sample frames * channels values.
+    /// (priming the overlap-add state); every later packet returns
+    /// previousBlockSize / 4 + blockSize / 4 sample frames * channels values.
     /// </summary>
     public async Task<float[]> DecodePacketAsync(ReadOnlyMemory<byte> packet)
     {
@@ -206,6 +222,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         int residueStride;
         bool[] floorOk;
         int[] floorIndex;
+        int windowOffset;
         VorbisMappingConfig mapping;
 
         // Persistent buffers allocated conditionally per path. Disposed in
@@ -276,6 +293,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
             blockSize = head[1];
             halfBlock = blockSize / 2;
             residueStride = halfBlock;
+            windowOffset = head[2] != 0 ? _ident.BlockSize0 + (head[3] * 2 + head[4]) * _ident.BlockSize1 : 0;
 
             floorOk = new bool[channels];
             floorIndex = new int[channels];
@@ -296,6 +314,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
             floorOk = bitstream.FloorOk;
             floorIndex = bitstream.FloorIndexPerChannel;
             mapping = bitstream.Mapping;
+            windowOffset = bitstream.WindowOffset;
 
             dV1Posteriors = _accelerator.Allocate1D<int>((long)channels * _maxXListLength);
             dV1Residue = _accelerator.Allocate1D<float>((long)channels * halfBlock);
@@ -318,27 +337,28 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
             : dV1Posteriors!.View;
         ArrayView<float> dResidueView = useV2Path ? dV2Residue!.View : dV1Residue!.View;
 
+        // Overlap-add geometry (Vorbis I sec 4.3.8): this packet returns prevN / 4 + n / 4 frames, none for the first.
+        int prevBlockSize = _previousBlockSize;
+        int outFrames = prevBlockSize > 0 ? prevBlockSize / 4 + blockSize / 4 : 0;
+
         // Allocate per-call GPU buffers.
         long tdBufferLen = (long)channels * blockSize;
         long specBufferLen = (long)channels * halfBlock;
         using var dFloor = _accelerator.Allocate1D<float>(specBufferLen);
         using var dSpec = _accelerator.Allocate1D<float>(specBufferLen);
         using var dTd = _accelerator.Allocate1D<float>(tdBufferLen);
-        using var dWindow = _accelerator.Allocate1D<float>(blockSize);
-        using var dPcmCm = _accelerator.Allocate1D<float>((long)channels * halfBlock);
-        using var dPcmInterleaved = _accelerator.Allocate1D<float>((long)channels * halfBlock);
+        using var dPcmInterleaved = _accelerator.Allocate1D<float>(Math.Max(1L, (long)channels * outFrames));
 
         // Floor render scratch buffers (sized for the largest possible xList).
         using var dScratchInt = _accelerator.Allocate1D<int>((long)channels * 2 * _maxXListLength);
         using var dScratchByte = _accelerator.Allocate1D<byte>((long)channels * _maxXListLength);
 
         dFloor.View.MemSetToZero();
-        dWindow.View.CopyFromCPU(VorbisWindow.GenerateCanonical(blockSize));
         // Per-channel launches below: pace them (the browser's command encoder
         // must not collect a long queue for many-channel streams).
         var chainPacer = new LaunchPacer(_accelerator);
 
-        // Spec must start zeroed - silent-floor channels are left as zero
+        // Spec must start zeroed - unused-floor channels are left as zero
         // (the GPU multiply only runs for floorOk channels).
         dSpec.View.MemSetToZero();
 
@@ -372,53 +392,28 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
             await chainPacer.LaunchedAsync();
         }
 
-        // Allocate / re-allocate previous-right-half buffer if blockSize changed.
-        bool havePrevious = _previousBlockSize == blockSize && _dPrevRightHalf is not null;
-        MemoryBuffer1D<float, Stride1D.Dense> dPrev;
-        if (havePrevious)
+        // Step 2: GPU inverse channel coupling of the RESIDUE vectors per coupling step in REVERSE
+        // order (Vorbis I sec 4.3.6), before the floor multiply. Mono streams have zero coupling steps.
+        var couplingMag = mapping.CouplingMagnitudeChannels;
+        var couplingAng = mapping.CouplingAngleChannels;
+        for (int step = couplingMag.Length - 1; step >= 0; step--)
         {
-            dPrev = _dPrevRightHalf!;
-        }
-        else
-        {
-            _dPrevRightHalf?.Dispose();
-            _dPrevRightHalf = _accelerator.Allocate1D<float>((long)channels * halfBlock);
-            // First packet (or block-size change): zero-init the previous-right-half.
-            var zeros = new float[(long)channels * halfBlock];
-            _dPrevRightHalf.View.CopyFromCPU(zeros);
-            dPrev = _dPrevRightHalf;
+            var magView = dResidueView.SubView((long)couplingMag[step] * residueStride, halfBlock);
+            var angView = dResidueView.SubView((long)couplingAng[step] * residueStride, halfBlock);
+            _inverseCouplingKernel(new Index1D(halfBlock), magView, angView);
+            await chainPacer.LaunchedAsync();
         }
 
-        // Allocate the new-right-half buffer (replaces dPrev after this call).
-        var dNewRight = _accelerator.Allocate1D<float>((long)channels * halfBlock);
-
-        // Step 2: GPU floor x residue multiply (per-bin parallel). Silent-
+        // Step 3: GPU floor x residue multiply (per-bin parallel, sec 4.3.7). Unused-
         // floor channels stay zero (we don't dispatch their multiply).
         for (int ch = 0; ch < channels; ch++)
         {
             if (!floorOk[ch]) continue;
             long offs = (long)ch * halfBlock;
             var floorView = dFloor.View.SubView(offs, halfBlock);
-            long residueOffs = (long)ch * residueStride;
-            var residueView = dResidueView.SubView(residueOffs, halfBlock);
+            var residueView = dResidueView.SubView((long)ch * residueStride, halfBlock);
             var specView = dSpec.View.SubView(offs, halfBlock);
             _multiplyKernel(new Index1D(halfBlock), floorView, residueView, specView);
-            await chainPacer.LaunchedAsync();
-        }
-
-        // Step 3: GPU inverse channel coupling per coupling step in REVERSE
-        // order (Vorbis I sec 4.3.8). Mono streams have zero coupling steps.
-        var couplingMag = mapping.CouplingMagnitudeChannels;
-        var couplingAng = mapping.CouplingAngleChannels;
-        for (int step = couplingMag.Length - 1; step >= 0; step--)
-        {
-            int magCh = couplingMag[step];
-            int angCh = couplingAng[step];
-            long magOffs = (long)magCh * halfBlock;
-            long angOffs = (long)angCh * halfBlock;
-            var magView = dSpec.View.SubView(magOffs, halfBlock);
-            var angView = dSpec.View.SubView(angOffs, halfBlock);
-            _inverseCouplingKernel(new Index1D(halfBlock), magView, angView);
             await chainPacer.LaunchedAsync();
         }
 
@@ -437,42 +432,25 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
             await chainPacer.LaunchedAsync();
         }
 
-        // Step 5: GPU PostImdct (window + overlap-add + new-right-half-save) per channel.
-        for (int ch = 0; ch < channels; ch++)
-        {
-            long tdBase = (long)ch * blockSize;
-            long halfBase = (long)ch * halfBlock;
-            var tdView = dTd.View.SubView(tdBase, blockSize);
-            var prevView = dPrev.View.SubView(halfBase, halfBlock);
-            var newRightView = dNewRight.View.SubView(halfBase, halfBlock);
-            var pcmView = dPcmCm.View.SubView(halfBase, halfBlock);
-
-            _postImdctKernel(new Index1D(halfBlock),
-                tdView, dWindow.View, prevView, newRightView, pcmView, halfBlock);
-            await chainPacer.LaunchedAsync();
-        }
-
-        // Step 6: GPU interleave channel-major PCM -> sample-major PCM.
-        if (havePrevious)
-        {
-            _interleaveKernel(new Index1D(halfBlock * channels),
-                dPcmCm.View, dPcmInterleaved.View, channels, halfBlock);
-        }
+        // Step 5: window + overlap-add with the previous block + new right half, all channels, interleaved output.
+        int rowStride = _ident.BlockSize1 / 2;
+        var dPrev = _dRightHalf[_prevRight];
+        var dNext = _dRightHalf[1 - _prevRight];
+        _overlapKernel(new Index1D(channels * Math.Max(outFrames, halfBlock)),
+            dTd.View, _dWindows.View.SubView(windowOffset, blockSize), dPrev.View, dNext.View,
+            dPcmInterleaved.View, channels, blockSize, prevBlockSize, rowStride);
 
         await _accelerator.SynchronizeAsync();
 
-        // Persist the new right half for the next call.
-        _dPrevRightHalf!.Dispose();
-        _dPrevRightHalf = dNewRight;
+        // The right half just written is the next packet's previous one.
+        _prevRight = 1 - _prevRight;
         _previousBlockSize = blockSize;
-        _previousHalfBlock = halfBlock;
 
         // First packet: no audio output (priming overlap-add).
-        if (!havePrevious) return Array.Empty<float>();
+        if (outFrames == 0) return Array.Empty<float>();
 
         // Read back interleaved PCM.
-        var pcm = await dPcmInterleaved.CopyToHostAsync();
-        return pcm;
+        return await dPcmInterleaved.View.SubView(0, (long)channels * outFrames).CopyToHostAsync();
 
         } // end try
         finally
@@ -491,13 +469,13 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     private readonly record struct CpuBitstream(
         int[]?[] FloorPosteriors, int[] FloorIndexPerChannel,
         float[][] Residues, bool[] FloorOk,
-        VorbisMappingConfig Mapping, int BlockSize);
+        VorbisMappingConfig Mapping, int BlockSize, int WindowOffset);
 
     /// <summary>
     /// CPU helper for v1: parse packet via the existing CPU decoder + return
     /// per-channel floor curves + residue buffers + floor flags + mapping
-    /// (for inverse coupling steps). The multiply + inverse coupling + IMDCT
-    /// + post-IMDCT + interleave steps all run on GPU. The hot path moves to
+    /// (for inverse coupling steps). The inverse coupling + multiply + IMDCT
+    /// + post-IMDCT steps all run on GPU. The hot path moves to
     /// GPU as the Vorbis-Huffman GPU bit-reader keystone primitive lands.
     /// </summary>
     private CpuBitstream DecodeSpectrumOnCpu(ReadOnlyMemory<byte> packet)
@@ -508,6 +486,9 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         int blockSize = header.BlockSize;
         int halfBlock = blockSize / 2;
         int channels = _ident.AudioChannels;
+        int windowOffset = header.IsLongBlock
+            ? _ident.BlockSize0 + ((header.PreviousWindowLong ? 2 : 0) + (header.NextWindowLong ? 1 : 0)) * _ident.BlockSize1
+            : 0;
 
         // Per-channel floor decode (CPU bit-stream + Huffman). The
         // posterior int[] is handed to the GPU floor render kernel below.
@@ -530,9 +511,14 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
             posteriors[ch] = posterior;
         }
 
-        // Residue decode per submap.
+        // Residue decode per submap, after the nonzero vector propagate (sec 4.3.4).
         var doNotDecode = new bool[channels];
         for (int ch = 0; ch < channels; ch++) doNotDecode[ch] = !floorOk[ch];
+        for (int i = 0; i < mapping.CouplingMagnitudeChannels.Length; i++)
+        {
+            int mag = mapping.CouplingMagnitudeChannels[i], ang = mapping.CouplingAngleChannels[i];
+            if (!doNotDecode[mag] || !doNotDecode[ang]) { doNotDecode[mag] = false; doNotDecode[ang] = false; }
+        }
         var residueBuffers = new float[channels][];
         for (int ch = 0; ch < channels; ch++) residueBuffers[ch] = new float[halfBlock];
 
@@ -560,11 +546,11 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
                 subBuffers, subSkip, halfBlock);
         }
 
-        // Floor render, multiply, inverse coupling, IMDCT, and the rest of
+        // Floor render, inverse coupling, multiply, IMDCT, and the rest of
         // the chain now all run on GPU - we hand the raw posteriors +
         // residues + flags + mapping to the caller.
         return new CpuBitstream(
-            posteriors, floorIndexPerChannel, residueBuffers, floorOk, mapping, blockSize);
+            posteriors, floorIndexPerChannel, residueBuffers, floorOk, mapping, blockSize, windowOffset);
     }
 
     /// <summary>Largest codebook dimension count (the residue entry-vector scratch size, at least 1).</summary>
@@ -645,37 +631,26 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     }
 
     /// <summary>
-    /// Per-sample PostImdct kernel: window apply + overlap-add against
-    /// previous right half + save new right half. One thread per
-    /// half-block sample.
+    /// Window + block-switching overlap-add + right-half save for all channels
+    /// (<see cref="VorbisPostImdctGpu.OverlapSwitchingAt"/>). One thread per
+    /// (frame or right-half sample, channel).
     /// </summary>
-    private static void VorbisDecodePostImdctKernel(
+    private static void VorbisDecodeOverlapKernel(
         Index1D index,
         ArrayView<float> td, ArrayView<float> window,
         ArrayView<float> previousRightHalf, ArrayView<float> newRightHalfOut,
-        ArrayView<float> pcmOut, int halfBlockSize)
+        ArrayView<float> pcmOut, int channels, int blockSize, int prevBlockSize, int rowStride)
     {
-        VorbisPostImdctGpu.ProcessAt(td, 0, window, 0, previousRightHalf, 0,
-            newRightHalfOut, 0, pcmOut, 0, halfBlockSize, index.X);
-    }
-
-    /// <summary>
-    /// Per-element interleave kernel: channel-major (channel * numFrames + n)
-    /// -> sample-major (n * channels + channel).
-    /// </summary>
-    private static void VorbisDecodeInterleaveKernel(
-        Index1D index,
-        ArrayView<float> channelMajor, ArrayView<float> interleavedOut,
-        int channels, int numFrames)
-    {
-        VorbisInterleaveOutputGpu.InterleaveAt(channelMajor, 0, interleavedOut, 0,
-            channels, numFrames, index.X);
+        VorbisPostImdctGpu.OverlapSwitchingAt(td, window, previousRightHalf, newRightHalfOut, pcmOut,
+            channels, blockSize, prevBlockSize, rowStride, index.X);
     }
 
     /// <summary>Release GPU resources. Does NOT dispose the accelerator.</summary>
     public void Dispose()
     {
-        _dPrevRightHalf?.Dispose();
+        _dRightHalf[0].Dispose();
+        _dRightHalf[1].Dispose();
+        _dWindows.Dispose();
         _dInverseDb.Dispose();
         _dXListsFlat.Dispose();
         // v2 infrastructure.

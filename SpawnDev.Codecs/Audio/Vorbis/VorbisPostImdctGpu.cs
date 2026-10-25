@@ -63,4 +63,48 @@ public static class VorbisPostImdctGpu
         // Save right half of current as the previous-right-half for next call.
         newRightHalfOut[newRightBase + i] = rightWindowed;
     }
+
+    /// <summary>
+    /// Block-switching overlap-add (Vorbis I sec 4.3.8) at flat index <paramref name="i"/>, for all channels in
+    /// one dispatch of <c>channels * max(outFrames, blockSize / 2)</c> threads. A packet returns the frames from
+    /// the previous block's centre to this block's centre, <c>outFrames = prevBlockSize / 4 + blockSize / 4</c>
+    /// (none for the first packet, <paramref name="prevBlockSize"/> = 0): output frame t is the previous block's
+    /// windowed sample prevBlockSize / 2 + t (its stored right half, zero past it) plus this block's windowed
+    /// sample t - prevBlockSize / 4 + blockSize / 4 (zero before it). Written interleaved. Also stores this
+    /// block's windowed right half for the next packet (into a DIFFERENT buffer than the one read).
+    /// </summary>
+    /// <param name="td">IMDCT outputs, channel-major rows of blockSize.</param>
+    /// <param name="window">This block's window (blockSize, shaped by its neighbours: <see cref="VorbisWindow.Generate"/>).</param>
+    /// <param name="previousRightHalf">Previous block's windowed right halves, rows of <paramref name="rowStride"/>.</param>
+    /// <param name="newRightHalfOut">This block's windowed right halves, rows of <paramref name="rowStride"/>.</param>
+    /// <param name="pcmOut">Interleaved output frames (channels * outFrames).</param>
+    /// <param name="channels">Channel count.</param>
+    /// <param name="blockSize">This block's size.</param>
+    /// <param name="prevBlockSize">Previous block's size, 0 for the first packet.</param>
+    /// <param name="rowStride">Row stride of the right-half buffers (at least blockSize1 / 2).</param>
+    /// <param name="i">Flat thread index.</param>
+    public static void OverlapSwitchingAt(
+        ArrayView<float> td, ArrayView<float> window,
+        ArrayView<float> previousRightHalf, ArrayView<float> newRightHalfOut,
+        ArrayView<float> pcmOut,
+        int channels, int blockSize, int prevBlockSize, int rowStride, int i)
+    {
+        int half = blockSize / 2;
+        int outFrames = prevBlockSize > 0 ? prevBlockSize / 4 + blockSize / 4 : 0;
+        if (i < channels * outFrames)
+        {
+            int t = i / channels;
+            int ch = i - t * channels;
+            int c = t - (prevBlockSize / 4 - blockSize / 4);
+            float v = t < prevBlockSize / 2 ? previousRightHalf[(long)ch * rowStride + t] : 0f;
+            if (c >= 0) v += td[(long)ch * blockSize + c] * window[c];
+            pcmOut[i] = v;
+        }
+        if (i < channels * half)
+        {
+            int ch = i / half;
+            int k = i - ch * half;
+            newRightHalfOut[(long)ch * rowStride + k] = td[(long)ch * blockSize + half + k] * window[half + k];
+        }
+    }
 }

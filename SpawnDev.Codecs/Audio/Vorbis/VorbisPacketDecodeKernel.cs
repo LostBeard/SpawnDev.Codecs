@@ -10,8 +10,8 @@
 // Plans/PLAN-Vorbis-Decoder-V2-GPU-BitStream-Decode.md.
 //
 // Bit-stream decoding is sequential (one GPU thread per packet), so the decode is RESUMABLE: every loop
-// position (phase, channel, submap, pass, partition, member, codeword index inside the partition, the
-// type-2 de-interleave cursor) and the bit reader live in a small device int region (StateInts), and each
+// position (phase, channel, submap, pass, partition, member, codeword index inside the partition) and the
+// bit reader live in a small device int region (StateInts), and each
 // launch of Step does at most StepBudget work units before it stores them and returns. A unit is one loop
 // iteration plus one per bit read plus one per decoded vector element, so no launch grows with the packet
 // (a packet's work grows with its bits, channels and block size: up to 255 channels x 4096 coefficients x
@@ -50,7 +50,7 @@ public sealed class VorbisPacketDecodeSetup
         TAllChildren = 22, TAllLeafToEntry = 23, TChildrenOffsets = 24, TLeafOffsets = 25, TMaxDepths = 26,
         TCodebookParams = 27, TAllMultiplicands = 28, TMultOffsets = 29, TMultLengths = 30,
         TCodebookDimensions = 31, TCodebookEntries = 32, TCodebookLookupTypes = 33, TCodebookQuantvals = 34,
-        TCodebookSequenceP = 35, TableCount = 36;
+        TCodebookSequenceP = 35, TMappingCoupling = 36, TMappingCouplingOffsets = 37, TableCount = 38;
 
     /// <summary>The int pool.</summary>
     public required int[] Ints { get; init; }
@@ -108,6 +108,8 @@ public sealed class VorbisPacketDecodeSetup
         tables[TCodebookLookupTypes] = cb.CodebookLookupTypes;
         tables[TCodebookQuantvals] = cb.CodebookQuantvals;
         tables[TCodebookSequenceP] = cb.CodebookSequenceP;
+        tables[TMappingCoupling] = s.MappingCoupling;
+        tables[TMappingCouplingOffsets] = s.MappingCouplingOffsets;
 
         var starts = new int[TableCount];
         int at = TableCount;
@@ -181,11 +183,10 @@ public static class VorbisPacketDecodeKernel
     /// <summary>State slot holding the phase; <see cref="PhaseDone"/> once the packet is decoded.</summary>
     public const int SPhase = 0;
     private const int SBytePos = 1, SBitPos = 2, SCh = 3, SSub = 4, SPass = 5, SPc = 6, SSubPhase = 7,
-        SMember = 8, SIdx = 9, SDeintCh = 10, SDeintI = 11;
+        SMember = 8, SIdx = 9;
 
     /// <summary>Phases.</summary>
-    public const int PhaseStart = 0, PhaseFloors = 1, PhaseSubmap = 2, PhaseResidue = 3, PhaseDeinterleave = 4,
-        PhaseDone = 5;
+    public const int PhaseStart = 0, PhaseFloors = 1, PhaseSubmap = 2, PhaseResidue = 3, PhaseDone = 4;
 
     /// <summary>Compute the required <c>allIntOut</c> length for the given configuration.</summary>
     public static long ComputeAllIntOutLength(int channels, int maxXListLength)
@@ -197,10 +198,11 @@ public static class VorbisPacketDecodeKernel
 
     /// <summary>
     /// Ints of the <c>intScratch</c> a stream needs: classifications (one per partition, at most halfBlock per
-    /// channel for types 0/1 and channels * halfBlock for type 2) plus the doNotDecode flags (channels ints, at the end).
+    /// channel for types 0/1 and channels * halfBlock for type 2), then the submap's member -> channel map
+    /// (channels ints), then the per-channel no-residue flags (channels ints, at the end).
     /// </summary>
     public static long ComputeIntScratchLength(int channels, int blockSize1)
-        => (long)channels * (blockSize1 / 2) + channels;
+        => (long)channels * (blockSize1 / 2) + 2L * channels;
 
     /// <summary>
     /// One bounded launch of the packet decode (see the file header). Residues are written channel-major with a
@@ -212,7 +214,7 @@ public static class VorbisPacketDecodeKernel
     /// <param name="setupDoubles">The double pool of <see cref="VorbisPacketDecodeSetup"/>.</param>
     /// <param name="allIntOut">Combined int output buffer; layout per <see cref="PacketHeaderOffset"/> + sections.</param>
     /// <param name="residuesFlatOut">[channels * blockSize1 / 2] residue floats, channel-major.</param>
-    /// <param name="intScratch">Classifications + doNotDecode flags (<see cref="ComputeIntScratchLength"/>).</param>
+    /// <param name="intScratch">Classifications, member map and no-residue flags (<see cref="ComputeIntScratchLength"/>).</param>
     /// <param name="entryVecScratch">[max codebook dimensions] residue decode entry vector scratch.</param>
     /// <param name="state">The resumable state (<see cref="StateInts"/> ints).</param>
     /// <param name="sc">Stream scalars.</param>
@@ -233,7 +235,8 @@ public static class VorbisPacketDecodeKernel
         long floorIndexBase = floorOkBase + channels;
         long posteriorsBase = floorIndexBase + channels;
         long errBase = posteriorsBase + (long)channels * sc.MaxXListLength;
-        long doNotDecodeBase = intScratch.Length - channels;
+        long noResidueBase = intScratch.Length - channels;
+        long memberChBase = noResidueBase - channels;
 
         int phase = state[SPhase];
         var r = VorbisBitReaderGpu.Init((int)packet.Length);
@@ -270,6 +273,10 @@ public static class VorbisPacketDecodeKernel
         if (phase == PhaseFloors)
         {
             int ch = state[SCh];
+            // Every floor's class tables are slices of the flat per-floor arrays; its subclass books are a slice of
+            // the per-(floor, class) offsets, starting at the floor's first class (the class counts of the earlier
+            // floors = its ClassDimensions offset).
+            int scbFlat = setupInts[VorbisPacketDecodeSetup.TFloorClassSubclassBooks];
             // At least one floor per launch: every launch makes progress whatever the budget.
             bool go = ch < channels;
             while (go)
@@ -280,7 +287,8 @@ public static class VorbisPacketDecodeKernel
                 allIntOut[floorIndexBase + ch] = floorIdx;
                 int fs = setupInts[VorbisPacketDecodeSetup.TFloorScalars] + floorIdx * 5;
                 int xListLen = setupInts[fs + 3];
-                int scbBase = setupInts[VorbisPacketDecodeSetup.TFloorClassSubclassBooksOffsets];
+                int firstClass = setupInts[setupInts[VorbisPacketDecodeSetup.TFloorClassDimensionsOffsets] + floorIdx];
+                int scbOffsets = setupInts[VorbisPacketDecodeSetup.TFloorClassSubclassBooksOffsets] + firstClass;
                 int yLen = VorbisFloor1DecoderGpu.Decode(
                     ref r, packet,
                     setupInts[fs + 0], setupInts[fs + 1], xListLen,
@@ -288,8 +296,8 @@ public static class VorbisPacketDecodeKernel
                     setupInts, Table(setupInts, VorbisPacketDecodeSetup.TFloorClassDimensions, VorbisPacketDecodeSetup.TFloorClassDimensionsOffsets, floorIdx),
                     setupInts, Table(setupInts, VorbisPacketDecodeSetup.TFloorClassSubclasses, VorbisPacketDecodeSetup.TFloorClassSubclassesOffsets, floorIdx),
                     setupInts, Table(setupInts, VorbisPacketDecodeSetup.TFloorClassMasterbooks, VorbisPacketDecodeSetup.TFloorClassMasterbooksOffsets, floorIdx),
-                    setupInts, Table(setupInts, VorbisPacketDecodeSetup.TFloorClassSubclassBooks, VorbisPacketDecodeSetup.TFloorClassSubclassBooksOffsets, floorIdx),
-                    setupInts, scbBase,
+                    setupInts, scbFlat,
+                    setupInts, scbOffsets,
                     setupInts, setupInts,
                     setupInts, setupInts[VorbisPacketDecodeSetup.TCodebookParams],
                     allIntOut, posteriorsBase + (long)ch * sc.MaxXListLength);
@@ -301,6 +309,26 @@ public static class VorbisPacketDecodeKernel
             state[SCh] = ch;
             if (ch >= channels)
             {
+                // Nonzero vector propagate (Vorbis I sec 4.3.4): a channel decodes no residue when its floor is
+                // unused, unless a coupling step pairs it with a channel whose floor is used (both then decode).
+                for (int c = 0; c < channels; c++)
+                    intScratch[noResidueBase + c] = allIntOut[floorOkBase + c] != 0 ? 0 : 1;
+                int coupling = setupInts[VorbisPacketDecodeSetup.TMappingCoupling];
+                int cplOffsets = setupInts[VorbisPacketDecodeSetup.TMappingCouplingOffsets];
+                int cplStart = setupInts[cplOffsets + mappingIdx];
+                int cplEnd = setupInts[cplOffsets + mappingIdx + 1];
+                for (int k = cplStart; k < cplEnd; k += 2)
+                {
+                    long mag = noResidueBase + setupInts[coupling + k];
+                    long ang = noResidueBase + setupInts[coupling + k + 1];
+                    bool either = (intScratch[mag] == 0) | (intScratch[ang] == 0);
+                    if (either)
+                    {
+                        intScratch[mag] = 0;
+                        intScratch[ang] = 0;
+                    }
+                }
+                work += channels + (cplEnd - cplStart);
                 phase = PhaseSubmap;
                 state[SSub] = 0;
             }
@@ -313,7 +341,6 @@ public static class VorbisPacketDecodeKernel
             int s = state[SSub];
             int residueIdx = 0;
             int members = 0;
-            int firstSubmapChannel = -1;
             if (s < submapCount)
             {
                 residueIdx = setupInts[setupInts[VorbisPacketDecodeSetup.TMappingResidues] + submapBase + s];
@@ -321,9 +348,7 @@ public static class VorbisPacketDecodeKernel
                 {
                     if (setupInts[muxBase + ch] == s)
                     {
-                        if (phase == PhaseSubmap)
-                            intScratch[doNotDecodeBase + members] = allIntOut[floorOkBase + ch] != 0 ? 0 : 1;
-                        if (firstSubmapChannel < 0) firstSubmapChannel = ch;
+                        if (phase == PhaseSubmap) intScratch[memberChBase + members] = ch;
                         members++;
                     }
                 }
@@ -333,8 +358,6 @@ public static class VorbisPacketDecodeKernel
             int residueType = setupInts[rs + 0];
             int partitionSize = setupInts[rs + 3];
             int classbook = setupInts[rs + 5];
-            // Rows of this submap start at its first channel (channels of a submap are contiguous; v1 mapping).
-            long outBase = (long)(firstSubmapChannel < 0 ? 0 : firstSubmapChannel) * halfBlock;
             // Type 2 decodes one interleaved vector of members * halfBlock as a single virtual channel.
             int vlen = residueType == 2 ? members * halfBlock : halfBlock;
             int begin = setupInts[rs + 1];
@@ -355,7 +378,7 @@ public static class VorbisPacketDecodeKernel
                     // Skip the submap when it has no members, every member is do-not-decode, or nothing to read.
                     int anyDecode = 0;
                     for (int m = 0; m < members; m++)
-                        if (intScratch[doNotDecodeBase + m] == 0) anyDecode = 1;
+                        if (intScratch[noResidueBase + intScratch[memberChBase + m]] == 0) anyDecode = 1;
                     bool skip = (members == 0) | (anyDecode == 0) | (nToRead <= 0);
                     if (skip)
                     {
@@ -372,56 +395,17 @@ public static class VorbisPacketDecodeKernel
                     }
                 }
             }
-            else if (phase == PhaseResidue)
+            else
             {
                 int result = ResidueSteps(
                     ref r, packet, setupInts, setupDoubles, sc.CodebookCount,
                     residueType, residueIdx, partitionSize, classbook, actualBegin, partitionsToRead,
-                    residueType == 2 ? 1 : members,
-                    residuesFlatOut, outBase, halfBlock,
-                    intScratch, doNotDecodeBase, entryVecScratch,
+                    members,
+                    residuesFlatOut, halfBlock,
+                    intScratch, memberChBase, noResidueBase, entryVecScratch,
                     state, ref work);
-                // result: 0 = budget spent, 1 = finished, 2 = end of packet (stops this submap, no de-interleave).
+                // result: 0 = budget spent, 1 = finished, 2 = end of packet (stops this submap).
                 if (result != 0)
-                {
-                    bool deinterleave = (result == 1) & (residueType == 2) & (members > 1);
-                    if (deinterleave)
-                    {
-                        state[SDeintCh] = members - 1;
-                        state[SDeintI] = halfBlock - 1;
-                        phase = PhaseDeinterleave;
-                    }
-                    else
-                    {
-                        state[SSub] = s + 1;
-                        phase = PhaseSubmap;
-                    }
-                }
-            }
-            else
-            {
-                // Type 2 de-interleave, in place, from the end: interleaved [i * members + ch] -> row ch.
-                int dch = state[SDeintCh];
-                int di = state[SDeintI];
-                bool go = dch >= 0; // at least one element per launch
-                while (go)
-                {
-                    long src = outBase + (long)di * members + dch;
-                    long dst = outBase + (long)dch * halfBlock + di;
-                    bool add = (intScratch[doNotDecodeBase + dch] == 0) & (src != dst);
-                    if (add) residuesFlatOut[dst] += residuesFlatOut[src];
-                    work++;
-                    di--;
-                    if (di < 0)
-                    {
-                        di = halfBlock - 1;
-                        dch--;
-                    }
-                    go = (dch >= 0) & (work < StepBudget);
-                }
-                state[SDeintCh] = dch;
-                state[SDeintI] = di;
-                if (dch < 0)
                 {
                     state[SSub] = s + 1;
                     phase = PhaseSubmap;
@@ -444,15 +428,18 @@ public static class VorbisPacketDecodeKernel
     /// Advances the residue decode of one submap (Vorbis I sec 8.6.2, the 8-pass partition loop) until the budget
     /// is spent. Flattened order, identical to the nested loops: for pass, for partition pc: (pass 0 and pc a
     /// multiple of the classwords per codeword: one classword per decoding member), then per member the
-    /// partition's codewords. Returns 0 (budget spent), 1 (all passes done) or 2 (end of packet / bad codeword).
+    /// partition's codewords. Member m of the submap is channel intScratch[memberChBase + m]; its residue row
+    /// starts at channel * n. Type 2 decodes the interleaved vector of all members as ONE virtual channel and
+    /// writes its element j straight to member j % members at position j / members (no de-interleave pass).
+    /// Returns 0 (budget spent), 1 (all passes done) or 2 (end of packet / bad codeword).
     /// </summary>
     private static int ResidueSteps(
         ref VorbisBitReaderGpuState r, ArrayView<byte> packet,
         ArrayView<int> pool, ArrayView<double> doubles, int codebookCount,
         int residueType, int residueIdx, int partitionSize, int classbook, int actualBegin, int partitionsToRead,
-        int members,
-        ArrayView<float> outFlat, long outBase, int n,
-        ArrayView<int> intScratch, long doNotDecodeBase, ArrayView<float> entryVec,
+        int submapMembers,
+        ArrayView<float> outFlat, int n,
+        ArrayView<int> intScratch, long memberChBase, long noResidueBase, ArrayView<float> entryVec,
         ArrayView<int> state, ref int work)
     {
         int classifications = pool[pool[VorbisPacketDecodeSetup.TResidueScalars] + residueIdx * 6 + 4];
@@ -466,6 +453,7 @@ public static class VorbisPacketDecodeKernel
         // Type 2 decodes its virtual channel as type 1 and ignores the do-not-decode flags (any member decoding
         // means decode all).
         int partType = type2 ? 1 : residueType;
+        int members = type2 ? 1 : submapMembers;
 
         int pass = state[SPass];
         int pc = state[SPc];
@@ -505,7 +493,7 @@ public static class VorbisPacketDecodeKernel
                     sub = 1;
                     m = 0;
                 }
-                else if ((!type2) & (intScratch[doNotDecodeBase + m] != 0))
+                else if ((!type2) & (intScratch[noResidueBase + intScratch[memberChBase + m]] != 0))
                 {
                     m++;
                     work++;
@@ -541,7 +529,7 @@ public static class VorbisPacketDecodeKernel
                 idx = 0;
                 work++;
             }
-            else if ((!type2) & (intScratch[doNotDecodeBase + m] != 0))
+            else if ((!type2) & (intScratch[noResidueBase + intScratch[memberChBase + m]] != 0))
             {
                 m++;
                 work++;
@@ -590,18 +578,33 @@ public static class VorbisPacketDecodeKernel
                                 doubles[bookIndex], doubles[codebookCount + bookIndex],
                                 pool[pool[VorbisPacketDecodeSetup.TCodebookSequenceP] + bookIndex],
                                 entryVec, 0);
-                            long partBase = outBase + (long)m * n + actualBegin + (long)pc * partitionSize;
-                            if (partType == 0)
+                            // Offset of the codeword's first element in the (virtual) channel's vector.
+                            int partStart = actualBegin + pc * partitionSize;
+                            if (type2)
                             {
                                 for (int d = 0; d < dims; d++)
-                                    outFlat[partBase + idx + (long)d * step] += entryVec[d];
-                                idx++;
+                                {
+                                    int j = partStart + idx + d;
+                                    long row = intScratch[memberChBase + j % submapMembers];
+                                    outFlat[row * n + j / submapMembers] += entryVec[d];
+                                }
+                                idx += dims;
                             }
                             else
                             {
-                                for (int d = 0; d < dims; d++)
-                                    outFlat[partBase + idx + d] += entryVec[d];
-                                idx += dims;
+                                long partBase = (long)intScratch[memberChBase + m] * n + partStart;
+                                if (partType == 0)
+                                {
+                                    for (int d = 0; d < dims; d++)
+                                        outFlat[partBase + idx + (long)d * step] += entryVec[d];
+                                    idx++;
+                                }
+                                else
+                                {
+                                    for (int d = 0; d < dims; d++)
+                                        outFlat[partBase + idx + d] += entryVec[d];
+                                    idx += dims;
+                                }
                             }
                         }
                     }

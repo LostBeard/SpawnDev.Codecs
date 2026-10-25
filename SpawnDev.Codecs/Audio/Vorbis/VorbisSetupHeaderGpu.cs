@@ -36,6 +36,8 @@
 //     - MappingFloors         : int[] - per-mapping per-submap floor index
 //     - MappingResidues       : int[] - per-mapping per-submap residue index
 //     - MappingSubmapOffsets  : int[] - per-mapping offset into MappingFloors+MappingResidues
+//     - MappingCoupling       : int[] - per-mapping coupling steps as (magnitude, angle) pairs
+//     - MappingCouplingOffsets: int[] - per-mapping offset into MappingCoupling
 //
 //   Modes:
 //     - ModeBlockFlags        : byte[] - 1 byte per mode (BlockFlag bit packed in bit 0)
@@ -103,7 +105,7 @@ public sealed record VorbisSetupHeaderFlat
 
     // ---- Mappings ----
 
-    /// <summary>Per-mapping 1 scalar: Submaps. (Coupling not yet supported in v1 mono decoder.)</summary>
+    /// <summary>Per-mapping 1 scalar: Submaps (the coupling steps are in <see cref="MappingCoupling"/>).</summary>
     public required int[] MappingScalars { get; init; }
 
     /// <summary>Concat of per-channel Mux across mappings.</summary>
@@ -117,6 +119,11 @@ public sealed record VorbisSetupHeaderFlat
     public required int[] MappingResidues { get; init; }
     /// <summary>Per-mapping offset into MappingFloors / MappingResidues (parallel).</summary>
     public required int[] MappingSubmapOffsets { get; init; }
+
+    /// <summary>Concat of per-mapping coupling steps as (magnitude, angle) channel pairs.</summary>
+    public required int[] MappingCoupling { get; init; }
+    /// <summary>Per-mapping offset into MappingCoupling (length mappings + 1; steps = (next - this) / 2).</summary>
+    public required int[] MappingCouplingOffsets { get; init; }
 
     // ---- Modes ----
 
@@ -167,6 +174,8 @@ public static class VorbisSetupHeaderGpu
             MappingFloors = ConcatInt(setup.Mappings, m => m.SubmapFloor),
             MappingResidues = ConcatInt(setup.Mappings, m => m.SubmapResidue),
             MappingSubmapOffsets = OffsetsInt(setup.Mappings, m => m.SubmapFloor.Length),
+            MappingCoupling = ConcatInt(setup.Mappings, CouplingPairs),
+            MappingCouplingOffsets = OffsetsInt(setup.Mappings, m => 2 * m.CouplingMagnitudeChannels.Length),
 
             // Modes
             ModeBlockFlags = BuildModeBlockFlags(setup.Modes),
@@ -211,6 +220,17 @@ public static class VorbisSetupHeaderGpu
         for (int i = 0; i < mappings.Length; i++)
         {
             arr[i] = mappings[i].Submaps;
+        }
+        return arr;
+    }
+
+    private static int[] CouplingPairs(VorbisMappingConfig m)
+    {
+        var arr = new int[2 * m.CouplingMagnitudeChannels.Length];
+        for (int i = 0; i < m.CouplingMagnitudeChannels.Length; i++)
+        {
+            arr[2 * i] = m.CouplingMagnitudeChannels[i];
+            arr[2 * i + 1] = m.CouplingAngleChannels[i];
         }
         return arr;
     }

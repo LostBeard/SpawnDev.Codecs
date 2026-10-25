@@ -31,7 +31,8 @@ public static class VorbisFloor1DecoderGpu
     ///   - the number of Y values written to <paramref name="yOut"/>
     ///     (= xList length when the floor is non-silent)
     ///   - 0 when the packet signalled a silent floor (nonzero flag = 0;
-    ///     caller's yOut buffer is left untouched).
+    ///     caller's yOut buffer is left untouched) or ended inside the floor
+    ///     (the floor is then unused, as in libvorbis).
     /// </summary>
     /// <param name="state">Vorbis bit reader state (mutated).</param>
     /// <param name="data">Packet bytes.</param>
@@ -82,6 +83,9 @@ public static class VorbisFloor1DecoderGpu
                          : multiplier == 2 ? 7
                          : multiplier == 3 ? 7
                          : 6;
+        // End of packet anywhere in the floor makes the floor unused (libvorbis floor1_inverse1 'eop'):
+        // eop latches and the result is 0.
+        int eop = VorbisBitReaderGpu.BitsRemaining(in state) < 2 * endpointBits ? 1 : 0;
         yOut[yOutBase + 0] = (int)VorbisBitReaderGpu.ReadBits(ref state, data, endpointBits);
         yOut[yOutBase + 1] = (int)VorbisBitReaderGpu.ReadBits(ref state, data, endpointBits);
 
@@ -101,6 +105,7 @@ public static class VorbisFloor1DecoderGpu
                 cval = DecodeBook(ref state, data,
                     huffmanChildren, huffmanLeafToEntry, codebookParams, codebookParamsBase,
                     masterbook);
+                if (cval < 0) { eop = 1; cval = 0; }
             }
 
             // Subclass books slice for this class.
@@ -111,21 +116,20 @@ public static class VorbisFloor1DecoderGpu
             {
                 int book = classSubclassBooksFlat[classSlice + (cval & csub)];
                 cval >>= cbits;
+                int y = 0;
                 if (book >= 0)
                 {
-                    yOut[yOutBase + yIndex] = DecodeBook(ref state, data,
+                    y = DecodeBook(ref state, data,
                         huffmanChildren, huffmanLeafToEntry, codebookParams, codebookParamsBase,
                         book);
+                    if (y < 0) { eop = 1; y = 0; }
                 }
-                else
-                {
-                    yOut[yOutBase + yIndex] = 0;
-                }
+                yOut[yOutBase + yIndex] = y;
                 yIndex++;
             }
         }
 
-        return xListLen;
+        return eop != 0 ? 0 : xListLen;
     }
 
     /// <summary>
