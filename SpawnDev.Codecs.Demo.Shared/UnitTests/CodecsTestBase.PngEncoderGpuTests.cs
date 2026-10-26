@@ -192,6 +192,7 @@ public abstract partial class CodecsTestBase
     private async Task<byte[]> EncodePngManagedAsync(byte[] rgba, int w, int h, PngEncodeOptions? options)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new PngEncoderGpu(acc);
@@ -327,6 +328,7 @@ public abstract partial class CodecsTestBase
     public async Task PngEncoderGpu_TextChunks_RoundTrip_AndHostReaderSeesThem()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new PngEncoderGpu(acc);
@@ -358,6 +360,7 @@ public abstract partial class CodecsTestBase
     public async Task PngEncoderGpu_ArrayViewOverload_WritesCallerBuffer_AndGpuDecoderReadsItBack()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new PngEncoderGpu(acc);
@@ -405,6 +408,7 @@ public abstract partial class CodecsTestBase
         AssertPixelsEqual(src, png.Rgba8, "1500x900 host reader");
 
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new PngDecoderGpu(acc);
@@ -424,6 +428,7 @@ public abstract partial class CodecsTestBase
         var src = PicturePixels(w, h, 0x5E0C, opaque: false, gray: false);
         var options = new PngEncodeOptions { CompressionLevel = 3, BlockSize = 1 << 20 };
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var normal = new PngEncoderGpu(acc);

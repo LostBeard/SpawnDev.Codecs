@@ -52,6 +52,7 @@ public abstract partial class CodecsTestBase
     private async Task AssertInflateMatchesAsync(byte[] raw, CompressionLevel level, string what)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             byte[] zlib = ZlibCompress(raw, level);
@@ -93,6 +94,7 @@ public abstract partial class CodecsTestBase
     public async Task InflateGpu_FixedHuffmanVector_Hello()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // zlib.compress(b"hello"): a fixed-Huffman block.
@@ -108,6 +110,7 @@ public abstract partial class CodecsTestBase
     public async Task InflateGpu_EmptyStream()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // zlib.compress(b""): a fixed block holding only end-of-block, Adler-32 of nothing = 1.
@@ -166,6 +169,7 @@ public abstract partial class CodecsTestBase
     public async Task InflateGpu_BadAdlerTrailer_ReportsAdlerMismatch()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             byte[] raw = StructuredData(5_000, 0x1F07);
@@ -186,6 +190,7 @@ public abstract partial class CodecsTestBase
     public async Task InflateGpu_TruncatedInput_ReportsInputTruncated()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             byte[] raw = StructuredData(20_000, 0x1F08);
@@ -201,6 +206,7 @@ public abstract partial class CodecsTestBase
     public async Task InflateGpu_BadHeader_ReportsBadZlibHeader()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             byte[] zlib = ZlibCompress(StructuredData(1_000, 0x1F09), CompressionLevel.Optimal);
@@ -215,6 +221,7 @@ public abstract partial class CodecsTestBase
     public async Task InflateGpu_OutputCapacityTooSmall_ReportsOutputOverflow()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             byte[] raw = StructuredData(10_000, 0x1F0A);
@@ -240,6 +247,7 @@ public abstract partial class CodecsTestBase
     public async Task InflateGpu_LargeStream_BadAdlerTrailer_ReportsAdlerMismatch()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             byte[] raw = StructuredData(1_500_000, 0x1F0D);

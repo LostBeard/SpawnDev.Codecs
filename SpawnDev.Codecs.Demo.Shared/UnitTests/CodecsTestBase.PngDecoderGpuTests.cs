@@ -69,6 +69,7 @@ public abstract partial class CodecsTestBase
     public async Task PngDecoderGpu_AllFixtures_Rgba8_MatchTruth_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new PngDecoderGpu(acc);
@@ -114,6 +115,7 @@ public abstract partial class CodecsTestBase
     public async Task PngDecoderGpu_AllFixtures_Rgba16_MatchTruth()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new PngDecoderGpu(acc);
@@ -147,6 +149,7 @@ public abstract partial class CodecsTestBase
     public async Task PngDecoderGpu_ReadInfo_ReportsHeaderFacts()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new PngDecoderGpu(acc);
@@ -170,6 +173,7 @@ public abstract partial class CodecsTestBase
     private async Task AssertPngRejectedAsync(byte[] file, string expectedMessagePart, string what)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new PngDecoderGpu(acc);
@@ -251,6 +255,7 @@ public abstract partial class CodecsTestBase
     private async Task AssertPngMatchesHostReaderAsync(byte[] png, bool sixteen, string what)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var host = ReadPngOnHost(png);

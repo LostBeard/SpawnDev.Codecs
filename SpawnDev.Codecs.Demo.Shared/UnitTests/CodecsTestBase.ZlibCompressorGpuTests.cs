@@ -40,6 +40,7 @@ public abstract partial class CodecsTestBase
     private async Task AssertZlibRoundTripAsync(byte[] raw, int level, int blockSize, string what, double? maxRatio = null)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var comp = new ZlibCompressorGpu(acc, blockSize, threadsPerWave: 4);
@@ -106,6 +107,30 @@ public abstract partial class CodecsTestBase
     public async Task ZlibCompressorGpu_RepeatedByte_OverlappingMatches() =>
         await AssertZlibRoundTripAsync(Enumerable.Repeat((byte)0x7A, 200_000).ToArray(), 2, 65536, "repeated byte", 0.01);
 
+    /// <summary>
+    /// Level 4 = Huffman only (zlib Z_HUFFMAN_ONLY): bytes with a skewed distribution and no repeats worth matching (like the
+    /// exponent plane of BF16 weights). .NET's zlib must inflate it exactly, and the size must be within 1 % (+ block headers)
+    /// of an optimal Huffman code of every 64 KiB block, built in the test from the data (the order-0 entropy is NOT a
+    /// bound a Huffman coder can reach on skewed data): stored blocks or a broken code-length builder fail it.
+    /// </summary>
+    [TestMethod(Timeout = 600000)]
+    public async Task ZlibCompressorGpu_HuffmanOnly_Level4_NearOptimalHuffman()
+    {
+        var rng = new Random(0x4F11);
+        var raw = new byte[1_000_000];
+        for (int i = 0; i < raw.Length; i++)
+        {
+            // Two-sided geometric around 120 (exponent-like): ~3 bits of entropy per byte.
+            int k = 0;
+            while (rng.Next(3) == 0 && k < 40) k++;
+            raw[i] = (byte)(rng.Next(2) == 0 ? 120 + k : 119 - k);
+        }
+        int blocks = (raw.Length + 65535) / 65536;
+        double optimal = PlaneChunkHuffmanBytes(raw, 1); // 64 KiB chunks = the 65536-byte blocks below
+        await AssertZlibRoundTripAsync(raw, DeflateGpu.LevelHuffmanOnly, 65536, "Huffman-only, skewed bytes",
+            maxRatio: (optimal * 1.01 + blocks * 120 + 6) / raw.Length);
+    }
+
     [TestMethod]
     public async Task ZlibCompressorGpu_IncompressibleRandom_FallsBackToStored()
     {
@@ -119,6 +144,7 @@ public abstract partial class CodecsTestBase
     public async Task ZlibCompressorGpu_ArrayViewOverload_WritesCallerBuffer()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var comp = new ZlibCompressorGpu(acc, 8192, 4);
@@ -156,6 +182,7 @@ public abstract partial class CodecsTestBase
     public async Task ZlibCompressorGpu_Level3_SmallCompareBudget_SameBytes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             foreach (var (name, raw) in new[] { ("text", TextData(400_000, 12)), ("structured", StructuredData(300_000, 0x2B06)) })

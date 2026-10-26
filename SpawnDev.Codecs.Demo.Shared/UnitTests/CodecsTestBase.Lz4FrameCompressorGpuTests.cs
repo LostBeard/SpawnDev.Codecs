@@ -25,6 +25,12 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
+    /// <summary>
+    /// The LZ4 kernels scatter: one thread writes a whole block (compressor slots, decoded blocks, the header walk). WebGL
+    /// stores only at a thread's own slot, so these tests do not run there.
+    /// </summary>
+    private static readonly AcceleratorRequirements Lz4Requirements = new() { RequiresScatterStores = true };
+
     private const string Lz4FixturePrefix = "SpawnDev.Codecs.Demo.Shared.TestData.Lz4.";
 
     private static readonly string[] Lz4Words = { "the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog", "pack", "my", "box",
@@ -140,6 +146,7 @@ public abstract partial class CodecsTestBase
     private async Task AssertLz4CasesAsync(Func<Lz4Case, bool> which, int waveBlocks, int minCases)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, Lz4Requirements);
         try
         {
             using var comp = new Lz4FrameCompressorGpu(acc, waveBlocks);
@@ -172,6 +179,7 @@ public abstract partial class CodecsTestBase
     public async Task Lz4FrameCompressorGpu_ManagedOverload_MatchesLiblz4()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, Lz4Requirements);
         try
         {
             using var comp = new Lz4FrameCompressorGpu(acc, 8);
@@ -190,6 +198,7 @@ public abstract partial class CodecsTestBase
         if (!OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, Lz4Requirements);
         try
         {
             using var comp = new Lz4FrameCompressorGpu(acc, 8);
@@ -215,6 +224,7 @@ public abstract partial class CodecsTestBase
     public async Task Lz4FrameCompressorGpu_RejectsBadArguments()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, Lz4Requirements);
         try
         {
             using var comp = new Lz4FrameCompressorGpu(acc, 2);

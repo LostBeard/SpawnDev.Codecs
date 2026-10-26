@@ -181,7 +181,7 @@ internal sealed class DeflateKernels : IDisposable
         int level = prm[PrmLevel];
         // Greedy parses are bounded by their positions alone (at most 4 * chain compares each): only the lazy one
         // stops on compares, and only its host loop checks for unfinished parses.
-        int compareBudget = level >= 3 ? prm[PrmCompareBudget] : int.MaxValue;
+        int compareBudget = level == 3 ? prm[PrmCompareBudget] : int.MaxValue;
         DeflateGpu.ParseStep(data, block * bs, BlockLength(prm, block), level, scratch, idx.X * prm[PrmScratchPer], bs,
             DeflateGpu.ParseChunk, compareBudget);
     }
@@ -390,7 +390,7 @@ internal sealed class DeflateBlockRunner : IDisposable
                     Kernels.RunParse(data, _scratch.View, _prm.View, first, count);
                     await pacer.LaunchedAsync();
                 }
-                if (level >= 3)
+                if (level == 3)
                 {
                     // Lazy matching can stop a parse launch on its compare budget before ParseChunk positions.
                     bool pending = true;
@@ -469,13 +469,13 @@ public sealed class ZlibCompressorGpu : IDisposable
     /// Compress <paramref name="length"/> bytes that are on the accelerator into a zlib stream in
     /// <paramref name="output"/> (at least <see cref="GetMaxCompressedSize"/> bytes). Returns the stream length.
     /// </summary>
-    /// <param name="level">0 = stored, 1 = fast, 2 = default, 3 = best (lazy matching).</param>
+    /// <param name="level">0 = stored, 1 = fast, 2 = default, 3 = best (lazy matching), 4 = Huffman only (<see cref="DeflateGpu.LevelHuffmanOnly"/>).</param>
     public async Task<int> CompressAsync(
         ArrayView1D<byte, Stride1D.Dense> data, int length,
         ArrayView1D<byte, Stride1D.Dense> output, int level = 2)
     {
         if (length < 0 || length > data.Length) throw new ArgumentOutOfRangeException(nameof(length));
-        if (level < 0 || level > 3) throw new ArgumentOutOfRangeException(nameof(level));
+        if (level < 0 || level > DeflateGpu.LevelHuffmanOnly) throw new ArgumentOutOfRangeException(nameof(level));
         long maxOut = GetMaxCompressedSize(length, _blockSize);
         if (output.Length < maxOut)
             throw new ArgumentException($"output must hold {maxOut} bytes.", nameof(output));

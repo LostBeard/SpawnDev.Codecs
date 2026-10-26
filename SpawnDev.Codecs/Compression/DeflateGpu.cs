@@ -51,6 +51,13 @@ public static class DeflateGpu
     public const int WindowSize = 32768;
     /// <summary>Longest match.</summary>
     public const int MaxMatch = 258;
+    /// <summary>
+    /// Level of a Huffman-only block (zlib's Z_HUFFMAN_ONLY strategy): every byte a literal, no LZ77, dynamic Huffman codes
+    /// of the byte frequencies (or stored when that is smaller). The right coder for data whose redundancy is only in the
+    /// byte distribution, e.g. a byte plane of float weights.
+    /// </summary>
+    public const int LevelHuffmanOnly = 4;
+
     /// <summary>Largest allowed block size in input bytes (distances must fit the window).</summary>
     public const int MaxBlockSize = 1 << 20;
 
@@ -416,7 +423,8 @@ public static class DeflateGpu
     /// Compress input bytes [<paramref name="start"/>, <paramref name="start"/> + <paramref name="len"/>) of
     /// <paramref name="data"/> into <paramref name="o"/> at <paramref name="outStart"/> (at most
     /// <paramref name="outCap"/> bytes). Returns the output byte count, or -1 when the slot was too small.
-    /// <paramref name="level"/>: 0 = stored only, 1 = greedy (chain 8), 2 = greedy (chain 32), 3 = lazy (chain 64).
+    /// <paramref name="level"/>: 0 = stored only, 1 = greedy (chain 8), 2 = greedy (chain 32), 3 = lazy (chain 64),
+    /// <see cref="LevelHuffmanOnly"/> = literals only.
     /// The whole block in one call (one thread); the kernels run the same phases as bounded launches.
     /// </summary>
     public static int CompressBlock(
@@ -475,8 +483,9 @@ public static class DeflateGpu
         int st = tail + StateOff;
         if (s[st + StPhase] != PhaseParse) return;
 
+        bool huffmanOnly = level == LevelHuffmanOnly;
         int maxChain = level == 1 ? 8 : (level == 2 ? 32 : 64);
-        bool lazy = level >= 3;
+        bool lazy = level == 3;
         int niceLen = level == 1 ? 32 : (level == 2 ? 128 : 258);
 
         int pos = s[st + StPos];
@@ -490,6 +499,13 @@ public static class DeflateGpu
         bool going = pos < posLimit;
         while (going)
         {
+            if (huffmanOnly)
+            {
+                n = AddLiteral(s, tokAt, tail, n, data[start + pos]);
+                pos++;
+                going = pos < posLimit;
+                continue;
+            }
             int found = FindMatch(data, start, pos, len, s, headAt, prevAt, maxChain, niceLen, ref compares);
             int bestLen = found >> 16;
             int bestDist = found & 0xFFFF;

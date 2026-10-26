@@ -70,6 +70,7 @@ public abstract partial class CodecsTestBase
     public async Task Lz4FrameDecompressorGpu_Liblz4Frames_AllConfigurations_DecodeToTheContent()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, Lz4Requirements);
         try
         {
             using var dec = new Lz4FrameDecompressorGpu(acc);
@@ -90,6 +91,7 @@ public abstract partial class CodecsTestBase
     public async Task Lz4FrameDecompressorGpu_DamagedFrames_RefusedWithTheReason()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, Lz4Requirements);
         try
         {
             using var dec = new Lz4FrameDecompressorGpu(acc);
@@ -127,6 +129,7 @@ public abstract partial class CodecsTestBase
     public async Task Lz4FrameDecompressorGpu_CompressorFixtures_DecodeToTheirInputs()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, Lz4Requirements);
         try
         {
             using var dec = new Lz4FrameDecompressorGpu(acc);
@@ -147,6 +150,7 @@ public abstract partial class CodecsTestBase
     public async Task Lz4Frame_RoundTrip40MB_OnTheAccelerator()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, Lz4Requirements);
         try
         {
             using var comp = new Lz4FrameCompressorGpu(acc);
@@ -169,6 +173,7 @@ public abstract partial class CodecsTestBase
     public async Task Lz4FrameDecompressorGpu_ManagedOverload_AndOutputTooSmall()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, Lz4Requirements);
         try
         {
             using var dec = new Lz4FrameDecompressorGpu(acc);
@@ -195,6 +200,7 @@ public abstract partial class CodecsTestBase
         if (!OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, Lz4Requirements);
         try
         {
             using var dec = new Lz4FrameDecompressorGpu(acc);

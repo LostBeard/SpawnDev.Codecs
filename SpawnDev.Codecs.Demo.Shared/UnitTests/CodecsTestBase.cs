@@ -52,6 +52,14 @@ public abstract partial class CodecsTestBase : IDisposable
     }
 
     /// <summary>
+    /// What a SERIAL stream coder needs (inflate, deflate, PNG, LZ4 and the entropy coders): one thread walks a whole
+    /// stream and writes everything it decodes or encodes, i.e. many stores per thread at computed positions. WebGL
+    /// (Transform Feedback) captures a thread's store only at its own slot, so those kernels cannot run there; a test of
+    /// one declares it with <c>RequireFeatures(acc, SerialStreamKernels)</c> and is skipped on WebGL with this reason.
+    /// </summary>
+    protected static readonly AcceleratorRequirements SerialStreamKernels = new() { RequiresScatterStores = true };
+
+    /// <summary>
     /// Throw <see cref="UnsupportedTestException"/> if the supplied accelerator's
     /// backend cannot satisfy the requirements. Use at the top of any test whose
     /// kernels need features not available on every backend (atomics, shared

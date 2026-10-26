@@ -178,19 +178,23 @@ public sealed class ShuffleFilterGpu : IDisposable
         for (int offset = 0; offset < length; offset += LaunchBytes)
         {
             int count = Math.Min(LaunchBytes, length - offset);
+            // Each launch gets the destination from its own first byte: thread idx stores dst[idx], its own slot
+            // (WebGL's Transform Feedback captures a thread's store only there).
+            var part = dst.SubView(offset, count);
             switch (op)
             {
-                case Op.Shuffle: _shuffle(count, src, dst, elementSize, block, length, offset); break;
-                case Op.Unshuffle: _unshuffle(count, src, dst, elementSize, block, length, offset); break;
-                case Op.BitShuffle: _bitShuffle(count, src, dst, elementSize, block, length, offset); break;
-                default: _bitUnshuffle(count, src, dst, elementSize, block, length, offset); break;
+                case Op.Shuffle: _shuffle(count, src, part, elementSize, block, length, offset); break;
+                case Op.Unshuffle: _unshuffle(count, src, part, elementSize, block, length, offset); break;
+                case Op.BitShuffle: _bitShuffle(count, src, part, elementSize, block, length, offset); break;
+                default: _bitUnshuffle(count, src, part, elementSize, block, length, offset); break;
             }
             await _pacer.LaunchedAsync();
         }
     }
 
     // ------------------------------------------------------------------
-    // Kernels: one thread per output byte o = offset + idx (a gather; every thread stores only dst[o]).
+    // Kernels: one thread per output byte o = offset + idx (a gather). dst is the launch's part of the output (it starts at
+    // byte offset), so every thread stores only dst[idx]: its own slot on every backend, WebGL included.
     // ------------------------------------------------------------------
 
     private static void ShuffleKernel(Index1D idx, ArrayView<byte> src, ArrayView<byte> dst, int elementSize, int block, int length, int offset)
@@ -205,7 +209,7 @@ public sealed class ShuffleFilterGpu : IDisposable
             int i = o - j * elements;
             s = i * elementSize + j;
         }
-        dst[o] = src[s];
+        dst[idx.X] = src[s];
     }
 
     private static void UnshuffleKernel(Index1D idx, ArrayView<byte> src, ArrayView<byte> dst, int elementSize, int block, int length, int offset)
@@ -220,7 +224,7 @@ public sealed class ShuffleFilterGpu : IDisposable
             int j = o - i * elementSize;
             s = j * elements + i;
         }
-        dst[o] = src[s];
+        dst[idx.X] = src[s];
     }
 
     /// <summary>Byte offset of the bitshuffle block (full, or the last rounded-down one) holding output byte <paramref name="o"/>.</summary>
@@ -272,7 +276,7 @@ public sealed class ShuffleFilterGpu : IDisposable
             for (int k = 0; k < 8; k++)
                 v |= ((src[at + k * elementSize] >> b) & 1) << k;
         }
-        dst[o] = (byte)v;
+        dst[idx.X] = (byte)v;
     }
 
     private static void BitUnshuffleKernel(Index1D idx, ArrayView<byte> src, ArrayView<byte> dst, int elementSize, int block, int length, int offset)
@@ -295,7 +299,7 @@ public sealed class ShuffleFilterGpu : IDisposable
             for (int b = 0; b < 8; b++)
                 v |= ((src[at + b * rowBytes] >> k) & 1) << b;
         }
-        dst[o] = (byte)v;
+        dst[idx.X] = (byte)v;
     }
 
     public void Dispose()
