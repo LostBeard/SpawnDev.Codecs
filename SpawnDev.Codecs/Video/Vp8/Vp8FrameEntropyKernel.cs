@@ -310,9 +310,6 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
         // Probe slices in coefProbsByType. Block types: 0=Y_no_DC,
         // 1=Y2, 2=UV, 3=Y_with_DC.
         const int probsPerType = 8 * 33;
-        var probsY4 = coefProbsByType.SubView(0L * probsPerType, probsPerType);
-        var probsY2 = coefProbsByType.SubView(1L * probsPerType, probsPerType);
-        var probsUv = coefProbsByType.SubView(2L * probsPerType, probsPerType);
 
         Vp8BoolEncoderGpuState p0State;
         Vp8BoolEncoderGpuState tpState;
@@ -336,17 +333,16 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
             tpState = Vp8BoolEncoderGpu.Load(st, StTp);
         }
 
-        // Per-row left context (9 cells); reset per row, carried across steps in st[StLeft ..].
-        int leftY4_0 = st[StLeft + 0], leftY4_1 = st[StLeft + 1], leftY4_2 = st[StLeft + 2], leftY4_3 = st[StLeft + 3];
-        int leftU_0 = st[StLeft + 4], leftU_1 = st[StLeft + 5];
-        int leftV_0 = st[StLeft + 6], leftV_1 = st[StLeft + 7];
-        int leftY2 = st[StLeft + 8];
-
         // Mode probs read once into registers.
         byte kfYProb0 = constsExtended[56];
         byte kfYProb1 = constsExtended[57];
         byte kfYProb2 = constsExtended[58];
         byte kfUvProb0 = constsExtended[59];
+
+        // One block's 16 coefficients, copied from its plane so that the block coder below has ONE call site (inlined
+        // once). Calling it per block type (Y2, 16 x Y, 4 x U, 4 x V) inlined it 25 times: a 181k-line WGSL function
+        // whose module step ran Chrome's GPU process past 6 GB.
+        var block = LocalMemory.Allocate<short>(16);
 
         int mbCount = mbCols * mbRows;
         int mbIdx = st[StNextMb];
@@ -359,10 +355,8 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
             int mbCol = mbIdx - mbRow * mbCols;
             if (mbCol == 0)
             {
-                leftY4_0 = 0; leftY4_1 = 0; leftY4_2 = 0; leftY4_3 = 0;
-                leftU_0 = 0; leftU_1 = 0;
-                leftV_0 = 0; leftV_1 = 0;
-                leftY2 = 0;
+                // Left non-zero contexts (9 cells: Y rows 0..3, U rows 0..1, V rows 0..1, Y2) reset per row.
+                for (int c = 0; c < 9; c++) st[StLeft + c] = 0;
             }
 
             long aboveBase = (long)mbCol * 9;
@@ -375,100 +369,50 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
             // 2. Encode UV mode = DcPred (single bit 0).
             Vp8BoolEncoderGpu.EncodeBool(ref p0State, partition0Out, 0, kfUvProb0);
 
-            // 3. Y2 (block type 1, firstCoef=0).
-            int y2Ctx = aboveCtx[aboveBase + 8] + leftY2;
-            long y2Base = (long)mbIdx * 16;
-            int y2Eob = Vp8CoefBlockEncoderGpu.Encode(
-                ref tpState, tokenP0Out, probsY2, constsExtended,
-                y2Ctx, 0, y2Coefs.SubView(y2Base, 16));
-            int y2HasCoef = y2Eob > 0 ? 1 : 0;
-            aboveCtx[aboveBase + 8] = (byte)y2HasCoef;
-            leftY2 = y2HasCoef;
-
-            // 4. Y4 16 blocks (block type 0, firstCoef=1).
-            long y4McBase = (long)mbIdx * 256;
-            for (int by = 0; by < 4; by++)
+            // 3. The 25 coefficient blocks in bitstream order: Y2 (type 1, first coefficient 0), the 16 Y blocks in
+            //    raster order (type 0, first coefficient 1), the 4 U blocks, the 4 V blocks (type 2, first coefficient 0).
+            //    Context cells: above 0..3 = Y columns, 4..5 = U columns, 6..7 = V columns, 8 = Y2; left the same by rows.
+            for (int b = 0; b < 25; b++)
             {
-                for (int bx = 0; bx < 4; bx++)
+                int kind, aboveIdx, leftIdx, firstCoef, probType;
+                long src;
+                if (b == 0)
                 {
-                    int blockIdxInMb = by * 4 + bx;
-                    int aboveVal;
-                    if (bx == 0) aboveVal = aboveCtx[aboveBase + 0];
-                    else if (bx == 1) aboveVal = aboveCtx[aboveBase + 1];
-                    else if (bx == 2) aboveVal = aboveCtx[aboveBase + 2];
-                    else aboveVal = aboveCtx[aboveBase + 3];
-
-                    int leftVal;
-                    if (by == 0) leftVal = leftY4_0;
-                    else if (by == 1) leftVal = leftY4_1;
-                    else if (by == 2) leftVal = leftY4_2;
-                    else leftVal = leftY4_3;
-
-                    int ctx = aboveVal + leftVal;
-                    int eob = Vp8CoefBlockEncoderGpu.Encode(
-                        ref tpState, tokenP0Out, probsY4, constsExtended,
-                        ctx, 1,
-                        y4Coefs.SubView(y4McBase + (long)blockIdxInMb * 16, 16));
-                    int hasCoef = eob > 0 ? 1 : 0;
-
-                    if (bx == 0) aboveCtx[aboveBase + 0] = (byte)hasCoef;
-                    else if (bx == 1) aboveCtx[aboveBase + 1] = (byte)hasCoef;
-                    else if (bx == 2) aboveCtx[aboveBase + 2] = (byte)hasCoef;
-                    else aboveCtx[aboveBase + 3] = (byte)hasCoef;
-
-                    if (by == 0) leftY4_0 = hasCoef;
-                    else if (by == 1) leftY4_1 = hasCoef;
-                    else if (by == 2) leftY4_2 = hasCoef;
-                    else leftY4_3 = hasCoef;
+                    kind = 0; aboveIdx = 8; leftIdx = 8; firstCoef = 0; probType = 1;
+                    src = (long)mbIdx * 16;
                 }
-            }
-
-            // 5. U 4 blocks (block type 2, firstCoef=0).
-            long uMcBase = (long)mbIdx * 4 * 16;
-            for (int by = 0; by < 2; by++)
-            {
-                for (int bx = 0; bx < 2; bx++)
+                else if (b < 17)
                 {
-                    int blockIdx = by * 2 + bx;
-                    int aboveVal = (bx == 0)
-                        ? (int)aboveCtx[aboveBase + 4]
-                        : (int)aboveCtx[aboveBase + 5];
-                    int leftVal = (by == 0) ? leftU_0 : leftU_1;
-                    int ctx = aboveVal + leftVal;
-                    int eob = Vp8CoefBlockEncoderGpu.Encode(
-                        ref tpState, tokenP0Out, probsUv, constsExtended,
-                        ctx, 0,
-                        uCoefs.SubView(uMcBase + (long)blockIdx * 16, 16));
-                    int hasCoef = eob > 0 ? 1 : 0;
-                    if (bx == 0) aboveCtx[aboveBase + 4] = (byte)hasCoef;
-                    else aboveCtx[aboveBase + 5] = (byte)hasCoef;
-                    if (by == 0) leftU_0 = hasCoef;
-                    else leftU_1 = hasCoef;
+                    int k = b - 1;
+                    kind = 1; aboveIdx = k & 3; leftIdx = k >> 2; firstCoef = 1; probType = 0;
+                    src = (long)mbIdx * 256 + (long)k * 16;
                 }
-            }
-
-            // 6. V 4 blocks (block type 2, firstCoef=0).
-            long vMcBase = (long)mbIdx * 4 * 16;
-            for (int by = 0; by < 2; by++)
-            {
-                for (int bx = 0; bx < 2; bx++)
+                else if (b < 21)
                 {
-                    int blockIdx = by * 2 + bx;
-                    int aboveVal = (bx == 0)
-                        ? (int)aboveCtx[aboveBase + 6]
-                        : (int)aboveCtx[aboveBase + 7];
-                    int leftVal = (by == 0) ? leftV_0 : leftV_1;
-                    int ctx = aboveVal + leftVal;
-                    int eob = Vp8CoefBlockEncoderGpu.Encode(
-                        ref tpState, tokenP0Out, probsUv, constsExtended,
-                        ctx, 0,
-                        vCoefs.SubView(vMcBase + (long)blockIdx * 16, 16));
-                    int hasCoef = eob > 0 ? 1 : 0;
-                    if (bx == 0) aboveCtx[aboveBase + 6] = (byte)hasCoef;
-                    else aboveCtx[aboveBase + 7] = (byte)hasCoef;
-                    if (by == 0) leftV_0 = hasCoef;
-                    else leftV_1 = hasCoef;
+                    int k = b - 17;
+                    kind = 2; aboveIdx = 4 + (k & 1); leftIdx = 4 + (k >> 1); firstCoef = 0; probType = 2;
+                    src = (long)mbIdx * 64 + (long)k * 16;
                 }
+                else
+                {
+                    int k = b - 21;
+                    kind = 3; aboveIdx = 6 + (k & 1); leftIdx = 6 + (k >> 1); firstCoef = 0; probType = 2;
+                    src = (long)mbIdx * 64 + (long)k * 16;
+                }
+
+                // One small loop per source plane (a loop is never if-converted, so no plane is read out of range).
+                if (kind == 0) { for (int i = 0; i < 16; i++) block[i] = y2Coefs[src + i]; }
+                else if (kind == 1) { for (int i = 0; i < 16; i++) block[i] = y4Coefs[src + i]; }
+                else if (kind == 2) { for (int i = 0; i < 16; i++) block[i] = uCoefs[src + i]; }
+                else { for (int i = 0; i < 16; i++) block[i] = vCoefs[src + i]; }
+
+                int ctx = aboveCtx[aboveBase + aboveIdx] + st[StLeft + leftIdx];
+                int eob = Vp8CoefBlockEncoderGpu.Encode(
+                    ref tpState, tokenP0Out, coefProbsByType.SubView((long)probType * probsPerType, probsPerType),
+                    constsExtended, ctx, firstCoef, block);
+                int hasCoef = eob > 0 ? 1 : 0;
+                aboveCtx[aboveBase + aboveIdx] = (byte)hasCoef;
+                st[StLeft + leftIdx] = hasCoef;
             }
 
             mbIdx++;
@@ -487,10 +431,6 @@ public sealed class Vp8FrameEntropyKernel : IDisposable
         st[StNextMb] = mbIdx;
         Vp8BoolEncoderGpu.Save(st, StP0, ref p0State);
         Vp8BoolEncoderGpu.Save(st, StTp, ref tpState);
-        st[StLeft + 0] = leftY4_0; st[StLeft + 1] = leftY4_1; st[StLeft + 2] = leftY4_2; st[StLeft + 3] = leftY4_3;
-        st[StLeft + 4] = leftU_0; st[StLeft + 5] = leftU_1;
-        st[StLeft + 6] = leftV_0; st[StLeft + 7] = leftV_1;
-        st[StLeft + 8] = leftY2;
     }
 
     /// <summary>Release kernel resources.</summary>
