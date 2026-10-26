@@ -8,7 +8,8 @@
 //   WebPRgbaToYuvGpu          RGBA -> YUV 4:2:0 + alpha, libwebp's import + transparent-area cleanup (unless Exact)
 //   WebPLossyAnalysisKernel   one thread per macroblock: susceptibility histogram, I16 / UV mode guesses
 //   WebPLossySetupKernel      one thread: k-means segmentation, quantizers / matrices / lambdas, segment probabilities
-//   WebPLossyEncodeRowKernel  one thread, launches of MbsPerLaunch macroblocks: the RD token loop (serial by libwebp's design)
+//   WebPLossyEncodeRowKernel  one thread, five stage kernels per macroblock (prepare, I16, I4, UV, record): the RD token loop
+//                             (serial by libwebp's design), split so each kernel fits a browser shader compiler
 //   WebPLossyFinishKernel     one thread, a chain of bounded launches: final probabilities, token partition, filter
 //                             strength, partition 0
 //
@@ -61,7 +62,7 @@ public sealed class WebPLossyEncoderGpu : IDisposable
     private readonly WebPRgbaToYuvGpu _toYuv;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>> _analysis;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _setup;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int> _row;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>[] _stages;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>>
         _finishProbas, _finishTokens, _finishHeader, _finishModes, _finishEnd;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>> _assemble;
@@ -85,7 +86,15 @@ public sealed class WebPLossyEncoderGpu : IDisposable
         _toYuv = new WebPRgbaToYuvGpu(accelerator);
         _analysis = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>>(WebPLossyAnalysisKernel.AnalysisKernel);
         _setup = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(WebPLossySetupKernel.SetupKernel);
-        _row = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int>(WebPLossyEncodeRowKernel.EncodeRowKernel);
+        // the RD loop, one macroblock at a time as five stage kernels (each small enough for a browser shader compiler)
+        _stages = new[]
+        {
+            LoadStage(accelerator, WebPLossyEncodeRowKernel.PrepareStage),
+            LoadStage(accelerator, WebPLossyEncodeRowKernel.Intra16Stage),
+            LoadStage(accelerator, WebPLossyEncodeRowKernel.Intra4Stage),
+            LoadStage(accelerator, WebPLossyEncodeRowKernel.UVStage),
+            LoadStage(accelerator, WebPLossyEncodeRowKernel.RecordStage),
+        };
         _finishProbas = LoadFinish(accelerator, WebPLossyFinishKernel.FinishProbasKernel);
         _finishTokens = LoadFinish(accelerator, WebPLossyFinishKernel.FinishTokensKernel);
         _finishHeader = LoadFinish(accelerator, WebPLossyFinishKernel.FinishHeaderKernel);
@@ -108,6 +117,10 @@ public sealed class WebPLossyEncoderGpu : IDisposable
         _state = new StageBuffer<int>(accelerator);
         _tokens = new StageBuffer<int>(accelerator);
     }
+
+    private static Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> LoadStage(
+        Accelerator accelerator, Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> kernel)
+        => accelerator.LoadAutoGroupedStreamKernel(kernel);
 
     private static Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>> LoadFinish(
         Accelerator accelerator, Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>> kernel)
@@ -291,11 +304,12 @@ public sealed class WebPLossyEncoderGpu : IDisposable
                 state.SubView(l.StLevelCost, WebPLossySetupKernel.LevelCostCount));
             var pacer = new LaunchPacer(_accelerator);
             for (int row = 0; row < l.MbH; row++)
-                for (int x = 0; x < l.MbW; x += WebPLossyEncodeRowKernel.MbsPerLaunch)
-                {
-                    _row(1, yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x, x + WebPLossyEncodeRowKernel.MbsPerLaunch);
-                    await pacer.LaunchedAsync();
-                }
+                for (int x = 0; x < l.MbW; x++)
+                    foreach (var stage in _stages)
+                    {
+                        stage(1, yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
+                        await pacer.LaunchedAsync();
+                    }
             await _accelerator.SynchronizeAsync();
             var m = await _meta.View.CopyToHostAsync();
             var err = (WebPLossyEncError)m[M.Error];

@@ -48,7 +48,8 @@ internal static partial class WebPLossyEncodeRowKernel
     public const int ILeftDerr = 1650;  // 4
     public const int IDerrA = 1654, IDerrB = 1660, IDerrUv = 1666;   // 6 each
     public const int IModesI4 = 1672;   // rd->modes_i4 (16)
-    public const int IntScratchSize = 1696;
+    public const int IRdScalars = 1688; // the ModeScore scalars between stage kernels (D, SD, H, R, Score as lo/hi, Nz: 11)
+    public const int IntScratchSize = 1700;
     // level-array offsets inside a ModeScore slot
     private const int LDc = 0, LAc = 16, LUv = 272;
 
@@ -284,57 +285,66 @@ internal static partial class WebPLossyEncodeRowKernel
             for (int i = 0; i < size; ++i) b[o + j * BPS + i] = (byte)v;
     }
 
-    /// <summary>One prediction family (DC / V / H / TM) of size 8 or 16 at `o`; left / top: offsets into `b` / `top`, or -1 when absent.</summary>
-    private static void PredictBlock(ArrayView<byte> b, int o, int size, int round, int shift,
-        int leftOff, ArrayView<byte> top, int topOff, int mode)
+    /// <summary>libwebp's DC rule: the top and / or left sum (a missing side counts the other twice), rounded; 0x80 with neither.</summary>
+    private static int PredDc(int topSum, int leftSum, bool hasTop, bool hasLeft, int round, int shift)
     {
-        bool hasLeft = leftOff >= 0, hasTop = topOff >= 0;
-        if (mode == 0)
+        if (!hasTop & !hasLeft) return 0x80;
+        int s = hasTop ? (hasLeft ? topSum + leftSum : topSum + topSum) : leftSum + leftSum;
+        return (s + round) >> shift;
+    }
+
+    /// <summary>
+    /// Every I16 and UV prediction of the macroblock (what libwebp's VP8MakeLuma16Preds / VP8MakeChroma8Preds write for the 4 I16 modes and the 4
+    /// UV modes of both chroma planes, sample for sample), as ONE flat loop over the 4 * 256 + 4 * 2 * 64 output samples.
+    /// The former per-mode form (twelve inlined calls, each with constant-bound pixel loops the D3D shader compiler unrolls, cost ~60 s
+    /// of FXC compile time alone (the WGSL of the whole stage 134 s); this form compiles in well under a second.
+    /// Offsets: -1 = side absent; the left samples are in `b`, the top samples in `top`.
+    /// </summary>
+    private static void PredictAll(ArrayView<byte> b, ArrayView<byte> top,
+        int yLeft, int yTop, int uLeft, int uTop, int vLeft, int vTop)
+    {
+        bool yHasL = yLeft >= 0, yHasT = yTop >= 0, uHasL = uLeft >= 0, uHasT = uTop >= 0, vHasL = vLeft >= 0, vHasT = vTop >= 0;
+        int yTs = 0, yLs = 0, uTs = 0, uLs = 0, vTs = 0, vLs = 0;
+        for (int j = 0; j < 16; ++j)
         {
-            int dc = 0;
-            if (hasTop)
-            {
-                for (int j = 0; j < size; ++j) dc += top[topOff + j];
-                if (hasLeft) { for (int j = 0; j < size; ++j) dc += b[leftOff + j]; }
-                else dc += dc;
-                dc = (dc + round) >> shift;
-            }
-            else if (hasLeft)
-            {
-                for (int j = 0; j < size; ++j) dc += b[leftOff + j];
-                dc += dc;
-                dc = (dc + round) >> shift;
-            }
-            else dc = 0x80;
-            Fill(b, o, dc, size);
+            if (yHasT) yTs += top[yTop + j];
+            if (yHasL) yLs += b[yLeft + j];
+            bool c8 = j < 8;
+            if (c8 & uHasT) uTs += top[uTop + j];
+            if (c8 & uHasL) uLs += b[uLeft + j];
+            if (c8 & vHasT) vTs += top[vTop + j];
+            if (c8 & vHasL) vLs += b[vLeft + j];
         }
-        else if (mode == 2)   // VE
+        int yDc = PredDc(yTs, yLs, yHasT, yHasL, 16, 5);
+        int uDc = PredDc(uTs, uLs, uHasT, uHasL, 8, 4);
+        int vDc = PredDc(vTs, vLs, vHasT, vHasL, 8, 4);
+        for (int k = 0; k < 4 * 256 + 4 * 2 * 64; ++k)
         {
-            if (hasTop) { for (int j = 0; j < size; ++j) for (int i = 0; i < size; ++i) b[o + j * BPS + i] = top[topOff + i]; }
-            else Fill(b, o, 127, size);
-        }
-        else if (mode == 3)   // HE
-        {
-            if (hasLeft) { for (int j = 0; j < size; ++j) for (int i = 0; i < size; ++i) b[o + j * BPS + i] = b[leftOff + j]; }
-            else Fill(b, o, 129, size);
-        }
-        else                  // TM
-        {
-            if (hasLeft)
+            int mode, x, y, o, leftOff, topOff, dc;
+            bool hasL, hasT;
+            if (k < 1024)
             {
-                if (hasTop)
-                {
-                    int tl = b[leftOff - 1];
-                    for (int y = 0; y < size; ++y)
-                        for (int x = 0; x < size; ++x) b[o + y * BPS + x] = Clip8b(b[leftOff + y] + top[topOff + x] - tl);
-                }
-                else { for (int j = 0; j < size; ++j) for (int i = 0; i < size; ++i) b[o + j * BPS + i] = b[leftOff + j]; }
+                mode = k >> 8; y = (k >> 4) & 15; x = k & 15;
+                o = BPred + I16Off(mode); leftOff = yLeft; topOff = yTop; hasL = yHasL; hasT = yHasT; dc = yDc;
             }
             else
             {
-                if (hasTop) { for (int j = 0; j < size; ++j) for (int i = 0; i < size; ++i) b[o + j * BPS + i] = top[topOff + i]; }
-                else Fill(b, o, 129, size);
+                int r = k - 1024;
+                mode = r >> 7; y = (r >> 3) & 7; x = r & 7;
+                bool isV = ((r >> 6) & 1) != 0;
+                o = BPred + UVOff(mode) + (isV ? 8 : 0);
+                leftOff = isV ? vLeft : uLeft; topOff = isV ? vTop : uTop;
+                hasL = isV ? vHasL : uHasL; hasT = isV ? vHasT : uHasT; dc = isV ? vDc : uDc;
             }
+            int v;
+            if (mode == 0) v = dc;                                                    // DC
+            else if (mode == 2) v = hasT ? top[topOff + x] : 127;                     // VE
+            else if (mode == 3) v = hasL ? b[leftOff + y] : 129;                      // HE
+            else if (hasL & hasT) v = Clip8b(b[leftOff + y] + top[topOff + x] - b[leftOff - 1]);   // TM
+            else if (hasL) v = b[leftOff + y];
+            else if (hasT) v = top[topOff + x];
+            else v = 129;
+            b[o + y * BPS + x] = (byte)v;
         }
     }
 
