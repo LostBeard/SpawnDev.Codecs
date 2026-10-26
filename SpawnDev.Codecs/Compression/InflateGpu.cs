@@ -719,26 +719,28 @@ public static class InflateGpu
         int index = 0;
         int result = -1;
         int found = 0;
-        for (int len = 1; len <= MaxBits; len++)
+        // Stops at the code's length (it used to walk all MaxBits lengths with the rest masked off: ~15 table reads per
+        // symbol whatever its length). The condition is one bool built with & (a compound loop condition hung WGSL).
+        int len = 1;
+        bool going = st.Err == 0;
+        while (going)
         {
-            bool active = (found == 0) & (st.Err == 0);
-            if (active)
+            code |= Bits(ref st, src, 1);
+            int count = scratch[countAt + len];
+            if (code - count < first)
             {
-                code |= Bits(ref st, src, 1);
-                int count = scratch[countAt + len];
-                if (code - count < first)
-                {
-                    result = scratch[symAt + index + (code - first)];
-                    found = 1;
-                }
-                else
-                {
-                    index += count;
-                    first += count;
-                    first <<= 1;
-                    code <<= 1;
-                }
+                result = scratch[symAt + index + (code - first)];
+                found = 1;
             }
+            else
+            {
+                index += count;
+                first += count;
+                first <<= 1;
+                code <<= 1;
+            }
+            len++;
+            going = (found == 0) & (len <= MaxBits) & (st.Err == 0);
         }
         bool exhausted = (found == 0) & (st.Err == 0);
         if (exhausted)

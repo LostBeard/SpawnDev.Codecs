@@ -44,11 +44,23 @@ public abstract partial class CodecsTestBase
         {
             using var dec = new BmpDecoderGpu(acc);
             var failures = new List<string>();
-            int checkedCount = 0;
+            int checkedCount = 0, rleRefused = 0;
+            bool canRle = acc.Device.Satisfies(SerialStreamKernels);
             foreach (var name in GifBmpFixtureNames(BmpFixturePrefix, ".bmp"))
             {
                 byte[] bmp = ReadEmbedded(BmpFixturePrefix + name + ".bmp");
                 byte[] expected = ReadEmbedded(BmpFixturePrefix + name + ".rgba8");
+                if (!canRle && name.StartsWith("rle", StringComparison.Ordinal))
+                {
+                    // WebGL: the RLE run stream is decoded by one thread that writes every pixel (scatter stores).
+                    try
+                    {
+                        await dec.DecodeAsync(bmp);
+                        failures.Add($"{name}: RLE decoded on an accelerator without scatter stores");
+                    }
+                    catch (NotSupportedException) { rleRefused++; }
+                    continue;
+                }
                 try
                 {
                     // Managed overload.
@@ -78,6 +90,7 @@ public abstract partial class CodecsTestBase
             }
             True(failures.Count == 0,
                 $"{failures.Count} of {checkedCount + failures.Count} BMP fixtures failed:\n" + string.Join("\n", failures));
+            True(checkedCount >= 20, $"only {checkedCount} BMP fixtures decoded ({rleRefused} RLE refused for want of scatter stores)");
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
@@ -91,8 +104,10 @@ public abstract partial class CodecsTestBase
             using var dec = new BmpDecoderGpu(acc);
             var failures = new List<string>();
             int checkedCount = 0;
+            bool canRle = acc.Device.Satisfies(SerialStreamKernels);
             foreach (var name in GifBmpFixtureNames(BmpFixturePrefix, ".bmp"))
             {
+                if (!canRle && name.StartsWith("rle", StringComparison.Ordinal)) continue; // refused on WebGL (see the RGBA8 test)
                 byte[] bmp = ReadEmbedded(BmpFixturePrefix + name + ".bmp");
                 byte[] truth8 = ReadEmbedded(BmpFixturePrefix + name + ".rgba8");
                 // 8 -> 16 bit is v * 257, little endian: both bytes equal v.
@@ -148,9 +163,10 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    private async Task AssertBmpRejectedAsync(byte[] file, string expectedMessagePart, string what)
+    private async Task AssertBmpRejectedAsync(byte[] file, string expectedMessagePart, string what, bool decodesRle = false)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        if (decodesRle) RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new BmpDecoderGpu(acc);
@@ -255,7 +271,7 @@ public abstract partial class CodecsTestBase
         var bmp = BmpFixture("rle8_basic");
         int off = bmp[10] | (bmp[11] << 8);   // pixel data offset
         bmp[off] = 200;                       // first run: 200 pixels into a 16 pixel wide image
-        await AssertBmpRejectedAsync(bmp, "draws outside the image", "RLE run past the row");
+        await AssertBmpRejectedAsync(bmp, "draws outside the image", "RLE run past the row", decodesRle: true);
     }
 
     [TestMethod]
@@ -264,7 +280,7 @@ public abstract partial class CodecsTestBase
         var bmp = BmpFixture("rle8_basic");
         int off = bmp[10] | (bmp[11] << 8);
         // Keep the first instruction (2 bytes) and one byte of the next.
-        await AssertBmpRejectedAsync(bmp.AsSpan(0, off + 3).ToArray(), "RLE data is truncated", "RLE stream cut inside an instruction");
+        await AssertBmpRejectedAsync(bmp.AsSpan(0, off + 3).ToArray(), "RLE data is truncated", "RLE stream cut inside an instruction", decodesRle: true);
     }
 
     [TestMethod]

@@ -61,6 +61,16 @@ bytes compress too (upcast weights). So C4 = byte grouping (`ShuffleFilterGpu.Sh
 one plane per byte position) + per plane and chunk the smallest of raw / Huffman-only deflate / deflate (our GPU
 zlib), decoded by InflateGpu. Every plane is a standard zlib stream.
 
+**Shipped 2026-10-26 as `WeightPackGpu`** (format "SDWP" v1). Real weights on CUDA (RTX 4070, 258-512 MB samples):
+BF16 0.676, FP16 0.667, FP32 0.608; unpack 1.2-1.6 GB/s, pack 0.12-0.14 GB/s (`weightpack-bench` in the console
+host; _TestStats "bench" records). Next, performance (the ratio is done):
+- **Unpack** (what model loading pays): one InflateGpu thread per 64 KiB chunk decodes bit by bit (puff-style canonical
+  walk). A table-driven Huffman decode (one lookup per symbol from a per-chunk LUT built in shared memory) and more
+  chunks in flight should take it from ~1.5 GB/s to tens of GB/s. Measure first: which part is the decode loop.
+- **Pack**: waves of 64 single-thread chunks (DeflateGpu scratch is 570 KB per chunk, mostly the unused LZ77 hash and
+  token arrays at the Huffman-only level). A dedicated Huffman-only encoder (histogram per chunk with many threads,
+  code build per chunk, bit offsets by prefix sum, every thread writes its bytes) removes the scratch and the waves.
+
 ### C5. GDeflate (Microsoft DirectStorage, Apache 2.0)
 Deflate's ratio with 32-lane parallel decode of ONE stream: the Deflate symbols reordered into 32 interleaved
 bitstreams. Reference CPU compressor/decompressor + HLSL GPU decoder in github.com/microsoft/DirectStorage (GDeflate/).

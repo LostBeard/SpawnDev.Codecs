@@ -9,6 +9,10 @@ using SpawnDev.UnitTesting;
 if (args.Length > 0 && args[0] == "wasm-vp9-dump")
     return await WasmVp9Dump.Run();
 
+// `weightpack-bench <file.safetensors> [maxMB] [cuda|opencl|cpu] [reps]`: WeightPackGpu on real model weights.
+if (args.Length > 0 && args[0] == "weightpack-bench")
+    return await WeightPackBench.Run(args);
+
 // Run SpawnDev.UnitTesting unit tests on desktop .NET via PlaywrightMultiTest harness.
 try
 {

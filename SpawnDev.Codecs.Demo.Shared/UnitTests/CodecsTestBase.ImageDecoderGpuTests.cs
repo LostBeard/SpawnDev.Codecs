@@ -21,6 +21,7 @@ public abstract partial class CodecsTestBase
     public async Task ImageDecoderGpu_PngAndJpegFixtures_DispatchAndMatchPillow()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels); // PNG inflate, JPEG / GIF / WebP entropy decode: serial stream coders
         try
         {
             using var dec = new ImageDecoderGpu(acc);
@@ -81,6 +82,7 @@ public abstract partial class CodecsTestBase
     public async Task ImageDecoderGpu_GifBmpWebPFixtures_DispatchAndMatchTruth()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels); // PNG inflate, JPEG / GIF / WebP entropy decode: serial stream coders
         try
         {
             using var dec = new ImageDecoderGpu(acc);   // one facade instance: all six decoders live side by side

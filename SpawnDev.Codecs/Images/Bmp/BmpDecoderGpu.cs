@@ -43,6 +43,8 @@ public sealed class BmpDecoderGpu : IDisposable
     private readonly StageBuffer<byte> _stageIn;
     private readonly StageBuffer<byte> _stageOut;
     private readonly StageBuffer<byte> _canvas;
+    private readonly StageBuffer<int> _alphaA, _alphaB;
+    private readonly bool _canRle;
 
     /// <summary>Compile the kernels.</summary>
     public BmpDecoderGpu(Accelerator accelerator)
@@ -55,6 +57,11 @@ public sealed class BmpDecoderGpu : IDisposable
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
         _canvas = new StageBuffer<byte>(accelerator);
+        _alphaA = new StageBuffer<int>(accelerator);
+        _alphaB = new StageBuffer<int>(accelerator);
+        // RLE4 / RLE8 is a sequential run stream decoded by one thread that writes every pixel it draws: scatter stores,
+        // which WebGL (Transform Feedback: a thread stores only its own slot) does not have.
+        _canRle = accelerator.Device.Satisfies(new AcceleratorRequirements { RequiresScatterStores = true });
     }
 
     // ------------------------------------------------------------------
@@ -289,14 +296,21 @@ public sealed class BmpDecoderGpu : IDisposable
 
         if (layout.IsRle)
         {
+            if (!_canRle)
+                throw new NotSupportedException(
+                    $"RLE-compressed BMP decoding needs scatter stores, which the {_accelerator.AcceleratorType} accelerator does not have.");
             // Pixels the stream never covers stay transparent black.
             canvas.SubView(0, (long)pixels * 4).MemSetToZero();
             _kernels.Rle(file, canvas, _meta.View);
         }
         else
         {
-            if (layout.HasAlphaChannel) _kernels.AlphaScan(file, _meta.View, pixels);
-            _kernels.Convert(file, canvas, _meta.View, pixels);
+            int alphaInts = BmpKernels.AlphaBufferInts(pixels);
+            var alphaA = _alphaA.Ensure(alphaInts);
+            var alphaB = _alphaB.Ensure(alphaInts);
+            ArrayView<int> alphaSeen = alphaA.SubView(0, 1);
+            if (layout.HasAlphaChannel) alphaSeen = _kernels.AlphaScan(file, _meta.View, alphaA, alphaB, pixels);
+            _kernels.Convert(file, canvas, _meta.View, alphaSeen, pixels);
         }
         if (format == PixelFormat.Rgba16) _pixel.Widen(canvas, output, pixels * 4);
         await _accelerator.SynchronizeAsync();
@@ -381,5 +395,7 @@ public sealed class BmpDecoderGpu : IDisposable
         _stageIn.Dispose();
         _stageOut.Dispose();
         _canvas.Dispose();
+        _alphaA.Dispose();
+        _alphaB.Dispose();
     }
 }

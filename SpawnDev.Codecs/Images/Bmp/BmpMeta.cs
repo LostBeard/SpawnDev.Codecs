@@ -95,7 +95,7 @@ public static class BmpMeta
     /// <summary>1 when the image has an alpha channel (explicit mask, or the 4th byte of 32-bit BI_RGB).</summary>
     public const int HasAlphaChannel = 36;
     /// <summary>Written by the alpha-scan kernel: 1 when any pixel has a non-zero alpha value.</summary>
-    public const int AlphaSeen = 37;
+    public const int AlphaSeen = 37; // unused since 2026-10-26: the alpha scan reduces into its own buffer (WebGL-safe)
     /// <summary>Absolute image height.</summary>
     public const int AbsHeight = 38;
     /// <summary>Effective red mask: the file's, or the BI_RGB default (0x7C00 for 16 bit, 0x00FF0000 for 32 bit).</summary>

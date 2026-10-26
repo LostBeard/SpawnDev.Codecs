@@ -4,8 +4,12 @@
 // only dispatches and reads back the metadata block.
 //
 // Decode:
-//   1. ScanKernel      (1 thread)            BITMAPFILEHEADER + DIB header (core / info / V2..V5) + channel masks.
-//   2. AlphaScanKernel (1 thread per pixel)  16/32-bit images with an alpha channel: is any alpha value non-zero?
+//   1. ScanKernel      (1 thread per scan slot)  BITMAPFILEHEADER + DIB header (core / info / V2..V5) + channel masks;
+//                                            every thread parses the header and stores only its own slot (a gather,
+//                                            so it runs on WebGL, which captures a thread's store only at its own slot).
+//   2. AlphaScanKernel (1 thread per AlphaGroup pixels) + AlphaFoldKernel (until one int is left): 16/32-bit images
+//                                            with an alpha channel: is any alpha value non-zero? (a reduction into its
+//                                            own buffer; each thread stores its own slot.)
 //   3. ConvertKernel   (1 thread per pixel)  1/4/8-bit palette, 16/24/32-bit, BITFIELDS masks -> RGBA8, flips
 //                                            bottom-up files, skips the row padding.
 //      RleKernel       (1 thread)            RLE4 / RLE8 are sequential run streams: one thread decodes the whole
@@ -25,8 +29,12 @@ namespace SpawnDev.Codecs.Images.Bmp;
 public sealed class BmpKernels : IDisposable
 {
     private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _scan;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _alphaScan;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _convert;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _alphaScan;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _alphaFold;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _convert;
+
+    /// <summary>Pixels (then partial flags) one alpha-scan thread folds.</summary>
+    public const int AlphaGroup = 1024;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _rle;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _encode;
 
@@ -35,8 +43,9 @@ public sealed class BmpKernels : IDisposable
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _scan = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, ArrayView<int>>(ScanKernel);
-        _alphaScan = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(AlphaScanKernel);
-        _convert = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(ConvertKernel);
+        _alphaScan = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(AlphaScanKernel);
+        _alphaFold = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(AlphaFoldKernel);
+        _convert = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(ConvertKernel);
         _rle = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(RleKernel);
         _encode = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(EncodeKernel);
@@ -45,19 +54,40 @@ public sealed class BmpKernels : IDisposable
     /// <summary>Parse the file and DIB headers into <paramref name="meta"/>.</summary>
     public void Scan(ArrayView<byte> file, int fileLength, ArrayView<int> meta)
     {
-        _scan(1, file, fileLength, meta);
+        _scan(BmpMeta.HostWrittenStart, file, fileLength, meta);
     }
 
-    /// <summary>Set <see cref="BmpMeta.AlphaSeen"/> when any of the <paramref name="pixelCount"/> pixels has a non-zero alpha value.</summary>
-    public void AlphaScan(ArrayView<byte> file, ArrayView<int> meta, int pixelCount)
+    /// <summary>Ints each of the two alpha-scan buffers needs for <paramref name="pixelCount"/> pixels.</summary>
+    public static int AlphaBufferInts(int pixelCount) => Math.Max(1, (pixelCount + AlphaGroup - 1) / AlphaGroup);
+
+    /// <summary>
+    /// 1 in element 0 of the returned view when any of the <paramref name="pixelCount"/> pixels has a non-zero alpha
+    /// value (0 otherwise): partial flags into <paramref name="a"/>, then folds between <paramref name="a"/> and
+    /// <paramref name="b"/> (each at least <see cref="AlphaBufferInts"/> ints) until one is left.
+    /// </summary>
+    public ArrayView<int> AlphaScan(ArrayView<byte> file, ArrayView<int> meta, ArrayView<int> a, ArrayView<int> b, int pixelCount)
     {
-        _alphaScan(pixelCount, file, meta);
+        int n = AlphaBufferInts(pixelCount);
+        _alphaScan(n, file, meta, a, pixelCount);
+        var src = a;
+        var dst = b;
+        while (n > 1)
+        {
+            int m = (n + AlphaGroup - 1) / AlphaGroup;
+            _alphaFold(m, src, dst, n);
+            (src, dst) = (dst, src);
+            n = m;
+        }
+        return src;
     }
 
-    /// <summary>Convert an uncompressed image to RGBA8 in <paramref name="canvas"/>.</summary>
-    public void Convert(ArrayView<byte> file, ArrayView<byte> canvas, ArrayView<int> meta, int pixelCount)
+    /// <summary>
+    /// Convert an uncompressed image to RGBA8 in <paramref name="canvas"/>. <paramref name="alphaSeen"/>[0] = 1 when the
+    /// alpha channel is used (from <see cref="AlphaScan"/>; ignored without an alpha channel).
+    /// </summary>
+    public void Convert(ArrayView<byte> file, ArrayView<byte> canvas, ArrayView<int> meta, ArrayView<int> alphaSeen, int pixelCount)
     {
-        _convert(pixelCount, file, canvas, meta);
+        _convert(pixelCount, file, canvas, meta, alphaSeen);
     }
 
     /// <summary>Decode an RLE4 / RLE8 stream to RGBA8 in <paramref name="canvas"/> (pre-cleared to 0: uncovered pixels stay transparent).</summary>
@@ -138,12 +168,14 @@ public sealed class BmpKernels : IDisposable
     // 1. Header scan
     // ------------------------------------------------------------------
 
-    private static void ScanKernel(Index1D _, ArrayView<byte> file, int fileLen, ArrayView<int> meta)
+    /// <summary>
+    /// One thread per scan slot (0 .. HostWrittenStart - 1): every thread parses the headers and stores only meta[slot].
+    /// The slots it does not own are written by their own threads; slots 17 .. HostWrittenStart - 1 are 0.
+    /// </summary>
+    private static void ScanKernel(Index1D index, ArrayView<byte> file, int fileLen, ArrayView<int> meta)
     {
-        for (int i = 0; i < BmpMeta.Size; i++) meta[i] = 0;
-        meta[BmpMeta.FileLength] = fileLen;
-
-        int err = 0;
+        int err = 0, hs = 0, off = 0, width = 0, height = 0, planes = 0, bpp = 0, comp = 0, imageSize = 0, clrUsed = 0;
+        int palOff = 0, maskR = 0, maskG = 0, maskB = 0, maskA = 0, hasMasks = 0;
         if (fileLen < 2)
         {
             err = (int)BmpError.TruncatedHeader;
@@ -159,8 +191,7 @@ public sealed class BmpKernels : IDisposable
 
         if (err == 0)
         {
-            int hs = Le32(file, 14);
-            meta[BmpMeta.HeaderSize] = hs;
+            hs = Le32(file, 14);
             bool known = (hs == 12) | (hs == 40) | (hs == 52) | (hs == 56) | (hs == 108) | (hs == 124);
             if (!known)
             {
@@ -172,29 +203,27 @@ public sealed class BmpKernels : IDisposable
             }
             else
             {
-                meta[BmpMeta.OffBits] = Le32(file, 10);
-                int comp = 0;
+                off = Le32(file, 10);
                 if (hs == 12)
                 {
-                    meta[BmpMeta.Width] = Le16(file, 18);
-                    meta[BmpMeta.Height] = Le16(file, 20);
-                    meta[BmpMeta.Planes] = Le16(file, 22);
-                    meta[BmpMeta.Bpp] = Le16(file, 24);
+                    width = Le16(file, 18);
+                    height = Le16(file, 20);
+                    planes = Le16(file, 22);
+                    bpp = Le16(file, 24);
                 }
                 else
                 {
                     comp = Le32(file, 30);
-                    meta[BmpMeta.Width] = Le32(file, 18);
-                    meta[BmpMeta.Height] = Le32(file, 22);
-                    meta[BmpMeta.Planes] = Le16(file, 26);
-                    meta[BmpMeta.Bpp] = Le16(file, 28);
-                    meta[BmpMeta.Compression] = comp;
-                    meta[BmpMeta.ImageSize] = Le32(file, 34);
-                    meta[BmpMeta.ClrUsed] = Le32(file, 46);
+                    width = Le32(file, 18);
+                    height = Le32(file, 22);
+                    planes = Le16(file, 26);
+                    bpp = Le16(file, 28);
+                    imageSize = Le32(file, 34);
+                    clrUsed = Le32(file, 46);
                 }
 
                 // Channel masks: after a 40-byte header when BITFIELDS / ALPHABITFIELDS, inside V2+ headers.
-                int palOff = 14 + hs;
+                palOff = 14 + hs;
                 int maskBytes = 0;
                 if (hs == 40)
                 {
@@ -218,38 +247,78 @@ public sealed class BmpKernels : IDisposable
                     }
                     else
                     {
-                        meta[BmpMeta.MaskR] = Le32(file, 54);
-                        meta[BmpMeta.MaskG] = Le32(file, 58);
-                        meta[BmpMeta.MaskB] = Le32(file, 62);
-                        if (maskBytes == 16) meta[BmpMeta.MaskA] = Le32(file, 66);
-                        meta[BmpMeta.FileHasMasks] = 1;
+                        maskR = Le32(file, 54);
+                        maskG = Le32(file, 58);
+                        maskB = Le32(file, 62);
+                        if (maskBytes == 16) maskA = Le32(file, 66);
+                        hasMasks = 1;
                     }
                 }
-                meta[BmpMeta.PaletteOffset] = palOff;
             }
         }
-        meta[BmpMeta.Error] = err;
+
+        int slot = index.X;
+        int v = 0;
+        if (slot == BmpMeta.Error) v = err;
+        else if (slot == BmpMeta.OffBits) v = off;
+        else if (slot == BmpMeta.HeaderSize) v = hs;
+        else if (slot == BmpMeta.Width) v = width;
+        else if (slot == BmpMeta.Height) v = height;
+        else if (slot == BmpMeta.Planes) v = planes;
+        else if (slot == BmpMeta.Bpp) v = bpp;
+        else if (slot == BmpMeta.Compression) v = comp;
+        else if (slot == BmpMeta.ImageSize) v = imageSize;
+        else if (slot == BmpMeta.ClrUsed) v = clrUsed;
+        else if (slot == BmpMeta.PaletteOffset) v = palOff;
+        else if (slot == BmpMeta.MaskR) v = maskR;
+        else if (slot == BmpMeta.MaskG) v = maskG;
+        else if (slot == BmpMeta.MaskB) v = maskB;
+        else if (slot == BmpMeta.MaskA) v = maskA;
+        else if (slot == BmpMeta.FileLength) v = fileLen;
+        else if (slot == BmpMeta.FileHasMasks) v = hasMasks;
+        meta[slot] = v;
     }
 
     // ------------------------------------------------------------------
     // 2. Alpha scan
     // ------------------------------------------------------------------
 
-    private static void AlphaScanKernel(Index1D index, ArrayView<byte> file, ArrayView<int> meta)
+    /// <summary>Thread t: 1 into partial[t] when any pixel of [t * AlphaGroup, +AlphaGroup) has a non-zero alpha value.</summary>
+    private static void AlphaScanKernel(Index1D index, ArrayView<byte> file, ArrayView<int> meta, ArrayView<int> partial, int pixelCount)
     {
         int w = meta[BmpMeta.Width];
-        int i = index.X;
-        int y = i / w;
-        int x = i - y * w;
-        uint v = ReadRaw(file, meta[BmpMeta.Bpp], RowStart(meta, y), x);
-        if ((v & (uint)meta[BmpMeta.EffMaskA]) != 0u) meta[BmpMeta.AlphaSeen] = 1;
+        int bpp = meta[BmpMeta.Bpp];
+        uint maskA = (uint)meta[BmpMeta.EffMaskA];
+        int p0 = index.X * AlphaGroup;
+        int p1 = p0 + AlphaGroup;
+        if (p1 > pixelCount) p1 = pixelCount;
+        int seen = 0;
+        for (int i = p0; i < p1; i++)
+        {
+            int y = i / w;
+            int x = i - y * w;
+            uint v = ReadRaw(file, bpp, RowStart(meta, y), x);
+            if ((v & maskA) != 0u) seen = 1;
+        }
+        partial[index.X] = seen;
+    }
+
+    /// <summary>Thread t: the OR of src[t * AlphaGroup, +AlphaGroup) (of <paramref name="n"/>) into dst[t].</summary>
+    private static void AlphaFoldKernel(Index1D index, ArrayView<int> src, ArrayView<int> dst, int n)
+    {
+        int i0 = index.X * AlphaGroup;
+        int i1 = i0 + AlphaGroup;
+        if (i1 > n) i1 = n;
+        int seen = 0;
+        for (int i = i0; i < i1; i++) seen |= src[i];
+        dst[index.X] = seen;
     }
 
     // ------------------------------------------------------------------
     // 3. Uncompressed pixels -> RGBA8
     // ------------------------------------------------------------------
 
-    private static void ConvertKernel(Index1D index, ArrayView<byte> file, ArrayView<byte> canvas, ArrayView<int> meta)
+    private static void ConvertKernel(Index1D index, ArrayView<byte> file, ArrayView<byte> canvas, ArrayView<int> meta, ArrayView<int> alphaSeen)
     {
         int w = meta[BmpMeta.Width];
         int bpp = meta[BmpMeta.Bpp];
@@ -288,7 +357,7 @@ public sealed class BmpKernels : IDisposable
             b = Channel(v, meta[BmpMeta.EffMaskB], meta[BmpMeta.ShiftB], meta[BmpMeta.BitsB]);
             // An alpha channel whose every value is 0 is treated as opaque (browsers do the same: such files
             // come from writers that store a padding byte there).
-            bool alpha = (meta[BmpMeta.HasAlphaChannel] != 0) & (meta[BmpMeta.AlphaSeen] != 0);
+            bool alpha = (meta[BmpMeta.HasAlphaChannel] != 0) & (alphaSeen[0] != 0);
             if (alpha) a = Channel(v, meta[BmpMeta.EffMaskA], meta[BmpMeta.ShiftA], meta[BmpMeta.BitsA]);
         }
 
