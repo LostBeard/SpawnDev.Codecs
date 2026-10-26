@@ -56,6 +56,17 @@ internal static class TestHelpers
         throw new Exception($"{Prefix(context)}Expected {typeof(TException).Name} but no exception was thrown");
     }
 
+    public static async Task ThrowsAsync<TException>(Func<Task> action, string? context = null) where TException : Exception
+    {
+        try { await action(); }
+        catch (TException) { return; }
+        catch (Exception ex)
+        {
+            throw new Exception($"{Prefix(context)}Expected {typeof(TException).Name} but got {ex.GetType().Name}: {ex.Message}");
+        }
+        throw new Exception($"{Prefix(context)}Expected {typeof(TException).Name} but no exception was thrown");
+    }
+
     public static void InRange(int value, int min, int max)
     {
         if (value < min || value > max)

@@ -54,6 +54,7 @@
 		<EmbeddedResource Include="TestData\WebPRgbToYuv\*" />
 		<EmbeddedResource Include="TestData\WebPLossyEnc\*" />
 		<EmbeddedResource Include="TestData\WebPLossyAlpha\*" />
+		<EmbeddedResource Include="TestData\Filters\*" />
 		<EmbeddedResource Include="TestData\Vorbis\*" />
 		<EmbeddedResource Include="TestData\Gif\*" />
 		<EmbeddedResource Include="TestData\GifEnc\*" />
