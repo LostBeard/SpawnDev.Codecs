@@ -1,0 +1,25 @@
+# liblz4 1.9.4
+text_700000_b64_linked	text	700000	65	ok	64 KB blocks, linked=True
+text_700000_b64_indep	text	700000	64	ok	64 KB blocks, linked=False
+text_700000_b256_linked	text	700000	257	ok	256 KB blocks, linked=True
+text_700000_b256_indep	text	700000	256	ok	256 KB blocks, linked=False
+text_2500000_b1024_linked	text	2500000	1025	ok	1024 KB blocks, linked=True
+text_2500000_b1024_indep	text	2500000	1024	ok	1024 KB blocks, linked=False
+text_2500000_b4096_linked	text	2500000	4097	ok	4096 KB blocks, linked=True
+text_2500000_b4096_indep	text	2500000	4096	ok	4096 KB blocks, linked=False
+struct_2000000_hc9_linked	struct	2000000	3	ok	HC level 9, linked
+struct_2000000_hc16_b4096	struct	2000000	3	ok	HC level 16 (optimal parser), 4 MB blocks
+text_500000_allchecks	text	500000	11	ok	block + content checksums, linked
+text_500000_nosize	text	500000	11	ok	no content size
+noise_300000_raw	noise	300000	5	ok	incompressible: raw blocks
+zeros_5000000_b4096	struct	5000000	-1	ok	one 4 MB match run per block
+empty	text	0	0	ok	empty frame
+struct_9000000_legacy	struct	9000000	13	ok	legacy frame, two 8 MB blocks
+concat_2x100000_skippable	text2	200000	17	ok	skippable + frame + empty skippable + frame (content = text(17) + text(18))
+bad_header_checksum	text	200000	21	HeaderChecksum	
+bad_magic	text	200000	21	BadMagic	
+bad_truncated	text	200000	21	Truncated	
+bad_block_checksum	text	200000	21	BlockChecksum	
+bad_content_checksum	text	200000	21	ContentChecksum	
+bad_offset	text	200000	22	BadOffset	
+bad_dictionary	text	200000	22	DictionaryNotSupported	

@@ -4,3 +4,5 @@ Bmp/* binary
 GifEnc/* binary
 Filters/* binary
 *.bin binary
+Lz4/*.lz4 binary
+Lz4Dec/*.lz4 binary
