@@ -510,52 +510,43 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         bool hasRows = (miRow16 + 1) < frameMiRows;
         bool hasCols = (miCol16 + 1) < frameMiCols;
 
+        bool leaf = false;
+        int is16x8 = 0;
         if (hasRows && hasCols)
         {
             // Standard path: NONE + BLOCK_16X16 leaf.
             EmitPartitionNone(ref state, outBuf, byteConsts,
                 sizeIdx: 1, bsl: 1, miRow: miRow16, miCol: miCol16,
                 abovePartCtx, leftPartCtx);
-
-            int mbR = miRow16 >> 1;
-            int mbC = miCol16 >> 1;
-            EncodeLeafBlock(
-                ref state, outBuf,
-                yCoefs, uCoefs, vCoefs,
-                byteConsts, ushortConsts,
-                aboveYMode, aboveSkip, aboveTxSize,
-                aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
-                leftYMode, leftSkip, leftTxSize,
-                leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
-                tokenCache,
-                mbR, mbC, miRow16, miCol16, mbCols);
+            leaf = true;
         }
         else if (hasCols)
         {
-            // Bottom-edge boundary: emit PARTITION_HORZ (1-bit value 0 at
-            // probs[1]). Encode top BLOCK_16X8 leaf only; bottom sub-block
-            // top-left is at miRow16+1 which is >= frameMiRows so the
-            // decoder skips it per spec.
+            // Bottom-edge boundary: emit PARTITION_HORZ (1-bit value 0 at probs[1]) and encode the top BLOCK_16X8
+            // leaf only; the bottom sub-block's top-left is at miRow16+1 >= frameMiRows, so the decoder skips it.
             EmitPartitionBoundary1Bit(ref state, outBuf, byteConsts,
                 sizeIdx: 1, bsl: 1, miRow: miRow16, miCol: miCol16,
                 abovePartCtx, leftPartCtx, probIdx: 1, value: 0);
-
-            int mbR = miRow16 >> 1;
-            int mbC = miCol16 >> 1;
-            EncodeLeafBlock16x8(
-                ref state, outBuf,
-                yCoefs, uCoefs, vCoefs,
-                byteConsts, ushortConsts,
-                aboveYMode, aboveSkip, aboveTxSize,
-                aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
-                leftYMode, leftSkip, leftTxSize,
-                leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
-                tokenCache,
-                mbR, mbC, miRow16, miCol16, mbCols);
+            leaf = true;
+            is16x8 = 1;
         }
         // else hasRows-only or corner: not implemented in v1 (1920x1080
         // doesn't hit these cases). Tracked as task #23 for full 4K + arbitrary
         // dim support.
+
+        if (leaf)
+        {
+            EncodeLeaf(
+                ref state, outBuf,
+                yCoefs, uCoefs, vCoefs,
+                byteConsts, ushortConsts,
+                aboveYMode, aboveSkip, aboveTxSize,
+                aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
+                leftYMode, leftSkip, leftTxSize,
+                leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
+                tokenCache,
+                miRow16 >> 1, miCol16 >> 1, miRow16, miCol16, mbCols, is16x8);
+        }
 
         // UpdatePartitionContext: same for 16x16+NONE and 16x16+HORZ in our path.
         for (int i = 0; i < 2; i++)
@@ -629,7 +620,15 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 0, byteConsts[probsBase + 0]);
     }
 
-    private static void EncodeLeafBlock(
+    /// <summary>
+    /// One leaf: BLOCK_16X16 (<paramref name="is16x8"/> 0: one Tx16x16 Y + one Tx8x8 U + one Tx8x8 V) or the top-half
+    /// BLOCK_16X8 at the bottom frame edge (1: two Tx8x8 Y + two Tx4x4 U + two Tx4x4 V, per the VP9 spec for BLOCK_16X8
+    /// with TX_MODE=ALLOW_32X32). Skip flag, Y mode and UV mode are the same for both (DC_PRED, skip=0 in v1).
+    /// The transforms are coded in ONE loop with one block-coder call site: written out per transform (3 + 6 call
+    /// sites) the block coder was inlined 9 times, and the walker's WGSL ran Chrome's shader compiler (Tint) out of
+    /// memory.
+    /// </summary>
+    private static void EncodeLeaf(
         ref Vp8BoolEncoderGpuState state, ArrayView<byte> outBuf,
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
@@ -638,7 +637,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<byte> leftYMode, ArrayView<byte> leftSkip, ArrayView<byte> leftTxSize,
         ArrayView<byte> leftYEntropyCtx, ArrayView<byte> leftUEntropyCtx, ArrayView<byte> leftVEntropyCtx,
         ArrayView<byte> tokenCache,
-        int mbR, int mbC, int miRow, int miCol, int mbCols)
+        int mbR, int mbC, int miRow, int miCol, int mbCols, int is16x8)
     {
         // ---- Skip flag ----
         // skip_context = above + left (each is 0 or 1).
@@ -651,9 +650,8 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             byteConsts[Vp9KeyframeConstantsGpu.SkipProbsOffset + skipContext]);
 
         // ---- Y mode (DC_PRED, value 0) ----
-        // Probs row indexed by (above_y_mode, left_y_mode). For DC_PRED
-        // the tree's first decision is at probs[0]; bit 0 means leaf
-        // Vp9IntraMode.DcPred. Net cost: 1 bit per leaf for v1.
+        // Probs row indexed by (above_y_mode, left_y_mode). For DC_PRED the tree's first decision is at probs[0];
+        // bit 0 means leaf Vp9IntraMode.DcPred.
         int b4Col = miCol * 2;
         int leftB4Idx = (miRow & 7) * 2;
         int aboveYCell = b4Col < MaxMiColsAligned * 2 ? aboveYMode[b4Col] : 0;
@@ -668,13 +666,16 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 0, byteConsts[uvProbBase + 0]);
 
         // ---- Update mode-info contexts ----
-        // For Block16x16 (b4Wide = b4High = 4, miWide = miHigh = 2).
+        // BLOCK_16X16: b4Wide = b4High = 4, miWide = miHigh = 2, Tx16x16. BLOCK_16X8: b4High = 2, miHigh = 1, Tx8x8.
+        int b4High = is16x8 != 0 ? 2 : 4;
+        int miHigh = is16x8 != 0 ? 1 : 2;
+        byte txSize = (byte)(is16x8 != 0 ? (int)Vp9TxSize.Tx8x8 : (int)Vp9TxSize.Tx16x16);
         for (int i = 0; i < 4; i++)
         {
             int c = b4Col + i;
             if (c < MaxMiColsAligned * 2) aboveYMode[c] = 0; // DcPred
         }
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < b4High; i++)
         {
             int r = (leftB4Idx + i) & 15;
             leftYMode[r] = 0; // DcPred
@@ -682,199 +683,96 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         for (int i = 0; i < 2; i++)
         {
             int c = miCol + i;
-            if (c < MaxMiColsAligned) { aboveSkip[c] = (byte)skipFlag; aboveTxSize[c] = (byte)Vp9TxSize.Tx16x16; }
+            if (c < MaxMiColsAligned) { aboveSkip[c] = (byte)skipFlag; aboveTxSize[c] = txSize; }
         }
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < miHigh; i++)
         {
             int r = (leftIdxMi + i) & 7;
             leftSkip[r] = (byte)skipFlag;
-            leftTxSize[r] = (byte)Vp9TxSize.Tx16x16;
+            leftTxSize[r] = txSize;
         }
 
-        // ---- Per-plane coef emission ----
+        // ---- Per-transform coef emission, one call site ----
+        // Y: 16x16 at (mbR*16, mbC*16): above cell mbC*4, left cell (mbR & 3)*4 (cells of 4 px); the 16x8 leaf's two
+        // Tx8x8 are stored at yCoefs[mbIdx*256 + 0..63] and [+64..127]. U / V: 8x8 at (mbR*8, mbC*8): above cell mbC*2,
+        // left cell (mbR & 3)*2; the 16x8 leaf's two Tx4x4 are at [mbIdx*64 + 0..15] and [+16..31].
         long mbIdx = (long)mbR * mbCols + mbC;
-
-        // Y plane: Tx16x16 at this 16x16 block. yPx = mbR*16, xPx = mbC*16.
-        // cellsPerTx = 16/4 = 4. aboveCellOff = xPx >> 2 = mbC*4.
-        // leftCellOff = (yPx & 63) >> 2 = (mbR & 3) * 4.
-        int yAboveCell = mbC * 4;
-        int yLeftCell = (mbR & 3) * 4;
-        EncodePlaneCoefs(
-            ref state, outBuf,
-            yCoefs, mbIdx * 256, 256,
-            byteConsts, ushortConsts,
-            yAboveCell, yLeftCell, cellsPerTx: 4,
-            isTx4x4: 0, txSizeForCoefProbs: (int)Vp9TxSize.Tx16x16,
-            planeType: (int)Vp9BlockCoefEnums.PlaneType.Y,
-            tokenCache, aboveYEntropyCtx, leftYEntropyCtx);
-
-        // U plane: Tx8x8 at mbR*8, mbC*8 in chroma plane.
-        // cellsPerTx = 8/4 = 2. aboveCellOff = (mbC*8) >> 2 = mbC*2.
-        // leftCellOff = ((mbR*8) & 31) >> 2 = (mbR & 3) * 2.
-        int uvAboveCell = mbC * 2;
-        int uvLeftCell = (mbR & 3) * 2;
-        EncodePlaneCoefs(
-            ref state, outBuf,
-            uCoefs, mbIdx * 64, 64,
-            byteConsts, ushortConsts,
-            uvAboveCell, uvLeftCell, cellsPerTx: 2,
-            isTx4x4: 0, txSizeForCoefProbs: (int)Vp9TxSize.Tx8x8,
-            planeType: (int)Vp9BlockCoefEnums.PlaneType.Uv,
-            tokenCache, aboveUEntropyCtx, leftUEntropyCtx);
-
-        EncodePlaneCoefs(
-            ref state, outBuf,
-            vCoefs, mbIdx * 64, 64,
-            byteConsts, ushortConsts,
-            uvAboveCell, uvLeftCell, cellsPerTx: 2,
-            isTx4x4: 0, txSizeForCoefProbs: (int)Vp9TxSize.Tx8x8,
-            planeType: (int)Vp9BlockCoefEnums.PlaneType.Uv,
-            tokenCache, aboveVEntropyCtx, leftVEntropyCtx);
+        int jobs = is16x8 != 0 ? 6 : 3;
+        for (int j = 0; j < jobs; j++)
+        {
+            int plane = is16x8 != 0 ? (j >> 1) : j;
+            int half = is16x8 != 0 ? (j & 1) : 0;
+            long coefBase;
+            int coefCount, aboveCell, leftCell, cellsPerTx, isTx4x4, tx, planeType;
+            if (plane == 0)
+            {
+                coefBase = mbIdx * 256 + half * 64;
+                coefCount = is16x8 != 0 ? 64 : 256;
+                aboveCell = mbC * 4 + half * 2;
+                leftCell = (mbR & 3) * 4;
+                cellsPerTx = is16x8 != 0 ? 2 : 4;
+                isTx4x4 = 0;
+                tx = is16x8 != 0 ? (int)Vp9TxSize.Tx8x8 : (int)Vp9TxSize.Tx16x16;
+                planeType = (int)Vp9BlockCoefEnums.PlaneType.Y;
+            }
+            else
+            {
+                coefBase = mbIdx * 64 + half * 16;
+                coefCount = is16x8 != 0 ? 16 : 64;
+                aboveCell = mbC * 2 + half;
+                leftCell = (mbR & 3) * 2;
+                cellsPerTx = is16x8 != 0 ? 1 : 2;
+                isTx4x4 = is16x8;
+                tx = is16x8 != 0 ? (int)Vp9TxSize.Tx4x4 : (int)Vp9TxSize.Tx8x8;
+                planeType = (int)Vp9BlockCoefEnums.PlaneType.Uv;
+            }
+            EncodePlaneCoefs(
+                ref state, outBuf, plane,
+                yCoefs, uCoefs, vCoefs, coefBase, coefCount,
+                byteConsts, ushortConsts,
+                aboveCell, leftCell, cellsPerTx,
+                isTx4x4, tx, planeType,
+                tokenCache,
+                aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
+                leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx);
+        }
     }
 
-    /// <summary>
-    /// Encode a top-half BLOCK_16X8 leaf at the bottom-edge boundary. Same
-    /// shape as <see cref="EncodeLeafBlock"/> but with 2 Tx8x8 luma + 2 Tx4x4
-    /// U + 2 Tx4x4 V transforms (per VP9 spec for BLOCK_16X8 with TX_MODE=
-    /// ALLOW_32X32). Mode-info contexts updated for a 2-mi-wide x 1-mi-tall
-    /// region (vs 2x2 for BLOCK_16X16).
-    /// </summary>
-    private static void EncodeLeafBlock16x8(
-        ref Vp8BoolEncoderGpuState state, ArrayView<byte> outBuf,
-        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
-        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
-        ArrayView<byte> aboveYMode, ArrayView<byte> aboveSkip, ArrayView<byte> aboveTxSize,
-        ArrayView<byte> aboveYEntropyCtx, ArrayView<byte> aboveUEntropyCtx, ArrayView<byte> aboveVEntropyCtx,
-        ArrayView<byte> leftYMode, ArrayView<byte> leftSkip, ArrayView<byte> leftTxSize,
-        ArrayView<byte> leftYEntropyCtx, ArrayView<byte> leftUEntropyCtx, ArrayView<byte> leftVEntropyCtx,
-        ArrayView<byte> tokenCache,
-        int mbR, int mbC, int miRow, int miCol, int mbCols)
+    /// <summary>Entropy-context cell <paramref name="idx"/> of plane <paramref name="plane"/> (0 Y, 1 U, 2 V); 0 past the array.</summary>
+    private static int ReadCtx(int plane, ArrayView<byte> y, ArrayView<byte> u, ArrayView<byte> v, int idx)
     {
-        // Skip flag, Y mode, UV mode emit identical to BLOCK_16X16 (DC_PRED,
-        // skip=0 in v1).
-        int leftIdxMi = miRow & 7;
-        int leftSkipBit = leftSkip[leftIdxMi];
-        int aboveSkipBit = miCol < MaxMiColsAligned ? aboveSkip[miCol] : 0;
-        int skipContext = aboveSkipBit + leftSkipBit;
-        int skipFlag = 0;
-        Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, skipFlag,
-            byteConsts[Vp9KeyframeConstantsGpu.SkipProbsOffset + skipContext]);
+        int r = 0;
+        if (plane == 0) { if (idx < y.Length) r = y[idx]; }
+        else if (plane == 1) { if (idx < u.Length) r = u[idx]; }
+        else { if (idx < v.Length) r = v[idx]; }
+        return r;
+    }
 
-        int b4Col = miCol * 2;
-        int leftB4Idx = (miRow & 7) * 2;
-        int aboveYCell = b4Col < MaxMiColsAligned * 2 ? aboveYMode[b4Col] : 0;
-        int leftYCell = leftYMode[leftB4Idx];
-        long yProbBase = Vp9KeyframeConstantsGpu.KfYModeProbsOffset
-                       + (long)(aboveYCell * 10 + leftYCell) * 9;
-        Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 0, byteConsts[yProbBase + 0]);
-
-        long uvProbBase = Vp9KeyframeConstantsGpu.KfUvModeProbsOffset;
-        Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 0, byteConsts[uvProbBase + 0]);
-
-        // Mode-info context updates for BLOCK_16X8: b4Wide=4, b4High=2,
-        // miWide=2, miHigh=1.
-        for (int i = 0; i < 4; i++)
-        {
-            int c = b4Col + i;
-            if (c < MaxMiColsAligned * 2) aboveYMode[c] = 0;
-        }
-        for (int i = 0; i < 2; i++)
-        {
-            int r = (leftB4Idx + i) & 15;
-            leftYMode[r] = 0;
-        }
-        for (int i = 0; i < 2; i++)
-        {
-            int c = miCol + i;
-            if (c < MaxMiColsAligned) { aboveSkip[c] = (byte)skipFlag; aboveTxSize[c] = (byte)Vp9TxSize.Tx8x8; }
-        }
-        // miHigh=1: only one left row updated.
-        leftSkip[leftIdxMi] = (byte)skipFlag;
-        leftTxSize[leftIdxMi] = (byte)Vp9TxSize.Tx8x8;
-
-        long mbIdx = (long)mbR * mbCols + mbC;
-
-        // Y plane: 2 Tx8x8 over the top 16x8 (left 8x8 + right 8x8).
-        // Sequential encode stores them at yCoefs[mbIdx*256 + 0..63] and [+64..127].
-        // cellsPerTx = 8/4 = 2.
-        int yAboveCell = mbC * 4;
-        int yLeftCell = (mbR & 3) * 4;
-        EncodePlaneCoefs(
-            ref state, outBuf,
-            yCoefs, mbIdx * 256 + 0, 64,
-            byteConsts, ushortConsts,
-            yAboveCell, yLeftCell, cellsPerTx: 2,
-            isTx4x4: 0, txSizeForCoefProbs: (int)Vp9TxSize.Tx8x8,
-            planeType: (int)Vp9BlockCoefEnums.PlaneType.Y,
-            tokenCache, aboveYEntropyCtx, leftYEntropyCtx);
-        EncodePlaneCoefs(
-            ref state, outBuf,
-            yCoefs, mbIdx * 256 + 64, 64,
-            byteConsts, ushortConsts,
-            yAboveCell + 2, yLeftCell, cellsPerTx: 2,
-            isTx4x4: 0, txSizeForCoefProbs: (int)Vp9TxSize.Tx8x8,
-            planeType: (int)Vp9BlockCoefEnums.PlaneType.Y,
-            tokenCache, aboveYEntropyCtx, leftYEntropyCtx);
-
-        // U plane: 2 Tx4x4 over top 8x4 chroma (left 4x4 + right 4x4).
-        // Stored at uCoefs[mbIdx*64 + 0..15] and [+16..31].
-        // cellsPerTx = 4/4 = 1.
-        int uvAboveCell = mbC * 2;
-        int uvLeftCell = (mbR & 3) * 2;
-        EncodePlaneCoefs(
-            ref state, outBuf,
-            uCoefs, mbIdx * 64 + 0, 16,
-            byteConsts, ushortConsts,
-            uvAboveCell, uvLeftCell, cellsPerTx: 1,
-            isTx4x4: 1, txSizeForCoefProbs: (int)Vp9TxSize.Tx4x4,
-            planeType: (int)Vp9BlockCoefEnums.PlaneType.Uv,
-            tokenCache, aboveUEntropyCtx, leftUEntropyCtx);
-        EncodePlaneCoefs(
-            ref state, outBuf,
-            uCoefs, mbIdx * 64 + 16, 16,
-            byteConsts, ushortConsts,
-            uvAboveCell + 1, uvLeftCell, cellsPerTx: 1,
-            isTx4x4: 1, txSizeForCoefProbs: (int)Vp9TxSize.Tx4x4,
-            planeType: (int)Vp9BlockCoefEnums.PlaneType.Uv,
-            tokenCache, aboveUEntropyCtx, leftUEntropyCtx);
-
-        // V plane: same as U.
-        EncodePlaneCoefs(
-            ref state, outBuf,
-            vCoefs, mbIdx * 64 + 0, 16,
-            byteConsts, ushortConsts,
-            uvAboveCell, uvLeftCell, cellsPerTx: 1,
-            isTx4x4: 1, txSizeForCoefProbs: (int)Vp9TxSize.Tx4x4,
-            planeType: (int)Vp9BlockCoefEnums.PlaneType.Uv,
-            tokenCache, aboveVEntropyCtx, leftVEntropyCtx);
-        EncodePlaneCoefs(
-            ref state, outBuf,
-            vCoefs, mbIdx * 64 + 16, 16,
-            byteConsts, ushortConsts,
-            uvAboveCell + 1, uvLeftCell, cellsPerTx: 1,
-            isTx4x4: 1, txSizeForCoefProbs: (int)Vp9TxSize.Tx4x4,
-            planeType: (int)Vp9BlockCoefEnums.PlaneType.Uv,
-            tokenCache, aboveVEntropyCtx, leftVEntropyCtx);
+    /// <summary>Writes entropy-context cell <paramref name="idx"/> of plane <paramref name="plane"/> (ignored past the array).</summary>
+    private static void WriteCtx(int plane, ArrayView<byte> y, ArrayView<byte> u, ArrayView<byte> v, int idx, byte value)
+    {
+        if (plane == 0) { if (idx < y.Length) y[idx] = value; }
+        else if (plane == 1) { if (idx < u.Length) u[idx] = value; }
+        else { if (idx < v.Length) v[idx] = value; }
     }
 
     private static void EncodePlaneCoefs(
-        ref Vp8BoolEncoderGpuState state, ArrayView<byte> outBuf,
-        ArrayView<short> coefs, long coefBase, int coefCount,
+        ref Vp8BoolEncoderGpuState state, ArrayView<byte> outBuf, int plane,
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs, long coefBase, int coefCount,
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
         int aboveCellOff, int leftCellOff, int cellsPerTx,
         int isTx4x4, int txSizeForCoefProbs, int planeType,
         ArrayView<byte> tokenCache,
-        ArrayView<byte> aboveEntropyCtx, ArrayView<byte> leftEntropyCtx)
+        ArrayView<byte> aboveY, ArrayView<byte> aboveU, ArrayView<byte> aboveV,
+        ArrayView<byte> leftY, ArrayView<byte> leftU, ArrayView<byte> leftV)
     {
         // Initial coef context = (aboveAgg != 0) + (leftAgg != 0).
         int aboveAgg = 0;
         int leftAgg = 0;
         for (int i = 0; i < cellsPerTx; i++)
         {
-            int aIdx = aboveCellOff + i;
-            int lIdx = leftCellOff + i;
-            if (aIdx < aboveEntropyCtx.Length) aboveAgg |= aboveEntropyCtx[aIdx];
-            if (lIdx < leftEntropyCtx.Length) leftAgg |= leftEntropyCtx[lIdx];
+            aboveAgg |= ReadCtx(plane, aboveY, aboveU, aboveV, aboveCellOff + i);
+            leftAgg |= ReadCtx(plane, leftY, leftU, leftV, leftCellOff + i);
         }
         int initialCtx = (aboveAgg != 0 ? 1 : 0) + (leftAgg != 0 ? 1 : 0);
 
@@ -899,10 +797,17 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             coefProbsBase = Vp9KeyframeConstantsGpu.CoefProbs16x16Offset;
         }
 
+        // The transform's coefficients, copied from their plane (one small loop per plane: a loop is never
+        // if-converted, so no plane is read out of range).
+        var block = LocalMemory.Allocate<short>(256);
+        if (plane == 0) { for (int i = 0; i < coefCount; i++) block[i] = yCoefs[coefBase + i]; }
+        else if (plane == 1) { for (int i = 0; i < coefCount; i++) block[i] = uCoefs[coefBase + i]; }
+        else { for (int i = 0; i < coefCount; i++) block[i] = vCoefs[coefBase + i]; }
+
         var scanView = ushortConsts.SubView(scanBase, coefCount);
         var neighborsView = ushortConsts.SubView(neighborsBase, (long)coefCount * 2);
         var coefProbsView = byteConsts.SubView(coefProbsBase, 432);
-        var coefsView = coefs.SubView(coefBase, coefCount);
+        var coefsView = block.SubView(0, coefCount);
         var coefConstsView = byteConsts.SubView(
             Vp9KeyframeConstantsGpu.CoefConstsOffset,
             Vp9KeyframeConstantsGpu.CoefConstsLength);
@@ -923,10 +828,8 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         byte ec = (byte)(eob > 0 ? 1 : 0);
         for (int i = 0; i < cellsPerTx; i++)
         {
-            int aIdx = aboveCellOff + i;
-            int lIdx = leftCellOff + i;
-            if (aIdx < aboveEntropyCtx.Length) aboveEntropyCtx[aIdx] = ec;
-            if (lIdx < leftEntropyCtx.Length) leftEntropyCtx[lIdx] = ec;
+            WriteCtx(plane, aboveY, aboveU, aboveV, aboveCellOff + i, ec);
+            WriteCtx(plane, leftY, leftU, leftV, leftCellOff + i, ec);
         }
     }
 
