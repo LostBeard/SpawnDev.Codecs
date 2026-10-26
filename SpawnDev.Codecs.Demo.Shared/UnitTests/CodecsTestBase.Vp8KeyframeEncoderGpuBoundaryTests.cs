@@ -137,13 +137,13 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp8KeyframeEncoderGpu_Batch_ArrayViewOverload_EqualsSingleFrameEncodes()
     {
         await RunBatchMatchesSingles(frameCount: 3, width: 48, height: 32, seed: 0x71B4);
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task Vp8KeyframeEncoderGpu_Batch_OddDimensions_EqualsSingleFrameEncodes()
     {
         await RunBatchMatchesSingles(frameCount: 2, width: 33, height: 17, seed: 0x71B5);

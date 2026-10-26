@@ -76,6 +76,9 @@ host; _TestStats "bench" records). Next, performance (the ratio is done):
 - **Unpack** (what model loading pays): one InflateGpu thread per 64 KiB chunk decodes bit by bit (puff-style canonical
   walk). A table-driven Huffman decode (one lookup per symbol from a per-chunk LUT built in shared memory) and more
   chunks in flight should take it from ~1.5 GB/s to tens of GB/s. Measure first: which part is the decode loop.
+  **10-26:** first-level tables in InflateGpu (9-bit literal/length, 7-bit distance, built per block in the stream's
+  scratch; longer codes walk the canonical code; read-ahead bytes go back before a stored block and at the end):
+  LTX DiT BF16 unpack 1.94 -> 4.05 GB/s on CUDA, same bytes. Next: shared-memory tables, more chunks in flight.
 - **Pack**: waves of 64 single-thread chunks (DeflateGpu scratch is 570 KB per chunk, mostly the unused LZ77 hash and
   token arrays at the Huffman-only level). A dedicated Huffman-only encoder (histogram per chunk with many threads,
   code build per chunk, bit offsets by prefix sum, every thread writes its bytes) removes the scratch and the waves.

@@ -130,6 +130,54 @@ public abstract partial class CodecsTestBase
     public async Task InflateGpu_StoredBlocks_NoCompression() =>
         await AssertInflateMatchesAsync(StructuredData(200_000, 0x1F01), CompressionLevel.NoCompression, "stored blocks");
 
+    /// <summary>
+    /// Stored blocks right after Huffman blocks: every Flush() of ZLibStream is a zlib sync flush, which ends the
+    /// current Huffman block and writes an empty stored block (00 00 FF FF). The table decode reads ahead, so the bytes
+    /// it read past the last code must go back before the stored header (else LEN / NLEN come from the wrong bytes).
+    /// That needs a short end-of-block code (a whole byte left after it and the 3 header bits): Huffman-only blocks over
+    /// a 3-symbol alphabet give it 2 bits. Pieces of 1 .. 3000 bytes so the blocks end at every bit position; plus
+    /// ordinary Optimal blocks.
+    /// </summary>
+    [TestMethod]
+    public async Task InflateGpu_SyncFlushes_StoredBlocksAfterHuffmanBlocks()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            var rng = new Random(0x1F06);
+            var small = new byte[60_000];
+            for (int i = 0; i < small.Length; i++) small[i] = (byte)"aab"[rng.Next(3)];
+            var cases = new (string name, byte[] raw, ZLibCompressionOptions options)[]
+            {
+                ("huffman-only, 3 symbols", small, new ZLibCompressionOptions { CompressionLevel = 6, CompressionStrategy = ZLibCompressionStrategy.HuffmanOnly }),
+                ("optimal, structured", StructuredData(120_000, 0x1F05), new ZLibCompressionOptions { CompressionLevel = 6 }),
+            };
+            foreach (var (name, raw, options) in cases)
+            {
+                using var ms = new MemoryStream();
+                int flushes = 0;
+                using (var z = new ZLibStream(ms, options, leaveOpen: true))
+                {
+                    int at = 0;
+                    while (at < raw.Length)
+                    {
+                        int n = System.Math.Min(raw.Length - at, rng.Next(1, 3000));
+                        z.Write(raw, at, n);
+                        z.Flush();
+                        flushes++;
+                        at += n;
+                    }
+                }
+                byte[] zlib = ms.ToArray();
+                var (result, output) = await InflateOnGpuAsync(acc, zlib, raw.Length);
+                Equal(raw.Length, result, $"{name}: inflated length after {flushes} sync flushes (negative = -InflateError)");
+                EqualBytes(raw, output, $"{name}: inflated bytes");
+            }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
     [TestMethod]
     public async Task InflateGpu_IncompressibleRandom_Optimal()
     {

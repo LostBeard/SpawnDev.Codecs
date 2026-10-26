@@ -3,7 +3,10 @@
 // DEFLATE (RFC 1951) / zlib (RFC 1950) decoder, GPU-callable form. A port of Mark Adler's puff.c
 // (zlib/contrib/puff, public-domain-style permissive licence) into ILGPU-compatible C#: no managed
 // allocations, no tables as static arrays (length / distance bases are computed arithmetically),
-// all scratch lives in an ArrayView<int> the caller owns.
+// all scratch lives in an ArrayView<int> the caller owns. Symbols decode through first-level lookup tables (9-bit
+// literal/length, 7-bit distance, built per block in the scratch): one read for every code that short; longer codes
+// take puff's canonical walk. The table decode reads up to two bytes ahead; they go back before a stored block's
+// header and after the last block.
 //
 // A DEFLATE stream is one sequential bit-serial dependency chain, so per the library's cardinal
 // rule it runs on ONE GPU thread (still accelerator-resident: the compressed bytes and the
@@ -98,7 +101,17 @@ public static class InflateGpu
     private const int FixLitSymOff = FixLitCountOff + 16; // [288]
     private const int FixDistCountOff = FixLitSymOff + 288; // [16] fixed distance code
     private const int FixDistSymOff = FixDistCountOff + 16; // [32]
-    private const int StateOff = FixDistSymOff + 32;      // [24]  resumable decode state (slots below)
+    // First-level decode tables (see BuildLut): the block's codes and the fixed codes.
+    private const int LitLutOff = FixDistSymOff + 32;     // [512] literal/length, LitLutBits
+    private const int DistLutOff = LitLutOff + 512;       // [128] distance, DistLutBits
+    private const int FixLitLutOff = DistLutOff + 128;    // [512]
+    private const int FixDistLutOff = FixLitLutOff + 512; // [128]
+    private const int StateOff = FixDistLutOff + 128;     // [24]  resumable decode state (slots below)
+
+    /// <summary>Bits of the literal/length lookup table: every fixed code and most dynamic ones (longer codes walk the canonical code).</summary>
+    private const int LitLutBits = 9;
+    /// <summary>Bits of the distance lookup table.</summary>
+    private const int DistLutBits = 7;
 
     /// <summary>Number of <c>int</c>s of scratch one inflate needs.</summary>
     public const int ScratchInts = StateOff + 24;
@@ -353,22 +366,27 @@ public static class InflateGpu
                 int litSym = sb + LitSymOff;
                 int distCount = sb + DistCountOff;
                 int distSym = sb + DistSymOff;
+                int litLut = sb + LitLutOff;
+                int distLut = sb + DistLutOff;
                 if (tables != 0)
                 {
                     litCount = sb + FixLitCountOff;
                     litSym = sb + FixLitSymOff;
                     distCount = sb + FixDistCountOff;
                     distSym = sb + FixDistSymOff;
+                    litLut = sb + FixLitLutOff;
+                    distLut = sb + FixDistLutOff;
                 }
-                int endOfBlock = CodeSymbol(ref st, src, dst, scratch, litCount, litSym, distCount, distSym);
+                int endOfBlock = CodeSymbol(ref st, src, dst, scratch, litCount, litSym, distCount, distSym, litLut, distLut);
                 bool blockDone = (endOfBlock != 0) & (st.Err == 0);
                 if (blockDone) phase = last != 0 ? PhaseEnd : PhaseHeader;
             }
             else
             {
-                // After the last block: the result, and for a verified zlib stream the Adler-32 trailer. The bit
-                // reader loads a byte only when it needs one, so InPos is exactly the byte boundary after the last
-                // (possibly partially used) deflate byte.
+                // After the last block: the result, and for a verified zlib stream the Adler-32 trailer. The table
+                // decode reads ahead, so whole bytes still in the bit buffer go back first: InPos is then exactly the
+                // byte boundary after the last (possibly partially used) deflate byte.
+                GiveBackWholeBytes(ref st);
                 result = st.OutPos - st.OutBase;
                 if (mode == ModeZlibVerify)
                 {
@@ -425,7 +443,8 @@ public static class InflateGpu
     /// <summary>Stored block header: returns LEN after checking it (the bytes are copied by the stored phase).</summary>
     private static int StoredHeader(ref InflateState st, ArrayView<byte> src)
     {
-        // Discard the rest of the current byte.
+        // Bytes the table decode read ahead go back; then discard the rest of the current byte.
+        GiveBackWholeBytes(ref st);
         st.BitBuf = 0;
         st.BitCnt = 0;
         int len = 0;
@@ -465,6 +484,8 @@ public static class InflateGpu
 
         for (int sym = 0; sym < 30; sym++) scratch[sb + LengthsOff + sym] = 5;
         Construct(scratch, sb, sb + LengthsOff, 30, sb + FixDistCountOff, sb + FixDistSymOff);
+        BuildLut(scratch, sb + FixLitCountOff, sb + FixLitSymOff, sb + FixLitLutOff, LitLutBits);
+        BuildLut(scratch, sb + FixDistCountOff, sb + FixDistSymOff, sb + FixDistLutOff, DistLutBits);
     }
 
     /// <summary>Dynamic block header: reads the code lengths and builds the block's codes into the dynamic tables.</summary>
@@ -576,6 +597,8 @@ public static class InflateGpu
             st.Err = (int)InflateError.BadHuffmanCode;
             return;
         }
+        BuildLut(scratch, sb + LitCountOff, sb + LitSymOff, sb + LitLutOff, LitLutBits);
+        BuildLut(scratch, sb + DistCountOff, sb + DistSymOff, sb + DistLutOff, DistLutBits);
     }
 
     /// <summary>
@@ -584,10 +607,10 @@ public static class InflateGpu
     /// </summary>
     private static int CodeSymbol(
         ref InflateState st, ArrayView<byte> src, ArrayView<byte> dst, ArrayView<int> scratch,
-        int litCount, int litSym, int distCount, int distSym)
+        int litCount, int litSym, int distCount, int distSym, int litLut, int distLut)
     {
         int endOfBlock = 0;
-        int sym = Decode(ref st, src, scratch, litCount, litSym);
+        int sym = DecodeFast(ref st, src, scratch, litLut, LitLutBits, litCount, litSym);
         if (st.Err != 0)
         {
             endOfBlock = 0;
@@ -632,7 +655,7 @@ public static class InflateGpu
                     len = 3 + ((4 + ((ls - 8) & 3)) << e) + Bits(ref st, src, e);
                 }
 
-                int dsym = Decode(ref st, src, scratch, distCount, distSym);
+                int dsym = DecodeFast(ref st, src, scratch, distLut, DistLutBits, distCount, distSym);
                 if (st.Err == 0)
                 {
                     if (dsym >= 30)
@@ -705,6 +728,74 @@ public static class InflateGpu
         st.BitBuf = val >> need;
         st.BitCnt -= need;
         return (int)(val & ((1u << need) - 1u));
+    }
+
+    /// <summary>Returns the whole bytes still unread in the bit buffer to the input (the table decode reads ahead).</summary>
+    private static void GiveBackWholeBytes(ref InflateState st)
+    {
+        int whole = st.BitCnt >> 3;
+        st.InPos -= whole;
+        st.BitCnt -= whole * 8;
+        st.BitBuf &= (1u << st.BitCnt) - 1u;
+    }
+
+    /// <summary>
+    /// Decodes one symbol through the first-level table at <paramref name="lutAt"/> (<paramref name="lutBits"/> bits:
+    /// one read for every code that short); a longer code, or one whose bits run past the end of the input, takes the
+    /// canonical walk of <see cref="Decode"/>.
+    /// </summary>
+    private static int DecodeFast(
+        ref InflateState st, ArrayView<byte> src, ArrayView<int> scratch, int lutAt, int lutBits, int countAt, int symAt)
+    {
+        // Read ahead up to lutBits bits while input remains (no error at its end: the walk reports that).
+        bool loading = (st.BitCnt < lutBits) & (st.InPos < st.InEnd) & (st.Err == 0);
+        while (loading)
+        {
+            st.BitBuf |= (uint)src[st.InPos] << st.BitCnt;
+            st.InPos++;
+            st.BitCnt += 8;
+            loading = (st.BitCnt < lutBits) & (st.InPos < st.InEnd);
+        }
+        int entry = scratch[lutAt + (int)(st.BitBuf & ((1u << lutBits) - 1u))];
+        int len = entry & 15;
+        int result;
+        bool hit = (len != 0) & (len <= st.BitCnt) & (st.Err == 0);
+        if (hit)
+        {
+            st.BitBuf >>= len;
+            st.BitCnt -= len;
+            result = entry >> 4;
+        }
+        else result = Decode(ref st, src, scratch, countAt, symAt);
+        return result;
+    }
+
+    /// <summary>
+    /// Fills the first-level table of a canonical code (per-length counts at <paramref name="countAt"/>, sorted symbols at
+    /// <paramref name="symAt"/>): every entry whose low bits start with a code of at most <paramref name="lutBits"/> bits
+    /// holds (symbol &lt;&lt; 4) | length; the others hold 0. DEFLATE sends a code's first bit first, so the index is the
+    /// code bit-reversed.
+    /// </summary>
+    private static void BuildLut(ArrayView<int> scratch, int countAt, int symAt, int lutAt, int lutBits)
+    {
+        int size = 1 << lutBits;
+        for (int i = 0; i < size; i++) scratch[lutAt + i] = 0;
+        int code = 0;
+        int index = 0;
+        for (int len = 1; len <= lutBits; len++)
+        {
+            int count = scratch[countAt + len];
+            for (int k = 0; k < count; k++)
+            {
+                int rev = 0;
+                for (int b = 0; b < len; b++) rev |= ((code >> b) & 1) << (len - 1 - b);
+                int entry = (scratch[symAt + index + k] << 4) | len;
+                for (int fill = rev; fill < size; fill += 1 << len) scratch[lutAt + fill] = entry;
+                code++;
+            }
+            index += count;
+            code <<= 1;
+        }
     }
 
     /// <summary>
