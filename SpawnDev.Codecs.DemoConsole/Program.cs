@@ -13,6 +13,10 @@ if (args.Length > 0 && args[0] == "wasm-vp9-dump")
 if (args.Length > 0 && args[0] == "weightpack-bench")
     return await WeightPackBench.Run(args);
 
+// `gdeflate-bench <file.gdf> <original> [cuda|opencl|cpu] [reps]`: GDeflateDecompressorGpu on a reference stream.
+if (args.Length > 0 && args[0] == "gdeflate-bench")
+    return await GDeflateBench.Run(args);
+
 // Run SpawnDev.UnitTesting unit tests on desktop .NET via PlaywrightMultiTest harness.
 try
 {
