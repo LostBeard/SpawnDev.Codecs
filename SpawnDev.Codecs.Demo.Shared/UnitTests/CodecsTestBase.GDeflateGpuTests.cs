@@ -60,13 +60,13 @@ public abstract partial class CodecsTestBase
         return diff == null ? null : $"{name}: {diff}";
     }
 
-    private async Task AssertGDeflateCasesAsync(Func<GDeflateCase, bool> which, int wave, int minCases)
+    private async Task AssertGDeflateCasesAsync(Func<GDeflateCase, bool> which, int wave, int minCases, GDeflateDecodeMode mode = GDeflateDecodeMode.LanesPerTile)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         RequireFeatures(acc, Lz4Requirements);
         try
         {
-            using var dec = new GDeflateDecompressorGpu(acc, wave);
+            using var dec = new GDeflateDecompressorGpu(acc, wave, mode);
             var cases = GDeflateCases().Where(c => c.Expected == "ok").Where(which).ToList();
             True(cases.Count >= minCases, $"only {cases.Count} GDeflate streams selected");
             var failures = new List<string>();
@@ -83,6 +83,11 @@ public abstract partial class CodecsTestBase
     [TestMethod(Timeout = 600000)]
     public async Task GDeflateDecompressorGpu_ReferenceStreams_DecodeToTheContent() =>
         await AssertGDeflateCasesAsync(_ => true, GDeflateDecompressorGpu.DefaultWave, 30);
+
+    /// <summary>The one-thread-per-tile mode (the reference decoder's order) on every reference stream.</summary>
+    [TestMethod(Timeout = 600000)]
+    public async Task GDeflateDecompressorGpu_ThreadPerTile_DecodeToTheContent() =>
+        await AssertGDeflateCasesAsync(_ => true, GDeflateDecompressorGpu.DefaultWave, 30, GDeflateDecodeMode.ThreadPerTile);
 
     [TestMethod(Timeout = 600000)]
     public async Task GDeflateDecompressorGpu_SmallWaves_DecodeToTheContent() =>

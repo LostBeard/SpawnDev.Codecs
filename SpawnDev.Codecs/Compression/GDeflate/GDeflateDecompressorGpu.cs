@@ -26,6 +26,15 @@ using SpawnDev.SpawnJS.JSObjects;
 
 namespace SpawnDev.Codecs.Compression.GDeflate;
 
+/// <summary>How <see cref="GDeflateDecompressorGpu"/> spreads a tile over the accelerator.</summary>
+public enum GDeflateDecodeMode
+{
+    /// <summary>32 threads per tile (the format's design): one symbol per sub-stream per round. The default.</summary>
+    LanesPerTile = 0,
+    /// <summary>One thread per tile walking the sub-streams in turn (the reference decoder's order).</summary>
+    ThreadPerTile = 1,
+}
+
 /// <summary>GDeflate (DirectStorage tile stream) decompressor on the accelerator.</summary>
 public sealed class GDeflateDecompressorGpu : IDisposable
 {
@@ -85,22 +94,29 @@ public sealed class GDeflateDecompressorGpu : IDisposable
     private readonly LaunchPacer _pacer;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _header;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _decode;
+    private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int> _decodeLanes;
+    private readonly GDeflateDecodeMode _mode;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _prm, _scratch;
     private readonly MemoryBuffer1D<byte, Stride1D.Dense> _noOut;
     private readonly StageBuffer<byte> _stageIn, _stageOut;
 
-    /// <summary>Compiles the kernels and allocates one wave's working memory (~7 KB per tile of <paramref name="wave"/>).</summary>
-    public GDeflateDecompressorGpu(Accelerator accelerator, int wave = DefaultWave)
+    /// <summary>
+    /// Compiles the kernels; <see cref="GDeflateDecodeMode.ThreadPerTile"/> also allocates one wave's working memory (~9 KB
+    /// per tile of <paramref name="wave"/>; the lanes mode keeps it in shared memory).
+    /// </summary>
+    public GDeflateDecompressorGpu(Accelerator accelerator, int wave = DefaultWave, GDeflateDecodeMode mode = GDeflateDecodeMode.LanesPerTile)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         if (wave < 1 || wave > 65535) throw new ArgumentOutOfRangeException(nameof(wave));
         _accelerator = accelerator;
         _wave = wave;
+        _mode = mode;
         _pacer = new LaunchPacer(accelerator);
         _header = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(HeaderKernel);
         _decode = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(DecodeKernel);
+        _decodeLanes = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int>(DecodeLanesKernel);
         _prm = accelerator.Allocate1D<int>(PrmInts);
-        _scratch = accelerator.Allocate1D<int>((long)wave * ScratchInts);
+        _scratch = accelerator.Allocate1D<int>(mode == GDeflateDecodeMode.ThreadPerTile ? (long)wave * ScratchInts : 1);
         _noOut = accelerator.Allocate1D<byte>(1);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
@@ -182,7 +198,8 @@ public sealed class GDeflateDecompressorGpu : IDisposable
         for (int first = 0; first < _tiles; first += _wave)
         {
             int count = Math.Min(_wave, _tiles - first);
-            _decode(count, data, outView, _scratch.View, _prm.View, first);
+            if (_mode == GDeflateDecodeMode.ThreadPerTile) _decode(count, data, outView, _scratch.View, _prm.View, first);
+            else _decodeLanes(new KernelConfig(count, Streams), data, outView, _prm.View, first);
             await _pacer.LaunchedAsync();
         }
         await _accelerator.SynchronizeAsync();
@@ -377,6 +394,360 @@ public sealed class GDeflateDecompressorGpu : IDisposable
         if ((st.Err == 0) & (st.OutPos != st.OutEnd)) st.Err = (int)GDeflateError.TileLength;
         if (st.Err != 0) Fail(prm, (GDeflateError)st.Err, tile);
         else Atomic.Add(ref prm[PDone], 1);
+    }
+
+    // ------------------------------------------------------------------
+    // 32 lanes per tile (GDeflateDecodeMode.LanesPerTile)
+    // ------------------------------------------------------------------
+
+    // Shared control ints: input cursor and end, error, final-block flag, block type, stored length; per-lane areas for
+    // votes, prefix sums and the round's copy parameters.
+    private const int CCursor = 0, CInEnd = 1, CErr = 2, CFinal = 3, CType = 4, CStoredLen = 5;
+    private const int CVote = 8, CScan = CVote + Streams, CCopyDist = CScan + Streams, CCopyLen = CCopyDist + Streams,
+        CCopyPos = CCopyLen + Streams;
+    private const int ControlInts = CCopyPos + Streams;
+
+    /// <summary>
+    /// One group of 32 lanes per tile (the HLSL reference decoder's portable path). Every lane's bit reader, the decode
+    /// tables and the input cursor live in shared memory. Lane 0 reads each block header (and a dynamic block's code
+    /// lengths) serially in the reference's order; Huffman blocks then decode in rounds of one symbol per lane: a ballot
+    /// refills the lanes that fell under 32 bits in lane order, a prefix sum places the round's output, literals are
+    /// stored and the copies run in lane order with all 32 lanes copying. Stored blocks hand one byte per lane per round.
+    /// Every loop that holds a barrier is steered by Group.BarrierOr / BarrierPopCount (uniform on every backend).
+    /// </summary>
+    private static void DecodeLanesKernel(ArrayView<byte> d, ArrayView<byte> o, ArrayView<int> prm, int first)
+    {
+        var sc = SharedMemory.Allocate<int>(ScratchInts);
+        var ctl = SharedMemory.Allocate<int>(ControlInts);
+        int lane = Group.IdxX;
+        int tile = first + Grid.IdxX;
+        int tiles = prm[PTiles];
+        int data = prm[PData];
+        int inPos = data;
+        if (tile > 0) inPos = data + (int)Read32(d, 8 + 4 * tile);
+        int inEnd = data + (int)Read32(d, 8);
+        if (tile < tiles - 1) inEnd = data + (int)Read32(d, 8 + 4 * (tile + 1));
+        else if (tiles > 1) inEnd = data + (int)Read32(d, 8 + 4 * (tiles - 1)) + (int)Read32(d, 8);
+        int outBase = tile * TileSize;
+        int outEnd = outBase + TileSize;
+        int last = prm[PLastSize];
+        if ((tile == tiles - 1) & (last != 0)) outEnd = outBase + last;
+
+        if (lane == 0)
+        {
+            ctl[CCursor] = inPos + 4 * Streams;
+            ctl[CInEnd] = inEnd;
+            ctl[CErr] = inPos + 4 * Streams > inEnd ? (int)GDeflateError.Truncated : 0;
+        }
+        // Every sub-stream starts with one 32-bit packet, in lane order.
+        uint firstPacket = 0;
+        if (inPos + 4 * lane + 4 <= inEnd) firstPacket = Read32(d, inPos + 4 * lane);
+        sc[BitLoOff + lane] = (int)firstPacket;
+        sc[BitHiOff + lane] = 0;
+        sc[BitsLeftOff + lane] = 32;
+        Group.Barrier();
+
+        int dst = outBase;
+        bool going = Group.BarrierAnd(ctl[CErr] == 0);
+        while (going)
+        {
+            if (lane == 0) HeaderSerial(d, sc, ctl);
+            Group.Barrier();
+            bool err = Group.BarrierOr(ctl[CErr] != 0);
+            bool stored = Group.BarrierOr(ctl[CType] == 0);
+            if (!err)
+            {
+                if (stored) dst = StoredLanes(d, o, sc, ctl, lane, dst, outEnd);
+                else dst = HuffmanLanes(d, o, sc, ctl, lane, dst, outBase, outEnd);
+            }
+            bool final = Group.BarrierOr(ctl[CFinal] != 0);
+            going = Group.BarrierAnd((!final) & (ctl[CErr] == 0));
+        }
+
+        if (lane == 0)
+        {
+            int e = ctl[CErr];
+            if ((e == 0) & (dst != outEnd)) e = (int)GDeflateError.TileLength;
+            if (e != 0) Fail(prm, (GDeflateError)e, tile);
+            else Atomic.Add(ref prm[PDone], 1);
+        }
+    }
+
+    /// <summary>Lane 0: the block header in the reference's order (a dynamic block's code lengths and tables too).</summary>
+    private static void HeaderSerial(ArrayView<byte> d, ArrayView<int> sc, ArrayView<int> ctl)
+    {
+        var st = new TileState { InPos = ctl[CCursor], InEnd = ctl[CInEnd], Idx = 0, IsCopy = 0, Err = 0 };
+        int final = PopBits(ref st, sc, 0, 1);
+        int type = PopBits(ref st, sc, 0, 2);
+        Ensure(ref st, d, sc, 0);
+        int storedLen = 0;
+        if (type == 2) DynamicHeader(ref st, d, sc, 0);
+        else if (type == 1) StaticHeader(sc, 0);
+        else if (type == 0) storedLen = PopBits(ref st, sc, 0, 16);
+        else st.Err = (int)GDeflateError.BadBlockType;
+        ctl[CCursor] = st.InPos;
+        if (st.Err != 0) ctl[CErr] = st.Err;
+        ctl[CFinal] = final;
+        ctl[CType] = type;
+        ctl[CStoredLen] = storedLen;
+    }
+
+    /// <summary>A stored block: one byte per lane per round (byte k from sub-stream k mod 32).</summary>
+    private static int StoredLanes(ArrayView<byte> d, ArrayView<byte> o, ArrayView<int> sc, ArrayView<int> ctl, int lane, int dst, int outEnd)
+    {
+        int size = ctl[CStoredLen];
+        int done = 0;
+        bool more = Group.BarrierOr(done < size);
+        while (more)
+        {
+            bool active = done + lane < size;
+            int b = 0;
+            if (active) b = LanePop(sc, ctl, lane, 8);
+            LaneRefill(d, sc, ctl, lane, active);
+            if (active)
+            {
+                int at = dst + done + lane;
+                if (at < outEnd) o[at] = (byte)b;
+                else ctl[CErr] = (int)GDeflateError.TileLength;
+            }
+            done += Streams;
+            more = Group.BarrierOr((done < size) & (ctl[CErr] == 0));
+        }
+        return dst + size;
+    }
+
+    /// <summary>A Huffman block in rounds of one symbol per lane (the HLSL reference's CompressedBlock).</summary>
+    private static int HuffmanLanes(ArrayView<byte> d, ArrayView<byte> o, ArrayView<int> sc, ArrayView<int> ctl, int lane,
+        int dst, int outBase, int outEnd)
+    {
+        uint below = (1u << lane) - 1u;
+        // Round 0: literal/length symbols only.
+        int clen = 0;
+        int sym = LaneDecode(sc, ctl, lane, false, ref clen);
+        bool eob = sym == 256;
+        int eobMask = Vote(ctl, lane, eob);
+        bool stop = Group.BarrierOr(eob | (ctl[CErr] != 0));
+        bool oob = ((uint)eobMask & below) != 0;
+        int value = 0;
+        if (!oob) value = LaneTranslate(sc, ctl, lane, sym, clen, false);
+        LaneRefill(d, sc, ctl, lane, !oob);
+        int length = oob ? 0 : value;
+        int total = 0;
+        int offset = Scan(ctl, lane, length, ref total);
+        bool isCopy = (!oob) & (sym > 256);
+        int lit = sym;
+
+        bool more = !stop;
+        while (more)
+        {
+            bool isDist = isCopy;
+            sym = LaneDecode(sc, ctl, lane, isDist, ref clen);
+            eob = (!isDist) & (sym == 256);
+            eobMask = Vote(ctl, lane, eob);
+            stop = Group.BarrierOr(eob | (ctl[CErr] != 0));
+            oob = ((uint)eobMask & below) != 0;
+            bool consume = isDist | (!oob);
+            value = 0;
+            if (consume) value = LaneTranslate(sc, ctl, lane, sym, clen, isDist);
+            LaneRefill(d, sc, ctl, lane, consume);
+            // The previous round's literals and copies (this round decoded the copies' distances).
+            WriteRound(o, ctl, lane, dst + offset, value, length, lit, isDist, outBase, outEnd);
+            dst += total;
+            length = (isDist | oob) ? 0 : value;
+            offset = Scan(ctl, lane, length, ref total);
+            isCopy = (!isDist) & (!oob) & (sym > 256);
+            lit = sym;
+            more = !stop;
+        }
+
+        // Last round: the distances of the copies decoded with the end-of-block round.
+        int dist = 0;
+        if (isCopy)
+        {
+            sym = LaneDecode(sc, ctl, lane, true, ref clen);
+            dist = LaneTranslate(sc, ctl, lane, sym, clen, true);
+        }
+        LaneRefill(d, sc, ctl, lane, isCopy);
+        WriteRound(o, ctl, lane, dst + offset, dist, length, lit, isCopy, outBase, outEnd);
+        return dst + total;
+    }
+
+    /// <summary>
+    /// Stores the round's literals at their places, then runs its copies in lane order with all lanes copying (overlap
+    /// safe: byte i of a copy reads the byte dist back modulo dist, which is never part of the copy itself).
+    /// </summary>
+    private static void WriteRound(ArrayView<byte> o, ArrayView<int> ctl, int lane, int pos, int dist, int length, int lit, bool isCopy,
+        int outBase, int outEnd)
+    {
+        bool bad = (length > 0) & (pos + length > outEnd);
+        if (bad) ctl[CErr] = (int)GDeflateError.TileLength;
+        if ((!isCopy) & (length != 0) & (!bad)) o[pos] = (byte)lit;
+        bool copy = isCopy & (length > 0) & (!bad);
+        if (copy & ((dist <= 0) | (dist > pos - outBase)))
+        {
+            ctl[CErr] = (int)GDeflateError.BadDistance;
+            copy = false;
+        }
+        ctl[CCopyDist + lane] = dist;
+        ctl[CCopyLen + lane] = copy ? length : 0;
+        ctl[CCopyPos + lane] = pos;
+        int copyMask = Vote(ctl, lane, copy);
+        int copies = Group.BarrierPopCount(copy);
+        for (int k = 0; k < copies; k++)
+        {
+            int l = NthSetBit((uint)copyMask, k);
+            int cdist = ctl[CCopyDist + l];
+            int clen = ctl[CCopyLen + l];
+            int cpos = ctl[CCopyPos + l];
+            for (int i = lane; i < clen; i += Streams) o[cpos + i] = o[cpos - cdist + i % cdist];
+            Group.Barrier();
+        }
+    }
+
+    /// <summary>Ballot: bit i set when lane i's predicate holds (two barriers).</summary>
+    private static int Vote(ArrayView<int> ctl, int lane, bool p)
+    {
+        ctl[CVote + lane] = p ? 1 : 0;
+        Group.Barrier();
+        int mask = 0;
+        for (int i = 0; i < Streams; i++) mask |= ctl[CVote + i] << i;
+        Group.Barrier();
+        return mask;
+    }
+
+    /// <summary>Exclusive prefix sum over the lanes; <paramref name="total"/> = the sum of all.</summary>
+    private static int Scan(ArrayView<int> ctl, int lane, int v, ref int total)
+    {
+        ctl[CScan + lane] = v;
+        Group.Barrier();
+        int s = 0, t = 0;
+        for (int i = 0; i < Streams; i++)
+        {
+            int x = ctl[CScan + i];
+            t += x;
+            if (i < lane) s += x;
+        }
+        Group.Barrier();
+        total = t;
+        return s;
+    }
+
+    /// <summary>
+    /// Refills, in lane order, the lanes (with <paramref name="p"/>) holding fewer than 32 bits: each reads the 32-bit
+    /// packet at the cursor plus 4 x the number of refilling lanes below it; then the cursor moves past them all.
+    /// </summary>
+    private static void LaneRefill(ArrayView<byte> d, ArrayView<int> sc, ArrayView<int> ctl, int lane, bool p)
+    {
+        int left = sc[BitsLeftOff + lane];
+        bool need = p & (left < 32);
+        int mask = Vote(ctl, lane, need);
+        int cursor = ctl[CCursor];
+        if (need)
+        {
+            int at = cursor + 4 * PopCount((uint)mask & ((1u << lane) - 1u));
+            if (at + 4 > ctl[CInEnd]) ctl[CErr] = (int)GDeflateError.Truncated;
+            else
+            {
+                uint v = Read32(d, at);
+                uint lo = (uint)sc[BitLoOff + lane];
+                uint hi = (uint)sc[BitHiOff + lane];
+                if (left == 0) lo = v;
+                else
+                {
+                    lo |= v << left;
+                    hi |= v >> (32 - left);
+                }
+                sc[BitLoOff + lane] = (int)lo;
+                sc[BitHiOff + lane] = (int)hi;
+                sc[BitsLeftOff + lane] = left + 32;
+            }
+        }
+        Group.Barrier();
+        if (lane == 0) ctl[CCursor] = cursor + 4 * PopCount((uint)mask);
+        Group.Barrier();
+    }
+
+    private static int LanePop(ArrayView<int> sc, ArrayView<int> ctl, int lane, int n)
+    {
+        var st = new TileState { Idx = lane };
+        int v = PopBits(ref st, sc, 0, n);
+        if (st.Err != 0) ctl[CErr] = st.Err;
+        return v;
+    }
+
+    /// <summary>The lane's next symbol from its peeked bits (nothing consumed); -1 (and the error) when none decodes.</summary>
+    private static int LaneDecode(ArrayView<int> sc, ArrayView<int> ctl, int lane, bool isDist, ref int len)
+    {
+        uint bits = (uint)sc[BitLoOff + lane];
+        int sym;
+        if (isDist) sym = PeekSymbol(sc, 0, bits, DistLutOff, DistLutBits, DistCountOff, DistSymOff, ref len);
+        else sym = PeekSymbol(sc, 0, bits, LitLutOff, LitLutBits, LitCountOff, LitSymOff, ref len);
+        if (sym < 0) ctl[CErr] = (int)GDeflateError.BadSymbol;
+        return sym;
+    }
+
+    /// <summary>
+    /// Consumes the lane's symbol (<paramref name="clen"/> bits) and its extra bits; returns the distance, or for a
+    /// literal/length symbol the output bytes it stands for (literal 1, match its length, end of block 0).
+    /// </summary>
+    private static int LaneTranslate(ArrayView<int> sc, ArrayView<int> ctl, int lane, int sym, int clen, bool isDist)
+    {
+        var st = new TileState { Idx = lane };
+        int value = 0;
+        if (sym < 0) st.Err = (int)GDeflateError.BadSymbol;
+        else
+        {
+            Remove(ref st, sc, 0, clen);
+            if (isDist)
+            {
+                if (sym >= 32) st.Err = (int)GDeflateError.BadDistance;
+                else
+                {
+                    value = sym + 1;
+                    if (sym >= 4)
+                    {
+                        int de = (sym >> 1) - 1;
+                        value = ((2 + (sym & 1)) << de) + 1 + PopBits(ref st, sc, 0, de);
+                    }
+                }
+            }
+            else if (sym < 256) value = 1;
+            else if (sym > 256)
+            {
+                int ls = sym - 257;
+                if (ls >= 29) st.Err = (int)GDeflateError.BadSymbol;
+                else if (ls < 8) value = 3 + ls;
+                else if (ls == 28) value = 3 + PopBits(ref st, sc, 0, 16); // Deflate64
+                else
+                {
+                    int e = ((ls - 8) >> 2) + 1;
+                    value = 3 + ((4 + ((ls - 8) & 3)) << e) + PopBits(ref st, sc, 0, e);
+                }
+            }
+        }
+        if (st.Err != 0) ctl[CErr] = st.Err;
+        return value;
+    }
+
+    private static int PopCount(uint v)
+    {
+        v -= (v >> 1) & 0x55555555u;
+        v = (v & 0x33333333u) + ((v >> 2) & 0x33333333u);
+        return (int)((((v + (v >> 4)) & 0x0F0F0F0Fu) * 0x01010101u) >> 24);
+    }
+
+    /// <summary>Index of the k-th (0-based) set bit of <paramref name="mask"/>.</summary>
+    private static int NthSetBit(uint mask, int k)
+    {
+        int result = 0;
+        int seen = 0;
+        for (int b = 0; b < Streams; b++)
+        {
+            bool set = ((mask >> b) & 1u) != 0;
+            if (set & (seen == k)) result = b;
+            if (set) seen++;
+        }
+        return result;
     }
 
     private struct TileState
@@ -576,15 +947,20 @@ public sealed class GDeflateDecompressorGpu : IDisposable
     /// </summary>
     private static int DecodeSymbol(ref TileState st, ArrayView<int> sc, int sb, int lutOff, int lutBits, int countOff, int symOff)
     {
-        uint bits = Peek(ref st, sc, sb);
+        int len = 0;
+        int result = PeekSymbol(sc, sb, Peek(ref st, sc, sb), lutOff, lutBits, countOff, symOff, ref len);
+        if (result < 0) st.Err = (int)GDeflateError.BadSymbol;
+        else Remove(ref st, sc, sb, len);
+        return result;
+    }
+
+    /// <summary>The symbol <paramref name="bits"/> start with and its code length (-1 when no code matches); nothing consumed.</summary>
+    private static int PeekSymbol(ArrayView<int> sc, int sb, uint bits, int lutOff, int lutBits, int countOff, int symOff, ref int len)
+    {
         int entry = sc[sb + lutOff + (int)(bits & ((1u << lutBits) - 1u))];
-        int len = entry & 15;
+        len = entry & 15;
         int result = -1;
-        if (len != 0)
-        {
-            result = entry >> 4;
-            Remove(ref st, sc, sb, len);
-        }
+        if (len != 0) result = entry >> 4;
         else
         {
             int code = 0, first = 0, index = 0;
@@ -609,8 +985,7 @@ public sealed class GDeflateDecompressorGpu : IDisposable
                     walking = l <= MaxBits;
                 }
             }
-            if (result < 0) st.Err = (int)GDeflateError.BadSymbol;
-            else Remove(ref st, sc, sb, l);
+            len = l;
         }
         return result;
     }
