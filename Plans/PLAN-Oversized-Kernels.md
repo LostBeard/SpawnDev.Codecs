@@ -48,6 +48,13 @@ block b -> (probability set, first coefficient, above / left context index, coef
 contexts kept in the step state, ONE `Encode` call site. Also drops three storage bindings (12 views today). Until it
 lands, every browser test that compiles Vp8EntropyStep stays fenced (they can take the whole PC's RAM: never without a memory watchdog).
 
+**Done 2026-10-26:** Vp8EntropyStep (1f58768) and Vp9EntropyStep (db91d83) now inline their block coder ONCE (VP8: the
+25 blocks of a macroblock in one loop; VP9: one leaf coder for 16x16 / 16x8 and the 3 or 6 transforms in one loop,
+coefficients copied into LocalMemory per job). Tint module step (Data, node Dawn): Vp8EntropyStep 181k -> 12,950 lines,
+>6 GB -> 163 MB / 147 ms; Vp9EntropyStep >6 GB -> 17,133 lines, 184 MB / 176 ms. Bit-exact with the CPU encoders on
+CPU / CUDA / OpenCL, red-checked. Unfenced for browser runs from ILGPU 5.4.7-local.1 (WGSL write scan through SubViews:
+partition0Out of Vp8EntropyStep and the batch kernels' outputs were treated as read-only before).
+
 ## Shape of the split (the same for every codec)
 
 The monolith is "for each block, in order: predict, transform, quantize, entropy-code, reconstruct" in one serial
