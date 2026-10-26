@@ -6,3 +6,6 @@ Filters/* binary
 *.bin binary
 Lz4/*.lz4 binary
 Lz4Dec/*.lz4 binary
+Snappy/*.sz binary
+SnappyDec/*.sz binary
+SnappyDec/*.content binary

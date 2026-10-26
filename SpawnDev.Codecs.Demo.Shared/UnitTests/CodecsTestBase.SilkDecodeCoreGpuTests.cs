@@ -171,6 +171,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeCoreGpu_Unvoiced_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // NB unvoiced: 8 kHz, 4 subframes, lpcOrder=10, frameLength=160.
@@ -209,6 +210,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeCoreGpu_Voiced_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // NB voiced: same 8 kHz / 4 sub, but signalType=2 - exercises the
@@ -348,6 +350,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeCoreGpu_Voiced_MB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // MB voiced: 12 kHz × 4 subframes × 60 = 240 samples/frame.
@@ -386,6 +389,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeCoreGpu_Voiced_WB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // WB voiced: 16 kHz × 4 subframes × 80 samples = 320 samples/frame.
@@ -423,6 +427,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeCoreGpu_Voiced_NB_NlsfInterpEnabled_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Voiced NB with NLSF interpolation enabled. This is the ONLY config
@@ -464,6 +469,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeCoreGpu_VoicedNB_3FramesStateRolling_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Decode 3 consecutive voiced NB frames, threading the persistent

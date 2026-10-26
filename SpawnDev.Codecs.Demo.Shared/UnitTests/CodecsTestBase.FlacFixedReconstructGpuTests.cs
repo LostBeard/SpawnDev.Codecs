@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacFixedReconstructGpu_Order0_NoOp_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Order 0 -> no prediction, samples == residuals.
@@ -30,6 +31,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacFixedReconstructGpu_Order1_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             await ReconstructAndVerify(acc, order: 1, length: 64, seed: 0xCAFE0001u);
@@ -41,6 +43,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacFixedReconstructGpu_Order2_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             await ReconstructAndVerify(acc, order: 2, length: 256, seed: 0xCAFE0002u);
@@ -52,6 +55,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacFixedReconstructGpu_Order3_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             await ReconstructAndVerify(acc, order: 3, length: 512, seed: 0xCAFE0003u);
@@ -63,6 +67,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacFixedReconstructGpu_Order4_FullBlock_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Order 4 with 4096-block (typical FLAC default) - exercises the long-running

@@ -310,6 +310,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeFrameGpu_PhaseAP_Voiced_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
 
@@ -632,6 +633,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeFrameGpu_PhaseAPC_Voiced_MB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
 
@@ -701,6 +703,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeFrameGpu_PhaseAPC_Voiced_WB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
 
@@ -771,6 +774,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeFrameGpu_TwoFrameStateRolling_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
 
@@ -885,6 +889,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeFrameGpu_PhaseAPC_Unvoiced_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
 
@@ -950,6 +955,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeFrameGpu_PhaseAPC_Inactive_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
 
@@ -1015,6 +1021,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeFrameGpu_PhaseAPCF_Voiced_NB_OutBufShiftBitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
 
@@ -1092,6 +1099,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeFrameGpu_PhaseAPC_Voiced_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
 
@@ -1164,6 +1172,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkDecodeFrameGpu_PhaseA_Unvoiced_NB_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
 

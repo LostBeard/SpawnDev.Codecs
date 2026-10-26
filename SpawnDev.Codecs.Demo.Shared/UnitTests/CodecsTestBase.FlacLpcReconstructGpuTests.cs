@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacLpcReconstructGpu_Order8_Q12_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Typical FLAC encoder choice: order 8, quant level 12.
@@ -31,6 +32,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacLpcReconstructGpu_Order16_Q14_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Order 16, max-typical quant level 14.
@@ -45,6 +47,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacLpcReconstructGpu_Order32_Q14_FullBlock_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Max FLAC order 32, full 4096-sample block.
@@ -60,6 +63,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacLpcReconstructGpu_Order4_LowQuant_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Low quant level (5) - exercises the right-shift path with smaller divisor.

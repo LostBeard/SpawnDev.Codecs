@@ -1,0 +1,27 @@
+# Rust snap crate via cramjam 2.14.0
+text_700000_raw	raw	text	700000	41	ok	snap raw, 11 blocks
+text_700000_framed	framed	text	700000	41	ok	snap framed
+zeros_5000000_raw	raw	struct	5000000	-1	ok	snap raw, 77 blocks of offset-1 copies
+noise_300000_framed	framed	noise	300000	5	ok	incompressible: uncompressed chunks
+empty_raw	raw	text	0	0	ok	empty raw stream (varint 0)
+empty_framed	framed	text	0	0	ok	empty framed stream (no chunks)
+empty_framed_id_only	framed	text	0	0	ok	stream identifier only
+far_700000_greedy_raw	raw	far	700000	9	ok	no block structure: copies 400 KB back, tags 60-63, copy-4
+struct_300000_greedy_raw	raw	struct	300000	2	ok	greedy, overlapping copies
+hand_raw	raw	file	70103	0	ok	hand-built: 2- and 4-byte literal forms, copy-4 runs, offsets 1 / 3 / 5 / 2047
+text_200000_framed_mixed_chunks	framed	text	200000	43	ok	chunks of 1 B..64 KB compressed and stored, padding + skippable chunks, a second stream identifier
+bad_framed_no_identifier	framed	text	200000	44	BadStreamIdentifier	chunks without the stream identifier
+bad_framed_identifier_body	framed	text	200000	44	BadStreamIdentifier	identifier body sNaPpY damaged
+bad_framed_reserved_chunk	framed	text	200000	44	ReservedChunk	unskippable reserved chunk type 0x02
+bad_framed_checksum	framed	text	200000	44	ChunkChecksum	first chunk's CRC-32C damaged
+bad_framed_truncated	framed	text	200000	44	Truncated	last chunk cut short
+bad_framed_compressed_too_large	framed	text	70000	45	ChunkTooLarge	a compressed chunk that decodes to 70000 bytes
+bad_framed_stored_too_large	framed	text	70000	45	ChunkTooLarge	an uncompressed chunk of 70000 bytes
+bad_framed_inner_length	framed	text	5000	46	LengthMismatch	chunk's raw stream declares 4999 bytes and holds 5000
+bad_raw_offset_zero	raw	text	8	0	BadOffset	copy offset 0
+bad_raw_offset_before_start	raw	text	12	0	BadOffset	copy reaching 1 byte before the output
+bad_raw_length_short	raw	text	200000	47	LengthMismatch	declares one byte more than it holds
+bad_raw_length_long	raw	text	200000	47	LengthMismatch	declares one byte less than it holds
+bad_raw_truncated	raw	text	200000	47	Truncated	last literal cut short
+bad_raw_varint	raw	text	0	0	BadVarint	length varint longer than 5 bytes / 32 bits
+bad_raw_empty	raw	text	0	0	Truncated	no length varint

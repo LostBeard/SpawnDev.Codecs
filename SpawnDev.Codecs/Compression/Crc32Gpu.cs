@@ -1,7 +1,8 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
-// CRC-32 (IEEE 802.3, reflected polynomial 0xEDB88320), the checksum of PNG chunks and gzip. GPU-callable
-// table-driven form: the 256-entry table is a small constant buffer uploaded once per accelerator.
+// CRC-32 (IEEE 802.3, reflected polynomial 0xEDB88320), the checksum of PNG chunks and gzip, and CRC-32C (Castagnoli,
+// 0x82F63B78; Snappy framing) through the same functions over its own table. GPU-callable table-driven form: the
+// 256-entry table is a small constant buffer uploaded once per accelerator.
 //
 // Long ranges are checksummed in parallel PIECES of PieceBytes: the register update is linear over GF(2), so
 // Update(s, D) = Shift(s, |D|) ^ Update(0, D), where Shift advances a register over |D| zero bytes (a 32x32 bit
@@ -27,15 +28,23 @@ public static class Crc32Gpu
     /// </summary>
     public const int CombinePieces = 1024;
 
+    /// <summary>Reflected IEEE 802.3 polynomial (PNG, gzip, zip).</summary>
+    public const uint IeeePolynomial = 0xEDB88320u;
+    /// <summary>Reflected Castagnoli polynomial (CRC-32C: Snappy framing, iSCSI, ext4).</summary>
+    public const uint CastagnoliPolynomial = 0x82F63B78u;
+
     /// <summary>The standard 256-entry CRC-32 table (constant data, built on the host once).</summary>
-    public static uint[] BuildTable()
+    public static uint[] BuildTable() => BuildTable(IeeePolynomial);
+
+    /// <summary>The 256-entry table of the reflected <paramref name="polynomial"/>; every function here works with any such table.</summary>
+    public static uint[] BuildTable(uint polynomial)
     {
         var table = new uint[256];
         for (uint n = 0; n < 256; n++)
         {
             uint c = n;
             for (int k = 0; k < 8; k++)
-                c = (c & 1) != 0 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+                c = (c & 1) != 0 ? polynomial ^ (c >> 1) : c >> 1;
             table[n] = c;
         }
         return table;

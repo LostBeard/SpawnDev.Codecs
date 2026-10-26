@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkBwexpanderGpu_Expand16_Order16_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Typical SILK NB AR filter: order 16, Q12 coefficients in [-32768, 32767].
@@ -47,6 +48,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkBwexpanderGpu_Expand32_Order10_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // 32-bit coefficients in Q24 - typical for SILK whitening filters.
@@ -76,6 +78,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkBwexpanderGpu_Expand16_RandomBatch_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             const int order = 16;

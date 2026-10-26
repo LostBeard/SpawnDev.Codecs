@@ -36,6 +36,15 @@ and ratio within a stated bound of `lz4 -1`, since LZ4 encoders are not unique).
 Snappy is the same shape with a simpler format (nvCOMP rates it best overall on GPUs); add it after LZ4 by reusing the
 LZ4 match finder.
 
+**Done 2026-10-26 (Snappy):** `Compression/Snappy/SnappyCompressorGpu` + `SnappyDecompressorGpu`, raw and framed.
+Compressor byte-identical with the Rust snap crate (cramjam = python-snappy's backend; 28 inputs x 2 formats up to
+40 MB; Google's C++ library is not the target, its encoder differs since 1.1.8). snap compresses 64 KB blocks with a
+fresh table, so one thread per block, resumable like LZ4. Decoder: framed chunks are independent segments; a raw stream
+is cut by a one-thread element scan into ~64 KB segments, and a segment whose copies reach before it (no 64 KB block
+structure, e.g. any whole-stream encoder) decodes in order after the independent ones. Fixtures
+`scripts/compression/make_snappy_fixtures.py` (snap streams, hand-built streams with every element form, damaged
+streams). CRC-32C is `Crc32Gpu` over the Castagnoli table.
+
 ### C3. Entropy core: interleaved rANS
 GPU-friendly entropy coder (32 interleaved states per chunk; Recoil-style split metadata for more parallel decode).
 Used by C4 and by the zstd FSE stage later. Truth: round trip + an independent Python rANS for the format we define.

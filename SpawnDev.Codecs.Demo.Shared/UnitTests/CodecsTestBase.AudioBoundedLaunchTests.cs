@@ -20,6 +20,7 @@ public abstract partial class CodecsTestBase
     public async Task OpusRangeDecoderGpu_DecodeIcdf_SpansLaunches_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             int n = 3 * OpusRangeDecoderGpuTestKernel.StepSymbols + 17;
@@ -40,6 +41,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacBitRoundTripGpu_SpansLaunches_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var (values, bits) = BoundedBitSequence(2 * FlacBitRoundTripKernel.StepSymbols + 5, 0xF1AC);
@@ -58,6 +60,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisBitRoundTripGpu_SpansLaunches_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var (values, bits) = BoundedBitSequence(2 * VorbisBitRoundTripKernel.StepSymbols + 5, 0x0B15);
@@ -147,6 +150,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacEncoderGpu_LongStream_RoundTripsViaCpuDecoder()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             const int frames = 2100;
@@ -173,6 +177,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacDecoderGpu_DamagedFrames_ReportSerialStatusCodes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             const int channels = 2;
@@ -221,6 +226,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisAudioDecoderGpu_LongBlock_SpansLaunches_MatchesCpuDecoder()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var options = new VorbisAudioEncoderOptions { SampleRateHz = 44100, Channels = 1, BlockSize = 8192 };
