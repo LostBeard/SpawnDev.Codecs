@@ -24,6 +24,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPLossyEncoderGpu_Methods3And4_ByteIdenticalWithLibwebp()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLossyEncoderGpu(acc);
@@ -66,6 +67,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPLossyEncoderGpu_UnportedMethods_AreRefused()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLossyEncoderGpu(acc);
@@ -155,6 +157,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPLossyEncoderGpu_Transparency_Vp8ChunkIdenticalWithLibwebp_AlphaExact()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLossyEncoderGpu(acc);
@@ -187,6 +190,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPLossyEncoderGpu_Transparency_ArrayViewOverload_WritesOnlyTheFile()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLossyEncoderGpu(acc);
@@ -223,6 +227,7 @@ public abstract partial class CodecsTestBase
     {
         PillowOracle.RequireAvailable();
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLossyEncoderGpu(acc);

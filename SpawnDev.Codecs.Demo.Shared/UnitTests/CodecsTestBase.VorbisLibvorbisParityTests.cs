@@ -96,6 +96,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisAudioDecoderGpu_LibvorbisStreams_MatchLibvorbis()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var failures = new List<string>();

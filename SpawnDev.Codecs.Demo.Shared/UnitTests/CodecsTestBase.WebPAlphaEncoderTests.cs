@@ -148,6 +148,7 @@ public abstract partial class CodecsTestBase
         bool pillow = PillowAvailable();
         string? dir = pillow ? WebPEncoderOutputDir("alpha") : null;
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         var failures = new List<string>();
         var report = new List<string>();
         try
@@ -239,6 +240,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPLosslessEncoderGpu_Alpha_IncompressiblePlane_FallsBackToRaw_WithinTheBound()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLosslessEncoderGpu(acc);
@@ -270,6 +272,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPLosslessEncoderGpu_Alpha_ArrayViewOverload_WritesOnlyThePayload()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLosslessEncoderGpu(acc);
@@ -301,6 +304,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPLosslessEncoderGpu_Alpha_BadArguments_AreRejected()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLosslessEncoderGpu(acc);

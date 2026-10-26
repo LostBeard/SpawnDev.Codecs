@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacCrcGpu_EmptyInput_BothZero()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var (cpu8, cpu16) = ComputeCpu(Array.Empty<byte>());
@@ -30,6 +31,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacCrcGpu_SingleByte_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             byte[] data = { 0x42 };
@@ -45,6 +47,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacCrcGpu_FrameHeaderTypical_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Typical FLAC frame-header bytes (sync + block-strategy + sample-rate + utf8 sample number).
@@ -61,6 +64,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacCrcGpu_RandomBatch_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var rng = new Random(unchecked((int)0xF1ACBABEu));
@@ -82,6 +86,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacCrcGpu_LongRanges_PieceCombine_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var rng = new Random(unchecked((int)0xF1AC10C5u));

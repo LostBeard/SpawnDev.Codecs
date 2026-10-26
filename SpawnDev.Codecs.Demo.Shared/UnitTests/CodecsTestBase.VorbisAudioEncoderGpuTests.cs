@@ -22,6 +22,7 @@ public abstract partial class CodecsTestBase
         // wrapper converts to UnsupportedTestException so the harness records
         // Unsupported rather than Failed.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
 
@@ -48,6 +49,7 @@ public abstract partial class CodecsTestBase
         // path. Silence input -> all packets produce identical bytes, which
         // is also the baseline shape of EncodeAudioPacketAsync(silence).
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var options = new VorbisAudioEncoderOptions
@@ -96,6 +98,7 @@ public abstract partial class CodecsTestBase
         // wrapper converts to UnsupportedTestException so the harness records
         // Unsupported rather than Failed.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
 

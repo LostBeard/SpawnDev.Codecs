@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisHuffmanDecoderGpu_TinyCodebook_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // 4 entries with lengths [2, 2, 2, 2] -> codes 00, 01, 10, 11.
@@ -31,6 +32,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisHuffmanDecoderGpu_MixedLengths_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Mixed lengths exercising deeper tree paths.

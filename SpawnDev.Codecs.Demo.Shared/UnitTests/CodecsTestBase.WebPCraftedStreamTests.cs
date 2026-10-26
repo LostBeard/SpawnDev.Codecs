@@ -99,6 +99,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPDecoderGpu_CraftedStream_ValidControl_Decodes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);

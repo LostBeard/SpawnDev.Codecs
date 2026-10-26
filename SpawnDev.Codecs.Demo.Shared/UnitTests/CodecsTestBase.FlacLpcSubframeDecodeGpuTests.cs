@@ -19,6 +19,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacLpcSubframeDecodeGpu_Order8_Q12_NoWasted_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Order 8, 12-bit precision, quant 12, 64-block, 16-bit samples.
@@ -34,6 +35,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacLpcSubframeDecodeGpu_Order16_Q14_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Order 16, 14-bit precision, quant 14, 256-block.
@@ -50,6 +52,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacLpcSubframeDecodeGpu_Order4_WastedBits_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Wasted-bits path: declared bps 16, wasted 4 -> effective 12.

@@ -52,6 +52,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPDecoderGpu_Metadata_EveryCase_MatchesLibwebpDemuxer_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         var failures = new List<string>();
         int count = 0;
         try
@@ -143,6 +144,7 @@ public abstract partial class CodecsTestBase
         };
         string dir = WebPEncoderOutputDir("metadata_subsets");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         var failures = new List<string>();
         try
         {

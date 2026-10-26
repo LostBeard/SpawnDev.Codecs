@@ -20,6 +20,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisAudioDecoderGpu_ArrayViewOverload_MatchesManaged_WritesOnlyItsFrames()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var failures = new List<string>();
@@ -67,6 +68,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisAudioDecoderGpu_ArrayViewOverload_RejectsAShortPcmView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var fx = LoadVorbisFixtures()[0];
@@ -89,6 +91,7 @@ public abstract partial class CodecsTestBase
         if (!OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             await RunVorbisTypedArrayMatchesManaged(acc);

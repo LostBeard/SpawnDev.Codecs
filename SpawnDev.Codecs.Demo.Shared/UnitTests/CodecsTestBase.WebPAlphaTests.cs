@@ -95,6 +95,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPDecoderGpu_Alpha_AllFixtures_MatchLibwebp_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);
@@ -151,6 +152,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPDecoderGpu_Alpha_AnimationFrames_EachFrameHasItsOwnPlane()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);
@@ -180,6 +182,7 @@ public abstract partial class CodecsTestBase
     private async Task AssertAlphaRejectedAsync(byte[] file, string expectedMessagePart, string what)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);
@@ -248,6 +251,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPDecoderGpu_Alpha_BufferTooSmall_Throws()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);

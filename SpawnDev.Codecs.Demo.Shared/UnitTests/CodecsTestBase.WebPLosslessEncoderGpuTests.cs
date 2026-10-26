@@ -102,6 +102,7 @@ public abstract partial class CodecsTestBase
         int[] qualities, string? keepDir, bool exact, Func<WebPFixtureRow, WebPEncodeOptions, WebPEncodeOptions>? tweak = null)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         var failures = new List<string>();
         try
         {
@@ -201,6 +202,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPLosslessEncoderGpu_ExactFalse_ClearsRgbUnderTransparentAlpha_Only()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLosslessEncoderGpu(acc);
@@ -243,6 +245,7 @@ public abstract partial class CodecsTestBase
 
         // Our own decoder reads them back and reports the orientation (one small file; only the metadata blobs come back).
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLosslessEncoderGpu(acc);
@@ -272,6 +275,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPLosslessEncoderGpu_ArrayViewOverload_WritesOnlyTheFile()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         // stage timings on the console (PMT copies CODEC_TRACE lines to WGSLDumps/browser_console.log)
         var sw = System.Diagnostics.Stopwatch.StartNew();
         void Mark(string what) => Console.WriteLine($"CODEC_TRACE {sw.ElapsedMilliseconds} ms {what}");
@@ -318,6 +322,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPLosslessEncoderGpu_IncompressibleNoise_StaysWithinGetMaxEncodedSize()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLosslessEncoderGpu(acc);
@@ -361,6 +366,7 @@ public abstract partial class CodecsTestBase
         RequirePillowVerify(); // the verdict comes from the Python bitstream parser
         string dir = WebPEncoderOutputDir("features");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLosslessEncoderGpu(acc);
@@ -427,6 +433,7 @@ public abstract partial class CodecsTestBase
         bool pillow = PillowAvailable();
         string? dir = pillow ? WebPEncoderOutputDir("extreme") : null;
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         var failures = new List<string>();
         try
         {
@@ -476,6 +483,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPLosslessEncoderGpu_BadArguments_AreRejected()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLosslessEncoderGpu(acc);

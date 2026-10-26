@@ -19,6 +19,7 @@ public abstract partial class CodecsTestBase
         if (!OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);
@@ -82,6 +83,7 @@ public abstract partial class CodecsTestBase
         if (!OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLosslessEncoderGpu(acc);

@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisEncoderResidueEmitGpu_EmitAll_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Codebook: 8 entries, valid prefix code lengths.

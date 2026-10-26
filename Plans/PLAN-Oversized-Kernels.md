@@ -31,6 +31,23 @@ Budget: every kernel at most ~8k lines of WGSL, measured offline with the WgslSc
 Before item 1: run the real-GPU WebGPU lane on Lore's set (PNG / JPEG / WebP decode + lossless + lossy encode) to see
 which of these actually fail there today (the compile time matters only if Chrome hits its limit).
 
+## 2026-10-26: Tint memory, not compile time, was the killer (Data)
+
+ILGPU declared every value as a function-scope `var`; Tint's module step is O(vars in scope x branches), so the giant
+kernels ran Chrome's GPU process to ~16 GB (system RAM to ~515 MB) and died ("Instance reference no longer exists").
+ILGPU 5.4.6-local.3 emits single-assignment values as `let` (and one `let` per copy of a value duplicated into sibling
+scopes): Vp8EntropyStep 58,200 -> 3,113 vars, Vp8KeyframeDecodeStep 23,118 -> 981. Chrome (DXC) after the change:
+Av1EncodeFrameStep 0.8 s module + 15.4 s pipeline, Vp8KeyframeDecodeStep 1.2 + 18.6 s (was OOM), Vp9EntropyStep 4.8 +
+92.2 s (was OOM; GPU process peaks at 5.85 GB: keep a watchdog), **Vp8EntropyStep still dies (6.2 GB within 5 s)**.
+
+**Vp8EntropyStep (Vp8FrameEntropyKernel) split, mine:** the macroblock loop inlines `Vp8CoefBlockEncoderGpu.Encode` 25
+times (Y2, 16 Y blocks, 4 U, 4 V; ~181k lines of WGSL). Design: the encoder allocates the four coefficient arrays as
+sub-views of ONE buffer (producers unchanged: they get the sub-views), the entropy kernel takes that one view plus the
+four base offsets (in the strides struct), and walks the 25 blocks of a macroblock in bitstream order in one flat loop:
+block b -> (probability set, first coefficient, above / left context index, coefficient offset) computed from b, left
+contexts kept in the step state, ONE `Encode` call site. Also drops three storage bindings (12 views today). Until it
+lands, every browser test that compiles Vp8EntropyStep stays fenced (they can take the whole PC's RAM: never without a memory watchdog).
+
 ## Shape of the split (the same for every codec)
 
 The monolith is "for each block, in order: predict, transform, quantize, entropy-code, reconstruct" in one serial

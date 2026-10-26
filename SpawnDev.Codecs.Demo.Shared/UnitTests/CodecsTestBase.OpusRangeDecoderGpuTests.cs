@@ -64,6 +64,7 @@ public abstract partial class CodecsTestBase
     public async Task OpusRangeDecoderGpu_DecodeUint_SmallRanges_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // 2026-05-04: WebGPU gate lifted on rc.13 (WGSL Div/Rem unsigned cast fix).
@@ -85,6 +86,7 @@ public abstract partial class CodecsTestBase
     public async Task OpusRangeDecoderGpu_DecodeUint_LargeRanges_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             if (acc.AcceleratorType == AcceleratorType.WebGPU)
@@ -139,6 +141,7 @@ public abstract partial class CodecsTestBase
     public async Task OpusRangeDecoderGpu_DecodeBitLogP_LogP15Mixed_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // 2026-05-04: WebGPU gate lifted - rc.12 ships the WGSL Shr
@@ -164,6 +167,7 @@ public abstract partial class CodecsTestBase
     public async Task OpusRangeDecoderGpu_DecodeBitLogP_LogP1FairCoin_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // 2026-05-04: WebGPU gate lifted on rc.12 (WGSL Shr fix).
@@ -231,6 +235,7 @@ public abstract partial class CodecsTestBase
     public async Task OpusRangeDecoderGpu_DecodeIcdf_Uniform4_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             if (acc.AcceleratorType == AcceleratorType.Wasm)
@@ -277,6 +282,7 @@ public abstract partial class CodecsTestBase
     public async Task OpusRangeDecoderGpu_DecodeIcdf_TypeOffsetVad_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             if (acc.AcceleratorType == AcceleratorType.Wasm)
@@ -311,6 +317,7 @@ public abstract partial class CodecsTestBase
     public async Task OpusRangeDecoderGpu_DecodeIcdf_LongSequence_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             if (acc.AcceleratorType == AcceleratorType.Wasm)

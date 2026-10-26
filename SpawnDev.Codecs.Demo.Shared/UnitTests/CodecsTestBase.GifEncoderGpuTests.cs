@@ -83,6 +83,7 @@ public abstract partial class CodecsTestBase
     public async Task GifEncoderGpu_Fixtures_ProduceTheReferenceFileByteForByte_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new GifEncoderGpu(acc);
@@ -131,6 +132,7 @@ public abstract partial class CodecsTestBase
     public async Task GifEncoderGpu_Fixtures_DecodeBackToTheCanvas_InBothDecoderModes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new GifEncoderGpu(acc);
@@ -191,6 +193,7 @@ public abstract partial class CodecsTestBase
     {
         PillowOracle.RequireAvailable();
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new GifEncoderGpu(acc);
@@ -232,6 +235,7 @@ public abstract partial class CodecsTestBase
     public async Task GifEncoderGpu_QuantizedPictures_MapEveryPixelToANearestPaletteColour_AndBeatPillowMedianCut()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new GifEncoderGpu(acc);
@@ -314,6 +318,7 @@ public abstract partial class CodecsTestBase
     public async Task GifEncoderGpu_RandomExactInputs_RoundTripLosslessly_AcrossSizesFramesAndSegments()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new GifEncoderGpu(acc);
@@ -382,6 +387,7 @@ public abstract partial class CodecsTestBase
     public async Task GifEncoderGpu_WorstCaseNoise_StaysInsideGetMaxEncodedSize_AndDecodesExactly()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new GifEncoderGpu(acc);
@@ -417,6 +423,7 @@ public abstract partial class CodecsTestBase
     public async Task GifEncoderGpu_ArgumentValidation_RejectsBadInputsWithTheRightExceptions()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new GifEncoderGpu(acc);
@@ -462,6 +469,7 @@ public abstract partial class CodecsTestBase
     public async Task GifEncoderGpu_InstanceIsReusable_AcrossSizesFramesAndModes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new GifEncoderGpu(acc);
@@ -493,6 +501,7 @@ public abstract partial class CodecsTestBase
     public async Task GifEncoderGpu_LargePicture_ManySegments_RoundTripsThroughOurDecoder()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new GifEncoderGpu(acc);
@@ -513,6 +522,7 @@ public abstract partial class CodecsTestBase
     {
         PillowOracle.RequireAvailable();
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new GifEncoderGpu(acc);

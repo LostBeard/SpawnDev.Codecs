@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacBitGpu_RoundTrip_FixedWidth_8bit()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             const int n = 32;
@@ -41,6 +42,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacBitGpu_RoundTrip_VariableWidth_BoundaryAligned()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Mix of bit widths that crosses byte boundaries multiple
@@ -65,6 +67,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacBitGpu_RoundTrip_RandomBatch()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             const int n = 128;

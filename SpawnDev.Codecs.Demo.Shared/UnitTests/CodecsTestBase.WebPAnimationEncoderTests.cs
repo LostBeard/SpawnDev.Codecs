@@ -128,6 +128,7 @@ public abstract partial class CodecsTestBase
     {
         string dir = WebPEncoderOutputDir("animation");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         var failures = new List<string>();
         try
         {
@@ -162,6 +163,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPLosslessEncoderGpu_Animation_ExactFalse_ClearsRgbUnderAlpha0_Only()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLosslessEncoderGpu(acc);
@@ -190,6 +192,7 @@ public abstract partial class CodecsTestBase
         byte[] xmp = System.Text.Encoding.UTF8.GetBytes("<x:xmpmeta xmlns:x='adobe:ns:meta/'><rdf/></x:xmpmeta>"); // odd length: padded
         string dir = WebPEncoderOutputDir("animation_meta");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         var failures = new List<string>();
         try
         {
@@ -237,6 +240,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPLosslessEncoderGpu_Animation_ArrayViewOverload_WritesOnlyTheFile()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLosslessEncoderGpu(acc);
@@ -275,6 +279,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPLosslessEncoderGpu_Animation_BadArguments_AreRejected()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new WebPLosslessEncoderGpu(acc);

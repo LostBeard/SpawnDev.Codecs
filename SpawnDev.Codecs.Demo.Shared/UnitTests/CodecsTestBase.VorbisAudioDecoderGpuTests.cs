@@ -29,6 +29,7 @@ public abstract partial class CodecsTestBase
         // the wrapper converts to UnsupportedTestException so the harness
         // records Unsupported rather than Failed.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
 
@@ -85,6 +86,7 @@ public abstract partial class CodecsTestBase
         // the wrapper converts to UnsupportedTestException so the harness
         // records Unsupported rather than Failed.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
 
@@ -131,6 +133,7 @@ public abstract partial class CodecsTestBase
         // the wrapper converts to UnsupportedTestException so the harness
         // records Unsupported rather than Failed.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
 

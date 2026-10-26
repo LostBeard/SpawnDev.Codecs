@@ -19,6 +19,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacFixedSubframeDecodeGpu_Order2_NoWasted_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Order 2 FIXED, 16-bit samples, no wasted bits.
@@ -32,6 +33,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacFixedSubframeDecodeGpu_Order4_NoWasted_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             await EncodeDecodeAndVerify(acc, order: 4, blockSize: 64, bps: 16, wastedBits: 0,
@@ -44,6 +46,7 @@ public abstract partial class CodecsTestBase
     public async Task FlacFixedSubframeDecodeGpu_Order2_WastedBits_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Wasted-bits path: declared bps 16, wasted 4 -> effective 12.

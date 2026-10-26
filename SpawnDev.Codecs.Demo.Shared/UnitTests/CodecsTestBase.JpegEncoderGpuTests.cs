@@ -119,6 +119,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegEncoderGpu_AllFixtures_ByteIdenticalToPillow_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new JpegEncoderGpu(acc);
@@ -170,6 +171,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegEncoderGpu_ProductionScale_1024x768_ByteIdenticalToPillowSha256()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new JpegEncoderGpu(acc);
@@ -203,6 +205,7 @@ public abstract partial class CodecsTestBase
         if (!OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new JpegEncoderGpu(acc);
@@ -231,6 +234,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegEncoderGpu_WorstCaseNoise_FitsGetMaxEncodedSize_AndEveryModeDecodesToTheSamePixels()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new JpegEncoderGpu(acc);
@@ -283,6 +287,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegEncoderGpu_FlatPicture_LongEobRuns_ByteIdenticalToPillowSha256()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new JpegEncoderGpu(acc);
@@ -312,6 +317,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegEncoderGpu_OptimalHuffmanTables_AreValidAndLengthLimited()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernels = new JpegScanEncoderKernels(acc);
@@ -394,6 +400,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegEncoderGpu_RoundTrip_PsnrPerQuality_AndDecoderMatchesPillowDecodeOfSameBytes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new JpegEncoderGpu(acc);
@@ -438,6 +445,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegEncoderGpu_ExifOrientation_IsReadBackByTheDecoder()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new JpegEncoderGpu(acc);
@@ -462,6 +470,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegEncoderGpu_InvalidArguments_AreRejected()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new JpegEncoderGpu(acc);

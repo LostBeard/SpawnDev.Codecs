@@ -55,6 +55,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPEncoder_HuffmanLengths_FibonacciHistogram_AreLimitedAndComplete()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // 30 symbols with Fibonacci counts: the unrestricted tree is 29 bits deep.
@@ -87,6 +88,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPEncoder_HuffmanLengths_EdgeHistograms()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // flat 280: lengths 8 and 9, complete

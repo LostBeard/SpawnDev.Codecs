@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisEncoderBitstreamEmitGpu_EmitPacket_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Classbook: 4 entries valid prefix (lengths 2,2,2,2).

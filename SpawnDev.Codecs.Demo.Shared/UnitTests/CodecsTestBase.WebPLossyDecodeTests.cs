@@ -62,6 +62,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPDecoderGpu_Lossy_AllFixtures_MatchLibwebp()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);   // one instance decodes everything: buffers must grow and be reused correctly
@@ -134,6 +135,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPDecoderGpu_Lossy_DecoderStaysUsableAcrossKindsAndSizes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);

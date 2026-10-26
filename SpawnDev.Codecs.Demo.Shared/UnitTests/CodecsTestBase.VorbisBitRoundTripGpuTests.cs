@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisBitGpu_RoundTrip_FixedWidth_8bit()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             const int n = 32;
@@ -40,6 +41,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisBitGpu_RoundTrip_RandomBatch()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             const int n = 128;

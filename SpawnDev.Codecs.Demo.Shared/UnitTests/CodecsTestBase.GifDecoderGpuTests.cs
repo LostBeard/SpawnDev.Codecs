@@ -97,6 +97,7 @@ public abstract partial class CodecsTestBase
     private async Task GifEveryFrameMatchesAsync(GifCompositing mode, string kind, int minFrames)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new GifDecoderGpu(acc) { Compositing = mode };
@@ -173,6 +174,7 @@ public abstract partial class CodecsTestBase
     public async Task GifDecoderGpu_DefaultMode_IsPillow_AndFirstFrameMatchesViaDecodeAsync()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new GifDecoderGpu(acc);
@@ -223,6 +225,7 @@ public abstract partial class CodecsTestBase
     public async Task GifDecoderGpu_Rgba16_WidensEverySample_BothModes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var failures = new List<string>();
@@ -265,6 +268,7 @@ public abstract partial class CodecsTestBase
     public async Task GifDecoderGpu_ReadFrames_ReadInfo_And_LoopCount_ReportTheFileStructure()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new GifDecoderGpu(acc);
@@ -336,6 +340,7 @@ public abstract partial class CodecsTestBase
     public async Task GifDecoderGpu_LoopExtension_OnlyBeforeTheFirstImageCounts()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new GifDecoderGpu(acc);
@@ -356,6 +361,7 @@ public abstract partial class CodecsTestBase
     private async Task AssertGifRejectedAsync(byte[] file, string expectedMessagePart, string what, int frame = 0)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new GifDecoderGpu(acc);
@@ -372,6 +378,7 @@ public abstract partial class CodecsTestBase
     public async Task GifDecoderGpu_HostileFixtures_AreRejectedWithTheSpecificReason()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new GifDecoderGpu(acc);
@@ -465,6 +472,7 @@ public abstract partial class CodecsTestBase
     public async Task GifDecoderGpu_HandWrittenLzw_DecodesIncludingTheKwKwKCaseAndWidthChange()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new GifDecoderGpu(acc);
@@ -492,6 +500,7 @@ public abstract partial class CodecsTestBase
         if (OperatingSystem.IsBrowser() || string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
             throw new UnsupportedTestException("Set SPAWNDEV_GIF_FUZZ_DIR to a folder made by make_gif_fixtures.py --fuzz-dir to run the bulk Pillow comparison.");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new GifDecoderGpu(acc);
@@ -557,6 +566,7 @@ public abstract partial class CodecsTestBase
         // Exactly the limit is fine and every frame is addressable.
         var ok = f.Take(f.Count - 1 - frame.Count).Concat(new byte[] { 0x3B }).ToArray();
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new GifDecoderGpu(acc);
@@ -572,6 +582,7 @@ public abstract partial class CodecsTestBase
     public async Task GifDecoderGpu_FrameIndexOutOfRange_Throws()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new GifDecoderGpu(acc);
@@ -590,6 +601,7 @@ public abstract partial class CodecsTestBase
     public async Task GifDecoderGpu_OutputViewTooSmall_Throws_AndFileLengthIsValidated()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new GifDecoderGpu(acc);
@@ -611,6 +623,7 @@ public abstract partial class CodecsTestBase
     {
         // One decoder instance decodes a big file, a tiny one, then the big one again (grow-only buffers must not leak state).
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new GifDecoderGpu(acc);

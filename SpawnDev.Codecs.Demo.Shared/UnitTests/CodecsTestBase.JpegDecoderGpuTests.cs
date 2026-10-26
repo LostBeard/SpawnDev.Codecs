@@ -45,6 +45,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegDecoderGpu_AllFixtures_Rgba8_MatchPillow_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new JpegDecoderGpu(acc);
@@ -93,6 +94,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegDecoderGpu_Rgba16_IsRgba8Replicated()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new JpegDecoderGpu(acc);
@@ -117,6 +119,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegDecoderGpu_ReadInfo_ReportsHeaderFacts()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new JpegDecoderGpu(acc);
@@ -158,6 +161,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegDecoderGpu_ApplyOrientation_MatchesPillowTranspose()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new JpegDecoderGpu(acc);
@@ -196,6 +200,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegDecoderGpu_BaselineWithoutEoi_DecodesWhenAllDataIsPresent()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new JpegDecoderGpu(acc);
@@ -219,6 +224,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegDecoderGpu_ProductionScale_1024x768_MatchesPillowSha256()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new JpegDecoderGpu(acc);
@@ -241,6 +247,7 @@ public abstract partial class CodecsTestBase
     public async Task JpegDecoderGpu_ExifOrientation_LittleEndianAndAfterOtherAppSegments()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new JpegDecoderGpu(acc);
@@ -261,6 +268,7 @@ public abstract partial class CodecsTestBase
         if (!OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new JpegDecoderGpu(acc);
@@ -289,6 +297,7 @@ public abstract partial class CodecsTestBase
     private async Task AssertJpegRejectedAsync(string fixture, string expectedMessagePart)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new JpegDecoderGpu(acc);
@@ -344,6 +353,7 @@ public abstract partial class CodecsTestBase
             ("bad_mcu_too_many_blocks", "more than 10 blocks"),
         };
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var dec = new JpegDecoderGpu(acc);

@@ -89,6 +89,7 @@ public abstract partial class CodecsTestBase
     private async Task CheckWebPStillFixturesAsync(int initialPoolInts, string what)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc, initialPoolInts);
@@ -135,6 +136,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPDecoderGpu_ReadInfo_ReportsFacts_ForEveryFixture()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);
@@ -166,6 +168,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPDecoderGpu_FileInfoAndMetadata_MatchEmbeddedChunks()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);
@@ -220,6 +223,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPDecoderGpu_ReadFrames_MatchesTheRiffChunks()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);
@@ -248,6 +252,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPDecoderGpu_Animations_EveryCanvasMatchesLibwebp_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);
@@ -294,6 +299,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPDecoderGpu_FrameIndexOutOfRange_Throws()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);
@@ -313,6 +319,7 @@ public abstract partial class CodecsTestBase
     private async Task AssertWebPRejectedAsync(byte[] file, string expectedMessagePart, string what)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);
@@ -386,6 +393,7 @@ public abstract partial class CodecsTestBase
     public async Task WebPDecoderGpu_Rgba16Request_IsRejected()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new WebPDecoderGpu(acc);
