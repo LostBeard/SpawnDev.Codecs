@@ -55,7 +55,7 @@ public sealed class ImdctReferenceGpuKernel : IDisposable
         for (int first = 0; first < blockCount; first += group)
         {
             int blocks = Math.Min(group, blockCount - first);
-            _kernel(checked(blocks * 2 * n), input, output, blocks, n, first);
+            _kernel(checked(blocks * 2 * n), input, output.SubView((long)first * 2 * n, (long)blocks * 2 * n), blocks, n, first);
             await pacer.LaunchedAsync();
         }
         await _accelerator.SynchronizeAsync();
@@ -77,8 +77,10 @@ public sealed class ImdctReferenceGpuKernel : IDisposable
         int idx = tid - local * twoN;
         int blockIdx = firstBlock + local;
         long inBase = (long)blockIdx * n;
-        long outBase = (long)blockIdx * twoN;
-        output[outBase + idx] = ImdctReferenceGpu.Sample(input, inBase, n, idx);
+        // output starts at this launch's first block (the launcher passes a sub-view), so thread tid stores output[tid]: its
+        // own slot on every backend (WebGL's Transform Feedback places a launch's stores at the thread index; an offset
+        // store from a later launch overwrote the first blocks).
+        output[tid] = ImdctReferenceGpu.Sample(input, inBase, n, idx);
     }
 
     /// <summary>Release kernel resources.</summary>

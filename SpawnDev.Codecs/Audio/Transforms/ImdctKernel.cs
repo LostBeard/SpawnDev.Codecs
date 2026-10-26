@@ -108,7 +108,7 @@ public sealed class ImdctKernel : IDisposable
         for (int first = 0; first < blockCount; first += group)
         {
             int blocks = Math.Min(group, blockCount - first);
-            _kernel(checked(blocks * 2 * n), input, output, blocks, n, first);
+            _kernel(checked(blocks * 2 * n), input, output.SubView((long)first * 2 * n, (long)blocks * 2 * n), blocks, n, first);
             await pacer.LaunchedAsync();
         }
     }
@@ -156,7 +156,6 @@ public sealed class ImdctKernel : IDisposable
         int blockIdx = firstBlock + local;
 
         long inBase = (long)blockIdx * n;
-        long outBase = (long)blockIdx * twoN;
 
         // Argument reduction (see file header). Express the angle as
         //   theta = pi/(4N) * m * q
@@ -191,7 +190,10 @@ public sealed class ImdctKernel : IDisposable
             residue += deltaResidue;
             if (residue >= modulus) residue -= modulus;
         }
-        output[outBase + idx] = acc;
+        // output starts at this launch's first block (the launcher passes a sub-view), so thread t stores output[t]: its
+        // own slot on every backend (WebGL's Transform Feedback places a launch's stores at the thread index; an offset
+        // store from a later launch overwrote the first blocks).
+        output[t] = acc;
     }
 
     /// <summary>Release kernel resources. Does NOT dispose the accelerator.</summary>
