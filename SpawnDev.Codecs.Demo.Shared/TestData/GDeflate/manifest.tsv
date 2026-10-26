@@ -1,0 +1,35 @@
+# Microsoft DirectStorage GDeflate reference (NVIDIA libdeflate fork) via gdcli
+text_1_l1	text	1	8	1	148	ok	
+text_100_l1	text	100	16	1	272	ok	
+text_65535_l1	text	65535	9	1	14476	ok	
+text_65536_l1	text	65536	10	1	14552	ok	
+text_65537_l1	text	65537	11	1	14588	ok	
+text_300000_l1	text	300000	19	1	66776	ok	
+noise_200000_l1	noise	200000	99	1	200628	ok	incompressible: stored blocks
+struct_1000003_l1	struct	1000003	5	1	94040	ok	
+text_1_l6	text	1	8	6	148	ok	
+text_100_l6	text	100	16	6	272	ok	
+text_65535_l6	text	65535	9	6	10368	ok	
+text_65536_l6	text	65536	10	6	10336	ok	
+text_65537_l6	text	65537	11	6	10416	ok	
+text_300000_l6	text	300000	19	6	47624	ok	
+noise_200000_l6	noise	200000	99	6	200628	ok	incompressible: stored blocks
+struct_1000003_l6	struct	1000003	5	6	74608	ok	
+text_1_l12	text	1	8	12	148	ok	
+text_100_l12	text	100	16	12	272	ok	
+text_65535_l12	text	65535	9	12	8660	ok	
+text_65536_l12	text	65536	10	12	8560	ok	
+text_65537_l12	text	65537	11	12	8748	ok	
+text_300000_l12	text	300000	19	12	39968	ok	
+noise_200000_l12	noise	200000	99	12	200628	ok	incompressible: stored blocks
+struct_1000003_l12	struct	1000003	5	12	70892	ok	
+zeros_2000000_l6	struct	2000000	-1	6	4472	ok	one long match run per tile
+mixed_200000_l9	mixed	200000	3	9	153796	ok	
+far_700000_l12	far	700000	9	12	180652	ok	
+text_8000000_l6	text	8000000	31	6	1261088	ok	123 tiles
+file_Big_Buck_Bunny_180_10s_webm_l12	file:Big_Buck_Bunny_180_10s.webm	225951	0	12	224944	ok	
+file_bbb_first_frame_yuv_l12	file:bbb_first_frame.yuv	86400	0	12	64092	ok	
+file_bbb_180_2s_ivf_l12	file:bbb_180_2s.ivf	77725	0	12	77536	ok	
+bad_magic	text	200000	44	6	31840	BadHeader	magic != id ^ 0xFF
+bad_codec_id	text	200000	44	6	31840	BadHeader	codec id 5 (not GDeflate)
+bad_block_type	text	200000	44	6	31840	BadBlockType	first block BTYPE set to reserved 3

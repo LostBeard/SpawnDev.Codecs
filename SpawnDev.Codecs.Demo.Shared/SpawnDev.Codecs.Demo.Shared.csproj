@@ -59,6 +59,7 @@
 		<EmbeddedResource Include="TestData\Lz4Dec\*" />
 		<EmbeddedResource Include="TestData\Snappy\*" />
 		<EmbeddedResource Include="TestData\SnappyDec\*" />
+		<EmbeddedResource Include="TestData\GDeflate\*" />
 		<EmbeddedResource Include="TestData\Vorbis\*" />
 		<EmbeddedResource Include="TestData\Gif\*" />
 		<EmbeddedResource Include="TestData\GifEnc\*" />

@@ -9,3 +9,4 @@ Lz4Dec/*.lz4 binary
 Snappy/*.sz binary
 SnappyDec/*.sz binary
 SnappyDec/*.content binary
+GDeflate/*.gdf binary

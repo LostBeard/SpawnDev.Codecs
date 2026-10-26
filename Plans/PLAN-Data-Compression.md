@@ -89,6 +89,15 @@ bitstreams. Reference CPU compressor/decompressor + HLSL GPU decoder in github.c
 Encoder reuses DeflateGpu's LZ77 + Huffman; only the bit layout differs. Truth: the reference library (byte-exact
 decode; encode decodes with the reference). Best general format when ratio matters more than LZ4's speed.
 
+**Decoder done 2026-10-26:** `Compression/GDeflate/GDeflateDecompressorGpu` (tile stream: 8-byte header, offset table,
+64 KB tiles; one thread per tile, a wave per launch). NOTE the alphabet is Deflate64 (the reference builds libdeflate
+with DEFLATE64): distance symbols 30 / 31 (32769 / 49153 + 14 bits) and length symbol 285 = 3 + 16 extra bits; stored
+blocks carry LEN only. Fixtures from the reference built from source (scratchpad gdeflate_cli: cmake + MSVC driver
+around GDeflate::Compress / Decompress), `scripts/compression/make_gdeflate_fixtures.py`: 31 streams at levels 1 / 6 /
+9 / 12 + damaged ones. A Python model of the decoder (scratchpad gd_model.py) found the Deflate64 detail. Next: the
+32-lanes-per-tile decoder (the HLSL shader's shared-memory path) for few-tile streams; then the encoder (DeflateGpu's
+LZ77 + Huffman, Deflate64 distances, swizzled bit layout).
+
 ### C6. Gaussian splat containers
 - **SPZ** (Niantic, MIT): gzip of quantised columns. Read v2/v3 (+ v4 when its spec is out), write with our parallel
   Deflate. Replaces the CPU GZipStream in SpawnDev.ILGPU.ML Formats/SPZParser + SPZExporter (7 GZip/Deflate stream
