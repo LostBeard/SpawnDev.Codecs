@@ -76,6 +76,9 @@ internal static class WeightPackBench
         {
             kind = "bench",
             repo = "SpawnDev.Codecs",
+            name = "WeightPack unpack throughput",
+            value = Math.Round(data.Length / unpackBest / 1e9, 3),
+            unit = "GB/s",
             config = $"weightpack-{backend}-{Path.GetFileNameWithoutExtension(path)}",
             file = Path.GetFileName(path),
             dtype,

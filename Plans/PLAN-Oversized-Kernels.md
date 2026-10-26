@@ -7,6 +7,12 @@ and killed the GPU process ("A valid external Instance reference no longer exist
 batch encode kernel killed it; the VP8 transcode never finished; the lossless WebP emit (42k lines) killed it until it
 was split (2dc85b1: largest piece 5.4k lines, 2.4 s on FXC).
 
+**Correction 2026-10-26 (Data):** Chrome's WebGPU here compiles with **DXC** (chrome://gpu `use_dxc`), but the node Dawn
+used by the compile screen always takes **FXC** (shader-f16=false with any Dawn flags). Every screen number in this plan
+is an FXC number, a proxy, not Chrome's compile time; the real-GPU lane is the measurement that counts. Opaque loop bounds
+(ILGPU experiment) gave no gain on FXC over 19 of these kernels; Chrome-DXC timings pending. Splitting into stage kernels
+and flattening loop nests stays the lever that has worked in the real browser.
+
 Budget: every kernel at most ~8k lines of WGSL, measured offline with the WgslScreen tool + the Dawn compile screen
 (scratchpad dawn_compile/screen_all.sh) before a browser run, and confirmed in the real-GPU WebGPU lane.
 
