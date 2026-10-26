@@ -73,7 +73,12 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>Packs on the accelerator, checks the size bound, unpacks into a poisoned buffer and compares on the accelerator.</summary>
-    private static async Task<int> AssertWeightPackRoundTripAsync(Accelerator acc, WeightPackGpu pack, byte[] data, int elementSize, string what, bool sizeBound = true)
+    /// <summary>
+    /// Packs with <paramref name="pack"/> and unpacks with <paramref name="unpack"/>, a DIFFERENT instance (as in real use:
+    /// packed once, unpacked at load): one instance's plane buffer still holds the shuffled input after packing, so a chunk
+    /// that never decoded would pass a same-instance round trip.
+    /// </summary>
+    private static async Task<int> AssertWeightPackRoundTripAsync(Accelerator acc, WeightPackGpu pack, WeightPackGpu unpack, byte[] data, int elementSize, string what, bool sizeBound = true)
     {
         using var dIn = DeviceVerify.Upload(acc, data, 13);
         using var dPacked = DeviceVerify.Poisoned(acc, WeightPackGpu.GetMaxPackedSize(data.Length, elementSize) + 17);
@@ -85,7 +90,7 @@ public abstract partial class CodecsTestBase
             True(n <= bound, $"{what}: packed {n} bytes, the per-chunk optimal Huffman bound is {bound:F0} ({(double)n / data.Length:F4} of {data.Length})");
         }
         using var dOut = DeviceVerify.Poisoned(acc, data.Length + 29);
-        int m = await pack.UnpackAsync(dPacked.View, n, dOut.View);
+        int m = await unpack.UnpackAsync(dPacked.View, n, dOut.View);
         Equal(data.Length, m, $"{what}: unpacked length");
         var expected = new byte[data.Length + 29];
         data.CopyTo(expected, 0);
@@ -103,9 +108,10 @@ public abstract partial class CodecsTestBase
         try
         {
             using var pack = new WeightPackGpu(acc);
-            int bf = await AssertWeightPackRoundTripAsync(acc, pack, Weights(3_000_001, 2, 1), 2, "BF16 3M");
-            int hf = await AssertWeightPackRoundTripAsync(acc, pack, Weights(1_000_000, 3, 2), 2, "FP16 1M");
-            int f32 = await AssertWeightPackRoundTripAsync(acc, pack, Weights(1_000_000, 4, 3), 4, "FP32 1M");
+            using var unpack = new WeightPackGpu(acc);
+            int bf = await AssertWeightPackRoundTripAsync(acc, pack, unpack, Weights(3_000_001, 2, 1), 2, "BF16 3M");
+            int hf = await AssertWeightPackRoundTripAsync(acc, pack, unpack, Weights(1_000_000, 3, 2), 2, "FP16 1M");
+            int f32 = await AssertWeightPackRoundTripAsync(acc, pack, unpack, Weights(1_000_000, 4, 3), 4, "FP32 1M");
             // A coder that falls back to stored everywhere passes the round trips but not this.
             True(bf < 3_000_001 * 2 * 0.75, $"BF16 packed to {(double)bf / (3_000_001 * 2):F3} of its size (exponent plane not coded?)");
             True(f32 < 4_000_000 * 0.90, $"FP32 packed to {f32 / 4_000_000.0:F3} of its size");
@@ -122,18 +128,19 @@ public abstract partial class CodecsTestBase
         try
         {
             using var pack = new WeightPackGpu(acc);
-            await AssertWeightPackRoundTripAsync(acc, pack, System.Array.Empty<byte>(), 2, "empty");
-            await AssertWeightPackRoundTripAsync(acc, pack, new byte[] { 7, 9 }, 2, "one BF16");
+            using var unpack = new WeightPackGpu(acc);
+            await AssertWeightPackRoundTripAsync(acc, pack, unpack, System.Array.Empty<byte>(), 2, "empty");
+            await AssertWeightPackRoundTripAsync(acc, pack, unpack, new byte[] { 7, 9 }, 2, "one BF16");
             var rng = new Random(5);
             var b1 = new byte[200_003];
             for (int i = 0; i < b1.Length; i++) b1[i] = (byte)(rng.Next(4) == 0 ? rng.Next(256) : 17);
-            await AssertWeightPackRoundTripAsync(acc, pack, b1, 1, "element size 1");
+            await AssertWeightPackRoundTripAsync(acc, pack, unpack, b1, 1, "element size 1");
             var b3 = new byte[3 * 70_001];
             rng.NextBytes(b3);
-            await AssertWeightPackRoundTripAsync(acc, pack, b3, 3, "element size 3, random (stored chunks)", sizeBound: true);
+            await AssertWeightPackRoundTripAsync(acc, pack, unpack, b3, 3, "element size 3, random (stored chunks)", sizeBound: true);
             var b8 = new byte[8 * 40_000];
             for (int i = 0; i < 40_000; i++) BitConverter.TryWriteBytes(b8.AsSpan(i * 8), (double)(i % 977) * 0.125);
-            await AssertWeightPackRoundTripAsync(acc, pack, b8, 8, "FP64 element size 8");
+            await AssertWeightPackRoundTripAsync(acc, pack, unpack, b8, 8, "FP64 element size 8");
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
@@ -172,7 +179,8 @@ public abstract partial class CodecsTestBase
             }
             Equal(packed.Length, pos, "chunks fill the blob exactly");
             EqualBytes(data, back, ".NET inflate + host un-shuffle");
-            EqualBytes(data, await pack.UnpackAsync(packed), "managed unpack");
+            using var unpack = new WeightPackGpu(acc);
+            EqualBytes(data, await unpack.UnpackAsync(packed), "managed unpack (another instance)");
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
@@ -220,8 +228,12 @@ public abstract partial class CodecsTestBase
         try
         {
             using var pack = new WeightPackGpu(acc);
-            await AssertWeightPackRoundTripAsync(acc, pack, Weights(32 * 1024 * 1024, 2, 21), 2, "BF16 64 MiB", sizeBound: false);
-            await AssertWeightPackRoundTripAsync(acc, pack, Weights(20_000_000, 4, 22), 4, "FP32 80 MB", sizeBound: false);
+            using var unpack = new WeightPackGpu(acc);
+            await AssertWeightPackRoundTripAsync(acc, pack, unpack, Weights(32 * 1024 * 1024, 2, 21), 2, "BF16 64 MiB", sizeBound: false);
+            await AssertWeightPackRoundTripAsync(acc, pack, unpack, Weights(20_000_000, 4, 22), 4, "FP32 80 MB", sizeBound: false);
+            // Decode waves of 300 chunks: the 64 MiB BF16 tensor (1024 chunks) crosses three wave boundaries.
+            using var smallWaves = new WeightPackGpu(acc, decompressWave: 300);
+            await AssertWeightPackRoundTripAsync(acc, pack, smallWaves, Weights(32 * 1024 * 1024, 2, 21), 2, "BF16 64 MiB, decode waves of 300", sizeBound: false);
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
@@ -236,13 +248,14 @@ public abstract partial class CodecsTestBase
         try
         {
             using var pack = new WeightPackGpu(acc);
-            await RunWeightPackTypedArray(pack);
+            using var unpack = new WeightPackGpu(acc);
+            await RunWeightPackTypedArray(pack, unpack);
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("browser")]
-    private static async Task RunWeightPackTypedArray(WeightPackGpu pack)
+    private static async Task RunWeightPackTypedArray(WeightPackGpu pack, WeightPackGpu unpack)
     {
         byte[] data = Weights(120_000, 2, 31);
         using var js = new Uint8Array(data.Length);
@@ -250,7 +263,7 @@ public abstract partial class CodecsTestBase
         using var packed = await pack.PackAsync(js, 2);
         byte[] managed = await pack.PackAsync(data, 2);
         EqualBytes(managed, packed.ReadBytes(), "TypedArray pack = managed pack");
-        using var back = await pack.UnpackAsync(packed);
+        using var back = await unpack.UnpackAsync(packed);
         EqualBytes(data, back.ReadBytes(), "TypedArray unpack");
     }
 

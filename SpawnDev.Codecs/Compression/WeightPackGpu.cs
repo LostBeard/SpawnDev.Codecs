@@ -12,7 +12,7 @@
 // finds long-range repeats this coder does not; recorded, not hidden).
 //
 // Every chunk compresses and decompresses independently: compression is one thread per chunk in waves (the DeflateGpu
-// phases as bounded launches), decompression is one thread per chunk (InflateGpu raw, bounded launches) in waves, with
+// phases as bounded launches), decompression is one thread per chunk (InflateGpu raw, one launch per chunk) in waves, with
 // the chunk offsets computed on the accelerator from the table. Every chunk is a standard DEFLATE stream, so any zlib
 // (raw inflate, wbits -15) reads the format with the table.
 //
@@ -41,8 +41,13 @@ public sealed class WeightPackGpu : IDisposable
     public const int HeaderBytes = 24;
     /// <summary>Chunks compressed at once (each needs DeflateGpu.ScratchInts(ChunkBytes) ints).</summary>
     public const int CompressWave = 64;
-    /// <summary>Chunks decompressed at once (each needs InflateGpu.ScratchInts ints).</summary>
-    public const int DecompressWave = 4096;
+    /// <summary>Default chunks decompressed at once (each needs InflateGpu.ScratchInts ints: ~75 MB at 8192).</summary>
+    public const int DecompressWave = 8192;
+    /// <summary>
+    /// Output budget of one decompress launch per chunk: a whole chunk and its end (a chunk is at most ChunkBytes, so a
+    /// launch stays bounded however big the tensor; one launch per wave instead of one per 2 KB of input).
+    /// </summary>
+    private const int DecodeOutputBudget = ChunkBytes + 1;
     /// <summary>Bytes one Huffman-only parse launch reads per chunk (a literal per byte, no match search: cheap).</summary>
     public const int ParseBudget = 8192;
     /// <summary>Table entries one layout launch walks.</summary>
@@ -57,6 +62,7 @@ public sealed class WeightPackGpu : IDisposable
     private const int PrmInts = 12;
 
     private readonly Accelerator _accelerator;
+    private readonly int _decompressWave;
     private readonly LaunchPacer _pacer;
     private readonly ShuffleFilterGpu _shuffle;
     private readonly int _scratchPerChunk = DeflateGpu.ScratchInts(ChunkBytes);
@@ -75,11 +81,16 @@ public sealed class WeightPackGpu : IDisposable
     private readonly StageBuffer<byte> _planes, _stageIn, _stageOut;
     private readonly StageBuffer<int> _offsets;
 
-    /// <summary>Compiles the kernels and allocates the working memory (~40 MB).</summary>
-    public WeightPackGpu(Accelerator accelerator)
+    /// <summary>
+    /// Compiles the kernels and allocates the working memory: ~37 MB to compress, ~9.5 KB per chunk of
+    /// <paramref name="decompressWave"/> to decompress (~78 MB at the default 8192).
+    /// </summary>
+    public WeightPackGpu(Accelerator accelerator, int decompressWave = DecompressWave)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        if (decompressWave < 1 || decompressWave > 65536) throw new ArgumentOutOfRangeException(nameof(decompressWave));
         _accelerator = accelerator;
+        _decompressWave = decompressWave;
         _pacer = new LaunchPacer(accelerator);
         _shuffle = new ShuffleFilterGpu(accelerator);
         _cInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(CompressInitKernel);
@@ -95,7 +106,7 @@ public sealed class WeightPackGpu : IDisposable
         _dCheck = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(DecompressCheckKernel);
         _prm = accelerator.Allocate1D<int>(PrmInts);
         _cScratch = accelerator.Allocate1D<int>((long)CompressWave * _scratchPerChunk);
-        _dScratch = accelerator.Allocate1D<int>((long)DecompressWave * InflateGpu.ScratchInts);
+        _dScratch = accelerator.Allocate1D<int>((long)_decompressWave * InflateGpu.ScratchInts);
         _slots = accelerator.Allocate1D<byte>((long)CompressWave * SlotBytes);
         _planes = new StageBuffer<byte>(accelerator);
         _stageIn = new StageBuffer<byte>(accelerator);
@@ -260,16 +271,14 @@ public sealed class WeightPackGpu : IDisposable
         }
 
         var planes = _planes.Ensure(total);
-        int steps = InflateGpu.MaxSteps(ChunkBytes + ChunkBytes / 8 + 64, ChunkBytes);
-        for (int first = 0; first < chunks; first += DecompressWave)
+        for (int first = 0; first < chunks; first += _decompressWave)
         {
-            int count = Math.Min(DecompressWave, chunks - first);
+            int count = Math.Min(_decompressWave, chunks - first);
             _dInit(count, offsets, _dScratch.View, _prm.View, first);
-            for (int s = 0; s < steps; s++)
-            {
-                _dStep(count, data, planes, _dScratch.View, _prm.View, first);
-                await _pacer.LaunchedAsync();
-            }
+            // One launch inflates every chunk of the wave to its end (DecodeOutputBudget); the check refuses a chunk
+            // that did not finish.
+            _dStep(count, data, planes, _dScratch.View, _prm.View, first);
+            await _pacer.LaunchedAsync();
             _dCheck(count, offsets, _dScratch.View, _prm.View, first);
         }
         await _shuffle.UnshuffleAsync(planes, output, total, elementSize);
@@ -475,7 +484,7 @@ public sealed class WeightPackGpu : IDisposable
     private static void DecompressStepKernel(Index1D i, ArrayView<byte> data, ArrayView<byte> planes, ArrayView<int> scratch, ArrayView<int> prm, int first)
     {
         if (prm[PError] != 0) return;
-        InflateGpu.Step(data, planes, scratch, i.X * InflateGpu.ScratchInts, InflateGpu.StepInputBytes, InflateGpu.StepOutputBytes);
+        InflateGpu.Step(data, planes, scratch, i.X * InflateGpu.ScratchInts, int.MaxValue, DecodeOutputBudget);
     }
 
     /// <summary>One thread per chunk of the wave: the chunk must have inflated to exactly its size.</summary>
