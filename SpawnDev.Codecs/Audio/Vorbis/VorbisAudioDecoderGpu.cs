@@ -28,10 +28,12 @@
 // BlockSize1 and the channel count), so a packet allocates nothing on the device. The bit-stream decode
 // is the GPU step kernel only: the CPU reference decoder lives in SpawnDev.Codecs.References.
 
+using System.Runtime.Versioning;
 using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.Codecs.Audio.Transforms;
 using SpawnDev.ILGPU;
+using SpawnDev.SpawnJS.JSObjects;
 
 namespace SpawnDev.Codecs.Audio.Vorbis;
 
@@ -148,7 +150,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         var xListsFlat = new int[Math.Max(1, totalXList)];
         for (int f = 0; f < setup.Floors.Length; f++)
         {
-            Array.Copy(setup.Floors[f].XList, 0, xListsFlat, _xListOffsets[f], _xListLengths[f]);
+            System.Array.Copy(setup.Floors[f].XList, 0, xListsFlat, _xListOffsets[f], _xListLengths[f]);
         }
         _dXListsFlat = accelerator.Allocate1D<int>(xListsFlat.Length);
         _dXListsFlat.View.CopyFromCPU(xListsFlat);
@@ -216,20 +218,72 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     }
 
     /// <summary>
+    /// Most interleaved samples one packet returns (<c>channels * BlockSize1 / 2</c>): the size a caller's PCM view needs for
+    /// <see cref="DecodePacketAsync(ArrayView1D{byte, Stride1D.Dense}, int, ArrayView1D{float, Stride1D.Dense})"/>.
+    /// </summary>
+    public int MaxSamplesPerPacket => _ident.AudioChannels * (_ident.BlockSize1 / 2);
+
+    /// <summary>
+    /// Decode one audio packet that is already on the accelerator, writing the interleaved float PCM into a caller-owned
+    /// view. Returns the number of sample FRAMES written (samples = frames * channels): 0 for the first packet (it primes the
+    /// overlap-add), previousBlockSize / 4 + blockSize / 4 for every later one. Nothing but a few header ints crosses to the host.
+    /// </summary>
+    /// <param name="packet">The packet bytes (the view may be longer than <paramref name="packetLength"/>).</param>
+    /// <param name="packetLength">Bytes of the packet.</param>
+    /// <param name="pcmOut">Receives the samples; at least <see cref="MaxSamplesPerPacket"/> floats.</param>
+    public async Task<int> DecodePacketAsync(ArrayView1D<byte, Stride1D.Dense> packet, int packetLength, ArrayView1D<float, Stride1D.Dense> pcmOut)
+    {
+        if (packetLength < 0 || packetLength > packet.Length) throw new ArgumentOutOfRangeException(nameof(packetLength));
+        if (pcmOut.Length < MaxSamplesPerPacket)
+            throw new ArgumentException($"pcmOut must hold {MaxSamplesPerPacket} floats (MaxSamplesPerPacket).", nameof(pcmOut));
+        if (packetLength == 0) return 0;
+        return await DecodeCoreAsync(packet.SubView(0, packetLength), pcmOut);
+    }
+
+    /// <summary>
     /// Decode one audio packet. Returns the interleaved float PCM samples
     /// emitted by this packet. The first packet returns an empty array
     /// (priming the overlap-add state); every later packet returns
     /// previousBlockSize / 4 + blockSize / 4 sample frames * channels values.
+    /// A terminal CPU sink; in a browser prefer the TypedArray overload.
     /// </summary>
     public async Task<float[]> DecodePacketAsync(ReadOnlyMemory<byte> packet)
     {
-        if (packet.Length == 0) return Array.Empty<float>();
+        if (packet.Length == 0) return System.Array.Empty<float>();
+        var dPacket = _dPacket.Ensure(packet.Length);
+        DeviceTransfer.Upload(dPacket, packet.Span);
+        int frames = await DecodeCoreAsync(dPacket.SubView(0, packet.Length), _dPcm.View);
+        if (frames == 0) return System.Array.Empty<float>();
+        return await _dPcm.View.SubView(0, (long)_ident.AudioChannels * frames).CopyToHostAsync();
+    }
+
+    /// <summary>
+    /// Decode one audio packet held in a JS typed array (browser accelerators only); the samples come back as a JS
+    /// <see cref="Float32Array"/> (empty for the first packet). Neither the packet nor the samples enter the .NET heap.
+    /// The caller disposes the result.
+    /// </summary>
+    [SupportedOSPlatform("browser")]
+    public async Task<Float32Array> DecodePacketAsync(TypedArray packet)
+    {
+        ArgumentNullException.ThrowIfNull(packet);
+        int length = (int)packet.ByteLength;
+        if (length == 0) return new Float32Array(0);
+        var dPacket = _dPacket.Ensure(length);
+        DeviceTransfer.Upload(dPacket, packet);
+        int frames = await DecodeCoreAsync(dPacket.SubView(0, length), _dPcm.View);
+        return await DeviceTransfer.DownloadFloat32ArrayAsync(_dPcm.View, (long)_ident.AudioChannels * frames);
+    }
+
+    /// <summary>
+    /// The decode itself: <paramref name="packet"/> (exactly the packet's bytes) on the accelerator, interleaved PCM written to
+    /// <paramref name="pcmOut"/>. Returns the sample frames written.
+    /// </summary>
+    private async Task<int> DecodeCoreAsync(ArrayView1D<byte, Stride1D.Dense> packet, ArrayView1D<float, Stride1D.Dense> pcmOut)
+    {
         int channels = _ident.AudioChannels;
 
         // ---- bit-stream decode on the accelerator: the resumable step kernel ----
         int modeBits = VorbisMath.Ilog(_setup.Modes.Length - 1);
-        var dPacket = _dPacket.Ensure(packet.Length);
-        DeviceTransfer.Upload(dPacket, packet.Span);
 
         _dAllIntOut.View.MemSetToZero();
         _dResidue.View.MemSetToZero();
@@ -253,7 +307,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
             {
                 _v2DecodeKernel(
                     new Index1D(1),
-                    dPacket.SubView(0, packet.Length),
+                    packet,
                     _dV2SetupInts.View, _dV2SetupDoubles.View,
                     _dAllIntOut.View, _dResidue.View,
                     _dIntScratch.View, _dEntryVecScratch.View,
@@ -363,7 +417,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         var dNext = _dRightHalf[1 - _prevRight];
         _overlapKernel(new Index1D(channels * Math.Max(outFrames, halfBlock)),
             _dTd.View.SubView(0, (long)channels * blockSize), _dWindows.View.SubView(windowOffset, blockSize),
-            dPrev.View, dNext.View, _dPcm.View, channels, blockSize, prevBlockSize, rowStride);
+            dPrev.View, dNext.View, pcmOut, channels, blockSize, prevBlockSize, rowStride);
 
         await _accelerator.SynchronizeAsync();
 
@@ -371,11 +425,8 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         _prevRight = 1 - _prevRight;
         _previousBlockSize = blockSize;
 
-        // First packet: no audio output (priming overlap-add).
-        if (outFrames == 0) return Array.Empty<float>();
-
-        // Read back interleaved PCM.
-        return await _dPcm.View.SubView(0, (long)channels * outFrames).CopyToHostAsync();
+        // 0 for the first packet (priming the overlap-add)
+        return outFrames;
     }
 
     /// <summary>Largest codebook dimension count (the residue entry-vector scratch size, at least 1).</summary>

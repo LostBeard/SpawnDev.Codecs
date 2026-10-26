@@ -109,6 +109,29 @@ public static class DeviceTransfer
         Upload(stage.View.SubView(offset, length), src.Span.Slice(0, (int)length));
     }
 
+    /// <summary>
+    /// Read <paramref name="count"/> floats from the start of <paramref name="src"/> into a new JS
+    /// <see cref="Float32Array"/> (the caller disposes it). The samples do not enter the .NET heap.
+    /// </summary>
+    /// <exception cref="NotSupportedException">The view is not on a browser accelerator.</exception>
+    [SupportedOSPlatform("browser")]
+    public static async Task<Float32Array> DownloadFloat32ArrayAsync(ArrayView1D<float, Stride1D.Dense> src, long count)
+    {
+        if (count < 0 || count > src.Length) throw new ArgumentOutOfRangeException(nameof(count));
+        var contiguous = (IContiguousArrayView)src.BaseView;
+        if (contiguous.Buffer is not IBrowserMemoryBuffer browser)
+            throw new NotSupportedException(
+                $"A TypedArray overload needs a browser accelerator buffer; got {contiguous.Buffer.GetType().Name} " +
+                $"on {contiguous.Buffer.Accelerator.AcceleratorType}. On a desktop accelerator use the managed or ArrayView1D overload.");
+        using var bytes = await browser.CopyToHostUint8ArrayAsync(contiguous.IndexInBytes, count * sizeof(float));
+        // A float view needs a 4-aligned byte offset: view the bytes in place when they are, copy (in JS) when not.
+        if ((bytes.ByteOffset & 3) == 0) return bytes.ReCast<Float32Array>(0, count);
+        var result = new Float32Array(count);
+        using var resultBytes = new Uint8Array(result.Buffer);
+        resultBytes.Set(bytes);
+        return result;
+    }
+
     private static IBrowserMemoryBuffer RequireBrowserBuffer(ArrayView1D<byte, Stride1D.Dense> view, out long byteOffset)
     {
         var contiguous = (IContiguousArrayView)view.BaseView;

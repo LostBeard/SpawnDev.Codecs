@@ -96,18 +96,22 @@ public abstract partial class CodecsTestBase
     public async Task VorbisAudioDecoderGpu_LibvorbisStreams_MatchLibvorbis()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
-        var failures = new List<string>();
-        foreach (var fx in LoadVorbisFixtures())
+        try
         {
-            var (ident, setup, audio) = ReadVorbisPackets(fx.Ogg);
-            using var dec = new VorbisAudioDecoderGpu(acc, ident, setup);
-            var ours = new List<float>(fx.Frames * fx.Channels + ident.BlockSize1 * fx.Channels);
-            foreach (var packet in audio) ours.AddRange(await dec.DecodePacketAsync(packet));
-            string? diff = CompareVorbisPcm(fx, ours.ToArray(), out float err);
-            Console.WriteLine($"{fx.Name}: {DescribeVorbisSetup(ident, setup)}, " +
-                $"{ours.Count / fx.Channels} frames (libvorbis {fx.Frames}), max |error| {err:G4}");
-            if (diff != null) failures.Add(diff);
+            var failures = new List<string>();
+            foreach (var fx in LoadVorbisFixtures())
+            {
+                var (ident, setup, audio) = ReadVorbisPackets(fx.Ogg);
+                using var dec = new VorbisAudioDecoderGpu(acc, ident, setup);
+                var ours = new List<float>(fx.Frames * fx.Channels + ident.BlockSize1 * fx.Channels);
+                foreach (var packet in audio) ours.AddRange(await dec.DecodePacketAsync(packet));
+                string? diff = CompareVorbisPcm(fx, ours.ToArray(), out float err);
+                Console.WriteLine($"{fx.Name}: {DescribeVorbisSetup(ident, setup)}, " +
+                    $"{ours.Count / fx.Channels} frames (libvorbis {fx.Frames}), max |error| {err:G4}");
+                if (diff != null) failures.Add(diff);
+            }
+            True(failures.Count == 0, string.Join("\n", failures));
         }
-        True(failures.Count == 0, string.Join("\n", failures));
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }
