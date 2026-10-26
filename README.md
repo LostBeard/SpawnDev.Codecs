@@ -1,316 +1,299 @@
+<div align="center">
+
 # SpawnDev.Codecs
 
-**Pure-.NET, ILGPU-accelerated, patent-clean audio and video codecs.**
+**Image, video and audio codecs in C#, running on any GPU, in the browser or on the desktop.**
 
-Runs on every ILGPU backend - CUDA, OpenCL, CPU, WebGPU, WebGL, Wasm - which means it runs on desktop AND in Blazor WASM browsers. No native binaries, no closed-source dependencies, no patent-encumbered codecs.
+Every encoder and decoder is a chain of C# kernels that [SpawnDev.ILGPU](https://github.com/LostBeard/SpawnDev.ILGPU) compiles to WGSL, GLSL, WebAssembly, PTX, OpenCL C or SIMD CPU code.
+No native binaries. No server. Patent-clean formats only.
 
-> **Status: SpawnDev.Codecs 0.3.0-rc.1 (2026-05-03).** *Architectural project split: main `SpawnDev.Codecs` library now ships ZERO external dependencies (only `SpawnDev.ILGPU` + `SpawnDev.EBML`). CPU reference encoders + decoders moved to a new sibling project `SpawnDev.Codecs.References` (which carries `Concentus 2.2.2` for the Opus reference). Consumers wanting only the GPU pairs reference `SpawnDev.Codecs`; consumers wanting CPU references too reference both. See CHANGELOG for full file inventory + Path-to-1.0.0.* 6 of 6 codec encoders + 6 of 6 codec decoders WORKING through the public IVideoDecoder / OpusDecoder / FlacDecoder / VorbisOggDecoder APIs (CPU paths now in `SpawnDev.Codecs.References`). **5 of 6 codecs also ship 100%-ILGPU GPU encoder/decoder pairs** (`Vp8/Vp9/Av1KeyframeEncoderGpu` + `Vp8/Vp9/Av1KeyframeDecoderGpu`, `FlacEncoderGpu` + `FlacDecoderGpu`, `VorbisAudioEncoderGpu` + `VorbisAudioDecoderGpu`); Opus has 31 SILK GPU primitives + the shared Daala range coder, and the top-level Opus integration class is the next codec on the GPU port roadmap. Every audio + video encoder produces bytes that the matching reference decoder accepts: **FLAC** bit-exact lossless (matches ffmpeg byte-for-byte); **Opus** round-trip via Concentus 2.2.2 (matches ffmpeg's libopus quality at 20.3 dB SNR on real audio); **Vorbis** beats ffmpeg's libvorbis on real audio (35.7 dB SNR vs 20.9 dB) thanks to per-block adaptive floor 1 + 1024-entry residue codebook; **VP8** keyframes accepted by ffmpeg pixel-perfect (1920x1072 BBB transcode at 5 fps; 1/2/4/8 token partitions all accepted); **VP9** keyframes accepted by ffmpeg native decoder across all dimensions 16x16-1920x1088 (max diff Y=1 at Q=8); **AV1** keyframes accepted by libdav1d across all dimensions on real BBB content (60/60 frames decoded; av1.mp4 plays cleanly alongside vp8/vp9). Every decoder API surface (`Vp8Decoder` / `Vp9Decoder` / `Av1Decoder`) routes real keyframes through the walker pipelines and emits real YUV planes (no `NotImplementedException`, no placeholder). Browser demos: `/transcode` (CPU video round-trip), `/audio` (CPU audio round-trip), `/gpu-transcode` (100%-ILGPU GPU video round-trip). See the feature matrix below.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.txt)
+[![.NET 10](https://img.shields.io/badge/.NET-10-512bd4.svg)](https://dotnet.microsoft.com/)
+[![Sponsor](https://img.shields.io/badge/sponsor-LostBeard-ea4aaa.svg?logo=githubsponsors)](https://github.com/sponsors/LostBeard)
 
-## Current feature matrix
+[Docs](Docs/README.md) | [What is verified](Docs/status.md) | [Changelog](CHANGELOG.md) | [Plans](Plans/)
 
-### Audio codecs
+</div>
 
-| Codec | Decoder | Encoder |
-|-------|---------|---------|
-| **FLAC (native)** | Complete: CONSTANT/VERBATIM/FIXED/LPC, stereo decorrelation, CRC-8 + CRC-16, MD5 verify, SEEKTABLE + VORBIS_COMMENT metadata | Complete: CONSTANT detection + FIXED order search + LPC via Levinson-Durbin + stereo mode selection, MD5, optional VORBIS_COMMENT tag injection |
-| **FLAC-in-Ogg** | Complete | Manual via `OggPageWriter` |
-| **Opus (SILK)** | Complete: mono + stereo across NB/MB/WB, 10/20/40/60 ms frames | **WORKING as of 2026-04-27.** Top-level `OpusEncoder.EncodeFrame(...)` produces RFC 6716 packets across all 6 ILGPU backends. Mono + stereo, 8 / 16 / 24 / 48 kHz, 2.5 / 5 / 10 / 20 ms frames, VoIP / Audio / RestrictedLowDelay applications. Encoded packets round-trip cleanly through our `OpusDecoder`. Per-frame work delegates to the BSD-3 Concentus 2.2.2 backbone today; `Audio/Opus/Silk/` + `Audio/Opus/Celt/` scaffolds keep the future hand-port path open without API breakage. |
-| **Opus (CELT)** | **WORKING as of 2026-04-27.** CELT + Hybrid (SILK+CELT) decode paths wired via [Concentus 2.2.2](https://www.nuget.org/packages/Concentus) BSD-3 backbone. Bit-exact vs Concentus oracle on 186 CELT/Hybrid tests across CPU + CUDA + OpenCL + WebGPU + WebGL + Wasm. Fixtures: 1 kHz / 880 Hz / 2 kHz / 440 Hz sines @ 48 kHz, mono + stereo, 2.5 / 5 / 10 / 20 ms frames, single-packet + 3-packet streams. `Audio/Opus/Celt/` scaffolds (CeltConstants, CeltMode, CeltDecoderState) keep the future hand-port path open without API breakage. | **WORKING as of 2026-04-27** (see Opus (SILK) row - encoder is shared across modes). |
-| **Opus-in-Ogg** | Done for SILK - parses `OpusHead` + `OpusTags` + audio packets end-to-end | Done as packager - wraps pre-encoded Opus packets into `.opus` bytes |
-| **Vorbis** | **Amplitude-correct as of 2026-04-27**: Huffman codeword assignment ports libvorbis `_make_words` marker algorithm (entry-index order, not count-sorted); FLOOR1_fromdB_LOOKUP is the verbatim 256-entry libvorbis static table; ResidueDecoder.LookupVector implements the q_sequencep cross-dimension accumulator with abs(multiplicand). MDCT normalisation now follows libvorbis convention (4/N on the encoder forward, unscaled inverse), so libvorbis-encoded streams decode at full source amplitude (RMS within 5% of ffmpeg) and our-encoded streams decode at full source amplitude through ffmpeg. End-to-end on a 440Hz sine ogg from libvorbis: our decoder produces a clean 440.2Hz tone vs ffmpeg's 440.3Hz (matches to 0.1Hz), peak ratio 1.13, RMS ratio 0.95. EOP-aware residue path per spec sec 8.6.5. | **WORKING as of 2026-04-27.** `VorbisAudioEncoder` produces a complete `.ogg` Vorbis stream from float PCM. ffmpeg accepts the bitstream and decodes it back at the correct amplitude (peak within 12% of source, RMS within 1% of source on 440 Hz tone tests). Identification + setup + comment headers, codebook encoding via `VorbisCodebookEncoder`, residue + floor1 + window + MDCT pipeline all wired. Codebook layout anchors entry N/2 at value 0 exactly so noise-gated bins decode to silence rather than ±half-step quantisation noise summed over N/2 bins. |
+---
 
-### Audio containers
+## What it is
 
-| Container | Read | Write |
-|-----------|------|-------|
-| RIFF / WAVE | Yes - 8/12/16/20/24/32-bit PCM, 32-bit float, multi-channel, LIST-chunk skipping, WAVE_FORMAT_EXTENSIBLE | Yes |
-| AIFF | Yes - 8/16/24/32-bit PCM, IEEE 80-bit extended sample rate | Yes |
-| Ogg | Yes - page + packet, CRC-32 per RFC 3533, multi-bitstream demux | Yes |
+SpawnDev.Codecs is a codec library for .NET where the codec work itself, from colour conversion to the entropy coder,
+runs on the accelerator you hand it. The host is a pure coordinator: it uploads the input, launches kernels in order
+and reads back the finished file or picture. The same library and the same kernels run:
 
-### Multimedia containers
+- **in the browser** (Blazor WebAssembly) on WebGPU, WebGL or WebAssembly, with nothing leaving the user's machine, and
+- **on the desktop** (Windows, Linux, macOS) on CUDA, OpenCL or the CPU.
 
-| Container | Read | Write |
-|-----------|------|-------|
-| WebM / Matroska (EBML) | Via [`SpawnDev.EBML 3.0.0`](https://www.nuget.org/packages/SpawnDev.EBML) - schema-driven path navigation, non-destructive edits | Via `SpawnDev.EBML` |
-| MP4 / ISOBMFF | Structural box reader (ftyp, container recursion, size=0 "rest of file" convention) | Not yet |
+## Highlights
 
-### Transforms (shared)
+- **Image codecs, checked against the reference libraries.** PNG (with APNG frames, Adam7, 16-bit, text chunks), JPEG
+  (baseline and progressive), WebP (lossless, lossy, alpha, animation), GIF and BMP, encode and decode, plus one
+  `ImageDecoderGpu` that recognizes the format.
+- **Byte-identical with the reference encoders where the format allows it:** WebP lossy encode matches libwebp 1.6.0
+  (methods 3 and 4, 222 opaque and 145 transparent test pictures) and JPEG encode matches libjpeg-turbo file for file;
+  WebP and JPEG decode match libwebp and libjpeg-turbo pixel for pixel.
+- **Video:** VP8, VP9 and AV1 keyframe encoders and decoders, including a full-syntax VP8 keyframe decoder that matches
+  ffmpeg pixel for pixel on 182 real files.
+- **Audio:** Vorbis decoders that match libvorbis on real streams, FLAC, and Opus (SILK GPU primitives, a CPU reference
+  path).
+- **One API shape everywhere.** Every entry point has three overloads: data already on the accelerator (`ArrayView1D`),
+  a JS typed array in the browser (`TypedArray`, never touching the .NET heap) and managed memory (`byte[]`).
+- **Bounded launches.** Serial stages (bit writers, entropy coders) are resumable chains of short launches, so no kernel
+  holds the GPU long enough to stall the desktop or trip the OS watchdog.
 
-- MDCT + IMDCT reference implementations (CPU, O(N²))
-- Round-trip identity `MDCT(IMDCT(X)) = N·X` validated to float precision
-- FFT-accelerated CPU and ILGPU-kernel variants planned
+## Status
 
-### Video codecs
+Pre-release. The CPU, CUDA and OpenCL lanes are where the verification above was run. The browser lanes (WebGPU, WebGL,
+Wasm) run the same suite and are being brought to green: some video kernels are still too large for Chrome's shader
+compiler, and a few image tests run over their time limit there. [**Docs/status.md**](Docs/status.md) lists every codec
+by backend with the evidence; where it disagrees with this page, that file wins.
 
-Patent-clean via the AOMedia patent pledge.
+## Install
 
-| Codec | Decoder | Encoder |
-|-------|---------|---------|
-| **VP8** | **WORKING as of 2026-04-27.** Full keyframe walker (Vp8KeyframeWalker.Decode) with B_PRED + non-B_PRED reconstruction, libvpx coefficient decode order (Y2 first when not B_PRED -> 16 Y4 -> 4 U -> 4 V), per-MB above + left entropy contexts, sub-block 4x4 intra prediction. Verified against ffmpeg on a 64x64 testsrc keyframe: Y MAE 0.04 / U MAE 0.01 / V MAE 0.00, range exact match, first-row Y bytes EXACT match. Max abs Y diff 56 explained by loop filter (out of scope). Inter frames + loop filter remain NotImplementedException. Multi-token-partition (Log2NumPartitions=0..3 = 1/2/4/8 partitions) supported on both encoder + walker; ffmpeg native VP8 decodes all four partition counts. | **WORKING as of 2026-04-27.** Top-level Vp8KeyframeEncoder integrates forward DCT (6/6 BIT-EXACT round-trip vs inverse) + Walsh + forward quantizer + coef block encoder (17/17 BIT-EXACT round-trip vs decoder, all 6 cat tokens) + frame tag writer (6/6 round-trip) + frame header writer (7/7 round-trip) + bool encoder (708/708 round-trip). ffmpeg ACCEPTS our 32x32 keyframe bitstream and decodes it to YUV. No reconstruction write-back yet (subsequent MBs use 127/129 edge fills) - bitstream is structurally valid; pixel quality fix is incremental. |
-| **VP9** | **WORKING as of 2026-04-27.** Full keyframe walker (Vp9KeyframeWalker.DecodeFrame) drives partition tree -> leaf block -> per-tx-block predict + invert + add for all three planes on real BBB.webm bytes. First 16x16 Y BIT-EXACT vs ffmpeg (cap fix in Vp9CoefContext.GetCoefContext: was clamping ctx at 2 when libvpx returns raw `(1+tc[n0]+tc[n1])>>1` no clamp, range [0,5]). 352 leaf blocks decoded across the first BBB keyframe; first 16 px of Y top row + Y left col + first 16x16 Y block ALL EXACT MATCH; V plane mean within 0.03 of ffmpeg; U plane within small drift; Y plane recognizable scene with blocking artifacts (loop filter out of scope). Inter prediction + loop filter + 4:2:2 / 4:4:4 / high-bit-depth NotImplementedException. | **Frame-level WORKING as of 2026-04-27.** Top-level `Vp9KeyframeEncoder` (~640 LoC) takes YUV420 -> complete VP9 keyframe bitstream (uncompressed header + compressed header + single-tile data). v1 defaults: Profile 0 / 8-bit / 4:2:0, Block16x16 leaves with DC_PRED for Y + UV + Tx16x16 luma + Tx8x8 chroma DctDct, single tile, no loop filter, no segmentation, default coef probs. Round-trip via Vp9KeyframeWalker: pixels-in -> encode -> walker decode -> pixels-out with max error 0-1 across 16x16, 32x32, 64x64, and non-square 80x48 frames. ffmpeg native VP9 decoder accepts single-block (16x16) frames pixel-perfect. Multi-block ffmpeg validation pending a walker-side bitstream-divergence fix. Underlying primitives: full forward transform set (Vp9ForwardDct 4x4/8x8/16x16/**32x32**, Vp9ForwardAdst 4/8/**16**), Vp9ForwardQuantizer, Vp9BlockCoefEncoder (bit-exact mirror of decoder, 114/114 round-trip), Vp9BoolEncoder with leading marker bit fix vs libvpx vpx_start_encode, Vp9SuperframeWriter (BBB packets BIT-EXACT). 240+ tests pass across CPU + CUDA + OpenCL + WebGPU + WebGL + Wasm. |
-| **AV1** | **Pipeline runs end-to-end as of 2026-04-27.** Daala range DECODER 309/309 round-trip + verified on real BBB AV1 OBU bytes. OBU + SH (28 fields) + FrameHeader (16 fields) + tile group parsers all running on bbb_180_2s.ivf. Av1KeyframeWalker.DecodeFrame produces real pixel data (not 128 placeholders) via the full chain: partition tree -> mode_info read -> Av1CoefDecoder (av1_read_coeffs_txb port: txb_skip / eob_multi / coeff_base / coeff_lps / dc_sign / Golomb / dequant) -> Av1Inverse2dTransform (16 tx_type x N tx_size dispatch over Av1InverseDct/Adst/Identity 1D primitives) -> Av1IntraEdge buffer -> Av1IntraPredictDispatch -> add+clip into Av1FrameBuffer. ALL default CDF tables ported (~5000 lines of token + partition + intra mode + skip + txfm + segment + delta_q from libaom). 18/18 walker tests pass on every backend. **Bit-exactness vs ffmpeg ground truth NOT yet hit:** BBB first frame Y mean 54 vs ffmpeg 97 (delta -43). Remaining bit-exactness gaps: hand-tuned 60-table libaom scan set (currently programmatic), dynamic q-context (hardcoded to bin 3), CFL alpha magnitudes, directional intra modes D45/D67/D113/D135/D157/D203 (currently fall back to DC), tx_type read via intra_ext_tx CDF (currently hardcoded DCT_DCT), 32x32/64x64 1D inverse transforms. | **Block emit WORKING as of 2026-04-27.** Top-level `Av1KeyframeEncoder` (~808 LoC) + `Av1CoefEncoder` (~496 LoC, bit-exact mirror of `Av1CoefDecoder`) emit a complete AV1 keyframe bitstream from YUV420 input. v1: TD + SH + Frame OBU, partition-tree recursion, per-block predict -> Av1Forward2dTransform -> Av1ForwardQuantizer -> Av1CoefEncoder (txb_skip / tx_type / eob / coeff_base{,_eob} / coeff_lps / dc_sign / Golomb) -> dequant -> inverse-DCT -> recon writeback. **Walker round-trip:** 16x16 flat-gray (Y=128) reconstructs to **Y=128.19, U=V=128.00** (within 0.2 of input). **ffmpeg trace_headers:** parses our SH + Frame Header CLEANLY (every field readable). **libdav1d:** rejects the entropy stream during tile MSAC decode; the headers are spec-perfect (verified) and the encoder is internally self-consistent with our decoder mirror, so the gap is in the MSAC byte sequence itself (likely coef CDF context indexing). All forward transform primitives shipped + bit-exact: Av1ForwardDct 4/8/16/**32**, Av1ForwardAdst 4/**8**/**16**, Av1Forward2dTransform 2D dispatcher (libaom shifts + cos_bits), Av1ForwardQuantizer, Av1RangeEncoder (309/309 round-trip). |
+The package is not on nuget.org yet (the first release follows green browser lanes). Until then, reference the project:
 
-Containers wired for video pipelines: IVF reader + writer, Matroska / WebM via SpawnDev.EBML, Ogg.
-
-### GPU encoder + decoder pairs (v3 100% ILGPU)
-
-Every entry below runs entirely on the accelerator (CUDA + OpenCL + CPU
-verified bit-exact via PlaywrightMultiTest; WebGPU + WebGL + Wasm by
-ILGPU IR symmetry). Host is a pure coordinator: alloc + upload + dispatch
-+ readback. No CPU math, no CPU iteration, no CPU bitstream assembly.
-
-| Codec  | GPU Encoder              | GPU Decoder              | Status                                |
-|--------|--------------------------|--------------------------|---------------------------------------|
-| VP8    | `Vp8KeyframeEncoderGpu`  | `Vp8KeyframeDecoderGpu`  | v1 keyframe + frame-batch (extent=N parallel encode); BBB 1920x1072 ffmpeg-pixel-perfect; 1/2/4/8 token partitions |
-| VP9    | `Vp9KeyframeEncoderGpu`  | `Vp9KeyframeDecoderGpu`  | v1 keyframe + multi-block walker + frame-batch; spec-compliant 1920x1080 boundary MB Tx8x8/Tx4x4 path |
-| FLAC   | `FlacEncoderGpu`         | `FlacDecoderGpu`         | v1 keyframe + 7 standalone subframe-decode primitives (FixedReconstruct + LpcReconstruct + ChannelDecorrelation + ResidualDecoder + SubframeHeader + Fixed/Lpc subframe composites); RunBatch shipped |
-| AV1    | `Av1KeyframeEncoderGpu`  | `Av1KeyframeDecoderGpu`  | v1 keyframe bit-exact vs CPU encoder; libdav1d-clean on real BBB content; frame-batch (`EncodeKeyFramesBatchAsync`); Tx4x4 forward + inverse + constants prep for boundary chroma |
-| Vorbis | `VorbisAudioEncoderGpu`  | `VorbisAudioDecoderGpu`  | v1 mono pair (silence-path round-trip bit-exact across CUDA + OpenCL + CPU; full .ogg stream output; 21 GPU primitives including OverlapAdd); `EncodeAudioPacketsBatchAsync` for batched encode (per-packet host-SubView dispatch, single end-of-batch sync) |
-| Opus   | -                        | -                        | 31 SILK GPU primitives + shared Daala range coder |
-
-Frame-batch architecture (VP8/VP9/AV1): every `Run`/`RunBatch` kernel
-takes per-frame-slot views; batch path SubViews per-frame buffers at the
-kernel head and dispatches at extent = `numFrames * perFrameWork`. One
-host upload + one readback per batch instead of N.
-
-Each pair has tests in `CodecsTestBase.<Codec>KeyframeEncoderGpuTests.cs`
-+ `CodecsTestBase.<Codec>KeyframeDecoderGpuTests.cs` running across every
-backend.
-
-### Out of scope (patent-encumbered)
-
-H.264, H.265, AAC, MP3 - delegated to platform encoders via [SpawnDev.MultiMedia](https://github.com/LostBeard/SpawnDev.MultiMedia).
-
-## Example - CPU public API
-
-```csharp
-using SpawnDev.Codecs.Audio.Flac;
-using SpawnDev.Codecs.Audio.Wav;
-
-// WAV -> FLAC -> WAV lossless round-trip.
-var wav = WavFileCodec.ReadFile("in.wav");
-FlacEncoder.EncodeToFile("out.flac", wav.InterleavedSamples, wav.SampleRateHz, wav.Channels, wav.BitsPerSample);
-var flac = FlacDecoder.DecodeFile("out.flac");
-WavFileCodec.WriteFile("roundtrip.wav", flac.InterleavedSamples, flac.StreamInfo.SampleRateHz,
-    flac.StreamInfo.Channels, flac.StreamInfo.BitsPerSample);
+```bash
+git clone https://github.com/LostBeard/SpawnDev.Codecs.git
+dotnet add <your project> reference SpawnDev.Codecs/SpawnDev.Codecs/SpawnDev.Codecs.csproj
 ```
 
-## Quickstart - GPU encoder + decoder pairs
+Requires **.NET 10**. Depends on [SpawnDev.ILGPU](https://github.com/LostBeard/SpawnDev.ILGPU),
+[SpawnDev.SpawnJS](https://github.com/LostBeard/SpawnDev.SpawnJS) and [SpawnDev.EBML](https://github.com/LostBeard/SpawnDev.EBML).
+The CPU reference implementations (for verification, with Concentus for Opus) are a separate project,
+`SpawnDev.Codecs.References`, so the main library has no third-party codec dependency.
 
-The GPU pairs are the headline feature. Every encoder + decoder in the
-table below runs entirely as ILGPU kernels - the host is a pure
-coordinator (alloc + upload + dispatch + readback). The same code runs
-on CUDA, OpenCL, CPU, WebGPU, WebGL, and Wasm without changes.
+## Quick start
 
-### Acquire an accelerator
+### 1. Create an accelerator
 
-For desktop, pick a backend that satisfies your codec's feature
-requirements (most codecs need atomics; that rules out WebGL):
+The application owns the accelerator; codec classes never dispose it.
 
 ```csharp
+// Desktop: CUDA when present, then OpenCL, then CPU
 using ILGPU;
 using SpawnDev.ILGPU;
 
-using var ctx = Context.Create(b => b.CPU().Cuda().OpenCL());
-using var acc = ctx.CreatePreferredAccelerator(
-    new AcceleratorRequirements { RequiresAtomics = true });
-// -> CUDA when present, then OpenCL, then CPU.
+using var context = Context.Create(b => b.CPU().Cuda().OpenCL());
+using var accelerator = context.CreatePreferredAccelerator(new AcceleratorRequirements { RequiresAtomics = true });
 ```
-
-For Blazor WebAssembly, pick a browser backend the same way:
 
 ```csharp
-using SpawnDev.ILGPU.WebGPU;
+// Blazor WebAssembly: WebGPU, falling back to WebGL, then Wasm
+using SpawnDev.ILGPU;
 
 var builder = Context.Create();
-await builder.WebGPU();
-var ctx = builder.ToContext();
-var devices = ctx.GetWebGPUDevices();
-using var acc = await devices[0].CreateAcceleratorAsync(ctx);
-// Falls back to ctx.Wasm() / ctx.WebGL() when WebGPU is unavailable
-// (your code can branch on context.Devices).
+await builder.AllAcceleratorsAsync();
+var context = builder.ToContext();
+var accelerator = await context.CreatePreferredAcceleratorAsync();
 ```
 
-### VP8 GPU encode + decode round-trip
+### 2. Decode any image
+
+```csharp
+using SpawnDev.Codecs.Images;
+
+using var images = new ImageDecoderGpu(accelerator);
+DecodedImage picture = await images.DecodeAsync(File.ReadAllBytes("photo.jpg"));
+// picture.Info: Format, Width, Height, HasAlpha, BitDepth, FrameCount, Orientation
+// picture.Pixels: Width x Height x 4 bytes of RGBA8
+```
+
+### 3. Encode WebP, PNG, JPEG
+
+```csharp
+using SpawnDev.Codecs.Images.Png;
+using SpawnDev.Codecs.Images.Jpeg;
+using SpawnDev.Codecs.Images.WebP.Lossy;
+
+using var webp = new WebPLossyEncoderGpu(accelerator);
+byte[] lossy = await webp.EncodeAsync(rgba, width, height, new WebPLossyEncodeOptions { Quality = 80 });   // alpha -> VP8X + ALPH
+
+using var png = new PngEncoderGpu(accelerator);
+byte[] lossless = await png.EncodeAsync(rgba, width, height, new PngEncodeOptions
+{
+    TextChunks = new Dictionary<string, string> { ["parameters"] = "seed 1, 20 steps" },
+});
+
+using var jpeg = new JpegEncoderGpu(accelerator);
+byte[] photo = await jpeg.EncodeAsync(rgba, width, height, new JpegEncodeOptions { Quality = 90, Progressive = true });
+```
+
+### 4. Keep it on the device
+
+When the pixels are already in a GPU buffer (a render target, a model's output), use the `ArrayView1D` overload: the
+encoder reads them where they are and writes the file into a buffer you own. Only a few integers cross to the host.
+
+```csharp
+long capacity = PngEncoderGpu.GetMaxEncodedSize(width, height);
+using var file = accelerator.Allocate1D<byte>(capacity);
+int length = await png.EncodeAsync(rgbaOnDevice.View, width, height, file.View);
+```
+
+In the browser the `TypedArray` overloads take and return JS typed arrays (`Uint8Array`, `Float32Array`), so a picture
+from `fetch`, OPFS or a canvas goes to the GPU and back without entering the .NET heap. See [Docs/api.md](Docs/api.md).
+
+### 5. Video and audio
 
 ```csharp
 using SpawnDev.Codecs.Video.Vp8;
-
-using var enc = new Vp8KeyframeEncoderGpu(acc);
-byte[] encoded = enc.EncodeKeyFrame(
-    yPlane, ySrcStride: width,
-    uPlane, uvSrcStride: width / 2,
-    vPlane,
-    width, height, baseQIndex: 30);
-
-using var dec = new Vp8KeyframeDecoderGpu(acc);
-var frame = dec.DecodeKeyFrame(encoded, baseQIndex: 30);
-// frame.YPlane, .UPlane, .VPlane, .Width, .Height
-```
-
-### VP9 GPU encode + decode round-trip
-
-```csharp
-using SpawnDev.Codecs.Video.Vp9;
-
-using var enc = new Vp9KeyframeEncoderGpu(acc);
-byte[] encoded = await enc.EncodeKeyFrameAsync(
-    yPlane, uPlane, vPlane, width, height, baseQIndex: 30);
-
-using var dec = new Vp9KeyframeDecoderGpu(acc);
-Vp9DecodedFrame frame = await dec.DecodeKeyFrameAsync(encoded);
-// frame.YPlane, .UPlane, .VPlane, .Width, .Height
-```
-
-### AV1 GPU encode + decode (single tile, v1)
-
-```csharp
-using SpawnDev.Codecs.Video.Av1;
-
-using var enc = new Av1KeyframeEncoderGpu(acc);
-byte[] encoded = await enc.EncodeKeyFrameAsync(
-    yPlane, uPlane, vPlane, width, height, baseQIndex: 32);
-
-using var dec = new Av1KeyframeDecoderGpu(acc);
-// v1 takes raw tile bytes; encoder produces TD/SH/Frame OBU stream.
-// End-to-end via the public Av1Decoder for now (CPU walker).
-var (y, u, v) = await dec.DecodeSingleTileAsync(tileBytes, width, height, baseQIndex: 32);
-```
-
-### FLAC GPU encode + decode round-trip
-
-```csharp
-using SpawnDev.Codecs.Audio.Flac;
-
-using var enc = new FlacEncoderGpu(acc);
-byte[] encoded = await enc.EncodeStreamAsync(
-    interleavedSamples, sampleRateHz, channels, bitsPerSample);
-
-using var dec = new FlacDecoderGpu(acc);
-var result = await dec.DecodeStreamAsync(encoded);
-// result.InterleavedSamples, .StreamInfo
-```
-
-### Vorbis GPU encode + decode round-trip
-
-```csharp
 using SpawnDev.Codecs.Audio.Vorbis;
 
-using var enc = new VorbisAudioEncoderGpu(acc, new VorbisAudioEncoderOptions
-{
-    SampleRateHz = 44100, Channels = 1, BlockSize = 1024
-});
-byte[] oggBytes = await enc.EncodeStreamAsync(monoFloat);
+using var vp8 = new Vp8KeyframeEncoderGpu(accelerator);
+byte[] frame = await vp8.EncodeKeyFrameAsync(y, width, u, width / 2, v, width, height, baseQIndex: 30);
 
-// Public CPU decoder API for the .ogg side; GPU decoder consumes
-// per-packet bytes once the stream is parsed.
-var decResult = VorbisOggDecoder.Decode(oggBytes);
-// decResult.InterleavedSamples (float[])
+using var vp8Decoder = new Vp8FullKeyframeDecoderGpu(accelerator);
+var decoded = await vp8Decoder.DecodeKeyFrameAsync(frame);   // YPlane, UPlane, VPlane
+
+using var vorbis = new VorbisAudioDecoderGpu(accelerator, identificationHeader, setupHeader);
+float[] pcm = await vorbis.DecodePacketAsync(packet);        // interleaved samples of one packet
 ```
 
-### Tip - skip kernel-feature-incompatible backends
+## What is in the box
 
-WebGL has no atomics. If your kernel needs atomics (most codec
-kernels do), `device.Satisfies(new AcceleratorRequirements { RequiresAtomics = true })`
-returns false and `Context.CreatePreferredAccelerator` skips the
-backend automatically. In tests, throw `UnsupportedTestException`
-(`SpawnDev.UnitTesting`) so the harness reports the test as Skipped
-rather than Failed.
+| Area | Encode | Decode |
+|------|--------|--------|
+| **PNG** | `PngEncoderGpu`: deflate on the accelerator (independent blocks), adaptive filters, RGBA / RGB / grey / grey + alpha, 8 and 16-bit, tEXt / iTXt | `PngDecoderGpu`: all colour types and depths, Adam7, tRNS, CRC and Adler-32 checks, APNG frames, `ReadTextAsync` |
+| **JPEG** | `JpegEncoderGpu`: baseline and progressive, 4:4:4 / 4:2:2 / 4:2:0, optimized Huffman tables, restart markers, EXIF orientation; byte-identical with libjpeg-turbo | `JpegDecoderGpu`: baseline, extended and progressive, grey / YCbCr (all common subsamplings) / CMYK / YCCK, restart markers, EXIF orientation; bit-exact with libjpeg-turbo |
+| **WebP** | `WebPLosslessEncoderGpu` (VP8L, alpha planes, metadata, animation); `WebPLossyEncoderGpu` (VP8, byte-identical with libwebp, alpha via ALPH) | `WebPDecoderGpu`: lossless, lossy, ALPH, animations (lossy, lossless and mixed), ICC / EXIF / XMP |
+| **GIF** | `GifEncoderGpu`: quantization, LZW, animations | `GifDecoderGpu`: LZW, interlace, transparency, disposal, animations |
+| **BMP** | `BmpEncoderGpu` | `BmpDecoderGpu` |
+| **Any image** | n/a | `ImageDecoderGpu` recognizes PNG, JPEG, WebP, GIF and BMP on the device and dispatches |
+| **VP8** | `Vp8KeyframeEncoderGpu` (keyframes, one token partition, batches of frames) | `Vp8FullKeyframeDecoderGpu` (full keyframe syntax, loop filter, segments, B_PRED) |
+| **VP9** | `Vp9KeyframeEncoderGpu` (keyframes, batches) | `Vp9KeyframeDecoderGpu` (keyframes) |
+| **AV1** | `Av1KeyframeEncoderGpu` (keyframes: DC prediction, 16x16 blocks, OBU framing on the device) | `Av1KeyframeDecoderGpu` (single tile) |
+| **Vorbis** | `VorbisAudioEncoderGpu` (first version: mono, fixed block size) | `VorbisAudioDecoderGpu` (any channel count, block switching, libvorbis parity) |
+| **FLAC** | `FlacEncoderGpu` (first version: verbatim subframes) | `FlacDecoderGpu` (first version, same subset) |
+| **Opus** | CPU reference (Concentus) in `SpawnDev.Codecs.References`; SILK GPU primitives in the library | same |
+| **Compression** | `ZlibCompressorGpu`, `DeflateGpu` | `InflateGpu` |
+| **Containers** | Ogg, IVF, RIFF/WAVE, AIFF; WebM / Matroska through SpawnDev.EBML | the same, plus an MP4 box reader |
 
-## Host is Pure Coordinator — 100% Accelerator-Resident
+Video is keyframe-only today. Limits that remain (for example the VP9 decoder and AV1 at 64-pixel multiples) are listed
+per codec in [Docs/video.md](Docs/video.md) and [Docs/status.md](Docs/status.md).
 
-**Every codec encoder and decoder in this library runs entirely as ILGPU kernels.** The host (the .NET environment that uses the accelerator) is treated as a pure coordinator — it allocates GPU buffers, uploads source data, dispatches kernel chains, and reads back the final output bytes. Nothing CPU-side touches the encoded bitstream or the decoded pixels. **No CPU math, no CPU iteration, no CPU bool encoding, no CPU bitstream assembly.**
+## Backends
 
-This is a hard design rule, not an aspiration. Every kernel in this repo, every integration class, every encoder + decoder pipeline holds to it. When a piece of work is still on the CPU, it gets ported.
+| Backend | Runs on | Kernels compile to | Where |
+|---------|---------|--------------------|-------|
+| **WebGPU** | GPU | WGSL | Browser |
+| **WebGL** | GPU | GLSL ES 3.0 (no atomics or scatter stores: some codecs skip it) | Browser |
+| **Wasm** | Web Workers | WebAssembly | Browser |
+| **CUDA** | NVIDIA GPU | PTX | Desktop |
+| **OpenCL** | Any OpenCL GPU | OpenCL C | Desktop |
+| **CPU** | CPU cores | .NET (Velocity SIMD by default on 64-bit) | Desktop |
 
-### Why this matters
-
-- **Blazor WASM UI thread.** In the browser, the .NET runtime IS the UI thread. Any meaningful CPU work freezes the page. Pushing every codec stage to ILGPU means the UI stays responsive while a 1080p frame transcodes underneath.
-- **Zero CPU↔GPU bouncing in the hot path.** Each round-trip across the PCIe / WebGPU / WebGL / Wasm boundary costs latency and throughput. Once source data is on the accelerator, it stays there until the final output buffer is ready.
-- **Backend uniformity.** The same kernels run on CUDA, OpenCL, CPU emulator, WebGPU, WebGL, and Wasm. The host code doesn't branch on backend - it dispatches the same chain everywhere.
-- **Scales with the silicon, not the .NET runtime.** The performance ceiling is whatever the accelerator can deliver, not whatever the host can spare around UI work and JS interop.
-
-### What this looks like in practice
-
-The VP8 keyframe encoder (`Vp8KeyframeEncoderGpu`) is the first complete v3 reference. Its `EncodeKeyFrame` method is a textbook example of the pattern:
-
-```csharp
-// PURE COORDINATOR. No math, no iteration, no bitstream work.
-public byte[] EncodeKeyFrame(/* YUV planes + dims + baseQ */)
-{
-    using var dY = _accelerator.Allocate1D<byte>(...);
-    // ... allocate other GPU buffers ...
-
-    UploadPlane(ySrc, ...);  // necessary I/O - source from outside accelerator
-    UploadPlane(uSrc, ...);
-    UploadPlane(vSrc, ...);
-
-    _setup.Run(/* compute dequantizers + write frame header */);
-    _sequentialEncode.Run(/* per-MB predict + transform + quant + recon */);
-    _entropy.Run(/* per-MB modes + coef tokens to bool streams */);
-    _assemble.Run(/* frame tag + concat partitions into output */);
-
-    _accelerator.Synchronize();
-
-    var lenArr = dOutLen.GetAsArray1D();              // 1 int readback
-    var outputBuffer = dOutput.GetAsArray1D();        // final bytes readback
-    return outputBuffer.AsSpan(0, lenArr[0]).ToArray();
-}
-```
-
-That's the whole encoder. Every byte of the output bitstream is written by an ILGPU kernel. See `Plans/VP8-GPU-encoder-architecture.md` for the kernel chain breakdown.
-
-## Architecture
-
-Every codec is decomposed into kernel-resident stages. Even stages that look "inherently sequential" (entropy coders, range coders, bool encoders) run on the GPU - just as a single thread per stream rather than parallel across many. Single-thread on GPU is still GPU-resident, and that's what the host-as-coordinator rule demands.
-
-| Stage | Work | Where |
-|-------|------|-------|
-| **Massively parallel** | DCT / MDCT, motion estimation, quantization, loop filter, inverse transforms, motion compensation | **ILGPU kernels** - backend-agnostic |
-| **Sequential per stream** | Range coding (Daala/VP8 bool/SILK), Huffman, LPC prediction, rate control feedback | **ILGPU kernels** - one thread per stream, multiple streams in parallel where the spec allows (token partitions, tiles) |
-| **Frame-level orchestration** | Per-MB predict→transform→recon dependency loops, header bit emission | **ILGPU kernels** - single-thread per frame for v1/v2 correctness; wave-parallel scheduling planned for v4 throughput |
-| **Coordination** | Buffer alloc, source upload, kernel dispatch order, final readback | **C# host** - pure coordinator, no math |
-
-The "host CPU does the entropy stage" pattern other codec libraries use is explicitly rejected here. Bool encoders, range coders, Huffman trees - all of them run on the accelerator.
-
-## Testing
-
-Every slice is validated through the `PlaywrightMultiTest` harness, which runs the same test suite across every ILGPU backend (WebGPU, WebGL, Wasm, CUDA, OpenCL, CPU) and aggregates the results. Thousands of cross-backend test executions gate each merge.
+## How it works
 
 ```
-dotnet test PlaywrightMultiTest/PlaywrightMultiTest.csproj --filter "FullyQualifiedName~Flac"
+  input (pixels, PCM, a file)        caller's ArrayView1D | TypedArray | byte[]
+        |  one upload (or none: already on the device)
+        v
+  parallel stages     colour conversion, prediction, transforms, quantization, loop filters, filters
+        |             (one thread per pixel / block / candidate)
+        v
+  serial stages       bit writers, range / bool / Huffman coders, the libwebp RD loop
+        |             (one thread per stream, resumable: many short launches, state in device buffers)
+        v
+  container           RIFF / PNG chunks / JFIF / OBUs written by a kernel, one thread per output byte
+        |
+        v
+  output              into the caller's view, or one readback into a byte[] / Uint8Array
 ```
 
-The in-browser demo at `SpawnDev.Codecs.Demo/` ships several pages exercising the live library:
+The host never touches codec data: no per-pixel loops, no bitstream assembly, no entropy coding on the CPU. Stages that
+look inherently sequential run on the GPU as single threads, split into bounded launches; the throughput work happens
+inside the kernels. [Docs/architecture.md](Docs/architecture.md) has the rules and the reasons.
 
-- **`/transcode`** - encode + decode all 3 video codecs (VP8, VP9, AV1) end-to-end, render YUV-&gt;RGBA output on canvas.
-- **`/audio`** - encode + decode all 3 audio codecs (FLAC, Vorbis, Opus) end-to-end, draw source vs decoded waveforms with per-codec SNR + compression ratio + encode/decode timings.
-- **`/benchmarks`** - throughput + compression measurements for FLAC + transforms.
-- **`/tests`** - SpawnDev.UnitTesting cross-backend test harness (runs every test in `CodecsTestBase` against every available browser ILGPU backend).
+## Verification
 
-## Relationship to the SpawnDev media ecosystem
+Correctness is checked against the reference implementations, never against this library's own output:
 
-| Library | Role |
-|---------|------|
-| [SpawnDev.RTC](https://github.com/LostBeard/SpawnDev.RTC) | WebRTC signaling + transport |
-| [SpawnDev.WebTorrent](https://github.com/LostBeard/SpawnDev.WebTorrent) | BitTorrent infrastructure |
-| [SpawnDev.ILGPU](https://github.com/LostBeard/SpawnDev.ILGPU) | GPU compute backbone |
-| [SpawnDev.SpawnJS](https://github.com/LostBeard/SpawnDev.SpawnJS) | Browser interop (WebAudio, MediaDevices) |
-| [SpawnDev.MultiMedia](https://github.com/LostBeard/SpawnDev.MultiMedia) | Capture + platform-native encoders (H.264/H.265/AAC) |
-| **SpawnDev.Codecs** | **Pure-.NET open-source codecs** (this library) |
+| Codec | Oracle | Bar |
+|-------|--------|-----|
+| WebP lossy encode | libwebp 1.6.0 (through Pillow) | byte-identical files (methods 3 / 4) |
+| WebP lossy / lossless decode | libwebp | identical pixels |
+| WebP lossless encode, PNG, GIF, BMP encode | libwebp / Pillow and our decoders | exact round trip; Pillow decodes our files to the same pixels |
+| JPEG encode / decode | libjpeg-turbo (through Pillow) | byte-identical files / identical pixels |
+| VP8 keyframe decode | ffmpeg | identical planes on 182 files |
+| Vorbis decode | libvorbis (through libsndfile) | within 1e-4 per sample (observed 7.5e-7) |
+| SILK decode (CPU reference) | Concentus | matching the cross-validation streams |
+
+Fixtures are made by scripts in [`scripts/`](scripts/) (the truth comes from the reference library), and every guard is
+red-checked: the fix is disabled and the test must fail by name.
+
+## Repository layout
+
+| Path | Contents |
+|------|----------|
+| `SpawnDev.Codecs/` | The library |
+| `SpawnDev.Codecs.References/` | CPU reference codecs (verification), Concentus for Opus |
+| `SpawnDev.Codecs.Demo/` | Blazor WebAssembly demo and browser test host |
+| `SpawnDev.Codecs.Demo.Shared/` | The shared test suite (`CodecsTestBase`) and its fixtures (`TestData/`) |
+| `SpawnDev.Codecs.DemoConsole/` | Desktop host for the shared test suite |
+| `SpawnDev.Codecs.Tests/` | xUnit tests |
+| `PlaywrightMultiTest/` | The test runner (desktop and browser, every backend) |
+| `scripts/` | Fixture generators (reference libraries), dev scripts |
+| `Plans/` | Design documents and open work |
+| `Docs/` | Topic documentation |
+
+## Documentation
+
+| | |
+|---|---|
+| [Status](Docs/status.md) | Every codec by backend, with the evidence |
+| [Images](Docs/images.md) | PNG, JPEG, WebP, GIF, BMP: API, options, limits |
+| [Video](Docs/video.md) | VP8, VP9, AV1: API, batches, limits |
+| [Audio](Docs/audio.md) | Vorbis, FLAC, Opus, audio containers |
+| [API shape](Docs/api.md) | The three overloads, buffers, zero copy in the browser |
+| [Architecture](Docs/architecture.md) | Host as coordinator, bounded launches, browser shader budget |
+| [Testing](Docs/testing.md) | PlaywrightMultiTest, fixtures and oracles, environment switches |
+| [Changelog](CHANGELOG.md) | Every change, in detail |
+
+## Build and test
+
+```bash
+dotnet build SpawnDev.Codecs.slnx
+```
+
+Tests run through **PlaywrightMultiTest**, which drives the desktop backends and a real Chromium for the browser
+backends:
+
+```bash
+dotnet test PlaywrightMultiTest --filter "FullyQualifiedName~WebGPUCodecsTests.WebPLossy"
+```
+
+Details, environment switches and the per-test desktop script are in [Docs/testing.md](Docs/testing.md).
+
+## Patent policy
+
+Only formats with no patent exposure: PNG, JPEG (baseline and progressive), WebP, GIF, BMP, VP8 / VP9 / AV1 (AOMedia
+patent pledge), Opus (RFC 6716), FLAC and Vorbis. H.264, H.265 / HEIC and AAC are out of scope; for those, use platform
+encoders through [SpawnDev.MultiMedia](https://github.com/LostBeard/SpawnDev.MultiMedia).
+
+## Contributing
+
+Issues and pull requests are welcome. A bug in this library, in SpawnDev.ILGPU or in SpawnDev.SpawnJS is fixed in that
+library, not worked around in a consumer, so a good report is a failing test or a file that decodes wrong, with the
+backend named. Run the tests for the lanes you touched before opening a pull request.
+
+## Support the project
+
+SpawnDev is built by one developer and a small team of AI agents. If it is useful to you,
+[sponsoring on GitHub](https://github.com/sponsors/LostBeard) directly funds more codecs, more verified formats and more
+backends. Stars, issues and sharing what you build with it help just as much.
+
+## Credits
+
+- [**ILGPU**](https://github.com/m4rs-mt/ILGPU) by Marcel Koester and contributors, the compiler that makes C# GPU kernels possible.
+- [**SpawnDev.ILGPU**](https://github.com/LostBeard/SpawnDev.ILGPU), which adds the WebGPU, WebGL and Wasm backends and the Velocity CPU backend.
+- [**SpawnDev.SpawnJS**](https://github.com/LostBeard/SpawnDev.SpawnJS), typed C# access to the browser's APIs.
+- The reference implementations this library is checked against and ported from: libwebp, libjpeg, libpng / zlib,
+  libvpx, libaom / dav1d, libvorbis, libopus and Concentus, ffmpeg, libjpeg-turbo and Pillow. Attribution is in [NOTICE.md](NOTICE.md).
+
+Created by Todd Tanner ([@LostBeard](https://github.com/LostBeard)) together with a crew of Claude AI agents: Riker,
+Data, Tuvok and Geordi. Live long and prosper. 🖖
 
 ## License
 
-MIT - see `LICENSE.txt`. Upstream attribution for reference-ported code is in `NOTICE.md`.
-
-## The SpawnDev Crew
-
-Built by a starship crew:
-
-- **LostBeard** (Todd Tanner) - Captain, library author, keeper of the vision
-- **Riker** (Claude CLI #1) - First Officer, implementation lead on consuming projects
-- **Data** (Claude CLI #2) - Operations Officer, deep-library work, test rigor, root-cause analysis
-- **Tuvok** (Claude CLI #3) - Security/Research Officer, design planning, documentation, code review
-- **Geordi** (Claude CLI #4) - Chief Engineer, library internals, GPU kernels, backend work
-
-AI-and-human teamwork isn't a gimmick - it's how the SpawnDev ecosystem gets built. Credit where credit is due. 🖖
+[MIT](LICENSE.txt). Upstream attribution for ported reference code is in [NOTICE.md](NOTICE.md).
