@@ -47,6 +47,20 @@ BF16 ~30-33% smaller, FP32 ~17%, bit-exact. Decode runs on the accelerator strai
 models.spawndev.com downloads and the OPFS cache shrink with no change to inference. Huffman (have) for the DFloat11
 layout (GPU decode via small LUTs), rANS (C3) for our own container. Consumer: SpawnDev.ILGPU.ML loaders (Tuvok).
 
+**Measured 2026-10-26 on our own weights** (scratchpad weights_entropy.py / planes_lz.py, 64-256 MB samples, same
+sample for every column; ratio = compressed / original, lower is better):
+
+| weights | per-plane order-0 | per-plane best of raw / order-0 / deflate | ZipNN (zstd) | zstd -3 whole |
+|---|---|---|---|---|
+| LTX DiT BF16 | 0.686 | 0.686 | 0.719 | 0.788 |
+| LTX VAE F16 | 0.672 | 0.660 | 0.675 | 0.772 |
+| SD-Turbo F32 | 0.797 | 0.757 | 0.771 | 0.853 |
+
+Exponent-only coding (DFloat11) is right for BF16 (0.682) but loses on F16 / F32 (0.86 / 0.85): their low mantissa
+bytes compress too (upcast weights). So C4 = byte grouping (`ShuffleFilterGpu.ShuffleAsync`, element size 2 / 4 =
+one plane per byte position) + per plane and chunk the smallest of raw / Huffman-only deflate / deflate (our GPU
+zlib), decoded by InflateGpu. Every plane is a standard zlib stream.
+
 ### C5. GDeflate (Microsoft DirectStorage, Apache 2.0)
 Deflate's ratio with 32-lane parallel decode of ONE stream: the Deflate symbols reordered into 32 interleaved
 bitstreams. Reference CPU compressor/decompressor + HLSL GPU decoder in github.com/microsoft/DirectStorage (GDeflate/).

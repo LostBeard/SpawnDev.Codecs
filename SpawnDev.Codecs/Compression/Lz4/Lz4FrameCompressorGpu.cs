@@ -86,7 +86,8 @@ public sealed class Lz4FrameCompressorGpu : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _tail;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, int> _xxhStripes;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _prm, _state, _table, _offsets;
-    private readonly MemoryBuffer1D<byte, Stride1D.Dense> _slots;
+    // _empty: the input view of an empty input (WebGPU refuses one buffer bound to two read_write slots).
+    private readonly MemoryBuffer1D<byte, Stride1D.Dense> _slots, _empty;
     private readonly StageBuffer<byte> _stageIn, _stageOut;
 
     /// <summary>
@@ -113,6 +114,7 @@ public sealed class Lz4FrameCompressorGpu : IDisposable
         _table = accelerator.Allocate1D<int>((long)_waveBlocks * HashSize);
         _offsets = accelerator.Allocate1D<int>(_waveBlocks);
         _slots = accelerator.Allocate1D<byte>((long)_waveBlocks * SlotBytes);
+        _empty = accelerator.Allocate1D<byte>(1);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
     }
@@ -153,7 +155,7 @@ public sealed class Lz4FrameCompressorGpu : IDisposable
         _prm.View.CopyFromCPU(prm);
 
         // The kernels read the input's length from this view (the copy kernel bounds the last block with it).
-        var data = length > 0 ? input.SubView(0, length) : output.SubView(0, 1);
+        var data = length > 0 ? input.SubView(0, length) : _empty.View;
         _header(1, output, _prm.View);
         for (int waveBase = 0; waveBase < blocks; waveBase += _waveBlocks)
         {
@@ -646,6 +648,7 @@ public sealed class Lz4FrameCompressorGpu : IDisposable
         _table.Dispose();
         _offsets.Dispose();
         _slots.Dispose();
+        _empty.Dispose();
         _stageIn.Dispose();
         _stageOut.Dispose();
     }

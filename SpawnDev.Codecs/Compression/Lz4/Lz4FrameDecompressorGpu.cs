@@ -85,6 +85,8 @@ public sealed class Lz4FrameDecompressorGpu : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _frameCheck;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _prm;
     private MemoryBuffer1D<int, Stride1D.Dense>? _blocks, _frames;
+    // Stand-in tables of the counting walk (never written; WebGPU refuses one buffer bound to two read_write slots).
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _noBlocks, _noFrames;
     private readonly StageBuffer<byte> _stageIn, _stageOut;
 
     /// <summary>Compiles the kernels.</summary>
@@ -100,6 +102,8 @@ public sealed class Lz4FrameDecompressorGpu : IDisposable
         _blockCheck = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(BlockCheckKernel);
         _frameCheck = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(FrameCheckKernel);
         _prm = accelerator.Allocate1D<int>(PrmInts);
+        _noBlocks = accelerator.Allocate1D<int>(1);
+        _noFrames = accelerator.Allocate1D<int>(1);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
     }
@@ -220,8 +224,8 @@ public sealed class Lz4FrameDecompressorGpu : IDisposable
         prm[PCapBlocks] = record ? _blockCount : 0;
         prm[PCapFrames] = record ? _frameCount : 0;
         _prm.View.CopyFromCPU(prm);
-        var blocks = dummy || _blocks is null ? _prm.View : _blocks.View;
-        var frames = dummy || _frames is null ? _prm.View : _frames.View;
+        var blocks = dummy || _blocks is null ? _noBlocks.View : _blocks.View;
+        var frames = dummy || _frames is null ? _noFrames.View : _frames.View;
         // Every hop but a frame's closing one reads at least 4 bytes (a legacy frame closes without reading), so
         // length / 2 / WalkHops + 3 launches always reach the end; check the state every 64 launches so short
         // inputs stop early.
@@ -873,6 +877,8 @@ public sealed class Lz4FrameDecompressorGpu : IDisposable
     public void Dispose()
     {
         _prm.Dispose();
+        _noBlocks.Dispose();
+        _noFrames.Dispose();
         _blocks?.Dispose();
         _frames?.Dispose();
         _stageIn.Dispose();
