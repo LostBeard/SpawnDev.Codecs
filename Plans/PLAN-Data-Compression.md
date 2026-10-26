@@ -94,9 +94,12 @@ decode; encode decodes with the reference). Best general format when ratio matte
 with DEFLATE64): distance symbols 30 / 31 (32769 / 49153 + 14 bits) and length symbol 285 = 3 + 16 extra bits; stored
 blocks carry LEN only. Fixtures from the reference built from source (scratchpad gdeflate_cli: cmake + MSVC driver
 around GDeflate::Compress / Decompress), `scripts/compression/make_gdeflate_fixtures.py`: 31 streams at levels 1 / 6 /
-9 / 12 + damaged ones. A Python model of the decoder (scratchpad gd_model.py) found the Deflate64 detail. Next: the
-32-lanes-per-tile decoder (the HLSL shader's shared-memory path) for few-tile streams; then the encoder (DeflateGpu's
-LZ77 + Huffman, Deflate64 distances, swizzled bit layout).
+9 / 12 + damaged ones. A Python model of the decoder (scratchpad gd_model.py) found the Deflate64 detail.
+**32 lanes per tile done (default):** the HLSL shader's shared-memory path (lane 0 parses headers serially; Huffman
+rounds of one symbol per lane, ballot refills, prefix sums, cooperative copies). RTX 4070 vs Microsoft's CPU decoder on
+31 threads: LTX BF16 512 MB 3.10 vs 2.01 GB/s, C# source 36 MB 6.17 vs 5.65 GB/s (thread-per-tile was 1.90 / 0.39).
+Next for speed: subgroup ballots / shuffles where the backend has them (each shared-memory vote is two barriers),
+parallel table builds; then the encoder (DeflateGpu's LZ77 + Huffman, Deflate64 distances, swizzled bit layout).
 
 ### C6. Gaussian splat containers
 - **SPZ** (Niantic, MIT): gzip of quantised columns. Read v2/v3 (+ v4 when its spec is out), write with our parallel
