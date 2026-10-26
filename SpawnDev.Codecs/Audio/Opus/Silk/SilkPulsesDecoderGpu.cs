@@ -38,8 +38,8 @@ public struct SilkPulsesInputs
     public int LsbIcdfAt;
     /// <summary>silk_sign_iCDF offset.</summary>
     public int SignIcdfAt;
-    /// <summary>The shell code tables (may share <see cref="Bytes"/>'s buffer).</summary>
-    public SilkShellCoderTables ShellTables;
+    /// <summary>Where the shell code tables sit in <see cref="Bytes"/> (offsets only: a second view of the same buffer would be a second read_write binding, which WebGPU rejects).</summary>
+    public SilkShellCoderTableOffsets ShellTables;
     /// <summary>Int scratch: sumPulses[MaxNbShellBlocks] and nLshifts[MaxNbShellBlocks] regions.</summary>
     public ArrayView<int> Scratch;
     /// <summary>sumPulses region offset in <see cref="Scratch"/>.</summary>
@@ -57,16 +57,15 @@ public struct SilkPulsesInputs
         PulsesPerBlockIcdfAt = bytes.Add(SilkIcdfTables.PulsesPerBlock),
         LsbIcdfAt = bytes.Add(SilkIcdfTables.Lsb),
         SignIcdfAt = bytes.Add(SilkIcdfTables.Sign),
-        ShellTables = SilkShellCoderTables.AddStandard(bytes),
+        ShellTables = SilkShellCoderTableOffsets.AddStandard(bytes),
         SumPulsesScratchAt = ints.Reserve(SilkPulsesDecoderGpu.MaxNbShellBlocks),
         NLshiftsScratchAt = ints.Reserve(SilkPulsesDecoderGpu.MaxNbShellBlocks),
     };
 
-    /// <summary>Points the struct (and its shell tables) at the uploaded byte buffer and int scratch.</summary>
+    /// <summary>Points the struct at the uploaded byte buffer (which holds the shell tables too) and int scratch.</summary>
     public void Bind(ArrayView<byte> bytes, ArrayView<int> scratch)
     {
         Bytes = bytes;
-        ShellTables.Bytes = bytes;
         Scratch = scratch;
     }
 }
@@ -160,7 +159,7 @@ public static class SilkPulsesDecoderGpu
             {
                 SilkShellCoderGpu.Decode(
                     ref state, buf, bufStart, storage,
-                    inputs.ShellTables, sum,
+                    inputs.Bytes, inputs.ShellTables, sum,
                     pulsesOut, blockBase);
             }
             else

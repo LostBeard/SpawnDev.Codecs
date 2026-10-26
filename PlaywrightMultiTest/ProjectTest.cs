@@ -83,6 +83,17 @@ public class ProjectTest
 
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IPage, PageRuntime> PageRuntimes = new();
 
+    /// <summary>Console text that means the runtime is gone (the same set as SpawnDev.ILGPU.ML's PMT).</summary>
+    private static readonly string[] RuntimeDeadMarkers =
+    {
+        "runtime already exited",               // the follow-on asserts
+        "Garbage collector could not allocate", // managed heap exhausted - the real first line
+        "ExitStatus",                           // dotnet.native.js when the runtime calls exit()
+        "MONO_WASM: Assert failed",             // any mono-level assert takes the runtime with it
+        "[MONO] * Assertion",                   // the runtime's own assert line, the FIRST fatal line
+        "Aborted(",                             // emscripten abort
+    };
+
     private static PageRuntime WatchRuntime(IPage page)
     {
         if (PageRuntimes.TryGetValue(page, out var state)) return state;
@@ -92,7 +103,7 @@ public class ProjectTest
         {
             if (msg.Type != "error" || state.DeadReason != null) return;
             var text = msg.Text;
-            if (text.Contains("runtime already exited") || text.Contains("MONO_WASM: Assert failed") || text.Contains("[MONO] * Assertion at"))
+            if (Array.Exists(RuntimeDeadMarkers, m => text.Contains(m, StringComparison.Ordinal)))
                 state.DeadReason = Clip(text, 400);
         };
         page.Crash += (_, _) => state.DeadReason ??= "the page crashed";
@@ -189,6 +200,14 @@ public class ProjectTest
             // current state text
             var stateMessage = await row.Locator(".test-state").TextContentAsync();
 
+            // An out-of-memory in the page leaves the .NET heap unusable (2026-10-25: the next tiny test hung 10 min):
+            // report this test as it is, but give the next one a fresh page.
+            if (stateMessage != null && stateMessage.Contains("OutOfMemoryException", StringComparison.Ordinal))
+                runtime.DeadReason ??= "OutOfMemoryException in the previous test";
+            // The in-page runner gave up waiting on a test that is still running: same as a hang.
+            if (stateMessage != null && stateMessage.Contains("still running", StringComparison.Ordinal))
+                runtime.DeadReason ??= $"{Name} was still running when the page gave up on it";
+
             //  check for error  class
             var wasError = await row.EvaluateAsync<bool>("el => el.classList.contains('test-error')");
 
@@ -240,6 +259,9 @@ public class ProjectTest
         }
         catch (Exception ex)
         {
+            // A test that never finished is still running in the page: the next test needs a fresh page, or it
+            // waits behind the hung one (each later test would burn the whole wait).
+            if (ex is TimeoutException) runtime.DeadReason ??= $"{Name} never finished";
             throw new Exception($"Test {Name} failed with error: {ex.Message}");
         }
     }

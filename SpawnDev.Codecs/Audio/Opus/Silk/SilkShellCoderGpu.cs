@@ -44,7 +44,43 @@ public struct SilkShellCoderTables
     /// Appends the standard libopus shell code tables to <paramref name="bytes"/>; set <see cref="Bytes"/> to the
     /// uploaded buffer.
     /// </summary>
-    public static SilkShellCoderTables AddStandard(PackedDeviceBuffer<byte> bytes) => new SilkShellCoderTables
+    public static SilkShellCoderTables AddStandard(PackedDeviceBuffer<byte> bytes)
+    {
+        var at = SilkShellCoderTableOffsets.AddStandard(bytes);
+        return new SilkShellCoderTables
+        {
+            OffsetsAt = at.OffsetsAt, Table0At = at.Table0At, Table1At = at.Table1At, Table2At = at.Table2At, Table3At = at.Table3At,
+        };
+    }
+
+    /// <summary>The offsets alone (for a caller that passes <see cref="Bytes"/> itself).</summary>
+    public SilkShellCoderTableOffsets Offsets => new SilkShellCoderTableOffsets
+    {
+        OffsetsAt = OffsetsAt, Table0At = Table0At, Table1At = Table1At, Table2At = Table2At, Table3At = Table3At,
+    };
+}
+
+/// <summary>
+/// Where the five shell code tables sit in a packed byte buffer the caller passes separately. A kernel parameter struct
+/// that already holds that buffer embeds this, not <see cref="SilkShellCoderTables"/>: two views of ONE buffer in one
+/// kernel's arguments are two read_write storage bindings of the same buffer, which WebGPU rejects (the SILK pulse
+/// kernel failed on WebGPU this way while every other backend accepted it).
+/// </summary>
+public struct SilkShellCoderTableOffsets
+{
+    /// <summary>silk_shell_code_table_offsets (17 entries).</summary>
+    public int OffsetsAt;
+    /// <summary>silk_shell_code_table0 - leaf-level table.</summary>
+    public int Table0At;
+    /// <summary>silk_shell_code_table1.</summary>
+    public int Table1At;
+    /// <summary>silk_shell_code_table2.</summary>
+    public int Table2At;
+    /// <summary>silk_shell_code_table3 - root-level table.</summary>
+    public int Table3At;
+
+    /// <summary>Appends the standard libopus shell code tables to <paramref name="bytes"/>.</summary>
+    public static SilkShellCoderTableOffsets AddStandard(PackedDeviceBuffer<byte> bytes) => new SilkShellCoderTableOffsets
     {
         OffsetsAt = bytes.Add(SilkShellCodeTables.Offsets),
         Table0At = bytes.Add(SilkShellCodeTables.Table0),
@@ -73,7 +109,24 @@ public static class SilkShellCoderGpu
         SilkShellCoderTables tables,
         int pulsesTotal,
         ArrayView<short> pulsesOut, long pulsesOutBase)
+        => Decode(ref state, buf, bufStart, storage, tables.Bytes, tables.Offsets, pulsesTotal, pulsesOut, pulsesOutBase);
+
+    /// <summary>
+    /// <see cref="Decode(ref OpusRangeDecoderGpuState, ArrayView{byte}, int, uint, SilkShellCoderTables, int, ArrayView{short}, long)"/>
+    /// with the tables' buffer passed on its own (<paramref name="tableBytes"/>, offsets in <paramref name="at"/>).
+    /// </summary>
+    public static void Decode(
+        ref OpusRangeDecoderGpuState state,
+        ArrayView<byte> buf, int bufStart, uint storage,
+        ArrayView<byte> tableBytes, SilkShellCoderTableOffsets at,
+        int pulsesTotal,
+        ArrayView<short> pulsesOut, long pulsesOutBase)
     {
+        var tables = new SilkShellCoderTables
+        {
+            Bytes = tableBytes,
+            OffsetsAt = at.OffsetsAt, Table0At = at.Table0At, Table1At = at.Table1At, Table2At = at.Table2At, Table3At = at.Table3At,
+        };
         // Tier-3: split the whole block into two halves of 8.
         int p3a, p3b;
         DecodeSplit(ref state, buf, bufStart, storage,
