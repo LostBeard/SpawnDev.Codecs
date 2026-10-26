@@ -70,8 +70,40 @@ public class ProjectTest
         return string.IsNullOrWhiteSpace(errorText) ? "Blazor unhandled error (no message)" : errorText.Trim();
     }
 
+    /// <summary>
+    /// Per-page record of a dead .NET runtime. Once Mono asserts or the runtime exits, the page's DOM is frozen: the Run
+    /// buttons stay enabled and the rows keep their old state, so reading them reports PASS for every later test (a run
+    /// on 2026-10-25 logged 2,489 fake passes at ~250 ms each after one runtime exit). The test running when it died is
+    /// failed with the runtime's message and the page is reloaded before the next test.
+    /// </summary>
+    private sealed class PageRuntime
+    {
+        public string? DeadReason;
+    }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IPage, PageRuntime> PageRuntimes = new();
+
+    private static PageRuntime WatchRuntime(IPage page)
+    {
+        if (PageRuntimes.TryGetValue(page, out var state)) return state;
+        state = new PageRuntime();
+        PageRuntimes.Add(page, state);
+        page.Console += (_, msg) =>
+        {
+            if (msg.Type != "error" || state.DeadReason != null) return;
+            var text = msg.Text;
+            if (text.Contains("runtime already exited") || text.Contains("MONO_WASM: Assert failed") || text.Contains("[MONO] * Assertion at"))
+                state.DeadReason = Clip(text, 400);
+        };
+        page.Crash += (_, _) => state.DeadReason ??= "the page crashed";
+        return state;
+    }
+
+    private static string Clip(string text, int max) => text.Length <= max ? text : text.Substring(0, max) + $"... ({text.Length} chars)";
+
     public async Task RunTest(IPage page)
     {
+        var runtime = WatchRuntime(page);
         try
         {
             // Codec kernels (entropy walkers, transform chains) currently
@@ -88,9 +120,10 @@ public class ProjectTest
 
             var rowSelector = $"tr.{TestClassName}";
 
-            // make sure we are on the test page this test is on
-            if (page.Url != TestPageUrl)
+            // make sure we are on the test page this test is on, with a live runtime
+            if (page.Url != TestPageUrl || runtime.DeadReason != null)
             {
+                runtime.DeadReason = null;
                 await page.GotoAsync(TestPageUrl);
 
                 // wait for test to load (5min - codec test pages enumerate
@@ -126,17 +159,27 @@ public class ProjectTest
                 return await runButton.IsEnabledAsync();
             });
 
+            // Self-test of the dead-runtime guard: PMT_SELFTEST_EXIT_RUNTIME=<test name> exits the page's .NET runtime
+            // (dotnet.js RuntimeAPI.exit) just before that test, so it must FAIL and the next test must pass after a reload.
+            var exitBefore = Environment.GetEnvironmentVariable("PMT_SELFTEST_EXIT_RUNTIME");
+            if (!string.IsNullOrEmpty(exitBefore) && Name.EndsWith(exitBefore, StringComparison.Ordinal))
+                await page.EvaluateAsync("() => { try { globalThis.getDotnetRuntime(0).exit(1, 'PMT self-test'); } catch (e) { console.error('MONO_WASM: Assert failed: PMT self-test exit threw ' + e); } }");
+
             // click the button to start the process for this row (button will be disabled)
             await runButton.ClickAsync();
 
-            // wait for test to finish (button will become enabled again)
+            // wait for test to finish (button will become enabled again) or for the runtime to die
             await page.WaitForConditionAsync(async () =>
             {
-                return await runButton.IsEnabledAsync();
+                return runtime.DeadReason != null || await runButton.IsEnabledAsync();
             });
 
             // Stop capturing console
             page.Console -= OnConsole;
+
+            // A dead runtime leaves the row as it was: never read it as a result (the next test reloads the page).
+            if (runtime.DeadReason != null)
+                throw new Exception($"The page's .NET runtime died during this test: {runtime.DeadReason}");
 
             // Only flag a Blazor error if it appeared NEW during this test (wasn't already there)
             string? blazorError = null;
@@ -156,10 +199,10 @@ public class ProjectTest
             if (consoleErrors.Count > 0 || consoleWarnings.Count > 0)
             {
                 Console.Error.WriteLine($"[{Name}] Console: {consoleErrors.Count} error(s), {consoleWarnings.Count} warning(s)");
-                foreach (var err in consoleErrors)
-                    Console.Error.WriteLine($"  ERROR: {err}");
-                foreach (var warn in consoleWarnings)
-                    Console.Error.WriteLine($"  WARN: {warn}");
+                foreach (var err in consoleErrors.Take(10))
+                    Console.Error.WriteLine($"  ERROR: {Clip(err, 2000)}");
+                foreach (var warn in consoleWarnings.Take(10))
+                    Console.Error.WriteLine($"  WARN: {Clip(warn, 2000)}");
             }
 
             ResultMessage = stateMessage;

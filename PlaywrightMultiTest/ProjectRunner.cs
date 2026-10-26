@@ -277,7 +277,7 @@ namespace PlaywrightMultiTest
                             {
                                 try
                                 {
-                                    File.AppendAllText(consoleLogPath, $"[{msg.Type}] {text}\n---END_MSG---\n");
+                                    File.AppendAllText(consoleLogPath, $"[{msg.Type}] {(text.Length > 20000 && !text.Contains("WGSL") ? text.Substring(0, 20000) + "..." : text)}\n---END_MSG---\n");
                                 }
                                 catch { }
                             }

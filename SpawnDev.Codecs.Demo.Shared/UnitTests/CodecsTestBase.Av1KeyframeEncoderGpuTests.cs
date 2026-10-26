@@ -58,6 +58,34 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
+    // Random content past one superblock (64x128: two superblock rows; 128x128: four superblocks, the above-right and
+    // left neighbours of the second superblock column) - the batch test failed on WebGPU at 64x128 while 64x64 passed.
+    [TestMethod(Timeout = 600000)]
+    public async Task Av1KeyframeEncoderGpu_Random64x128_MatchesCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            var rng = new Random(0xA1B2);
+            var (yPlane, uPlane, vPlane) = MakeRandomYuv420(64, 128, rng);
+            await EncodeAndCompare(acc, yPlane, uPlane, vPlane, 64, 128, 40);
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    [TestMethod(Timeout = 600000)]
+    public async Task Av1KeyframeEncoderGpu_Random128x128_MatchesCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            var rng = new Random(unchecked((int)0xA1F12828u));
+            var (yPlane, uPlane, vPlane) = MakeRandomYuv420(128, 128, rng);
+            await EncodeAndCompare(acc, yPlane, uPlane, vPlane, 128, 128, 40);
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
     [TestMethod(Timeout = 600000)]
     public async Task Av1KeyframeEncoderGpu_ConstGray64x128_MatchesCpu()
     {
