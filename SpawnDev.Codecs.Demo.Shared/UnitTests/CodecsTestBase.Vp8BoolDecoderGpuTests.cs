@@ -20,6 +20,7 @@ public abstract partial class CodecsTestBase
         // encode on CPU via Vp8BoolEncoder, decode on GPU via the test
         // kernel, assert decoded bits == original bits.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp8BoolDecoderTestKernel(acc);

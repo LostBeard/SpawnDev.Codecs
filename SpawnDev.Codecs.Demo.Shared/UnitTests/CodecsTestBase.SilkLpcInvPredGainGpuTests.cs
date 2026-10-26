@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkLpcInvPredGainGpu_StableNbFilter_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Stable order-10 NB SILK AR filter (typical Q12 coefficients).
@@ -31,6 +32,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkLpcInvPredGainGpu_DcUnstable_ReturnsZero()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // DC unstable: sum of coefficients >= 4096.
@@ -44,6 +46,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkLpcInvPredGainGpu_StableOrder16_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Stable order-16 WB SILK AR filter.

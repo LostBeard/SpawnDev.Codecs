@@ -114,6 +114,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkLtpIndicesDecoderGpu_Per0Independent4Subfr_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // perIndex=0 (8-symbol gain codebook), 4 subframes, conditional=0 -> ltpScale read.
@@ -139,6 +140,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkLtpIndicesDecoderGpu_Per1Conditional2Subfr_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // perIndex=1 (16-symbol gain codebook), 2 subframes, conditional=1 -> scale=0 fixed.
@@ -163,6 +165,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkLtpIndicesDecoderGpu_Per2Independent4Subfr_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // perIndex=2 (32-symbol gain codebook), 4 subframes, conditional=0.

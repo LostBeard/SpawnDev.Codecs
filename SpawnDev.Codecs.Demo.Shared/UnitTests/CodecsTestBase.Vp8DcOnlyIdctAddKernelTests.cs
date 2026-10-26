@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp8DcOnlyIdctAddKernel_RandomInput_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp8DcOnlyIdctAddKernel(acc);

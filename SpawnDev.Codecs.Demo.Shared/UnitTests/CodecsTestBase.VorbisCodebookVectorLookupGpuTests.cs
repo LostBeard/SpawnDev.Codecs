@@ -19,6 +19,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisCodebookVectorLookupGpu_Type0_AllZeros_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var book = new VorbisCodebook
@@ -44,6 +45,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisCodebookVectorLookupGpu_Type2_FlatNoSeq_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Type 2: flat table indexed by entry*dims + dim.
@@ -70,6 +72,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisCodebookVectorLookupGpu_Type1_QuantBaseSeqP_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Type 1 with sequenceP=true exercises the sequential reconstruction

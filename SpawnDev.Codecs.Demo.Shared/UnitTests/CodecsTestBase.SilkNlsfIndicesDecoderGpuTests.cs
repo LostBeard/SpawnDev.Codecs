@@ -130,6 +130,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkNlsfIndicesDecoderGpu_NbMbVoiced20ms_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var codebook = SilkNlsfCodebookTables.NbMb;
@@ -166,6 +167,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkNlsfIndicesDecoderGpu_NbMbInactive10ms_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var codebook = SilkNlsfCodebookTables.NbMb;
@@ -198,6 +200,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkNlsfIndicesDecoderGpu_WbVoiced20ms_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // WB codebook (order=16).

@@ -18,7 +18,6 @@ public abstract partial class CodecsTestBase
     public async Task VorbisAudioPacketHeaderGpu_ShortAndLongModes_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
-        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // 2 modes: mode 0 short (blockFlag=false), mode 1 long (true).

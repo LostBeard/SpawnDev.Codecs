@@ -50,6 +50,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardQuantizerGpu_AllSignsAllSizes_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Block sizes: 16 (Tx4x4), 64 (Tx8x8), 256 (Tx16x16), 1024 (Tx32x32).
@@ -78,6 +79,7 @@ public abstract partial class CodecsTestBase
         // and value v, the CPU does (|v| + q/2) / q with sign re-applied.
         // The GPU must agree exactly.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Coefficients that land exactly on rounding boundaries for q=10.
@@ -101,6 +103,7 @@ public abstract partial class CodecsTestBase
         // backend that lowers `int / q` as `>>` on the negative branch
         // would diverge here.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var input = new int[64];
@@ -116,6 +119,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardQuantizerGpu_AllZeroInput_StaysZero()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var input = new int[256];

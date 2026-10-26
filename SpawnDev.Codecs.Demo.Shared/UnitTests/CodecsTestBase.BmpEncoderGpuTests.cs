@@ -68,6 +68,7 @@ public abstract partial class CodecsTestBase
     public async Task BmpEncoderGpu_Bgra32_RoundTrips_AndWritesTheDocumentedHeader()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, AtomicKernels);
         try
         {
             using var enc = new BmpEncoderGpu(acc);
@@ -101,6 +102,7 @@ public abstract partial class CodecsTestBase
     public async Task BmpEncoderGpu_Bgr24_RoundTrips_AlphaDropped_RowsPadded()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, AtomicKernels);
         try
         {
             using var enc = new BmpEncoderGpu(acc);
@@ -135,6 +137,7 @@ public abstract partial class CodecsTestBase
     public async Task BmpEncoderGpu_Indexed8_RoundTrips_WithASortedExactPalette()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, AtomicKernels);
         try
         {
             using var enc = new BmpEncoderGpu(acc);
@@ -171,6 +174,7 @@ public abstract partial class CodecsTestBase
     public async Task BmpEncoderGpu_Indexed8_MoreThan256Colours_IsRejected()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, AtomicKernels);
         try
         {
             using var enc = new BmpEncoderGpu(acc);
@@ -200,6 +204,7 @@ public abstract partial class CodecsTestBase
     public async Task BmpEncoderGpu_ArrayViewOverload_MatchesManaged_AndStaysInsideItsRange()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, AtomicKernels);
         try
         {
             using var enc = new BmpEncoderGpu(acc);

@@ -51,6 +51,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9Idct8x8Gpu_AllZeroCoefs_LeavesPredictorUnchanged()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var coefs = new short[64];
@@ -65,6 +66,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9Idct8x8Gpu_DcOnly_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // DC-only coefficient produces a flat residual. A range of
@@ -86,6 +88,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9Idct8x8Gpu_RandomCoefs_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var rng = new Random(unchecked((int)0xDC0E8C18u));
@@ -110,6 +113,7 @@ public abstract partial class CodecsTestBase
         // Push the residual past 0 / 255 boundary to verify clip3
         // matches the CPU oracle exactly.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var coefs = new short[64];

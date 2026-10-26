@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9Iadst8x8Gpu_DcOnly_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             short[] coefs = new short[64];
@@ -30,6 +31,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9Iadst8x8Gpu_RandomCoefs_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var rng = new Random(unchecked((int)0xC088_AD88u));
@@ -44,6 +46,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9Iadst8x8Gpu_LargeCoefs_ClipsCorrect_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             short[] coefs = new short[64];
@@ -59,6 +62,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9Iadst8x8Gpu_ZeroCoefs_Identity_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             short[] coefs = new short[64];

@@ -98,6 +98,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkGainIndicesDecoderGpu_VoicedIndependent4Subfr_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Voiced (signalType=2), independent coding, 4 subframes (20ms frame).
@@ -140,6 +141,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkGainIndicesDecoderGpu_InactiveIndependent4Subfr_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Inactive (signalType=0), independent, 4 subframes.

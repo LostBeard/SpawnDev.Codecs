@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9DcPredict16x16Kernel_BothEdges_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9DcPredict16x16Kernel(acc);
@@ -37,6 +38,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9DcPredict16x16Kernel_TopOnly_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9DcPredict16x16Kernel(acc);
@@ -60,6 +62,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9DcPredict16x16Kernel_LeftOnly_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9DcPredict16x16Kernel(acc);
@@ -82,6 +85,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9DcPredict16x16Kernel_None_FillsWith128()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9DcPredict16x16Kernel(acc);
@@ -98,6 +102,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9DcPredict16x16Kernel_RandomInputs_BitExact()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9DcPredict16x16Kernel(acc);
@@ -128,6 +133,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9DcPredict16x16Kernel_BatchedDispatch_AllBlocksBitExact()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9DcPredict16x16Kernel(acc);

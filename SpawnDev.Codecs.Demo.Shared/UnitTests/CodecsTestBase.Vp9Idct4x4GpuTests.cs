@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9Idct4x4Gpu_DcOnly_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             short[] coefs = new short[16];
@@ -30,6 +31,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9Idct4x4Gpu_RandomCoefs_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var rng = new Random(unchecked((int)0xC044_4444u));
@@ -44,6 +46,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9Idct4x4Gpu_LargeCoefs_ClipsCorrect_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Large coefficients to exercise the [0, 255] clip path.
@@ -60,6 +63,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9Idct4x4Gpu_ZeroCoefs_Identity_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // All-zero coefs -> output equals predictor (with the 8>>4 = 0 add).

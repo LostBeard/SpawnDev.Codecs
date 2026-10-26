@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkNlsf2AGpu_Order10_NB_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Order-10 NB-style NLSFs: monotonically increasing in [0, 32768).
@@ -31,6 +32,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkNlsf2AGpu_Order16_WB_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Order-16 WB-style NLSFs.
@@ -45,6 +47,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkNlsf2AGpu_Order10_RandomMonotonic_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Random monotonic NLSFs.

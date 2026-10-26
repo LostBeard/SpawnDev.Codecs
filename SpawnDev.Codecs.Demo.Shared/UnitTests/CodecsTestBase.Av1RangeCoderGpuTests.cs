@@ -58,6 +58,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1RangeCoderGpu_RoundTrip_AllZeros_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             int n = 64;
@@ -86,6 +87,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1RangeCoderGpu_RoundTrip_RandomBits_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             int n = 256;
@@ -121,6 +123,7 @@ public abstract partial class CodecsTestBase
         // range coder into its narrow-range regime where carry
         // propagation gets exercised heavily.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             int n = 64;

@@ -48,6 +48,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardDct8x8Gpu_AllZero_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             await AssertVp9Fdct8x8GpuMatchesCpuAsync(acc, new short[64]);
@@ -59,6 +60,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardDct8x8Gpu_Impulses_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // DC impulse, mid impulse, negative impulse - exercises every
@@ -77,6 +79,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardDct8x8Gpu_RandomResiduals_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var rng = new Random(unchecked((int)0xFD088DC7u));
@@ -95,6 +98,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardDct8x8Gpu_SaturationLimits_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var positive = new short[64];

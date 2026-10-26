@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkExcitationDequantizerGpu_VoicedLow_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             await DequantizeAndVerify(acc, signalType: 2, quantOffsetType: 0,
@@ -30,6 +31,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkExcitationDequantizerGpu_VoicedHigh_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             await DequantizeAndVerify(acc, signalType: 2, quantOffsetType: 1,
@@ -42,6 +44,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkExcitationDequantizerGpu_UnvoicedLow_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             await DequantizeAndVerify(acc, signalType: 1, quantOffsetType: 0,
@@ -54,6 +57,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkExcitationDequantizerGpu_InactiveHigh_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             await DequantizeAndVerify(acc, signalType: 0, quantOffsetType: 1,

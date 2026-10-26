@@ -223,6 +223,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkParametersDecoderGpu_VoicedNbWb20msIndependent_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var codebook = SilkNlsfCodebookTables.Wb;
@@ -284,6 +285,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkParametersDecoderGpu_UnvoicedNb10msIndependent_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var codebook = SilkNlsfCodebookTables.NbMb;

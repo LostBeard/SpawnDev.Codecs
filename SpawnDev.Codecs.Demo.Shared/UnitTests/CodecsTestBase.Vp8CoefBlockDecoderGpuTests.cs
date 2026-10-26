@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp8CoefBlockDecoderGpu_RandomBlocks_RoundTripsCpuEncoder()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp8CoefBlockDecoderTestKernel(acc);

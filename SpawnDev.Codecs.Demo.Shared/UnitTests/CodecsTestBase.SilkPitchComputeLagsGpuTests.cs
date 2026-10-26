@@ -82,6 +82,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkPitchComputeLagsGpu_Wb20ms_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // WB (16kHz) 20ms - Stage3 codebook, 34 contours, 4 subframes.
@@ -96,6 +97,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkPitchComputeLagsGpu_Nb20ms_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // NB (8kHz) 20ms - Stage2 codebook, 11 contours, 4 subframes.
@@ -110,6 +112,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkPitchComputeLagsGpu_Mb10ms_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // MB (12kHz) 10ms - Stage310Ms codebook, 12 contours, 2 subframes.
@@ -123,6 +126,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkPitchComputeLagsGpu_ClampingHigh_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Force lag clamping at maxLag = 18 * fsKHz = 288 for WB.

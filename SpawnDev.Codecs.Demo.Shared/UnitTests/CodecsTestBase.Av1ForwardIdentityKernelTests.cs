@@ -272,6 +272,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1ForwardIdentity32Kernel_ZeroInput_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Av1ForwardIdentity32Kernel(acc);
@@ -296,6 +297,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1ForwardIdentity32Kernel_RandomBatch_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Av1ForwardIdentity32Kernel(acc);
@@ -329,6 +331,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1ForwardIdentity32Kernel_DcOnlyInput_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Av1ForwardIdentity32Kernel(acc);

@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp8IntraPredict16x16Kernel_AllModesAndAvailabilities_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp8IntraPredict16x16Kernel(acc);

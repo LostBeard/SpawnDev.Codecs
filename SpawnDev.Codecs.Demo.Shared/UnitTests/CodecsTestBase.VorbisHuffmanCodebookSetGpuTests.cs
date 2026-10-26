@@ -18,7 +18,6 @@ public abstract partial class CodecsTestBase
     public async Task VorbisHuffmanCodebookSetGpu_FlattenedDecode_MatchesSingle()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
-        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Three small codebooks with different shapes.

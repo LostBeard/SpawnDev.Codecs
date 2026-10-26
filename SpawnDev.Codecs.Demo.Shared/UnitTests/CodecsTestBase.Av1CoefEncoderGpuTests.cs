@@ -116,6 +116,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1CoefEncoderGpu_DcOnly_Tx8x8_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var constsByte = Av1KeyframeConstantsGpu.BuildByteConstsBuffer();
@@ -146,6 +147,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1CoefEncoderGpu_RandomSparse_Tx16x16_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var constsByte = Av1KeyframeConstantsGpu.BuildByteConstsBuffer();
@@ -179,6 +181,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1CoefEncoderGpu_RandomDense_Tx8x8_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var constsByte = Av1KeyframeConstantsGpu.BuildByteConstsBuffer();
@@ -211,6 +214,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1CoefEncoderGpu_HighMagnitude_Tx16x16_GolombPath_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var constsByte = Av1KeyframeConstantsGpu.BuildByteConstsBuffer();

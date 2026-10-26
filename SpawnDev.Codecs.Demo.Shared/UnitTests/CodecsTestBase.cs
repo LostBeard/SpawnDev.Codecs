@@ -60,6 +60,12 @@ public abstract partial class CodecsTestBase : IDisposable
     protected static readonly AcceleratorRequirements SerialStreamKernels = new() { RequiresScatterStores = true };
 
     /// <summary>
+    /// What a kernel using atomics needs (BMP encoder palette build: Atomic.CompareExchange). WebGL has no atomics; a test
+    /// of one declares it with <c>RequireFeatures(acc, AtomicKernels)</c> and is skipped on WebGL with this reason.
+    /// </summary>
+    protected static readonly AcceleratorRequirements AtomicKernels = new() { RequiresAtomics = true };
+
+    /// <summary>
     /// Throw <see cref="UnsupportedTestException"/> if the supplied accelerator's
     /// backend cannot satisfy the requirements. Use at the top of any test whose
     /// kernels need features not available on every backend (atomics, shared

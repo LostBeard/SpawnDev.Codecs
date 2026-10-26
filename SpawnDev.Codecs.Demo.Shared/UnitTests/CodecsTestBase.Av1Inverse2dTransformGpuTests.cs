@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1Inverse2dTransformGpu_4x4_ZeroInput_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Av1Inverse2dTransformGpuKernel(acc);
@@ -42,6 +43,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1Inverse2dTransformGpu_4x4_DcOnly_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Av1Inverse2dTransformGpuKernel(acc);
@@ -68,6 +70,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1Inverse2dTransformGpu_4x4_RandomBatch_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Av1Inverse2dTransformGpuKernel(acc);
@@ -109,6 +112,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1Inverse2dTransformGpu_8x8_ZeroInput_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Av1Inverse2dTransformGpuKernel(acc);
@@ -133,6 +137,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1Inverse2dTransformGpu_8x8_RandomBatch_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Av1Inverse2dTransformGpuKernel(acc);
@@ -173,6 +178,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1Inverse2dTransformGpu_16x16_ZeroInput_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Av1Inverse2dTransformGpuKernel(acc);
@@ -197,6 +203,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1Inverse2dTransformGpu_16x16_RandomBatch_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Av1Inverse2dTransformGpuKernel(acc);

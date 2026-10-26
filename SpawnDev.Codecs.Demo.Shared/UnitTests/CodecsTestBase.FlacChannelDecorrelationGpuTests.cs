@@ -18,7 +18,6 @@ public abstract partial class CodecsTestBase
     public async Task FlacChannelDecorrelationGpu_LeftSide_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
-        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             await DecorrelateAndVerify(acc,
@@ -32,7 +31,6 @@ public abstract partial class CodecsTestBase
     public async Task FlacChannelDecorrelationGpu_RightSide_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
-        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             await DecorrelateAndVerify(acc,
@@ -46,7 +44,6 @@ public abstract partial class CodecsTestBase
     public async Task FlacChannelDecorrelationGpu_MidSide_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
-        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             await DecorrelateAndVerify(acc,
@@ -60,7 +57,6 @@ public abstract partial class CodecsTestBase
     public async Task FlacChannelDecorrelationGpu_MidSide_FullBlock_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
-        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Full 4096-sample FLAC block - exercises the parallel pattern at scale.

@@ -21,6 +21,7 @@ public abstract partial class CodecsTestBase
         // very-skewed-toward-1, value boundary cases. Any drift between
         // GPU and CPU bool coder shows up in the output bytes.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp8BoolEncoderTestKernel(acc);
@@ -105,6 +106,7 @@ public abstract partial class CodecsTestBase
         // Random sequence stress test. 1024 bits with random probabilities
         // covering the full [1, 255] range.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp8BoolEncoderTestKernel(acc);

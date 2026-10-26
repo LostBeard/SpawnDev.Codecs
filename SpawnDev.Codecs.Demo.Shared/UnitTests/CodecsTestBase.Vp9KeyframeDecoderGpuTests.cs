@@ -112,6 +112,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9KeyframeDecoderGpu_64x64_FlatGray_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             int width = 64, height = 64;
@@ -132,6 +133,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9KeyframeDecoderGpu_64x64_RandomContent_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             int width = 64, height = 64;
@@ -154,6 +156,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9KeyframeDecoderGpu_64x64_BaseQSweep_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             int width = 64, height = 64;

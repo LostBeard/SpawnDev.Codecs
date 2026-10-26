@@ -134,6 +134,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9KeyframeDecoderGpu_ArrayViewOverload_WritesCallerPlanesAndMatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new Vp9KeyframeDecoderGpu(acc);

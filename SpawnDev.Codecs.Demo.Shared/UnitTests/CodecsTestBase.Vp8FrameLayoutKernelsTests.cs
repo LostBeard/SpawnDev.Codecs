@@ -16,6 +16,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp8FrameLayoutKernels_GatherScatterY16_RoundTrip()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var k = new Vp8FrameLayoutKernels(acc);
@@ -50,6 +51,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp8FrameLayoutKernels_GatherScatterUv8_RoundTrip()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var k = new Vp8FrameLayoutKernels(acc);
@@ -85,6 +87,7 @@ public abstract partial class CodecsTestBase
         // Verify the GPU gather produces the exact byte layout the FDCT
         // kernel would expect: per-MB 256 bytes, row-major within the MB.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var k = new Vp8FrameLayoutKernels(acc);

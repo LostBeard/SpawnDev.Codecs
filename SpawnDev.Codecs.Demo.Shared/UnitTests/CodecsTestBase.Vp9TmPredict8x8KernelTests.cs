@@ -14,6 +14,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9TmPredict8x8Kernel_KnownPattern_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9TmPredict8x8Kernel(acc);
@@ -37,6 +38,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9TmPredict8x8Kernel_RandomInputs_BitExact()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9TmPredict8x8Kernel(acc);
@@ -68,6 +70,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9TmPredict8x8Kernel_BatchedDispatch_AllBlocksBitExact()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9TmPredict8x8Kernel(acc);

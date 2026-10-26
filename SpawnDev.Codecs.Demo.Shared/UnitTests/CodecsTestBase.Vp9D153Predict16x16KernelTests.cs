@@ -15,6 +15,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9D153Predict16x16Kernel_KnownPattern_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9D153Predict16x16Kernel(acc);
@@ -38,6 +39,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9D153Predict16x16Kernel_RandomInputs_BitExact()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9D153Predict16x16Kernel(acc);
@@ -69,6 +71,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9D153Predict16x16Kernel_BatchedDispatch_AllBlocksBitExact()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9D153Predict16x16Kernel(acc);

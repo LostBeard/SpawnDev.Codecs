@@ -30,7 +30,6 @@ public abstract partial class CodecsTestBase
     public async Task VorbisPacketDecodeKernel_LoadsOnAccelerator()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
-        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Just try to load the kernel. If ILGPU compiles it for the

@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardDct4x4Gpu_RandomInput_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var rng = new Random(unchecked((int)0xC044_FD44u));
@@ -31,6 +32,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardDct4x4Gpu_FlatInput_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Flat input - exercises the DC bias path.
@@ -45,6 +47,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardDct4x4Gpu_ZeroInput_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             short[] input = new short[16];
@@ -57,6 +60,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardDct4x4Gpu_LargeStride_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Source 4x4 block at the start of an 8-wide row stride.

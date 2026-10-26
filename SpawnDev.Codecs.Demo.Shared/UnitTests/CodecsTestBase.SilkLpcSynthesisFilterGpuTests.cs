@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkLpcSynthesisFilterGpu_Order10_NB_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             short[] aQ12 = { 600, -300, 100, -50, 25, -12, 6, -3, 1, -1 };
@@ -33,6 +34,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkLpcSynthesisFilterGpu_Order16_WB_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             short[] aQ12 = { 800, -400, 200, -100, 50, -25, 12, -6,
@@ -49,6 +51,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkLpcSynthesisFilterGpu_LargeGain_Saturation_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Stress the LSHIFT_SAT32 + SAT16 paths with high gain + large residual.

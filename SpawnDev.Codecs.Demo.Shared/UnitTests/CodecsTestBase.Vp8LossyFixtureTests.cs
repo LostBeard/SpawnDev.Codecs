@@ -124,6 +124,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp8FullKeyframeDecoderGpu_AllFixtures_MatchFfmpeg_ManagedOverload()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new Vp8FullKeyframeDecoderGpu(acc);
@@ -157,6 +158,7 @@ public abstract partial class CodecsTestBase
         // planes written into caller views pre-filled with 0xAB and longer than needed. A decoder that wrote short, past the
         // picture, or into the wrong plane leaves / disturbs 0xAB.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new Vp8FullKeyframeDecoderGpu(acc);
@@ -227,6 +229,7 @@ public abstract partial class CodecsTestBase
         if (!OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new Vp8FullKeyframeDecoderGpu(acc);
@@ -297,6 +300,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp8FullKeyframeDecoderGpu_HostileInputs_ThrowTheSpecificReason()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new Vp8FullKeyframeDecoderGpu(acc);
@@ -382,6 +386,7 @@ public abstract partial class CodecsTestBase
         // Flip bytes, truncate, and splice random data into real frames: every outcome must be a normal decode (garbage
         // pixels are fine for a corrupt stream) or a Vp8DecodeException, never another exception type, never a hang.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new Vp8FullKeyframeDecoderGpu(acc);

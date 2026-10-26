@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardDct8x8Kernel_ZeroInput_ProducesAllZeroCoefs()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9ForwardDct8x8Kernel(acc);
@@ -38,6 +39,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardDct8x8Kernel_DcOnlyInput_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9ForwardDct8x8Kernel(acc);
@@ -69,6 +71,7 @@ public abstract partial class CodecsTestBase
         // some backends lower `int / 2` as arithmetic-shift-right which
         // is off-by-one for odd negative outputs.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9ForwardDct8x8Kernel(acc);
@@ -122,6 +125,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardDct8x8Kernel_RandomInput_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9ForwardDct8x8Kernel(acc);

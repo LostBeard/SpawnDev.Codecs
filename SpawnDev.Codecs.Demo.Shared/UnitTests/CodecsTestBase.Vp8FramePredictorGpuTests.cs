@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp8FramePredictorGpu_AllDcMode_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var pipeline = new Vp8FramePredictorGpu(acc);

@@ -33,6 +33,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkNlsfStabilizeGpu_NeedsAdjustment_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // NLSF with violated spacing - some adjacent pairs are too close.
@@ -49,6 +50,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkNlsfStabilizeGpu_HeavyDisorder_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Severely disordered NLSF that forces the fallback insertion-sort + clamp path.

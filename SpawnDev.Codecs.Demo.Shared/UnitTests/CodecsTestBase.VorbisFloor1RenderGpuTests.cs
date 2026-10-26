@@ -64,6 +64,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisFloor1RenderGpu_RenderLine_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             const int halfBlock = 256;

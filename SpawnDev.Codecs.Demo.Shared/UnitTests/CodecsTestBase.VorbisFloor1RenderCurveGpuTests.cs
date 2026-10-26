@@ -18,6 +18,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisFloor1RenderCurveGpu_SmallFloor_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // Minimal floor: 4 control points across the half-block.
@@ -44,6 +45,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisFloor1RenderCurveGpu_LargerFloor_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // 8-control-point floor with multiplier 4 (steepest quantization).

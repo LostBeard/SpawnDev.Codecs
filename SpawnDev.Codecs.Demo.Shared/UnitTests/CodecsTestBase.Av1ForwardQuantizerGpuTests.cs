@@ -19,6 +19,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1ForwardQuantizerGpu_ZeroInput_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Av1ForwardQuantizerGpuKernel(acc);
@@ -52,6 +53,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1ForwardQuantizerGpu_RandomBatch8x8_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Av1ForwardQuantizerGpuKernel(acc);
@@ -94,6 +96,7 @@ public abstract partial class CodecsTestBase
     public async Task Av1ForwardQuantizerGpu_RandomBatch16x16_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Av1ForwardQuantizerGpuKernel(acc);

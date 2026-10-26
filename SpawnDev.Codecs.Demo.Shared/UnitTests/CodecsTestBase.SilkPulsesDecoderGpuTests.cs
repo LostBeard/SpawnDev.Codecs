@@ -75,6 +75,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkPulsesDecoderGpu_AllZeros20msNb_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // 20ms NB: 8kHz × 20ms = 160 samples = 10 shell blocks of 16.
@@ -93,6 +94,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkPulsesDecoderGpu_SparseSigned20msWb_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // 20ms WB: 16kHz × 20ms = 320 samples = 20 shell blocks of 16.
@@ -116,6 +118,7 @@ public abstract partial class CodecsTestBase
     public async Task SilkPulsesDecoderGpu_DenseLowMagnitude10msMb_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             // 10ms MB: 12kHz × 10ms = 120 samples (NOT a multiple of 16!).

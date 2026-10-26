@@ -21,6 +21,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp8FrameTransformGpu_RandomMacroblocks_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var pipeline = new Vp8FrameTransformGpu(acc);

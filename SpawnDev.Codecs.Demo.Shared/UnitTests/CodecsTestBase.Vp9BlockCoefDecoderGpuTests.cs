@@ -126,6 +126,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9BlockCoefDecoderGpu_AllZero4x4_RoundTrips()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var block = new short[16];
@@ -141,6 +142,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9BlockCoefDecoderGpu_DcOnly4x4_RoundTrips()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var block = new short[16];
@@ -157,6 +159,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9BlockCoefDecoderGpu_NegativeOne4x4_RoundTrips()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var block = new short[16];
@@ -173,6 +176,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9BlockCoefDecoderGpu_AllMagnitudes4x4_RoundTrips()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var scan = Vp9ScanTables.GetScan(Vp9TxSize.Tx4x4, Vp9ScanType.Default);
@@ -192,6 +196,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9BlockCoefDecoderGpu_RandomSparse8x8_RoundTrips()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var rng = new Random(unchecked((int)0x8C0DEC58u));
@@ -222,6 +227,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9BlockCoefDecoderGpu_RandomSparse16x16_RoundTrips()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var rng = new Random(unchecked((int)0x16DC0DE1u));
@@ -249,6 +255,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9BlockCoefDecoderGpu_NonZeroInitialCtx_RoundTrips()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             for (int initialCtx = 0; initialCtx < 3; initialCtx++)
