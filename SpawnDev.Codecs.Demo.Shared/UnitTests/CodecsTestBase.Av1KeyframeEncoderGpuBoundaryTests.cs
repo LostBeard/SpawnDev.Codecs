@@ -119,6 +119,54 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
+    /// <summary>
+    /// Batches of 1, 2 and 3 frames against single-frame encodes of the same frames (and the CPU reference), reporting
+    /// every frame's length and first differing byte. Separates "the batch kernel is wrong" (a batch of ONE differs) from
+    /// "frames of one batch interfere" (only batches of 2+ differ). WebGPU showed frame 0 of a 3-frame batch 63 bytes
+    /// longer than its single-frame encode while every single-frame size passed.
+    /// </summary>
+    [TestMethod(Timeout = 600000)]
+    public async Task Av1KeyframeEncoderGpu_BatchOfOneTwoThree_EqualsSingleFrameEncodes()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var enc = new Av1KeyframeEncoderGpu(acc);
+            const int width = 64, height = 128, baseQIndex = 40;
+            int uvLen = width * height / 4;
+            var rng = new Random(0xA1B2);
+            var ys = new byte[3][]; var us = new byte[3][]; var vs = new byte[3][];
+            var single = new byte[3][];
+            for (int f = 0; f < 3; f++)
+            {
+                ys[f] = RandomPlane(rng, width * height);
+                us[f] = RandomPlane(rng, uvLen);
+                vs[f] = RandomPlane(rng, uvLen);
+                single[f] = await enc.EncodeKeyFrameAsync(ys[f], us[f], vs[f], width, height, baseQIndex);
+                byte[] cpu = Av1KeyframeEncoder.EncodeKeyFrame(ys[f], width, us[f], width / 2, vs[f], width, height, baseQIndex);
+                EqualBytes(cpu, single[f], $"frame {f}: single-frame GPU encode vs CPU reference");
+            }
+            var failures = new List<string>();
+            for (int n = 1; n <= 3; n++)
+            {
+                var batch = await enc.EncodeKeyFramesBatchAsync(
+                    System.Array.ConvertAll(ys[..n], p => (ReadOnlyMemory<byte>)p),
+                    System.Array.ConvertAll(us[..n], p => (ReadOnlyMemory<byte>)p),
+                    System.Array.ConvertAll(vs[..n], p => (ReadOnlyMemory<byte>)p),
+                    width, height, baseQIndex);
+                for (int f = 0; f < n; f++)
+                {
+                    if (batch[f].AsSpan().SequenceEqual(single[f])) continue;
+                    int first = 0, lim = Math.Min(batch[f].Length, single[f].Length);
+                    while (first < lim && batch[f][first] == single[f][first]) first++;
+                    failures.Add($"batch of {n}, frame {f}: {batch[f].Length} bytes vs single {single[f].Length}, first difference at byte {first}");
+                }
+            }
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
     [TestMethod(Timeout = 600000)]
     public async Task Av1KeyframeEncoderGpu_Rejects_UnalignedSizeAndBadQuantizer()
     {

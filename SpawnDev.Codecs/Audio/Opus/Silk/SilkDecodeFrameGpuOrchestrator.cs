@@ -69,7 +69,6 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
 
     private readonly Action<
         Index1D,
-        ArrayView<short>,
         SilkDecodeCoreInputs,
         SilkDecodeCoreScalars> _decodeCoreKernel;
 
@@ -112,7 +111,6 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
 
         _decodeCoreKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
-            ArrayView<short>,
             SilkDecodeCoreInputs,
             SilkDecodeCoreScalars>(SilkFrameDecodeCoreKernel);
 
@@ -229,11 +227,16 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             SubfrLength = subfrLength,
             FrameLength = frameLength,
             LtpMemLength = ltpMemLength,
-            // LtpScaleQ14 is read from paramsShortOut by the kernel adapter.
+            // LtpScaleQ14 is read from the parameters (inputs.ParamsShort) by the kernel adapter.
             LtpScaleQ14 = 0,
             NlsfInterpEnabled = nlsfInterpEnabled,
         };
-        _decodeCoreKernel(1, paramsShortOut, decodeCoreInputs, decodeCoreScalars);
+        // The core reads exactly what the parameters stage just wrote. Those views travel ONLY inside the inputs struct:
+        // passing paramsShortOut as its own argument as well bound one buffer to two read_write slots, which WebGPU
+        // rejects ("Storage buffer aliasing detected in kernel 'Kernel_SilkFrameDecodeCoreKernel'").
+        decodeCoreInputs.ParamsShort = paramsShortOut;
+        decodeCoreInputs.ParamsInt = paramsIntOut;
+        _decodeCoreKernel(1, decodeCoreInputs, decodeCoreScalars);
     }
 
     /// <summary>
@@ -338,14 +341,13 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
     /// the local scalars copy used by the synthesis chain.</summary>
     private static void SilkFrameDecodeCoreKernel(
         Index1D _,
-        ArrayView<short> paramsShortIn,
         SilkDecodeCoreInputs inputs,
         SilkDecodeCoreScalars scalars)
     {
         // Pull the scalar LTP scale Q14 out of the short parameter buffer and
         // patch it into the local scalars (host code pre-zeroed it).
         var localScalars = scalars;
-        localScalars.LtpScaleQ14 = paramsShortIn[SilkDecodedParametersLayout.ShortLtpScaleQ14Offset];
+        localScalars.LtpScaleQ14 = inputs.ParamsShort[SilkDecodedParametersLayout.ShortLtpScaleQ14Offset];
         SilkDecodeCoreGpu.Decode(inputs, localScalars);
     }
 
