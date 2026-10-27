@@ -927,11 +927,23 @@ public static partial class DeflateGpu
         ArrayView<byte> data, int start, int pos, int len, ArrayView<int> s, int headAt, int prevAt,
         int maxChain, int niceLen, ref int compares)
     {
+        int cand = -1;
+        if (pos + 3 <= len) cand = s[headAt + Hash3(data, start + pos)];
+        return FindMatchFrom(data, start, pos, len, s, prevAt, cand, maxChain, niceLen, ref compares);
+    }
+
+    /// <summary>
+    /// <see cref="FindMatch"/> from the chain's first candidate <paramref name="cand"/> (the latest earlier position with
+    /// the hash of <paramref name="pos"/>, -1 for none).
+    /// </summary>
+    private static int FindMatchFrom(
+        ArrayView<byte> data, int start, int pos, int len, ArrayView<int> s, int prevAt, int cand,
+        int maxChain, int niceLen, ref int compares)
+    {
         int bestLen = 0;
         int bestDist = 0;
         if (pos + 3 <= len)
         {
-            int cand = s[headAt + Hash3(data, start + pos)];
             int chain = maxChain;
             int maxl = len - pos;
             if (maxl > MaxMatch) maxl = MaxMatch;

@@ -4,9 +4,10 @@
 // reference library read what it writes). The input is cut into 64 KB tiles; each tile is parsed by DeflateGpu's LZ77
 // matcher (levels 1-2 greedy, 3 lazy; 4 = Huffman only; 0 = stored), its codes are built with the Deflate64 alphabet
 // GDeflate uses, and it is written as one block (dynamic Huffman, or stored when that is smaller) swizzled over the 32
-// sub-streams (DeflateGpu.EmitGDeflate). Tiles run one thread each in waves through resumable launches; a layout launch
-// places them after the 8-byte header and the tile table, then one thread per byte copies them. Nothing but the final
-// length crosses to the host (level 3 also reads one int per wave to finish its lazy parses).
+// sub-streams (DeflateGpu.EmitGDeflateLanes, 32 lanes per tile). Tiles go in waves: the parse in parallel steps
+// (DeflateGpu.ParallelParse: hash chains by 32 lanes, a match search per position, a resumable walk per tile), the plan
+// by 256 lanes per tile, the writer by 32; a layout launch places the tiles after the 8-byte header and the tile table,
+// then one thread per byte copies them. Nothing but the final length crosses to the host.
 //
 // The output decodes with Microsoft's reference; it is not byte-identical with it (a different matcher), the format
 // does not require that.
@@ -28,20 +29,21 @@ public sealed class GDeflateCompressorGpu : IDisposable
     public const int TileSize = GDeflateDecompressorGpu.TileSize;
     /// <summary>
     /// Tiles compressed at once when the constructor's wave is 0: 512 on desktop accelerators (~290 MB of working memory),
-    /// 64 on browser ones (buffer limits). One thread compresses a tile, so throughput grows with the wave: measured on an
-    /// RTX 4070, 64 MB of BF16 weights at level 1: 0.008 GB/s at 64 tiles, 0.034 at 512, 0.056 at 1024.
+    /// 64 on browser ones (buffer limits). One thread parses a tile, so parse throughput grows with the wave: measured on
+    /// an RTX 4070 with the serial writer, 64 MB of BF16 weights at level 1: 0.008 GB/s at 64 tiles, 0.034 at 512.
     /// </summary>
     public const int DesktopWave = 512, BrowserWave = 64;
     /// <summary>Most tiles a stream can hold (16-bit tile count).</summary>
     public const int MaxTiles = 65535;
-    /// <summary>Parse launches a level-3 wave adds between two checks for unfinished parses.</summary>
-    private const int LazyParseBatch = 4;
-    /// <summary>Input positions one parse launch advances per tile (a greedy position costs at most 4 x chain compares).</summary>
+    /// <summary>
+    /// Positions per tile one match launch searches, and one walk launch advances (a search walks at most 64 chain links
+    /// of at most 258 compares).
+    /// </summary>
     public const int ParseChunk = 8192;
 
     // prm ints: input length, tiles, level, scratch ints per tile, slot bytes per tile, running output position, failed
-    // flag, pending lazy parses.
-    internal const int PLength = 0, PTiles = 1, PLevel = 2, PScratchPer = 3, PSlot = 4, PPos = 5, PFailed = 6, PPending = 7;
+    // flag.
+    internal const int PLength = 0, PTiles = 1, PLevel = 2, PScratchPer = 3, PSlot = 4, PPos = 5, PFailed = 6;
     internal const int PrmInts = 8;
 
     private readonly Accelerator _accelerator;
@@ -49,9 +51,13 @@ public sealed class GDeflateCompressorGpu : IDisposable
     private readonly LaunchPacer _pacer;
     private readonly int _scratchPer, _slotBytes;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _init;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _parse;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _pending;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _planEmit;
+    private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _chains;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _match;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _walk;
+    private readonly Action<KernelConfig, ArrayView<int>, ArrayView<int>, int> _plan;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _literals;
+    private readonly int _planLanes;
+    private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _emit;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _layout;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _copy;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _header;
@@ -76,11 +82,16 @@ public sealed class GDeflateCompressorGpu : IDisposable
         _wave = wave;
         _pacer = new LaunchPacer(accelerator);
         _scratchPer = DeflateGpu.ScratchInts(TileSize) + DeflateGpu.GDeflateWriterInts;
-        _slotBytes = DeflateGpu.MaxGDeflateTileOutput(TileSize);
+        // A multiple of 4: every packet of a tile is then one aligned word that only its lane writes.
+        _slotBytes = (DeflateGpu.MaxGDeflateTileOutput(TileSize) + 3) & ~3;
         _init = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(InitKernel);
-        _parse = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(ParseKernel);
-        _pending = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int>(PendingKernel);
-        _planEmit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(PlanEmitKernel);
+        _chains = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(ChainsKernel);
+        _match = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(MatchKernel);
+        _walk = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(WalkKernel);
+        _plan = accelerator.LoadStreamKernel<ArrayView<int>, ArrayView<int>, int>(PlanKernel);
+        _planLanes = Math.Min(PlanLanes, accelerator.MaxNumThreadsPerGroup);
+        _literals = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(LiteralsKernel);
+        _emit = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(EmitKernel);
         _layout = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(LayoutKernel);
         _copy = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(CopyKernel);
         _header = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(HeaderKernel);
@@ -134,28 +145,24 @@ public sealed class GDeflateCompressorGpu : IDisposable
         {
             int count = Math.Min(_wave, tiles - first);
             _init(count * DeflateGpu.HashSize, _scratch.View, _prm.View, first);
-            if (level > 0)
+            if (level == DeflateGpu.LevelHuffmanOnly) _literals(count * TileSize, data, _scratch.View, _prm.View, first);
+            else if (level > 0)
             {
-                for (int i = 0; i < parseSteps; i++)
+                // The parse in parallel steps (DeflateGpu.ParallelParse): hash chains, every position's match, the walk.
+                _chains(new KernelConfig(count, DeflateGpu.ChainLanes), data, _scratch.View, _prm.View, first);
+                for (int from = 0; from < TileSize; from += ParseChunk)
                 {
-                    _parse(count, data, _scratch.View, _prm.View, first, DeflateGpu.ParseCompareBudget);
+                    _match(count * ParseChunk, data, _scratch.View, _prm.View, first, from);
                     await _pacer.LaunchedAsync();
                 }
-                if (level == 3)
+                for (int i = 0; i < parseSteps; i++)
                 {
-                    // Lazy matching can stop a parse launch on its compare budget before ParseChunk positions.
-                    bool pending = true;
-                    while (pending)
-                    {
-                        _pending(1, _scratch.View, _prm.View, first, count);
-                        await _accelerator.SynchronizeAsync();
-                        pending = (await _prm.View.SubView(PPending, 1).CopyToHostAsync())[0] != 0;
-                        if (pending)
-                            for (int i = 0; i < LazyParseBatch; i++) _parse(count, data, _scratch.View, _prm.View, first, DeflateGpu.ParseCompareBudget);
-                    }
+                    _walk(count, data, _scratch.View, _prm.View, first);
+                    await _pacer.LaunchedAsync();
                 }
             }
-            _planEmit(count, data, _slots.View, _scratch.View, _prm.View, first);
+            _plan(new KernelConfig(count, _planLanes), _scratch.View, _prm.View, first);
+            _emit(new KernelConfig(count, EmitLanes), data, _slots.View, _scratch.View, _prm.View, first);
             _layout(1, output, _scratch.View, _offsets.View, _prm.View, first, count);
             _copy(count * _slotBytes, _slots.View, output, _scratch.View, _offsets.View, _prm.View, first);
             await _pacer.LaunchedAsync();
@@ -208,31 +215,65 @@ public sealed class GDeflateCompressorGpu : IDisposable
         DeflateGpu.InitBlockThread(k, TileLength(prm, first + b), prm[PLevel], scratch, b * prm[PScratchPer], TileSize);
     }
 
-    private static void ParseKernel(Index1D idx, ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int first, int compareBudget)
+    /// <summary>One group of DeflateGpu.ChainLanes lanes per tile of the wave: its hash chains.</summary>
+    private static void ChainsKernel(ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int first)
     {
-        int tile = first + idx.X;
-        int level = prm[PLevel];
-        // Greedy parses are bounded by their positions alone; only the lazy one stops on compares.
-        int budget = level == 3 ? compareBudget : int.MaxValue;
-        DeflateGpu.ParseStep(data, tile * TileSize, TileLength(prm, tile), level, scratch, idx.X * prm[PScratchPer], TileSize,
-            ParseChunk, budget);
+        var hs = SharedMemory.Allocate<int>(DeflateGpu.ChainLanes);
+        int b = Grid.IdxX;
+        int tile = first + b;
+        DeflateGpu.BuildChainsLanes(data, tile * TileSize, TileLength(prm, tile), scratch, b * prm[PScratchPer], TileSize, hs, Group.IdxX);
     }
 
-    private static void PendingKernel(Index1D _, ArrayView<int> scratch, ArrayView<int> prm, int first, int count)
+    /// <summary>One thread per position of positions [from, from + ParseChunk) of the wave's tiles: its best match.</summary>
+    private static void MatchKernel(Index1D i, ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int first, int from)
     {
-        int pending = 0;
-        for (int b = 0; b < count; b++) pending += DeflateGpu.ParsePending(scratch, b * prm[PScratchPer], TileSize);
-        prm[PPending] = pending;
+        int b = i.X / ParseChunk;
+        int k = from + (i.X - b * ParseChunk);
+        int tile = first + b;
+        DeflateGpu.FindMatchThread(data, tile * TileSize, TileLength(prm, tile), k, prm[PLevel], scratch, b * prm[PScratchPer], TileSize);
     }
 
-    /// <summary>One thread per tile of the wave: codes, then the whole tile as one GDeflate stream into its slot.</summary>
-    private static void PlanEmitKernel(Index1D idx, ArrayView<byte> data, ArrayView<byte> slots, ArrayView<int> scratch, ArrayView<int> prm, int first)
+    /// <summary>One thread per tile of the wave: the next ParseChunk positions of its greedy or lazy parse.</summary>
+    private static void WalkKernel(Index1D idx, ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int first)
     {
         int tile = first + idx.X;
+        DeflateGpu.WalkParseStep(data, tile * TileSize, TileLength(prm, tile), prm[PLevel], scratch, idx.X * prm[PScratchPer], TileSize,
+            ParseChunk);
+    }
+
+    /// <summary>Threads per tile when planning (they count its symbols).</summary>
+    private const int PlanLanes = 256;
+
+    /// <summary>One group per tile of the wave: its codes and the stored / static / dynamic decision.</summary>
+    private static void PlanKernel(ArrayView<int> scratch, ArrayView<int> prm, int first)
+    {
+        var h = SharedMemory.Allocate<int>(DeflateGpu.GDeflatePlanSharedInts);
+        int b = Grid.IdxX;
+        DeflateGpu.PlanGDeflateLanes(TileLength(prm, first + b), prm[PLevel], scratch, b * prm[PScratchPer], TileSize, h,
+            Group.IdxX, Group.DimX);
+    }
+
+    /// <summary>Level 4: one thread per byte of the wave's tiles writes its literal token (no parse).</summary>
+    private static void LiteralsKernel(Index1D i, ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int first)
+    {
+        int b = i.X / TileSize;
+        int k = i.X - b * TileSize;
+        int tile = first + b;
+        DeflateGpu.LiteralTokensThread(data, tile * TileSize, TileLength(prm, tile), k, scratch, b * prm[PScratchPer], TileSize);
+    }
+
+    /// <summary>Threads per tile when writing: one per GDeflate sub-stream.</summary>
+    private const int EmitLanes = 32;
+
+    /// <summary>One group of 32 lanes per tile of the wave: the whole tile as one GDeflate stream into its slot.</summary>
+    private static void EmitKernel(ArrayView<byte> data, ArrayView<byte> slots, ArrayView<int> scratch, ArrayView<int> prm, int first)
+    {
+        var w = SharedMemory.Allocate<int>(DeflateGpu.GDeflateLanesSharedInts);
+        int b = Grid.IdxX;
+        int tile = first + b;
         int len = TileLength(prm, tile);
-        int sb = idx.X * prm[PScratchPer];
-        DeflateGpu.PlanGDeflate(len, prm[PLevel], scratch, sb, TileSize);
-        DeflateGpu.EmitGDeflate(data, tile * TileSize, len, slots, idx.X * prm[PSlot], prm[PSlot], scratch, sb, TileSize);
+        DeflateGpu.EmitGDeflateLanes(data, tile * TileSize, len, slots, b * prm[PSlot], prm[PSlot], scratch, b * prm[PScratchPer], TileSize,
+            w, Group.IdxX);
     }
 
     /// <summary>
