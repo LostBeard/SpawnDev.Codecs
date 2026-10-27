@@ -71,6 +71,9 @@ internal static class WeightPackBench
         }
         var back = await dOut.View.CopyToHostAsync();
         bool exact = back.AsSpan().SequenceEqual(data);
+        // Packed bytes' hash: identifies the format bytes across encoder changes.
+        var packedBytes = await dPacked.View.SubView(0, n).CopyToHostAsync();
+        string packedSha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(packedBytes)).ToLowerInvariant();
         double ratio = (double)n / data.Length;
         var record = new
         {
@@ -84,6 +87,7 @@ internal static class WeightPackBench
             dtype,
             sampled_bytes = data.Length,
             packed_bytes = n,
+            packed_sha256 = packedSha,
             ratio = Math.Round(ratio, 4),
             pack_seconds = Math.Round(packBest, 3),
             unpack_seconds = Math.Round(unpackBest, 3),

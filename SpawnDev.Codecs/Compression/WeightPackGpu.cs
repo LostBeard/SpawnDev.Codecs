@@ -11,9 +11,11 @@
 // against ZipNN 0.719 / 0.675 / 0.771 and zstd -3 0.788 / 0.772 / 0.853 on the same samples (FP32: ZipNN's zstd stage
 // finds long-range repeats this coder does not; recorded, not hidden).
 //
-// Every chunk compresses and decompresses independently: compression is one thread per chunk in waves (the DeflateGpu
-// phases as bounded launches), decompression is one thread per chunk (InflateGpu raw, one launch per chunk) in waves, with
-// the chunk offsets computed on the accelerator from the table. Every chunk is a standard DEFLATE stream, so any zlib
+// Every chunk compresses and decompresses independently. Compression is parallel inside each chunk too: 256 threads
+// count its bytes, one thread builds its Huffman code (DeflateGpu.PlanHuffmanOnly: the code construction of the
+// Huffman-only level, so the bytes are exactly a DeflateGpu Huffman-only block), and 256 threads write its codes at bit
+// offsets from a prefix sum of the code lengths. Decompression is one thread per chunk (InflateGpu raw, one launch per
+// chunk) in waves, with the chunk offsets computed on the accelerator from the table. Every chunk is a standard DEFLATE stream, so any zlib
 // (raw inflate, wbits -15) reads the format with the table.
 //
 // Format "SDWP" version 1, little-endian:
@@ -39,8 +41,10 @@ public sealed class WeightPackGpu : IDisposable
     public const int ChunkBytes = 65536;
     /// <summary>Header bytes before the chunk table.</summary>
     public const int HeaderBytes = 24;
-    /// <summary>Chunks compressed at once (each needs DeflateGpu.ScratchInts(ChunkBytes) ints).</summary>
-    public const int CompressWave = 64;
+    /// <summary>Chunks compressed at once (~84 KB of working memory each: ~86 MB).</summary>
+    public const int CompressWave = 1024;
+    /// <summary>Most threads per chunk in the counting and emitting kernels (fewer where the device's groups are smaller).</summary>
+    private const int MaxPackLanes = 256;
     /// <summary>Default chunks decompressed at once (each needs InflateGpu.ScratchInts ints: ~75 MB at 8192).</summary>
     public const int DecompressWave = 8192;
     /// <summary>
@@ -48,13 +52,12 @@ public sealed class WeightPackGpu : IDisposable
     /// launch stays bounded however big the tensor; one launch per wave instead of one per 2 KB of input).
     /// </summary>
     private const int DecodeOutputBudget = ChunkBytes + 1;
-    /// <summary>Bytes one Huffman-only parse launch reads per chunk (a literal per byte, no match search: cheap).</summary>
-    public const int ParseBudget = 8192;
     /// <summary>Table entries one layout launch walks.</summary>
     public const int LayoutChunk = 65536;
 
     private const uint Magic = 0x50574453; // "SDWP"
     private const int SlotBytes = ChunkBytes + 64;
+    private const int SlotWords = SlotBytes / 4;
 
     // prm ints: element size, elements (plane length), chunks per plane, total chunks, running output position (compress)
     // or running input position (decompress), the input length, error flag + where.
@@ -65,24 +68,25 @@ public sealed class WeightPackGpu : IDisposable
     private readonly int _decompressWave;
     private readonly LaunchPacer _pacer;
     private readonly ShuffleFilterGpu _shuffle;
-    private readonly int _scratchPerChunk = DeflateGpu.ScratchInts(ChunkBytes);
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _cInit;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _cParse;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _cPlan, _cEmit;
+    private readonly int _packLanes;
+    private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, int, int> _cCount;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int> _cPlan;
+    private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<uint>, ArrayView<int>, int, int> _cEmit;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _cLayout;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _cCopy;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<uint>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _cCopy;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _cHeader;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _dLayout;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _dInit;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _dStep;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _dCheck;
-    private readonly MemoryBuffer1D<int, Stride1D.Dense> _prm, _cScratch, _dScratch;
-    private readonly MemoryBuffer1D<byte, Stride1D.Dense> _slots;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _prm, _counts, _tails, _dScratch;
+    private readonly MemoryBuffer1D<byte, Stride1D.Dense> _hdr;
+    private readonly MemoryBuffer1D<uint, Stride1D.Dense> _words;
     private readonly StageBuffer<byte> _planes, _stageIn, _stageOut;
     private readonly StageBuffer<int> _offsets;
 
     /// <summary>
-    /// Compiles the kernels and allocates the working memory: ~37 MB to compress, ~9.5 KB per chunk of
+    /// Compiles the kernels and allocates the working memory: ~86 MB to compress, ~9.5 KB per chunk of
     /// <paramref name="decompressWave"/> to decompress (~78 MB at the default 8192).
     /// </summary>
     public WeightPackGpu(Accelerator accelerator, int decompressWave = DecompressWave)
@@ -93,21 +97,25 @@ public sealed class WeightPackGpu : IDisposable
         _decompressWave = decompressWave;
         _pacer = new LaunchPacer(accelerator);
         _shuffle = new ShuffleFilterGpu(accelerator);
-        _cInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(CompressInitKernel);
-        _cParse = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(CompressParseKernel);
-        _cPlan = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(CompressPlanKernel);
-        _cEmit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(CompressEmitKernel);
+        // A power of two that divides ChunkBytes: 256, or the device's largest group (64 on the CPU accelerator).
+        _packLanes = MaxPackLanes;
+        while (_packLanes > accelerator.MaxNumThreadsPerGroup) _packLanes >>= 1;
+        _cCount = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, int, int>(CompressCountKernel);
+        _cPlan = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int>(CompressPlanKernel);
+        _cEmit = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<uint>, ArrayView<int>, int, int>(CompressEmitKernel);
         _cLayout = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(CompressLayoutKernel);
-        _cCopy = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(CompressCopyKernel);
+        _cCopy = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<uint>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(CompressCopyKernel);
         _cHeader = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(CompressHeaderKernel);
         _dLayout = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(DecompressLayoutKernel);
         _dInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(DecompressInitKernel);
         _dStep = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(DecompressStepKernel);
         _dCheck = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(DecompressCheckKernel);
         _prm = accelerator.Allocate1D<int>(PrmInts);
-        _cScratch = accelerator.Allocate1D<int>((long)CompressWave * _scratchPerChunk);
+        _counts = accelerator.Allocate1D<int>((long)CompressWave * 256);
+        _tails = accelerator.Allocate1D<int>((long)CompressWave * DeflateGpu.PlanTailInts);
+        _hdr = accelerator.Allocate1D<byte>((long)CompressWave * DeflateGpu.MaxDynamicHeaderBytes);
+        _words = accelerator.Allocate1D<uint>((long)CompressWave * SlotWords);
         _dScratch = accelerator.Allocate1D<int>((long)_decompressWave * InflateGpu.ScratchInts);
-        _slots = accelerator.Allocate1D<byte>((long)CompressWave * SlotBytes);
         _planes = new StageBuffer<byte>(accelerator);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
@@ -157,25 +165,15 @@ public sealed class WeightPackGpu : IDisposable
         prm[PLength] = length;
         _prm.View.CopyFromCPU(prm);
 
-        int parseSteps = ChunkBytes / ParseBudget + 1;
-        int emitSteps = DeflateGpu.EmitSteps(ChunkBytes) + 1;
         for (int first = 0; first < chunks; first += CompressWave)
         {
             int count = Math.Min(CompressWave, chunks - first);
-            _cInit(count * DeflateGpu.HashSize, _cScratch.View, _prm.View, first);
-            for (int s = 0; s < parseSteps; s++)
-            {
-                _cParse(count, planes, _cScratch.View, _prm.View, first);
-                await _pacer.LaunchedAsync();
-            }
-            _cPlan(count, planes, _slots.View, _cScratch.View, _prm.View, first);
-            for (int s = 0; s < emitSteps; s++)
-            {
-                _cEmit(count, planes, _slots.View, _cScratch.View, _prm.View, first);
-                await _pacer.LaunchedAsync();
-            }
-            _cLayout(1, output, _cScratch.View, _prm.View, OffsetsFor(count), first);
-            _cCopy(count * SlotBytes, _slots.View, output, _cScratch.View, OffsetsFor(count), first);
+            var group = new KernelConfig(count, _packLanes);
+            _cCount(group, planes, _counts.View, _words.View, _prm.View, first, _packLanes);
+            _cPlan(count, _counts.View, _tails.View, _hdr.View, _prm.View, first);
+            _cEmit(group, planes, _tails.View, _hdr.View, _words.View, _prm.View, first, _packLanes);
+            _cLayout(1, output, _tails.View, _prm.View, OffsetsFor(count), first);
+            _cCopy(count * SlotBytes, planes, _words.View, _hdr.View, output, _tails.View, OffsetsFor(count), _prm.View, first);
             await _pacer.LaunchedAsync();
         }
         _cHeader(1, output, _prm.View);
@@ -337,38 +335,111 @@ public sealed class WeightPackGpu : IDisposable
         return len;
     }
 
-    private static int CompressScratchBase(int b) => b * DeflateGpu.ScratchInts(ChunkBytes);
-
-    private static void CompressInitKernel(Index1D i, ArrayView<int> scratch, ArrayView<int> prm, int first)
+    /// <summary>
+    /// <paramref name="lanes"/> threads per chunk of the wave: the chunk's byte counts (shared-memory histogram) into counts,
+    /// and its output words cleared for the emit's ORs.
+    /// </summary>
+    private static void CompressCountKernel(ArrayView<byte> planes, ArrayView<int> counts, ArrayView<uint> words, ArrayView<int> prm, int first, int lanes)
     {
-        int b = i.X / DeflateGpu.HashSize;
-        int k = i.X - b * DeflateGpu.HashSize;
-        DeflateGpu.InitBlockThread(k, ChunkLength(prm, first + b), DeflateGpu.LevelHuffmanOnly, scratch, CompressScratchBase(b), ChunkBytes);
+        var hist = SharedMemory.Allocate<int>(256);
+        int lane = Group.IdxX;
+        int b = Grid.IdxX;
+        int g = first + b;
+        for (int v = lane; v < 256; v += lanes) hist[v] = 0;
+        for (int w = lane; w < SlotWords; w += lanes) words[(long)b * SlotWords + w] = 0;
+        Group.Barrier();
+        int start = ChunkStart(prm, g);
+        int len = ChunkLength(prm, g);
+        for (int i = lane; i < len; i += lanes) Atomic.Add(ref hist[(int)planes[start + i]], 1);
+        Group.Barrier();
+        for (int v = lane; v < 256; v += lanes) counts[b * 256 + v] = hist[v];
     }
 
-    private static void CompressParseKernel(Index1D i, ArrayView<byte> planes, ArrayView<int> scratch, ArrayView<int> prm, int first)
+    /// <summary>One thread per chunk of the wave: its Huffman code, the stored-or-dynamic decision and the block header.</summary>
+    private static void CompressPlanKernel(Index1D i, ArrayView<int> counts, ArrayView<int> tails, ArrayView<byte> hdr, ArrayView<int> prm, int first)
     {
         int g = first + i.X;
-        DeflateGpu.ParseStep(planes, ChunkStart(prm, g), ChunkLength(prm, g), DeflateGpu.LevelHuffmanOnly, scratch,
-            CompressScratchBase(i.X), ChunkBytes, ParseBudget, int.MaxValue);
+        DeflateGpu.PlanHuffmanOnly(counts, i.X * 256, ChunkLength(prm, g), tails, i.X * DeflateGpu.PlanTailInts,
+            hdr, i.X * DeflateGpu.MaxDynamicHeaderBytes);
     }
 
-    private static void CompressPlanKernel(Index1D i, ArrayView<byte> planes, ArrayView<byte> slots, ArrayView<int> scratch, ArrayView<int> prm, int first)
+    /// <summary>
+    /// <paramref name="lanes"/> threads per chunk of the wave (dynamic blocks): each sums the code lengths of its ChunkBytes / lanes bytes, a
+    /// prefix sum over the threads gives its first bit, and it ORs its codes into the chunk's words; thread 0 adds the
+    /// header bits, the last thread the end-of-block code.
+    /// </summary>
+    private static void CompressEmitKernel(ArrayView<byte> planes, ArrayView<int> tails, ArrayView<byte> hdr, ArrayView<uint> words,
+        ArrayView<int> prm, int first, int lanes)
     {
-        int g = first + i.X;
-        DeflateGpu.PlanBlock(planes, ChunkStart(prm, g), ChunkLength(prm, g), true, DeflateGpu.LevelHuffmanOnly,
-            slots, i.X * SlotBytes, SlotBytes, scratch, CompressScratchBase(i.X), ChunkBytes);
+        var codes = SharedMemory.Allocate<int>(256);
+        var lens = SharedMemory.Allocate<int>(256);
+        var part = SharedMemory.Allocate<int>(MaxPackLanes);
+        int lane = Group.IdxX;
+        int b = Grid.IdxX;
+        int g = first + b;
+        int tail = b * DeflateGpu.PlanTailInts;
+        for (int v = lane; v < 256; v += lanes)
+        {
+            codes[v] = tails[tail + DeflateGpu.PlanLitCodeOff + v];
+            lens[v] = tails[tail + DeflateGpu.PlanLitLenOff + v];
+        }
+        Group.Barrier();
+        int start = ChunkStart(prm, g);
+        int len = ChunkLength(prm, g);
+        int per = ChunkBytes / lanes;
+        int from = lane * per;
+        int to = from + per;
+        if (to > len) to = len;
+        int sum = 0;
+        for (int k = from; k < to; k++) sum += lens[(int)planes[start + k]];
+        part[lane] = sum;
+        Group.Barrier();
+        int before = 0;
+        int all = 0;
+        for (int j = 0; j < lanes; j++)
+        {
+            int x = part[j];
+            all += x;
+            if (j < lane) before += x;
+        }
+        bool dynamic = (len > 0) & (DeflateGpu.PlannedKind(tails, tail) == 0);
+        if (dynamic)
+        {
+            long wbase = (long)b * SlotWords;
+            int headerBits = DeflateGpu.PlannedHeaderBits(tails, tail);
+            int bit = headerBits + before;
+            for (int k = from; k < to; k++)
+            {
+                int v = planes[start + k];
+                OrBits(words, wbase, bit, (uint)codes[v], lens[v]);
+                bit += lens[v];
+            }
+            if (lane == 0)
+            {
+                int hb = b * DeflateGpu.MaxDynamicHeaderBytes;
+                for (int k = 0; k * 8 < headerBits; k++)
+                {
+                    int n = headerBits - k * 8;
+                    if (n > 8) n = 8;
+                    OrBits(words, wbase, k * 8, (uint)hdr[hb + k] & ((1u << n) - 1u), n);
+                }
+            }
+            if (lane == lanes - 1)
+                OrBits(words, wbase, headerBits + all, (uint)tails[tail + DeflateGpu.PlanLitCodeOff + 256], tails[tail + DeflateGpu.PlanLitLenOff + 256]);
+        }
     }
 
-    private static void CompressEmitKernel(Index1D i, ArrayView<byte> planes, ArrayView<byte> slots, ArrayView<int> scratch, ArrayView<int> prm, int first)
+    /// <summary>ORs the <paramref name="n"/> (at most 25) low bits of <paramref name="code"/> in at bit <paramref name="bit"/> (LSB first).</summary>
+    private static void OrBits(ArrayView<uint> words, long wbase, int bit, uint code, int n)
     {
-        int g = first + i.X;
-        DeflateGpu.EmitStep(planes, ChunkStart(prm, g), ChunkLength(prm, g), true, slots, i.X * SlotBytes, scratch,
-            CompressScratchBase(i.X), ChunkBytes, DeflateGpu.EmitChunk);
+        int w = bit >> 5;
+        int o = bit & 31;
+        Atomic.Or(ref words[wbase + w], code << o);
+        if (o + n > 32) Atomic.Or(ref words[wbase + w + 1], code >> (32 - o));
     }
 
     /// <summary>One thread: the wave's chunk lengths into the table and their output offsets after the running position.</summary>
-    private static void CompressLayoutKernel(Index1D idx, ArrayView<byte> output, ArrayView<int> scratch, ArrayView<int> prm, ArrayView<int> offsets, int first)
+    private static void CompressLayoutKernel(Index1D idx, ArrayView<byte> output, ArrayView<int> tails, ArrayView<int> prm, ArrayView<int> offsets, int first)
     {
         int chunks = prm[PChunks];
         int count = chunks - first;
@@ -376,8 +447,8 @@ public sealed class WeightPackGpu : IDisposable
         int pos = prm[PPos];
         for (int b = 0; b < count; b++)
         {
-            int n = DeflateGpu.BlockOutput(scratch, CompressScratchBase(b), ChunkBytes);
-            if (n < 0)
+            int n = DeflateGpu.PlannedBytes(tails, b * DeflateGpu.PlanTailInts);
+            if (n > SlotBytes)
             {
                 prm[PError] = 1;
                 prm[PErrorAt] = first + b;
@@ -394,14 +465,40 @@ public sealed class WeightPackGpu : IDisposable
         prm[PPos] = pos;
     }
 
-    /// <summary>One thread per slot byte of the wave: each chunk's DEFLATE bytes to its place.</summary>
-    private static void CompressCopyKernel(Index1D i, ArrayView<byte> slots, ArrayView<byte> output, ArrayView<int> scratch, ArrayView<int> offsets, int first)
+    /// <summary>
+    /// One thread per slot byte of the wave: each chunk's DEFLATE bytes to its place: a dynamic block's from its words,
+    /// a stored block's headers (every 65535 bytes) and bytes from the plane, an empty block's 2 bytes.
+    /// </summary>
+    private static void CompressCopyKernel(Index1D i, ArrayView<byte> planes, ArrayView<uint> words, ArrayView<byte> hdr, ArrayView<byte> output,
+        ArrayView<int> tails, ArrayView<int> offsets, ArrayView<int> prm, int first)
     {
         int b = i.X / SlotBytes;
         int k = i.X - b * SlotBytes;
-        int n = DeflateGpu.BlockOutput(scratch, CompressScratchBase(b), ChunkBytes);
+        int tail = b * DeflateGpu.PlanTailInts;
+        int n = DeflateGpu.PlannedBytes(tails, tail);
         if (k >= n) return;
-        output[offsets[b] + k] = slots[i.X];
+        int kind = DeflateGpu.PlannedKind(tails, tail);
+        int v;
+        if (kind == 0) v = (int)((words[(long)b * SlotWords + (k >> 2)] >> (8 * (k & 3))) & 0xFFu);
+        else if (kind == 2) v = hdr[b * DeflateGpu.MaxDynamicHeaderBytes + k];
+        else
+        {
+            // Stored sub-blocks of at most 65535 bytes, each after a 5-byte header (BFINAL on the last, LEN, NLEN).
+            int g = first + b;
+            int len = ChunkLength(prm, g);
+            int sub = k / 65540;
+            int r = k - sub * 65540;
+            int subStart = sub * 65535;
+            int cnt = len - subStart;
+            if (cnt > 65535) cnt = 65535;
+            if (r == 0) v = subStart + cnt == len ? 1 : 0;
+            else if (r == 1) v = cnt & 0xFF;
+            else if (r == 2) v = (cnt >> 8) & 0xFF;
+            else if (r == 3) v = ~cnt & 0xFF;
+            else if (r == 4) v = (~cnt >> 8) & 0xFF;
+            else v = planes[ChunkStart(prm, g) + subStart + r - 5];
+        }
+        output[offsets[b] + k] = (byte)v;
     }
 
     /// <summary>One thread: the header.</summary>
@@ -506,9 +603,11 @@ public sealed class WeightPackGpu : IDisposable
     {
         _shuffle.Dispose();
         _prm.Dispose();
-        _cScratch.Dispose();
+        _counts.Dispose();
+        _tails.Dispose();
+        _hdr.Dispose();
+        _words.Dispose();
         _dScratch.Dispose();
-        _slots.Dispose();
         _planes.Dispose();
         _stageIn.Dispose();
         _stageOut.Dispose();
