@@ -25,6 +25,10 @@ if (args.Length > 0 && args[0] == "gdeflate-encode")
 if (args.Length > 0 && args[0] == "zlib-encode")
     return await ZlibEncode.Run(args);
 
+// `bcn-encode <in.rgba> <width> <height> <bc1|bc3|bc4|bc5|bc7> <out> [cpu|cuda|opencl] [time]`: BcnEncoderGpu speed bench.
+if (args.Length > 0 && args[0] == "bcn-encode")
+    return await BcnEncode.Run(args);
+
 // Run SpawnDev.UnitTesting unit tests on desktop .NET via PlaywrightMultiTest harness.
 try
 {
