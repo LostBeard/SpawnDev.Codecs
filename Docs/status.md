@@ -13,13 +13,14 @@ one thread writes a whole stream, cannot run there; such tests declare `Requires
 result before that date means "never ran". The lane now creates the real WebGL2 accelerator; the WebGL column is being
 filled batch by batch.
 
-**Velocity (the vectorized CPU backend applications get by default) since 2026-10-26:** the CPU column is the ILGPU
-debug CPU backend, which interprets the kernels' IL, so Velocity's code generator was never exercised until the
-`VelocityCodecsTests` lane. Its first full run (10-26: 960 passed, 10 failed) ran the Scalar2 device by mistake
-(`Velocity()` registers Scalar2 first); since 10-27 the lane runs Vector128, the device applications get. ILGPU
-5.4.7-local.8 / local.9 fixed the VP9 decoder and the WebP lossy encoder. Open (reported to ILGPU): every VP9 encode
-overflows the stack on Vector128 (the generated kernel frame), and the VP9 batch encoder at an unaligned size (70x50)
-writes one byte more than the single-frame encode on Scalar2. The first full Vector128 run is in progress.
+**Velocity (the vectorized CPU backend applications get by default):** the CPU column is the ILGPU debug CPU backend,
+which interprets the kernels' IL, so Velocity's code generator was never exercised until the `VelocityCodecsTests`
+lane (10-26). Its first full run used the Scalar2 device by mistake (`Velocity()` registers Scalar2 first); the lane
+runs Vector128, the device applications get, since 10-27. **10-27, ILGPU 5.4.7-local.11: 970 passed, 0 failed** (2181
+skipped: CPU-only tests that run once in the CPU lane, browser-only overloads). The runs found four Velocity bugs,
+all fixed in ILGPU: a code-generator crash in the VP9 decoder, the WebP lossy encoder's bool NOT on Scalar2, a stack
+overflow of large kernels on Vector128 (every VP9 encode, AV1 encode and decode), and loop exit values mixed between
+lanes (VP9 batch encode at unaligned sizes).
 
 ## Compression
 
