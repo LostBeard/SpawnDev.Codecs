@@ -1,7 +1,8 @@
 # Runs desktop tests of THIS worktree one process each (exactly how PlaywrightMultiTest's console lane does),
 # at BelowNormal priority, printing one line per test. Build first with scripts/dev/build-console.ps1.
 #   pwsh scripts/dev/run-desktop-tests.ps1 -Pattern 'PngDecoderGpu'
-# -Class selects the backend class: CpuCodecsTests (default, ILGPU CPU backend), CudaCodecsTests, OpenCLCodecsTests.
+# -Class selects the backend class: CpuCodecsTests (default, ILGPU CPU backend), CudaCodecsTests, OpenCLCodecsTests,
+# VelocityCodecsTests (the vectorized CPU backend applications get by default).
 # GPU classes share the machine's one GPU with other agents: do NOT run Cuda/OpenCL unless the coordinator
 # (Geordi) has said the GPU is yours.
 param(

@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardDct32x32Kernel_ZeroInput_ProducesAllZeroCoefs()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9ForwardDct32x32Kernel(acc);
@@ -38,6 +39,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardDct32x32Kernel_DcOnlyInput_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9ForwardDct32x32Kernel(acc);
@@ -64,6 +66,7 @@ public abstract partial class CodecsTestBase
     public async Task Vp9ForwardDct32x32Kernel_RandomInput_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var kernel = new Vp9ForwardDct32x32Kernel(acc);

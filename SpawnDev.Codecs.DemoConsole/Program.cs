@@ -30,6 +30,7 @@ try
     services.AddSingleton<CpuCodecsTests>();
     services.AddSingleton<CudaCodecsTests>();
     services.AddSingleton<OpenCLCodecsTests>();
+    services.AddSingleton<VelocityCodecsTests>();
     var sp = services.BuildServiceProvider();
     var runner = new UnitTestRunner(sp, true);
     await ConsoleRunner.Run(args, runner);
