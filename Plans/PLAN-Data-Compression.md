@@ -102,8 +102,11 @@ around GDeflate::Compress / Decompress), `scripts/compression/make_gdeflate_fixt
 **32 lanes per tile done (default):** the HLSL shader's shared-memory path (lane 0 parses headers serially; Huffman
 rounds of one symbol per lane, ballot refills, prefix sums, cooperative copies). RTX 4070 vs Microsoft's CPU decoder on
 31 threads: LTX BF16 512 MB 3.10 vs 2.01 GB/s, C# source 36 MB 6.17 vs 5.65 GB/s (thread-per-tile was 1.90 / 0.39).
-Next for speed: subgroup ballots / shuffles where the backend has them (each shared-memory vote is two barriers),
-parallel table builds.
+**10-27:** occupancy-bound (measured: +10 KB of shared-memory padding per tile dropped 3.08 -> 1.94 GB/s), so the
+tables are packed two 16-bit entries per int (~10.4 -> ~6 KB per tile): 4.09 GB/s on BF16 weights, 7.12 on source.
+Halving the barriers per round (double-buffered votes, lane-private cursor) gained nothing on CUDA (a 32-lane group is
+one warp) and was not kept; ILGPU has no portable ballot (warp size differs per backend). Next: less shared memory
+still (nibble-packed lengths, LitLutBits 9), lanes building the tables in parallel.
 **Encoder done 2026-10-26:** `GDeflateCompressorGpu` (DeflateGpu's parse + `DeflateGpu.GDeflate.cs` plan / emit:
 Deflate64 long matches by merging same-distance matches, best of dynamic / static / stored, the reference writer's
 packet reservation). `scripts/compression/check_gdeflate_encoder.py`: 65 streams (13 inputs x levels 0-4) all decoded
