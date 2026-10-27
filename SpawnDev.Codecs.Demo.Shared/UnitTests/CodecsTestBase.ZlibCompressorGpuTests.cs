@@ -174,12 +174,12 @@ public abstract partial class CodecsTestBase
         await AssertZlibRoundTripAsync(StructuredData(2_500_000, 0x2B05), 3, 1 << 20, "2.5 MB structured, 1 MiB blocks, lazy");
 
     /// <summary>
-    /// A lazy parse launch stops on its compare budget; the host then checks for unfinished parses and launches more.
-    /// With a budget far below what the blocks need, the parse finishes only through that loop, and the stream must be
-    /// byte-identical to the one made with the default budget.
+    /// The parallel parse (DeflateGpu.ParallelParse) writes the bytes of the serial DeflateGpu.ParseStep, its oracle, at
+    /// levels 1-3. The serial lazy parse runs with a compare budget far below what the blocks need, so it finishes only
+    /// through the host's unfinished-parse loop.
     /// </summary>
     [TestMethod(Timeout = 600000)]
-    public async Task ZlibCompressorGpu_Level3_SmallCompareBudget_SameBytes()
+    public async Task ZlibCompressorGpu_ParallelParse_SameBytesAsSerialParse()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         RequireFeatures(acc, SerialStreamKernels);
@@ -187,12 +187,15 @@ public abstract partial class CodecsTestBase
         {
             foreach (var (name, raw) in new[] { ("text", TextData(400_000, 12)), ("structured", StructuredData(300_000, 0x2B06)) })
             {
-                using var normal = new ZlibCompressorGpu(acc, 65536, threadsPerWave: 4);
-                using var starved = new ZlibCompressorGpu(acc, 65536, threadsPerWave: 4) { ParseCompareBudget = 4096 };
-                byte[] a = await normal.CompressAsync(raw, 3);
-                byte[] b = await starved.CompressAsync(raw, 3);
-                EqualBytes(a, b, $"{name}: level 3 with a 4096-compare budget vs the default budget");
-                EqualBytes(raw, DotNetZlibDecompress(b), $"{name}: .NET inflates the starved-budget stream");
+                using var parallel = new ZlibCompressorGpu(acc, 65536, threadsPerWave: 4);
+                using var serial = new ZlibCompressorGpu(acc, 65536, threadsPerWave: 4) { SerialParse = true, ParseCompareBudget = 4096 };
+                for (int level = 1; level <= 3; level++)
+                {
+                    byte[] a = await parallel.CompressAsync(raw, level);
+                    byte[] b = await serial.CompressAsync(raw, level);
+                    EqualBytes(b, a, $"{name}: level {level} parallel parse vs the serial ParseStep (4096-compare budget)");
+                    EqualBytes(raw, DotNetZlibDecompress(a), $"{name}: .NET inflates the level {level} stream");
+                }
             }
         }
         finally { ReleaseAccelerator(ctx, acc); }

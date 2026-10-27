@@ -238,7 +238,7 @@ public sealed class GDeflateCompressorGpu : IDisposable
     {
         int tile = first + idx.X;
         DeflateGpu.WalkParseStep(data, tile * TileSize, TileLength(prm, tile), prm[PLevel], scratch, idx.X * prm[PScratchPer], TileSize,
-            ParseChunk);
+            ParseChunk, false);
     }
 
     /// <summary>Threads per tile when planning (they count its symbols).</summary>

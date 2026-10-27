@@ -418,11 +418,12 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>
-    /// Level 3 with 1 MiB blocks (IDAT chunks of 100+ CRC pieces) and a lazy-parse compare budget far below what the
-    /// blocks need, so the parse finishes only through the host's unfinished-parse loop: same bytes as the default budget.
+    /// Level 3 with 1 MiB blocks (IDAT chunks of 100+ CRC pieces): the parallel parse writes the bytes of the serial
+    /// ParseStep oracle, run with a lazy-parse compare budget far below what the blocks need (it finishes only through the
+    /// host's unfinished-parse loop).
     /// </summary>
     [TestMethod(Timeout = 600000)]
-    public async Task PngEncoderGpu_Level3_BigBlocks_SmallCompareBudget_SameBytes()
+    public async Task PngEncoderGpu_Level3_BigBlocks_ParallelParse_SameBytesAsSerialParse()
     {
         const int w = 1200, h = 700;
         var src = PicturePixels(w, h, 0x5E0C, opaque: false, gray: false);
@@ -431,11 +432,11 @@ public abstract partial class CodecsTestBase
         RequireFeatures(acc, SerialStreamKernels);
         try
         {
-            using var normal = new PngEncoderGpu(acc);
-            using var starved = new PngEncoderGpu(acc) { ParseCompareBudget = 4096 };
-            byte[] a = await normal.EncodeAsync(src, w, h, options);
-            byte[] b = await starved.EncodeAsync(src, w, h, options);
-            EqualBytes(a, b, "level 3 PNG with a 4096-compare budget vs the default budget");
+            using var parallel = new PngEncoderGpu(acc);
+            using var serial = new PngEncoderGpu(acc) { SerialParse = true, ParseCompareBudget = 4096 };
+            byte[] a = await parallel.EncodeAsync(src, w, h, options);
+            byte[] b = await serial.EncodeAsync(src, w, h, options);
+            EqualBytes(b, a, "level 3 PNG: parallel parse vs the serial ParseStep (4096-compare budget)");
             AssertPixelsEqual(src, ReadPngOnHost(b).Rgba8, "1200x700 level 3 host reader");
         }
         finally { ReleaseAccelerator(ctx, acc); }

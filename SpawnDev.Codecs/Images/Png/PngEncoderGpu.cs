@@ -96,13 +96,16 @@ public sealed class PngEncoderGpu : IDisposable
     private readonly StageBuffer<byte> _stageIn;
     private readonly StageBuffer<byte> _stageOut;
 
-    /// <summary>Compare budget of a lazy (level 3) parse launch (tests lower it; the output does not depend on it).</summary>
+    /// <summary>Compare budget of a serial lazy (level 3) parse launch (tests lower it; the output does not depend on it).</summary>
     internal int ParseCompareBudget { get; set; } = DeflateGpu.ParseCompareBudget;
+
+    /// <summary>Tests only: the serial-parse oracle (see DeflateBlockRunner.SerialParse).</summary>
+    internal bool SerialParse { get; set; }
 
     /// <summary>Compile the kernels.</summary>
     /// <param name="accelerator">The accelerator.</param>
-    /// <param name="threadsPerWave">Blocks compressed concurrently.</param>
-    public PngEncoderGpu(Accelerator accelerator, int threadsPerWave = 32)
+    /// <param name="threadsPerWave">Blocks compressed concurrently; 0 = as many as fit in the runner's working-memory budget.</param>
+    public PngEncoderGpu(Accelerator accelerator, int threadsPerWave = 0)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
@@ -234,6 +237,7 @@ public sealed class PngEncoderGpu : IDisposable
             _runners[options.BlockSize] = runner;
         }
         runner.ParseCompareBudget = ParseCompareBudget;
+        runner.SerialParse = SerialParse;
         int blocks = DeflateBlockRunner.BlocksFor(filteredLen, options.BlockSize);
         int piecesPerChunk = PngEncodeKernels.MaxCrcPiecesPerChunk(options.BlockSize);
         _layout.Ensure(blocks + 1);

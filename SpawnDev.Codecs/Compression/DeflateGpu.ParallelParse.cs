@@ -10,7 +10,8 @@
 //   3. WalkParseStep: one thread per block, ParseStep's greedy or lazy choices from those matches (resumable). It writes
 //      the tokens over the matches: token n is written after the match at position p &gt;= n was read, and later reads
 //      are at positions after p.
-// The literal/length and distance frequencies are not counted here (the GDeflate plan counts the merged tokens).
+// The walk counts the literal/length and distance frequencies and the extra bits as ParseStep does when asked (the
+// DEFLATE plan reads them; the GDeflate plan counts its merged tokens itself).
 
 using ILGPU;
 
@@ -20,6 +21,14 @@ public static partial class DeflateGpu
 {
     /// <summary>Threads per block of <see cref="BuildChainsLanes"/> (and positions per step).</summary>
     public const int ChainLanes = 32;
+    /// <summary>
+    /// Positions per block one match launch searches (a search walks at most 64 chain links of at most 258 compares) and
+    /// one walk launch advances (a table read and a token write each).
+    /// </summary>
+    public const int ParallelParseChunk = 8192;
+
+    /// <summary>Walk launches (<see cref="WalkParseStep"/> with <see cref="ParallelParseChunk"/>) that finish a block.</summary>
+    public static int WalkSteps(int blockSize) => (blockSize + ParallelParseChunk - 1) / ParallelParseChunk;
 
     /// <summary>
     /// Step 1, by the <see cref="ChainLanes"/> lanes of a group (<paramref name="lane"/> = Group.IdxX, with
@@ -90,19 +99,22 @@ public static partial class DeflateGpu
     /// <summary>
     /// Step 3, one thread per block: continues ParseStep's choices (greedy, or lazy at level 3) from the matches of step
     /// 2 for at most <paramref name="positionBudget"/> positions (plus the rest of the match it is in), then saves its
-    /// state. Writes the same tokens as ParseStep; a call after the parse ended does nothing.
+    /// state. Writes the same tokens as ParseStep (and with <paramref name="countFrequencies"/> its frequencies and extra
+    /// bits); a call after the parse ended does nothing.
     /// </summary>
     public static void WalkParseStep(ArrayView<byte> data, int start, int len, int level, ArrayView<int> s, int sb, int blockSize,
-        int positionBudget)
+        int positionBudget, bool countFrequencies)
     {
         int tokAt = sb + HashSize + blockSize;
-        int st = tokAt + blockSize + StateOff;
+        int tail = tokAt + blockSize;
+        int st = tail + StateOff;
         if (s[st + StPhase] != PhaseParse) return;
         bool lazy = level == 3;
         int pos = s[st + StPos];
         int n = s[st + StTokens];
         int pendingLen = s[st + StPendLen];
         int pendingDist = s[st + StPendDist];
+        int extraBits = s[st + StExtra];
         int posLimit = len;
         if (positionBudget < len - pos) posLimit = pos + positionBudget;
         bool going = pos < posLimit;
@@ -115,12 +127,12 @@ public static partial class DeflateGpu
             {
                 if (bestLen >= 3)
                 {
-                    s[tokAt + n] = found;
+                    WalkMatch(s, tokAt, tail, n, bestLen, bestDist, countFrequencies, ref extraBits);
                     pos += bestLen;
                 }
                 else
                 {
-                    s[tokAt + n] = data[start + pos];
+                    WalkLiteral(s, tokAt, tail, n, data[start + pos], countFrequencies);
                     pos++;
                 }
                 n++;
@@ -130,7 +142,7 @@ public static partial class DeflateGpu
                 if (bestLen > pendingLen)
                 {
                     // A longer match starts here: the previous byte becomes a literal.
-                    s[tokAt + n] = data[start + pos - 1];
+                    WalkLiteral(s, tokAt, tail, n, data[start + pos - 1], countFrequencies);
                     n++;
                     pendingLen = bestLen;
                     pendingDist = bestDist;
@@ -139,7 +151,7 @@ public static partial class DeflateGpu
                 else
                 {
                     // Take the pending match (it started at pos - 1).
-                    s[tokAt + n] = (pendingLen << 16) | pendingDist;
+                    WalkMatch(s, tokAt, tail, n, pendingLen, pendingDist, countFrequencies, ref extraBits);
                     n++;
                     pos = pos - 1 + pendingLen;
                     pendingLen = 0;
@@ -153,7 +165,7 @@ public static partial class DeflateGpu
             }
             else
             {
-                s[tokAt + n] = data[start + pos];
+                WalkLiteral(s, tokAt, tail, n, data[start + pos], countFrequencies);
                 n++;
                 pos++;
             }
@@ -163,7 +175,7 @@ public static partial class DeflateGpu
         {
             if (pendingLen > 0)
             {
-                s[tokAt + n] = (pendingLen << 16) | pendingDist;
+                WalkMatch(s, tokAt, tail, n, pendingLen, pendingDist, countFrequencies, ref extraBits);
                 n++;
             }
             pendingLen = 0;
@@ -173,5 +185,27 @@ public static partial class DeflateGpu
         s[st + StTokens] = n;
         s[st + StPendLen] = pendingLen;
         s[st + StPendDist] = pendingDist;
+        s[st + StExtra] = extraBits;
+    }
+
+    /// <summary>The walk's literal token (and its count, as AddLiteral).</summary>
+    private static void WalkLiteral(ArrayView<int> s, int tokAt, int tail, int n, int lit, bool count)
+    {
+        s[tokAt + n] = lit;
+        if (count) s[tail + LitFreqOff + lit] = s[tail + LitFreqOff + lit] + 1;
+    }
+
+    /// <summary>The walk's match token (and its counts and extra bits, as AddMatch).</summary>
+    private static void WalkMatch(ArrayView<int> s, int tokAt, int tail, int n, int length, int dist, bool count, ref int extraBits)
+    {
+        s[tokAt + n] = (length << 16) | dist;
+        if (count)
+        {
+            int ls = LengthSymbol(length);
+            int ds = DistSymbol(dist);
+            s[tail + LitFreqOff + ls] = s[tail + LitFreqOff + ls] + 1;
+            s[tail + DistFreqOff + ds] = s[tail + DistFreqOff + ds] + 1;
+            extraBits += LengthExtraBits(length) + DistExtraBits(dist);
+        }
     }
 }

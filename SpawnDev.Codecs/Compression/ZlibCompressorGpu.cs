@@ -44,6 +44,9 @@ internal sealed class DeflateKernels : IDisposable
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _init;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _parse;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _pending;
+    private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _chains;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _match;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _walk;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _plan, _emit;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _result;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _layout;
@@ -56,6 +59,9 @@ internal sealed class DeflateKernels : IDisposable
         _init = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(InitKernel);
         _parse = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(ParseKernel);
         _pending = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int>(PendingKernel);
+        _chains = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(ChainsKernel);
+        _match = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(MatchKernel);
+        _walk = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(WalkKernel);
         _plan = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(PlanKernel);
         _emit = accelerator.LoadAutoGroupedStreamKernel<
@@ -84,6 +90,18 @@ internal sealed class DeflateKernels : IDisposable
     /// <summary>One bounded parse launch of the blocks [waveBase, waveBase + count).</summary>
     public void RunParse(ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int waveBase, int count) =>
         _parse(count, data, scratch, prm, waveBase);
+
+    /// <summary>The wave's hash chains (DeflateGpu.ParallelParse step 1): one group of DeflateGpu.ChainLanes per block.</summary>
+    public void RunChains(ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int waveBase, int count) =>
+        _chains(new KernelConfig(count, DeflateGpu.ChainLanes), data, scratch, prm, waveBase);
+
+    /// <summary>Every position's match in [from, from + ParallelParseChunk) of the wave's blocks (step 2).</summary>
+    public void RunMatch(ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int waveBase, int count, int from) =>
+        _match(count * DeflateGpu.ParallelParseChunk, data, scratch, prm, waveBase, from);
+
+    /// <summary>One bounded walk launch of the wave (step 3).</summary>
+    public void RunWalk(ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int waveBase, int count) =>
+        _walk(count, data, scratch, prm, waveBase);
 
     /// <summary>Counts the wave's unfinished parses into prm[PrmPending].</summary>
     public void RunPending(ArrayView<int> scratch, ArrayView<int> prm, int waveBase, int count) =>
@@ -184,6 +202,37 @@ internal sealed class DeflateKernels : IDisposable
         int compareBudget = level == 3 ? prm[PrmCompareBudget] : int.MaxValue;
         DeflateGpu.ParseStep(data, block * bs, BlockLength(prm, block), level, scratch, idx.X * prm[PrmScratchPer], bs,
             DeflateGpu.ParseChunk, compareBudget);
+    }
+
+    private static void ChainsKernel(ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int waveBase)
+    {
+        var hs = SharedMemory.Allocate<int>(DeflateGpu.ChainLanes);
+        int b = Grid.IdxX;
+        int block = waveBase + b;
+        int bs = prm[PrmBlockSize];
+        int len = 0;
+        if (block < prm[PrmBlocks]) len = BlockLength(prm, block);
+        // A block past the end has length 0: its group still meets every barrier.
+        DeflateGpu.BuildChainsLanes(data, block * bs, len, scratch, b * prm[PrmScratchPer], bs, hs, Group.IdxX);
+    }
+
+    private static void MatchKernel(Index1D idx, ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int waveBase, int from)
+    {
+        int b = idx.X / DeflateGpu.ParallelParseChunk;
+        int k = from + (idx.X - b * DeflateGpu.ParallelParseChunk);
+        int block = waveBase + b;
+        if (block >= prm[PrmBlocks]) return;
+        int bs = prm[PrmBlockSize];
+        DeflateGpu.FindMatchThread(data, block * bs, BlockLength(prm, block), k, prm[PrmLevel], scratch, b * prm[PrmScratchPer], bs);
+    }
+
+    private static void WalkKernel(Index1D idx, ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int waveBase)
+    {
+        int block = waveBase + idx.X;
+        if (block >= prm[PrmBlocks]) return;
+        int bs = prm[PrmBlockSize];
+        DeflateGpu.WalkParseStep(data, block * bs, BlockLength(prm, block), prm[PrmLevel], scratch, idx.X * prm[PrmScratchPer], bs,
+            DeflateGpu.ParallelParseChunk, true);
     }
 
     private static void PendingKernel(Index1D _, ArrayView<int> scratch, ArrayView<int> prm, int waveBase, int count)
@@ -320,7 +369,13 @@ internal sealed class DeflateBlockRunner : IDisposable
     public ArrayView1D<int, Stride1D.Dense> Prm => _prm.View;
 
     /// <summary>
-    /// Byte compares after which a lazy (level 3) parse launch stops (<see cref="DeflateGpu.ParseCompareBudget"/>).
+    /// Tests only: parse levels 1-3 with the serial DeflateGpu.ParseStep (one thread per block, resumable launches) instead
+    /// of DeflateGpu.ParallelParse. It is the oracle of the parallel parse, which must write the same bytes.
+    /// </summary>
+    internal bool SerialParse { get; set; }
+
+    /// <summary>
+    /// Byte compares after which a serial lazy (level 3) parse launch stops (<see cref="DeflateGpu.ParseCompareBudget"/>).
     /// Tests lower it to drive the unfinished-parse loop; the output does not depend on it.
     /// </summary>
     internal int ParseCompareBudget { get; set; } = DeflateGpu.ParseCompareBudget;
@@ -328,10 +383,10 @@ internal sealed class DeflateBlockRunner : IDisposable
     public DeflateBlockRunner(Accelerator accelerator, int blockSize, int threadsPerWave)
     {
         if (blockSize < 1024 || blockSize > DeflateGpu.MaxBlockSize) throw new ArgumentOutOfRangeException(nameof(blockSize));
-        if (threadsPerWave < 1) throw new ArgumentOutOfRangeException(nameof(threadsPerWave));
+        if (threadsPerWave < 0) throw new ArgumentOutOfRangeException(nameof(threadsPerWave));
         _accelerator = accelerator;
         BlockSize = blockSize;
-        _wave = threadsPerWave;
+        _wave = threadsPerWave > 0 ? threadsPerWave : AutoWave(accelerator, blockSize);
         Kernels = new DeflateKernels(accelerator);
         _prm = accelerator.Allocate1D<int>(DeflateKernels.PrmInts);
         _slots = new StageBuffer<byte>(accelerator);
@@ -341,6 +396,22 @@ internal sealed class DeflateBlockRunner : IDisposable
     }
 
     public static int BlocksFor(int length, int blockSize) => Math.Max(1, (length + blockSize - 1) / blockSize);
+
+    /// <summary>Working memory a wave may take when the caller leaves the wave to the runner: desktop / browser accelerators.</summary>
+    public const long DesktopWaveBytes = 256L << 20, BrowserWaveBytes = 32L << 20;
+
+    /// <summary>
+    /// Blocks per wave when the caller passes 0: as many as fit in <see cref="DesktopWaveBytes"/> (browser accelerators:
+    /// <see cref="BrowserWaveBytes"/>) of working memory. One thread or group compresses a block in each step, so throughput
+    /// grows with the wave (RTX 4070, 64 MB of BF16 weights at level 1: 0.006 GB/s at 32 blocks, 0.053 at 512).
+    /// </summary>
+    public static int AutoWave(Accelerator accelerator, int blockSize)
+    {
+        bool browser = accelerator.AcceleratorType is AcceleratorType.WebGPU or AcceleratorType.WebGL or AcceleratorType.Wasm;
+        long budget = browser ? BrowserWaveBytes : DesktopWaveBytes;
+        long perBlock = 4L * DeflateGpu.ScratchInts(blockSize);
+        return (int)Math.Clamp(budget / perBlock, 1, 4096);
+    }
 
     /// <summary>
     /// Enqueue compression of the first <paramref name="length"/> bytes of <paramref name="data"/>: block outputs in
@@ -377,13 +448,14 @@ internal sealed class DeflateBlockRunner : IDisposable
 
         Kernels.RunAdler(data, _adler.View, _res.View, _prm.View, blocks, piecesPerBlock);
         int parseSteps = DeflateGpu.ParseSteps(BlockSize);
+        int walkSteps = DeflateGpu.WalkSteps(BlockSize);
         int emitSteps = DeflateGpu.EmitSteps(BlockSize);
         var pacer = new LaunchPacer(_accelerator);
         for (int first = 0; first < blocks; first += wave)
         {
             int count = Math.Min(wave, blocks - first);
             Kernels.RunInit(_scratch.View, _prm.View, first, count);
-            if (level > 0)
+            if ((level == DeflateGpu.LevelHuffmanOnly) | (SerialParse & (level > 0)))
             {
                 for (int i = 0; i < parseSteps; i++)
                 {
@@ -402,6 +474,21 @@ internal sealed class DeflateBlockRunner : IDisposable
                         if (pending)
                             for (int i = 0; i < LazyParseBatch; i++) Kernels.RunParse(data, _scratch.View, _prm.View, first, count);
                     }
+                }
+            }
+            else if (level > 0)
+            {
+                // The parse in parallel steps (DeflateGpu.ParallelParse), the same tokens and counts as ParseStep.
+                Kernels.RunChains(data, _scratch.View, _prm.View, first, count);
+                for (int from = 0; from < BlockSize; from += DeflateGpu.ParallelParseChunk)
+                {
+                    Kernels.RunMatch(data, _scratch.View, _prm.View, first, count, from);
+                    await pacer.LaunchedAsync();
+                }
+                for (int i = 0; i < walkSteps; i++)
+                {
+                    Kernels.RunWalk(data, _scratch.View, _prm.View, first, count);
+                    await pacer.LaunchedAsync();
                 }
             }
             Kernels.RunPlan(data, _slots.View, _scratch.View, _prm.View, first, count);
@@ -442,12 +529,13 @@ public sealed class ZlibCompressorGpu : IDisposable
     /// <summary>Compile the kernels.</summary>
     /// <param name="accelerator">The accelerator.</param>
     /// <param name="blockSize">Input bytes per independent block (1 KiB .. 1 MiB). Larger blocks compress better, smaller ones parallelize more.</param>
-    /// <param name="threadsPerWave">Blocks compressed concurrently (scratch memory scales with this).</param>
-    public ZlibCompressorGpu(Accelerator accelerator, int blockSize = DefaultBlockSize, int threadsPerWave = 32)
+    /// <param name="threadsPerWave">Blocks compressed concurrently (scratch memory scales with this); 0 = as many as fit in
+    /// DeflateBlockRunner.DesktopWaveBytes (browser accelerators: BrowserWaveBytes) of working memory.</param>
+    public ZlibCompressorGpu(Accelerator accelerator, int blockSize = DefaultBlockSize, int threadsPerWave = 0)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         if (blockSize < 1024 || blockSize > DeflateGpu.MaxBlockSize) throw new ArgumentOutOfRangeException(nameof(blockSize));
-        if (threadsPerWave < 1) throw new ArgumentOutOfRangeException(nameof(threadsPerWave));
+        if (threadsPerWave < 0) throw new ArgumentOutOfRangeException(nameof(threadsPerWave));
         _accelerator = accelerator;
         _blockSize = blockSize;
         _runner = new DeflateBlockRunner(accelerator, blockSize, threadsPerWave);
@@ -458,7 +546,10 @@ public sealed class ZlibCompressorGpu : IDisposable
 
     private static int BlockCount(int length, int blockSize) => Math.Max(1, (length + blockSize - 1) / blockSize);
 
-    /// <summary>Compare budget of a lazy parse launch (tests lower it; the output does not depend on it).</summary>
+    /// <summary>Tests only: the serial-parse oracle (see DeflateBlockRunner.SerialParse).</summary>
+    internal bool SerialParse { get => _runner.SerialParse; set => _runner.SerialParse = value; }
+
+    /// <summary>Compare budget of a serial lazy parse launch (tests lower it; the output does not depend on it).</summary>
     internal int ParseCompareBudget { get => _runner.ParseCompareBudget; set => _runner.ParseCompareBudget = value; }
 
     /// <summary>Upper bound of the compressed size of <paramref name="inputLength"/> bytes (the output view must be at least this long).</summary>

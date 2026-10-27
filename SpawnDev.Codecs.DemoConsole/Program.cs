@@ -21,6 +21,10 @@ if (args.Length > 0 && args[0] == "gdeflate-bench")
 if (args.Length > 0 && args[0] == "gdeflate-encode")
     return await GDeflateEncode.Run(args);
 
+// `zlib-encode <in> <out.zz> [level] [cpu|cuda|opencl] [time] [wave]`: ZlibCompressorGpu speed bench.
+if (args.Length > 0 && args[0] == "zlib-encode")
+    return await ZlibEncode.Run(args);
+
 // Run SpawnDev.UnitTesting unit tests on desktop .NET via PlaywrightMultiTest harness.
 try
 {
