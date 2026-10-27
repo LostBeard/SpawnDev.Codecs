@@ -135,6 +135,9 @@ public sealed class WebPLossyEncoderGpu : IDisposable
     /// </summary>
     private static int AlignPlane(int v) => (v + 255) & ~255;
 
+    /// <summary>The same 256-byte rule for int offsets (the state areas the setup kernel writes together).</summary>
+    private static int AlignInts(int v) => (v + 63) & ~63;
+
     private sealed class Layout
     {
         public int Width, Height, MbW, MbH, MbCount, PredsSize, Cw, Ch;
@@ -155,9 +158,9 @@ public sealed class WebPLossyEncoderGpu : IDisposable
         l.PredsSize = predsW * (4 * l.MbH + 1);
         l.WorkYTop = Align4(l.PredsSize); l.WorkScratch = Align4(l.WorkYTop + 2 * l.MbW * 16);
         l.WorkSize = l.WorkScratch + WebPLossyEncodeRowKernel.ByteScratchSize;
-        l.StNz = 0; l.StTopDerr = l.MbW + 1; l.StCoeffs = l.StTopDerr + l.MbW * 4;
-        l.StStats = l.StCoeffs + WebPLossySetupKernel.ProbaCount; l.StLevelCost = l.StStats + WebPLossySetupKernel.ProbaCount;
-        l.StScratch = l.StLevelCost + WebPLossySetupKernel.LevelCostCount;
+        l.StNz = 0; l.StTopDerr = l.MbW + 1; l.StCoeffs = AlignInts(l.StTopDerr + l.MbW * 4);
+        l.StStats = AlignInts(l.StCoeffs + WebPLossySetupKernel.ProbaCount); l.StLevelCost = AlignInts(l.StStats + WebPLossySetupKernel.ProbaCount);
+        l.StScratch = AlignInts(l.StLevelCost + WebPLossySetupKernel.LevelCostCount);
         l.StateSize = l.StScratch + WebPLossyEncodeRowKernel.IntScratchSize;
         l.P0Cap = 4096 + l.MbCount * 64;
         // A token codes at most one bit; at worst a bit costs 8 bits (probability 1/256): tokens bytes + slack.
