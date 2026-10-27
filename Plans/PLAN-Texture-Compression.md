@@ -28,6 +28,13 @@ TypedArray / ArrayView1D), no bulk bytes on the .NET heap, a reference oracle fo
   DXTC compressors, byte-identical on 19 fixtures, all 7 lanes. (The etcpak 0.9.15 Windows wheel runs the portable paths:
   its BC4 matches that arithmetic 256 / 256 blocks, the SSE4.1 variant 246; the portable BC1 ignores alpha.) Quality is
   etcpak's (fast range-fit); a higher-quality mode (cluster fit / least squares) can follow, gated on PSNR.
+- 10-27 **Encoder BC7** (`Bc7EncoderGpu`, behind `BcnEncoderGpu` with `BcnFormat.Bc7`): a port of bc7enc (the copy etcpak
+  0.9.15 builds) at its default settings: modes 6 + 1 for opaque blocks, 6 + 5 + 7 with alpha, perceptual weights, 64
+  partitions with the filter bank, least squares. One launch per mode (one thread per block, bc7enc's order, a packed
+  40-byte best-so-far per block), then a packing launch (one thread per output word). 9 fixtures (8435 blocks): CPU and
+  Velocity byte-identical with bc7enc on every block. GPU lanes: see the test log.
+  The etcpak wheel's SIMD modules are tagged cp37 and do not load on Python 3.13+, so the oracle runs `_etcpak_none`
+  (portable code); the fixture script asserts it.
 
 ## Oracles (Python, oracle venv)
 

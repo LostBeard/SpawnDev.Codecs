@@ -31,7 +31,8 @@ public sealed class BcnEncoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int> _encode;
     private readonly StageBuffer<byte> _stageIn;
     private readonly StageBuffer<byte> _stageOut;
-    private readonly StageBuffer<int> _bc7Scratch;
+    private readonly StageBuffer<int> _bc7ScratchA;
+    private readonly StageBuffer<int> _bc7ScratchB;
     private readonly Accelerator _accelerator;
     private Bc7EncoderGpu? _bc7;
 
@@ -47,7 +48,8 @@ public sealed class BcnEncoderGpu : IDisposable
         _encode = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>(EncodeKernel);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
-        _bc7Scratch = new StageBuffer<int>(accelerator);
+        _bc7ScratchA = new StageBuffer<int>(accelerator);
+        _bc7ScratchB = new StageBuffer<int>(accelerator);
     }
 
     /// <summary>
@@ -96,8 +98,8 @@ public sealed class BcnEncoderGpu : IDisposable
         if (format == BcnFormat.Bc7)
         {
             _bc7 ??= new Bc7EncoderGpu(_accelerator);
-            _bc7Scratch.Ensure(size / 16 * Bc7EncoderGpu.BlockInts);
-            _bc7.Encode(rgba, width, height, _bc7Scratch.View, blocks);
+            long ints = Bc7EncoderGpu.ScratchInts(width, height);
+            _bc7.Encode(rgba, width, height, _bc7ScratchA.Ensure(ints), _bc7ScratchB.Ensure(ints), blocks);
         }
         else _encode((int)(size / 4), rgba, blocks, _tables.View, (int)format, width, height);
     }
@@ -214,7 +216,8 @@ public sealed class BcnEncoderGpu : IDisposable
         _tables.Dispose();
         _stageIn.Dispose();
         _stageOut.Dispose();
-        _bc7Scratch.Dispose();
+        _bc7ScratchA.Dispose();
+        _bc7ScratchB.Dispose();
         _bc7?.Dispose();
     }
 }

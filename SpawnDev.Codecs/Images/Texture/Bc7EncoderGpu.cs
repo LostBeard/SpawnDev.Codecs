@@ -14,6 +14,7 @@
 using ILGPU;
 using ILGPU.Algorithms;
 using ILGPU.Runtime;
+using SpawnDev.ILGPU;
 
 namespace SpawnDev.Codecs.Images.Texture;
 
@@ -48,17 +49,21 @@ internal sealed class Bc7EncoderGpu : IDisposable
 
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _ti;
     private readonly MemoryBuffer1D<float, Stride1D.Dense> _tf;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int, int> _mode;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int, int, int> _mode;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>> _pack;
+    // Threads per block in a mode launch: 1 (it stores the whole best), or BlockInts where a thread may store only its
+    // own element (WebGL): thread j of a block computes the same candidate and stores int j.
+    private readonly int _lanes;
 
     public Bc7EncoderGpu(Accelerator accelerator)
     {
+        _lanes = accelerator.Device.Satisfies(new AcceleratorRequirements { RequiresScatterStores = true }) ? 1 : BlockInts;
         _ti = accelerator.Allocate1D<int>(TableInts);
         _tf = accelerator.Allocate1D<float>(TableFloats);
         BuildTables(out int[] ti, out float[] tf);
         _ti.View.CopyFromCPU(ti);
         _tf.View.CopyFromCPU(tf);
-        _mode = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int, int>(ModeKernel);
+        _mode = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int, int, int>(ModeKernel);
         _pack = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>>(PackKernel);
     }
 
@@ -164,15 +169,24 @@ internal sealed class Bc7EncoderGpu : IDisposable
         ti[TPW + 3] = 32 * 4;
     }
 
+    /// <summary>Ints each of the two scratch buffers needs for a width x height picture (the per-block best).</summary>
+    public static long ScratchInts(int width, int height) => (long)BlockInts * ((width + 3) / 4) * ((height + 3) / 4);
+
     /// <summary>
-    /// Queue the BC7 encode of rgba (width x height, edge pixels repeated) into blocks; scratch = BlockInts ints per block.
-    /// The mode launches run in bc7enc's order (6, 1, 5, 7), each replacing the block's best when strictly better.
+    /// Queue the BC7 encode of rgba (width x height, edge pixels repeated) into blocks; scratchA and scratchB hold
+    /// ScratchInts ints each. The mode launches run in bc7enc's order (6, 1, 5, 7), each reading the block's best from
+    /// one scratch buffer and writing the new best (its candidate when strictly better, else the old best) to the other,
+    /// so no launch reads what it writes.
     /// </summary>
-    public void Encode(ArrayView<byte> rgba, int width, int height, ArrayView<int> scratch, ArrayView<byte> blocks)
+    public void Encode(ArrayView<byte> rgba, int width, int height, ArrayView<int> scratchA, ArrayView<int> scratchB, ArrayView<byte> blocks)
     {
         int count = ((width + 3) / 4) * ((height + 3) / 4);
-        for (int which = 0; which < 4; which++) _mode(count, rgba, scratch, _ti.View, _tf.View, which, width, height);
-        _pack(count * 4, scratch, blocks, _ti.View);
+        for (int which = 0; which < 4; which++)
+        {
+            bool even = (which & 1) == 0;
+            _mode(count * _lanes, rgba, even ? scratchB : scratchA, even ? scratchA : scratchB, _ti.View, _tf.View, which, width, height, _lanes);
+        }
+        _pack(count * 4, scratchB, blocks, _ti.View);
     }
 
     public void Dispose()
@@ -204,13 +218,17 @@ internal sealed class Bc7EncoderGpu : IDisposable
     }
 
     /// <summary>
-    /// One thread per block: the candidate of one mode (which 0: mode 6, 1: mode 1, 2: mode 5, 3: mode 7), kept as the
-    /// block's best when it is the first or its weighted error is strictly lower (bc7enc's choice). Opaque blocks try modes
-    /// 6 and 1, blocks with alpha 6, 5 and 7; once the best error is 0 the later modes are skipped.
+    /// <paramref name="lanes"/> threads per block: the candidate of one mode (which 0: mode 6, 1: mode 1, 2: mode 5, 3:
+    /// mode 7), the block's new best when it is the first or its weighted error is strictly lower than the best in
+    /// <paramref name="prev"/> (bc7enc's choice); the new best goes to <paramref name="next"/>. Opaque blocks try modes 6
+    /// and 1, blocks with alpha 6, 5 and 7; once the best error is 0 the later modes are skipped. With one lane a thread
+    /// stores the whole best, with BlockInts lanes thread j stores its int j (whose index is the thread's).
     /// </summary>
-    private static void ModeKernel(Index1D block, ArrayView<byte> rgba, ArrayView<int> scratch, ArrayView<int> ti, ArrayView<float> tf,
-        int which, int width, int height)
+    private static void ModeKernel(Index1D index, ArrayView<byte> rgba, ArrayView<int> prev, ArrayView<int> next, ArrayView<int> ti,
+        ArrayView<float> tf, int which, int width, int height, int lanes)
     {
+        int block = index / lanes;
+        int lane = index - block * lanes;
         var px = LocalMemory.Allocate<int>(64);
         var idx = LocalMemory.Allocate<int>(16);
         var sel = LocalMemory.Allocate<int>(16);
@@ -218,37 +236,43 @@ internal sealed class Bc7EncoderGpu : IDisposable
         var res = LocalMemory.Allocate<int>(32);   // low[4], high[4], pbits[2] of the best solution; 16..25 a one-colour candidate
         var est = LocalMemory.Allocate<int>(40);   // the partition estimator's interpolated colours and thresholds
         var cand = LocalMemory.Allocate<int>(CandInts);
+        for (int i = 0; i < CandInts; i++) cand[i] = 0;
         bool alpha = LoadBlock(rgba, block, width, height, px);
         int w0 = ti[TPW], w1 = ti[TPW + 1], w2 = ti[TPW + 2], w3 = ti[TPW + 3];
 
         // One call site per heavy helper (each is inlined where it is called).
         int mode = which == 0 ? 6 : (which == 1 ? 1 : (which == 2 ? 5 : 7));
         bool active = (which == 0) | ((which == 1) & !alpha) | ((which >= 2) & alpha);
-        if (!active) return;
         int b = block * BlockInts;
-        ulong best = 0;
-        if (which != 0)
-        {
-            best = BestErr(scratch, b);
-            if (best == 0) return;
-        }
-        bool partitioned = (mode == 1) | (mode == 7);
-        bool cellAlpha = (mode == 7) | ((mode == 6) & alpha);
+        ulong best = which == 0 ? 0 : BestErr(prev, b);
+        bool run = active & ((which == 0) | (best != 0));
+        bool take = false;
+        ulong weighted = 0;
         int part = 0;
-        if (partitioned) part = EstimatePartition(mode, px, idx, est, ti, w0, w1, w2, w3);
-        ulong total = 0;
-        int subsets = partitioned ? 2 : 1;
-        for (int subset = 0; subset < subsets; subset++)
+        if (run)
         {
-            int n = 0;
-            for (int i = 0; i < 16; i++)
-                if ((!partitioned) | (ti[TP2 + part * 16 + i] == subset)) { idx[n] = i; n++; }
-            total += CellCompression(mode, n, cellAlpha, px, idx, sel, selTemp, res, ti, tf, w0, w1, w2, w3);
-            StoreCand(cand, res, subset, sel, idx, n);
+            bool partitioned = (mode == 1) | (mode == 7);
+            bool cellAlpha = (mode == 7) | ((mode == 6) & alpha);
+            if (partitioned) part = EstimatePartition(mode, px, idx, est, ti, w0, w1, w2, w3);
+            ulong total = 0;
+            int subsets = partitioned ? 2 : 1;
+            for (int subset = 0; subset < subsets; subset++)
+            {
+                int n = 0;
+                for (int i = 0; i < 16; i++)
+                    if ((!partitioned) | (ti[TP2 + part * 16 + i] == subset)) { idx[n] = i; n++; }
+                total += CellCompression(mode, n, cellAlpha, px, idx, sel, selTemp, res, ti, tf, w0, w1, w2, w3);
+                StoreCand(cand, res, subset, sel, idx, n);
+            }
+            if (mode == 5) total += Mode5Alpha(cand, px, sel, tf, w3);
+            weighted = Weighted(total);
+            take = (which == 0) | (weighted < best);
         }
-        if (mode == 5) total += Mode5Alpha(cand, px, sel, tf, w3);
-        ulong weighted = Weighted(total);
-        if ((which == 0) | (weighted < best)) WriteBest(scratch, b, weighted, mode, part, cand);
+        for (int j = 0; j < BlockInts; j++)
+        {
+            if ((lanes == 1) | (j == lane))
+                next[b + j] = take ? BestInt(j, weighted, mode, part, cand) : prev[b + j];
+        }
     }
 
     /// <summary>Subset <paramref name="subset"/>'s endpoints, p-bits and selectors (at the pixel indices) into the candidate.</summary>
@@ -270,28 +294,27 @@ internal sealed class Bc7EncoderGpu : IDisposable
     /// <summary>bc7enc's (uint64_t)(err * weight + .5f) with the default weight 1: the error rounded through a float.</summary>
     private static ulong Weighted(ulong err) => (ulong)((float)err * 1.0f + .5f);
 
-    /// <summary>The candidate, packed, as the block's best.</summary>
-    private static void WriteBest(ArrayView<int> scratch, int b, ulong err, int mode, int part, ArrayView<int> cand)
+    /// <summary>Int j of the candidate packed as the block's best.</summary>
+    private static int BestInt(int j, ulong err, int mode, int part, ArrayView<int> cand)
     {
-        scratch[b + BErrLo] = (int)(uint)err;
-        scratch[b + BErrHi] = (int)(uint)(err >> 32);
-        int pbits = cand[CPbits] | (cand[CPbits + 1] << 1) | (cand[CPbits + 2] << 2) | (cand[CPbits + 3] << 3);
-        scratch[b + BInfo] = mode | (part << 4) | (pbits << 10);
-        for (int e = 0; e < 4; e++)
+        int v = 0;
+        if (j == BErrLo) v = (int)(uint)err;
+        else if (j == BErrHi) v = (int)(uint)(err >> 32);
+        else if (j == BInfo)
+            v = mode | (part << 4) | ((cand[CPbits] | (cand[CPbits + 1] << 1) | (cand[CPbits + 2] << 2) | (cand[CPbits + 3] << 3)) << 10);
+        else if (j < BSel)
         {
-            int at = e * 4;
-            scratch[b + BEnd + e] = cand[at] | (cand[at + 1] << 8) | (cand[at + 2] << 16) | (cand[at + 3] << 24);
+            int at = (j - BEnd) * 4;
+            v = cand[at] | (cand[at + 1] << 8) | (cand[at + 2] << 16) | (cand[at + 3] << 24);
         }
-        int s0 = 0, s1 = 0, a = 0;
-        for (int i = 0; i < 8; i++)
+        else if (j < BASel)
         {
-            s0 |= cand[CSel + i] << (i * 4);
-            s1 |= cand[CSel + 8 + i] << (i * 4);
+            int at = CSel + (j - BSel) * 8;
+            for (int i = 0; i < 8; i++) v |= cand[at + i] << (i * 4);
         }
-        for (int i = 0; i < 16; i++) a |= cand[CASel + i] << (i * 2);
-        scratch[b + BSel] = s0;
-        scratch[b + BSel + 1] = s1;
-        scratch[b + BASel] = a;
+        else
+            for (int i = 0; i < 16; i++) v |= cand[CASel + i] << (i * 2);
+        return v;
     }
 
     /// <summary>handle_alpha_block_mode5's alpha part: the alpha endpoints and 2-bit selectors into the candidate; returns its error.</summary>
