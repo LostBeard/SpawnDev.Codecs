@@ -10,3 +10,5 @@ Snappy/*.sz binary
 SnappyDec/*.sz binary
 SnappyDec/*.content binary
 GDeflate/*.gdf binary
+Bcn/* binary
+Bcn/manifest.tsv text eol=lf

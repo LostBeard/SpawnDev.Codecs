@@ -1,0 +1,35 @@
+# PLAN: GPU texture compression (BCn first) (Geordi, 2026-10-27)
+
+TJ 10-26 asked for general data compression "with Google's suggestions BC7, bitshuffle, LZ4". Bitshuffle (filters) and
+LZ4 are done in PLAN-Data-Compression.md; that plan left texture formats to their own track. This is it. Consumers:
+SpawnScene / VoxelEngine / LostSpawns textures (WebGPU `texture-compression-bc` on desktop; ETC2 / ASTC on mobile and
+Quest later), and anything that uploads big RGBA textures every frame.
+
+Same rules as every codec here: ILGPU kernels on all six backends, host = coordinator, three overloads (managed /
+TypedArray / ArrayView1D), no bulk bytes on the .NET heap, a reference oracle for every byte.
+
+## Formats, in build order
+
+1. **Decoders BC1, BC3, BC4, BC5, BC7** (exact; the verification side and the fallback where the GPU lacks the format).
+   One thread per output pixel (gather form: a thread reads its block and decodes only what its pixel needs), so it
+   also runs on WebGL. BC7 decode is integer-exact by the spec; BC1's 3- and 4-colour interpolation rounding differs
+   between decoders, so the oracle and its rounding are named in the tests.
+2. **Encoders BC1 / BC4 / BC5** (range fit + refinement) and **BC3** (BC1 colour + BC4 alpha).
+3. **Encoder BC7** (modes 1 / 6 first, then the partitioned modes and alpha modes; bc7enc's search). Encoders are not
+   unique: the gate is that the reference decoders read our blocks and the PSNR is within a stated bound of the
+   reference encoder at comparable settings, logged with the losses.
+4. Later: BC6H, ETC2 / EAC, ASTC (the same oracles cover them).
+
+## Oracles (Python, oracle venv)
+
+- `etcpak` (K0lb3's bindings of etcpak; BC7 through bc7enc): `compress_bc1/3/4/5/7`, `decompress_*`.
+- `texture2ddecoder` (K0lb3, from AssetStudio): `decode_bc1/3/4/5/6/7`, ETC, ASTC: a second, independent decoder.
+- Fixtures: `scripts/texture/make_bcn_fixtures.py` writes blocks made by the reference encoders over real pictures
+  (TestData photos, alpha pictures) plus synthetic blocks that hit every BC7 mode / partition / rotation, and the RGBA
+  both reference decoders produce for them.
+
+## Gates
+
+- Decode: bit-exact with the reference decoder(s) on every fixture (BC1: the named rounding).
+- Encode: reference decoders read our blocks; PSNR vs the reference encoder logged in _TestStats (losses included).
+- Green on CPU, Velocity, CUDA, OpenCL, WebGPU, Wasm, WebGL.

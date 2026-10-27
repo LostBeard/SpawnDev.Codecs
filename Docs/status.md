@@ -47,6 +47,13 @@ lanes (VP9 batch encode at unaligned sizes).
 | GIF decode / encode | green | green | green | **partial** (10-25, 19 passed): correct, 2 fixture tests take 52 to 73 s | open | open | Pillow decodes our files to the same pixels; quantizer PSNR vs Pillow |
 | BMP decode / encode | green | green | green | green (10-25, 19 / 0) | header scan and alpha scan rewritten as gathers 10-26 (rerun pending); RLE refused (scatter stores) | open | Pillow |
 
+## Textures
+
+| Codec | CPU | CUDA | OpenCL | WebGPU | WebGL | Wasm | Evidence |
+|-------|-----|------|--------|--------|-------|------|----------|
+| BCn decode (BC1, BC3, BC4, BC5, BC7) | green (10-27, also Velocity) | green | green | green | green | green | 29 fixtures bit-exact with the reference decoders (texture2ddecoder, cross-checked with Pillow): reference-encoder blocks (etcpak, bc7enc per mode) over a real frame and an RGBA picture, random blocks (every BC7 mode, partition, rotation, the reserved mode), partial edge blocks. Spec choices where the references disagree: BC3 colour always 4-colour, BC1 3-colour index 3 = (0,0,0,0), BC7 reserved mode = (0,0,0,0) |
+| BCn encode | open | open | open | open | open | open | PLAN-Texture-Compression.md |
+
 ## Video
 
 | Codec | CPU | CUDA | OpenCL | WebGPU | WebGL | Wasm | Evidence |

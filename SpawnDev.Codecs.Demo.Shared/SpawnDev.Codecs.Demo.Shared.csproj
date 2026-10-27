@@ -60,6 +60,8 @@
 		<EmbeddedResource Include="TestData\Snappy\*" />
 		<EmbeddedResource Include="TestData\SnappyDec\*" />
 		<EmbeddedResource Include="TestData\GDeflate\*" />
+		<!-- BCn texture blocks + the reference decoders' RGBA (scripts/texture/make_bcn_fixtures.py). -->
+		<EmbeddedResource Include="TestData\Bcn\*" />
 		<EmbeddedResource Include="TestData\Vorbis\*" />
 		<EmbeddedResource Include="TestData\Gif\*" />
 		<EmbeddedResource Include="TestData\GifEnc\*" />

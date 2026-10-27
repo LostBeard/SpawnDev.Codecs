@@ -1,0 +1,29 @@
+bbb	bc1	320	180	bbb_first_frame_visual.png, reference encoder
+bbb	bc3	320	180	bbb_first_frame_visual.png, reference encoder
+bbb	bc4	320	180	bbb_first_frame_visual.png, reference encoder
+bbb	bc5	320	180	bbb_first_frame_visual.png, reference encoder
+bbb	bc7	320	180	bbb_first_frame_visual.png, reference encoder
+bbb_mode0	bc7	320	180	bbb, bc7enc mode mask 1 << 0
+bbb_mode1	bc7	320	180	bbb, bc7enc mode mask 1 << 1
+bbb_mode2	bc7	320	180	bbb, bc7enc mode mask 1 << 2
+bbb_mode3	bc7	320	180	bbb, bc7enc mode mask 1 << 3
+bbb_mode4	bc7	320	180	bbb, bc7enc mode mask 1 << 4
+bbb_mode5	bc7	320	180	bbb, bc7enc mode mask 1 << 5
+bbb_mode6	bc7	320	180	bbb, bc7enc mode mask 1 << 6
+bbb_mode7	bc7	320	180	bbb, bc7enc mode mask 1 << 7
+alpha	bc1	64	48	synthetic RGBA, reference encoder
+alpha	bc3	64	48	synthetic RGBA, reference encoder
+alpha	bc4	64	48	synthetic RGBA, reference encoder
+alpha	bc5	64	48	synthetic RGBA, reference encoder
+alpha	bc7	64	48	synthetic RGBA, reference encoder
+alpha_mode4	bc7	64	48	synthetic RGBA, bc7enc mode mask 1 << 4
+alpha_mode6	bc7	64	48	synthetic RGBA, bc7enc mode mask 1 << 6
+alpha_mode7	bc7	64	48	synthetic RGBA, bc7enc mode mask 1 << 7
+random	bc1	64	64	random blocks
+random	bc3	64	64	random blocks
+random	bc4	64	64	random blocks
+random	bc5	64	64	random blocks
+random	bc7	64	64	random blocks
+every_mode	bc7	64	64	random blocks, modes 0-7 and reserved in turn
+edge	bc7	37	21	random blocks, 37x21
+edge	bc1	37	21	random blocks, 37x21
