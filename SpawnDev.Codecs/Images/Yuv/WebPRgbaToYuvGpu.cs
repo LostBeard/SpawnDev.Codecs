@@ -14,9 +14,13 @@
 //   visible luma (SmoothenBlock, also for the partial right / bottom blocks); a run of fully transparent whole 8x8 blocks
 //   along a block row is flattened (Y 8x8, U/V 4x4) to the Y/U/V of the first block of the run.
 //
-// Kernels: one thread per chroma sample (writes its <= 4 luma, 1 U, 1 V and <= 4 alpha bytes); one thread per 8x8 block for
-// the smoothing; one thread per 8-row strip for the flattening (a run carries its value along the strip, so a strip is
-// serial). The host uploads the constant tables once and dispatches; nothing returns to the host.
+// Kernels: one thread per chroma sample (writes its <= 4 luma, 1 U, 1 V and <= 4 alpha bytes). The cleanup is in gather
+// form (every thread stores only its own output element, so it also runs where a thread may store only at its own slot,
+// WebGL): one thread per 8x8 block packs its visible luma count and sum; one thread per whole block finds where its run of
+// fully transparent blocks starts; then one thread per luma pixel and one per chroma sample write their own value (the
+// block mean for a hidden pixel of a partly transparent block, the run's first-block value inside a run). Reads never race
+// the writes: the means read only visible luma, which nothing writes, and a run's first block keeps its own value. The
+// host uploads the constant tables once and dispatches; nothing returns to the host.
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -34,21 +38,26 @@ public sealed class WebPRgbaToYuvGpu : IDisposable
 
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int> _convert;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int> _smoothen;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int> _flatten;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int> _blockStats;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _runStarts;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _cleanupLuma;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int> _cleanupChroma;
+    private readonly Accelerator _accelerator;
+    private MemoryBuffer1D<int, Stride1D.Dense>? _stats, _runs;
 
     /// <summary>Compile the kernels and upload the libwebp tables.</summary>
     public WebPRgbaToYuvGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        _accelerator = accelerator;
         _tables = accelerator.Allocate1D<int>(TableSize);
         _tables.View.CopyFromCPU(BuildTables());
         _convert = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>(ConvertKernel);
-        _smoothen = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(SmoothenKernel);
-        _flatten = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(FlattenKernel);
+        _blockStats = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int>(BlockStatsKernel);
+        _runStarts = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int>(RunStartKernel);
+        _cleanupLuma = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(CleanupLumaKernel);
+        _cleanupChroma = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int>(CleanupChromaKernel);
     }
 
     /// <summary>libwebp's InitGammaTables and kInvAlpha, computed exactly as the C source does (double pow, + .5 truncation).</summary>
@@ -97,9 +106,18 @@ public sealed class WebPRgbaToYuvGpu : IDisposable
         _convert((int)chroma, rgba, yPlane, uPlane, vPlane, alpha, _tables.View, width, height, cw);
         if (!cleanupTransparent) return;
         int bw = (width + 7) >> 3, bh = (height + 7) >> 3;
-        _smoothen(bw * bh, alpha, yPlane, uPlane, width, height);   // uPlane unused there; keeps one signature shape
-        int strips = height >> 3;
-        if (strips > 0 && width >= 8) _flatten(strips, alpha, yPlane, uPlane, vPlane, width, height);
+        int blocks = bw * bh;
+        if (_stats == null || _stats.Length < blocks)
+        {
+            _stats?.Dispose();
+            _runs?.Dispose();
+            _stats = _accelerator.Allocate1D<int>(blocks);
+            _runs = _accelerator.Allocate1D<int>(blocks);
+        }
+        _blockStats(blocks, alpha, yPlane, _stats.View, width, height);
+        _runStarts(blocks, _stats.View, _runs!.View, width, height);
+        _cleanupLuma((int)pixels, alpha, yPlane, _stats.View, _runs.View, width, height);
+        _cleanupChroma((int)chroma, uPlane, vPlane, _runs.View, width, height);
     }
 
     // ------------------------------------------------------------------
@@ -180,10 +198,10 @@ public sealed class WebPRgbaToYuvGpu : IDisposable
     }
 
     /// <summary>
-    /// SmoothenBlock on block (bx, by): alpha-0 luma of a PARTLY transparent block := mean of its visible luma. Blocks are 8x8,
-    /// the right / bottom ones clipped to the picture (libwebp smooths those too). Fully transparent blocks are left alone here.
+    /// One thread per 8x8 block (the right / bottom ones clipped to the picture): (visible luma sum &lt;&lt; 8) | visible
+    /// count, and bit 7 set when the block is a WHOLE 8x8 block of a whole 8-row strip with no visible pixel (flattened).
     /// </summary>
-    private static void SmoothenKernel(Index1D index, ArrayView<byte> alpha, ArrayView<byte> yPlane, ArrayView<byte> unused, int width, int height)
+    private static void BlockStatsKernel(Index1D index, ArrayView<byte> alpha, ArrayView<byte> yPlane, ArrayView<int> stats, int width, int height)
     {
         int bw = (width + 7) >> 3;
         int bx = index % bw, by = index / bw;
@@ -197,71 +215,83 @@ public sealed class WebPRgbaToYuvGpu : IDisposable
             for (int x = 0; x < w; x++)
             {
                 bool visible = alpha[row + x] != 0;
-                if (visible) { count = count + 1; sum = sum + yPlane[row + x]; }
+                if (visible)
+                {
+                    count = count + 1;
+                    sum = sum + yPlane[row + x];
+                }
             }
         }
-        bool partly = (count > 0) & (count < w * h);
-        if (!partly) return;
-        byte avg = (byte)(sum / count);
-        for (int y = 0; y < h; y++)
+        bool whole = (w == 8) & (h == 8);
+        int flat = (whole & (count == 0)) ? 128 : 0;
+        stats[index] = (sum << 8) | flat | count;
+    }
+
+    /// <summary>One thread per block: for a flattened block, the block index its run of flattened blocks starts at; else -1.</summary>
+    private static void RunStartKernel(Index1D index, ArrayView<int> stats, ArrayView<int> runs, int width, int height)
+    {
+        int bw = (width + 7) >> 3;
+        int bx = index % bw;
+        int start = -1;
+        if ((stats[index] & 128) != 0)
         {
-            int row = (y0 + y) * width + x0;
-            for (int x = 0; x < w; x++)
+            start = index;
+            for (int k = 1; k <= bx; k++)
             {
-                bool hidden = alpha[row + x] == 0;
-                if (hidden) yPlane[row + x] = avg;
+                bool flatBefore = (stats[index - k] & 128) != 0;
+                if (!flatBefore) k = bx + 1;
+                else start = index - k;
             }
         }
+        runs[index] = start;
     }
 
     /// <summary>
-    /// The flattening pass of WebPCleanupTransparentArea along one whole 8-row strip: each run of fully transparent whole 8x8
-    /// blocks takes the Y / U / V of its first block (U / V at x / 2 of that block's top-left).
+    /// One thread per luma pixel: SmoothenBlock (a hidden pixel of a PARTLY transparent block takes the integer mean of the
+    /// block's visible luma) and the flattening (a pixel of a flattened block takes the top-left luma of its run's first block).
     /// </summary>
-    private static void FlattenKernel(Index1D strip, ArrayView<byte> alpha, ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane, int width, int height)
+    private static void CleanupLumaKernel(Index1D index, ArrayView<byte> alpha, ArrayView<byte> yPlane, ArrayView<int> stats, ArrayView<int> runs,
+        int width, int height)
+    {
+        int bw = (width + 7) >> 3;
+        int x = index % width, y = index / width;
+        int b = (y >> 3) * bw + (x >> 3);
+        int st = stats[b];
+        int count = st & 127;
+        int x0 = (x >> 3) * 8, y0 = (y >> 3) * 8;
+        int w = width - x0 < 8 ? width - x0 : 8;
+        int h = height - y0 < 8 ? height - y0 : 8;
+        bool partly = (count > 0) & (count < w * h);
+        int run = runs[b];
+        if (run >= 0)
+        {
+            int rx = (run % bw) * 8;
+            yPlane[index] = yPlane[y0 * width + rx];
+        }
+        else if (partly & (alpha[index] == 0)) yPlane[index] = (byte)((st >> 8) / count);
+    }
+
+    /// <summary>One thread per chroma sample: inside a flattened block, the U / V at its run's first block (x / 2, y / 2 of its top-left).</summary>
+    private static void CleanupChromaKernel(Index1D index, ArrayView<byte> uPlane, ArrayView<byte> vPlane, ArrayView<int> runs, int width, int height)
     {
         int cw = (width + 1) >> 1;
-        int y0 = strip * 8;
-        int blocks = width >> 3;
-        bool needReset = true;
-        int vy = 0, vu = 0, vv = 0;
-        for (int b = 0; b < blocks; b++)
+        int bw = (width + 7) >> 3;
+        int cx = index % cw, cy = index / cw;
+        int b = (cy >> 2) * bw + (cx >> 2);
+        int run = runs[b];
+        if (run >= 0)
         {
-            int x0 = b * 8;
-            bool transparent = true;
-            for (int y = 0; y < 8; y++)
-                for (int x = 0; x < 8; x++)
-                {
-                    bool visible = alpha[(y0 + y) * width + x0 + x] != 0;
-                    if (visible) transparent = false;
-                }
-            if (transparent)
-            {
-                if (needReset)
-                {
-                    vy = yPlane[y0 * width + x0];
-                    vu = uPlane[(y0 >> 1) * cw + (x0 >> 1)];
-                    vv = vPlane[(y0 >> 1) * cw + (x0 >> 1)];
-                    needReset = false;
-                }
-                for (int y = 0; y < 8; y++)
-                    for (int x = 0; x < 8; x++)
-                        yPlane[(y0 + y) * width + x0 + x] = (byte)vy;
-                for (int y = 0; y < 4; y++)
-                    for (int x = 0; x < 4; x++)
-                    {
-                        int c = ((y0 >> 1) + y) * cw + (x0 >> 1) + x;
-                        uPlane[c] = (byte)vu;
-                        vPlane[c] = (byte)vv;
-                    }
-            }
-            else
-            {
-                needReset = true;
-            }
+            int src = (cy >> 2) * 4 * cw + (run % bw) * 4;
+            uPlane[index] = uPlane[src];
+            vPlane[index] = vPlane[src];
         }
     }
 
-    /// <summary>Release the table buffer.</summary>
-    public void Dispose() => _tables.Dispose();
+    /// <summary>Release the table and cleanup buffers.</summary>
+    public void Dispose()
+    {
+        _tables.Dispose();
+        _stats?.Dispose();
+        _runs?.Dispose();
+    }
 }

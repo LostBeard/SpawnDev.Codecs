@@ -116,7 +116,7 @@ public abstract partial class CodecsTestBase
                     if (big)
                     {
                         hashes = System.Text.Encoding.ASCII.GetString(ReadEmbedded(WebPRgbToYuvPrefix + name + ".sha256"))
-                            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                         rgba = ProceduralRgba(w, h);
                         if (Sha256Hex(rgba) != hashes[0]) { failures.Add($"{name}: procedural input differs from the generator's"); continue; }
                     }

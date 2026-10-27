@@ -128,6 +128,13 @@ public sealed class WebPLossyEncoderGpu : IDisposable
 
     private static int Align4(int v) => (v + 3) & ~3;
 
+    /// <summary>
+    /// Plane offsets inside the one YUV buffer: WebGPU binds a sub-view from a 256-byte-aligned offset
+    /// (minStorageBufferOffsetAlignment), so planes a kernel writes together must start 256 bytes apart or their bindings
+    /// overlap (the RGBA-to-YUV convert writes Y, U, V and alpha in one launch).
+    /// </summary>
+    private static int AlignPlane(int v) => (v + 255) & ~255;
+
     private sealed class Layout
     {
         public int Width, Height, MbW, MbH, MbCount, PredsSize, Cw, Ch;
@@ -143,7 +150,7 @@ public sealed class WebPLossyEncoderGpu : IDisposable
         l.MbCount = l.MbW * l.MbH;
         l.Cw = (width + 1) >> 1; l.Ch = (height + 1) >> 1;
         int n = width * height, c = l.Cw * l.Ch;
-        l.YuvU = Align4(n); l.YuvV = Align4(l.YuvU + c); l.YuvA = Align4(l.YuvV + c); l.YuvSize = l.YuvA + n;
+        l.YuvU = AlignPlane(n); l.YuvV = AlignPlane(l.YuvU + c); l.YuvA = AlignPlane(l.YuvV + c); l.YuvSize = l.YuvA + n;
         int predsW = 4 * l.MbW + 1;
         l.PredsSize = predsW * (4 * l.MbH + 1);
         l.WorkYTop = Align4(l.PredsSize); l.WorkScratch = Align4(l.WorkYTop + 2 * l.MbW * 16);
@@ -297,7 +304,7 @@ public sealed class WebPLossyEncoderGpu : IDisposable
             var state = _state.View;
             // ResetBoundaryPredictions: the border row / column of the 4x4 mode map is B_DC_PRED (0); the analysis writes the rest.
             _work.View.SubView(0, l.PredsSize).MemSetToZero();
-            _analysis(l.MbCount, yuv, yuv.SubView(l.YuvU, (long)l.Cw * l.Ch), yuv.SubView(l.YuvV, (long)l.Cw * l.Ch),
+            _analysis(l.MbCount, yuv.SubView(0, (long)width * height), yuv.SubView(l.YuvU, (long)l.Cw * l.Ch), yuv.SubView(l.YuvV, (long)l.Cw * l.Ch),
                 yuv.SubView(l.YuvA, (long)width * height), _mbRecs.View, _work.View, _meta.View);
             _setup(1, _mbRecs.View, _meta.View, _tables.View, _qTable.View,
                 state.SubView(l.StCoeffs, WebPLossySetupKernel.ProbaCount), state.SubView(l.StStats, WebPLossySetupKernel.ProbaCount),
