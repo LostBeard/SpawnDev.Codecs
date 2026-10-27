@@ -17,6 +17,7 @@ public abstract partial class CodecsTestBase
     public async Task VorbisResidueAccumulateGpu_Type2_AccumulatesMatchCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var book = new VorbisCodebook
