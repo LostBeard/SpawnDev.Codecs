@@ -31,3 +31,4 @@ foreach ($t in $list) {
     else { $fail++; "FAIL $($j.ResultText) $t`n     $($j.Error)" }
 }
 "--- $pass passed, $fail failed, $skip skipped of $($list.Count)"
+if ($fail -gt 0) { exit 1 }
