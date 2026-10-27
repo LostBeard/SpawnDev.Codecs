@@ -17,6 +17,10 @@ if (args.Length > 0 && args[0] == "weightpack-bench")
 if (args.Length > 0 && args[0] == "gdeflate-bench")
     return await GDeflateBench.Run(args);
 
+// `gdeflate-encode <in> <out.gdf> [level] [cpu|cuda|opencl]`: GDeflateCompressorGpu, for the reference check.
+if (args.Length > 0 && args[0] == "gdeflate-encode")
+    return await GDeflateEncode.Run(args);
+
 // Run SpawnDev.UnitTesting unit tests on desktop .NET via PlaywrightMultiTest harness.
 try
 {

@@ -162,6 +162,66 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
+    // ------------------------------------------------------------------ compressor
+
+    /// <summary>
+    /// GDeflateCompressorGpu at every level on the fixture inputs: each stream decodes with our decoder in BOTH modes
+    /// (32 lanes and thread per tile) to its input, and at level 3 it is at most 10 % larger than the reference library's
+    /// level-6 stream of the same input (a different matcher; the reference itself is checked offline by
+    /// scripts/compression/check_gdeflate_encoder.py).
+    /// </summary>
+    [TestMethod(Timeout = 600000)]
+    public async Task GDeflateCompressorGpu_AllLevels_RoundTripThroughBothDecoders()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, Lz4Requirements);
+        try
+        {
+            using var comp = new GDeflateCompressorGpu(acc, 8);
+            using var lanes = new GDeflateDecompressorGpu(acc);
+            using var serial = new GDeflateDecompressorGpu(acc, 64, GDeflateDecodeMode.ThreadPerTile);
+            var cases = GDeflateCases().Where(c => c.Expected == "ok" && c.Level == 6 && c.Length <= 2_000_000).ToList();
+            True(cases.Count >= 5, $"only {cases.Count} inputs");
+            var failures = new List<string>();
+            foreach (var c in cases)
+            {
+                byte[] input = GDeflateContent(c);
+                using var dIn = DeviceVerify.Upload(acc, input, 5);
+                for (int level = 0; level <= 4; level++)
+                {
+                    using var dStream = DeviceVerify.Poisoned(acc, GDeflateCompressorGpu.GetMaxCompressedSize(input.Length) + 32);
+                    int n = await comp.CompressAsync(dIn.View, input.Length, dStream.View, level);
+                    if (level == 3 && n > c.StreamLength * 1.10)
+                        failures.Add($"{c.Name} level 3: {n} bytes, the reference's level 6 is {c.StreamLength}");
+                    byte[] stream = await DeviceTransfer.DownloadAsync(dStream.View, n);
+                    string? a = await DecodeGDeflateAndCompareAsync(acc, lanes, $"{c.Name} level {level} (lanes)", stream, input);
+                    if (a != null) failures.Add(a);
+                    string? b = await DecodeGDeflateAndCompareAsync(acc, serial, $"{c.Name} level {level} (thread per tile)", stream, input);
+                    if (b != null) failures.Add(b);
+                }
+            }
+            True(failures.Count == 0, $"{failures.Count} failures:\n" + string.Join("\n", failures));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    [TestMethod]
+    public async Task GDeflateCompressorGpu_ManagedOverload_AndEmptyInputRefused()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, Lz4Requirements);
+        try
+        {
+            using var comp = new GDeflateCompressorGpu(acc, 4);
+            using var dec = new GDeflateDecompressorGpu(acc);
+            byte[] input = Lz4GenText(300_000, 77);
+            byte[] stream = await comp.CompressAsync(input, 2);
+            EqualBytes(input, await dec.DecompressAsync(stream), "managed round trip");
+            await ThrowsAsync<ArgumentOutOfRangeException>(async () => await comp.CompressAsync(System.Array.Empty<byte>()), "empty input");
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
     [TestMethod]
     public async Task GDeflateDecompressorGpu_TypedArrayOverload()
     {

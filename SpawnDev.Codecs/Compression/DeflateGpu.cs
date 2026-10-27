@@ -43,7 +43,7 @@ public struct DeflateBitWriter
 }
 
 /// <summary>GPU-callable DEFLATE block compressor.</summary>
-public static class DeflateGpu
+public static partial class DeflateGpu
 {
     /// <summary>Hash table size (entries) of the LZ77 matcher.</summary>
     public const int HashSize = 1 << 13;
@@ -94,7 +94,8 @@ public static class DeflateGpu
 
     // Slots of the resumable block state (relative to the tail's StateOff).
     private const int StPos = 0, StTokens = 1, StPendLen = 2, StPendDist = 3, StExtra = 4, StPhase = 5, StSeq = 6,
-        StCursor = 7, StAcc = 8, StCount = 9, StWPos = 10, StOverflow = 11, StOutLen = 12, StWEnd = 13;
+        StCursor = 7, StAcc = 8, StCount = 9, StWPos = 10, StOverflow = 11, StOutLen = 12, StWEnd = 13,
+        StHlit = 14, StHdist = 15, StHclen = 16, StGdStored = 17;
     // Block phases: parsing, parsed (codes not built yet), emitting tokens, emitting stored bytes, done.
     private const int PhaseParse = 0, PhaseParsed = 1, PhaseEmitTokens = 2, PhaseEmitStored = 3, PhaseDone = 4;
 
@@ -615,121 +616,11 @@ public static class DeflateGpu
 
         if (!stored)
         {
-            long extraBits = s[st + StExtra];
-            s[tail + LitFreqOff + 256] = 1;
-
-            // ---- code lengths ----
-            BuildLengths(s, tail + LitFreqOff, 286, 15, tail + LitLenOff, tail);
-            BuildLengths(s, tail + DistFreqOff, 30, 15, tail + DistLenOff, tail);
-            hlit = 286;
-            bool trimLit = (hlit > 257) & (s[tail + LitLenOff + hlit - 1] == 0);
-            while (trimLit)
-            {
-                hlit--;
-                trimLit = (hlit > 257) & (s[tail + LitLenOff + hlit - 1] == 0);
-            }
-            hdist = 30;
-            bool trimDist = (hdist > 1) & (s[tail + DistLenOff + hdist - 1] == 0);
-            while (trimDist)
-            {
-                hdist--;
-                trimDist = (hdist > 1) & (s[tail + DistLenOff + hdist - 1] == 0);
-            }
-
-            // ---- run-length code the length sequences ----
-            for (int i = 0; i < 24; i++) s[tail + ClFreqOff + i] = 0;
-            int total = hlit + hdist;
-            int ix = 0;
-            while (ix < total)
-            {
-                int cur = ix < hlit ? s[tail + LitLenOff + ix] : s[tail + DistLenOff + (ix - hlit)];
-                int run = 1;
-                int scanning = 1;
-                while (scanning != 0)
-                {
-                    int at = ix + run;
-                    if (at >= total)
-                    {
-                        scanning = 0;
-                    }
-                    else
-                    {
-                        int v = at < hlit ? s[tail + LitLenOff + at] : s[tail + DistLenOff + (at - hlit)];
-                        if (v == cur) run++; else scanning = 0;
-                    }
-                }
-                int r = run;
-                if (cur == 0)
-                {
-                    while (r >= 11)
-                    {
-                        int n = r < 138 ? r : 138;
-                        seqCount = AddClSymbol(s, tail, seqCount, 18, n - 11, 7);
-                        r -= n;
-                    }
-                    if (r >= 3)
-                    {
-                        seqCount = AddClSymbol(s, tail, seqCount, 17, r - 3, 3);
-                        r = 0;
-                    }
-                    while (r > 0)
-                    {
-                        seqCount = AddClSymbol(s, tail, seqCount, 0, 0, 0);
-                        r--;
-                    }
-                }
-                else
-                {
-                    seqCount = AddClSymbol(s, tail, seqCount, cur, 0, 0);
-                    r--;
-                    while (r >= 3)
-                    {
-                        int n = r < 6 ? r : 6;
-                        seqCount = AddClSymbol(s, tail, seqCount, 16, n - 3, 2);
-                        r -= n;
-                    }
-                    while (r > 0)
-                    {
-                        seqCount = AddClSymbol(s, tail, seqCount, cur, 0, 0);
-                        r--;
-                    }
-                }
-                ix += run;
-            }
-
-            // The code-length code must be complete: never leave it with a single used symbol.
-            int used = 0;
-            for (int i = 0; i < 19; i++) if (s[tail + ClFreqOff + i] > 0) used++;
-            if (used == 1)
-            {
-                int dummy = s[tail + ClFreqOff + 0] > 0 ? 1 : 0;
-                s[tail + ClFreqOff + dummy] = 1;
-            }
-            BuildLengths(s, tail + ClFreqOff, 19, 7, tail + ClLenOff, tail);
-            hclen = 19;
-            bool trimCl = (hclen > 4) & (s[tail + ClLenOff + InflateGpu.CodeLengthOrder(hclen - 1)] == 0);
-            while (trimCl)
-            {
-                hclen--;
-                trimCl = (hclen > 4) & (s[tail + ClLenOff + InflateGpu.CodeLengthOrder(hclen - 1)] == 0);
-            }
-
-            AssignCodes(s, tail + LitLenOff, 288, tail + LitCodeOff, tail);
-            AssignCodes(s, tail + DistLenOff, 32, tail + DistCodeOff, tail);
-            AssignCodes(s, tail + ClLenOff, 19, tail + ClCodeOff, tail);
-
-            // ---- exact dynamic-block size in bits ----
-            dynBits = 3 + 5 + 5 + 4 + 3L * hclen;
-            for (int i = 0; i < seqCount; i++)
-            {
-                int packed = s[tail + ClSeqOff + i];
-                dynBits += s[tail + ClLenOff + (packed & 31)] + ((packed >> 12) & 7);
-            }
-            for (int sym = 0; sym < 286; sym++)
-                dynBits += (long)s[tail + LitFreqOff + sym] * s[tail + LitLenOff + sym];
-            for (int sym = 0; sym < 30; sym++)
-                dynBits += (long)s[tail + DistFreqOff + sym] * s[tail + DistLenOff + sym];
-            dynBits += extraBits;
+            dynBits = BuildBlockCodes(s, tail, st);
+            hlit = s[st + StHlit];
+            hdist = s[st + StHdist];
+            hclen = s[st + StHclen];
+            seqCount = s[st + StSeq];
 
             long storedBits = 8L * (len + 5L * ((len + 65534) / 65535));
             if (dynBits >= storedBits) stored = true;
@@ -763,6 +654,141 @@ public static class DeflateGpu
         s[st + StSeq] = seqCount;
         s[st + StCursor] = 0;
         SaveWriter(ref w, s, st);
+    }
+
+    /// <summary>
+    /// The block's dynamic Huffman codes from its symbol frequencies: literal/length and distance code lengths (15-bit
+    /// limit, trailing zeros trimmed), the run-length coded length sequence and the code-length code, the canonical
+    /// codes; HLIT / HDIST / HCLEN and the sequence count go to the state slots. Returns the dynamic block's exact size in
+    /// bits (header included).
+    /// </summary>
+    private static long BuildBlockCodes(ArrayView<int> s, int tail, int st)
+    {
+        int hlit;
+        int hdist;
+        int hclen;
+        int seqCount = 0;
+        long dynBits;
+        long extraBits = s[st + StExtra];
+        s[tail + LitFreqOff + 256] = 1;
+
+        // ---- code lengths ----
+        BuildLengths(s, tail + LitFreqOff, 286, 15, tail + LitLenOff, tail);
+        BuildLengths(s, tail + DistFreqOff, 30, 15, tail + DistLenOff, tail);
+        hlit = 286;
+        bool trimLit = (hlit > 257) & (s[tail + LitLenOff + hlit - 1] == 0);
+        while (trimLit)
+        {
+            hlit--;
+            trimLit = (hlit > 257) & (s[tail + LitLenOff + hlit - 1] == 0);
+        }
+        hdist = 30;
+        bool trimDist = (hdist > 1) & (s[tail + DistLenOff + hdist - 1] == 0);
+        while (trimDist)
+        {
+            hdist--;
+            trimDist = (hdist > 1) & (s[tail + DistLenOff + hdist - 1] == 0);
+        }
+
+        // ---- run-length code the length sequences ----
+        for (int i = 0; i < 24; i++) s[tail + ClFreqOff + i] = 0;
+        int total = hlit + hdist;
+        int ix = 0;
+        while (ix < total)
+        {
+            int cur = ix < hlit ? s[tail + LitLenOff + ix] : s[tail + DistLenOff + (ix - hlit)];
+            int run = 1;
+            int scanning = 1;
+            while (scanning != 0)
+            {
+                int at = ix + run;
+                if (at >= total)
+                {
+                    scanning = 0;
+                }
+                else
+                {
+                    int v = at < hlit ? s[tail + LitLenOff + at] : s[tail + DistLenOff + (at - hlit)];
+                    if (v == cur) run++; else scanning = 0;
+                }
+            }
+            int r = run;
+            if (cur == 0)
+            {
+                while (r >= 11)
+                {
+                    int n = r < 138 ? r : 138;
+                    seqCount = AddClSymbol(s, tail, seqCount, 18, n - 11, 7);
+                    r -= n;
+                }
+                if (r >= 3)
+                {
+                    seqCount = AddClSymbol(s, tail, seqCount, 17, r - 3, 3);
+                    r = 0;
+                }
+                while (r > 0)
+                {
+                    seqCount = AddClSymbol(s, tail, seqCount, 0, 0, 0);
+                    r--;
+                }
+            }
+            else
+            {
+                seqCount = AddClSymbol(s, tail, seqCount, cur, 0, 0);
+                r--;
+                while (r >= 3)
+                {
+                    int n = r < 6 ? r : 6;
+                    seqCount = AddClSymbol(s, tail, seqCount, 16, n - 3, 2);
+                    r -= n;
+                }
+                while (r > 0)
+                {
+                    seqCount = AddClSymbol(s, tail, seqCount, cur, 0, 0);
+                    r--;
+                }
+            }
+            ix += run;
+        }
+
+        // The code-length code must be complete: never leave it with a single used symbol.
+        int used = 0;
+        for (int i = 0; i < 19; i++) if (s[tail + ClFreqOff + i] > 0) used++;
+        if (used == 1)
+        {
+            int dummy = s[tail + ClFreqOff + 0] > 0 ? 1 : 0;
+            s[tail + ClFreqOff + dummy] = 1;
+        }
+        BuildLengths(s, tail + ClFreqOff, 19, 7, tail + ClLenOff, tail);
+        hclen = 19;
+        bool trimCl = (hclen > 4) & (s[tail + ClLenOff + InflateGpu.CodeLengthOrder(hclen - 1)] == 0);
+        while (trimCl)
+        {
+            hclen--;
+            trimCl = (hclen > 4) & (s[tail + ClLenOff + InflateGpu.CodeLengthOrder(hclen - 1)] == 0);
+        }
+
+        AssignCodes(s, tail + LitLenOff, 288, tail + LitCodeOff, tail);
+        AssignCodes(s, tail + DistLenOff, 32, tail + DistCodeOff, tail);
+        AssignCodes(s, tail + ClLenOff, 19, tail + ClCodeOff, tail);
+
+        // ---- exact dynamic-block size in bits ----
+        dynBits = 3 + 5 + 5 + 4 + 3L * hclen;
+        for (int i = 0; i < seqCount; i++)
+        {
+            int packed = s[tail + ClSeqOff + i];
+            dynBits += s[tail + ClLenOff + (packed & 31)] + ((packed >> 12) & 7);
+        }
+        for (int sym = 0; sym < 286; sym++)
+            dynBits += (long)s[tail + LitFreqOff + sym] * s[tail + LitLenOff + sym];
+        for (int sym = 0; sym < 30; sym++)
+            dynBits += (long)s[tail + DistFreqOff + sym] * s[tail + DistLenOff + sym];
+        dynBits += extraBits;
+        s[st + StHlit] = hlit;
+        s[st + StHdist] = hdist;
+        s[st + StHclen] = hclen;
+        s[st + StSeq] = seqCount;
+        return dynBits;
     }
 
     /// <summary>
