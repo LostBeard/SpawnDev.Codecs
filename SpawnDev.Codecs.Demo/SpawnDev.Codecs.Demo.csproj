@@ -39,7 +39,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="SpawnDev.ILGPU" Version="5.4.7-local.8" />
+    <PackageReference Include="SpawnDev.ILGPU" Version="5.4.7-local.9" />
     <ProjectReference Include="..\SpawnDev.Codecs\SpawnDev.Codecs.csproj" />
     <ProjectReference Include="..\SpawnDev.Codecs.Demo.Shared\SpawnDev.Codecs.Demo.Shared.csproj" />
   </ItemGroup>
