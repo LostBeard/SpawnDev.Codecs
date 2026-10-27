@@ -105,8 +105,10 @@ rounds of one symbol per lane, ballot refills, prefix sums, cooperative copies).
 **10-27:** occupancy-bound (measured: +10 KB of shared-memory padding per tile dropped 3.08 -> 1.94 GB/s), so the
 tables are packed two 16-bit entries per int (~10.4 -> ~6 KB per tile): 4.09 GB/s on BF16 weights, 7.12 on source.
 Halving the barriers per round (double-buffered votes, lane-private cursor) gained nothing on CUDA (a 32-lane group is
-one warp) and was not kept; ILGPU has no portable ballot (warp size differs per backend). Next: less shared memory
-still (nibble-packed lengths, LitLutBits 9), lanes building the tables in parallel.
+one warp) and was not kept; ILGPU has no portable ballot (warp size differs per backend). Then ~3.9 KB per tile
+(9-bit literal table, 4-bit code lengths, copy slots outside the lanes kernel, one vote/scan area): 4.32 GB/s on
+weights; source text (550 tiles, all resident at once) stays 7.13. Knock-out: building the literal table twice costs
+~1 %, so parallel table builds are not worth it. Small inputs are now latency-bound per tile, not occupancy-bound.
 **Encoder done 2026-10-26:** `GDeflateCompressorGpu` (DeflateGpu's parse + `DeflateGpu.GDeflate.cs` plan / emit:
 Deflate64 long matches by merging same-distance matches, best of dynamic / static / stored, the reference writer's
 packet reservation). `scripts/compression/check_gdeflate_encoder.py`: 65 streams (13 inputs x levels 0-4) all decoded
