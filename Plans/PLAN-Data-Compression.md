@@ -104,6 +104,9 @@ parallel table builds.
 Deflate64 long matches by merging same-distance matches, best of dynamic / static / stored, the reference writer's
 packet reservation). `scripts/compression/check_gdeflate_encoder.py`: 65 streams (13 inputs x levels 0-4) all decoded
 by Microsoft's reference; level 3 within -3 .. +5 % of the reference's level 6.
+SPEED (a loss, recorded): one thread per tile is slow on a GPU: 512 MB of BF16 weights at 0.033 GB/s (level 1, waves of
+512 tiles; 0.008 at the old 64) vs 0.066 GB/s for the reference on ONE CPU thread. To be worth it the encoder needs
+parallel match finding inside a tile (per-position hash / match candidates, then a parse), not one serial LZ77 per tile.
 
 ### C6. Gaussian splat containers
 - **SPZ** (Niantic, MIT): gzip of quantised columns. Read v2/v3 (+ v4 when its spec is out), write with our parallel
