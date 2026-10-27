@@ -116,6 +116,12 @@ by Microsoft's reference; level 3 within -3 .. +5 % of the reference's level 6.
 SPEED (a loss, recorded): one thread per tile is slow on a GPU: 512 MB of BF16 weights at 0.033 GB/s (level 1, waves of
 512 tiles; 0.008 at the old 64) vs 0.066 GB/s for the reference on ONE CPU thread. To be worth it the encoder needs
 parallel match finding inside a tile (per-position hash / match candidates, then a parse), not one serial LZ77 per tile.
+**10-27, encoder in parallel (9d73c0c), byte-identical output:** knock-outs first (level 4, 64 MB: writer 68 %, plan
+18 %, the rest parse). Writer: 32 lanes per tile (lane = sub-stream; prefix sums hand out symbols and place the packet
+reservations of a dry pass). Plan: 256 lanes into shared histograms. Parse (DeflateGpu.ParallelParse): ParseStep's
+chains do not depend on the parse (every position is inserted in order), so 32 lanes build them, one thread per
+position searches, and a cheap walk per tile makes ParseStep's greedy / lazy choices. RTX 4070, 512 MB BF16: level 1
+0.474 GB/s (was 0.033), level 3 0.463, level 4 4.81 (was 0.061); vs the reference on one CPU thread at level 6: 0.066.
 
 ### C6. Gaussian splat containers
 - **SPZ** (Niantic, MIT): gzip of quantised columns. Read v2/v3 (+ v4 when its spec is out), write with our parallel
