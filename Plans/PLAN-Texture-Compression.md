@@ -32,7 +32,10 @@ TypedArray / ArrayView1D), no bulk bytes on the .NET heap, a reference oracle fo
   0.9.15 builds) at its default settings: modes 6 + 1 for opaque blocks, 6 + 5 + 7 with alpha, perceptual weights, 64
   partitions with the filter bank, least squares. One launch per mode (one thread per block, bc7enc's order, a packed
   40-byte best-so-far per block), then a packing launch (one thread per output word). 9 fixtures (8435 blocks): CPU and
-  Velocity byte-identical with bc7enc on every block. GPU lanes: see the test log.
+  Velocity / Wasm byte-identical with bc7enc on every block; CUDA 98.97%, OpenCL 94.5%, WebGPU 94.7% (ILGPU's GPU
+  float contracts multiply-add and rounds div / sqrt differently; PSNR never more than 0.01 dB lower), WebGL passes
+  the same gate. Green on all 7 lanes (ILGPU 5.4.9-local.3). Speed 2048x2048: CUDA 376, OpenCL 653 Mpixel/s; bc7enc
+  on one CPU thread 2.2.
   The etcpak wheel's SIMD modules are tagged cp37 and do not load on Python 3.13+, so the oracle runs `_etcpak_none`
   (portable code); the fixture script asserts it.
 
