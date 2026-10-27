@@ -82,6 +82,10 @@ host; _TestStats "bench" records). Next, performance (the ratio is done):
 - **Pack**: waves of 64 single-thread chunks (DeflateGpu scratch is 570 KB per chunk, mostly the unused LZ77 hash and
   token arrays at the Huffman-only level). A dedicated Huffman-only encoder (histogram per chunk with many threads,
   code build per chunk, bit offsets by prefix sum, every thread writes its bytes) removes the scratch and the waves.
+  **Done 10-26 (8f844bb):** count (256 threads, shared histogram) / plan (DeflateGpu.PlanHuffmanOnly) / emit (prefix-
+  summed bit offsets, Atomic.Or into words) / layout / copy, waves of 1024 chunks. Same bytes as before (SHA-256 of a
+  16 MB pack unchanged); LTX DiT BF16 pack 0.134 -> 3.57 GB/s on CUDA, unpack 8.79 GB/s. Green on CPU, CUDA, OpenCL,
+  WebGPU (ILGPU 5.4.7-local.7+: shared-memory atomics in WGSL), Wasm.
 
 ### C5. GDeflate (Microsoft DirectStorage, Apache 2.0)
 Deflate's ratio with 32-lane parallel decode of ONE stream: the Deflate symbols reordered into 32 interleaved

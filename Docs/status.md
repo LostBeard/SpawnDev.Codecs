@@ -13,6 +13,13 @@ one thread writes a whole stream, cannot run there; such tests declare `Requires
 result before that date means "never ran". The lane now creates the real WebGL2 accelerator; the WebGL column is being
 filled batch by batch.
 
+**Velocity (the vectorized CPU backend applications get by default) since 2026-10-26:** the CPU column is the ILGPU
+debug CPU backend, which interprets the kernels' IL, so Velocity's code generator was never exercised until the
+`VelocityCodecsTests` lane (one full run 10-26: 960 passed, 10 failed). ILGPU 5.4.7-local.8 fixed 6 of the failures.
+Still failing on Velocity only (green on the debug CPU backend and CUDA, reported to ILGPU): the VP9 batch encoder at
+an unaligned size (70x50, one byte longer than the single-frame encode) and the WebP lossy encoder (every output
+differs from libwebp).
+
 ## Compression
 
 | Codec | CPU | CUDA | OpenCL | WebGPU | WebGL | Wasm | Evidence |
@@ -21,7 +28,7 @@ filled batch by batch.
 | LZ4 frame compress / decompress | green | green | green | green (10-26, 12 / 0) | n/a (scatter stores) | green (10-26, 12 / 0) | compressor byte-identical with liblz4 1.9.4 (29 frames up to 40 MB); decoder reads every liblz4 configuration (64 KB .. 4 MB blocks, linked, HC, checksums, legacy, skippable) and refuses damaged frames with the reason |
 | Snappy compress / decompress (raw + framed) | green (10-26, 10 / 0) | green (10-26) | green (10-26) | green (10-26, 12 / 0) | n/a (scatter stores) | green (10-26, 12 / 0) | compressor byte-identical with the Rust snap crate (python-snappy / cramjam): 28 inputs x raw + framed up to 40 MB; decoder reads every element form (literal tags 60-63, copy-4, offsets 400 KB back), framed chunks of any size incl. stored / padding / skippable, and refuses 15 damaged streams with the reason |
 | GDeflate decompress + compress (DirectStorage tile streams) | green (10-26) | green (10-26, 7 / 0) | green (10-26, 7 / 0) | green (10-26, 8 / 0) | n/a (scatter stores) | green (10-26, 8 / 0) | 31 streams written and decoded by Microsoft's reference (built from source) at levels 1 / 6 / 9 / 12, 1 B .. 8 MB, stored / static / dynamic blocks, Deflate64 long matches and far distances; damaged streams refused with the reason. 32 lanes per tile (CUDA, RTX 4070): 3.10 GB/s on BF16 weights, 6.17 GB/s on source text, vs the reference CPU decoder on 31 threads 2.01 / 5.65. Compressor: 75 streams at levels 0-4 (CUDA-encoded, incl. 512 MB of BF16 weights) all decoded by the reference; level 3 within -3 .. +5 % of its level 6, BF16 weights 2.3 % smaller |
-| WeightPack (lossless tensors) | green | green | green | open | n/a (scatter stores) | green (10-26) | round trips exact; every chunk inflates with .NET DeflateStream; sizes within 1 % of an optimal Huffman code per chunk. Real weights (CUDA, RTX 4070): BF16 0.676 / FP16 0.667 / FP32 0.608 of the original, unpack 8.79 GB/s (BF16, table decode + one launch per wave 10-26; was 1.2 to 1.9), pack 0.12 to 0.14 GB/s |
+| WeightPack (lossless tensors) | green | green | green | green (10-26, 7 / 0, ILGPU 5.4.7-local.8) | n/a (scatter stores) | green (10-26, 7 / 0) | round trips exact; every chunk inflates with .NET DeflateStream; sizes within 1 % of an optimal Huffman code per chunk. Real weights (CUDA, RTX 4070): BF16 0.676 / FP16 0.667 / FP32 0.608 of the original, unpack 8.79 GB/s (BF16, table decode + one launch per wave 10-26; was 1.2 to 1.9), pack 3.57 GB/s (BF16, parallel Huffman-only encoder 10-26: per-chunk shared histogram, prefix-summed bit offsets; byte-identical with the old encoder; was 0.12 to 0.14) |
 | zlib / DEFLATE (+ Huffman-only level) | green | green | green | green (10-25) | n/a (scatter stores) | partial | .NET ZLibStream inflates our streams; our InflateGpu agrees |
 
 ## Images
