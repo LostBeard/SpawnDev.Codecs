@@ -99,7 +99,11 @@ around GDeflate::Compress / Decompress), `scripts/compression/make_gdeflate_fixt
 rounds of one symbol per lane, ballot refills, prefix sums, cooperative copies). RTX 4070 vs Microsoft's CPU decoder on
 31 threads: LTX BF16 512 MB 3.10 vs 2.01 GB/s, C# source 36 MB 6.17 vs 5.65 GB/s (thread-per-tile was 1.90 / 0.39).
 Next for speed: subgroup ballots / shuffles where the backend has them (each shared-memory vote is two barriers),
-parallel table builds; then the encoder (DeflateGpu's LZ77 + Huffman, Deflate64 distances, swizzled bit layout).
+parallel table builds.
+**Encoder done 2026-10-26:** `GDeflateCompressorGpu` (DeflateGpu's parse + `DeflateGpu.GDeflate.cs` plan / emit:
+Deflate64 long matches by merging same-distance matches, best of dynamic / static / stored, the reference writer's
+packet reservation). `scripts/compression/check_gdeflate_encoder.py`: 65 streams (13 inputs x levels 0-4) all decoded
+by Microsoft's reference; level 3 within -3 .. +5 % of the reference's level 6.
 
 ### C6. Gaussian splat containers
 - **SPZ** (Niantic, MIT): gzip of quantised columns. Read v2/v3 (+ v4 when its spec is out), write with our parallel
