@@ -235,6 +235,34 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
+## bc7enc - BC7 block compression
+
+`Images/Texture/Bc7EncoderGpu.cs` ports bc7enc's BC7 search (modes 1 and 6 for opaque blocks, 5, 6 and 7 for blocks
+with alpha, at its default settings) so that our encoder writes the blocks bc7enc writes. Its least-squares weights,
+partition order and partition predictors are copied by `scripts/texture/extract_bc7enc_tables.py` into
+`Bc7EncTables.g.cs`. Source: the bc7enc.cpp that etcpak 0.9.15 builds (https://github.com/wolfpld/etcpak, after
+https://github.com/richgel999/bc7enc). bc7enc is offered under two licenses (MIT or public domain); we take the MIT one:
+
+```
+MIT License
+Copyright(c) 2020-2021 Richard Geldreich, Jr.
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files(the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions :
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Final notes
 
 All codecs SpawnDev.Codecs implements are **patent-clean** - Opus, VP8, VP9, AV1, FLAC, Vorbis. Patent-encumbered codecs (H.264, H.265, AAC) are out of scope for this library and are delegated to platform encoders via SpawnDev.MultiMedia.

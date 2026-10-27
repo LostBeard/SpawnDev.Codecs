@@ -1,6 +1,6 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
-// BCn texture block encoder on the accelerator: RGBA8 to BC1, BC3, BC4 and BC5 blocks, the blocks etcpak writes (its
+// BCn texture block encoder on the accelerator: RGBA8 to BC1, BC3, BC4, BC5 and BC7 blocks, the blocks etcpak writes (its
 // portable DXTC compressors, ProcessDxtc.cpp, the paths the etcpak 0.9.15 Windows wheel runs: its BC4 blocks match this
 // arithmetic 256 / 256, the SSE4.1 variant's 246 / 256; BSD 3-clause, see NOTICE.md):
 //   colour (BC1, BC3's colour): a block whose pixels agree in their 5:6:5 bits is solid (c0 = 0, c1 = the colour, every
@@ -13,6 +13,7 @@
 // Pixels outside the picture (a size that is not a multiple of 4) repeat the nearest edge pixel. One thread per output
 // 32-bit word (it encodes its block, or the half of it the word belongs to, and writes its 4 bytes), so the kernel also
 // runs where a thread may store only its own elements (WebGL). Nothing returns to the host.
+// BC7 is bc7enc's search (the copy etcpak builds for compress_bc7), in Bc7EncoderGpu.
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -30,11 +31,15 @@ public sealed class BcnEncoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int> _encode;
     private readonly StageBuffer<byte> _stageIn;
     private readonly StageBuffer<byte> _stageOut;
+    private readonly StageBuffer<int> _bc7Scratch;
+    private readonly Accelerator _accelerator;
+    private Bc7EncoderGpu? _bc7;
 
-    /// <summary>Compile the kernel and upload etcpak's division table.</summary>
+    /// <summary>Compile the kernel and upload etcpak's division table (the BC7 kernels compile on first BC7 use).</summary>
     public BcnEncoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        _accelerator = accelerator;
         _tables = accelerator.Allocate1D<int>(TableInts);
         var t = new int[TableInts];
         for (int i = 0; i < 766; i++) t[DivBase + i] = EtcpakDxtcTables.DivTable[i];
@@ -42,11 +47,12 @@ public sealed class BcnEncoderGpu : IDisposable
         _encode = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>(EncodeKernel);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
+        _bc7Scratch = new StageBuffer<int>(accelerator);
     }
 
     /// <summary>
     /// Queue the encode of <paramref name="rgba"/> (width x height pixels of 4 bytes, tightly packed) into
-    /// <paramref name="blocks"/> (<see cref="BcnDecoderGpu.BlocksSize"/> bytes, row-major 4x4 blocks). BC1, BC3, BC4, BC5.
+    /// <paramref name="blocks"/> (<see cref="BcnDecoderGpu.BlocksSize"/> bytes, row-major 4x4 blocks). BC1, BC3, BC4, BC5, BC7.
     /// </summary>
     public void Encode(ArrayView1D<byte, Stride1D.Dense> rgba, int width, int height, BcnFormat format, ArrayView1D<byte, Stride1D.Dense> blocks)
     {
@@ -54,7 +60,7 @@ public sealed class BcnEncoderGpu : IDisposable
         if (rgba.Length < 4L * width * height) throw new ArgumentException("rgba too short.", nameof(rgba));
         long size = BcnDecoderGpu.BlocksSize(format, width, height);
         if (blocks.Length < size) throw new ArgumentException("blocks too short.", nameof(blocks));
-        _encode((int)(size / 4), rgba, blocks, _tables.View, (int)format, width, height);
+        Launch(rgba, blocks, width, height, format, size);
     }
 
     /// <summary>Encode a picture held by the host; returns the blocks.</summary>
@@ -67,7 +73,7 @@ public sealed class BcnEncoderGpu : IDisposable
         _stageIn.Ensure(n);
         _stageOut.Ensure(size);
         DeviceTransfer.Upload(_stageIn.View, rgba.Span.Slice(0, (int)n));
-        _encode((int)(size / 4), _stageIn.View, _stageOut.View, _tables.View, (int)format, width, height);
+        Launch(_stageIn.View, _stageOut.View, width, height, format, size);
         return await DeviceTransfer.DownloadAsync(_stageOut.View, size);
     }
 
@@ -81,14 +87,25 @@ public sealed class BcnEncoderGpu : IDisposable
         _stageIn.Ensure(rgba.ByteLength);
         _stageOut.Ensure(size);
         DeviceTransfer.Upload(_stageIn.View, rgba);
-        _encode((int)(size / 4), _stageIn.View, _stageOut.View, _tables.View, (int)format, width, height);
+        Launch(_stageIn.View, _stageOut.View, width, height, format, size);
         return await DeviceTransfer.DownloadUint8ArrayAsync(_stageOut.View, size);
+    }
+
+    private void Launch(ArrayView<byte> rgba, ArrayView<byte> blocks, int width, int height, BcnFormat format, long size)
+    {
+        if (format == BcnFormat.Bc7)
+        {
+            _bc7 ??= new Bc7EncoderGpu(_accelerator);
+            _bc7Scratch.Ensure(size / 16 * Bc7EncoderGpu.BlockInts);
+            _bc7.Encode(rgba, width, height, _bc7Scratch.View, blocks);
+        }
+        else _encode((int)(size / 4), rgba, blocks, _tables.View, (int)format, width, height);
     }
 
     private static void Validate(BcnFormat format, int width, int height)
     {
-        if (format is not (BcnFormat.Bc1 or BcnFormat.Bc3 or BcnFormat.Bc4 or BcnFormat.Bc5))
-            throw new ArgumentOutOfRangeException(nameof(format), "BC1, BC3, BC4 and BC5 (BC7 encoding is not written yet).");
+        if (format is not (BcnFormat.Bc1 or BcnFormat.Bc3 or BcnFormat.Bc4 or BcnFormat.Bc5 or BcnFormat.Bc7))
+            throw new ArgumentOutOfRangeException(nameof(format), "BC1, BC3, BC4, BC5 and BC7.");
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
         if ((long)width * height > int.MaxValue / 4) throw new ArgumentOutOfRangeException(nameof(width), "picture too large");
@@ -197,5 +214,7 @@ public sealed class BcnEncoderGpu : IDisposable
         _tables.Dispose();
         _stageIn.Dispose();
         _stageOut.Dispose();
+        _bc7Scratch.Dispose();
+        _bc7?.Dispose();
     }
 }

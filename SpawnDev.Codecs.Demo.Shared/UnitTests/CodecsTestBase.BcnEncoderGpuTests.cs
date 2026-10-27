@@ -1,4 +1,4 @@
-// Tests for BcnEncoderGpu (Images/Texture): RGBA8 to BC1, BC3, BC4 and BC5 blocks.
+// Tests for BcnEncoderGpu (Images/Texture): RGBA8 to BC1, BC3, BC4, BC5 and BC7 blocks.
 //
 // Fixtures (TestData/BcnEnc, scripts/texture/make_bcn_encoder_fixtures.py): pictures and the blocks etcpak 0.9.15
 // writes for them (its portable paths, the encoder ported): a Big Buck Bunny frame (320 and 316 wide), a synthetic RGBA
@@ -9,6 +9,12 @@
 // What can fail: the solid test, min / max and insets, the summed-range reciprocal, the position rounding and its index
 // mapping, 5:6:5 packing and endpoint order, the one-channel reciprocal and its 3-bit packing across the two words, the
 // BC3 / BC5 halves, the block order, and writes past the blocks (outputs are poisoned and longer).
+//
+// BC7 (bc7enc at its default settings, the blocks etcpak's portable module writes): the same pictures plus grey ramps,
+// partition-shaped two-colour blocks and alpha ramps / steps. bc7enc searches in float, so a GPU that rounds a division
+// or square root differently, or fuses a multiply-add, can land on another endpoint now and then: the test counts the
+// blocks that are byte-identical, and compares the PSNR of both encodings through our decoder (bit-exact with the
+// reference decoders).
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -39,6 +45,7 @@ public abstract partial class CodecsTestBase
                 "bc3" => BcnFormat.Bc3,
                 "bc4" => BcnFormat.Bc4,
                 "bc5" => BcnFormat.Bc5,
+                "bc7" => BcnFormat.Bc7,
                 _ => throw new Exception($"unknown format {c[1]}"),
             };
             cases.Add(new BcnCase(c[0], format, c[1], int.Parse(c[2]), int.Parse(c[3])));
@@ -55,7 +62,7 @@ public abstract partial class CodecsTestBase
             using var enc = new BcnEncoderGpu(acc);
             var failures = new List<string>();
             int checkedCount = 0;
-            foreach (var c in BcnEncCases())
+            foreach (var c in BcnEncCases().Where(c => c.Format != BcnFormat.Bc7))
             {
                 byte[] rgba = Gunzip(ReadEmbedded(BcnEncPrefix + c.Name + ".rgba.gz"));
                 byte[] expected = ReadEmbedded(BcnEncPrefix + c.Name + "." + c.Ext);
@@ -107,7 +114,7 @@ public abstract partial class CodecsTestBase
                     rgba[i + 2] = (byte)((x + y) * 3);
                     rgba[i + 3] = 255;
                 }
-            foreach (var f in new[] { BcnFormat.Bc1, BcnFormat.Bc3, BcnFormat.Bc4, BcnFormat.Bc5 })
+            foreach (var f in new[] { BcnFormat.Bc1, BcnFormat.Bc3, BcnFormat.Bc4, BcnFormat.Bc5, BcnFormat.Bc7 })
             {
                 byte[] blocks = await enc.EncodeAsync(rgba, w, h, f);
                 Equal(BcnDecoderGpu.BlocksSize(f, w, h), (long)blocks.Length, $"{f} block bytes for {w}x{h}");
@@ -120,10 +127,82 @@ public abstract partial class CodecsTestBase
                 True(worst <= 24, $"{f}: worst channel error {worst} on a smooth gradient (edge blocks repeat the edge pixels)");
             }
             await ThrowsAsync<ArgumentException>(() => enc.EncodeAsync(rgba.AsMemory(0, 16), w, h, BcnFormat.Bc1), "short rgba");
-            await ThrowsAsync<ArgumentOutOfRangeException>(() => enc.EncodeAsync(rgba, w, h, BcnFormat.Bc7), "BC7 encode is not written yet");
+            await ThrowsAsync<ArgumentOutOfRangeException>(() => enc.EncodeAsync(rgba, w, h, (BcnFormat)2), "no such format");
             await ThrowsAsync<ArgumentOutOfRangeException>(() => enc.EncodeAsync(rgba, 0, h, BcnFormat.Bc1), "zero width");
         }
         finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    /// <summary>
+    /// BC7 against bc7enc: every block byte-identical where the float arithmetic is IEEE single precision step by step
+    /// (the CPU, Velocity and Wasm backends; a perceptual weight off by one already changes 1.2% of the blocks), at least
+    /// 99% on the GPUs (their division, square root and fused multiply-add may round differently), and per fixture our
+    /// PSNR (RGBA, through our decoder) no more than 0.05 dB below bc7enc's.
+    /// </summary>
+    [TestMethod(Timeout = 900000)]
+    public async Task BcnEncoderGpu_Bc7_MatchesBc7enc()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var enc = new BcnEncoderGpu(acc);
+            using var dec = new BcnDecoderGpu(acc);
+            var failures = new List<string>();
+            var report = new List<string>();
+            long blocks = 0, same = 0;
+            int fixtures = 0;
+            foreach (var c in BcnEncCases().Where(c => c.Format == BcnFormat.Bc7))
+            {
+                byte[] rgba = Gunzip(ReadEmbedded(BcnEncPrefix + c.Name + ".rgba.gz"));
+                byte[] expected = ReadEmbedded(BcnEncPrefix + c.Name + ".bc7");
+                using var dIn = acc.Allocate1D<byte>(rgba.Length + 9);
+                DeviceTransfer.Upload(dIn.View, rgba);
+                using var dOut = acc.Allocate1D<byte>(expected.Length + 13);
+                DeviceTransfer.Upload(dOut.View, Poison((int)dOut.Length));
+                enc.Encode(dIn.View, c.Width, c.Height, BcnFormat.Bc7, dOut.View);
+                await acc.SynchronizeAsync();
+                byte[] all = await DeviceTransfer.DownloadAsync(dOut.View, dOut.Length);
+                byte[] poison = Poison((int)dOut.Length);
+                for (int i = expected.Length; i < all.Length; i++)
+                    if (all[i] != poison[i]) { failures.Add($"{c.Name}: wrote past the blocks at byte {i}"); break; }
+                byte[] ours = all.AsSpan(0, expected.Length).ToArray();
+                int n = expected.Length / 16, eq = 0, firstDiff = -1;
+                for (int b = 0; b < n; b++)
+                {
+                    if (ours.AsSpan(b * 16, 16).SequenceEqual(expected.AsSpan(b * 16, 16))) eq++;
+                    else if (firstDiff < 0) firstDiff = b;
+                }
+                blocks += n;
+                same += eq;
+                byte[] ourPx = await dec.DecodeAsync(ours, BcnFormat.Bc7, c.Width, c.Height);
+                byte[] refPx = await dec.DecodeAsync(expected, BcnFormat.Bc7, c.Width, c.Height);
+                double ourPsnr = PsnrRgba(rgba, ourPx), refPsnr = PsnrRgba(rgba, refPx);
+                string first = firstDiff < 0 ? "" : $", first differing block {firstDiff} (ours {Convert.ToHexString(ours, firstDiff * 16, 16)}, bc7enc {Convert.ToHexString(expected, firstDiff * 16, 16)})";
+                report.Add($"{c.Name} {c.Width}x{c.Height}: {eq} / {n} blocks identical, PSNR {ourPsnr:F3} dB (bc7enc {refPsnr:F3}){first}");
+                if (ourPsnr < refPsnr - 0.05) failures.Add($"{c.Name}: PSNR {ourPsnr:F3} dB, bc7enc {refPsnr:F3} dB");
+                fixtures++;
+            }
+            Console.WriteLine("BcnEncoderGpu_Bc7_MatchesBc7enc:\n  " + string.Join("\n  ", report) + $"\n  total {same} / {blocks} blocks identical");
+            True(fixtures >= 9, $"only {fixtures} BC7 fixtures");
+            bool exact = acc.AcceleratorType is AcceleratorType.CPU or AcceleratorType.Velocity or AcceleratorType.Wasm;
+            True(exact ? same == blocks : same * 100 >= blocks * 99,
+                $"only {same} of {blocks} blocks identical with bc7enc ({acc.AcceleratorType}):\n" + string.Join("\n", report));
+            True(failures.Count == 0, string.Join("\n", failures) + "\n" + string.Join("\n", report));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    /// <summary>PSNR over all four channels.</summary>
+    private static double PsnrRgba(byte[] a, byte[] b)
+    {
+        double se = 0;
+        for (int i = 0; i < a.Length; i++)
+        {
+            double d = a[i] - b[i];
+            se += d * d;
+        }
+        if (se == 0) return 99;
+        return 10 * Math.Log10(255.0 * 255.0 * a.Length / se);
     }
 
     [TestMethod]
