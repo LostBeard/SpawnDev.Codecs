@@ -52,7 +52,8 @@ lanes (VP9 batch encode at unaligned sizes).
 | Codec | CPU | CUDA | OpenCL | WebGPU | WebGL | Wasm | Evidence |
 |-------|-----|------|--------|--------|-------|------|----------|
 | BCn decode (BC1, BC3, BC4, BC5, BC7) | green (10-27, also Velocity) | green | green | green | green | green | 29 fixtures bit-exact with the reference decoders (texture2ddecoder, cross-checked with Pillow): reference-encoder blocks (etcpak, bc7enc per mode) over a real frame and an RGBA picture, random blocks (every BC7 mode, partition, rotation, the reserved mode), partial edge blocks. Spec choices where the references disagree: BC3 colour always 4-colour, BC1 3-colour index 3 = (0,0,0,0), BC7 reserved mode = (0,0,0,0) |
-| BCn encode | open | open | open | open | open | open | PLAN-Texture-Compression.md |
+| BCn encode BC1, BC3, BC4, BC5 | green (10-27, also Velocity) | green | green | green | green | green | 19 fixtures byte-identical with etcpak 0.9.15 (the portable paths its Windows wheel runs; ported, BSD 3-clause in NOTICE.md): a real frame at two widths, an RGBA picture, noise, flat / nearly flat blocks. Sizes that are not a multiple of 4 repeat the edge pixels |
+| BCn encode BC7 | open | open | open | open | open | open | next (PLAN-Texture-Compression.md) |
 
 ## Video
 

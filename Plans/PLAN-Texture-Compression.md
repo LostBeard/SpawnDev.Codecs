@@ -20,9 +20,20 @@ TypedArray / ArrayView1D), no bulk bytes on the .NET heap, a reference oracle fo
    reference encoder at comparable settings, logged with the losses.
 4. Later: BC6H, ETC2 / EAC, ASTC (the same oracles cover them).
 
+## Done
+
+- 10-27 **Decoders** BC1 / BC3 / BC4 / BC5 / BC7 (`BcnDecoderGpu`, gather form): 29 fixtures bit-exact, all 7 lanes. BC7
+  tables read back from a reference decoder (`scripts/texture/derive_bc7_tables.py`).
+- 10-27 **Encoders** BC1 / BC3 / BC4 / BC5 (`BcnEncoderGpu`, one thread per output word): a port of etcpak's portable
+  DXTC compressors, byte-identical on 19 fixtures, all 7 lanes. (The etcpak 0.9.15 Windows wheel runs the portable paths:
+  its BC4 matches that arithmetic 256 / 256 blocks, the SSE4.1 variant 246; the portable BC1 ignores alpha.) Quality is
+  etcpak's (fast range-fit); a higher-quality mode (cluster fit / least squares) can follow, gated on PSNR.
+
 ## Oracles (Python, oracle venv)
 
-- `etcpak` (K0lb3's bindings of etcpak; BC7 through bc7enc): `compress_bc1/3/4/5/7`, `decompress_*`.
+- `etcpak` (K0lb3's bindings of etcpak; BC7 through bc7enc): `compress_bc1/3/4/5/7`. Its `decompress_*` are broken in
+  0.9.15 (MemoryError / native faults), and bc7enc with a mode-5-only mask crashes on some pictures; mode-mask encodes
+  are not deterministic.
 - `texture2ddecoder` (K0lb3, from AssetStudio): `decode_bc1/3/4/5/6/7`, ETC, ASTC: a second, independent decoder.
 - Fixtures: `scripts/texture/make_bcn_fixtures.py` writes blocks made by the reference encoders over real pictures
   (TestData photos, alpha pictures) plus synthetic blocks that hit every BC7 mode / partition / rotation, and the RGBA

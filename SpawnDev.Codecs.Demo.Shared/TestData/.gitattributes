@@ -12,3 +12,5 @@ SnappyDec/*.content binary
 GDeflate/*.gdf binary
 Bcn/* binary
 Bcn/manifest.tsv text eol=lf
+BcnEnc/* binary
+BcnEnc/manifest.tsv text eol=lf
