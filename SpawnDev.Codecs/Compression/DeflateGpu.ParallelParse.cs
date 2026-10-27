@@ -208,4 +208,46 @@ public static partial class DeflateGpu
             extraBits += LengthExtraBits(length) + DistExtraBits(dist);
         }
     }
+
+    /// <summary>Shared ints <see cref="CountBlockLanes"/> needs: literal/length and distance counts, the extra bits.</summary>
+    public const int CountSharedInts = 286 + 30 + 1;
+
+    /// <summary>
+    /// After a parse that did not count (<see cref="WalkParseStep"/> without counts, or <see cref="LiteralTokensThread"/>):
+    /// the block's literal/length and distance frequencies and extra bits, as ParseStep counts them, by the
+    /// <paramref name="lanes"/> threads of a group (<paramref name="h"/> = <see cref="CountSharedInts"/> ints of shared
+    /// memory). The frequencies must be zero (<see cref="InitBlockThread"/>).
+    /// </summary>
+    public static void CountBlockLanes(ArrayView<int> s, int sb, int blockSize, ArrayView<int> h, int lane, int lanes)
+    {
+        int tokAt = sb + HashSize + blockSize;
+        int tail = tokAt + blockSize;
+        int st = tail + StateOff;
+        bool active = Group.BarrierAnd(s[st + StPhase] == PhaseParsed);
+        if (active)
+        {
+            for (int i = lane; i < CountSharedInts; i += lanes) h[i] = 0;
+            Group.Barrier();
+            int count = s[st + StTokens];
+            int extra = 0;
+            for (int t = lane; t < count; t += lanes)
+            {
+                int tok = s[tokAt + t];
+                if (tok < 256) Atomic.Add(ref h[tok], 1);
+                else
+                {
+                    int ml = tok >> 16;
+                    int md = tok & 0xFFFF;
+                    Atomic.Add(ref h[LengthSymbol(ml)], 1);
+                    Atomic.Add(ref h[286 + DistSymbol(md)], 1);
+                    extra += LengthExtraBits(ml) + DistExtraBits(md);
+                }
+            }
+            if (extra != 0) Atomic.Add(ref h[316], extra);
+            Group.Barrier();
+            for (int i = lane; i < 286; i += lanes) s[tail + LitFreqOff + i] = h[i];
+            for (int i = lane; i < 30; i += lanes) s[tail + DistFreqOff + i] = h[286 + i];
+            if (lane == 0) s[st + StExtra] = h[316];
+        }
+    }
 }

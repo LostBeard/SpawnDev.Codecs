@@ -47,6 +47,10 @@ internal sealed class DeflateKernels : IDisposable
     private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _chains;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _match;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _walk;
+    private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, int> _emitLanes;
+    private readonly int _emitLaneCount;
+    private readonly Action<KernelConfig, ArrayView<int>, ArrayView<int>, int> _count;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _literals;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _plan, _emit;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _result;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _layout;
@@ -62,6 +66,10 @@ internal sealed class DeflateKernels : IDisposable
         _chains = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(ChainsKernel);
         _match = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(MatchKernel);
         _walk = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(WalkKernel);
+        _emitLanes = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, int>(EmitLanesKernel);
+        _emitLaneCount = Math.Min(EmitLanes, accelerator.MaxNumThreadsPerGroup);
+        _count = accelerator.LoadStreamKernel<ArrayView<int>, ArrayView<int>, int>(CountKernel);
+        _literals = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(LiteralsKernel);
         _plan = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(PlanKernel);
         _emit = accelerator.LoadAutoGroupedStreamKernel<
@@ -102,6 +110,21 @@ internal sealed class DeflateKernels : IDisposable
     /// <summary>One bounded walk launch of the wave (step 3).</summary>
     public void RunWalk(ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int waveBase, int count) =>
         _walk(count, data, scratch, prm, waveBase);
+
+    /// <summary>Level 4 without a parse: one thread per byte of the wave's blocks writes its literal token.</summary>
+    public void RunLiterals(ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int waveBase, int count, int blockSize) =>
+        _literals(count * blockSize, data, scratch, prm, waveBase);
+
+    /// <summary>The wave's frequencies and extra bits after a parse that did not count them (groups of EmitLanes lanes).</summary>
+    public void RunCount(ArrayView<int> scratch, ArrayView<int> prm, int waveBase, int count) =>
+        _count(new KernelConfig(count, _emitLaneCount), scratch, prm, waveBase);
+
+    /// <summary>Threads per block writing a dynamic block's tokens (DeflateGpu.EmitBlockLanes).</summary>
+    public const int EmitLanes = 256;
+
+    /// <summary>The wave's dynamic blocks written by groups of lanes (stored blocks are left to RunEmit).</summary>
+    public void RunEmitLanes(ArrayView<byte> slots, ArrayView<int> scratch, ArrayView<uint> words, ArrayView<int> prm, int waveBase, int count) =>
+        _emitLanes(new KernelConfig(count, _emitLaneCount), slots, scratch, words, prm, waveBase);
 
     /// <summary>Counts the wave's unfinished parses into prm[PrmPending].</summary>
     public void RunPending(ArrayView<int> scratch, ArrayView<int> prm, int waveBase, int count) =>
@@ -232,7 +255,7 @@ internal sealed class DeflateKernels : IDisposable
         if (block >= prm[PrmBlocks]) return;
         int bs = prm[PrmBlockSize];
         DeflateGpu.WalkParseStep(data, block * bs, BlockLength(prm, block), prm[PrmLevel], scratch, idx.X * prm[PrmScratchPer], bs,
-            DeflateGpu.ParallelParseChunk, true);
+            DeflateGpu.ParallelParseChunk, false);
     }
 
     private static void PendingKernel(Index1D _, ArrayView<int> scratch, ArrayView<int> prm, int waveBase, int count)
@@ -267,6 +290,38 @@ internal sealed class DeflateKernels : IDisposable
         int bs = prm[PrmBlockSize];
         DeflateGpu.EmitStep(data, block * bs, BlockLength(prm, block), block == blocks - 1,
             slots, block * prm[PrmSlotCap], scratch, idx.X * prm[PrmScratchPer], bs, DeflateGpu.EmitChunk);
+    }
+
+    private static void LiteralsKernel(Index1D idx, ArrayView<byte> data, ArrayView<int> scratch, ArrayView<int> prm, int waveBase)
+    {
+        int bs = prm[PrmBlockSize];
+        int b = idx.X / bs;
+        int k = idx.X - b * bs;
+        int block = waveBase + b;
+        if (block >= prm[PrmBlocks]) return;
+        DeflateGpu.LiteralTokensThread(data, block * bs, BlockLength(prm, block), k, scratch, b * prm[PrmScratchPer], bs);
+    }
+
+    private static void CountKernel(ArrayView<int> scratch, ArrayView<int> prm, int waveBase)
+    {
+        var h = SharedMemory.Allocate<int>(DeflateGpu.CountSharedInts);
+        int b = Grid.IdxX;
+        DeflateGpu.CountBlockLanes(scratch, b * prm[PrmScratchPer], prm[PrmBlockSize], h, Group.IdxX, Group.DimX);
+    }
+
+    private static void EmitLanesKernel(ArrayView<byte> slots, ArrayView<int> scratch, ArrayView<uint> words, ArrayView<int> prm, int waveBase)
+    {
+        var part = SharedMemory.Allocate<int>(EmitLanes);
+        int b = Grid.IdxX;
+        int block = waveBase + b;
+        int blocks = prm[PrmBlocks];
+        int bs = prm[PrmBlockSize];
+        // A group past the last block finds no planned block (its scratch is the wave's, phase not EmitTokens) and still
+        // meets every barrier.
+        bool real = block < blocks;
+        int sb = b * prm[PrmScratchPer];
+        DeflateGpu.EmitBlockLanes(block == blocks - 1, slots, real ? block * prm[PrmSlotCap] : 0, scratch, sb, bs, words,
+            (long)b * DeflateGpu.EmitWordsPerBlock(bs), part, Group.IdxX, Group.DimX);
     }
 
     private static void ResultKernel(Index1D idx, ArrayView<int> scratch, ArrayView<int> res, ArrayView<int> prm, int waveBase)
@@ -358,6 +413,7 @@ internal sealed class DeflateBlockRunner : IDisposable
     private readonly StageBuffer<int> _res;
     private readonly StageBuffer<int> _scratch;
     private readonly StageBuffer<int> _adler;
+    private readonly StageBuffer<uint> _words;
 
     public DeflateKernels Kernels { get; }
     public int BlockSize { get; }
@@ -369,8 +425,9 @@ internal sealed class DeflateBlockRunner : IDisposable
     public ArrayView1D<int, Stride1D.Dense> Prm => _prm.View;
 
     /// <summary>
-    /// Tests only: parse levels 1-3 with the serial DeflateGpu.ParseStep (one thread per block, resumable launches) instead
-    /// of DeflateGpu.ParallelParse. It is the oracle of the parallel parse, which must write the same bytes.
+    /// Tests only: parse with the serial DeflateGpu.ParseStep and write every block with the serial EmitStep (one thread
+    /// per block, resumable launches) instead of DeflateGpu.ParallelParse, the lanes counting and EmitBlockLanes. It is
+    /// the oracle of the parallel path, which must write the same bytes.
     /// </summary>
     internal bool SerialParse { get; set; }
 
@@ -393,6 +450,7 @@ internal sealed class DeflateBlockRunner : IDisposable
         _res = new StageBuffer<int>(accelerator);
         _scratch = new StageBuffer<int>(accelerator);
         _adler = new StageBuffer<int>(accelerator);
+        _words = new StageBuffer<uint>(accelerator);
     }
 
     public static int BlocksFor(int length, int blockSize) => Math.Max(1, (length + blockSize - 1) / blockSize);
@@ -435,6 +493,7 @@ internal sealed class DeflateBlockRunner : IDisposable
         _adler.Ensure((long)blocks * piecesPerBlock);
         int wave = Math.Min(_wave, blocks);
         _scratch.Ensure((long)wave * scratchPer);
+        _words.Ensure((long)wave * DeflateGpu.EmitWordsPerBlock(BlockSize));
         var prm = new int[DeflateKernels.PrmInts];
         prm[DeflateKernels.PrmLength] = length;
         prm[DeflateKernels.PrmBlockSize] = BlockSize;
@@ -455,7 +514,7 @@ internal sealed class DeflateBlockRunner : IDisposable
         {
             int count = Math.Min(wave, blocks - first);
             Kernels.RunInit(_scratch.View, _prm.View, first, count);
-            if ((level == DeflateGpu.LevelHuffmanOnly) | (SerialParse & (level > 0)))
+            if (SerialParse & (level > 0))
             {
                 for (int i = 0; i < parseSteps; i++)
                 {
@@ -476,9 +535,14 @@ internal sealed class DeflateBlockRunner : IDisposable
                     }
                 }
             }
+            else if (level == DeflateGpu.LevelHuffmanOnly)
+            {
+                Kernels.RunLiterals(data, _scratch.View, _prm.View, first, count, BlockSize);
+                Kernels.RunCount(_scratch.View, _prm.View, first, count);
+            }
             else if (level > 0)
             {
-                // The parse in parallel steps (DeflateGpu.ParallelParse), the same tokens and counts as ParseStep.
+                // The parse in parallel steps (DeflateGpu.ParallelParse), the same tokens as ParseStep, then its counts.
                 Kernels.RunChains(data, _scratch.View, _prm.View, first, count);
                 for (int from = 0; from < BlockSize; from += DeflateGpu.ParallelParseChunk)
                 {
@@ -490,8 +554,12 @@ internal sealed class DeflateBlockRunner : IDisposable
                     Kernels.RunWalk(data, _scratch.View, _prm.View, first, count);
                     await pacer.LaunchedAsync();
                 }
+                Kernels.RunCount(_scratch.View, _prm.View, first, count);
             }
             Kernels.RunPlan(data, _slots.View, _scratch.View, _prm.View, first, count);
+            // Dynamic blocks by lanes; the bounded serial launches then write the stored blocks (rare), or every block on
+            // the serial oracle path.
+            if (!SerialParse) Kernels.RunEmitLanes(_slots.View, _scratch.View, _words.View, _prm.View, first, count);
             for (int i = 0; i < emitSteps; i++)
             {
                 Kernels.RunEmit(data, _slots.View, _scratch.View, _prm.View, first, count);
@@ -509,6 +577,7 @@ internal sealed class DeflateBlockRunner : IDisposable
         _res.Dispose();
         _scratch.Dispose();
         _adler.Dispose();
+        _words.Dispose();
     }
 }
 

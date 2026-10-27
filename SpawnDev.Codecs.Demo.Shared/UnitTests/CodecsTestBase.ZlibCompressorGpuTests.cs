@@ -174,9 +174,10 @@ public abstract partial class CodecsTestBase
         await AssertZlibRoundTripAsync(StructuredData(2_500_000, 0x2B05), 3, 1 << 20, "2.5 MB structured, 1 MiB blocks, lazy");
 
     /// <summary>
-    /// The parallel parse (DeflateGpu.ParallelParse) writes the bytes of the serial DeflateGpu.ParseStep, its oracle, at
-    /// levels 1-3. The serial lazy parse runs with a compare budget far below what the blocks need, so it finishes only
-    /// through the host's unfinished-parse loop.
+    /// The parallel parse (DeflateGpu.ParallelParse; level 4: one literal token per byte) and the lanes counting and
+    /// writing produce the bytes of the serial DeflateGpu.ParseStep / EmitStep, their oracle, at levels 1-4. The serial
+    /// lazy parse runs with a compare budget far below what the blocks need, so it finishes only through the host's
+    /// unfinished-parse loop.
     /// </summary>
     [TestMethod(Timeout = 600000)]
     public async Task ZlibCompressorGpu_ParallelParse_SameBytesAsSerialParse()
@@ -189,7 +190,7 @@ public abstract partial class CodecsTestBase
             {
                 using var parallel = new ZlibCompressorGpu(acc, 65536, threadsPerWave: 4);
                 using var serial = new ZlibCompressorGpu(acc, 65536, threadsPerWave: 4) { SerialParse = true, ParseCompareBudget = 4096 };
-                for (int level = 1; level <= 3; level++)
+                for (int level = 1; level <= 4; level++)
                 {
                     byte[] a = await parallel.CompressAsync(raw, level);
                     byte[] b = await serial.CompressAsync(raw, level);
