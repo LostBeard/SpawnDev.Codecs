@@ -52,19 +52,22 @@ public sealed class GDeflateDecompressorGpu : IDisposable
     // Per-tile scratch (ints).
     private const int BitLoOff = 0, BitHiOff = BitLoOff + Streams, BitsLeftOff = BitHiOff + Streams,
         CopyLenOff = BitsLeftOff + Streams, CopyOutOff = CopyLenOff + Streams;
-    private const int LensOff = CopyOutOff + Streams;          // [320 + 138 overrun]
-    private const int LitCountOff = LensOff + 460;              // [16]
-    private const int LitSymOff = LitCountOff + 16;             // [288]
-    private const int DistCountOff = LitSymOff + 288;           // [16]
-    private const int DistSymOff = DistCountOff + 16;           // [32]
-    private const int PreCountOff = DistSymOff + 32;            // [16]
-    private const int PreSymOff = PreCountOff + 16;             // [24]
-    private const int OffsOff = PreSymOff + 24;                 // [16]
-    private const int LitLutOff = OffsOff + 16;                 // [1024]
-    private const int DistLutOff = LitLutOff + (1 << LitLutBits); // [256]
-    private const int PreLutOff = DistLutOff + (1 << DistLutBits); // [128]
+    // Code lengths, symbol lists and first-level tables hold 16-bit entries, two per int (Get16 / Set16): the lanes
+    // kernel keeps all of it in shared memory, and the smaller it is the more tiles an SM runs at once. Only one thread
+    // writes them (the block header is serial), so the read-modify-write of a packed int never races.
+    private const int LensOff = CopyOutOff + Streams;          // [320 + 138 overrun] x 16 bits
+    private const int LitCountOff = LensOff + 230;              // [16]
+    private const int LitSymOff = LitCountOff + 16;             // [288] x 16 bits
+    private const int DistCountOff = LitSymOff + 144;           // [16]
+    private const int DistSymOff = DistCountOff + 16;           // [32] x 16 bits
+    private const int PreCountOff = DistSymOff + 16;            // [16]
+    private const int PreSymOff = PreCountOff + 16;             // [24] x 16 bits
+    private const int OffsOff = PreSymOff + 12;                 // [16]
+    private const int LitLutOff = OffsOff + 16;                 // [1024] x 16 bits
+    private const int DistLutOff = LitLutOff + (1 << LitLutBits) / 2; // [256] x 16 bits
+    private const int PreLutOff = DistLutOff + (1 << DistLutBits) / 2; // [128] x 16 bits
     /// <summary>Ints of working memory per tile.</summary>
-    public const int ScratchInts = PreLutOff + 128;
+    public const int ScratchInts = PreLutOff + 64;
 
     // prm ints.
     internal const int PLength = 0, PTiles = 1, PTotal = 2, PLastSize = 3, PData = 4, PError = 5, PErrorAt = 6, PDone = 7;
@@ -836,18 +839,18 @@ public sealed class GDeflateDecompressorGpu : IDisposable
         int ncode = PopBits(ref st, sc, sb, 4) + 4;
         Ensure(ref st, d, sc, sb);
         int lens = sb + LensOff;
-        for (int i = 0; i < 19; i++) sc[lens + i] = 0;
+        for (int i = 0; i < 19; i++) Set16(sc, lens, i, 0);
         int k = 0;
         bool reading = (k < ncode) & (st.Err == 0);
         while (reading)
         {
-            sc[lens + Compression.InflateGpu.CodeLengthOrder(k)] = PopBits(ref st, sc, sb, 3);
+            Set16(sc, lens, Compression.InflateGpu.CodeLengthOrder(k), PopBits(ref st, sc, sb, 3));
             Advance(ref st, d, sc, sb);
             k++;
             reading = (k < ncode) & (st.Err == 0);
         }
         if (st.Err != 0) return;
-        int left = Construct(sc, sb, lens, 19, sb + PreCountOff, sb + PreSymOff);
+        int left = Construct(sc, sb, lens, 0, 19, sb + PreCountOff, sb + PreSymOff);
         if (left != 0) { st.Err = (int)GDeflateError.BadCodeLengths; return; }
         BuildLut(sc, sb + PreCountOff, sb + PreSymOff, sb + PreLutOff, 7);
 
@@ -862,7 +865,7 @@ public sealed class GDeflateDecompressorGpu : IDisposable
             {
                 if (sym < 16)
                 {
-                    sc[lens + index] = sym;
+                    Set16(sc, lens, index, sym);
                     index++;
                 }
                 else
@@ -874,14 +877,14 @@ public sealed class GDeflateDecompressorGpu : IDisposable
                         if (index == 0) st.Err = (int)GDeflateError.BadCodeLengths;
                         else
                         {
-                            val = sc[lens + index - 1];
+                            val = Get16(sc, lens, index - 1);
                             rep = 3 + PopBits(ref st, sc, sb, 2);
                         }
                     }
                     else if (sym == 17) rep = 3 + PopBits(ref st, sc, sb, 3);
                     else rep = 11 + PopBits(ref st, sc, sb, 7);
                     // The reference lets a run overrun the lengths (into slack it ignores); so do we.
-                    for (int r = 0; r < rep; r++) sc[lens + index + r] = val;
+                    for (int r = 0; r < rep; r++) Set16(sc, lens, index + r, val);
                     index += rep;
                 }
                 if (st.Err == 0) Advance(ref st, d, sc, sb);
@@ -896,11 +899,11 @@ public sealed class GDeflateDecompressorGpu : IDisposable
     private static void StaticHeader(ArrayView<int> sc, int sb)
     {
         int lens = sb + LensOff;
-        for (int i = 0; i < 144; i++) sc[lens + i] = 8;
-        for (int i = 144; i < 256; i++) sc[lens + i] = 9;
-        for (int i = 256; i < 280; i++) sc[lens + i] = 7;
-        for (int i = 280; i < 288; i++) sc[lens + i] = 8;
-        for (int i = 288; i < 320; i++) sc[lens + i] = 5;
+        for (int i = 0; i < 144; i++) Set16(sc, lens, i, 8);
+        for (int i = 144; i < 256; i++) Set16(sc, lens, i, 9);
+        for (int i = 256; i < 280; i++) Set16(sc, lens, i, 7);
+        for (int i = 280; i < 288; i++) Set16(sc, lens, i, 8);
+        for (int i = 288; i < 320; i++) Set16(sc, lens, i, 5);
         var dummy = new TileState();
         BuildCodes(ref dummy, sc, sb, 288, 32);
     }
@@ -909,9 +912,9 @@ public sealed class GDeflateDecompressorGpu : IDisposable
     private static void BuildCodes(ref TileState st, ArrayView<int> sc, int sb, int nlit, int ndist)
     {
         int lens = sb + LensOff;
-        int left = Construct(sc, sb, lens, nlit, sb + LitCountOff, sb + LitSymOff);
+        int left = Construct(sc, sb, lens, 0, nlit, sb + LitCountOff, sb + LitSymOff);
         bool litBad = (left < 0) | ((left > 0) & (nlit != sc[sb + LitCountOff] + sc[sb + LitCountOff + 1]));
-        left = Construct(sc, sb, lens + nlit, ndist, sb + DistCountOff, sb + DistSymOff);
+        left = Construct(sc, sb, lens, nlit, ndist, sb + DistCountOff, sb + DistSymOff);
         bool distBad = (left < 0) | ((left > 0) & (ndist != sc[sb + DistCountOff] + sc[sb + DistCountOff + 1]));
         if (litBad | distBad) st.Err = (int)GDeflateError.BadHuffmanCode;
         else
@@ -957,7 +960,7 @@ public sealed class GDeflateDecompressorGpu : IDisposable
     /// <summary>The symbol <paramref name="bits"/> start with and its code length (-1 when no code matches); nothing consumed.</summary>
     private static int PeekSymbol(ArrayView<int> sc, int sb, uint bits, int lutOff, int lutBits, int countOff, int symOff, ref int len)
     {
-        int entry = sc[sb + lutOff + (int)(bits & ((1u << lutBits) - 1u))];
+        int entry = Get16(sc, sb + lutOff, (int)(bits & ((1u << lutBits) - 1u)));
         len = entry & 15;
         int result = -1;
         if (len != 0) result = entry >> 4;
@@ -972,7 +975,7 @@ public sealed class GDeflateDecompressorGpu : IDisposable
                 int count = sc[sb + countOff + l];
                 if (code - count < first)
                 {
-                    result = sc[sb + symOff + index + (code - first)];
+                    result = Get16(sc, sb + symOff, index + (code - first));
                     walking = false;
                 }
                 else
@@ -990,14 +993,17 @@ public sealed class GDeflateDecompressorGpu : IDisposable
         return result;
     }
 
-    /// <summary>Canonical decoding tables (puff's construct): 0 complete, &gt; 0 incomplete, &lt; 0 over-subscribed.</summary>
-    private static int Construct(ArrayView<int> sc, int sb, int lengthsAt, int n, int countAt, int symAt)
+    /// <summary>
+    /// Canonical decoding tables (puff's construct) from the <paramref name="n"/> 16-bit lengths from entry
+    /// <paramref name="first"/> at <paramref name="lengthsAt"/>: 0 complete, &gt; 0 incomplete, &lt; 0 over-subscribed.
+    /// </summary>
+    private static int Construct(ArrayView<int> sc, int sb, int lengthsAt, int first, int n, int countAt, int symAt)
     {
         int offsAt = sb + OffsOff;
         for (int len = 0; len <= MaxBits; len++) sc[countAt + len] = 0;
         for (int sym = 0; sym < n; sym++)
         {
-            int slot = countAt + sc[lengthsAt + sym];
+            int slot = countAt + Get16(sc, lengthsAt, first + sym);
             sc[slot] = sc[slot] + 1;
         }
         int left = 1;
@@ -1017,11 +1023,11 @@ public sealed class GDeflateDecompressorGpu : IDisposable
             for (int len = 1; len < MaxBits; len++) sc[offsAt + len + 1] = sc[offsAt + len] + sc[countAt + len];
             for (int sym = 0; sym < n; sym++)
             {
-                int l = sc[lengthsAt + sym];
+                int l = Get16(sc, lengthsAt, first + sym);
                 if (l != 0)
                 {
                     int at = sc[offsAt + l];
-                    sc[symAt + at] = sym;
+                    Set16(sc, symAt, at, sym);
                     sc[offsAt + l] = at + 1;
                 }
             }
@@ -1033,7 +1039,7 @@ public sealed class GDeflateDecompressorGpu : IDisposable
     private static void BuildLut(ArrayView<int> sc, int countAt, int symAt, int lutAt, int lutBits)
     {
         int size = 1 << lutBits;
-        for (int i = 0; i < size; i++) sc[lutAt + i] = 0;
+        for (int i = 0; i < size / 2; i++) sc[lutAt + i] = 0;
         int code = 0;
         int index = 0;
         for (int len = 1; len <= lutBits; len++)
@@ -1043,13 +1049,24 @@ public sealed class GDeflateDecompressorGpu : IDisposable
             {
                 int rev = 0;
                 for (int b = 0; b < len; b++) rev |= ((code >> b) & 1) << (len - 1 - b);
-                int entry = (sc[symAt + index + k] << 4) | len;
-                for (int fill = rev; fill < size; fill += 1 << len) sc[lutAt + fill] = entry;
+                int entry = (Get16(sc, symAt, index + k) << 4) | len;
+                for (int fill = rev; fill < size; fill += 1 << len) Set16(sc, lutAt, fill, entry);
                 code++;
             }
             index += count;
             code <<= 1;
         }
+    }
+
+    /// <summary>The 16-bit entry <paramref name="i"/> of the packed array at <paramref name="at"/>.</summary>
+    private static int Get16(ArrayView<int> sc, int at, int i) => (sc[at + (i >> 1)] >> ((i & 1) << 4)) & 0xFFFF;
+
+    /// <summary>Sets the 16-bit entry <paramref name="i"/> of the packed array at <paramref name="at"/> (one writer at a time).</summary>
+    private static void Set16(ArrayView<int> sc, int at, int i, int v)
+    {
+        int w = at + (i >> 1);
+        int sh = (i & 1) << 4;
+        sc[w] = (sc[w] & ~(0xFFFF << sh)) | ((v & 0xFFFF) << sh);
     }
 
     public void Dispose()
