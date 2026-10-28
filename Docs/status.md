@@ -2,7 +2,8 @@
 
 What is verified, on which backend, and how. "Verified" means a test that compares against a reference
 implementation (never against this library's own output) passed on that backend, with its guard red-checked. Dates are
-the last run of the named lane. Updated 2026-10-27.
+the last run of the named lane. Updated 2026-10-28 (browser Images and Audio refreshed on ILGPU 5.4.9-local.4; counts are
+passed / failed, skips are gated or CPU-only tests).
 
 Legend: **green** = the codec's suite passes on that lane; **partial** = runs, with the open items named; **open** = not
 yet passing or not yet run on the current build; **n/a** = the backend cannot run it (WebGL has no atomics or scatter
@@ -37,15 +38,15 @@ lanes (VP9 batch encode at unaligned sizes).
 
 | Codec | CPU | CUDA | OpenCL | WebGPU | WebGL | Wasm | Evidence |
 |-------|-----|------|--------|--------|-------|------|----------|
-| PNG decode / encode | green | green | green | partial: the decoder passed (10-22), rerun of both pending | n/a (scatter stores) | partial: decoder passed (10-22) | 64 decode fixtures; encoder output read by an independent host reader and by Pillow; text chunks |
-| JPEG decode / encode | green | green | green | open | open | open | decoder bit-exact with libjpeg-turbo on the fixture set (all subsamplings, progressive, restarts, CMYK / YCCK, EXIF); encoder byte-identical with libjpeg-turbo |
-| WebP lossless decode | green | green | green | green (10-26) | n/a (scatter stores) | open | libwebp pixels |
-| WebP lossless encode (+ ALPH, animation, metadata) | green | green | green | **partial** (10-26): correct, but launch-bound slow; 3 tests over the 30 s default | n/a (scatter stores) | open | libwebp and both our decoders decode our files to the source pixels |
-| WebP lossy decode | green | green | green | **partial** (10-26): 2 decoder tests over the 30 s default (TinyPool 85 s, metadata 40 s) | n/a (scatter stores) | open | 168 fixtures bit-exact with libwebp |
-| WebP lossy encode | green | green | green | green (10-27, 222 / 222, ILGPU 5.4.8-local.2) | open | green (10-27, 222 / 222) | byte-identical with libwebp, 222 fixtures (methods 3 / 4); the RD loop was split into stage kernels for browser shader compilers (10-25) |
-| WebP lossy encode with alpha | green | green | green (10-27) | green (10-27, 145 / 145) | open | green (10-27) | VP8 chunk byte-identical with libwebp, alpha exact (libwebp and our decoder), 145 fixtures |
-| GIF decode / encode | green | green | green | **partial** (10-25, 19 passed): correct, 2 fixture tests take 52 to 73 s | open | open | Pillow decodes our files to the same pixels; quantizer PSNR vs Pillow |
-| BMP decode / encode | green | green | green | green (10-25, 19 / 0) | header scan and alpha scan rewritten as gathers 10-26 (rerun pending); RLE refused (scatter stores) | open | Pillow |
+| PNG decode / encode | green | green | green | green (10-28, 21 / 0) | n/a (scatter stores) | green (10-28, 21 / 0) | 64 decode fixtures; encoder output read by an independent host reader and by Pillow; text chunks |
+| JPEG decode / encode | green | green | green | green (10-28, 18 / 0) | n/a (scatter stores) | green (10-28, 18 / 0) | decoder bit-exact with libjpeg-turbo on the fixture set (all subsamplings, progressive, restarts, CMYK / YCCK, EXIF); encoder byte-identical with libjpeg-turbo |
+| WebP lossless decode | green | green | green | green (10-28; the WebPDecoderGpu family, 29 / 0, covers lossless and lossy) | n/a (scatter stores) | **partial** (10-28, 27 / 2): wrong from the second decode / animation frame on (the decode status reads back as garbage, e.g. 0x10010); with Data | libwebp pixels |
+| WebP lossless encode (+ ALPH, animation, metadata) | green | green | green | green (10-28, 15 / 0) | n/a (scatter stores) | **partial** (10-28, 12 / 5): the 4 animation tests fail in our decoder's second-frame decode (see WebP lossless decode); ExtremeShapes 30.2 s, over the 30 s default | libwebp and both our decoders decode our files to the source pixels |
+| WebP lossy decode | green | green | green | green (10-28; TinyPool and metadata now inside the 30 s default) | n/a (scatter stores) | see WebP lossless decode (same decoder family) | 168 fixtures bit-exact with libwebp |
+| WebP lossy encode | green | green | green | green (10-28, ILGPU 5.4.9-local.4) | n/a (scatter stores) | green (10-28) | byte-identical with libwebp, 222 fixtures (methods 3 / 4); the RD loop was split into stage kernels for browser shader compilers (10-25) |
+| WebP lossy encode with alpha | green | green | green (10-27) | green (10-28) | n/a (scatter stores) | green (10-28) | VP8 chunk byte-identical with libwebp, alpha exact (libwebp and our decoder), 145 fixtures |
+| GIF decode / encode | green | green | green | green (10-28, 21 / 0; the slow fixture tests now inside the default) | n/a (scatter stores) | **partial** (10-28, 17 / 4): the encoder's MedAccumulateKernel traps on divide by zero (its divisions sit inside `if (k < n)`; GPUs are byte-identical with Pillow, so the guard looks hoisted); with Data | Pillow decodes our files to the same pixels; quantizer PSNR vs Pillow |
+| BMP decode / encode | green | green | green | green (10-28, 19 / 0) | green (10-28, 12 / 0; header and alpha scans as gathers); RLE refused (scatter stores) | green (10-28, 19 / 0) | Pillow |
 
 ## Textures
 
@@ -68,11 +69,11 @@ lanes (VP9 batch encode at unaligned sizes).
 
 | Codec | CPU | CUDA | OpenCL | WebGPU | WebGL | Wasm | Evidence |
 |-------|-----|------|--------|--------|-------|------|----------|
-| Vorbis decode | green | green (10-25) | green | green (10-26, real-GPU lane incl. the libvorbis parity tests) | open | open | six real libvorbis streams within 1e-4 of libvorbis (observed 7.5e-7) |
-| Vorbis encode (first version) | green | green | green | open | open | open | round trip through our decoders and ffmpeg |
-| FLAC (first version) | green | green | green | green (10-25, 63 / 0) | open | open | round trip; ffmpeg reads our files |
-| Opus CELT / range coder GPU parts | green | green | green | green (10-25, 12 / 0) | open | open | Concentus |
-| SILK GPU primitives | green | green (10-25) | green | **partial** (10-25): pulse kernels fixed after the run (one buffer was bound twice); the shell-coder kernel needs ILGPU 5.4.5 (struct binding fix) | open | open | Concentus |
+| Vorbis decode | green | green (10-25) | green | green (10-28; Vorbis family 59 / 0, the rest gated or CPU-only) | green (10-28, Vorbis family 186 / 0) | green (10-28, Vorbis family 188 / 0) | six real libvorbis streams within 1e-4 of libvorbis (observed 7.5e-7) |
+| Vorbis encode (first version) | green | green | green | green (10-28, 12 / 0) | green (10-28, 17 / 0) | green (10-28, 17 / 0) | round trip through our decoders and ffmpeg |
+| FLAC (first version) | green | green | green | green (10-28, 63 / 0) | green (10-28, 11 / 0; the serial coders gated) | green (10-28, 245 / 0) | round trip; ffmpeg reads our files |
+| Opus CELT / range coder GPU parts | green | green | green | green (10-28, Opus 7 / 0, CELT 10 / 0) | green (10-28, Opus 75 / 0, CELT 10 / 0) | green (10-28, Opus 77 / 0, CELT 17 / 0) | Concentus |
+| SILK GPU primitives | green | green (10-25) | green | green (10-28, 139 / 0) | green (10-28, 202 / 0) | green (10-28, 202 / 0) | Concentus |
 
 ## Notes
 
