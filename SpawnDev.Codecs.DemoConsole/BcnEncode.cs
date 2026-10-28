@@ -11,7 +11,8 @@ namespace SpawnDev.Codecs.DemoConsole;
 /// Encodes a raw RGBA8 picture to BCn blocks with <see cref="BcnEncoderGpu"/> and times it (the texture encode speed
 /// bench; compare the blocks with the reference encoder's for the same picture).
 ///
-/// Run: SpawnDev.Codecs.DemoConsole bcn-encode in.rgba width height bc1|bc3|bc4|bc5|bc7 out [cpu|cuda|opencl=cpu] [time]
+/// Run: SpawnDev.Codecs.DemoConsole bcn-encode in.rgba width height bc1|bc3|bc4|bc5|bc7 out [cpu|cuda|opencl=cpu] [time] [o2]
+/// (o2: the context at OptimizationLevel.O2 instead of ILGPU's default O1.)
 /// </summary>
 internal static class BcnEncode
 {
@@ -19,7 +20,7 @@ internal static class BcnEncode
     {
         if (args.Length < 6)
         {
-            Console.WriteLine("usage: bcn-encode <in.rgba> <width> <height> <bc1|bc3|bc4|bc5|bc7> <out> [cpu|cuda|opencl] [time]");
+            Console.WriteLine("usage: bcn-encode <in.rgba> <width> <height> <bc1|bc3|bc4|bc5|bc7> <out> [cpu|cuda|opencl] [time] [o2]");
             return 2;
         }
         byte[] rgba = File.ReadAllBytes(args[1]);
@@ -34,11 +35,12 @@ internal static class BcnEncode
             _ => throw new ArgumentException($"unknown format {args[4]}"),
         };
         string backend = args.Length > 6 ? args[6] : "cpu";
+        var level = args.Length > 8 && args[8] == "o2" ? OptimizationLevel.O2 : OptimizationLevel.O1;
         using var ctx = backend switch
         {
-            "cuda" => Context.Create(b => b.Cuda()),
-            "opencl" => Context.Create(b => b.OpenCL()),
-            _ => Context.Create(b => b.CPU()),
+            "cuda" => Context.Create(b => b.Cuda().Optimize(level)),
+            "opencl" => Context.Create(b => b.OpenCL().Optimize(level)),
+            _ => Context.Create(b => b.CPU().Optimize(level)),
         };
         using Accelerator acc = backend switch
         {
@@ -49,7 +51,7 @@ internal static class BcnEncode
         using var enc = new BcnEncoderGpu(acc);
         byte[] blocks = await enc.EncodeAsync(rgba, width, height, format);
         File.WriteAllBytes(args[5], blocks);
-        Console.WriteLine($"{width}x{height} -> {blocks.Length} bytes {format} ({acc.AcceleratorType})");
+        Console.WriteLine($"{width}x{height} -> {blocks.Length} bytes {format} ({acc.AcceleratorType}, {level})");
         if (args.Length > 7 && args[7] == "time")
         {
             // Warm (kernels compiled above): best of 3, device to device.
