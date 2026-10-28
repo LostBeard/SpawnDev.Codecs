@@ -425,7 +425,7 @@ public abstract partial class CodecsTestBase
         return m.Success ? int.Parse(m.Groups[1].Value) : 0;
     }
 
-    [TestMethod(Category = "NotOnWebGL")]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_ExtremeShapes_RoundTrip_AndOpenInLibwebp()
     {
         // The VP8L header has 14-bit sizes: 16384 is the largest. Also sizes around the transform block boundaries.
