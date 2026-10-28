@@ -29,6 +29,10 @@ if (args.Length > 0 && args[0] == "zlib-encode")
 if (args.Length > 0 && args[0] == "bcn-encode")
     return await BcnEncode.Run(args);
 
+// `dump-ptx <Namespace.Type> <MethodName> <out.ptx>`: the PTX of one kernel, for ptxas -v.
+if (args.Length > 0 && args[0] == "dump-ptx")
+    return DumpPtx.Run(args);
+
 // Run SpawnDev.UnitTesting unit tests on desktop .NET via PlaywrightMultiTest harness.
 try
 {
