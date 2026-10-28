@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterModeProbsTable_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(4, Vp9InterModeProbsTable.InterModes);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterModeProbsTable_TableShape()
     {
         CpuOnlyTest();
@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         Equal(3, t.Probs.GetLength(1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterModeProbsParser_Parse_NoUpdates_LeavesTableUntouched()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
                 Equal((byte)(50 + i * 3 + j), probs.Probs[i, j]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterModeProbsParser_Parse_RejectsNullArgs()
     {
         CpuOnlyTest();

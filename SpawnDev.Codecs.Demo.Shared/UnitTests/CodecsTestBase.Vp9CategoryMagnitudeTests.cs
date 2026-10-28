@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
         return _ => bits[idx++];
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CategoryMagnitude_CatMinValConstantsMatchSpec()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         Equal(67, Vp9CoefProbs.CatMinVal.Cat6);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CategoryMagnitude_Category1_BitZeroProducesMin()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         Equal(5, v); // CAT1_MIN_VAL + 0
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CategoryMagnitude_Category1_BitOneProducesMax()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         Equal(6, v); // CAT1_MIN_VAL + 1
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CategoryMagnitude_Category2_TwoBitsMsbFirst()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         Equal(9, v);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CategoryMagnitude_Category2_AllBitsZeroProducesMin()
     {
         CpuOnlyTest();
@@ -72,7 +72,7 @@ public abstract partial class CodecsTestBase
         Equal(7, v);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CategoryMagnitude_Category2_AllBitsOneProducesMax()
     {
         CpuOnlyTest();
@@ -81,7 +81,7 @@ public abstract partial class CodecsTestBase
         Equal(10, v); // 7 + 3
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CategoryMagnitude_Category3_BitsAreMsbFirst()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
         Equal(16, v);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CategoryMagnitude_Category4_AllOnesProducesMax()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
         Equal(34, v);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CategoryMagnitude_Category5_AllOnesProducesMax()
     {
         CpuOnlyTest();
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
         Equal(66, v);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CategoryMagnitude_Category6_8BitProfile_Reads14Bits()
     {
         CpuOnlyTest();
@@ -122,7 +122,7 @@ public abstract partial class CodecsTestBase
         Equal(67 + 8193, v);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CategoryMagnitude_Category6_HighBitDepth_Reads18Bits()
     {
         CpuOnlyTest();
@@ -133,7 +133,7 @@ public abstract partial class CodecsTestBase
         Equal(67 + 131073, v);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CategoryMagnitude_RejectsNonCategoryTokens()
     {
         CpuOnlyTest();

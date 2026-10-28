@@ -11,7 +11,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoderOptions_VorbisComments_InjectedAndDecoded()
     {
         CpuOnlyTest();
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoderOptions_EmptyCommentList_OmitsBlock()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         True(blocks.VorbisComment is null, "Empty comment list should omit the VORBIS_COMMENT block.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoderOptions_NullCommentList_OmitsBlock()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         True(blocks.VorbisComment is null);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoderOptions_Utf8Content_RoundtripsExactly()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
         Equal("ARTIST=漢字", blocks.VorbisComment.UserComments[1]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoderOptions_NullOptions_Throws()
     {
         CpuOnlyTest();

@@ -16,7 +16,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1InverseDct4_OnAllZeros_ProducesAllZeros()
     {
         CpuOnlyTest();
@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 4; i++) Equal(0, output[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1InverseDct4_OnDcImpulse_ScalesEqually()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         InRange(output[0], 700, 760);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1InverseDct8_OnAllZeros_ProducesAllZeros()
     {
         CpuOnlyTest();
@@ -57,7 +57,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 8; i++) Equal(0, output[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1InverseDct8_OnDcImpulse_ProducesEqualOutputs()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         True(output[0] != 0, "non-zero DC must yield non-zero outputs");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1InverseDct16_OnAllZeros_ProducesAllZeros()
     {
         CpuOnlyTest();
@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(0, output[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1InverseDct16_OnDcImpulse_ProducesEqualOutputs()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
         True(output[0] != 0, "non-zero DC must yield non-zero outputs");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1InverseAdst4_OnAllZeros_ProducesAllZeros()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 4; i++) Equal(0, output[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1InverseAdst4_PreservesNonzeroNature()
     {
         CpuOnlyTest();
@@ -114,7 +114,7 @@ public abstract partial class CodecsTestBase
         True(hasNonZero, "ADST of non-zero input must have non-zero output");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1InverseAdst8_PreservesNonzeroNature()
     {
         CpuOnlyTest();
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
         True(hasNonZero, "ADST of non-zero input must have non-zero output");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1InverseAdst16_PreservesNonzeroNature()
     {
         CpuOnlyTest();
@@ -139,7 +139,7 @@ public abstract partial class CodecsTestBase
         True(hasNonZero, "ADST of non-zero input must have non-zero output");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1InverseIdentity4_ScalesBySqrt2()
     {
         CpuOnlyTest();
@@ -154,7 +154,7 @@ public abstract partial class CodecsTestBase
         Equal(0, output[3]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1InverseIdentity8_ScalesBy2()
     {
         CpuOnlyTest();
@@ -164,7 +164,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 8; i++) Equal(input[i] * 2, output[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1InverseIdentity16_ScalesBy2Sqrt2()
     {
         CpuOnlyTest();
@@ -176,7 +176,7 @@ public abstract partial class CodecsTestBase
         Equal(283, output[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1InverseIdentity32_ScalesBy4()
     {
         CpuOnlyTest();

@@ -70,7 +70,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Tests ---------------------------------------------------------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void EbmlIntegration_Library_Resolves_FromSpawnDevCodecs()
     {
         CpuOnlyTest();
@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
             $"expected 'ebml' schema, got: {string.Join(",", keys)}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void EbmlIntegration_IsEBML_OnWebMHeader_ReturnsTrue()
     {
         CpuOnlyTest();
@@ -93,7 +93,7 @@ public abstract partial class CodecsTestBase
         True(parser.IsEBML(stream), "library must recognise our synthetic EBML header");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void EbmlIntegration_IsEBML_OnGarbage_ReturnsFalse()
     {
         CpuOnlyTest();
@@ -102,7 +102,7 @@ public abstract partial class CodecsTestBase
         False(parser.IsEBML(stream), "garbage must not look like EBML");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void EbmlIntegration_ParseDocument_WebMHeader_ReadsDocType()
     {
         CpuOnlyTest();
@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
         Equal("webm", doc!.ReadString("/EBML/DocType"));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void EbmlIntegration_ParseDocument_MatroskaHeader_ReadsDocType()
     {
         CpuOnlyTest();
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
         Equal("matroska", doc!.ReadString("/EBML/DocType"));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void EbmlIntegration_Document_HeaderIsMasterElement()
     {
         CpuOnlyTest();

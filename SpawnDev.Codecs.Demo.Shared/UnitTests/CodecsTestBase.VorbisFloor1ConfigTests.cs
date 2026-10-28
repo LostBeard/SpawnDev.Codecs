@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
         return VorbisFloor1ConfigParser.Parse(ref r);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1_SingleClass_MinimalConfig()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 0, 16, 7 }, cfg.XList);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1_TwoClasses_WithMasterbookAndSubclasses()
     {
         CpuOnlyTest();
@@ -95,7 +95,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 0, 32, 4, 8, 12, 16, 20 }, cfg.XList);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1_Multiplier_EncodesMinusOne()
     {
         CpuOnlyTest();
@@ -114,7 +114,7 @@ public abstract partial class CodecsTestBase
         Equal(4, cfg.Multiplier);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1_XListOrdering_KeepsInputOrder()
     {
         CpuOnlyTest();
@@ -138,7 +138,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 0, 32, 20, 5, 15 }, cfg.XList);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1_ExceedsSpecMaximum_Throws()
     {
         CpuOnlyTest();

@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
         return bytes;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IvfReader_BbbAv1Fixture_HeaderMatchesExpected()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
             $"expected non-zero num_frames, got {header.NumFrames}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IvfReader_BbbAv1Fixture_FrameCount()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         Equal(60, count);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ObuParser_BbbFirstFrame_StartsWithTemporalDelimiterOrSequenceHeader()
     {
         CpuOnlyTest();
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
             $"first frame OBUs {string.Join(',', seenTypes)} - expected TD or SH near start");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1SequenceHeader_BbbFirstFrame_ParsesProfileAndDimensions()
     {
         CpuOnlyTest();
@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
         Equal(1, sh.SubsamplingY);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1SequenceHeader_BbbFirstFrame_ParsesAdvancedFlags()
     {
         CpuOnlyTest();
@@ -166,7 +166,7 @@ public abstract partial class CodecsTestBase
         Equal(0, sh.SeqLevelIdx0);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1FrameHeader_BbbFirstFrame_FirstFrameIsKey()
     {
         CpuOnlyTest();
@@ -197,7 +197,7 @@ public abstract partial class CodecsTestBase
         Equal(true, fh.FrameIsIntra);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1FrameHeader_BbbFirstFrame_ParsesPostPrefixFields()
     {
         CpuOnlyTest();
@@ -235,7 +235,7 @@ public abstract partial class CodecsTestBase
         Equal(1, fh.ForceIntegerMv);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1FrameHeader_BbbAllFrames_FrameTypesPlausible()
     {
         CpuOnlyTest();
@@ -272,7 +272,7 @@ public abstract partial class CodecsTestBase
             $"expected inter frames; saw types {string.Join(',', typeCounts.Keys)}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ObuParser_BbbAllFrames_ParseWithoutErrors()
     {
         CpuOnlyTest();

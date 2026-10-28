@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFile_Encode_Decode_DiskRoundtrip()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void WavFile_Write_Read_DiskRoundtrip()
     {
         CpuOnlyTest();
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void AiffFile_Write_Read_DiskRoundtrip()
     {
         CpuOnlyTest();
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FileApi_NullPath_Throws()
     {
         CpuOnlyTest();
@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentNullException>(() => AiffFileCodec.ReadFile(null!));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void WavToFlacToAiff_FileChain_RoundtripsLosslessly()
     {
         CpuOnlyTest();

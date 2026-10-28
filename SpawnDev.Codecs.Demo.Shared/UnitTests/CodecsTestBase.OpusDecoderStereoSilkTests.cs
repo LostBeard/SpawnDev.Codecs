@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
         return packet;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_StereoNbInactive20Ms_InterleavesLR()
     {
         CpuOnlyTest();
@@ -138,7 +138,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_StereoWb20Ms_InterleavesLR()
     {
         CpuOnlyTest();
@@ -182,7 +182,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_StereoNbAt48kHz_ResamplesBothChannels()
     {
         CpuOnlyTest();
@@ -223,7 +223,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_StereoWbAt48kHz_ResamplesBothChannels()
     {
         CpuOnlyTest();

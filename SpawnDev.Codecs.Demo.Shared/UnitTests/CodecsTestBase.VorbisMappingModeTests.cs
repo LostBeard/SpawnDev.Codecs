@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Mapping tests --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisMapping_MonoSingleSubmap_ParsesMinimal()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         Equal(1, cfg.SubmapResidue[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisMapping_StereoWithCoupling_ParsesCouplingPair()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         Equal(3, cfg.SubmapResidue[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisMapping_MultipleSubmaps_ReadsMuxPerChannel()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 5, 7 }, cfg.SubmapResidue);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisMapping_ReservedBitsNonZero_Throws()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisMapping_CouplingPairWithSameChannel_Throws()
     {
         CpuOnlyTest();
@@ -119,7 +119,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Mode tests --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisMode_SingleMode_ShortBlock_Parses()
     {
         CpuOnlyTest();
@@ -135,7 +135,7 @@ public abstract partial class CodecsTestBase
         Equal(0, modes[0].Mapping);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisMode_TwoModes_MixedBlockSizesAndMappings()
     {
         CpuOnlyTest();
@@ -151,7 +151,7 @@ public abstract partial class CodecsTestBase
         Equal(1, modes[1].Mapping);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisMode_MissingFramingFlag_Throws()
     {
         CpuOnlyTest();
@@ -163,7 +163,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisMode_NonZeroWindowType_Throws()
     {
         CpuOnlyTest();
@@ -174,7 +174,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisMode_NonZeroTransformType_Throws()
     {
         CpuOnlyTest();

@@ -16,7 +16,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisEncoder_Ctor_RejectsStereo()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisEncoder_Ctor_RejectsBadBlockSize()
     {
         CpuOnlyTest();
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
         }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisEncoder_Headers_ParseCleanly()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
         True(setup.Modes.Length >= 1);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisEncoder_RoundTrip_440Hz_DominantFrequencyMatches()
     {
         CpuOnlyTest();
@@ -114,7 +114,7 @@ public abstract partial class CodecsTestBase
             $"Dominant frequency {peakHz} Hz differs from target {targetHz} Hz by more than 5 Hz");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisEncoder_RoundTrip_880Hz_DominantFrequencyMatches()
     {
         CpuOnlyTest();
@@ -154,7 +154,7 @@ public abstract partial class CodecsTestBase
             $"Dominant frequency {peakHz} Hz differs from target {targetHz} Hz by more than 10 Hz");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisBitWriter_RoundTripsThroughReader()
     {
         CpuOnlyTest();

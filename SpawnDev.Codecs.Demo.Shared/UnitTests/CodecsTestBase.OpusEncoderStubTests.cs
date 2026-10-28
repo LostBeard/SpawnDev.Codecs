@@ -14,7 +14,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Construct_ExposesCodecAndConfig()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         Equal(1, enc.ChannelCount);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Construct_BadSampleRate_Throws()
     {
         CpuOnlyTest();
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
         }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Construct_BadChannelCount_Throws()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_EncodeFrame_BadFrameSize_Throws()
     {
         CpuOnlyTest();
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
             () => enc.EncodeFrame(pcm, packet, frameSizeSamples: 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_EncodeFrame_PcmTooShort_Throws()
     {
         CpuOnlyTest();
@@ -81,7 +81,7 @@ public abstract partial class CodecsTestBase
             () => enc.EncodeFrame(pcm, packet, frameSizeSamples: 960));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_AfterDispose_Throws()
     {
         CpuOnlyTest();

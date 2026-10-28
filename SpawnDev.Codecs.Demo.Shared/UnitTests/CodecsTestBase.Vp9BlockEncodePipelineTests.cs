@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
         return (reconstructed, encoded.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockEncodePipeline_FlatBlock_LowQ_ReconstructsExactly()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal((byte)128, recon[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockEncodePipeline_DcOffset_LowQ_LowError()
     {
         CpuOnlyTest();
@@ -121,7 +121,7 @@ public abstract partial class CodecsTestBase
         True(maxErr <= 2, $"DC-only block round-trip error = {maxErr}, expected <= 2");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockEncodePipeline_Gradient_LowQ_LowError()
     {
         CpuOnlyTest();
@@ -140,7 +140,7 @@ public abstract partial class CodecsTestBase
         True(maxErr <= 4, $"gradient round-trip error = {maxErr}, expected <= 4");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockEncodePipeline_RandomBlocks_HighQ_BoundedError()
     {
         CpuOnlyTest();
@@ -161,7 +161,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockEncodePipeline_AllZero_ProducesSingleEobByte()
     {
         CpuOnlyTest();
@@ -234,7 +234,7 @@ public abstract partial class CodecsTestBase
         return (reconstructed, encoded.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockEncodePipeline_8x8_FlatBlock_LowQ_ReconstructsExactly()
     {
         CpuOnlyTest();
@@ -245,7 +245,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 64; i++) Equal((byte)128, recon[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockEncodePipeline_8x8_Gradient_LowQ_LowError()
     {
         CpuOnlyTest();
@@ -315,7 +315,7 @@ public abstract partial class CodecsTestBase
         return (reconstructed, encoded.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockEncodePipeline_16x16_FlatBlock_LowQ_ReconstructsExactly()
     {
         CpuOnlyTest();
@@ -326,7 +326,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 256; i++) Equal((byte)128, recon[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockEncodePipeline_16x16_Gradient_LowQ_LowError()
     {
         CpuOnlyTest();

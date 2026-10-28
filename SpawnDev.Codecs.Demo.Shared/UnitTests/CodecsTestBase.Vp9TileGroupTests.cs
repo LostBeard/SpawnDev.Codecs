@@ -15,7 +15,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileGroup_BbbFirstKeyframe_OneTileExtracted()
     {
         CpuOnlyTest();
@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
         True(firstTile.Length > 0, "tile must have content");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileGroup_AllBbbVisibleFrames_TilesFitInFrame()
     {
         CpuOnlyTest();

@@ -8,14 +8,14 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefSelector_Nearest_EmptyList_IsZero()
     {
         CpuOnlyTest();
         Equal(Vp9Mv.Zero, Vp9MvRefSelector.Nearest(new Vp9MvCandidatesList()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefSelector_Nearest_OneElement_ReturnsIt()
     {
         CpuOnlyTest();
@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
         Equal(new Vp9Mv(7, -3), Vp9MvRefSelector.Nearest(list));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefSelector_Near_LessThanTwoElements_IsZero()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9Mv.Zero, Vp9MvRefSelector.Near(list));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefSelector_Near_TwoElements_ReturnsSecond()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         Equal(new Vp9Mv(3, 4), Vp9MvRefSelector.Near(list));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefSelector_ForInterMode_NearestMv_PicksFirst()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
             Vp9MvRefSelector.ForInterMode(list, Vp9InterMode.NearestMv));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefSelector_ForInterMode_NearMv_PicksSecond()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
             Vp9MvRefSelector.ForInterMode(list, Vp9InterMode.NearMv));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefSelector_ForInterMode_ZeroMv_AlwaysZero()
     {
         CpuOnlyTest();
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9Mv.Zero, Vp9MvRefSelector.ForInterMode(list, Vp9InterMode.ZeroMv));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefSelector_ForInterMode_NewMv_UsesNearest()
     {
         CpuOnlyTest();
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
             Vp9MvRefSelector.ForInterMode(list, Vp9InterMode.NewMv));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefSelector_ForInterMode_RejectsInvalidMode()
     {
         CpuOnlyTest();

@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Absolute pitch coding --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PitchDecoder_AbsoluteNb20Ms_RoundTrips()
     {
         CpuOnlyTest();
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
         Equal((sbyte)contour, res.ContourIndex);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PitchDecoder_AbsoluteMb20Ms_RoundTrips()
     {
         CpuOnlyTest();
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
         Equal((sbyte)contour, res.ContourIndex);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PitchDecoder_AbsoluteWb20Ms_RoundTrips()
     {
         CpuOnlyTest();
@@ -108,7 +108,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Delta pitch coding --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PitchDecoder_DeltaCoding_RawSymbolOne_ProducesNegativeEightDelta()
     {
         CpuOnlyTest();
@@ -128,7 +128,7 @@ public abstract partial class CodecsTestBase
         Equal((sbyte)contour, res.ContourIndex);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PitchDecoder_DeltaCoding_RawSymbolAllNonZero_RoundTrips()
     {
         CpuOnlyTest();
@@ -151,7 +151,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PitchDecoder_DeltaCoding_RawZero_FallsBackToAbsolute()
     {
         CpuOnlyTest();
@@ -173,7 +173,7 @@ public abstract partial class CodecsTestBase
 
     // -------- 10 ms frame variants --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PitchDecoder_AbsoluteNb10Ms_UsesNarrowContourTable()
     {
         CpuOnlyTest();
@@ -192,7 +192,7 @@ public abstract partial class CodecsTestBase
         Equal((sbyte)contour, res.ContourIndex);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PitchDecoder_AbsoluteWb10Ms_UsesWideContourTable()
     {
         CpuOnlyTest();
@@ -212,7 +212,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Edge / argument cases --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PitchDecoder_NullRangeDecoder_Throws()
     {
         CpuOnlyTest();
@@ -220,7 +220,7 @@ public abstract partial class CodecsTestBase
             SilkPitchDecoder.DecodeIndices(null!, 16, 4, 0, false, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PitchDecoder_UnsupportedFsKHz_Throws()
     {
         CpuOnlyTest();
@@ -232,7 +232,7 @@ public abstract partial class CodecsTestBase
                 prevLagIndex: 0, prevSignalTypeWasVoiced: false, conditional: 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PitchDecoder_InvalidNbSubfr_Throws()
     {
         CpuOnlyTest();
@@ -246,7 +246,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Table selector sanity --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PitchTables_SelectorsMatchLibopus()
     {
         CpuOnlyTest();

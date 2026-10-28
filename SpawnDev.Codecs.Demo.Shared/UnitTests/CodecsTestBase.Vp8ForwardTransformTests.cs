@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8ForwardTransform_ShortFdct4x4_AllZero_LibvpxQuirkIsBitExact()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8ForwardTransform_ShortFdct4x4_Determinism()
     {
         CpuOnlyTest();
@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(a[i], b[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8ForwardTransform_ShortFdct4x4_FwdInv_RoundTripFlatBlock()
     {
         CpuOnlyTest();
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal((byte)128, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8ForwardTransform_ShortFdct4x4_FwdInv_RoundTripSmallGradient()
     {
         CpuOnlyTest();
@@ -93,7 +93,7 @@ public abstract partial class CodecsTestBase
         True(maxErr <= 1, $"VP8 fdct4x4 + idct4x4 round-trip: max err = {maxErr}, expected <= 1");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8ForwardTransform_ShortWalsh4x4_AllZero_ProducesAllZero()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal((short)0, output[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8ForwardTransform_ShortWalsh4x4_FwdInv_DcOnlyRoundTrip()
     {
         CpuOnlyTest();

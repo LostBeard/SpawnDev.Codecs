@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
         return (dst, above, left);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1IntraPredictor_V_CopiesAboveIntoEveryRow()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1IntraPredictor_H_ReplicatesLeftPerRow()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1IntraPredictor_Dc_AveragesAllAvailableEdges()
     {
         CpuOnlyTest();
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(113, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1IntraPredictor_DcLeft_AveragesLeftOnly()
     {
         CpuOnlyTest();
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(125, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1IntraPredictor_DcTop_AveragesAboveOnly()
     {
         CpuOnlyTest();
@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(80, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1IntraPredictor_Dc128_FillsWithMidGray()
     {
         CpuOnlyTest();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 64; i++) Equal(128, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1IntraPredictor_Paeth_OnFlatEdges_ProducesFlatBlock()
     {
         CpuOnlyTest();
@@ -106,7 +106,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(100, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1IntraPredictor_Paeth_PicksClosestToBase()
     {
         CpuOnlyTest();
@@ -123,7 +123,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)100, Av1IntraPredictor.PaethSingle(100, 100, 50));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1IntraPredictor_Smooth_BlendsTowardCorners()
     {
         CpuOnlyTest();
@@ -134,7 +134,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) InRange(dst[i], 99, 101);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1IntraPredictor_SmoothV_BlendsTopWithBottomLeft()
     {
         CpuOnlyTest();
@@ -151,7 +151,7 @@ public abstract partial class CodecsTestBase
         InRange(dst[3 * 4], 120, 130);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1IntraPredictor_SmoothH_BlendsLeftWithTopRight()
     {
         CpuOnlyTest();

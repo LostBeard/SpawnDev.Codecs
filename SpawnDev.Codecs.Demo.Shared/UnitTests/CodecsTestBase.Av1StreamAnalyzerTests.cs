@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1StreamAnalyzer_BbbFixture_ReturnsCompleteSummary()
     {
         CpuOnlyTest();
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         Equal(61, summary.FrameTypeCounts[Av1FrameType.InterFrame]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1StreamAnalyzer_BbbFixture_FirstFrameIsVisibleKeyframe()
     {
         CpuOnlyTest();
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
         Equal(true, first.Header.ShowFrame);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1StreamAnalyzer_BbbFixture_PreservesFramePts()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1StreamAnalyzer_BbbFixture_ShowExistingMapsToValidSlot()
     {
         CpuOnlyTest();

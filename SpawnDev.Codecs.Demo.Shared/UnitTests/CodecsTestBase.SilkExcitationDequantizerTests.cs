@@ -13,7 +13,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- Zero pulses --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ExcDequant_ZeroPulses_ProducesOffsetSignal()
     {
         CpuOnlyTest();
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Single positive pulse --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ExcDequant_SinglePositivePulse_AppliesQuantAdjustAndOffset()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         Equal(48384, Math.Abs(exc[5]));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ExcDequant_SingleNegativePulse_AppliesQuantAdjustAndOffset()
     {
         CpuOnlyTest();
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Offset table coverage --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ExcDequant_AllFourQuantizationOffsets_AppliedCorrectly()
     {
         CpuOnlyTest();
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Deterministic PRNG flow --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ExcDequant_PrngIsDeterministicAcrossCalls()
     {
         CpuOnlyTest();
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 8; i++) Equal(exc1[i], exc2[i], $"pos {i}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ExcDequant_DifferentSeeds_ProduceDifferentSignPatterns()
     {
         CpuOnlyTest();
@@ -149,7 +149,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Hand-computed single-sample reference value --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ExcDequant_HandComputedReferenceValue()
     {
         CpuOnlyTest();
@@ -167,7 +167,7 @@ public abstract partial class CodecsTestBase
         Equal(65856, exc[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ExcDequant_HandComputedReferenceValue_NegativeRand()
     {
         CpuOnlyTest();
@@ -227,7 +227,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Argument validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ExcDequant_InvalidSignalType_Throws()
     {
         CpuOnlyTest();
@@ -237,7 +237,7 @@ public abstract partial class CodecsTestBase
             SilkExcitationDequantizer.Dequantize(exc, pulses, signalType: 3, quantOffsetType: 0, seed: 0, frameLength: 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ExcDequant_InvalidQuantOffset_Throws()
     {
         CpuOnlyTest();
@@ -247,7 +247,7 @@ public abstract partial class CodecsTestBase
             SilkExcitationDequantizer.Dequantize(exc, pulses, signalType: 1, quantOffsetType: 2, seed: 0, frameLength: 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ExcDequant_OutputTooSmall_Throws()
     {
         CpuOnlyTest();

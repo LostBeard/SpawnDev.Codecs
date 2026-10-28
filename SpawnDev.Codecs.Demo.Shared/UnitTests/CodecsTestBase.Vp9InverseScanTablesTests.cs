@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InverseScanTables_4x4_AllThreeFlavorsRoundTrip()
     {
         CpuOnlyTest();
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         AssertIscanRoundTripsScan(Vp9ScanTables.ColScan4x4,     Vp9InverseScanTables.ColIscan4x4,     16, "col 4x4");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InverseScanTables_8x8_AllThreeFlavorsRoundTrip()
     {
         CpuOnlyTest();
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
         AssertIscanRoundTripsScan(Vp9ScanTables.ColScan8x8,     Vp9InverseScanTables.ColIscan8x8,     64, "col 8x8");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InverseScanTables_16x16_AllThreeFlavorsRoundTrip()
     {
         CpuOnlyTest();
@@ -55,14 +55,14 @@ public abstract partial class CodecsTestBase
         AssertIscanRoundTripsScan(Vp9ScanTables.ColScan16x16,     Vp9InverseScanTables.ColIscan16x16,     256, "col 16x16");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InverseScanTables_32x32_DefaultFlavorRoundTrips()
     {
         CpuOnlyTest();
         AssertIscanRoundTripsScan(Vp9ScanTables.DefaultScan32x32, Vp9InverseScanTables.DefaultIscan32x32, 1024, "default 32x32");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InverseScanTables_GetIscan_DispatchesCorrectly()
     {
         CpuOnlyTest();

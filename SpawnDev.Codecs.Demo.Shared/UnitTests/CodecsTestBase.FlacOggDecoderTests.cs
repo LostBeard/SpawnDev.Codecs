@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         return OggPageWriter.WriteStream(serial, outgoing);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacOgg_MonoSine_RoundtripsThroughNativeAndOggWrapping()
     {
         CpuOnlyTest();
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacOgg_StereoMultiframe_Roundtrips()
     {
         CpuOnlyTest();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacOgg_24BitMono_Roundtrips()
     {
         CpuOnlyTest();
@@ -102,7 +102,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacOgg_BadMappingMarker_Throws()
     {
         CpuOnlyTest();
@@ -117,7 +117,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacOgg_MissingFlacMagic_Throws()
     {
         CpuOnlyTest();

@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
         return idx;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoder_Stress_Nb20Ms_100RandomFrames_NoCrashesOrRangeViolations()
     {
         CpuOnlyTest();
@@ -127,7 +127,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoder_Stress_Wb20Ms_100RandomFrames_NoCrashesOrRangeViolations()
     {
         CpuOnlyTest();
@@ -171,7 +171,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoder_Stress_MultiFrameStreaming_StateDoesNotCorrupt()
     {
         CpuOnlyTest();

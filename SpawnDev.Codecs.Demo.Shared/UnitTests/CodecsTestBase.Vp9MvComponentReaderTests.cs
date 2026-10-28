@@ -8,14 +8,14 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvComponentReader_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
         Equal(1, Vp9MvComponentReader.Class0Bits);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvComponentReader_AllZeroBits_IsSmallestPositive()
     {
         CpuOnlyTest();
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
         Equal(2, mv);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvComponentReader_Class0_Hp_AllZero_Magnitude1()
     {
         CpuOnlyTest();
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
         Equal(1, mv);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvComponentReader_SignBit_Negates()
     {
         CpuOnlyTest();
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         Equal(-2, mv);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvComponentReader_Class1_NonClass0Path()
     {
         CpuOnlyTest();
@@ -81,7 +81,7 @@ public abstract partial class CodecsTestBase
         Equal(18, mv);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvComponentReader_RejectsNullReader()
     {
         CpuOnlyTest();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
             Vp9MvComponentReader.ReadComponent((Vp9BoolDecoder)null!, probs, false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvComponentReader_RejectsNullProbs()
     {
         CpuOnlyTest();
@@ -98,7 +98,7 @@ public abstract partial class CodecsTestBase
             Vp9MvComponentReader.ReadComponent(p => 0, null!, false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvComponentReader_DelegateOverload_MatchesBoolDecoder()
     {
         CpuOnlyTest();

@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterMode_OffsetValuesMatchLibvpx()
     {
         CpuOnlyTest();
@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
         Equal(4, Vp9InterModeTree.InterModes);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterModeTree_HasCorrectShape()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         Equal((sbyte)(-3), Vp9InterModeTree.Tree[5]); // -NewMv = -3
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterModeTree_DecodesZeroMvOnFirstZeroBit()
     {
         CpuOnlyTest();
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9InterMode.ZeroMv, m);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterModeTree_DecodesNearestMvOnPath_1_0()
     {
         CpuOnlyTest();
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9InterMode.NearestMv, m);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterModeTree_DecodesNearMvOnPath_1_1_0()
     {
         CpuOnlyTest();
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9InterMode.NearMv, m);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterModeTree_DecodesNewMvOnPath_1_1_1()
     {
         CpuOnlyTest();
@@ -78,7 +78,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9InterMode.NewMv, m);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterModeTree_RejectsUndersizedProbs()
     {
         CpuOnlyTest();

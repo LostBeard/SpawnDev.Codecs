@@ -14,7 +14,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffman_AllSameLength_AssignsConsecutiveCodes()
     {
         CpuOnlyTest();
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
         Equal(2, tbl.MaxLength);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffman_CanonicalIncreasingLengths()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         Equal(3u, tbl.Codewords[2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffman_WithUnusedEntries_UnusedGetZeroCode()
     {
         CpuOnlyTest();
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         Equal(1u, tbl.Codewords[2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffman_SingleUsedEntry_CodeIsZero()
     {
         CpuOnlyTest();
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
         Equal(0u, tbl.Codewords[1]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffman_OverSpecified_Throws()
     {
         CpuOnlyTest();
@@ -78,7 +78,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffman_MixedLengths_AssignLowestFreeCodewordInEntryOrder()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
         Equal(0b01u, tbl.Codewords[3]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffman_SpecExample_Section3_2_1()
     {
         CpuOnlyTest();
@@ -107,7 +107,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < expected.Length; i++) Equal(expected[i], tbl.Codewords[i], $"entry {i}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffman_AllUnused_EmptyTable()
     {
         CpuOnlyTest();
@@ -117,7 +117,7 @@ public abstract partial class CodecsTestBase
         Equal(3, tbl.Codewords.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffman_MaxLength32_Builds()
     {
         CpuOnlyTest();
@@ -129,7 +129,7 @@ public abstract partial class CodecsTestBase
         Equal(32, tbl.MaxLength);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffman_MaxLength33_Throws()
     {
         CpuOnlyTest();

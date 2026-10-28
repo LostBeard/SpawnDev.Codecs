@@ -9,7 +9,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeProbs_AllArraysHaveExpectedLengths()
     {
         CpuOnlyTest();
@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
         Equal(4, Vp9IntraModeProbs.BlockSizeGroups);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeProbs_KfUvModeProbs_FirstAndLastRowsMatchLibvpx()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)128, Vp9IntraModeProbs.KfUvModeProbs[89]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeProbs_DefaultIfYProbs_FirstAndLastRowsMatchLibvpx()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)29,  Vp9IntraModeProbs.DefaultIfYProbs[35]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeProbs_DefaultIfUvProbs_FirstAndLastRowsMatchLibvpx()
     {
         CpuOnlyTest();
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)125, Vp9IntraModeProbs.DefaultIfUvProbs[89]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeProbs_KeyframeUvProbsHelper_ReturnsCorrectSliceForEveryYMode()
     {
         CpuOnlyTest();
@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeProbs_InterFrameYProbsHelper_ReturnsCorrectSliceForEveryGroup()
     {
         CpuOnlyTest();
@@ -93,7 +93,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeProbs_InterFrameUvProbsHelper_ReturnsCorrectSliceForEveryYMode()
     {
         CpuOnlyTest();
@@ -106,7 +106,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeProbs_Helpers_RejectOutOfRangeArgs()
     {
         CpuOnlyTest();
@@ -120,7 +120,7 @@ public abstract partial class CodecsTestBase
             Vp9IntraModeProbs.InterFrameYProbs(-1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeProbs_DriveProbsIntoIntraModeTree_DecodesDcPredOnFirstZeroBit()
     {
         CpuOnlyTest();

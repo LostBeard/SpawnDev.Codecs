@@ -9,7 +9,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SuperframeWriter_SingleFrame_RoundTripsViaParser()
     {
         CpuOnlyTest();
@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         Equal(frame.Length, parsed.Frames[0].Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SuperframeWriter_TwoFrames_RoundTripsThroughParser()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 200; i++) Equal(f2[i], packet[100 + i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SuperframeWriter_LargeFrames_UsesMultiByteSizes()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
         Equal(1000, parsed.Frames[1].Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SuperframeWriter_RejectsInvalidInput()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => Vp9SuperframeWriter.Emit(nineFrames));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SuperframeWriter_BbbPackets_RoundTripBitExact()
     {
         CpuOnlyTest();

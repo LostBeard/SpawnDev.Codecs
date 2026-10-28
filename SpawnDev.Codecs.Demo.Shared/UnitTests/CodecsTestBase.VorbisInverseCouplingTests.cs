@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
         };
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisInverseCoupling_PositiveMag_PositiveAng_YieldsMsMinus()
     {
         CpuOnlyTest();
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         Equal(2f, angBuf[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisInverseCoupling_PositiveMag_NegativeAng_YieldsMsPlus()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         Equal(5f, angBuf[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisInverseCoupling_NegativeMag_PositiveAng()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         Equal(-2f, angBuf[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisInverseCoupling_NegativeMag_NegativeAng()
     {
         CpuOnlyTest();
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
         Equal(-5f, angBuf[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisInverseCoupling_NoCouplingSteps_NoChange()
     {
         CpuOnlyTest();
@@ -88,7 +88,7 @@ public abstract partial class CodecsTestBase
         Equal(-3.3f, ch1[2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisInverseCoupling_MultipleBins_AppliedElementwise()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
         EqualFloats(new[] { 2f, -2f, 5f, -5f }, ang);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisInverseCoupling_MultipleSteps_AppliedInReverse()
     {
         CpuOnlyTest();

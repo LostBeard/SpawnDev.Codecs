@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompoundMv_Zero_BothComponentsZero()
     {
         CpuOnlyTest();
@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
         Equal(true, Vp9CompoundMv.Zero.IsZero);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompoundMv_IsZero_DetectsAnyNonzeroComponent()
     {
         CpuOnlyTest();
@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         Equal(true, new Vp9CompoundMv(Vp9Mv.Zero, Vp9Mv.Zero).IsZero);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompoundMv_Sum_AddsComponents()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         Equal(new Vp9Mv(10, 3), c.Sum);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompoundMv_Clamp_AppliesToBoth()
     {
         CpuOnlyTest();
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
         Equal(100, clamped.Mv1.Col);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompoundMv_RecordEquality()
     {
         CpuOnlyTest();

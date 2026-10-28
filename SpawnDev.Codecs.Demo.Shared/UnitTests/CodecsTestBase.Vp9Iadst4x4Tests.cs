@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
         return dest;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst4x4_ZeroCoefficients_LeavesPredictorUnchanged()
     {
         CpuOnlyTest();
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal((byte)128, dest[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst4x4_Clips_HighInputToUpper255()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         True(anyChanged, "iADST on non-zero coefficients must change at least one pixel");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst4x4_Clips_LargeNegativesToZero()
     {
         CpuOnlyTest();
@@ -70,7 +70,7 @@ public abstract partial class CodecsTestBase
         True(anyZero, "at least one pixel must have clipped to 0 on all-negative input");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst4x4_IsDeterministic_ForRandomInputs()
     {
         CpuOnlyTest();
@@ -88,7 +88,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst4x4_SingleCoefficient_ProducesNonZeroResidual()
     {
         CpuOnlyTest();
@@ -105,7 +105,7 @@ public abstract partial class CodecsTestBase
         True(changed, "non-zero coefficient must produce non-zero residual somewhere");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst4x4_StridedDest_OnlyTouches4x4Block()
     {
         CpuOnlyTest();
@@ -119,7 +119,7 @@ public abstract partial class CodecsTestBase
                 Equal((byte)77, canvas[row * 16 + col]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst4x4_Throws_OnShortInput()
     {
         CpuOnlyTest();
@@ -130,7 +130,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst4x4_Throws_OnBadStride()
     {
         CpuOnlyTest();

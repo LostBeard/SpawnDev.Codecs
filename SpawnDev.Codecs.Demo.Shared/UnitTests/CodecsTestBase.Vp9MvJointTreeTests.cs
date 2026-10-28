@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvJointTree_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(6, Vp9MvJointTree.Tree.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvJointTree_Tree_Layout()
     {
         CpuOnlyTest();
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
         Equal(-3, (int)Vp9MvJointTree.Tree[5]); // -Hnzvnz
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvJointTree_Decode_AllZero_PicksZeroJoint()
     {
         CpuOnlyTest();
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
             Vp9MvJointTree.Decode(p => 0, new byte[] { 128, 128, 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvJointTree_Decode_OneZeroOne_PicksHnzvz()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
             Vp9MvJointTree.Decode(p => bits[callIdx++], new byte[] { 128, 128, 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvJointTree_Decode_BitsTwo_PicksHzvnz()
     {
         CpuOnlyTest();
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
             Vp9MvJointTree.Decode(p => bits[callIdx++], new byte[] { 128, 128, 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvJointTree_Decode_BitsThree_PicksHnzvnz()
     {
         CpuOnlyTest();
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
             Vp9MvJointTree.Decode(p => bits[callIdx++], new byte[] { 128, 128, 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvJointTree_Decode_RejectsShortProbs()
     {
         CpuOnlyTest();
@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
             Vp9MvJointTree.Decode(p => 0, new byte[] { 128, 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvJointTree_Decode_RejectsNullReader()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
             Vp9MvJointTree.Decode(null!, new byte[] { 128, 128, 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvJointTree_Decode_UsesIndexedProbs()
     {
         CpuOnlyTest();

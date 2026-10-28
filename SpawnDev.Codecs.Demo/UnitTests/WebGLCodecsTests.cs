@@ -17,6 +17,8 @@ namespace SpawnDev.Codecs.Demo.UnitTests;
 /// that reason; every other test runs. (Until 2026-10-26 this class threw for EVERY test, so no Codecs kernel had ever
 /// run on WebGL.)
 /// </remarks>
+// CPU-only tests (Category = "CpuOnly") run once, in CpuCodecsTests: discovery leaves them out here.
+[ExcludeCategories("CpuOnly")]
 public class WebGLCodecsTests : CodecsTestBase
 {
     protected override async ValueTask<(Context, Accelerator)> CreateKernelAcceleratorAsync()

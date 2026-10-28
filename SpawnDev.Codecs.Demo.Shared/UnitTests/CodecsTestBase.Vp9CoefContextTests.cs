@@ -10,7 +10,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefContext_PtEnergyClass_HasCorrectLengthAndValues()
     {
         CpuOnlyTest();
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)0, Vp9CoefContext.PtEnergyClass[(int)Vp9CoefToken.Eob]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefContext_GetCoefContext_ScanPos0HasAllZeroNeighbors_ReturnsZero()
     {
         CpuOnlyTest();
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
         Equal(0, ctx);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefContext_GetCoefContext_OneEnergyClass1Neighbor_ReturnsOne()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         Equal(1, ctx);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefContext_GetCoefContext_BothNeighborsHighEnergy_ReturnsFive()
     {
         CpuOnlyTest();
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
         Equal(5, ctx);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefContext_GetCoefContext_BothEnergyClass2_ReturnsContext2()
     {
         CpuOnlyTest();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
         Equal(2, ctx);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefContext_GetCoefContext_BothEnergyClass1_ReturnsContext1()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         Equal(1, ctx);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefContext_GetCoefContext_RejectsOutOfRangeScanPos()
     {
         CpuOnlyTest();

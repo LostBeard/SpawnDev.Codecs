@@ -12,7 +12,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void CeltConstants_Eband5Ms_MatchesLibopus()
     {
         CpuOnlyTest();
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void CeltConstants_BandCounts_MatchLibopus()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         Equal(21, CeltConstants.NB_BANDS_FULLBAND);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void CeltConstants_FrameSizes_48kHz()
     {
         CpuOnlyTest();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => CeltMode.Create(960, 22));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void CeltMode_EndBandForBandwidth_MapsCorrectly()
     {
         CpuOnlyTest();
@@ -100,7 +100,7 @@ public abstract partial class CodecsTestBase
         Equal(CeltConstants.NB_BANDS_FULLBAND, CeltMode.EndBandForBandwidth(OpusBandwidth.Fullband));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void CeltMode_EndBandForBandwidth_MediumbandThrows()
     {
         CpuOnlyTest();
@@ -122,7 +122,7 @@ public abstract partial class CodecsTestBase
         Equal(21, mode.EffectiveEBands);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void CeltConstants_FixedPoint_MatchesLibopus()
     {
         CpuOnlyTest();

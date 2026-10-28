@@ -12,7 +12,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8KeyframeEncoder_FlatLuma_RoundTripsViaWalker()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8KeyframeEncoder_MultiMbGradient_RoundTripsViaWalker()
     {
         CpuOnlyTest();
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
             $"decoded mean={decMean}, source mean={srcMean} - expected within +/-6 (lossy at Q=30 but not amplified)");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8KeyframeEncoder_UsesPlaneType1ForY2_NotPlaneType3()
     {
         CpuOnlyTest();
@@ -129,7 +129,7 @@ public abstract partial class CodecsTestBase
         Equal((short)-76, y2_via_type1[0], "Y2 qcoef[0] at PLANE_TYPE=1 must equal the expected -76");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8KeyframeEncoder_RejectsBaseQIndex_OutOfRange()
     {
         CpuOnlyTest();

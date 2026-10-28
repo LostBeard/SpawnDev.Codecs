@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvProbs_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
         Equal(4, Vp9MvComponentProbs.MvFpSize);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvProbs_TableShapes()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         Equal(3, c.Fp.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvProbsParser_NoUpdates_LeavesTableUntouched_NoHp()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvProbsParser_NoUpdates_AllowHp_HpProbsAlsoUntouched()
     {
         CpuOnlyTest();
@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvProbsParser_UpdateMvProb_ReturnsCurrent_WhenFlagZero()
     {
         CpuOnlyTest();
@@ -100,7 +100,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)100, newProb);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvProbsParser_RejectsNullArgs()
     {
         CpuOnlyTest();

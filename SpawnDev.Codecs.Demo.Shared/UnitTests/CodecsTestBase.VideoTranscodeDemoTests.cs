@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task VideoTranscodeDemo_Vp8_GradientFrame_RoundTripsViaCpuApi()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
             () => new Vp8Decoder());
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task VideoTranscodeDemo_Vp9_GradientFrame_RoundTripsViaCpuApi()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
             () => new Vp9Decoder());
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task VideoTranscodeDemo_Av1_GradientFrame_RoundTripsViaCpuApi()
     {
         CpuOnlyTest();

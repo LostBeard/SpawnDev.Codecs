@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvBoundsCalculator_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -19,7 +19,7 @@ public abstract partial class CodecsTestBase
         Equal(1504, Vp9MvBoundsCalculator.RightBottomMargin);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvBoundsCalculator_TopLeftBlock_IsNegOnlyForTopLeft()
     {
         CpuOnlyTest();
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
         Equal(3488, b.MaxCol);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvBoundsCalculator_BottomRightBlock_IsZeroOnlyForBottomRight()
     {
         CpuOnlyTest();
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
         Equal(1504, b.MaxCol);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvBoundsCalculator_LargerBlock_BoundsShrink()
     {
         CpuOnlyTest();
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
         Equal(3424, b.MaxCol);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvBoundsCalculator_RejectsNegativeMiPosition()
     {
         CpuOnlyTest();
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
             Vp9MvBoundsCalculator.Compute(0, -1, Vp9BlockSize.Block8x8, 32, 32));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvBoundsCalculator_RejectsNonPositiveFrameDimensions()
     {
         CpuOnlyTest();

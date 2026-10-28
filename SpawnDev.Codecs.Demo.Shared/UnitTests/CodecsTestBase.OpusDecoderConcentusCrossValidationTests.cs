@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         return Math.Sqrt(sumSq / Math.Max(1, pcm.Length));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_ConcentusEncodedSilk_NbMono_DecodesWithoutCrash()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_ConcentusEncodedSilk_ComparedToConcentusDecode_RmsInSameBallpark()
     {
         CpuOnlyTest();
@@ -108,7 +108,7 @@ public abstract partial class CodecsTestBase
             $"Our RMS ({ourRms:F4}) should be within factor-of-4 of Concentus RMS ({concentusRms:F4}); ratio={ratio:F2}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_ConcentusEncodedSilk_WbMono_20Ms_DecodesWithoutCrash()
     {
         CpuOnlyTest();
@@ -141,7 +141,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_ConcentusEncodedSilk_Nb10Ms_DecodesWithoutCrash()
     {
         CpuOnlyTest();
@@ -173,7 +173,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_ConcentusEncodedSilk_NbSilence_DecodesSilent()
     {
         CpuOnlyTest();

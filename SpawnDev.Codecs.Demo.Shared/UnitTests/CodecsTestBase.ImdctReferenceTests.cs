@@ -15,7 +15,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Imdct_ZeroInput_ZeroOutput()
     {
         CpuOnlyTest();
@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 2 * n; i++) Equal(0.0f, output[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Imdct_OutputLength_IsTwoN()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         Equal(64, output.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Imdct_Linearity_SumOfTransformsEqualsTransformOfSum()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Imdct_SingleCoefficient_ProducesCosinePattern()
     {
         CpuOnlyTest();
@@ -81,21 +81,21 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Imdct_InputTooShort_Throws()
     {
         CpuOnlyTest();
         Throws<ArgumentException>(() => ImdctReference.Transform(new float[0], new float[0]));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Imdct_WrongOutputLength_Throws()
     {
         CpuOnlyTest();
         Throws<ArgumentException>(() => ImdctReference.Transform(new float[8], new float[10]));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Imdct_ScalingSanity_AllOnesInputProducesNonzeroOutput()
     {
         CpuOnlyTest();
@@ -114,7 +114,7 @@ public abstract partial class CodecsTestBase
         True(sumAbs > 0, "Sum-of-cosines output cannot be identically zero.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Imdct_SmallSizes_2_4_8_16_AllRun()
     {
         CpuOnlyTest();

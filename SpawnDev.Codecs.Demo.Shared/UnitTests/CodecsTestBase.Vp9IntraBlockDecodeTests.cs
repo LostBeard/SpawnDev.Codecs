@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         return arr;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraBlockDecode_TxSizeToN_AllSizes()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         Equal(32, Vp9IntraBlockDecode.TxSizeToN(Vp9TxSize.Tx32x32));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraBlockDecode_TxSizeToN_RejectsUnknown()
     {
         CpuOnlyTest();
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
             Vp9IntraBlockDecode.TxSizeToN((Vp9TxSize)99));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraBlockDecode_DcPred_4x4_ComposesPredictAndIht()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraBlockDecode_VPred_8x8_UsesAdstDctTxType()
     {
         CpuOnlyTest();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 64; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraBlockDecode_TmPred_16x16_UsesAdstAdstTxType()
     {
         CpuOnlyTest();
@@ -120,7 +120,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 256; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraBlockDecode_32x32_AlwaysUsesDctDctEvenForTmMode()
     {
         CpuOnlyTest();
@@ -146,7 +146,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 1024; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraBlockDecode_DcPred_NoEdges_Uses128Variant()
     {
         CpuOnlyTest();
@@ -164,7 +164,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal((byte)128, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraBlockDecode_D207_LeftOnly_4x4_Roundtrips()
     {
         CpuOnlyTest();

@@ -17,7 +17,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ObuWriter_Leb128_RoundTripCanonicalValues()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ObuWriter_Leb128_KnownEncodings()
     {
         CpuOnlyTest();
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
         Equal(0x7F, (int)buf3[1]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ObuWriter_BbbFirstFrame_RoundTripsBitExact()
     {
         CpuOnlyTest();
@@ -86,7 +86,7 @@ public abstract partial class CodecsTestBase
         True(total >= 3, $"expected several OBUs in first frame; got {total}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ObuWriter_BbbAllFrames_RoundTripsBitExact()
     {
         CpuOnlyTest();
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
         True(totalBytes > 50_000, $"expected substantial OBU bytes; got {totalBytes}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ObuWriter_BbbAllFrames_ConcatenatedRoundTripMatchesSource()
     {
         CpuOnlyTest();
@@ -163,7 +163,7 @@ public abstract partial class CodecsTestBase
         True(totalBytes > 50_000, $"expected substantial frame bytes; got {totalBytes}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ObuWriter_BbbFirstFrame_ConcatenatedRoundTripMatchesSource()
     {
         CpuOnlyTest();

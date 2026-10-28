@@ -13,7 +13,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- silk_SMULWW --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Smulww_ProducesExpectedProduct()
     {
         CpuOnlyTest();
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
         Equal(50, silk_SMULWW(0x8000, 100));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Smulww_HandlesLargeValues()
     {
         CpuOnlyTest();
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
 
     // -------- SilkBwexpander --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Bwexpander16_ChirpOne_Identity()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Bwexpander16_ChirpZero_Zeroes()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Bwexpander16_ChirpHalf_HalvesFirstCoeff()
     {
         CpuOnlyTest();
@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
         if (diff > 1) throw new Exception($"ar[0] = {ar[0]}, expected ~5000");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Bwexpander16_EmptyArray_NoOp()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
         SilkBwexpander.Expand16(ar, 32768); // should not throw
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Bwexpander32_ChirpOne_Identity()
     {
         CpuOnlyTest();
@@ -107,7 +107,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Bwexpander32_ChirpZero_Zeroes()
     {
         CpuOnlyTest();
@@ -119,7 +119,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Bwexpander32_ChirpDecaysAlongCoefficients()
     {
         CpuOnlyTest();
@@ -138,7 +138,7 @@ public abstract partial class CodecsTestBase
             throw new Exception($"ar[3]/ar[0] = {ratio:F3}, expected near 0.729");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Bwexpander32_EmptyArray_NoOp()
     {
         CpuOnlyTest();

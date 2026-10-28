@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
             $"{setup.Floors.Length} floors, residue types [{string.Join(",", setup.Residues.Select(r => (int)r.Type))}], " +
             $"{setup.Codebooks.Length} books";
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisAudioDecoder_LibvorbisStreams_MatchLibvorbis()
     {
         CpuOnlyTest();

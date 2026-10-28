@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraMode_EnumValuesMatchLibvpx()
     {
         CpuOnlyTest();
@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         Equal(10, Vp9IntraModeTree.IntraModes);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeTree_HasCorrectShape()
     {
         CpuOnlyTest();
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
         Equal((sbyte)(-7), Vp9IntraModeTree.Tree[17]); // -D207Pred = -7
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeTree_DecodesDcPredOnFirstZeroBit()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9IntraMode.DcPred, m);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeTree_DecodesTmPredOnPath_1_0()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9IntraMode.TmPred, m);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeTree_DecodesVPredOnPath_1_1_0()
     {
         CpuOnlyTest();
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9IntraMode.VPred, m);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeTree_DecodesHPredOnPath_1_1_1_0_0()
     {
         CpuOnlyTest();
@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9IntraMode.HPred, m);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeTree_DecodesD135PredOnPath_1_1_1_0_1_0()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9IntraMode.D135Pred, m);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeTree_DecodesD207PredOnPath_AllOnesIntoD153_Last1()
     {
         CpuOnlyTest();
@@ -109,7 +109,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9IntraMode.D207Pred, m);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraModeTree_RejectsUndersizedProbs()
     {
         CpuOnlyTest();

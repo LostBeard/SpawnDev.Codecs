@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BitDepth_NumericValues_AreActualBitsCount()
     {
         CpuOnlyTest();
@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
         Equal(12, (int)Vp9BitDepth.Bits12);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BitDepth_Resolve_Profile0Or1_AlwaysBits8()
     {
         CpuOnlyTest();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9BitDepth.Bits8, Vp9BitDepths.Resolve(Vp9Profile.Profile1, tenOrTwelveBit: true));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BitDepth_Resolve_Profile2_FlagPicks10Or12()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9BitDepth.Bits12, Vp9BitDepths.Resolve(Vp9Profile.Profile2, tenOrTwelveBit: true));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BitDepth_Resolve_Profile3_FlagPicks10Or12()
     {
         CpuOnlyTest();
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9BitDepth.Bits12, Vp9BitDepths.Resolve(Vp9Profile.Profile3, tenOrTwelveBit: true));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BitDepth_MaxSampleValue()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         Equal(4095, Vp9BitDepths.MaxSampleValue(Vp9BitDepth.Bits12));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BitDepth_MaxQuantizerIndex()
     {
         CpuOnlyTest();

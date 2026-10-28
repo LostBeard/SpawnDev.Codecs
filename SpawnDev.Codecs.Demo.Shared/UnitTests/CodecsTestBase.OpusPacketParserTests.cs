@@ -18,14 +18,14 @@ public abstract partial class CodecsTestBase
         return packet;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_EmptyPacket_Throws()
     {
         CpuOnlyTest();
         Throws<ArgumentException>(() => OpusPacketParser.Parse(ReadOnlyMemory<byte>.Empty));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_TryParse_EmptyPacket_ReturnsInvalid()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         Equal(OpusPacketError.InvalidPacket, err);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_CountCode0_SingleFrame()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         True(parsed.Padding.IsEmpty);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_CountCode1_TwoCbrFrames()
     {
         CpuOnlyTest();
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
         EqualBytes(new byte[] { 0xCC, 0xDD }, parsed.Frames[1].ToArray());
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_CountCode1_OddPayload_Throws()
     {
         CpuOnlyTest();
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => OpusPacketParser.Parse(packet));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_CountCode2_TwoVbrFrames_ShortSize()
     {
         CpuOnlyTest();
@@ -88,7 +88,7 @@ public abstract partial class CodecsTestBase
         EqualBytes(new byte[] { 0xDD, 0xEE }, parsed.Frames[1].ToArray());
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_CountCode2_TwoVbrFrames_LongSize()
     {
         CpuOnlyTest();
@@ -114,7 +114,7 @@ public abstract partial class CodecsTestBase
         Equal(secondFrame[0], parsed.Frames[1].Span[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_CountCode2_SizeBeyondBuffer_Throws()
     {
         CpuOnlyTest();
@@ -122,7 +122,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => OpusPacketParser.Parse(packet));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_CountCode3_CbrMultiple()
     {
         CpuOnlyTest();
@@ -141,7 +141,7 @@ public abstract partial class CodecsTestBase
         EqualBytes(new byte[] { 0x77, 0x88 }, parsed.Frames[3].ToArray());
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_CountCode3_VbrMultiple()
     {
         CpuOnlyTest();
@@ -168,7 +168,7 @@ public abstract partial class CodecsTestBase
         EqualBytes(frame2, parsed.Frames[2].ToArray());
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_CountCode3_WithPadding()
     {
         CpuOnlyTest();
@@ -198,7 +198,7 @@ public abstract partial class CodecsTestBase
         Equal(5, parsed.Padding.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_CountCode3_ZeroFrames_Throws()
     {
         CpuOnlyTest();
@@ -206,7 +206,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => OpusPacketParser.Parse(packet));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_CountCode3_TooManyFrames_Throws()
     {
         CpuOnlyTest();
@@ -215,7 +215,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => OpusPacketParser.Parse(packet));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_Frames_ReferenceOriginalBuffer_NoCopy()
     {
         CpuOnlyTest();
@@ -227,7 +227,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)0xFF, parsed.Frames[0].Span[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_GetTotalSamples_SingleFrame20ms()
     {
         CpuOnlyTest();
@@ -236,7 +236,7 @@ public abstract partial class CodecsTestBase
         Equal(960, parsed.GetTotalSamples(48_000));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_GetTotalSamples_TwoFrames20ms()
     {
         CpuOnlyTest();
@@ -246,7 +246,7 @@ public abstract partial class CodecsTestBase
         Equal(1920, parsed.GetTotalSamples(48_000));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Parser_SelfDelimited_SingleFrame()
     {
         CpuOnlyTest();

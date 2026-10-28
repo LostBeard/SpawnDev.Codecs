@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvSubPel_OneEighthToQ4_DoublesValue()
     {
         CpuOnlyTest();
@@ -19,7 +19,7 @@ public abstract partial class CodecsTestBase
         Equal(-2, Vp9MvSubPel.OneEighthPelToQ4(-1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvSubPel_Split_ZeroIsZeroZero()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         Equal(0, sub);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvSubPel_Split_OnePixel_PelOneSubZero()
     {
         CpuOnlyTest();
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         Equal(0, sub);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvSubPel_Split_HalfPel_PelZeroSub8()
     {
         CpuOnlyTest();
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
         Equal(8, sub);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvSubPel_Split_NegativeOne_PelMinusOneSub15()
     {
         CpuOnlyTest();
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         Equal(15, sub);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvSubPel_Split_NegativePixel()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         Equal(0, sub);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvSubPel_Combine_RoundtripsPositive()
     {
         CpuOnlyTest();
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvSubPel_Combine_RoundtripsNegative()
     {
         CpuOnlyTest();
@@ -88,7 +88,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvSubPel_Combine_RejectsOutOfRangeSubPel()
     {
         CpuOnlyTest();

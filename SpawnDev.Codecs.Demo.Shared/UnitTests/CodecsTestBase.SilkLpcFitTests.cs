@@ -15,7 +15,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- New macros --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Abs_ReturnsAbsoluteValue()
     {
         CpuOnlyTest();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         Equal(int.MaxValue, silk_abs(-int.MaxValue));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Min_ReturnsSmaller()
     {
         CpuOnlyTest();
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         Equal(int.MinValue, silk_min(int.MinValue, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Div32_IntegerDivide()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         Equal(0, silk_DIV32(0, 1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Rshift32_SignedArithmeticShift()
     {
         CpuOnlyTest();
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         Equal(-1, silk_RSHIFT32(-1, 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Sat16_ClampsToInt16Range()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         Equal(short.MinValue, silk_SAT16(short.MinValue));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkConstants_Int16Max_Is32767()
     {
         CpuOnlyTest();
@@ -78,7 +78,7 @@ public abstract partial class CodecsTestBase
 
     // -------- SilkLpcFit --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcFit_SmallCoefficients_DirectConvert()
     {
         CpuOnlyTest();
@@ -98,7 +98,7 @@ public abstract partial class CodecsTestBase
         Equal((short)(4096 / 2), aQOut[3]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcFit_LargeCoefficient_TriggersIteration()
     {
         CpuOnlyTest();
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcFit_ZeroCoefficients_ProducesZeros()
     {
         CpuOnlyTest();
@@ -136,7 +136,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < aQOut.Length; i++) Equal((short)0, aQOut[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcFit_InputBufferTooSmall_Throws()
     {
         CpuOnlyTest();
@@ -145,7 +145,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => SilkLpcFit.Fit(aQOut, aQIn, 12, 24, 10));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcFit_OutputBufferTooSmall_Throws()
     {
         CpuOnlyTest();
@@ -154,7 +154,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => SilkLpcFit.Fit(aQOut, aQIn, 12, 24, 10));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcFit_QIn_EqualsQOut_NoShift()
     {
         CpuOnlyTest();

@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
         return arr;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraPredictor_Dispatches_DcPred_BothEdges()
     {
         CpuOnlyTest();
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraPredictor_Dispatches_DcPred_TopOnly_WhenLeftMissing()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 64; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraPredictor_Dispatches_DcPred_LeftOnly_WhenAboveMissing()
     {
         CpuOnlyTest();
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 64; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraPredictor_Dispatches_DcPred_128_WhenNoEdges()
     {
         CpuOnlyTest();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal((byte)128, actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraPredictor_Dispatches_VPred_MatchesDirectCall()
     {
         CpuOnlyTest();
@@ -108,7 +108,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraPredictor_Dispatches_HPred_MatchesDirectCall()
     {
         CpuOnlyTest();
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraPredictor_Dispatches_TmPred_MatchesDirectCall()
     {
         CpuOnlyTest();
@@ -145,7 +145,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraPredictor_Dispatches_D45_MatchesDirectCall()
     {
         CpuOnlyTest();
@@ -163,7 +163,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraPredictor_Dispatches_D63_MatchesDirectCall()
     {
         CpuOnlyTest();
@@ -181,7 +181,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraPredictor_Dispatches_D135_MatchesDirectCall()
     {
         CpuOnlyTest();
@@ -200,7 +200,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraPredictor_Dispatches_D117_MatchesDirectCall()
     {
         CpuOnlyTest();
@@ -219,7 +219,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraPredictor_Dispatches_D153_MatchesDirectCall()
     {
         CpuOnlyTest();
@@ -238,7 +238,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraPredictor_Dispatches_D207_MatchesDirectCall()
     {
         CpuOnlyTest();
@@ -256,7 +256,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraPredictor_RejectsUnknownMode()
     {
         CpuOnlyTest();

@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
         return packet;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_NbInactive20Ms_SingleFrame_DecodesViaSilkRouting()
     {
         CpuOnlyTest();
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_WbUnvoiced20Ms_SingleFrame_DecodesViaSilkRouting()
     {
         CpuOnlyTest();
@@ -144,7 +144,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_SilkAt16kHzOutput_NoResamplingPath()
     {
         CpuOnlyTest();

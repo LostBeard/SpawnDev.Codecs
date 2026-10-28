@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Unvoiced path --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeCore_Unvoiced_ZeroPulses_ProducesValidPcmRange()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeCore_Unvoiced_StateIsUpdatedAfterDecode()
     {
         CpuOnlyTest();
@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
         True(prevGainBefore != state.PrevGainQ16, "PrevGainQ16 should have been updated");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeCore_Unvoiced_TwoBackToBackFrames_NoCrash()
     {
         CpuOnlyTest();
@@ -109,7 +109,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeCore_Inactive_NoLtp_ProducesValidOutput()
     {
         CpuOnlyTest();
@@ -133,7 +133,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Voiced path --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeCore_Voiced_FirstFrameFromReset_NoCrash()
     {
         CpuOnlyTest();
@@ -170,7 +170,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeCore_Voiced_WithNlsfInterpolation_NoCrash()
     {
         CpuOnlyTest();
@@ -202,7 +202,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Argument validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeCore_NullState_Throws()
     {
         CpuOnlyTest();
@@ -213,7 +213,7 @@ public abstract partial class CodecsTestBase
             SilkDecodeCore.Decode(null!, parameters, pulses, 1, 0, 0, false, xq));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeCore_NullParameters_Throws()
     {
         CpuOnlyTest();
@@ -224,7 +224,7 @@ public abstract partial class CodecsTestBase
             SilkDecodeCore.Decode(state, null!, pulses, 1, 0, 0, false, xq));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeCore_UnconfiguredState_Throws()
     {
         CpuOnlyTest();
@@ -236,7 +236,7 @@ public abstract partial class CodecsTestBase
             SilkDecodeCore.Decode(state, parameters, pulses, 1, 0, 0, false, xq));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeCore_ZeroPrevGain_Throws()
     {
         CpuOnlyTest();
@@ -252,7 +252,7 @@ public abstract partial class CodecsTestBase
                 nlsfInterpolationEnabled: false, xqOut: xq));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeCore_OutputTooSmall_Throws()
     {
         CpuOnlyTest();

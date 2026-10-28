@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ColorRange_NumericValues_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(1, (int)Vp9ColorRange.Full);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ColorSpaces_IsRgb_OnlyForSrgb()
     {
         CpuOnlyTest();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         Equal(true, Vp9ColorSpaces.IsRgb(Vp9ColorSpace.Srgb));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ColorSpaces_ImpliesFullRange_OnlyForSrgb()
     {
         CpuOnlyTest();

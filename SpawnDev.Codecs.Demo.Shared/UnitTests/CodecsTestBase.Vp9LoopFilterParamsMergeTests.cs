@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterParamsMerge_RefDeltas_NullParsed_PreservesPersistent()
     {
         CpuOnlyTest();
@@ -21,7 +21,7 @@ public abstract partial class CodecsTestBase
         Equal(4, merged[3]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterParamsMerge_RefDeltas_AllUpdated_OverridesPersistent()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         Equal(40, merged[3]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterParamsMerge_RefDeltas_PartialUpdate_MixesValues()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         Equal(4, merged[3]);  // persistent
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterParamsMerge_RefDeltas_EmptyParsed_PreservesPersistent()
     {
         CpuOnlyTest();
@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
         Equal(8, merged[3]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterParamsMerge_ModeDeltas_NullParsed_PreservesPersistent()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
         Equal(7, merged[1]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterParamsMerge_ModeDeltas_PartialUpdate()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
         Equal(11, merged[1]); // updated
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterParamsMerge_RejectsNullPersistent()
     {
         CpuOnlyTest();
@@ -92,7 +92,7 @@ public abstract partial class CodecsTestBase
             Vp9LoopFilterParamsMerge.MergeModeDeltas(null, null!));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterParamsMerge_RejectsWrongLengthPersistent()
     {
         CpuOnlyTest();

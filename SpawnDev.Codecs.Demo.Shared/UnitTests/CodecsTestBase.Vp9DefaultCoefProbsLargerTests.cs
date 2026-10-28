@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DefaultCoefProbs8x8_HasCorrectShapeAndPadding()
     {
         CpuOnlyTest();
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)187, Vp9CoefProbs.DefaultCoefProbs8x8[Vp9CoefProbs.Index4x4(0, 0, 0, 0, 2)]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DefaultCoefProbs16x16_HasCorrectShapeAndPadding()
     {
         CpuOnlyTest();
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)153, Vp9CoefProbs.DefaultCoefProbs16x16[Vp9CoefProbs.Index4x4(0, 0, 0, 0, 2)]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DefaultCoefProbs32x32_HasCorrectShapeAndPadding()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)140, Vp9CoefProbs.DefaultCoefProbs32x32[Vp9CoefProbs.Index4x4(0, 0, 0, 0, 2)]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DefaultCoefProbs_DispatcherReturnsCorrectArray()
     {
         CpuOnlyTest();
@@ -72,7 +72,7 @@ public abstract partial class CodecsTestBase
         True(ReferenceEquals(Vp9CoefProbs.DefaultCoefProbs32x32, Vp9CoefProbs.DefaultCoefProbsFor(Vp9TxSize.Tx32x32)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DefaultCoefProbs_AllNonPadEntries_AreInValidRange()
     {
         CpuOnlyTest();

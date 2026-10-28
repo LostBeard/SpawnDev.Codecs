@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- Validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Nlsf2A_InvalidOrder_Throws()
     {
         CpuOnlyTest();
@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => SilkNlsf2A.Compute(aQ12, nlsf, 12));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Nlsf2A_OutputTooSmall_Throws()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => SilkNlsf2A.Compute(aQ12, nlsf, 10));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Nlsf2A_InputTooSmall_Throws()
     {
         CpuOnlyTest();
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Evenly spaced NLSFs (stability check) --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Nlsf2A_EvenlySpacedOrder10_ProducesStableFilter()
     {
         CpuOnlyTest();
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
         True(invGain <= (1 << 30), "invGain should be <= 2^30");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Nlsf2A_EvenlySpacedOrder16_ProducesStableFilter()
     {
         CpuOnlyTest();
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Always-stable contract (generator test) --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Nlsf2A_AlwaysProducesStableFilter_Order10()
     {
         CpuOnlyTest();
@@ -120,7 +120,7 @@ public abstract partial class CodecsTestBase
         Equal(500, stableCount);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Nlsf2A_AlwaysProducesStableFilter_Order16()
     {
         CpuOnlyTest();
@@ -149,7 +149,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Boundary NLSFs --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Nlsf2A_MinimallySeparatedNlsfs_StillStable()
     {
         CpuOnlyTest();
@@ -169,7 +169,7 @@ public abstract partial class CodecsTestBase
         True(invGain > 0, $"Expected stable filter after stabilization loop for tightly-packed NLSFs. A_Q12=[{string.Join(",", aQ12)}]");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Nlsf2A_NlsfsSpanningFullRange_Stable()
     {
         CpuOnlyTest();

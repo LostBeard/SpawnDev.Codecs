@@ -15,7 +15,7 @@ public abstract partial class CodecsTestBase
         return dest;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst16x16_ZeroCoefficients_LeavesPredictorUnchanged()
     {
         CpuOnlyTest();
@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 256; i++) Equal((byte)128, dest[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst16x16_IsDeterministic_ForRandomInputs()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst16x16_SingleCoefficient_ProducesNonZeroResidual()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         True(changed);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst16x16_HighPositive_OutputsValidPixels()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 256; i++) True(dest[i] <= 255);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst16x16_LargeNegatives_ClipToZeroSomewhere()
     {
         CpuOnlyTest();
@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
         True(anyZero);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst16x16_StridedDest_OnlyTouches16x16Block()
     {
         CpuOnlyTest();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
                 Equal((byte)77, canvas[row * 32 + col]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst16x16_Throws_OnShortInput()
     {
         CpuOnlyTest();
@@ -105,7 +105,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst16x16_Throws_OnBadStride()
     {
         CpuOnlyTest();

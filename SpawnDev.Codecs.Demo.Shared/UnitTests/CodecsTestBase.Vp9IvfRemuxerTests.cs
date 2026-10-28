@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
         return ms.ToArray();
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IvfRemuxer_BbbAsIvf_RemuxIsByteIdentical()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IvfRemuxer_BbbAsIvf_HeaderPreserved()
     {
         CpuOnlyTest();

@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         enc.EncodeIcdf(pred1Idx1, SilkIcdfTables.Uniform5, 8);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StereoDecodePred_IndicesZero_DecodesNearZeroPredictors()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         True(predQ13[1] > -14000 && predQ13[1] < 14000, $"predQ13[1] = {predQ13[1]} out of range");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StereoDecodePred_DistinctIndices_DecodeRoundTrip()
     {
         CpuOnlyTest();
@@ -70,7 +70,7 @@ public abstract partial class CodecsTestBase
         True(Math.Abs(predQ13[1]) < 14000, $"predQ13[1] = {predQ13[1]}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StereoDecodePred_SymmetricIndices_PreSubtractedDeltaIsZero()
     {
         CpuOnlyTest();
@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
         Equal(0, predQ13[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StereoDecodeMidOnly_ZeroSymbol_ReturnsZero()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
         Equal(0, SilkStereoDecodePred.DecodeMidOnly(dec));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StereoDecodeMidOnly_OneSymbol_ReturnsOne()
     {
         CpuOnlyTest();
@@ -109,7 +109,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Table shape sanity --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StereoPredTables_ExpectedShapes()
     {
         CpuOnlyTest();
@@ -131,7 +131,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Arg validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StereoDecodePred_NullDecoder_Throws()
     {
         CpuOnlyTest();
@@ -139,7 +139,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentNullException>(() => SilkStereoDecodePred.DecodePred(null!, predQ13));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StereoDecodePred_OutputTooSmall_Throws()
     {
         CpuOnlyTest();

@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
             Equal(expected, dst[row * stride + col]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DcPredictor_BothEdges_4x4_FlatInput100_Produces100()
     {
         CpuOnlyTest();
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
         AssertBlockUniformlyFilled(dst, 4, 4, 100);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DcPredictor_BothEdges_8x8_FlatInput200_Produces200()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         AssertBlockUniformlyFilled(dst, 8, 8, 200);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DcPredictor_BothEdges_16x16_AsymmetricInputProducesRoundedAverage()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         AssertBlockUniformlyFilled(dst, 16, 16, 150);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DcPredictor_BothEdges_32x32_FullDynamicRange()
     {
         CpuOnlyTest();
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
         AssertBlockUniformlyFilled(dst, 32, 32, 128);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DcPredictor_TopOnly_4x4_FlatInput80_Produces80()
     {
         CpuOnlyTest();
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
         AssertBlockUniformlyFilled(dst, 4, 4, 80);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DcPredictor_TopOnly_16x16_FlatInput100_Produces100()
     {
         CpuOnlyTest();
@@ -98,7 +98,7 @@ public abstract partial class CodecsTestBase
         AssertBlockUniformlyFilled(dst, 16, 16, 100);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DcPredictor_LeftOnly_8x8_FlatInput150_Produces150()
     {
         CpuOnlyTest();
@@ -109,7 +109,7 @@ public abstract partial class CodecsTestBase
         AssertBlockUniformlyFilled(dst, 8, 8, 150);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DcPredictor_Dc128_AllSizes_ProduceFlat128()
     {
         CpuOnlyTest();
@@ -121,7 +121,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DcPredictor_BothEdges_StrideLargerThanN_OnlyTouchesNxN()
     {
         CpuOnlyTest();
@@ -145,7 +145,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DcPredictor_RejectsInvalidSize()
     {
         CpuOnlyTest();
@@ -155,7 +155,7 @@ public abstract partial class CodecsTestBase
             Vp9DcPredictor.DcPredict128(new byte[16], n: 0, stride: 16));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DcPredictor_BothEdges_RejectsTooSmallEdgeSpans()
     {
         CpuOnlyTest();

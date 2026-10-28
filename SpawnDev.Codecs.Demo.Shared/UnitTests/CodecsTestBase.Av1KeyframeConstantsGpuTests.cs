@@ -18,7 +18,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1KeyframeConstantsGpu_BufferSizes_MatchLayout()
     {
         CpuOnlyTest();
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
         Equal(Av1KeyframeConstantsGpu.UshortConstsTotalEntries, ushortBuf.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1KeyframeConstantsGpu_ScanTables_MatchSource()
     {
         CpuOnlyTest();
@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
                 $"scan16x16 mismatch at {i}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1KeyframeConstantsGpu_NzMapCtxOffset_RoundTrips()
     {
         CpuOnlyTest();
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
                 $"NzMapCtxOffset[16x16] mismatch at {i}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1KeyframeConstantsGpu_EobGroupStartAndOffsetBits_RoundTrip()
     {
         CpuOnlyTest();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1KeyframeConstantsGpu_CdfSentinels_MatchSource()
     {
         CpuOnlyTest();
@@ -154,7 +154,7 @@ public abstract partial class CodecsTestBase
         Equal(srcIntraExtTx16[0], ushortBuf[Av1KeyframeConstantsGpu.IntraExtTxCdfTx16DcOffset + 0], "IntraExtTx tx16 DC sentinel");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1KeyframeConstantsGpu_Tx4x4_AllEntries_MatchSource()
     {
         CpuOnlyTest();

@@ -12,7 +12,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerDownFir_16To8_ZeroInput_ProducesZeroOutput()
     {
         CpuOnlyTest();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < output.Length; i++) Equal((short)0, output[i], $"output[{i}]");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerDownFir_16To8_OutputCountIsHalf()
     {
         CpuOnlyTest();
@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerDownFir_16To12_3To4_UsesExpectedCoefs()
     {
         CpuOnlyTest();
@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerDownFir_12To8_2To3_UsesExpectedCoefs()
     {
         CpuOnlyTest();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerDownFir_16To8_StateCarriesAcrossCalls()
     {
         CpuOnlyTest();
@@ -123,7 +123,7 @@ public abstract partial class CodecsTestBase
         True(!identical, "output2 should differ from output1 (different input)");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerDownFir_DcInput_ProducesBoundedOutput()
     {
         CpuOnlyTest();

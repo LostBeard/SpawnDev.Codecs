@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
         };
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisAudio_SingleMode_ShortBlock_NoModeBits()
     {
         CpuOnlyTest();
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
         False(hdr.NextWindowLong);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisAudio_TwoModes_SelectsShortBlock()
     {
         CpuOnlyTest();
@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
         False(hdr.IsLongBlock);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisAudio_TwoModes_SelectsLongBlock_ReadsWindowFlags()
     {
         CpuOnlyTest();
@@ -104,7 +104,7 @@ public abstract partial class CodecsTestBase
         False(hdr.NextWindowLong);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisAudio_FourModes_UsesTwoModeBits()
     {
         CpuOnlyTest();
@@ -130,7 +130,7 @@ public abstract partial class CodecsTestBase
         True(hdr.NextWindowLong);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisAudio_PacketTypeOne_Throws()
     {
         CpuOnlyTest();
@@ -146,7 +146,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisAudio_CustomBlockSizes_ReflectedInResult()
     {
         CpuOnlyTest();

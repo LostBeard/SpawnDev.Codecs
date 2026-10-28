@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvBuilder_LowerPrecision_AllowedHp_NoChange()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(-3, Vp9MvBuilder.LowerMvPrecisionComponent(-3, allowHighPrecision: true));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvBuilder_LowerPrecision_EvenComponent_NoChange()
     {
         CpuOnlyTest();
@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         Equal(-12, Vp9MvBuilder.LowerMvPrecisionComponent(-12, allowHighPrecision: false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvBuilder_LowerPrecision_PositiveOdd_SubtractsOne()
     {
         CpuOnlyTest();
@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
         Equal(0, Vp9MvBuilder.LowerMvPrecisionComponent(1, allowHighPrecision: false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvBuilder_LowerPrecision_NegativeOdd_AddsOne()
     {
         CpuOnlyTest();
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         Equal(0, Vp9MvBuilder.LowerMvPrecisionComponent(-1, allowHighPrecision: false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvBuilder_LowerPrecision_StructForm()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         Equal(-2, lowered.Col);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvBuilder_ApplyDiff_AddsAndClamps()
     {
         CpuOnlyTest();
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
         Equal(10, result.Col);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvBuilder_ApplyDiff_NoHp_LowersPrecision()
     {
         CpuOnlyTest();
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
         Equal(8, result.Col);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvBuilder_ApplyDiff_ClampsExtreme()
     {
         CpuOnlyTest();

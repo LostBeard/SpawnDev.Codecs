@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
         return maxErr;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1Forward2d_Dct4x4_FwdInv_RoundTripSmall()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
             $"Av1 fdct/idct 4x4 round-trip: q1={e1}, q2={e2}, q4={e4}, q8={e8} - none within tolerance");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1Forward2d_Dct8x8_FwdInv_RoundTripSmall()
     {
         CpuOnlyTest();
@@ -68,7 +68,7 @@ public abstract partial class CodecsTestBase
             $"Av1 fdct/idct 8x8 round-trip: q1={e1}, q2={e2}, q4={e4}, q8={e8} - none within tolerance");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1Forward2d_Dct16x16_FwdInv_RoundTripSmall()
     {
         CpuOnlyTest();
@@ -81,7 +81,7 @@ public abstract partial class CodecsTestBase
             $"Av1 fdct/idct 16x16 round-trip: q1={e1}, q2={e2}, q4={e4}, q8={e8} - none within tolerance");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1Forward2d_AllZero_ProducesAllZero()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 256; i++) Equal(0, output[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1Forward2d_Determinism()
     {
         CpuOnlyTest();

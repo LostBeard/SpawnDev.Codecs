@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IvfDetector_BbbAv1Fixture_DetectsAv1()
     {
         CpuOnlyTest();
@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
         Equal(IvfCodec.Av1, IvfDetector.DetectCodec(bytes));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IvfDetector_RandomBytes_RejectsAsNotIvf()
     {
         CpuOnlyTest();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         Equal(IvfCodec.Unknown, IvfDetector.DetectCodec(bytes));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IvfDetector_TruncatedHeader_Rejects()
     {
         CpuOnlyTest();
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         Equal(IvfCodec.Unknown, IvfDetector.DetectCodec(bytes));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IvfDetector_Vp90FourCc_DetectsVp9()
     {
         CpuOnlyTest();

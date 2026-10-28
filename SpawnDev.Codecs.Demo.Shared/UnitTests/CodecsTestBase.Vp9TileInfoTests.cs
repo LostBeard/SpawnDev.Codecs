@@ -9,7 +9,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileInfo_GetTileNBits_640x480Frame()
     {
         CpuOnlyTest();
@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
         Equal(1, maxLog2);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileInfo_GetTileNBits_1920x1080Frame()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         Equal(2, maxLog2);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileInfo_GetTileNBits_4kFrame()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         Equal(3, maxLog2);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileInfo_GetTileNBits_8kFrame()
     {
         CpuOnlyTest();
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
         Equal(4, maxLog2);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileInfo_Parse_NoIncrements_NoRowSplit()
     {
         CpuOnlyTest();
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
         Equal(1, ti.TileRows);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileInfo_Parse_OneTileColIncrement_BumpsToTwoCols()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
         Equal(0, ti.Log2TileRows);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileInfo_Parse_TwoTileColIncrements_FourCols()
     {
         CpuOnlyTest();
@@ -104,7 +104,7 @@ public abstract partial class CodecsTestBase
         Equal(4, ti.TileCols);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileInfo_Parse_TileRowsLog2Equals2_ReadsTwoBits()
     {
         CpuOnlyTest();
@@ -117,7 +117,7 @@ public abstract partial class CodecsTestBase
         Equal(4, ti.TileRows);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileInfo_Parse_TileRowsLog2Equals1_ReadsTwoBits()
     {
         CpuOnlyTest();

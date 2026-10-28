@@ -12,7 +12,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1Curve_LowNeighbour_TakesLargestStrictlyLessThan()
     {
         CpuOnlyTest();
@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
         Equal(2, VorbisFloor1Curve.LowNeighbourOffset(x, 5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1Curve_HighNeighbour_TakesSmallestStrictlyGreaterThan()
     {
         CpuOnlyTest();
@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
         Equal(4, VorbisFloor1Curve.HighNeighbourOffset(x, 5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1Curve_RenderPoint_IntegerInterpolationAtHalf()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         Equal(150, VorbisFloor1Curve.RenderPoint(0, 100, 10, 200, 5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1Curve_RenderPoint_NegativeSlope()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         Equal(150, VorbisFloor1Curve.RenderPoint(0, 200, 10, 100, 5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1Curve_RenderPoint_Endpoints()
     {
         CpuOnlyTest();
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
         Equal(200, VorbisFloor1Curve.RenderPoint(0, 100, 10, 200, 10));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1Curve_Render_FullCurve_ProducesPositiveFloats()
     {
         CpuOnlyTest();
@@ -93,7 +93,7 @@ public abstract partial class CodecsTestBase
         True(curve[0] > 0, "curve[0] should be > 0 (first point amplitude).");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1Curve_Render_LengthMismatch_Throws()
     {
         CpuOnlyTest();
@@ -113,7 +113,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1Curve_Render_DifferentMultipliers_ProduceFiniteCurves()
     {
         CpuOnlyTest();

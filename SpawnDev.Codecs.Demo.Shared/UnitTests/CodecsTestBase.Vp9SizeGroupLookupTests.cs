@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SizeGroupLookup_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(13, Vp9SizeGroupLookup.Lookup.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SizeGroupLookup_Group0()
     {
         CpuOnlyTest();
@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         Equal(0, Vp9SizeGroupLookup.ForBlockSize(Vp9BlockSize.Block8x4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SizeGroupLookup_Group1()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         Equal(1, Vp9SizeGroupLookup.ForBlockSize(Vp9BlockSize.Block16x8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SizeGroupLookup_Group2()
     {
         CpuOnlyTest();
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
         Equal(2, Vp9SizeGroupLookup.ForBlockSize(Vp9BlockSize.Block32x16));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SizeGroupLookup_Group3()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         Equal(3, Vp9SizeGroupLookup.ForBlockSize(Vp9BlockSize.Block64x64));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SizeGroupLookup_RejectsOutOfRange()
     {
         CpuOnlyTest();

@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TmPredictor_4x4_FlatInputs_ProduceCornerExtrapolation()
     {
         CpuOnlyTest();
@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal((byte)100, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TmPredictor_4x4_KnownPattern()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)100, dst[12]); Equal((byte)110, dst[13]); Equal((byte)120, dst[14]); Equal((byte)130, dst[15]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TmPredictor_4x4_ClipsHighToTwoFiveFive()
     {
         CpuOnlyTest();
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal((byte)255, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TmPredictor_4x4_ClipsLowToZero()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal((byte)0, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TmPredictor_8x8_MixedClipping()
     {
         CpuOnlyTest();
@@ -93,7 +93,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)230, dst[r7 + 4]); Equal((byte)255, dst[r7 + 5]); Equal((byte)255, dst[r7 + 6]); Equal((byte)255, dst[r7 + 7]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TmPredictor_16x16_StridedDest_OnlyTouchesBlock()
     {
         CpuOnlyTest();
@@ -114,7 +114,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TmPredictor_32x32_FlatInputProducesFlatOutput()
     {
         CpuOnlyTest();
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 1024; i++) Equal((byte)80, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TmPredictor_RejectsInvalidSize()
     {
         CpuOnlyTest();
@@ -134,7 +134,7 @@ public abstract partial class CodecsTestBase
             Vp9TmPredictor.TmPredict(0, new byte[5], new byte[5], new byte[25], n: 5, stride: 5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TmPredictor_RejectsTooSmallEdgeSpans()
     {
         CpuOnlyTest();

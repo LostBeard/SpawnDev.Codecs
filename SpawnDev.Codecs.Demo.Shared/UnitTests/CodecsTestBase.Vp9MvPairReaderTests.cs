@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvPairReader_JointHasVertical_HzvnzAndHnzvnzOnly()
     {
         CpuOnlyTest();
@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
         Equal(true, Vp9MvPairReader.JointHasVertical(Vp9MvJointType.Hnzvnz));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvPairReader_JointHasHorizontal_HnzvzAndHnzvnzOnly()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         Equal(true, Vp9MvPairReader.JointHasHorizontal(Vp9MvJointType.Hnzvnz));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvPairReader_ZeroJoint_ReturnsZeroPair()
     {
         CpuOnlyTest();
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
         Equal(0, h);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvPairReader_HnzvzJoint_ReadsOnlyHorizontal()
     {
         CpuOnlyTest();
@@ -57,7 +57,7 @@ public abstract partial class CodecsTestBase
         Equal(2, h);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvPairReader_HzvnzJoint_ReadsOnlyVertical()
     {
         CpuOnlyTest();
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
         Equal(0, h);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvPairReader_HnzvnzJoint_ReadsBothInOrder()
     {
         CpuOnlyTest();
@@ -92,7 +92,7 @@ public abstract partial class CodecsTestBase
         Equal(2, h);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvPairReader_RejectsNullReader()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
             Vp9MvPairReader.ReadDiff((Vp9BoolDecoder)null!, probs, false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvPairReader_RejectsNullProbs()
     {
         CpuOnlyTest();

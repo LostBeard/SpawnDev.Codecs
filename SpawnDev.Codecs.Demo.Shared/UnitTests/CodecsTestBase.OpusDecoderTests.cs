@@ -15,7 +15,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- Config validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_Config_InvalidSampleRate_Throws()
     {
         CpuOnlyTest();
@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => new OpusDecoder(config));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_Config_InvalidChannelCount_Throws()
     {
         CpuOnlyTest();
@@ -31,14 +31,14 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => new OpusDecoder(config));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_Config_NullThrows()
     {
         CpuOnlyTest();
         Throws<ArgumentNullException>(() => new OpusDecoder(null!));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_Config_ValidSampleRates_AllSupported()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_Codec_IsOpus()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Factory --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusCodec_CreateDecoder_ReturnsIAudioDecoder()
     {
         CpuOnlyTest();
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Packet handling --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task OpusDecoder_DecodePacket_InvalidPacket_Throws()
     {
         CpuOnlyTest();
@@ -88,7 +88,7 @@ public abstract partial class CodecsTestBase
         catch (ArgumentException) { }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task OpusDecoder_DecodePacket_BufferTooSmall_Throws()
     {
         CpuOnlyTest();
@@ -104,7 +104,7 @@ public abstract partial class CodecsTestBase
         catch (ArgumentException) { }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task OpusDecoder_DecodePacket_HybridPath_DecodesWithoutThrowing()
     {
         CpuOnlyTest();
@@ -125,7 +125,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task OpusDecoder_DecodePacket_CeltPath_DecodesWithoutThrowing()
     {
         CpuOnlyTest();
@@ -144,7 +144,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Disposal --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task OpusDecoder_DecodePacket_AfterDispose_Throws()
     {
         CpuOnlyTest();
@@ -160,7 +160,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Short overload path --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task OpusDecoder_DecodePacket_ShortOverload_InvalidPacket_Throws()
     {
         CpuOnlyTest();

@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         return buf;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BoolDecoder_InitOnZeroBuffer_Succeeds()
     {
         CpuOnlyTest();
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
         Equal(0, d.Read(128));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BoolDecoder_InitOnHighBitBuffer_Throws()
     {
         CpuOnlyTest();
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
         True(threw, "init on 0x80-start buffer must throw");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BoolDecoder_AllZeroBuffer_ReadsAllZeros()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
             Equal(0, d.Read(128));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BoolDecoder_AllZeroBuffer_ExtremeProb255_AlsoReadsZero()
     {
         CpuOnlyTest();
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
             Equal(0, d.Read(255));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BoolDecoder_IsDeterministic_OnSameBuffer()
     {
         CpuOnlyTest();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
             Equal(a.Read(128), b.Read(128));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BoolDecoder_ReadLiteral_SumsIndividualReadBits()
     {
         CpuOnlyTest();
@@ -110,7 +110,7 @@ public abstract partial class CodecsTestBase
         Equal(literalValue, pieceValue);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BoolDecoder_ReadLiteral_ZeroBits_ReturnsZero()
     {
         CpuOnlyTest();
@@ -119,7 +119,7 @@ public abstract partial class CodecsTestBase
         Equal(0u, d.ReadLiteral(0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BoolDecoder_InitWithOffset_UsesCorrectWindow()
     {
         CpuOnlyTest();
@@ -137,7 +137,7 @@ public abstract partial class CodecsTestBase
             Equal(0, d.Read(128));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BoolDecoder_ConstructorThrows_OnBadArgs()
     {
         CpuOnlyTest();

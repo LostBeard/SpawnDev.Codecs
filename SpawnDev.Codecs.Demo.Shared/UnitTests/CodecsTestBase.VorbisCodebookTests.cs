@@ -13,7 +13,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- VorbisMath --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisMath_Ilog_KnownValues()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         Equal(5, VorbisMath.Ilog(16));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisMath_Lookup1Values_KnownGeometries()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         Equal(100, VorbisMath.Lookup1Values(100, 1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisMath_Float32Unpack_RoundNumbers()
     {
         CpuOnlyTest();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
         return VorbisCodebookParser.Parse(ref r);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisCodebook_Unordered_Dense_4Entries_2BitEach()
     {
         CpuOnlyTest();
@@ -117,7 +117,7 @@ public abstract partial class CodecsTestBase
         Equal(0, cb.LookupType);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisCodebook_Sparse_SomeEntriesUnused()
     {
         CpuOnlyTest();
@@ -141,7 +141,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 3, 0, 5 }, cb.Lengths);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisCodebook_Ordered_MonotonicLengths()
     {
         CpuOnlyTest();
@@ -163,7 +163,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 2, 2, 3, 3, 3 }, cb.Lengths);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisCodebook_LookupType2_MultiplicandsParsed()
     {
         CpuOnlyTest();
@@ -194,7 +194,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 1, 2, 3, 4, 5, 6 }, cb.Multiplicands);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisCodebook_BadSync_Throws()
     {
         CpuOnlyTest();
@@ -205,7 +205,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisCodebook_ReservedLookupType_Throws()
     {
         CpuOnlyTest();

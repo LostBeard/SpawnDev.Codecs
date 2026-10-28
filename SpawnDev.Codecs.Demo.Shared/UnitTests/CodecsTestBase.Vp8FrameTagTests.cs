@@ -9,7 +9,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8FrameTag_KeyFrame320x240_ParsesAllFields()
     {
         CpuOnlyTest();
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
         Equal(0, tag.VerticalScale!.Value);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8FrameTag_InterFrameNoSync_ParsesPrefixOnly()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         True(tag.Height is null, "Height should be null for inter frame");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8FrameTag_KeyFrameInvalidStartCode_Throws()
     {
         CpuOnlyTest();
@@ -73,14 +73,14 @@ public abstract partial class CodecsTestBase
         Throws<InvalidDataException>(() => Vp8FrameTagParser.Parse(frame));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8FrameTag_TruncatedFrame_Throws()
     {
         CpuOnlyTest();
         Throws<ArgumentException>(() => Vp8FrameTagParser.Parse(new byte[2]));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8FrameTag_TruncatedKeyFrame_Throws()
     {
         CpuOnlyTest();
@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => Vp8FrameTagParser.Parse(frame));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8FrameTag_KeyFrameMaxDimensions_ParsesCorrectly()
     {
         CpuOnlyTest();

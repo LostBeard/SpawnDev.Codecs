@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefEncoder_AllZero4x4_RoundTrips()
     {
         CpuOnlyTest();
@@ -70,7 +70,7 @@ public abstract partial class CodecsTestBase
             input, expectedEob: 0);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefEncoder_DcOnly4x4_RoundTrips()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
             input, expectedEob: 1);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefEncoder_NegativeOne4x4_RoundTrips()
     {
         CpuOnlyTest();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
             input, expectedEob: 1);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefEncoder_AllMagnitudes4x4_RoundTrips()
     {
         CpuOnlyTest();
@@ -113,7 +113,7 @@ public abstract partial class CodecsTestBase
             input, expectedEob: 10);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefEncoder_RandomSparse8x8_RoundTrips()
     {
         CpuOnlyTest();
@@ -145,7 +145,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefEncoder_Plane_RefType_Variants_RoundTrip()
     {
         CpuOnlyTest();
@@ -169,7 +169,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefEncoder_Random16x16_RoundTrips()
     {
         CpuOnlyTest();

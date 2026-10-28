@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public Task AudioTranscodeDemo_FlacRoundTrip_LosslessSineRecovers()
     {
         CpuOnlyTest();
@@ -57,7 +57,7 @@ public abstract partial class CodecsTestBase
         return Task.CompletedTask;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public Task AudioTranscodeDemo_VorbisRoundTrip_LossySineRecovers()
     {
         CpuOnlyTest();
@@ -99,7 +99,7 @@ public abstract partial class CodecsTestBase
         return Task.CompletedTask;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task AudioTranscodeDemo_OpusRoundTrip_LossySineRecovers()
     {
         CpuOnlyTest();

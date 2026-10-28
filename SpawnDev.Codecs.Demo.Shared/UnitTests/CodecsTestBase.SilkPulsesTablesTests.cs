@@ -14,7 +14,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- Shape and constants --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesTables_Constants_MatchLibopus()
     {
         CpuOnlyTest();
@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         Equal(10, SilkConstants.N_RATE_LEVELS);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesTables_RateLevels_HasTwoRowsOfNine()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)0, SilkIcdfTables.RateLevels[17]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesTables_RateLevels_OffsetMatchesSignalTypeShift()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         Equal(9, SilkIcdfTables.RateLevelsOffset(2)); // voiced
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesTables_PulsesPerBlock_HasTenRowsOfEighteen()
     {
         CpuOnlyTest();
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)0, SilkIcdfTables.PulsesPerBlock[5 * 18 + 17]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesTables_PulsesPerBlock_AllRowsEndInZero()
     {
         CpuOnlyTest();
@@ -86,7 +86,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesTables_Sign_HasSixRowsOfSeven()
     {
         CpuOnlyTest();
@@ -102,7 +102,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)102, SilkIcdfTables.Sign[41]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesTables_Sign_OffsetMatchesRowIndexFormula()
     {
         CpuOnlyTest();
@@ -121,7 +121,7 @@ public abstract partial class CodecsTestBase
         Equal(35, SilkIcdfTables.SignOffset(2, 1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesTables_Lsb_IsTwoSymbolBinaryIcdf()
     {
         CpuOnlyTest();

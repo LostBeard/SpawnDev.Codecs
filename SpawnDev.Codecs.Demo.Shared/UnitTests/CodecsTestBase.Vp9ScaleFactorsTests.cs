@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScaleFactors_RefNoScale_Is16384()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(16384, Vp9ScaleFactors.RefNoScale);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScaleFactors_FixedPointScale_SameSize_IsNoScale()
     {
         CpuOnlyTest();
@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9ScaleFactors.RefNoScale, Vp9ScaleFactors.FixedPointScale(1080, 1080));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScaleFactors_FixedPointScale_DoubleSize_DoublesScale()
     {
         CpuOnlyTest();
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
         Equal(2 * Vp9ScaleFactors.RefNoScale, Vp9ScaleFactors.FixedPointScale(1280, 640));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScaleFactors_FixedPointScale_HalfSize_HalvesScale()
     {
         CpuOnlyTest();
@@ -40,28 +40,28 @@ public abstract partial class CodecsTestBase
         Equal(8192, Vp9ScaleFactors.FixedPointScale(320, 640));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScaleFactors_StepQ4FromScale_NoScale_Is16()
     {
         CpuOnlyTest();
         Equal(16, Vp9ScaleFactors.StepQ4FromScale(Vp9ScaleFactors.RefNoScale));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScaleFactors_StepQ4FromScale_DoubleScale_Is32()
     {
         CpuOnlyTest();
         Equal(32, Vp9ScaleFactors.StepQ4FromScale(2 * Vp9ScaleFactors.RefNoScale));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScaleFactors_StepQ4FromScale_HalfScale_Is8()
     {
         CpuOnlyTest();
         Equal(8, Vp9ScaleFactors.StepQ4FromScale(8192));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScaleFactors_IsNoScale_DetectsExactly()
     {
         CpuOnlyTest();
@@ -70,7 +70,7 @@ public abstract partial class CodecsTestBase
         Equal(false, Vp9ScaleFactors.IsNoScale(Vp9ScaleFactors.RefNoScale + 1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScaleFactors_FixedPointScale_RejectsZeroDenominator()
     {
         CpuOnlyTest();

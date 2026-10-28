@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
         return _ => bits[idx++];
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefDecoder_EobAtPositionZero_ReturnsZeroAndAllZeros()
     {
         CpuOnlyTest();
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal((short)0, block[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefDecoder_ZeroAtPosZero_ThenOneAtPos1_ThenEobAtPos2()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) if (i != 4) Equal((short)0, block[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefDecoder_PositiveOneAtPositionZero_WritesOneAtRasterZero()
     {
         CpuOnlyTest();
@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
         for (int i = 1; i < 16; i++) Equal((short)0, block[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefDecoder_NegativeOneAtPositionZero_WritesMinusOneAtRasterZero()
     {
         CpuOnlyTest();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
         for (int i = 1; i < 16; i++) Equal((short)0, block[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefDecoder_ThreePositiveOnes_LandAtScanRasterPositions()
     {
         CpuOnlyTest();
@@ -124,7 +124,7 @@ public abstract partial class CodecsTestBase
         Equal((short)0, block[15]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefDecoder_TwoTokenAtPositionZero_WritesTwoSignedAtRasterZero()
     {
         CpuOnlyTest();
@@ -142,7 +142,7 @@ public abstract partial class CodecsTestBase
         Equal((short)2, block[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefDecoder_8x8Block_RoutesThroughBigPlaneArrays()
     {
         CpuOnlyTest();
@@ -159,7 +159,7 @@ public abstract partial class CodecsTestBase
         for (int i = 1; i < 64; i++) Equal((short)0, block[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockCoefDecoder_RejectsUndersizedBlock()
     {
         CpuOnlyTest();

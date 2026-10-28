@@ -1,3 +1,4 @@
+using SpawnDev.UnitTesting;
 using ILGPU;
 using ILGPU.Runtime;
 using ILGPU.Runtime.Cuda;
@@ -10,6 +11,8 @@ namespace SpawnDev.Codecs.DemoConsole.UnitTests;
 /// cross-platform test from <see cref="CodecsTestBase"/> and runs ILGPU kernel
 /// tests on the first available NVIDIA GPU via PTX codegen.
 /// </summary>
+// CPU-only tests (Category = "CpuOnly") run once, in CpuCodecsTests: discovery leaves them out here.
+[ExcludeCategories("CpuOnly")]
 public class CudaCodecsTests : CodecsTestBase
 {
     protected override ValueTask<(Context, Accelerator)> CreateKernelAcceleratorAsync()

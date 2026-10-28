@@ -13,7 +13,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- ResidualDequant (static helper) --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResidualDequant_AllZeros_ProducesAllZeros()
     {
         CpuOnlyTest();
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < order; i++) Equal((short)0, xQ10[i], $"xQ10[{i}]");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResidualDequant_SingleNonZeroIndex_ProducesExpectedValue()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         Equal((short)expected, xQ10[order - 1], $"last xQ10");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResidualDequant_NegativeIndex_AddsLevelAdj()
     {
         CpuOnlyTest();
@@ -124,7 +124,7 @@ public abstract partial class CodecsTestBase
         };
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecode_ZeroResiduals_ReturnsCodebookEntry()
     {
         CpuOnlyTest();
@@ -145,7 +145,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecode_Output_IsOrderedAfterStabilize()
     {
         CpuOnlyTest();
@@ -167,7 +167,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecode_Output_WithinQ15Range()
     {
         CpuOnlyTest();
@@ -185,7 +185,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecode_OutputTooSmall_Throws()
     {
         CpuOnlyTest();
@@ -195,7 +195,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => SilkNlsfDecoder.Decode(small, indices, cb));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecode_IndicesTooShort_Throws()
     {
         CpuOnlyTest();
@@ -205,7 +205,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => SilkNlsfDecoder.Decode(nlsfQ15, tooShort, cb));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecode_NullCodebook_Throws()
     {
         CpuOnlyTest();

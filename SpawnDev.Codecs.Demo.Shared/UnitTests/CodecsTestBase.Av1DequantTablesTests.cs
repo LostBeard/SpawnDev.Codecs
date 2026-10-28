@@ -9,7 +9,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1DequantTables_HaveCorrectLengths()
     {
         CpuOnlyTest();
@@ -21,7 +21,7 @@ public abstract partial class CodecsTestBase
         Equal(256, Av1DequantTables.AcLookup12.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1DequantTables_DcQuantQtx_MatchesLibaomValues()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         Equal(21387, Av1DequantTables.DcQuantQtx(255, 0, 12));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1DequantTables_AcQuantQtx_MatchesLibaomValues()
     {
         CpuOnlyTest();
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
         Equal(29247, Av1DequantTables.AcQuantQtx(255, 0, 12));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1DequantTables_DeltaShiftsQindex()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         Equal(81, Av1DequantTables.DcQuantQtx(100, -10, 8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1DequantTables_DeltaClampsToRange()
     {
         CpuOnlyTest();
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
         Equal(4, Av1DequantTables.DcQuantQtx(50, -100, 8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1SmoothWeights_HaveExpectedLayout()
     {
         CpuOnlyTest();
@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)255, Av1SmoothWeights.Weights[60]);  // bs=64
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1SmoothWeights_GetWeights_SlicesCorrectRange()
     {
         CpuOnlyTest();

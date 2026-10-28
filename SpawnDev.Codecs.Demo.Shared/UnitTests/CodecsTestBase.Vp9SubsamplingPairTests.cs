@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubsamplingPair_NamedSingletons()
     {
         CpuOnlyTest();
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
         Equal(false, Vp9SubsamplingPair.Yuv420.Is444);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubsamplingPair_Yuv420_HalvesBothAxes()
     {
         CpuOnlyTest();
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         Equal(360, Vp9SubsamplingPair.Yuv420.ChromaHeight(720));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubsamplingPair_Yuv422_HalvesHorizontalOnly()
     {
         CpuOnlyTest();
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
         Equal(720, Vp9SubsamplingPair.Yuv422.ChromaHeight(720));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubsamplingPair_Yuv444_PreservesBothAxes()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         Equal(720, Vp9SubsamplingPair.Yuv444.ChromaHeight(720));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubsamplingPair_Yuv440_HalvesVerticalOnly()
     {
         CpuOnlyTest();
@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
         Equal(360, Vp9SubsamplingPair.Yuv440.ChromaHeight(720));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubsamplingPair_ChromaPixelCount_Yuv420()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         Equal(230400, Vp9SubsamplingPair.Yuv420.ChromaPixelCount(1280, 720));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubsamplingPair_RecordEquality()
     {
         CpuOnlyTest();

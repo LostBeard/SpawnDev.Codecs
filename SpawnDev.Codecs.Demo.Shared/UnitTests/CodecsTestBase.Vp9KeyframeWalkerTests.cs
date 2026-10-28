@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
     /// not throw and must produce a frame buffer of the right
     /// dimensions.
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9KeyframeWalker_DecodesBbbFirstKeyframe_NoExceptions()
     {
         CpuOnlyTest();
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
     /// coefficient decode + dequant + iDCT + reconstruct pipeline
     /// works end-to-end on a real keyframe.
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9KeyframeWalker_FirstYBlock_IsBitExactVsFfmpeg()
     {
         CpuOnlyTest();
@@ -127,7 +127,7 @@ public abstract partial class CodecsTestBase
     /// filter the Y plane has artifacts but the means of all three
     /// planes should be in the right ballpark.
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9KeyframeWalker_PlaneStats_AreInRecognizableBand()
     {
         CpuOnlyTest();
@@ -169,7 +169,7 @@ public abstract partial class CodecsTestBase
     /// slice). Drive the BBB stream until we hit an inter frame, then
     /// confirm the walker throws.
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9KeyframeWalker_RejectsInterFrame_ThrowsNotImplemented()
     {
         CpuOnlyTest();

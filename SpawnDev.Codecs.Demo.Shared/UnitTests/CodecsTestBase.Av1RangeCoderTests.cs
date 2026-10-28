@@ -11,7 +11,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1RangeCoder_BoolsAtVariedProbabilities_RoundTrip()
     {
         CpuOnlyTest();
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
             Equal(symbols[i], dec.DecodeBoolQ15(probs[i % probs.Length]));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1RangeCoder_FourSymbolCdf_RoundTrip()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
             Equal(symbols[i], dec.DecodeCdfQ15(icdf, 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1RangeCoder_RawBits_RoundTrip()
     {
         CpuOnlyTest();
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
             Equal(values[i], dec.DecodeBits(8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1RangeCoder_MixedOps_RoundTripStress()
     {
         CpuOnlyTest();
@@ -114,7 +114,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1RangeDecoder_InitialState_MatchesLibaom()
     {
         CpuOnlyTest();

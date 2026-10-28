@@ -13,7 +13,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- Argument / state guards --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_Ctor_Capacity_AllocatesBuffer()
     {
         CpuOnlyTest();
@@ -22,21 +22,21 @@ public abstract partial class CodecsTestBase
         Equal(0, enc.Error);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_Ctor_NegativeCapacity_Throws()
     {
         CpuOnlyTest();
         Throws<ArgumentOutOfRangeException>(() => new OpusRangeEncoder(-1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_Ctor_NullBuffer_Throws()
     {
         CpuOnlyTest();
         Throws<ArgumentNullException>(() => new OpusRangeEncoder(null!, 0, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_Ctor_OffsetOutOfRange_Throws()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => new OpusRangeEncoder(buf, 5, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_Encode_AfterDone_Throws()
     {
         CpuOnlyTest();
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
         Throws<InvalidOperationException>(() => enc.EncodeBitLogP(1, 2));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_ToArray_BeforeDone_Throws()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         Throws<InvalidOperationException>(() => enc.ToArray());
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_Done_Twice_IsNoOp()
     {
         CpuOnlyTest();
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Round-trip: the real correctness gate --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_RoundTrip_SingleBitLogP()
     {
         CpuOnlyTest();
@@ -88,7 +88,7 @@ public abstract partial class CodecsTestBase
         Equal(1, dec.DecodeBitLogP(3));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_RoundTrip_MultipleBitLogP()
     {
         CpuOnlyTest();
@@ -106,7 +106,7 @@ public abstract partial class CodecsTestBase
         Equal(0, dec.Error);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_RoundTrip_IcdfSmallTable()
     {
         CpuOnlyTest();
@@ -121,7 +121,7 @@ public abstract partial class CodecsTestBase
         Equal(0, dec.Error);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_RoundTrip_Icdf16Wide()
     {
         CpuOnlyTest();
@@ -135,7 +135,7 @@ public abstract partial class CodecsTestBase
         foreach (int s in symbols) Equal(s, dec.DecodeIcdf16(icdf, 16));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_RoundTrip_EncodeUpdatePair()
     {
         CpuOnlyTest();
@@ -154,7 +154,7 @@ public abstract partial class CodecsTestBase
         Equal(0, dec.Error);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_RoundTrip_EncodeBinDecodeBin()
     {
         CpuOnlyTest();
@@ -172,7 +172,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_RoundTrip_RawBitsSmall()
     {
         CpuOnlyTest();
@@ -185,7 +185,7 @@ public abstract partial class CodecsTestBase
         foreach (uint v in values) Equal(v, dec.DecodeBits(4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_RoundTrip_RawBitsLarge()
     {
         CpuOnlyTest();
@@ -198,7 +198,7 @@ public abstract partial class CodecsTestBase
         foreach (uint v in values) Equal(v, dec.DecodeBits(25));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_RoundTrip_UintSmall()
     {
         CpuOnlyTest();
@@ -212,7 +212,7 @@ public abstract partial class CodecsTestBase
         foreach (uint v in values) Equal(v, dec.DecodeUint(ft));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_RoundTrip_UintLarge()
     {
         CpuOnlyTest();
@@ -226,7 +226,7 @@ public abstract partial class CodecsTestBase
         foreach (uint v in values) Equal(v, dec.DecodeUint(ft));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_RoundTrip_MixedOperations()
     {
         CpuOnlyTest();
@@ -261,7 +261,7 @@ public abstract partial class CodecsTestBase
         Equal(0, dec.Error);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_RoundTrip_LongRandomSymbolStream()
     {
         CpuOnlyTest();
@@ -287,7 +287,7 @@ public abstract partial class CodecsTestBase
         EqualInts(decoded1, decoded2, "second pass matches first");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_Shrink_ValidSize_Succeeds()
     {
         CpuOnlyTest();
@@ -300,7 +300,7 @@ public abstract partial class CodecsTestBase
         Equal(0x5Au, dec.DecodeBits(8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_Shrink_TooSmall_Throws()
     {
         CpuOnlyTest();
@@ -311,7 +311,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => enc.Shrink(5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Encoder_PatchInitialBits_UpdatesFirstByte()
     {
         CpuOnlyTest();

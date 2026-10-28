@@ -12,7 +12,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1KeyframeWalker_BbbFirstKeyframe_DecodesWithoutThrowing()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
             $"Y plane range only {yMin}..{yMax} - walker may have collapsed to flat output");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1KeyframeWalker_BbbFirstKeyframe_PixelMeansApproximateFfmpeg()
     {
         CpuOnlyTest();
@@ -102,7 +102,7 @@ public abstract partial class CodecsTestBase
         return sum / (double)plane.Length;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1KeyframeWalker_RejectsInterFrameInputs()
     {
         CpuOnlyTest();

@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- NB/MB codebook shape and constants --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkNlsfCb_NbMb_HasCorrectShape()
     {
         CpuOnlyTest();
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
         Equal(11, cb.DeltaMinQ15.Length);   // Order + 1
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkNlsfCb_NbMb_SampleEntries_MatchLibopus()
     {
         CpuOnlyTest();
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
 
     // -------- WB codebook shape and constants --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkNlsfCb_Wb_HasCorrectShape()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
         Equal(17, cb.DeltaMinQ15.Length);   // Order + 1
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkNlsfCb_Wb_SampleEntries_MatchLibopus()
     {
         CpuOnlyTest();
@@ -132,7 +132,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Cross-table sanity --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkNlsfCb_Icdf_EndsWithZero()
     {
         CpuOnlyTest();

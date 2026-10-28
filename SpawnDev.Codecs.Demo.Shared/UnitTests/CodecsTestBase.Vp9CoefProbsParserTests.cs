@@ -11,7 +11,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefProbsParser_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
         Equal(432, Vp9CoefProbsParser.FlatSize);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefProbsParser_BandCoefContexts_DcVsAc()
     {
         CpuOnlyTest();
@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
         Equal(6, Vp9CoefProbsParser.BandCoefContexts(5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefProbsParser_FlatIndex_MatchesAxisOrdering()
     {
         CpuOnlyTest();
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
         Equal(431, Vp9CoefProbsParser.FlatIndex(1, 1, 5, 5, 2));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefProbsParser_TxModeToBiggestTxSize_AllValues()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         Equal(3, Vp9CoefProbsParser.TxModeToBiggestTxSize(Vp9TxMode.TxModeSelect));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefProbsParser_TxModeToBiggestTxSize_RejectsUnknown()
     {
         CpuOnlyTest();
@@ -68,7 +68,7 @@ public abstract partial class CodecsTestBase
             Vp9CoefProbsParser.TxModeToBiggestTxSize((Vp9TxMode)99));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefProbsParser_NoUpdate_LeavesTableUntouched()
     {
         CpuOnlyTest();
@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < probs.Length; i++) Equal(snapshot[i], probs[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefProbsParser_ReadCoefProbs_AllTxSizesUntouched_WhenNoUpdates()
     {
         CpuOnlyTest();
@@ -114,7 +114,7 @@ public abstract partial class CodecsTestBase
                 Equal(snapshots[i][j], tables[i][j]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefProbsParser_ReadCoefProbs_OnlyUpToMaxTxSize_Walked()
     {
         CpuOnlyTest();
@@ -140,7 +140,7 @@ public abstract partial class CodecsTestBase
                 Equal((byte)100, tables[i][j]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefProbsParser_RejectsUndersizedTable()
     {
         CpuOnlyTest();

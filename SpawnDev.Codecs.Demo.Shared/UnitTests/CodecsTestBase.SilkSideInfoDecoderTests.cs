@@ -12,7 +12,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SideInfo_SignalType_NoVadTable_AllRawValues_RoundTrip()
     {
         CpuOnlyTest();
@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SideInfo_SignalType_VadTable_AllRawValues_RoundTrip()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SideInfo_Seed_AllValues_RoundTrip()
     {
         CpuOnlyTest();
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SideInfo_SignalType_NullRangeDecoder_Throws()
     {
         CpuOnlyTest();
@@ -83,14 +83,14 @@ public abstract partial class CodecsTestBase
             SilkSideInfoDecoder.DecodeSignalType(null!, useVadTable: true));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SideInfo_Seed_NullRangeDecoder_Throws()
     {
         CpuOnlyTest();
         Throws<ArgumentNullException>(() => SilkSideInfoDecoder.DecodeSeed(null!));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SideInfo_SequentialDecode_MatchesSequentialEncode()
     {
         CpuOnlyTest();

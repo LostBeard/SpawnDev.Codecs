@@ -10,7 +10,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Dequantizer_LookupTables_HaveExactly256Entries()
     {
         CpuOnlyTest();
@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
         Equal(256, Vp9Dequantizer.AcQLookup8.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Dequantizer_DcLookup_KnownEndpointsMatchSpec()
     {
         CpuOnlyTest();
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
         Equal((short)1336, Vp9Dequantizer.DcQLookup8[255]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Dequantizer_AcLookup_KnownEndpointsMatchSpec()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         Equal((short)1828, Vp9Dequantizer.AcQLookup8[255]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Dequantizer_DcQuant_AppliesDeltaThenClamps()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         Equal((short)Vp9Dequantizer.DcQLookup8[255], Vp9Dequantizer.DcQuant(200, 100));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Dequantizer_AcQuant_AppliesDeltaThenClamps()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
         Equal((short)Vp9Dequantizer.AcQLookup8[255], Vp9Dequantizer.AcQuant(200, 100));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Dequantizer_PlaneQuantizer_BuildsBothFromBaseAndDeltas()
     {
         CpuOnlyTest();
@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9Dequantizer.AcQuant(60, 3), pq.Ac);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Dequantizer_DequantizeInPlace_ZeroCoefficientsStayZero()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
             Equal((short)0, coeffs[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Dequantizer_DequantizeInPlace_AppliesDcThenAc()
     {
         CpuOnlyTest();
@@ -105,7 +105,7 @@ public abstract partial class CodecsTestBase
         Equal((short)(11 * 50), coeffs[3]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Dequantizer_DequantizeInPlace_NegativeCoefficientsPreserveSign()
     {
         CpuOnlyTest();
@@ -117,7 +117,7 @@ public abstract partial class CodecsTestBase
         Equal((short)( 30 * 11), coeffs[2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Dequantizer_DequantizeInPlace_SaturatesAtInt16Bounds()
     {
         CpuOnlyTest();
@@ -132,7 +132,7 @@ public abstract partial class CodecsTestBase
         Equal((short)(-100 * 16), coeffs[3]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Dequantizer_DequantizeInPlace_EmptySpanIsNoOp()
     {
         CpuOnlyTest();
@@ -142,7 +142,7 @@ public abstract partial class CodecsTestBase
         // No assertions - the test passes if no exception is thrown.
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Dequantizer_DequantizeInPlace_FollowedByIdct4x4_RoundTripsThroughPipeline()
     {
         CpuOnlyTest();

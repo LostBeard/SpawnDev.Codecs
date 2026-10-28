@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9YModeProbsParser_NoUpdates_LeavesTableUntouched()
     {
         CpuOnlyTest();
@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < probs.Length; i++) Equal(snapshot[i], probs[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9YModeProbsParser_RejectsUndersizedBuffer()
     {
         CpuOnlyTest();
@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
             Vp9YModeProbsParser.Read(new byte[35], reader));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9YModeProbsParser_RejectsNullArgs()
     {
         CpuOnlyTest();

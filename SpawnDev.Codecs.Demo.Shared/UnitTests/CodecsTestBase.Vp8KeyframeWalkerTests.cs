@@ -17,7 +17,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8KeyframeWalker_RejectsNonKeyFrame()
     {
         CpuOnlyTest();
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
             Vp8KeyframeWalker.Decode(tag, hdr, bd, new byte[16], fb, ec));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8KeyframeWalker_MultiPartition_DecodesIdenticallyToSinglePartition()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8KeyframeWalker_RejectsMismatchedEntropyContextsCols()
     {
         CpuOnlyTest();
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
             Vp8KeyframeWalker.Decode(tag, hdr, bd, new byte[16], fb, ec));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8KeyframeWalker_AllSkipMb_ReconstructsBaselinePrediction()
     {
         CpuOnlyTest();
@@ -148,7 +148,7 @@ public abstract partial class CodecsTestBase
             }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8KeyframeWalker_SingleMbDcPred_NoResidual_ReconstructsBaseline()
     {
         CpuOnlyTest();
@@ -177,7 +177,7 @@ public abstract partial class CodecsTestBase
                 Equal((byte)128, fb.YPlane[i * fb.YStride + j]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8KeyframeWalker_SingleMb_NoSkip_ZeroResidual_StillBaseline()
     {
         CpuOnlyTest();
@@ -221,7 +221,7 @@ public abstract partial class CodecsTestBase
                 Equal((byte)128, fb.YPlane[i * fb.YStride + j]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8KeyframeWalker_FrameBufferDimensions_RoundsToMb()
     {
         CpuOnlyTest();

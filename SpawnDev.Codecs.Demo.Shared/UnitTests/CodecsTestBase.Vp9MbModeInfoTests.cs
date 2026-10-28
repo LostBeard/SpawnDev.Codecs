@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MbModeInfo_Intra_IsIntraTrue()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9IntraMode.HPred, info.UvMode!.Value);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MbModeInfo_InterSingleRef_IsIntraFalse_NotCompound()
     {
         CpuOnlyTest();
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
         Equal(-8, info.PrimaryMv.Col);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MbModeInfo_InterCompound_IsCompoundTrue()
     {
         CpuOnlyTest();
@@ -70,7 +70,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9MvReferenceFrame.AltRef, info.CompoundRefFrame!.Value);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MbModeInfo_DefaultsForOmittedFields()
     {
         CpuOnlyTest();
@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
         Equal(false, info.SegmentIdPredicted);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MbModeInfo_RecordEquality()
     {
         CpuOnlyTest();

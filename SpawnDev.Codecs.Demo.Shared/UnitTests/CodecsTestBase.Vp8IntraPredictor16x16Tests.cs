@@ -9,7 +9,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8IntraPredictor16x16_DcPred_NoNeighbors_Returns128()
     {
         CpuOnlyTest();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)128, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8IntraPredictor16x16_DcPred_AllOnesNeighbors_ReturnsOne()
     {
         CpuOnlyTest();
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)1, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8IntraPredictor16x16_DcPred_OnlyAbove_AveragesAboveOnly()
     {
         CpuOnlyTest();
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)32, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8IntraPredictor16x16_VPred_CopiesAboveRowDown()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
                 Equal(above[c], dst[r * 16 + c]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8IntraPredictor16x16_HPred_CopiesLeftColumnRight()
     {
         CpuOnlyTest();
@@ -99,7 +99,7 @@ public abstract partial class CodecsTestBase
                 Equal(left[r], dst[r * 16 + c]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8IntraPredictor16x16_TmPred_KnownInput_KnownOutput()
     {
         CpuOnlyTest();
@@ -118,7 +118,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)150, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8IntraPredictor16x16_TmPred_ClampsAt255()
     {
         CpuOnlyTest();
@@ -136,7 +136,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)255, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8IntraPredictor16x16_TmPred_ClampsAtZero()
     {
         CpuOnlyTest();

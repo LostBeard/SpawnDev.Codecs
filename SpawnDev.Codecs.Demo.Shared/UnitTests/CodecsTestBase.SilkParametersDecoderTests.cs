@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Non-voiced frame: pitch + LTP zeroed --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ParametersDecoder_InactiveFrame_PitchAndLtpZero()
     {
         CpuOnlyTest();
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Voiced frame: all fields populated --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ParametersDecoder_VoicedFrame_AllFieldsPopulated()
     {
         CpuOnlyTest();
@@ -107,7 +107,7 @@ public abstract partial class CodecsTestBase
         Equal(12288, output.LtpScaleQ14);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ParametersDecoder_VoicedFrame_LtpTapsShiftedToQ14()
     {
         CpuOnlyTest();
@@ -141,7 +141,7 @@ public abstract partial class CodecsTestBase
 
     // -------- NLSF interpolation path --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ParametersDecoder_InterpolationDisabled_FirstHalfCopiesSecondHalf()
     {
         CpuOnlyTest();
@@ -167,7 +167,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ParametersDecoder_InterpolationEnabled_FirstHalfDiffersFromSecondHalf()
     {
         CpuOnlyTest();
@@ -198,7 +198,7 @@ public abstract partial class CodecsTestBase
         True(different > 0, $"Expected interp to produce a different first-half LPC (same count: {cb.Order - different})");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ParametersDecoder_PrevNlsfUpdatedToCurrentOnExit()
     {
         CpuOnlyTest();
@@ -222,7 +222,7 @@ public abstract partial class CodecsTestBase
 
     // -------- LTP scale table --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ParametersDecoder_LtpScaleTable_AllThreeIndices()
     {
         CpuOnlyTest();
@@ -247,7 +247,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Arg validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ParametersDecoder_NullOutput_Throws()
     {
         CpuOnlyTest();
@@ -259,7 +259,7 @@ public abstract partial class CodecsTestBase
                 8, 4, ref lastGainIdx, prevNlsf, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ParametersDecoder_UnsupportedFsKHz_Throws()
     {
         CpuOnlyTest();

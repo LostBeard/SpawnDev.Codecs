@@ -9,7 +9,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8InverseTransform_DcOnlyIdctAdd_ZeroDc_ProducesZeroDeltaPlusPred()
     {
         CpuOnlyTest();
@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
             Equal(pred[i], dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8InverseTransform_DcOnlyIdctAdd_PositiveDc_AddsConstant()
     {
         CpuOnlyTest();
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)101, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8InverseTransform_DcOnlyIdctAdd_NegativeDc_ClampsAtZero()
     {
         CpuOnlyTest();
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)0, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8InverseTransform_DcOnlyIdctAdd_LargePositiveDc_ClampsAt255()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)255, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8InverseTransform_ShortIdct4x4Llm_AllZeroCoeffs_ProducesZeroDeltaPlusPred()
     {
         CpuOnlyTest();
@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
             Equal(pred[i], dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8InverseTransform_ShortInvWalsh4x4_KnownInput_KnownOutput()
     {
         CpuOnlyTest();

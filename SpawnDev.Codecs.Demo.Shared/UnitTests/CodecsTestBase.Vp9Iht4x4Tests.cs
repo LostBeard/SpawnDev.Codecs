@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
         return dest;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iht4x4_DctDct_MatchesIdct4x4Reference()
     {
         CpuOnlyTest();
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iht4x4_AdstAdst_MatchesIadstReference()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iht4x4_AdstDct_VsDctAdst_ProduceDifferentOutput()
     {
         CpuOnlyTest();
@@ -86,7 +86,7 @@ public abstract partial class CodecsTestBase
             "AdstDct and DctAdst must not produce identical output on asymmetric input");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iht4x4_AllFourTxTypes_ZeroInput_LeavePredictorUnchanged()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iht4x4_AllFourTxTypes_ProduceValidPixels()
     {
         CpuOnlyTest();
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iht4x4_Throws_OnShortInput()
     {
         CpuOnlyTest();
@@ -136,7 +136,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iht4x4_Throws_OnBadStride()
     {
         CpuOnlyTest();

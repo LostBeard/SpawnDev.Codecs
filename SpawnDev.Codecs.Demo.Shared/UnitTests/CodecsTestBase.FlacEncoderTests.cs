@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
         return samples;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_Mono_Silence_Roundtrips()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_Mono_Sine_Roundtrips_ExactlyLossless()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_Stereo_Sine_Roundtrips()
     {
         CpuOnlyTest();
@@ -68,7 +68,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_24Bit_Roundtrips()
     {
         CpuOnlyTest();
@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_8Bit_Roundtrips()
     {
         CpuOnlyTest();
@@ -92,7 +92,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_MultipleFrames_Concatenate()
     {
         CpuOnlyTest();
@@ -104,7 +104,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_PartialLastBlock_Roundtrips()
     {
         CpuOnlyTest();
@@ -116,7 +116,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_FourChannel_Roundtrips()
     {
         CpuOnlyTest();
@@ -135,7 +135,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_CustomSampleRate_WithSideBytes_Roundtrips()
     {
         CpuOnlyTest();
@@ -147,7 +147,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_CustomBlockSize_WithSideBytes_Roundtrips()
     {
         CpuOnlyTest();
@@ -159,7 +159,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_ValidatesBadChannels_Throws()
     {
         CpuOnlyTest();
@@ -169,7 +169,7 @@ public abstract partial class CodecsTestBase
         True(threw, "0 channels should throw.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_ValidatesBadBps_Throws()
     {
         CpuOnlyTest();
@@ -179,7 +179,7 @@ public abstract partial class CodecsTestBase
         True(threw, "Unsupported bps 11 should throw.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_StreamInfo_RecordsTotalSamples()
     {
         CpuOnlyTest();
@@ -189,7 +189,7 @@ public abstract partial class CodecsTestBase
         Equal(777UL, decoded.StreamInfo.TotalSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_Silence_UsesConstantSubframes_CompactEncoding()
     {
         CpuOnlyTest();
@@ -210,7 +210,7 @@ public abstract partial class CodecsTestBase
         EqualInts(silent, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_DcOffset_UsesConstantSubframes()
     {
         CpuOnlyTest();
@@ -225,7 +225,7 @@ public abstract partial class CodecsTestBase
         True(encoded.Length < 100, $"DC-encoded 512 samples should be under 100 bytes; got {encoded.Length}.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_PerChannelMix_OneConstantOneVerbatim()
     {
         CpuOnlyTest();
@@ -243,7 +243,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_Sine_CompressesBelowVerbatim()
     {
         CpuOnlyTest();
@@ -260,7 +260,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_Ramp_CompressesDramatically()
     {
         CpuOnlyTest();
@@ -278,7 +278,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_Quadratic_CompressesWithFixedOrder2()
     {
         CpuOnlyTest();
@@ -294,7 +294,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_StereoHighlyCorrelated_PicksMidSide()
     {
         CpuOnlyTest();
@@ -318,7 +318,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_StereoUncorrelated_PicksIndependent_StillRoundtrips()
     {
         CpuOnlyTest();
@@ -338,7 +338,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, decoded.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_DampedSinusoid_CompressesWithLpc()
     {
         CpuOnlyTest();
@@ -363,7 +363,7 @@ public abstract partial class CodecsTestBase
         True(encoded.Length < 2048, $"Damped sinusoid should compress below VERBATIM; got {encoded.Length} bytes.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacEncoder_WhiteNoise_LargeBlock_LpcAvoidsFailure()
     {
         CpuOnlyTest();

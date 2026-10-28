@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         EnableIntraEdgeFilter = false,
     };
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1FrameHeaderWriter_VisibleKeyFrame_RoundTripsThroughParser()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         Equal(true, fh.ErrorResilientMode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1FrameHeaderWriter_VisibleInterFrame_ErrorResilientFalse_RoundTrips()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
         Equal(false, fh.ErrorResilientMode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1FrameHeaderWriter_HiddenFrame_ShowableTrue_RoundTrips()
     {
         CpuOnlyTest();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
         Equal(false, fh.ErrorResilientMode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1FrameHeaderWriter_ShowExistingFrame_RoundTrips()
     {
         CpuOnlyTest();
@@ -106,7 +106,7 @@ public abstract partial class CodecsTestBase
         Equal(5, fh.FrameToShowMapIdx);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1FrameHeaderWriter_IntraOnlyFrame_RoundTrips()
     {
         CpuOnlyTest();
@@ -125,7 +125,7 @@ public abstract partial class CodecsTestBase
         Equal(false, fh.ErrorResilientMode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1FrameHeaderWriter_SwitchFrame_RoundTrips()
     {
         CpuOnlyTest();
@@ -146,7 +146,7 @@ public abstract partial class CodecsTestBase
         Equal(true, fh.FrameSizeOverride);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1FrameHeaderWriter_FromHeader_RoundTripsViaWriter()
     {
         CpuOnlyTest();
@@ -177,7 +177,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1FrameHeaderWriter_RejectsImplicitErrorResilientMisconfig()
     {
         CpuOnlyTest();
@@ -207,7 +207,7 @@ public abstract partial class CodecsTestBase
             }, sh));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1FrameHeaderWriter_ReducedStillPictureHeader_EmptyHeader()
     {
         CpuOnlyTest();

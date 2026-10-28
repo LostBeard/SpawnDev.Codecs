@@ -44,7 +44,12 @@ public abstract partial class CodecsTestBase : IDisposable
     /// </summary>
     protected virtual bool RunsCpuOnlyTests => false;
 
-    /// <summary>First statement of every CPU-only test: skip unless this is the lane that runs them (see <see cref="RunsCpuOnlyTests"/>).</summary>
+    /// <summary>
+    /// First statement of every CPU-only test: skip unless this is the lane that runs them (see <see cref="RunsCpuOnlyTests"/>).
+    /// Every CPU-only test is also tagged <c>[TestMethod(Category = "CpuOnly")]</c> and the other lanes declare
+    /// <c>[ExcludeCategories("CpuOnly")]</c>, so discovery never lists them there (no launch per skipped test); this check
+    /// remains the guard for a lane that forgets the attribute or a test run by name.
+    /// </summary>
     protected void CpuOnlyTest()
     {
         if (!RunsCpuOnlyTests)

@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationParams_Disabled_ParsesSingleFlag()
     {
         CpuOnlyTest();
@@ -19,7 +19,7 @@ public abstract partial class CodecsTestBase
         Equal(false, s.UpdateData);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationParams_EnabledNoUpdates_ReadsTwoFlags()
     {
         CpuOnlyTest();
@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
         Equal(false, s.UpdateData);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationParams_UpdateMap_TreeProbsAndTemporalFlag()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)Vp9SegmentationParams.MaxProb, s.PredProbs[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationParams_UpdateMapWithTemporalUpdate_ReadsPredProbs()
     {
         CpuOnlyTest();
@@ -93,7 +93,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)20, s.PredProbs[2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationParams_UpdateData_AllFeaturesDisabled()
     {
         CpuOnlyTest();
@@ -119,7 +119,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationParams_UpdateData_AltQAndAltLfWithSign()
     {
         CpuOnlyTest();
@@ -156,7 +156,7 @@ public abstract partial class CodecsTestBase
         Equal(false, s.FeatureEnabled[0, (int)Vp9SegFeature.Skip]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationParams_UpdateData_RefFrameAndSkipFeatures()
     {
         CpuOnlyTest();

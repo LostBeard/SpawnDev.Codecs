@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
         return FlacSubframeHeaderParser.Parse(ref r);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframeHeader_Constant_NoWastedBits()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         Equal(0, h.WastedBitsPerSample);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframeHeader_Verbatim_NoWastedBits()
     {
         CpuOnlyTest();
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
         Equal(0, h.WastedBitsPerSample);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframeHeader_FixedOrder0()
     {
         CpuOnlyTest();
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
         Equal(0, h.Order);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframeHeader_FixedOrder4()
     {
         CpuOnlyTest();
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
         Equal(4, h.Order);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframeHeader_FixedOrder5_Throws()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         True(threw, "FIXED order 5 should throw.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframeHeader_LpcOrder1()
     {
         CpuOnlyTest();
@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
         Equal(1, h.Order);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframeHeader_LpcOrder32()
     {
         CpuOnlyTest();
@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
         Equal(32, h.Order);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframeHeader_ReservedType_Throws()
     {
         CpuOnlyTest();
@@ -99,7 +99,7 @@ public abstract partial class CodecsTestBase
         True(threw, "Reserved type 0b000010 should throw.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframeHeader_ReservedBit_NonZero_Throws()
     {
         CpuOnlyTest();
@@ -109,7 +109,7 @@ public abstract partial class CodecsTestBase
         True(threw, "Non-zero reserved bit should throw.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframeHeader_Constant_OneWastedBit()
     {
         CpuOnlyTest();
@@ -121,7 +121,7 @@ public abstract partial class CodecsTestBase
         Equal(1, h.WastedBitsPerSample);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframeHeader_Constant_ThreeWastedBits()
     {
         CpuOnlyTest();
@@ -133,7 +133,7 @@ public abstract partial class CodecsTestBase
         Equal(3, h.WastedBitsPerSample);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframeHeader_LpcOrder8_WithWastedBits()
     {
         CpuOnlyTest();

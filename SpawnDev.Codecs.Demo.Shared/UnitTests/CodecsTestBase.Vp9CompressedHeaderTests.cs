@@ -11,7 +11,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_Lossless_ForcesOnly4x4()
     {
         CpuOnlyTest();
@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9ReferenceMode.SingleReference, result.ReferenceMode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_IntraOnly_NoInterFrameTablesRead()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9ReferenceMode.SingleReference, result.ReferenceMode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_InterFrame_ReadsInterTables()
     {
         CpuOnlyTest();
@@ -97,7 +97,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9ReferenceMode.SingleReference, result.ReferenceMode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_InterFrame_CompoundAllowed_BitsConsumed()
     {
         CpuOnlyTest();
@@ -122,7 +122,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9ReferenceMode.SingleReference, result.ReferenceMode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_State_TableShapesInitializedCorrectly()
     {
         CpuOnlyTest();
@@ -134,7 +134,7 @@ public abstract partial class CodecsTestBase
         Equal(48, s.PartitionProbs.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_State_PartitionProbsSeededFromKfDefaults()
     {
         CpuOnlyTest();
@@ -143,7 +143,7 @@ public abstract partial class CodecsTestBase
             Equal(Vp9PartitionProbs.KfPartitionProbs[i], s.PartitionProbs[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_State_YModeProbsSeededFromIfDefaults()
     {
         CpuOnlyTest();
@@ -152,7 +152,7 @@ public abstract partial class CodecsTestBase
             Equal(Vp9IntraModeProbs.DefaultIfYProbs[i], s.YModeProbs[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_RejectsNullArgs()
     {
         CpuOnlyTest();

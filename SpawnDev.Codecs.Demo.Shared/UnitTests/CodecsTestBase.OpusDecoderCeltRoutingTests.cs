@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
         return max;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_CeltPacket_FullbandMono_BitExactMatchesConcentus()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         True(maxDiff == 0.0, $"CELT decode should be bit-exact vs Concentus oracle; max diff {maxDiff}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_CeltPacket_FullbandStereo_BitExactMatchesConcentus()
     {
         CpuOnlyTest();
@@ -95,7 +95,7 @@ public abstract partial class CodecsTestBase
         True(maxDiff == 0.0, $"Stereo CELT should be bit-exact vs Concentus oracle; max diff {maxDiff}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_CeltPacket_2_5msFrame_BitExactMatchesConcentus()
     {
         CpuOnlyTest();
@@ -122,7 +122,7 @@ public abstract partial class CodecsTestBase
         True(maxDiff == 0.0, $"2.5 ms CELT should be bit-exact; max diff {maxDiff}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_HybridPacket_FullbandMono_BitExactMatchesConcentus()
     {
         CpuOnlyTest();
@@ -151,7 +151,7 @@ public abstract partial class CodecsTestBase
         True(maxDiff == 0.0, $"Hybrid decode should be bit-exact vs Concentus oracle; max diff {maxDiff}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_CeltPacket_MultiPacketStream_StateCarriesAcrossPackets()
     {
         CpuOnlyTest();

@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         return dest;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst8x8_ZeroCoefficients_LeavesPredictorUnchanged()
     {
         CpuOnlyTest();
@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 64; i++) Equal((byte)128, dest[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst8x8_IsDeterministic_ForRandomInputs()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst8x8_SingleCoefficient_ProducesNonZeroResidual()
     {
         CpuOnlyTest();
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
         True(changed, "single coefficient must produce non-zero residual somewhere");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst8x8_HighPositive_OutputsClippedPixels()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
             True(dest[i] <= 255, "clip violated upper bound");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst8x8_LargeNegatives_ClipToZeroSomewhere()
     {
         CpuOnlyTest();
@@ -86,7 +86,7 @@ public abstract partial class CodecsTestBase
         True(anyZero, "at least one pixel must clip to 0 on all-negative input");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst8x8_StridedDest_OnlyTouches8x8Block()
     {
         CpuOnlyTest();
@@ -100,7 +100,7 @@ public abstract partial class CodecsTestBase
                 Equal((byte)77, canvas[row * 32 + col]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst8x8_Throws_OnShortInput()
     {
         CpuOnlyTest();
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Iadst8x8_Throws_OnBadStride()
     {
         CpuOnlyTest();

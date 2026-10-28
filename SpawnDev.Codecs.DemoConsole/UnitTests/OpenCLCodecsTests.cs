@@ -1,3 +1,4 @@
+using SpawnDev.UnitTesting;
 using ILGPU;
 using ILGPU.Runtime;
 using ILGPU.Runtime.OpenCL;
@@ -10,6 +11,8 @@ namespace SpawnDev.Codecs.DemoConsole.UnitTests;
 /// cross-platform test from <see cref="CodecsTestBase"/> and runs ILGPU kernel
 /// tests on the first OpenCL-capable device (GPU or CPU).
 /// </summary>
+// CPU-only tests (Category = "CpuOnly") run once, in CpuCodecsTests: discovery leaves them out here.
+[ExcludeCategories("CpuOnly")]
 public class OpenCLCodecsTests : CodecsTestBase
 {
     protected override ValueTask<(Context, Accelerator)> CreateKernelAcceleratorAsync()

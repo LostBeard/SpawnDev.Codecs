@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
     // Application matrix
     // -----------------------------------------------------------------------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Voip_Mono_8kHz_20ms_Roundtrips()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
             True(pcm[i] >= -1.0f && pcm[i] <= 1.0f, $"pcm[{i}] out of [-1,1]: {pcm[i]}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Audio_Mono_48kHz_20ms_Roundtrips()
     {
         CpuOnlyTest();
@@ -109,7 +109,7 @@ public abstract partial class CodecsTestBase
             True(pcm[i] >= -1.0f && pcm[i] <= 1.0f);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_RestrictedLowDelay_Mono_48kHz_20ms_Roundtrips()
     {
         CpuOnlyTest();
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
     // Frame-size matrix at 48 kHz mono (Audio application)
     // -----------------------------------------------------------------------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Audio_Mono_48kHz_2_5ms_Roundtrips()
     {
         CpuOnlyTest();
@@ -139,7 +139,7 @@ public abstract partial class CodecsTestBase
         Equal(120, pcm.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Audio_Mono_48kHz_5ms_Roundtrips()
     {
         CpuOnlyTest();
@@ -152,7 +152,7 @@ public abstract partial class CodecsTestBase
         Equal(240, pcm.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Audio_Mono_48kHz_10ms_Roundtrips()
     {
         CpuOnlyTest();
@@ -165,7 +165,7 @@ public abstract partial class CodecsTestBase
         Equal(480, pcm.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Audio_Mono_48kHz_20ms_Roundtrips_FrameSizes()
     {
         CpuOnlyTest();
@@ -182,7 +182,7 @@ public abstract partial class CodecsTestBase
     // Sample-rate matrix at mono 20 ms (Audio application)
     // -----------------------------------------------------------------------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Audio_Mono_8kHz_20ms_Roundtrips()
     {
         CpuOnlyTest();
@@ -195,7 +195,7 @@ public abstract partial class CodecsTestBase
         Equal(160, pcm.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Audio_Mono_16kHz_20ms_Roundtrips()
     {
         CpuOnlyTest();
@@ -208,7 +208,7 @@ public abstract partial class CodecsTestBase
         Equal(320, pcm.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Audio_Mono_24kHz_20ms_Roundtrips()
     {
         CpuOnlyTest();
@@ -225,7 +225,7 @@ public abstract partial class CodecsTestBase
     // Stereo coverage
     // -----------------------------------------------------------------------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Audio_Stereo_48kHz_20ms_Roundtrips()
     {
         CpuOnlyTest();
@@ -237,7 +237,7 @@ public abstract partial class CodecsTestBase
         Equal(960 * 2, pcm.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Voip_Stereo_16kHz_20ms_Roundtrips()
     {
         CpuOnlyTest();
@@ -253,7 +253,7 @@ public abstract partial class CodecsTestBase
     // Multi-frame stream continuity (encoder state must carry across frames)
     // -----------------------------------------------------------------------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Audio_Mono_48kHz_ThreeFrames_Stream_Roundtrips()
     {
         CpuOnlyTest();
@@ -305,7 +305,7 @@ public abstract partial class CodecsTestBase
     // Energy / silence sanity checks
     // -----------------------------------------------------------------------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Silence_Roundtrips_NearZero()
     {
         CpuOnlyTest();
@@ -341,7 +341,7 @@ public abstract partial class CodecsTestBase
         True(rms < 0.05, $"silence in -> low-energy out expected, got RMS {rms:F4}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusEncoder_Sine_Roundtrips_NonZeroEnergy()
     {
         CpuOnlyTest();

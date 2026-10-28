@@ -10,7 +10,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void TocByte_Config_MapsToCorrectModeAndBandwidth_AllConfigs()
     {
         CpuOnlyTest();
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void TocByte_StereoBit_SetsChannelCount()
     {
         CpuOnlyTest();
@@ -68,7 +68,7 @@ public abstract partial class CodecsTestBase
         True(stereo.IsStereo);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void TocByte_FrameCountCode_ExtractsLowTwoBits()
     {
         CpuOnlyTest();
@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void TocByte_GetSamplesPerFrame_MatchesRfcTable()
     {
         CpuOnlyTest();
@@ -110,7 +110,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void TocByte_GetSamplesPerFrame_ZeroSampleRate_Throws()
     {
         CpuOnlyTest();
@@ -118,7 +118,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => toc.GetSamplesPerFrame(0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void TocByte_ToString_IncludesAllFields()
     {
         CpuOnlyTest();

@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ReferenceModeParser_CompoundReferenceAllowed_AllSameBias_ReturnsFalse()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(false, Vp9ReferenceModeParser.CompoundReferenceAllowed(true, true, true));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ReferenceModeParser_CompoundReferenceAllowed_AnyDifferentBias_ReturnsTrue()
     {
         CpuOnlyTest();
@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         Equal(true, Vp9ReferenceModeParser.CompoundReferenceAllowed(false, true, false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ReferenceModeParser_CompoundNotAllowed_AlwaysSingleReference()
     {
         CpuOnlyTest();
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9ReferenceMode.SingleReference, mode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ReferenceModeParser_CompoundAllowed_ZeroBuffer_ReadsSingleReference()
     {
         CpuOnlyTest();
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9ReferenceMode.SingleReference, mode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ReferenceModeParser_RejectsNullReader()
     {
         CpuOnlyTest();

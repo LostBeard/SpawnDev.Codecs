@@ -22,7 +22,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- Zero-residual (bare codebook vector) tests --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfPipeline_NbMb_AllFirstStageIndices_ProduceStableLpc()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfPipeline_Wb_AllFirstStageIndices_ProduceStableLpc()
     {
         CpuOnlyTest();
@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Small-perturbation stress --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfPipeline_NbMb_WithSmallResiduals_ProducesStableLpc()
     {
         CpuOnlyTest();
@@ -122,7 +122,7 @@ public abstract partial class CodecsTestBase
         Equal(trials, stable);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfPipeline_Wb_WithSmallResiduals_ProducesStableLpc()
     {
         CpuOnlyTest();

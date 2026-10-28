@@ -72,7 +72,7 @@ public abstract partial class CodecsTestBase
         Md5Signature = new byte[16],
     };
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_Fixed_192_44100_Stereo_16bit_Parses()
     {
         CpuOnlyTest();
@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
         Equal(bytes.Length, header.HeaderBytesConsumed);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_Variable_48000_MidSide_24bit_Parses()
     {
         CpuOnlyTest();
@@ -104,7 +104,7 @@ public abstract partial class CodecsTestBase
         Equal(24, header.BitsPerSample);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_BlockSizeCode0110_8bitSide_Resolves()
     {
         CpuOnlyTest();
@@ -116,7 +116,7 @@ public abstract partial class CodecsTestBase
         Equal(100, header.BlockSize);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_BlockSizeCode0111_16bitSide_Resolves()
     {
         CpuOnlyTest();
@@ -128,7 +128,7 @@ public abstract partial class CodecsTestBase
         Equal(8192, header.BlockSize);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_SampleRateCode1100_kHzSide_Resolves()
     {
         CpuOnlyTest();
@@ -139,7 +139,7 @@ public abstract partial class CodecsTestBase
         Equal(48000, header.SampleRateHz);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_SampleRateCode1101_HzSide_Resolves()
     {
         CpuOnlyTest();
@@ -150,7 +150,7 @@ public abstract partial class CodecsTestBase
         Equal(44100, header.SampleRateHz);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_SampleRateCode1110_DecaHzSide_Resolves()
     {
         CpuOnlyTest();
@@ -161,7 +161,7 @@ public abstract partial class CodecsTestBase
         Equal(44100, header.SampleRateHz);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_SampleRateCode0000_FallsBackToStreamInfo()
     {
         CpuOnlyTest();
@@ -170,7 +170,7 @@ public abstract partial class CodecsTestBase
         Equal(44100, header.SampleRateHz);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_BpsCode000_FallsBackToStreamInfo()
     {
         CpuOnlyTest();
@@ -179,7 +179,7 @@ public abstract partial class CodecsTestBase
         Equal(16, header.BitsPerSample); // from streaminfo
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_ChannelAssignment_LeftSide()
     {
         CpuOnlyTest();
@@ -189,7 +189,7 @@ public abstract partial class CodecsTestBase
         Equal(2, header.Channels);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_ChannelAssignment_RightSide()
     {
         CpuOnlyTest();
@@ -198,7 +198,7 @@ public abstract partial class CodecsTestBase
         Equal(FlacChannelAssignment.RightSide, header.ChannelAssignment);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_ChannelAssignment_EightIndependent()
     {
         CpuOnlyTest();
@@ -208,7 +208,7 @@ public abstract partial class CodecsTestBase
         Equal(8, header.Channels);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_BadSync_Throws()
     {
         CpuOnlyTest();
@@ -219,7 +219,7 @@ public abstract partial class CodecsTestBase
             FlacFrameHeaderParser.Parse(bytes, TestStreamInfo()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_BadCrc8_Throws()
     {
         CpuOnlyTest();
@@ -230,7 +230,7 @@ public abstract partial class CodecsTestBase
             FlacFrameHeaderParser.Parse(bytes, TestStreamInfo()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_ReservedBpsCode011_Throws()
     {
         CpuOnlyTest();
@@ -239,7 +239,7 @@ public abstract partial class CodecsTestBase
             FlacFrameHeaderParser.Parse(bytes, TestStreamInfo()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_ReservedBlockSizeCode0000_Throws()
     {
         CpuOnlyTest();
@@ -248,7 +248,7 @@ public abstract partial class CodecsTestBase
             FlacFrameHeaderParser.Parse(bytes, TestStreamInfo()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_InvalidSampleRateCode1111_Throws()
     {
         CpuOnlyTest();
@@ -257,7 +257,7 @@ public abstract partial class CodecsTestBase
             FlacFrameHeaderParser.Parse(bytes, TestStreamInfo()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_ReservedChannelCode1011_Throws()
     {
         CpuOnlyTest();
@@ -266,7 +266,7 @@ public abstract partial class CodecsTestBase
             FlacFrameHeaderParser.Parse(bytes, TestStreamInfo()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_BlockSize_AllPowerOfTwoCodes()
     {
         CpuOnlyTest();
@@ -281,7 +281,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_SampleRate_AllFixedCodes()
     {
         CpuOnlyTest();
@@ -296,7 +296,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_BitsPerSample_AllFixedCodes()
     {
         CpuOnlyTest();
@@ -317,7 +317,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrameHeader_Utf8FrameNumber_MultiByte_Parses()
     {
         CpuOnlyTest();

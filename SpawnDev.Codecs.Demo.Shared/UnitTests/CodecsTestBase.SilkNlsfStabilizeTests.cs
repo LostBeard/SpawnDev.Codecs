@@ -13,7 +13,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- New SilkMacros helpers --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_RShiftRound_HandTracedValues()
     {
         CpuOnlyTest();
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
         Equal(2, silk_RSHIFT_ROUND(8, 2));   // ((8 >> 1) + 1) >> 1 = (4 + 1) >> 1 = 2
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Limit32_ClampsWithinBounds()
     {
         CpuOnlyTest();
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         Equal(int.MinValue, silk_LIMIT_32(int.MinValue, int.MinValue, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_AddSat16_SaturatesCorrectly()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         Equal(short.MaxValue, silk_ADD_SAT16(short.MaxValue, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_InsertionSort_SortsAscending()
     {
         CpuOnlyTest();
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
         silk_insertion_sort_increasing_all_values_int16(empty); // should not throw
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_InsertionSort_HandlesNegatives()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
 
     // -------- SilkNlsfStabilize --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfStabilize_AlreadyStable_Unchanged()
     {
         CpuOnlyTest();
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfStabilize_TooCloseMiddle_SpacesApart()
     {
         CpuOnlyTest();
@@ -128,7 +128,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfStabilize_FirstBelowBoundary_ClampsUp()
     {
         CpuOnlyTest();
@@ -139,7 +139,7 @@ public abstract partial class CodecsTestBase
         True(nlsf[0] >= deltaMin[0], $"nlsf[0]={nlsf[0]} should be >= {deltaMin[0]}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfStabilize_LastAboveBoundary_ClampsDown()
     {
         CpuOnlyTest();
@@ -151,7 +151,7 @@ public abstract partial class CodecsTestBase
         True(nlsf[nlsf.Length - 1] <= upperBound, $"last NLSF {nlsf[nlsf.Length - 1]} should be <= {upperBound}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfStabilize_ReversedInput_FallbackSortsCorrectly()
     {
         CpuOnlyTest();
@@ -167,7 +167,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfStabilize_DeltaMinTooSmall_Throws()
     {
         CpuOnlyTest();
@@ -176,7 +176,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => SilkNlsfStabilize.Stabilize(nlsf, deltaMin));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfStabilize_LastDeltaZero_Throws()
     {
         CpuOnlyTest();

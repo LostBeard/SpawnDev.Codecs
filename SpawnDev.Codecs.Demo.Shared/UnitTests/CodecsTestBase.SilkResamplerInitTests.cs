@@ -14,7 +14,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- Init: rate routing --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerInit_Decoder_IdentityRate_SelectsCopyPath()
     {
         CpuOnlyTest();
@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         Equal(16, state.FsOutKHz);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerInit_Decoder_8To16_SelectsUp2Path()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         Equal(SilkResamplerConstants.USE_UP2_HQ_WRAPPER, state.ResamplerFunction);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerInit_Decoder_16To48_SelectsIirFirPath()
     {
         CpuOnlyTest();
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
         Equal(SilkResamplerConstants.USE_IIR_FIR, state.ResamplerFunction);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerInit_Decoder_16To24_SelectsIirFirPath()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         Equal(SilkResamplerConstants.USE_IIR_FIR, state.ResamplerFunction);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerInit_Decoder_16To8_SelectsDownFirPath()
     {
         CpuOnlyTest();
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
         Equal(SilkResamplerConstants.DOWN_ORDER_FIR1, state.FirOrder);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerInit_Decoder_12To8_SelectsDownFirPath_3Over4()
     {
         CpuOnlyTest();
@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Init: delay matrix --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerInit_DelayMatrix_Decoder_MatchesLibopus()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         Equal(7, state.InputDelay);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerInit_DelayMatrix_Decoder_Nb_MatchesLibopus()
     {
         CpuOnlyTest();
@@ -119,7 +119,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Init: unsupported rates --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerInit_Decoder_InvalidInputRate_Throws()
     {
         CpuOnlyTest();
@@ -130,7 +130,7 @@ public abstract partial class CodecsTestBase
             SilkResampler.Init(state, 11000, 8000, forEncode: false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerInit_Encoder_InvalidOutputRate_Throws()
     {
         CpuOnlyTest();
@@ -141,7 +141,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Apply: identity / pass-through --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerApply_IdentityRate_PassesThroughOverOneBatch()
     {
         CpuOnlyTest();
@@ -175,7 +175,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerApply_IdentityRate_StateCarriesAcrossCalls()
     {
         CpuOnlyTest();

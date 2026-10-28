@@ -1,3 +1,4 @@
+using SpawnDev.UnitTesting;
 using ILGPU;
 using ILGPU.Runtime;
 using ILGPU.Runtime.Velocity;
@@ -12,6 +13,8 @@ namespace SpawnDev.Codecs.DemoConsole.UnitTests;
 /// AllAccelerators / HostCompute pick: <c>Velocity()</c> alone registers Scalar2 (two scalar lanes) first, and device 0 of
 /// that is not what applications run.
 /// </summary>
+// CPU-only tests (Category = "CpuOnly") run once, in CpuCodecsTests: discovery leaves them out here.
+[ExcludeCategories("CpuOnly")]
 public class VelocityCodecsTests : CodecsTestBase
 {
     protected override ValueTask<(Context, Accelerator)> CreateKernelAcceleratorAsync()

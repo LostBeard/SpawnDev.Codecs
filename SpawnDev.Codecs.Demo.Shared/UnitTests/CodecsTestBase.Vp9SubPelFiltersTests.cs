@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelFilters_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
         Equal(7, Vp9SubPelFilters.FilterBits);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelFilters_TableLengths_AreUniform()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         Equal(128, Vp9SubPelFilters.Bilinear.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelFilters_AllFilters_AtSubPel0_AreIdentity()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelFilters_AllFilters_AllRowsSumToFilterScale()
     {
         CpuOnlyTest();
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelFilters_EightTap_SubPel8_IsCenterSymmetric()
     {
         CpuOnlyTest();
@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
         Equal((short)78, row[3]); Equal((short)78, row[4]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelFilters_Bilinear_SubPel8_IsHalfHalf()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
         Equal((short)0, row[6]); Equal((short)0, row[7]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelFilters_GetFilter_RejectsSwitchable()
     {
         CpuOnlyTest();
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
             Vp9SubPelFilters.GetFilter(Vp9InterpFilter.Switchable));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelFilters_GetRow_RejectsOutOfRangeSubPel()
     {
         CpuOnlyTest();

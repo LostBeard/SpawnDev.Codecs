@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Profile_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -19,7 +19,7 @@ public abstract partial class CodecsTestBase
         Equal(4, Vp9Profiles.Count);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Profile_IsHighBitDepth_OnlyProfiles2And3()
     {
         CpuOnlyTest();
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
         Equal(true, Vp9Profiles.IsHighBitDepth(Vp9Profile.Profile3));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Profile_AllowsNonYuv420_OnlyProfiles1And3()
     {
         CpuOnlyTest();
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
         Equal(true, Vp9Profiles.AllowsNonYuv420(Vp9Profile.Profile3));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Profile_IsMostPermissive_OnlyProfile3()
     {
         CpuOnlyTest();
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
         Equal(true, Vp9Profiles.IsMostPermissive(Vp9Profile.Profile3));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Profile_FlagsCombineCorrectly()
     {
         CpuOnlyTest();

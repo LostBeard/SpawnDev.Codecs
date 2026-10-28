@@ -10,7 +10,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8DefaultCoefProbs_Dimensions_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
         Equal(11, Vp8DefaultCoefProbs.DefaultProbs.GetLength(3));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8DefaultCoefProbs_Type0Band0_AllNeutral128()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
                 Equal((byte)128, Vp8DefaultCoefProbs.DefaultProbs[0, 0, ctx, node]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8DefaultCoefProbs_Type0Band1_Context0_MatchesLibvpx()
     {
         CpuOnlyTest();
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
             Equal(expected[n], Vp8DefaultCoefProbs.DefaultProbs[0, 1, 0, n]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8DefaultCoefProbs_Type1Band0_Context2_MatchesLibvpx()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
             Equal(expected[n], Vp8DefaultCoefProbs.DefaultProbs[1, 0, 2, n]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8DefaultCoefProbs_Type3Band0_Context0_MatchesLibvpx()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
             Equal(expected[n], Vp8DefaultCoefProbs.DefaultProbs[3, 0, 0, n]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8DefaultCoefProbs_Type2Band7_AllNeutral128()
     {
         CpuOnlyTest();

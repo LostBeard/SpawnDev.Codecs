@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
         return bytes;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mp4Box_FlatLeafBoxes_Enumerated()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         Equal(16, boxes[1].Offset);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mp4Box_ContainerBox_RecursesIntoChildren()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         Equal("tkhd", boxes[0].Children![1].Children![0].Type);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mp4Box_FindFirst_FindsNestedBox()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
         Equal("stsd", found!.Type);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mp4Box_ExtendedSize_Size1IndicatesLarge()
     {
         CpuOnlyTest();
@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
         Equal(16, boxes[0].HeaderSize);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mp4Box_SizeZero_ExtendsToEndOfFile()
     {
         CpuOnlyTest();
@@ -129,7 +129,7 @@ public abstract partial class CodecsTestBase
         Equal(32L, boxes[0].Size);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mp4Box_TruncatedHeader_Throws()
     {
         CpuOnlyTest();
@@ -139,7 +139,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mp4Box_SizeExceedsBuffer_Throws()
     {
         CpuOnlyTest();

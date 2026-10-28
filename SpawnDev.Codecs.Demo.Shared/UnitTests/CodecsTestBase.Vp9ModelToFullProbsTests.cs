@@ -10,7 +10,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ModelToFullProbs_ConstantsMatchLibvpx()
     {
         CpuOnlyTest();
@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
         Equal(2,  Vp9CoefProbs.PivotNode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ModelToFullProbs_CopiesModelThenAppendsPareto8Row()
     {
         CpuOnlyTest();
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)29,  full[10]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ModelToFullProbs_PivotEqualsTwoIndexesSecondPareto8Row()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)52,  full[10]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ModelToFullProbs_PivotEquals255IndexesLastPareto8Row()
     {
         CpuOnlyTest();
@@ -78,7 +78,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)255, full[10]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ModelToFullProbs_PivotZero_ThrowsInvalidData()
     {
         CpuOnlyTest();
@@ -92,7 +92,7 @@ public abstract partial class CodecsTestBase
         Throws<InvalidDataException>(() => Vp9CoefProbs.ModelToFullProbs(model, full));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ModelToFullProbs_RejectsTooSmallBuffers()
     {
         CpuOnlyTest();
@@ -100,7 +100,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => Vp9CoefProbs.ModelToFullProbs(new byte[3], new byte[10]));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ModelToFullProbs_DrivenByDefaultCoefProbs4x4_ProducesValidFullVector()
     {
         CpuOnlyTest();

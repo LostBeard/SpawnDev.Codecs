@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterpFilter_Switchable_FirstBitOne()
     {
         CpuOnlyTest();
@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9InterpFilter.Switchable, f);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterpFilter_EightTap_BitZeroIndex0()
     {
         CpuOnlyTest();
@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9InterpFilter.EightTap, f);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterpFilter_EightTapSmooth_BitZeroIndex1()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9InterpFilter.EightTapSmooth, f);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterpFilter_EightTapSharp_BitZeroIndex2()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9InterpFilter.EightTapSharp, f);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterpFilter_Bilinear_BitZeroIndex3()
     {
         CpuOnlyTest();

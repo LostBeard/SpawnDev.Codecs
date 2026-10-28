@@ -10,7 +10,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ForwardAdst16_AllZeroInput_ProducesAllZeroOutput()
     {
         CpuOnlyTest();
@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(0, output[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ForwardAdst16_Determinism()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(a[i], b[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ForwardAdst16_ImpulseInput_NonZeroOutput()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         True(any, "impulse must produce non-zero coefficients");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ForwardAdst16_2dRoundTrip_OnSmoothResidual_LowError()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
         True(maxErr <= 2, $"max ADST round-trip error = {maxErr}, expected <= 2");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ForwardAdst16_Throws_OnShortInput()
     {
         CpuOnlyTest();
@@ -92,7 +92,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ForwardAdst16_Throws_OnShortOutput()
     {
         CpuOnlyTest();

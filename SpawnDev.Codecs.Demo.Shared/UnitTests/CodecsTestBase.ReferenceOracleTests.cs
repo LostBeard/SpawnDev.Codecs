@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ReferenceOracle_GenerateSineWave_HasCorrectLength()
     {
         CpuOnlyTest();
@@ -21,7 +21,7 @@ public abstract partial class CodecsTestBase
         Equal(960 * 2, pcm.Length, "Sine wave should be samples * channels long");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ReferenceOracle_GenerateSineWave_ValuesInAmplitudeRange()
     {
         CpuOnlyTest();
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ReferenceOracle_Encode_Silence_ProducesValidPacket()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         InRange(opusBytes.Length, 1, 1275);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ReferenceOracle_Encode_SineWave_ProducesValidPacket()
     {
         CpuOnlyTest();
@@ -51,7 +51,7 @@ public abstract partial class CodecsTestBase
         InRange(opusBytes.Length, 1, 1275);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ReferenceOracle_RoundTrip_Silence_ProducesExpectedLength()
     {
         CpuOnlyTest();
@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
         Equal(960, decoded.Length, "Should decode to 960 samples (20ms at 48kHz)");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ReferenceOracle_RoundTrip_SineWave_PreservesDominantFrequency()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
         True(peak > 0.1f, $"Decoded peak {peak} too small; Opus encoder produced silence?");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ReferenceOracle_Stereo_RoundTrip_Works()
     {
         CpuOnlyTest();
@@ -92,7 +92,7 @@ public abstract partial class CodecsTestBase
         Equal(960 * 2, decoded.Length, "Stereo silence should decode to 1920 interleaved samples");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ReferenceOracle_MultipleSampleRates_Succeed()
     {
         CpuOnlyTest();

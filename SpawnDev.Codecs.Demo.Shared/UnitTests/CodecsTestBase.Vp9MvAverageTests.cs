@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvAverage_Average2_RoundsHalfAwayFromZero()
     {
         CpuOnlyTest();
@@ -22,7 +22,7 @@ public abstract partial class CodecsTestBase
         Equal(new Vp9Mv(-2, 0), Vp9MvAverage.Average2(new Vp9Mv(-1, 0), new Vp9Mv(-2, 0)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvAverage_Average2_BothComponents()
     {
         CpuOnlyTest();
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
         Equal(new Vp9Mv(5, -9), Vp9MvAverage.Average2(new Vp9Mv(4, -8), new Vp9Mv(6, -10)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvAverage_Average4_PositiveSum()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         Equal(3, Vp9MvAverage.RoundComp4(10));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvAverage_Average4_NegativeSum()
     {
         CpuOnlyTest();
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         Equal(0, Vp9MvAverage.RoundComp4(0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvAverage_Average4_FullStruct()
     {
         CpuOnlyTest();
@@ -70,7 +70,7 @@ public abstract partial class CodecsTestBase
         Equal(new Vp9Mv(3, -4), avg);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvAverage_Average4_AllZeros_IsZero()
     {
         CpuOnlyTest();
@@ -78,7 +78,7 @@ public abstract partial class CodecsTestBase
             Vp9Mv.Zero, Vp9Mv.Zero, Vp9Mv.Zero, Vp9Mv.Zero));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvAverage_Average4_AllSame_PreservesValue()
     {
         CpuOnlyTest();

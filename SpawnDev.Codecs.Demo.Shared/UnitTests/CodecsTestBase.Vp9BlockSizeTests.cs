@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockSize_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9BlockSize.Block64x64, Vp9BlockSizes.Largest);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockSize_LookupArrayLengths()
     {
         CpuOnlyTest();
@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
         Equal(13, Vp9BlockSizes.NumPelsLog2.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockSize_Width_AllSizes()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         Equal(64, Vp9BlockSizes.Width(Vp9BlockSize.Block64x64));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockSize_Height_AllSizes()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         Equal(64, Vp9BlockSizes.Height(Vp9BlockSize.Block64x64));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockSize_MiWidthHeight_64x64Is8x8()
     {
         CpuOnlyTest();
@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
         Equal(1, Vp9BlockSizes.MiHeight(Vp9BlockSize.Block8x8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockSize_B4x4WidthHeight_4x4Is1x1()
     {
         CpuOnlyTest();
@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
         Equal(16, Vp9BlockSizes.B4x4Height(Vp9BlockSize.Block64x64));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockSize_NumPelsLog2_64x64Is12()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         Equal(10, Vp9BlockSizes.NumPelsLog2[(int)Vp9BlockSize.Block32x32]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockSize_IsSquare()
     {
         CpuOnlyTest();
@@ -118,7 +118,7 @@ public abstract partial class CodecsTestBase
         Equal(false, Vp9BlockSizes.IsSquare(Vp9BlockSize.Block64x32));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockSize_NumPelsLog2_DerivedFromWidthHeight()
     {
         CpuOnlyTest();
@@ -132,7 +132,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockSize_B4x4WidthLog2_MatchesNum4x4Wide()
     {
         CpuOnlyTest();
@@ -146,7 +146,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockSize_B4x4HeightLog2_MatchesNum4x4High()
     {
         CpuOnlyTest();
@@ -160,7 +160,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BlockSize_B4x4Log2_64x64Is4()
     {
         CpuOnlyTest();

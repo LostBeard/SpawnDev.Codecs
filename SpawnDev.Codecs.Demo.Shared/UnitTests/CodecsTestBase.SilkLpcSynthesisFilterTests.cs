@@ -10,7 +10,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcSynthesisFilter_ZeroInput_ZeroState_ProducesZeroPcm()
     {
         CpuOnlyTest();
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 40; i++) Equal((short)0, pcm[i], $"pos {i}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcSynthesisFilter_ZeroCoefficients_OutputMirrorsResidual()
     {
         CpuOnlyTest();
@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcSynthesisFilter_WriteToStateMatchesResidualPlusPrediction()
     {
         CpuOnlyTest();
@@ -81,7 +81,7 @@ public abstract partial class CodecsTestBase
         Equal(123456 + 80, state[SilkConstants.MAX_LPC_ORDER]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcSynthesisFilter_Order16_DoesNotCrashAtRealisticSize()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcSynthesisFilter_HistoryAffectsOutput()
     {
         CpuOnlyTest();
@@ -128,7 +128,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Argument validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcSynthesisFilter_InvalidOrder_Throws()
     {
         CpuOnlyTest();
@@ -140,7 +140,7 @@ public abstract partial class CodecsTestBase
             SilkLpcSynthesisFilter.Apply(state, pres, aQ12, 1024, order: 12, subfrLen: 10, pcm));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcSynthesisFilter_StateBufferTooSmall_Throws()
     {
         CpuOnlyTest();

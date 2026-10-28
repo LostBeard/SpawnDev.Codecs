@@ -10,7 +10,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1BitWriter_EmptyAfterTrailingBits_IsOneByte()
     {
         CpuOnlyTest();
@@ -21,7 +21,7 @@ public abstract partial class CodecsTestBase
         Equal(0x80, (int)bytes[0]); // single trailing-1 in bit 7 + zero pad
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1BitWriter_SingleByteThroughTrailing_PreservesBits()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         Equal(0x80, (int)bytes[1]); // trailing-1 then zero pad
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1BitWriter_MixedFlags_ReadBackInOrder()
     {
         CpuOnlyTest();
@@ -57,7 +57,7 @@ public abstract partial class CodecsTestBase
         Equal((uint)7, br.ReadBits(4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1BitWriter_LargeMultiByteField_ReadBack()
     {
         CpuOnlyTest();
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
         Equal((uint)0xABCDEF, br.ReadBits(24));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1BitWriter_RejectsValueOutOfRange()
     {
         CpuOnlyTest();
@@ -88,7 +88,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => bw.WriteBits(0, 33));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1BitWriter_ZeroBitsIsNoop()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         Equal(false, br.ReadFlag());
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1BitWriter_PositionTracksBitsWritten()
     {
         CpuOnlyTest();
@@ -117,7 +117,7 @@ public abstract partial class CodecsTestBase
         Equal(24, bw.BitPosition);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1BitWriter_ToArrayWithoutTrailing_Throws()
     {
         CpuOnlyTest();

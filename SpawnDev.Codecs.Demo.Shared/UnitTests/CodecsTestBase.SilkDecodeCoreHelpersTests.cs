@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- Quantization offset table --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeCoreHelpers_QuantizationOffsets_MatchLibopus()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         Equal((short)100, SilkConstants.QUANTIZATION_OFFSETS_Q10[1, 1]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeCoreHelpers_Constants_MatchLibopus()
     {
         CpuOnlyTest();
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
 
     // -------- silk_MLA_ovflw --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MlaOvflw_BasicAddAndMultiply_MatchesExpectedValue()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
                                                // Signed interpretation: 4294967286 - 4294967296 = -10. Confirmed.
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MlaOvflw_Overflow_WrapsAroundCleanly()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
 
     // -------- silk_RAND --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Rand_FromSeedZero_MatchesManualComputation()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
         Equal(907633515, silk_RAND(0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Rand_FromSeedOne_MatchesManualComputation()
     {
         CpuOnlyTest();
@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
         Equal(1103947680, silk_RAND(1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Rand_SequenceIsDeterministic()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Rand_ProducesDiverseValues()
     {
         CpuOnlyTest();
@@ -118,7 +118,7 @@ public abstract partial class CodecsTestBase
 
     // -------- silk_ADD_SAT32 --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void AddSat32_NonOverflowing_EqualsRegularAdd()
     {
         CpuOnlyTest();
@@ -128,7 +128,7 @@ public abstract partial class CodecsTestBase
         Equal(-1, silk_ADD_SAT32(int.MinValue, int.MaxValue));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void AddSat32_OverflowPositive_ClampsToMaxValue()
     {
         CpuOnlyTest();
@@ -136,7 +136,7 @@ public abstract partial class CodecsTestBase
         Equal(int.MaxValue, silk_ADD_SAT32(int.MaxValue - 10, 100));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void AddSat32_OverflowNegative_ClampsToMinValue()
     {
         CpuOnlyTest();
@@ -146,7 +146,7 @@ public abstract partial class CodecsTestBase
 
     // -------- silk_SUB_LSHIFT32 --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SubLshift32_MatchesDefinition()
     {
         CpuOnlyTest();
@@ -158,7 +158,7 @@ public abstract partial class CodecsTestBase
 
     // -------- silk_LSHIFT_ovflw --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LshiftOvflw_MatchesUnsignedShift()
     {
         CpuOnlyTest();
@@ -171,7 +171,7 @@ public abstract partial class CodecsTestBase
 
     // -------- silk_DIV32_varQ --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Div32VarQ_Q16GainAdjustment_MatchesExpectedRatio()
     {
         CpuOnlyTest();
@@ -181,7 +181,7 @@ public abstract partial class CodecsTestBase
         True(relErr < 0.001, $"expected ~131072 (2.0 in Q16), got {res} (rel err {relErr:P})");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Div32VarQ_IdenticalInputs_EqualsOne()
     {
         CpuOnlyTest();
@@ -192,7 +192,7 @@ public abstract partial class CodecsTestBase
         True(relErr < 0.001, $"expected ~65536 (1.0 in Q16), got {res} (rel err {relErr:P})");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Div32VarQ_NegativeNumerator_ProducesNegativeResult()
     {
         CpuOnlyTest();
@@ -204,7 +204,7 @@ public abstract partial class CodecsTestBase
         True(relErr < 0.001, $"expected ~-131072 (-2.0 in Q16), got {res} (rel err {relErr:P})");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Div32VarQ_SignMatchesInputSign()
     {
         CpuOnlyTest();

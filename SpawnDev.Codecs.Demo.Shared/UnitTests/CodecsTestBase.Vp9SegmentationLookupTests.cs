@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationLookup_MaxQuantizerIndex_Is255()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(255, Vp9SegmentationLookup.MaxQuantizerIndex);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationLookup_IsFeatureActive_DisabledSegmentation_AlwaysFalse()
     {
         CpuOnlyTest();
@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         Equal(false, Vp9SegmentationLookup.IsFeatureActive(seg, 0, Vp9SegFeature.AltQ));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationLookup_IsFeatureActive_EnabledSegmentation_RespectsFlag()
     {
         CpuOnlyTest();
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
         Equal(false, Vp9SegmentationLookup.IsFeatureActive(seg, 0, Vp9SegFeature.AltLf));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationLookup_GetFeatureData_ReturnsRawValue()
     {
         CpuOnlyTest();
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
         Equal(42, Vp9SegmentationLookup.GetFeatureData(seg, 3, Vp9SegFeature.AltQ));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationLookup_ResolveQIndex_NoSegment_ReturnsBase()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         Equal(64, Vp9SegmentationLookup.ResolveQIndex(seg, 0, 64));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationLookup_ResolveQIndex_AltQInactive_ReturnsBase()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         Equal(64, Vp9SegmentationLookup.ResolveQIndex(seg, 0, 64));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationLookup_ResolveQIndex_DeltaMode_AddsToBase()
     {
         CpuOnlyTest();
@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
         Equal(54, Vp9SegmentationLookup.ResolveQIndex(seg, 0, 64));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationLookup_ResolveQIndex_AbsoluteMode_IgnoresBase()
     {
         CpuOnlyTest();
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
         Equal(100, Vp9SegmentationLookup.ResolveQIndex(seg, 1, 64));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationLookup_ResolveQIndex_ClampsToZero()
     {
         CpuOnlyTest();
@@ -95,7 +95,7 @@ public abstract partial class CodecsTestBase
         Equal(0, Vp9SegmentationLookup.ResolveQIndex(seg, 0, 64));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationLookup_ResolveQIndex_ClampsToMaxQ()
     {
         CpuOnlyTest();
@@ -106,7 +106,7 @@ public abstract partial class CodecsTestBase
         Equal(255, Vp9SegmentationLookup.ResolveQIndex(seg, 0, 64));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentationLookup_RejectsNullSegmentation()
     {
         CpuOnlyTest();

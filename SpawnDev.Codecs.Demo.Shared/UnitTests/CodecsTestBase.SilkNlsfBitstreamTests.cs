@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecodeIndices_NbMb_ZeroResiduals_AllSignalTypes_RoundTrip()
     {
         CpuOnlyTest();
@@ -106,7 +106,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecodeIndices_Wb_ZeroResiduals_AllSignalTypes_RoundTrip()
     {
         CpuOnlyTest();
@@ -138,7 +138,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecodeIndices_NonZeroResiduals_WithinAmplitude_RoundTrip()
     {
         CpuOnlyTest();
@@ -166,7 +166,7 @@ public abstract partial class CodecsTestBase
         Equal(4, interpCoef);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecodeIndices_RailExtensionNegative_RoundTrip()
     {
         CpuOnlyTest();
@@ -195,7 +195,7 @@ public abstract partial class CodecsTestBase
         Equal(1, interpCoef);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecodeIndices_RailExtensionPositive_RoundTrip()
     {
         CpuOnlyTest();
@@ -222,7 +222,7 @@ public abstract partial class CodecsTestBase
         Equal(0, interpCoef);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecodeIndices_ThenFullDecode_ProducesStableLpc()
     {
         CpuOnlyTest();
@@ -251,7 +251,7 @@ public abstract partial class CodecsTestBase
         True(invGain > 0, $"End-to-end WB NLSF from bitstream should produce a stable LPC; interpCoef={interpCoef}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecodeIndices_InvalidSignalType_Throws()
     {
         CpuOnlyTest();
@@ -263,7 +263,7 @@ public abstract partial class CodecsTestBase
             SilkNlsfDecoder.DecodeIndices(indices, dec, SilkNlsfCodebookTables.Wb, signalType: 3, nbSubfr: 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecodeIndices_NullCodebook_Throws()
     {
         CpuOnlyTest();
@@ -275,7 +275,7 @@ public abstract partial class CodecsTestBase
             SilkNlsfDecoder.DecodeIndices(indices, dec, null!, signalType: 0, nbSubfr: 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfDecodeIndices_NullRangeDecoder_Throws()
     {
         CpuOnlyTest();

@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadBits_ByteAligned_ReturnsFullByte()
     {
         CpuOnlyTest();
@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
         True(r.IsEnd, "Reader should be at end after consuming both bytes.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadBits_SingleBitsMsbFirst()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         True(r.IsEnd, "Reader should be at end after 8 bits.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadBits_PartialByte()
     {
         CpuOnlyTest();
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
         True(r.IsEnd);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadBits_CrossByteBoundary()
     {
         CpuOnlyTest();
@@ -68,7 +68,7 @@ public abstract partial class CodecsTestBase
         True(r.IsEnd);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadBits_Span_MultiByte()
     {
         CpuOnlyTest();
@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
         True(r.IsEnd);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadBits_MaxWidth_32Bits()
     {
         CpuOnlyTest();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
         True(r.IsEnd);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadBits_Zero_ReturnsZero_NoAdvance()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
         Equal(8, r.BitsRemaining);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadBits_OutOfRange_Throws()
     {
         CpuOnlyTest();
@@ -118,7 +118,7 @@ public abstract partial class CodecsTestBase
         });
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadBits_NotEnough_Throws()
     {
         CpuOnlyTest();
@@ -130,7 +130,7 @@ public abstract partial class CodecsTestBase
         });
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_BitsRemaining_And_Position_Track()
     {
         CpuOnlyTest();
@@ -150,7 +150,7 @@ public abstract partial class CodecsTestBase
         True(r.IsEnd);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadBitsSigned_Positive()
     {
         CpuOnlyTest();
@@ -160,7 +160,7 @@ public abstract partial class CodecsTestBase
         Equal(10, r.ReadBitsSigned(5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadBitsSigned_NegativeSignExtend()
     {
         CpuOnlyTest();
@@ -170,7 +170,7 @@ public abstract partial class CodecsTestBase
         Equal(-6, r.ReadBitsSigned(5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadBitsSigned_FullWidth32()
     {
         CpuOnlyTest();
@@ -180,7 +180,7 @@ public abstract partial class CodecsTestBase
         Equal(int.MinValue, r.ReadBitsSigned(32));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadBitsSigned_AllOnes()
     {
         CpuOnlyTest();
@@ -190,7 +190,7 @@ public abstract partial class CodecsTestBase
         Equal(-1, r.ReadBitsSigned(4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadBitsSigned_InvalidWidth_Throws()
     {
         CpuOnlyTest();
@@ -207,7 +207,7 @@ public abstract partial class CodecsTestBase
         });
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUnary_ZeroPrefix()
     {
         CpuOnlyTest();
@@ -218,7 +218,7 @@ public abstract partial class CodecsTestBase
         Equal(1, r.Position);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUnary_SevenZeros()
     {
         CpuOnlyTest();
@@ -230,7 +230,7 @@ public abstract partial class CodecsTestBase
         True(r.IsEnd);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUnary_CrossesByteBoundary()
     {
         CpuOnlyTest();
@@ -241,7 +241,7 @@ public abstract partial class CodecsTestBase
         Equal(10, r.Position);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUnary_ExceedsStream_Throws()
     {
         CpuOnlyTest();
@@ -254,7 +254,7 @@ public abstract partial class CodecsTestBase
         });
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_AlignToByte_FromMidByte()
     {
         CpuOnlyTest();
@@ -267,7 +267,7 @@ public abstract partial class CodecsTestBase
         Equal(0x55u, r.ReadBits(8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_AlignToByte_OnBoundary_NoOp()
     {
         CpuOnlyTest();
@@ -282,7 +282,7 @@ public abstract partial class CodecsTestBase
 
     // ----- UTF-8 variable-length integer (FLAC frame header sample/frame number) -----
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUtf8VarLen_AsciiRange_OneByte()
     {
         CpuOnlyTest();
@@ -294,7 +294,7 @@ public abstract partial class CodecsTestBase
         Equal(0x7Ful, r2.ReadUtf8VariableLength(7));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUtf8VarLen_TwoByte()
     {
         CpuOnlyTest();
@@ -304,7 +304,7 @@ public abstract partial class CodecsTestBase
         Equal(0xA2ul, r.ReadUtf8VariableLength(7));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUtf8VarLen_ThreeByte()
     {
         CpuOnlyTest();
@@ -314,7 +314,7 @@ public abstract partial class CodecsTestBase
         Equal(0x20ACul, r.ReadUtf8VariableLength(7));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUtf8VarLen_FourByte()
     {
         CpuOnlyTest();
@@ -324,7 +324,7 @@ public abstract partial class CodecsTestBase
         Equal(0x1F600ul, r.ReadUtf8VariableLength(7));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUtf8VarLen_FiveByte()
     {
         CpuOnlyTest();
@@ -336,7 +336,7 @@ public abstract partial class CodecsTestBase
         Equal(expected, r.ReadUtf8VariableLength(7));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUtf8VarLen_SixByte_FrameNumber()
     {
         CpuOnlyTest();
@@ -348,7 +348,7 @@ public abstract partial class CodecsTestBase
         Equal(expected, r.ReadUtf8VariableLength(6));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUtf8VarLen_SevenByte_SampleNumber()
     {
         CpuOnlyTest();
@@ -360,7 +360,7 @@ public abstract partial class CodecsTestBase
         Equal(expected, r.ReadUtf8VariableLength(7));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUtf8VarLen_SevenByte_NotAllowed_Throws()
     {
         CpuOnlyTest();
@@ -373,7 +373,7 @@ public abstract partial class CodecsTestBase
         });
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUtf8VarLen_InvalidContinuation_Throws()
     {
         CpuOnlyTest();
@@ -386,7 +386,7 @@ public abstract partial class CodecsTestBase
         });
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUtf8VarLen_InvalidLead_Throws()
     {
         CpuOnlyTest();
@@ -399,7 +399,7 @@ public abstract partial class CodecsTestBase
         });
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacBitReader_ReadUtf8VarLen_InvalidMaxBytes_Throws()
     {
         CpuOnlyTest();

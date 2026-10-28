@@ -12,7 +12,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8BoolCoder_AlternatingBoolsAtProbHalf_RoundTrip()
     {
         CpuOnlyTest();
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
             Equal(symbols[i], dec.DecodeBool(128));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8BoolCoder_BoolsAtSkewedProbabilities_RoundTrip()
     {
         CpuOnlyTest();
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
             Equal(symbols[i], dec.DecodeBool(probs[i % probs.Length]));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8BoolCoder_RawValues_RoundTrip()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
             Equal(values[i], dec.DecodeValue(8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8BoolCoder_MixedOpsStress_RoundTrip()
     {
         CpuOnlyTest();

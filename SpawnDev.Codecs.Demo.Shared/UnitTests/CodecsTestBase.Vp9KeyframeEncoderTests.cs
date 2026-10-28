@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
     /// the VP9 frame_marker (0b10 in top 2 bits => byte starts with
     /// 0b10xxxxxx) and the sync code at the right offset.
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9KeyframeEncoder_EncodesFlat16x16Black_HasValidSyncCode()
     {
         CpuOnlyTest();
@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
     /// At low Q the reconstructed luma value should be very close to
     /// the input (within a couple of units).
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9KeyframeEncoder_FlatBlack16x16_RoundTripsViaWalker()
     {
         CpuOnlyTest();
@@ -124,7 +124,7 @@ public abstract partial class CodecsTestBase
     /// 32x32 flat gray frame round-trips. Larger frame triggers
     /// recursive 64x64 -> 32x32 -> 16x16 partition decomposition.
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9KeyframeEncoder_FlatGray32x32_RoundTripsViaWalker()
     {
         CpuOnlyTest();
@@ -164,7 +164,7 @@ public abstract partial class CodecsTestBase
     /// gradient within Q-induced tolerance. Exercises the forward DCT
     /// and quantizer paths on non-trivial input.
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9KeyframeEncoder_Gradient32x32_RoundTripsWithinTolerance()
     {
         CpuOnlyTest();
@@ -209,7 +209,7 @@ public abstract partial class CodecsTestBase
     /// vertical gradient where every Block16x16 leaf has at least one
     /// real reconstructed neighbor.
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9KeyframeEncoder_Gradient32x32_PerBlockBitstreamConsistent()
     {
         CpuOnlyTest();
@@ -269,7 +269,7 @@ public abstract partial class CodecsTestBase
     /// Sanity: the encoded output is reasonably compact (under a few
     /// KB for a flat 16x16 black frame).
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9KeyframeEncoder_FlatBlack16x16_OutputIsCompact()
     {
         CpuOnlyTest();

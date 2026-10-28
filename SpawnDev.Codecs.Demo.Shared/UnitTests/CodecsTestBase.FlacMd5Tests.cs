@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
         return FlacMd5.Compute(samples, 8);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMd5_EmptyString_MatchesRfc1321()
     {
         CpuOnlyTest();
@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
         Equal("d41d8cd98f00b204e9800998ecf8427e", Hex(Md5OfString("")));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMd5_LetterA_MatchesRfc1321()
     {
         CpuOnlyTest();
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
         Equal("0cc175b9c0f1b6a831c399e269772661", Hex(Md5OfString("a")));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMd5_Abc_MatchesRfc1321()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         Equal("900150983cd24fb0d6963f7d28e17f72", Hex(Md5OfString("abc")));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMd5_MessageDigest_MatchesRfc1321()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         Equal("f96b697d7cb7938d525a2f31aaf161d0", Hex(Md5OfString("message digest")));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMd5_Alphabet_MatchesRfc1321()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         Equal("c3fcd3d76192e4007dfb496cca67e13b", Hex(Md5OfString("abcdefghijklmnopqrstuvwxyz")));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMd5_AlphaNum_MatchesRfc1321()
     {
         CpuOnlyTest();
@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
             Hex(Md5OfString("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMd5_EightyDigits_MatchesRfc1321()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
             Hex(Md5OfString(string.Concat(Enumerable.Repeat("1234567890", 8)))));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMd5_16BitPcm_PacksAsLeTwosComplement()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
         True(actual[0] != 0 || actual[1] != 0, "MD5 should be non-trivially non-zero.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMd5_DecoderVerifiesLosslessRoundtrip()
     {
         CpuOnlyTest();
@@ -112,7 +112,7 @@ public abstract partial class CodecsTestBase
         True(decoded.VerifyMd5(), "Encoded-then-decoded samples must satisfy STREAMINFO MD5.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMd5_DecoderRejectsCorruptedStreamInfoMd5()
     {
         CpuOnlyTest();
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
         False(decoded.VerifyMd5(), "Corrupted MD5 must be detected.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMd5_AllZeroStoredMd5_VerifyReturnsTrue()
     {
         CpuOnlyTest();

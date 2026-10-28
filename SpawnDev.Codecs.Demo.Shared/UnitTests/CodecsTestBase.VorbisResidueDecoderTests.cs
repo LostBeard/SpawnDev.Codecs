@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisResidue_AllChannelsDoNotDecode_LeavesOutputUnchanged()
     {
         CpuOnlyTest();
@@ -51,7 +51,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisResidue_NToReadIsZero_NoReads()
     {
         CpuOnlyTest();
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 32; i++) Equal(0.0f, ch0[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisResidue_RangeNotAlignedToPartition_Throws()
     {
         CpuOnlyTest();
@@ -106,7 +106,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisResidue_CascadeAllZero_NoVectorBooks_OutputRemainsZero()
     {
         CpuOnlyTest();

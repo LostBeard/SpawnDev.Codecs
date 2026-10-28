@@ -9,7 +9,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9StreamAnalyzer_BbbFixture_ReturnsCompleteSummary()
     {
         CpuOnlyTest();
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
         Equal(180, summary.SizeChanges[0].Height);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9StreamAnalyzer_BbbFixture_FirstFrameIsKeyframe()
     {
         CpuOnlyTest();

@@ -10,7 +10,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8Quantizer_DcQLookup_HasCorrectLengthAndBoundaryValues()
     {
         CpuOnlyTest();
@@ -19,7 +19,7 @@ public abstract partial class CodecsTestBase
         Equal(157, Vp8Quantizer.DcQLookup[127]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8Quantizer_AcQLookup_HasCorrectLengthAndBoundaryValues()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         Equal(284, Vp8Quantizer.AcQLookup[127]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8Quantizer_Y1Dc_AppliesDelta()
     {
         CpuOnlyTest();
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
         Equal(29, Vp8Quantizer.Y1Dc(37, -5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8Quantizer_Y1Dc_ClampsAtBoundaries()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         Equal(157, Vp8Quantizer.Y1Dc(200, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8Quantizer_Y2Dc_DoublesDcValue()
     {
         CpuOnlyTest();
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
         Equal(76, Vp8Quantizer.Y2Dc(37, 5)); // 38 * 2
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8Quantizer_Y2Ac_AppliesScaleAndFloor()
     {
         CpuOnlyTest();
@@ -72,7 +72,7 @@ public abstract partial class CodecsTestBase
         Equal(8, Vp8Quantizer.Y2Ac(0, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8Quantizer_UvDc_ClampsAt132()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
         Equal(34, Vp8Quantizer.UvDc(37, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8Quantizer_UvAc_NoSpecialClamp()
     {
         CpuOnlyTest();

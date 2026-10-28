@@ -14,7 +14,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- CRC-32 --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggCrc32_SingleByte_0x01_EqualsPolynomial()
     {
         CpuOnlyTest();
@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         Equal(0x04C11DB7u, OggCrc32.Compute(input));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggCrc32_AllZero_IsZero()
     {
         CpuOnlyTest();
@@ -34,14 +34,14 @@ public abstract partial class CodecsTestBase
         Equal(0u, OggCrc32.Compute(input));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggCrc32_Empty_IsZero()
     {
         CpuOnlyTest();
         Equal(0u, OggCrc32.Compute(Array.Empty<byte>()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggCrc32_Deterministic()
     {
         CpuOnlyTest();
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
         return bytes;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggPageReader_ParsesValidSinglePage()
     {
         CpuOnlyTest();
@@ -98,7 +98,7 @@ public abstract partial class CodecsTestBase
         False(page.IsEndOfStream);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggPageReader_BadCapturePattern_Throws()
     {
         CpuOnlyTest();
@@ -110,7 +110,7 @@ public abstract partial class CodecsTestBase
         True(threw, "Bad capture pattern should throw.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggPageReader_BadCrc_Throws()
     {
         CpuOnlyTest();
@@ -124,7 +124,7 @@ public abstract partial class CodecsTestBase
         True(threw, "CRC mismatch should throw.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggPageReader_BadVersion_Throws()
     {
         CpuOnlyTest();
@@ -144,7 +144,7 @@ public abstract partial class CodecsTestBase
         True(threw, "Bad Ogg version should throw.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggPageReader_EnumerateMultiplePages()
     {
         CpuOnlyTest();
@@ -170,7 +170,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Packet assembly --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggPacketReader_SinglePagePacket()
     {
         CpuOnlyTest();
@@ -185,7 +185,7 @@ public abstract partial class CodecsTestBase
         Equal(1u, packets[0].BitstreamSerial);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggPacketReader_MultiSegmentSinglePagePacket()
     {
         CpuOnlyTest();
@@ -203,7 +203,7 @@ public abstract partial class CodecsTestBase
         EqualBytes(payload, packets[0].Data);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggPacketReader_PacketAcrossTwoPages()
     {
         CpuOnlyTest();
@@ -230,7 +230,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 50; i++) Equal((byte)(100 + i), packets[0].Data[255 + i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggPacketReader_MultiplePacketsInOnePage()
     {
         CpuOnlyTest();
@@ -247,7 +247,7 @@ public abstract partial class CodecsTestBase
         EqualBytes(new byte[] { 60, 70, 80, 90 }, packets[2].Data);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggPacketReader_IndependentBitstreams()
     {
         CpuOnlyTest();

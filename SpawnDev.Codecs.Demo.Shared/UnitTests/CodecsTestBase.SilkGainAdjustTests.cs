@@ -11,7 +11,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GainAdjust_SameGain_ReturnsOneAndLeavesStateUnchanged()
     {
         CpuOnlyTest();
@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < state.Length; i++) Equal(original[i], state[i], $"state[{i}]");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GainAdjust_GainIncreasedByTwo_ScalesStateDownByHalf()
     {
         CpuOnlyTest();
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GainAdjust_GainHalved_ScalesStateUpByTwo()
     {
         CpuOnlyTest();
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GainAdjust_OnlyScalesFirstMaxLpcOrderSamples()
     {
         CpuOnlyTest();
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Arg validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GainAdjust_ZeroCurGain_Throws()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
             SilkGainAdjust.Apply(state, prevGainQ16: 65536, curGainQ16: 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GainAdjust_StateTooSmall_Throws()
     {
         CpuOnlyTest();

@@ -12,7 +12,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1Decoder_NonzeroFlagClear_ReturnsNull()
     {
         CpuOnlyTest();
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
         True(y is null, "Silent-floor packet should return null.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1Decoder_SinglePartition_NoMasterbook_ReadsYValues()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 100, 50, 2 }, y!);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1Decoder_ClassSubclasses_ReadsMasterbookFirst()
     {
         CpuOnlyTest();
@@ -124,7 +124,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 10, 20, 0, 3 }, y!);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1Decoder_MultiplierEndpointBits_PicksRightWidth()
     {
         CpuOnlyTest();
@@ -151,7 +151,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 63, 0 }, y!);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisFloor1Decoder_BadMasterbookIndex_Throws()
     {
         CpuOnlyTest();

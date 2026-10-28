@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SkipProbs_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(3, new Vp9SkipProbs().Probs.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SkipProbs_DefaultProbs_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)64,  probs.Probs[2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SkipProbs_DefaultProbs_IsDefensivelyCloned()
     {
         CpuOnlyTest();
@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)192, Vp9SkipProbs.DefaultProbs[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SkipProbs_Parse_NoUpdates_LeavesTableUntouched()
     {
         CpuOnlyTest();
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)200, probs.Probs[2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SkipProbs_Parse_RejectsNullArgs()
     {
         CpuOnlyTest();

@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Av1Decoder_BbbStream_ParsesEverySequenceHeader_LearnsDimensions()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         Equal(false, decoder.LastSequenceHeader.Monochrome);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Av1Decoder_BbbStream_EmitsFramesAtCorrectDimensions()
     {
         CpuOnlyTest();
@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Av1Decoder_BbbFirstFrame_LastFrameObuCounts_IncludesSequenceHeader()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
             $"first frame must contain SequenceHeader; saw {string.Join(',', counts.Keys)}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Av1Decoder_BbbStream_CumulativeStats_MatchObservedTotals()
     {
         CpuOnlyTest();
@@ -143,7 +143,7 @@ public abstract partial class CodecsTestBase
         // No IntraOnlyFrame or SwitchFrame in BBB.
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Av1Decoder_BbbStream_TracksShowExistingFrameSeparately()
     {
         CpuOnlyTest();
@@ -170,7 +170,7 @@ public abstract partial class CodecsTestBase
             "show_existing should not be counted as KeyFrame in cumulative type counts");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Av1Decoder_WriterBuiltMinimalStream_DecodesSequenceHeader()
     {
         CpuOnlyTest();
@@ -209,7 +209,7 @@ public abstract partial class CodecsTestBase
         Equal(1080, decoder.Height);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Av1Decoder_BbbFirstFrame_PopulatesLastFrameHeader_AsKeyframe()
     {
         CpuOnlyTest();

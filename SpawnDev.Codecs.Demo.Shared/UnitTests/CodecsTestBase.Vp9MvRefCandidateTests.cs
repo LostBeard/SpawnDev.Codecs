@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefCandidate_None_HasIntraRef_ZeroMv()
     {
         CpuOnlyTest();
@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
         Equal(false, Vp9MvRefCandidate.None.HasMotion);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefCandidate_IsIntra_OnlyForIntraRef()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         Equal(false, last.IsIntra);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefCandidate_HasMotion_FalseForZeroMv()
     {
         CpuOnlyTest();
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
         Equal(false, c.HasMotion);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefCandidate_HasMotion_TrueForNonzero()
     {
         CpuOnlyTest();
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
         Equal(true, new Vp9MvRefCandidate(new Vp9Mv(-5, 8), Vp9MvReferenceFrame.AltRef).HasMotion);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefCandidate_RecordEquality()
     {
         CpuOnlyTest();

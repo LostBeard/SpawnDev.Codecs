@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
 
     // -------- CONSTANT --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframe_Constant_Positive_Replicates()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 42, 42, 42, 42, 42 }, samples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframe_Constant_Negative_Replicates()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
 
     // -------- VERBATIM --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframe_Verbatim_MixedSamples()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
 
     // -------- FIXED --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframe_FixedOrder0_ResidualIsSample()
     {
         CpuOnlyTest();
@@ -112,7 +112,7 @@ public abstract partial class CodecsTestBase
         EqualInts(expected, samples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframe_FixedOrder1_Reconstructs()
     {
         CpuOnlyTest();
@@ -128,7 +128,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 5, 7, 10, 8, 15 }, samples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframe_FixedOrder2_Reconstructs()
     {
         CpuOnlyTest();
@@ -147,7 +147,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 3, 6, 10, 15, 21, 28 }, samples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframe_FixedOrder4_Reconstructs()
     {
         CpuOnlyTest();
@@ -168,7 +168,7 @@ public abstract partial class CodecsTestBase
 
     // -------- LPC --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframe_Lpc_Order1_Decays()
     {
         CpuOnlyTest();
@@ -189,7 +189,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 100, 50, 25, 12, 6 }, samples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframe_Lpc_Order2_MatchesHandComputed()
     {
         CpuOnlyTest();
@@ -215,7 +215,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 10, 6, 9, 6, 7 }, samples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframe_Lpc_NegativeQuantLevel_Throws()
     {
         CpuOnlyTest();
@@ -235,7 +235,7 @@ public abstract partial class CodecsTestBase
         True(threw, "Negative LPC quant level should throw.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframe_Lpc_ReservedPrecision1111_Throws()
     {
         CpuOnlyTest();
@@ -253,7 +253,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Wasted bits --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframe_Constant_WithWastedBits_LeftShifts()
     {
         CpuOnlyTest();
@@ -266,7 +266,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 40, 40, 40, 40 }, samples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSubframe_Verbatim_WithWastedBits_LeftShifts()
     {
         CpuOnlyTest();

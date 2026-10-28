@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Basic round-trips --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeFrame_InactiveNoVadIndependent_FirstFrame_DecodesSuccessfully()
     {
         CpuOnlyTest();
@@ -145,7 +145,7 @@ public abstract partial class CodecsTestBase
         True(!state.FirstFrameAfterReset, "FirstFrameAfterReset should flip to false");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeFrame_UnvoicedWithVad_FirstFrame_DecodesSuccessfully()
     {
         CpuOnlyTest();
@@ -180,7 +180,7 @@ public abstract partial class CodecsTestBase
         Equal(SilkSideInfoDecoder.TypeUnvoiced, (sbyte)state.PrevSignalType);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeFrame_VoicedWithLtp_FirstFrame_DecodesSuccessfully()
     {
         CpuOnlyTest();
@@ -224,7 +224,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Multi-frame: state carries across --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeFrame_TwoBackToBackFrames_OutBufShiftsCorrectly()
     {
         CpuOnlyTest();
@@ -273,7 +273,7 @@ public abstract partial class CodecsTestBase
             $"PrevSignalType should still be inactive, got {state.PrevSignalType}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeFrame_FirstFrameAfterReset_FlagFlipsToFalse()
     {
         CpuOnlyTest();
@@ -304,7 +304,7 @@ public abstract partial class CodecsTestBase
 
     // -------- WB configuration --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeFrame_WbInactiveFrame_DecodesSuccessfully()
     {
         CpuOnlyTest();
@@ -338,7 +338,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Argument validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeFrame_NullState_Throws()
     {
         CpuOnlyTest();
@@ -350,7 +350,7 @@ public abstract partial class CodecsTestBase
             SilkDecodeFrame.Decode(null!, dec, pcm, vadFlag: false, conditional: 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeFrame_UnconfiguredState_Throws()
     {
         CpuOnlyTest();
@@ -363,7 +363,7 @@ public abstract partial class CodecsTestBase
             SilkDecodeFrame.Decode(state, dec, pcm, vadFlag: false, conditional: 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void DecodeFrame_OutputBufferTooSmall_Throws()
     {
         CpuOnlyTest();

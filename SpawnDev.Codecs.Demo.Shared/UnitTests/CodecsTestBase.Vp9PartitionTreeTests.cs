@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionType_EnumValuesMatchLibvpxOrdering()
     {
         CpuOnlyTest();
@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)3, (byte)Vp9PartitionType.Split);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionTree_HasCorrectShape()
     {
         CpuOnlyTest();
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
         Equal((sbyte)(-3), Vp9PartitionTree.Tree[5]); // -Split = -3
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionTree_DecodesNoneOnFirstZeroBit()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9PartitionType.None, p);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionTree_DecodesHorzOnSecondBitZero()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9PartitionType.Horz, p);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionTree_DecodesVertOnSecondBitOneThirdBitZero()
     {
         CpuOnlyTest();
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9PartitionType.Vert, p);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionTree_DecodesSplitOnAllBitsOne()
     {
         CpuOnlyTest();
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9PartitionType.Split, p);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionTree_RejectsUndersizedProbs()
     {
         CpuOnlyTest();

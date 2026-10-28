@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
         return residual;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacResidual_SinglePartition_Param0_AllZeros()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 0, 0, 0, 0 }, residual);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacResidual_SinglePartition_Param2_Mixed_HandComputed()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         EqualInts(residuals, decoded);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacResidual_SinglePartition_NegativeResiduals()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
         EqualInts(residuals, decoded);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacResidual_PartitionOrder1_TwoPartitions_DifferentParams()
     {
         CpuOnlyTest();
@@ -105,7 +105,7 @@ public abstract partial class CodecsTestBase
         EqualInts(expected, decoded);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacResidual_EscapeCode_VerbatimResiduals()
     {
         CpuOnlyTest();
@@ -127,7 +127,7 @@ public abstract partial class CodecsTestBase
         EqualInts(residuals, decoded);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacResidual_PartitionedRice2_5BitParam()
     {
         CpuOnlyTest();
@@ -141,7 +141,7 @@ public abstract partial class CodecsTestBase
         EqualInts(residuals, decoded);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacResidual_ReservedCodingMethod_Throws()
     {
         CpuOnlyTest();
@@ -154,7 +154,7 @@ public abstract partial class CodecsTestBase
         True(threw, "Reserved coding method 0b10 should throw.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacResidual_PartitionOrderExceedsBlock_Throws()
     {
         CpuOnlyTest();

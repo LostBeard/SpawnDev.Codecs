@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9QuantizationParams_AllZero_IsLossless()
     {
         CpuOnlyTest();
@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         Equal(true, q.Lossless);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9QuantizationParams_NonZeroBaseQIndex_NotLossless()
     {
         CpuOnlyTest();
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
         Equal(false, q.Lossless);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9QuantizationParams_AllDeltas_PositiveValues()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         Equal(false, q.Lossless);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9QuantizationParams_NegativeDelta_HandledViaSignBit()
     {
         CpuOnlyTest();
@@ -78,7 +78,7 @@ public abstract partial class CodecsTestBase
         Equal(-2, q.UvAcDeltaQ);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9QuantizationParams_BaseQIdxMaxValue()
     {
         CpuOnlyTest();
@@ -92,7 +92,7 @@ public abstract partial class CodecsTestBase
         Equal(false, q.Lossless);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9QuantizationParams_OnlySomeDeltasPresent()
     {
         CpuOnlyTest();

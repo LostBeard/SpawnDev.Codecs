@@ -11,7 +11,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LtpGainTables_Vq0_HasExpectedShape()
     {
         CpuOnlyTest();
@@ -20,14 +20,14 @@ public abstract partial class CodecsTestBase
         Equal(5, SilkLtpGainTables.LtpVecSize);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LtpGainTables_Vq1_HasExpectedShape()
     {
         CpuOnlyTest();
         Equal(80, SilkLtpGainTables.Vq1.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LtpGainTables_Vq2_HasExpectedShape()
     {
         CpuOnlyTest();
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Per-codebook specific-entry checks --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GetGainVector_Cb0_Entry0_MatchesLibopus()
     {
         CpuOnlyTest();
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
         EqualSbyteArray(new sbyte[] { 4, 6, 24, 7, 5 }, taps, "Cb0 entry 0");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GetGainVector_Cb0_LastEntry_MatchesLibopus()
     {
         CpuOnlyTest();
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         EqualSbyteArray(new sbyte[] { 16, 14, 38, -3, 33 }, taps, "Cb0 entry 7");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GetGainVector_Cb1_Entry0_MatchesLibopus()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         EqualSbyteArray(new sbyte[] { 13, 22, 39, 23, 12 }, taps, "Cb1 entry 0");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GetGainVector_Cb1_LastEntry_MatchesLibopus()
     {
         CpuOnlyTest();
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
         EqualSbyteArray(new sbyte[] { 3, -1, 21, 16, 41 }, taps, "Cb1 entry 15");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GetGainVector_Cb2_Entry0_MatchesLibopus()
     {
         CpuOnlyTest();
@@ -86,7 +86,7 @@ public abstract partial class CodecsTestBase
         EqualSbyteArray(new sbyte[] { -6, 27, 61, 39, 5 }, taps, "Cb2 entry 0");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GetGainVector_Cb2_LastEntry_MatchesLibopus()
     {
         CpuOnlyTest();
@@ -98,7 +98,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Spot values mid-codebook --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GetGainVector_Cb2_MidEntry_MatchesLibopus()
     {
         CpuOnlyTest();
@@ -110,7 +110,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Arg validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GetGainVector_OutputTooSmall_Throws()
     {
         CpuOnlyTest();
@@ -119,7 +119,7 @@ public abstract partial class CodecsTestBase
             SilkLtpDecoder.GetGainVector(small, 0, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GetGainVector_InvalidPerIndex_Throws()
     {
         CpuOnlyTest();
@@ -128,7 +128,7 @@ public abstract partial class CodecsTestBase
             SilkLtpDecoder.GetGainVector(taps, perIndex: 3, ltpIndex: 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GetGainVector_LtpIndexOutOfRange_Throws()
     {
         CpuOnlyTest();
@@ -146,7 +146,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Reference equality --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LtpGainTables_Select_ReferenceEquality()
     {
         CpuOnlyTest();

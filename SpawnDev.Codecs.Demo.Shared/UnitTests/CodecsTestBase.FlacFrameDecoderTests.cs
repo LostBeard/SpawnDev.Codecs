@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         Md5Signature = new byte[16],
     };
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrame_Mono_ConstantSubframe_DecodesCorrectly()
     {
         CpuOnlyTest();
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 1234, 1234, 1234, 1234 }, frame.Samples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrame_Stereo_Independent_TwoVerbatimSubframes()
     {
         CpuOnlyTest();
@@ -102,7 +102,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 10, 20, 30, 40, -10, -20, -30, -40 }, frame.Samples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrame_Stereo_LeftSide_Decorrelates()
     {
         CpuOnlyTest();
@@ -132,7 +132,7 @@ public abstract partial class CodecsTestBase
         EqualInts(R, frame.Samples.Skip(4).Take(4).ToArray());
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrame_Stereo_RightSide_Decorrelates()
     {
         CpuOnlyTest();
@@ -159,7 +159,7 @@ public abstract partial class CodecsTestBase
         EqualInts(R, frame.Samples.Skip(4).Take(4).ToArray());
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrame_Stereo_MidSide_Decorrelates()
     {
         CpuOnlyTest();
@@ -195,7 +195,7 @@ public abstract partial class CodecsTestBase
         EqualInts(R, frame.Samples.Skip(4).Take(4).ToArray());
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrame_BadCrc16_Throws()
     {
         CpuOnlyTest();
@@ -214,7 +214,7 @@ public abstract partial class CodecsTestBase
         True(threw, "Bad CRC-16 should throw.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacFrame_Mono_FixedOrder1_EndToEnd()
     {
         CpuOnlyTest();

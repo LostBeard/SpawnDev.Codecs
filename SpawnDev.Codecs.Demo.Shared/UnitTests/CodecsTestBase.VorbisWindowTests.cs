@@ -11,7 +11,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisWindow_Canonical_ProducesValuesInUnitInterval()
     {
         CpuOnlyTest();
@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisWindow_Canonical_SymmetricAroundCenter()
     {
         CpuOnlyTest();
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisWindow_Canonical_PrincenBradleyComplementarity()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisWindow_Canonical_CenterSamples_AtOneHalf()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         True(w[n / 2] > 0.98f, $"w[n/2] = {w[n / 2]} too low");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisWindow_Transition_BothLong_MatchesCanonical()
     {
         CpuOnlyTest();
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
                 $"transition[{i}] = {transition[i]} != canonical[{i}] = {canonical[i]}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisWindow_Transition_LeftShort_HasZeroPrefix()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
         for (int i = zeroEnd + halfShort; i < 32; i++) Equal(1f, w[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisWindow_Transition_RightShort_HasZeroSuffix()
     {
         CpuOnlyTest();
@@ -112,7 +112,7 @@ public abstract partial class CodecsTestBase
         for (int i = fallEnd; i < 64; i++) Equal(0f, w[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisWindow_OverlapAdd_PointwiseSum()
     {
         CpuOnlyTest();
@@ -123,7 +123,7 @@ public abstract partial class CodecsTestBase
         EqualFloats(new[] { 11f, 22f, 33f, 44f }, output);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisWindow_OverlapAdd_LengthMismatch_Throws()
     {
         CpuOnlyTest();
@@ -131,7 +131,7 @@ public abstract partial class CodecsTestBase
             VorbisWindow.OverlapAdd(new float[4], new float[5], new float[4]));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisWindow_Canonical_LengthTooSmall_Throws()
     {
         CpuOnlyTest();

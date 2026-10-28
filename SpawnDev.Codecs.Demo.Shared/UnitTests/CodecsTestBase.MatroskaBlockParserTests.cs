@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
         return body;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void BlockParser_NoLacing_YieldsSingleFrame_PreservesPayload()
     {
         CpuOnlyTest();
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
         True(payload.SequenceEqual(frames[0].Data), "payload bytes must round-trip");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void BlockParser_Timestamp_IsSignedInt16_AddedToCluster()
     {
         CpuOnlyTest();
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         Equal(995L, frames[0].Timestamp);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void BlockParser_Block_NotSimpleBlock_IgnoresKeyframeBit()
     {
         CpuOnlyTest();
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
         False(frames[0].IsKeyframe, "Block (non-simple) must not surface the keyframe bit");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void BlockParser_XiphLacing_ThreeFrames_RoundTrips()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         Equal(2, frames[2].LaceIndex);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void BlockParser_FixedLacing_FourEqualFrames()
     {
         CpuOnlyTest();
@@ -127,7 +127,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void BlockParser_EbmlLacing_DecreasingSizes_RoundTrips()
     {
         CpuOnlyTest();
@@ -166,7 +166,7 @@ public abstract partial class CodecsTestBase
         True(f2.SequenceEqual(frames[2].Data));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void BlockParser_TruncatedBody_Throws()
     {
         CpuOnlyTest();

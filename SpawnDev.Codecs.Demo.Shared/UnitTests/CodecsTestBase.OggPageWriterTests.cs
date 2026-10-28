@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggWriter_SmallPacket_RoundtripsThroughReader()
     {
         CpuOnlyTest();
@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
         EqualBytes(payload, page.Payload);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggWriter_ExactMultipleOf255_NeedsTerminator()
     {
         CpuOnlyTest();
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
         EqualBytes(payload, page.Payload);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggWriter_600BytePacket_SegmentTableHasThreeEntries()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         EqualBytes(payload, page.Payload);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggWriter_ZeroLengthPacket_SingleZeroSegment()
     {
         CpuOnlyTest();
@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
         Equal(0, page.Payload.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggWriter_WriteStream_PacketsAreAssembledBack()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         EqualBytes(packets[2].Data, assembled[2].Data);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggWriter_ReaderRejectsCorruptedWriterOutput()
     {
         CpuOnlyTest();
@@ -116,7 +116,7 @@ public abstract partial class CodecsTestBase
         True(threw, "Writer output with a corrupted payload byte should fail CRC check.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggWriter_EmptyPacketList_Throws()
     {
         CpuOnlyTest();
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OggWriter_RoundtripOpusStream_WritesDecodesTheSameWay()
     {
         CpuOnlyTest();

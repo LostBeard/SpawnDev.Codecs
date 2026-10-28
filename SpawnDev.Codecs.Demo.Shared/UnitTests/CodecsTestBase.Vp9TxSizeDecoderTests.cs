@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TxSizeDecoder_TxModeToBiggest_MatchesLibvpx()
     {
         CpuOnlyTest();
@@ -21,7 +21,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9TxSize.Tx32x32, t[(int)Vp9TxMode.TxModeSelect]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TxSizeDecoder_ForcedMode_ClampsToBlockMax()
     {
         CpuOnlyTest();
@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
             Vp9TxSizeDecoder.ReadTxSize(Vp9TxMode.AllowOnly8x8, max, null, ReadOnlySpan<byte>.Empty));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TxSizeDecoder_ForcedMode_BlockMaxBelowFrameMax()
     {
         CpuOnlyTest();
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
             Vp9TxSizeDecoder.ReadTxSize(Vp9TxMode.Allow32x32, max, null, ReadOnlySpan<byte>.Empty));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TxSizeDecoder_ForcedMode_Only4x4_AlwaysReturns4x4()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
                 null, ReadOnlySpan<byte>.Empty));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TxSizeDecoder_TxModeSelect_4x4Block_FallsThroughToForcedPath()
     {
         CpuOnlyTest();
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
                 null, ReadOnlySpan<byte>.Empty));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TxSizeDecoder_ReadSelected_Picks4x4_FromZeroBit()
     {
         CpuOnlyTest();
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
             Vp9TxSize.Tx32x32, reader, probs));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TxSizeDecoder_ReadSelected_RejectsTx4x4Max()
     {
         CpuOnlyTest();
@@ -88,7 +88,7 @@ public abstract partial class CodecsTestBase
                 new byte[] { 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TxSizeDecoder_ReadSelected_RejectsShortProbs()
     {
         CpuOnlyTest();
@@ -100,7 +100,7 @@ public abstract partial class CodecsTestBase
                 new byte[] { 128, 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TxSizeDecoder_ReadSelected_RejectsNullReader()
     {
         CpuOnlyTest();
@@ -109,7 +109,7 @@ public abstract partial class CodecsTestBase
                 new byte[] { 128, 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TxSizeDecoder_TxModeSelect_RequiresReaderFor8x8Plus()
     {
         CpuOnlyTest();

@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LtpDecoder_CodebookZero_AllGainIndices_RoundTrip()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LtpDecoder_CodebookOne_MixedIndices_RoundTrip()
     {
         CpuOnlyTest();
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
         Equal((sbyte)0, decScale);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LtpDecoder_CodebookTwo_FullRange_RoundTrip()
     {
         CpuOnlyTest();
@@ -97,7 +97,7 @@ public abstract partial class CodecsTestBase
         Equal((sbyte)2, decScale);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LtpDecoder_ConditionalCoding_ScaleIndexForcedToZero()
     {
         CpuOnlyTest();
@@ -118,7 +118,7 @@ public abstract partial class CodecsTestBase
         Equal((sbyte)0, decScale, "scale index should be 0 under conditional coding");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LtpDecoder_TwoSubframes_RoundTrip()
     {
         CpuOnlyTest();
@@ -139,7 +139,7 @@ public abstract partial class CodecsTestBase
         Equal((sbyte)2, decScale);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LtpDecoder_AllThreePerIndices_ThenScale_SequentialStream()
     {
         CpuOnlyTest();
@@ -167,7 +167,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Arg validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LtpDecoder_NullRangeDecoder_Throws()
     {
         CpuOnlyTest();
@@ -176,7 +176,7 @@ public abstract partial class CodecsTestBase
             SilkLtpDecoder.DecodeIndices(ltp, null!, 0, 4, out _, out _));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LtpDecoder_InvalidNbSubfr_Throws()
     {
         CpuOnlyTest();
@@ -188,7 +188,7 @@ public abstract partial class CodecsTestBase
             SilkLtpDecoder.DecodeIndices(ltp, dec, 0, 3, out _, out _));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LtpGainSelector_InvalidIndex_Throws()
     {
         CpuOnlyTest();
@@ -196,7 +196,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => SilkIcdfTables.SelectLtpGain(-1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LtpGainSelector_ReturnsReferenceEquality()
     {
         CpuOnlyTest();

@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameSizeLimits_Constants_MatchSpec()
     {
         CpuOnlyTest();
@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
         Equal(65536, Vp9FrameSizeLimits.MaxHeight);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameSizeLimits_IsValid_TypicalSizes()
     {
         CpuOnlyTest();
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
         Equal(true, Vp9FrameSizeLimits.IsValid(65536, 65536));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameSizeLimits_IsValid_RejectsOutOfRange()
     {
         CpuOnlyTest();
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         Equal(false, Vp9FrameSizeLimits.IsValid(-1, 720));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameSizeLimits_Validate_DoesNotThrowForValid()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         Vp9FrameSizeLimits.Validate(65536, 65536);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameSizeLimits_Validate_ThrowsForInvalid()
     {
         CpuOnlyTest();

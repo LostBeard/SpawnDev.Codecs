@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusOggEncoder_MonoThreeFrames_RoundtripsStructurally()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         Equal(expectedPerChannel, decoded.TotalSamplesPerChannel);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusOggEncoder_UserComments_RoundtripViaDecoder()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
         Equal("TITLE=Analytical Engine", decoded.Tags.UserComments[1]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusOggEncoder_TooManyChannels_Throws()
     {
         CpuOnlyTest();
@@ -102,7 +102,7 @@ public abstract partial class CodecsTestBase
         True(threw, "Output channels > 2 should throw (multi-stream deferred).");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusOggEncoder_EmptyPacketsList_Throws()
     {
         CpuOnlyTest();

@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
         return dest;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InverseTransform_4x4_DctDct_MatchesDirectIht()
     {
         CpuOnlyTest();
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InverseTransform_4x4_AdstAdst_MatchesDirectIht()
     {
         CpuOnlyTest();
@@ -57,7 +57,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InverseTransform_8x8_DctDct_MatchesDirectIht()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 64; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InverseTransform_8x8_AdstDct_MatchesDirectIht()
     {
         CpuOnlyTest();
@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 64; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InverseTransform_16x16_DctDct_MatchesDirectIht()
     {
         CpuOnlyTest();
@@ -99,7 +99,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 256; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InverseTransform_16x16_DctAdst_MatchesDirectIht()
     {
         CpuOnlyTest();
@@ -113,7 +113,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 256; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InverseTransform_32x32_DctDct_MatchesDirectIdct()
     {
         CpuOnlyTest();
@@ -127,7 +127,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 1024; i++) Equal(expected[i], actual[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InverseTransform_32x32_NonDctDct_Throws()
     {
         CpuOnlyTest();
@@ -141,7 +141,7 @@ public abstract partial class CodecsTestBase
             Vp9InverseTransform.Apply(Vp9TxType.AdstAdst, Vp9TxSize.Tx32x32, input, dest, 32));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InverseTransform_UnknownTxSize_Throws()
     {
         CpuOnlyTest();

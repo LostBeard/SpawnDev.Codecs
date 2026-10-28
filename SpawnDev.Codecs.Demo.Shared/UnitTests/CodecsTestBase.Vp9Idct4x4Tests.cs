@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
         return dest;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct4x4_ZeroCoefficients_LeavesPredictorUnchanged()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)128, dest[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct4x4_DcOnlyCoefficient_AppliesUniformResidual()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)132, dest[i]); // 100 + 32
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct4x4_Clips_HighResidualToUpper255()
     {
         CpuOnlyTest();
@@ -72,7 +72,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)255, dest[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct4x4_Clips_NegativeResidualToZero()
     {
         CpuOnlyTest();
@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)0, dest[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct4x4_StridedDest_OnlyTouches4x4Block()
     {
         CpuOnlyTest();
@@ -106,7 +106,7 @@ public abstract partial class CodecsTestBase
                 Equal((byte)77, canvas[row * 16 + col]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct4x4_IsDeterministic_ForRandomInputs()
     {
         CpuOnlyTest();
@@ -129,7 +129,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct4x4_Throws_OnShortInput()
     {
         CpuOnlyTest();
@@ -140,7 +140,7 @@ public abstract partial class CodecsTestBase
         True(threw, "short input must throw");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct4x4_Throws_OnBadStride()
     {
         CpuOnlyTest();

@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         return bytes.ToArray();
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadStreamMarker_Valid()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         Equal(4, bytesRead);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadStreamMarker_Wrong_Throws()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
             FlacMetadataParser.ReadStreamMarker(data, out _));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadStreamMarker_Short_Throws()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
             FlacMetadataParser.ReadStreamMarker(data, out _));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadBlockHeader_Decomposes()
     {
         CpuOnlyTest();
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
         Equal(0x123456, hdr.LengthBytes);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadBlockHeader_NotLast()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
         Equal(0, hdr.LengthBytes);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadStreamInfo_CanonicalFields()
     {
         CpuOnlyTest();
@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)(i + 1), info.Md5Signature[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadStreamInfo_VariableRate_48kHz_Mono_24bit()
     {
         CpuOnlyTest();
@@ -155,7 +155,7 @@ public abstract partial class CodecsTestBase
             Equal((byte)0, info.Md5Signature[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadStreamInfo_TooShort_Throws()
     {
         CpuOnlyTest();
@@ -164,7 +164,7 @@ public abstract partial class CodecsTestBase
             FlacMetadataParser.ReadStreamInfo(data));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadStreamInfo_InvalidSampleRate_Throws()
     {
         CpuOnlyTest();
@@ -183,7 +183,7 @@ public abstract partial class CodecsTestBase
             FlacMetadataParser.ReadStreamInfo(payload));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadStreamInfo_InvalidBitsPerSample_Throws()
     {
         CpuOnlyTest();
@@ -206,7 +206,7 @@ public abstract partial class CodecsTestBase
             FlacMetadataParser.ReadStreamInfo(payload));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadStreamPrelude_SingleStreamInfoBlock()
     {
         CpuOnlyTest();
@@ -218,7 +218,7 @@ public abstract partial class CodecsTestBase
         Equal(4 + 4 + 34, audioOffset); // marker + header + STREAMINFO payload
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadStreamPrelude_MultipleBlocks_StopsAtLast()
     {
         CpuOnlyTest();
@@ -243,7 +243,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)0xFF, arr[audioOffset]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadStreamPrelude_BadMarker_Throws()
     {
         CpuOnlyTest();
@@ -254,7 +254,7 @@ public abstract partial class CodecsTestBase
             FlacMetadataParser.ReadStreamPrelude(data));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadStreamPrelude_FirstBlockNotStreamInfo_Throws()
     {
         CpuOnlyTest();
@@ -267,7 +267,7 @@ public abstract partial class CodecsTestBase
             FlacMetadataParser.ReadStreamPrelude(bytes.ToArray()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacMetadataParser_ReadStreamPrelude_StreamInfoTruncated_Throws()
     {
         CpuOnlyTest();

@@ -150,7 +150,7 @@ public abstract partial class CodecsTestBase
     public Task GifDecoderGpu_WebCompositing_EveryFrameOfEveryFixture_MatchesSpecTruth()
         => GifEveryFrameMatchesAsync(GifCompositing.Web, "web", 430);
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GifDecoderGpu_SomeFixturesDifferBetweenThePillowAndWebTruths()
     {
         CpuOnlyTest();

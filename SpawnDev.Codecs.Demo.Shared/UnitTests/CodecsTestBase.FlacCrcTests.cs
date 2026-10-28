@@ -19,14 +19,14 @@ public abstract partial class CodecsTestBase
 {
     // -------- CRC-8 --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacCrc_Compute8_EmptyInput_IsZero()
     {
         CpuOnlyTest();
         Equal((byte)0x00, InvokeCompute8(Array.Empty<byte>()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacCrc_Compute8_Standard_123456789_IsF4()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)0xF4, InvokeCompute8(input));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacCrc_Compute8_SingleZero_IsZero()
     {
         CpuOnlyTest();
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)0x00, InvokeCompute8(new byte[] { 0x00 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacCrc_Compute8_Deterministic()
     {
         CpuOnlyTest();
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
         Equal(a, b);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacCrc_Compute8_InputSensitive()
     {
         CpuOnlyTest();
@@ -67,14 +67,14 @@ public abstract partial class CodecsTestBase
 
     // -------- CRC-16 --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacCrc_Compute16_EmptyInput_IsZero()
     {
         CpuOnlyTest();
         Equal((ushort)0x0000, InvokeCompute16(Array.Empty<byte>()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacCrc_Compute16_Standard_123456789_IsFEE8()
     {
         CpuOnlyTest();
@@ -83,14 +83,14 @@ public abstract partial class CodecsTestBase
         Equal((ushort)0xFEE8, InvokeCompute16(input));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacCrc_Compute16_SingleZero_IsZero()
     {
         CpuOnlyTest();
         Equal((ushort)0x0000, InvokeCompute16(new byte[] { 0x00 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacCrc_Compute16_Deterministic()
     {
         CpuOnlyTest();
@@ -100,7 +100,7 @@ public abstract partial class CodecsTestBase
         Equal(a, b);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacCrc_Compute16_InputSensitive()
     {
         CpuOnlyTest();

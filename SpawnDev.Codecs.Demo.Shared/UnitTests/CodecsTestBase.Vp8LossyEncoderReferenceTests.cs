@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
 {
     private const string WebPLossyEncPrefix = "SpawnDev.Codecs.Demo.Shared.TestData.WebPLossyEnc.";
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8LossyEncoderReference_AllFixtures_ByteIdenticalWithLibwebp()
     {
         CpuOnlyTest();

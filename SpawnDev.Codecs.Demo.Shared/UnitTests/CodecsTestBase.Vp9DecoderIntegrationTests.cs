@@ -51,7 +51,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9Decoder_DecodesBigBuckBunny_ReportsCorrectDimensions()
     {
         CpuOnlyTest();
@@ -78,7 +78,7 @@ public abstract partial class CodecsTestBase
         True(sink.Frames.Count > 0, $"decoder emitted no frames after {packetsFed} packets");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9Decoder_DecodesBigBuckBunny_EmittedFramesHaveCorrectPlaneSizes()
     {
         CpuOnlyTest();
@@ -109,7 +109,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9Decoder_FirstFrameIsKeyframe_LearnsDimensions()
     {
         CpuOnlyTest();
@@ -143,7 +143,7 @@ public abstract partial class CodecsTestBase
         Equal(180, decoder.LastFrameHeader.FrameHeight);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9Decoder_BbbStream_CumulativeStatsMatchObservedTotals()
     {
         CpuOnlyTest();
@@ -175,7 +175,7 @@ public abstract partial class CodecsTestBase
             $"expected many inter frames; saw NonKey={ftCounts.GetValueOrDefault(Vp9FrameType.NonKey, 0)}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9Decoder_BbbFirstFrame_FirstPartitionDecisionDecodes()
     {
         CpuOnlyTest();
@@ -212,7 +212,7 @@ public abstract partial class CodecsTestBase
             $"partition {partition} out of valid range");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9Decoder_BbbFirstFrame_BoolDecoderInitializesOverTile()
     {
         CpuOnlyTest();
@@ -244,7 +244,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 100; i++) br.Read(defaultPartProb);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9Decoder_RejectsNullSink()
     {
         CpuOnlyTest();
@@ -256,7 +256,7 @@ public abstract partial class CodecsTestBase
         True(threw, "expected ArgumentNullException for null sink");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9Decoder_FirstFrame_PlaneSizesMatchFfmpegGroundTruth()
     {
         CpuOnlyTest();
@@ -304,7 +304,7 @@ public abstract partial class CodecsTestBase
         Equal(gtBytes.Length, snap.Y.Length + snap.U.Length + snap.V.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9Decoder_DecodesEntireStream_NoExceptions()
     {
         CpuOnlyTest();

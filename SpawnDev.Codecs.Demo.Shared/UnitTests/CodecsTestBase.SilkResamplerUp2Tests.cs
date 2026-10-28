@@ -12,7 +12,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerUp2_8To16_ZeroInput_ProducesZeroOutput()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < output.Length; i++) Equal((short)0, output[i], $"output[{i}]");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerUp2_8To16_OutputCountIsDouble()
     {
         CpuOnlyTest();
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
         True(nonZero > output.Length / 4, $"Expected many non-zero outputs, got {nonZero}/{output.Length}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerUp2_8To16_DcInput_ProducesBoundedDcOutput()
     {
         CpuOnlyTest();
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerUp2_8To16_StateCarriesAcrossCalls()
     {
         CpuOnlyTest();
@@ -114,7 +114,7 @@ public abstract partial class CodecsTestBase
         True(jump < 2500, $"Batch-boundary jump too large: {jump}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerUp2_12To24_AlsoDispatchesAndProducesDoubleCount()
     {
         CpuOnlyTest();

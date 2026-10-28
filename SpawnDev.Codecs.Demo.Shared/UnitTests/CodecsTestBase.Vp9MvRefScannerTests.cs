@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefScanner_NoNeighbors_LeavesResultEmpty()
     {
         CpuOnlyTest();
@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         Equal(0, result.ForRef(Vp9MvReferenceFrame.AltRef).Count);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefScanner_IntraNeighbors_LeaveResultEmpty()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         Equal(0, result.ForRef(Vp9MvReferenceFrame.Last).Count);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefScanner_InterNeighbors_PopulatesByRef()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
         Equal(0, result.ForRef(Vp9MvReferenceFrame.Golden).Count);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefScanner_CompoundNeighbor_PopulatesBothRefs()
     {
         CpuOnlyTest();
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
         Equal(new Vp9Mv(2, -3), result.ForRef(Vp9MvReferenceFrame.Golden)[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefScanner_OutOfBoundsNeighbors_Skipped()
     {
         CpuOnlyTest();
@@ -135,7 +135,7 @@ public abstract partial class CodecsTestBase
         Equal(true, callCount < 8);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefScanner_RejectsNullMiAt()
     {
         CpuOnlyTest();
@@ -144,7 +144,7 @@ public abstract partial class CodecsTestBase
                 new Vp9MvRefCandidatesByRef()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefScanner_RejectsNullResult()
     {
         CpuOnlyTest();

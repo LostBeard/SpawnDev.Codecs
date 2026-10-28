@@ -10,14 +10,14 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DefaultCoefProbs4x4_HasCorrect432EntryLength()
     {
         CpuOnlyTest();
         Equal(432, Vp9CoefProbs.DefaultCoefProbs4x4.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DefaultCoefProbs4x4_PinnedFirstEntries_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)71,  p[Vp9CoefProbs.Index4x4(0, 0, 0, 2, 2)]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DefaultCoefProbs4x4_Band0Ctx3To5_AreZeroPadded()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DefaultCoefProbs4x4_PinnedBand1FirstContext_MatchesLibvpx()
     {
         CpuOnlyTest();
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)169, p[Vp9CoefProbs.Index4x4(0, 0, 1, 0, 2)]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DefaultCoefProbs4x4_PinnedUVInterBand5Last_MatchesLibvpx()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)61, p[431]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DefaultCoefProbs4x4_Index4x4_IsConsistentWithRowMajorMath()
     {
         CpuOnlyTest();

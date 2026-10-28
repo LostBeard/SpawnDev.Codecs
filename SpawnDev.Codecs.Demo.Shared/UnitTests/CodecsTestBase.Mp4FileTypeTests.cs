@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         return bytes;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mp4Ftyp_IsomBrand_WithCompatibles_Parses()
     {
         CpuOnlyTest();
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
         Equal("mp41", ftyp.CompatibleBrands[3]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mp4Ftyp_Av01Brand_Parses()
     {
         CpuOnlyTest();
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
         Equal(3, ftyp.CompatibleBrands.Count);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mp4Ftyp_NoCompatibleBrands_Parses()
     {
         CpuOnlyTest();
@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
         Equal(0, ftyp.CompatibleBrands.Count);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mp4Ftyp_WrongBoxType_Throws()
     {
         CpuOnlyTest();
@@ -92,7 +92,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mp4Ftyp_TooSmall_Throws()
     {
         CpuOnlyTest();

@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
         };
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacReadAllBlocks_StreamInfoOnly_ReturnsNullOptionals()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         Equal(4 + 4 + 34, blocks.AudioStartOffset);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacReadAllBlocks_StreamInfoPlusVorbisComment_Parses()
     {
         CpuOnlyTest();
@@ -88,7 +88,7 @@ public abstract partial class CodecsTestBase
         Equal("TITLE=Final Frontier", blocks.VorbisComment.UserComments[1]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacReadAllBlocks_StreamInfoPlusSeekTable_Parses()
     {
         CpuOnlyTest();
@@ -127,7 +127,7 @@ public abstract partial class CodecsTestBase
         Equal(64UL, blocks.SeekTable.Points[1].SampleNumber);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacReadAllBlocks_StreamInfoPlusCommentAndSeek_Both()
     {
         CpuOnlyTest();

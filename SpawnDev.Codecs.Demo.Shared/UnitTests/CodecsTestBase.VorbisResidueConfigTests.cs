@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
         return VorbisResidueConfigParser.Parse(ref r, type);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisResidue_Type0_SingleClassification_SinglePass_Parses()
     {
         CpuOnlyTest();
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
         Equal(-1, cfg.Books[0][7]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisResidue_Type1_MultipleCascadePasses()
     {
         CpuOnlyTest();
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
         Equal(12, cfg.Books[0][3]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisResidue_Type2_MultipleClassifications()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         Equal(31, cfg.Books[1][2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisResidue_InvalidType_Throws()
     {
         CpuOnlyTest();
@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisResidue_EndBeforeBegin_Throws()
     {
         CpuOnlyTest();
@@ -131,7 +131,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisResidue_CascadeZero_NoBooksRead()
     {
         CpuOnlyTest();

@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompoundReferenceMode_LastGoldenAgree_AltRefIsFixed()
     {
         CpuOnlyTest();
@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9MvReferenceFrame.Golden, mode.VarRef1);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompoundReferenceMode_LastGoldenAgree_BothBiased_AltRefIsFixed()
     {
         CpuOnlyTest();
@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9MvReferenceFrame.Golden, mode.VarRef1);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompoundReferenceMode_LastAltRefAgree_GoldenIsFixed()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9MvReferenceFrame.AltRef, mode.VarRef1);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompoundReferenceMode_GoldenAltRefAgree_LastIsFixed()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9MvReferenceFrame.AltRef, mode.VarRef1);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompoundReferenceMode_AllSame_FallsThroughToLastGoldenAgree()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9MvReferenceFrame.AltRef, allTrue.FixedRef);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompoundReferenceMode_RecordEquality()
     {
         CpuOnlyTest();

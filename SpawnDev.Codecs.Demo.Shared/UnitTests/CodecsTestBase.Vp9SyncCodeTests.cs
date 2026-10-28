@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SyncCode_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -18,7 +18,7 @@ public abstract partial class CodecsTestBase
         Equal(3, Vp9SyncCode.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SyncCode_AsArray_ReturnsThreeBytes()
     {
         CpuOnlyTest();
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)0x42, arr[2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SyncCode_Matches_TrueForExactSequence()
     {
         CpuOnlyTest();
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         Equal(true, Vp9SyncCode.Matches(data, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SyncCode_Matches_FalseForWrongFirstByte()
     {
         CpuOnlyTest();
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
         Equal(false, Vp9SyncCode.Matches(data, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SyncCode_Matches_FalseForTruncated()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         Equal(false, Vp9SyncCode.Matches(data, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SyncCode_Matches_TrueAtNonZeroOffset()
     {
         CpuOnlyTest();
@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
         Equal(true, Vp9SyncCode.Matches(data, 2));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SyncCode_Matches_FalseWhenOffsetPastEnd()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         Equal(false, Vp9SyncCode.Matches(data, 1)); // not enough bytes after offset 1
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SyncCode_Matches_RejectsNegativeOffset()
     {
         CpuOnlyTest();

@@ -9,7 +9,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefProbs_CatProbs_HaveCorrectLengthsAndPinnedValues()
     {
         CpuOnlyTest();
@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)129, Vp9CoefProbs.Cat6ProbHigh12[17]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefProbs_Pareto8Full_HasCorrectShape()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         Equal(8,   Vp9CoefProbs.Pareto8Full.GetLength(1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefProbs_Pareto8Full_PinnedFirstAndLastRows()
     {
         CpuOnlyTest();
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)255, Vp9CoefProbs.Pareto8Full[254, 7]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefProbs_Pareto8Full_AllValuesInValidRange()
     {
         CpuOnlyTest();

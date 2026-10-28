@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
         Equal(17, dec.EndBand);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void CeltDecoder_NullMode_Throws()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
             dec.DecodePacket(new byte[] { 0xF8, 0, 0 }, new float[960], 960));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_CeltPacket_ProducesValidPcm()
     {
         CpuOnlyTest();

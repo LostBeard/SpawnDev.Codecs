@@ -12,7 +12,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Sigmoid_InputZero_ReturnsHalf()
     {
         CpuOnlyTest();
@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
         Equal(16384, SilkSigmoid.silk_sigm_Q15(0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Sigmoid_ExactLutPoints_MatchTable()
     {
         CpuOnlyTest();
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Sigmoid_LargePositive_ClipsTo32767()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         Equal(32767, SilkSigmoid.silk_sigm_Q15(int.MaxValue));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Sigmoid_LargeNegative_ClipsToZero()
     {
         CpuOnlyTest();
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
         Equal(0, SilkSigmoid.silk_sigm_Q15(int.MinValue + 1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Sigmoid_NearlyMonotonic_AcrossRange()
     {
         CpuOnlyTest();
@@ -78,7 +78,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Sigmoid_MidpointPositive_ExactInterpolation()
     {
         CpuOnlyTest();
@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
         Equal(16384 + 237 * 16, SilkSigmoid.silk_sigm_Q15(16));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Sigmoid_MidpointNegative_ExactInterpolation()
     {
         CpuOnlyTest();
@@ -100,7 +100,7 @@ public abstract partial class CodecsTestBase
         Equal(16384 - 237 * 16, SilkSigmoid.silk_sigm_Q15(-16));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Sigmoid_ApproximateSymmetryAroundOrigin()
     {
         CpuOnlyTest();

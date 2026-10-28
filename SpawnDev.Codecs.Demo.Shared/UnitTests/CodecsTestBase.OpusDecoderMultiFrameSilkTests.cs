@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
         return packet;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_Nb40Ms_TwoInternalFrames_DecodesCorrectTotalSamples()
     {
         CpuOnlyTest();
@@ -108,7 +108,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_Wb60Ms_ThreeInternalFrames_DecodesCorrectTotalSamples()
     {
         CpuOnlyTest();
@@ -139,7 +139,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusDecoder_Mb40Ms_TwoInternalFrames_AtNative12kHz()
     {
         CpuOnlyTest();

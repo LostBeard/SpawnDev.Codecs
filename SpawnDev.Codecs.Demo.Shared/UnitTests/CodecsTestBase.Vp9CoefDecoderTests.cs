@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,
     };
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefDecoder_DecodeOne_EobBranchReturnsEobZeroValue()
     {
         CpuOnlyTest();
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
         Equal(0, r.Value);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefDecoder_DecodeOne_ZeroBranchReturnsZeroToken()
     {
         CpuOnlyTest();
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
         Equal(0, r.Value);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefDecoder_DecodeOne_OneBranchPositive_ReturnsPlusOne()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         Equal(1, r.Value);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefDecoder_DecodeOne_OneBranchNegative_ReturnsMinusOne()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
         Equal(-1, r.Value);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefDecoder_DecodeOne_TwoBranch_PositiveAndNegative()
     {
         CpuOnlyTest();
@@ -88,7 +88,7 @@ public abstract partial class CodecsTestBase
         Equal(-2, rn.Value);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefDecoder_DecodeOne_ThreeAndFourBranches()
     {
         CpuOnlyTest();
@@ -105,7 +105,7 @@ public abstract partial class CodecsTestBase
         Equal(-4, rf.Value);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefDecoder_DecodeOne_Category1_BothMagnitudes()
     {
         CpuOnlyTest();
@@ -125,7 +125,7 @@ public abstract partial class CodecsTestBase
         Equal(-6, r6.Value);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefDecoder_DecodeOne_Category6_LargeMagnitudeProducesExpectedValue()
     {
         CpuOnlyTest();
@@ -151,7 +151,7 @@ public abstract partial class CodecsTestBase
         Equal(67 + 16383, r.Value); // 16450
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefDecoder_DecodeOne_RejectsUndersizedProbsVector()
     {
         CpuOnlyTest();

@@ -8,35 +8,35 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanPicker_ScanTypeForTxType_DctDct_IsDefault()
     {
         CpuOnlyTest();
         Equal(Vp9ScanType.Default, Vp9ScanTables.ScanTypeForTxType(Vp9TxType.DctDct));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanPicker_ScanTypeForTxType_AdstDct_IsRow()
     {
         CpuOnlyTest();
         Equal(Vp9ScanType.Row, Vp9ScanTables.ScanTypeForTxType(Vp9TxType.AdstDct));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanPicker_ScanTypeForTxType_DctAdst_IsCol()
     {
         CpuOnlyTest();
         Equal(Vp9ScanType.Col, Vp9ScanTables.ScanTypeForTxType(Vp9TxType.DctAdst));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanPicker_ScanTypeForTxType_AdstAdst_IsDefault()
     {
         CpuOnlyTest();
         Equal(Vp9ScanType.Default, Vp9ScanTables.ScanTypeForTxType(Vp9TxType.AdstAdst));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanPicker_GetIntraScan_DcPred_4x4_DefaultScan()
     {
         CpuOnlyTest();
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
         Equal(true, ReferenceEquals(Vp9ScanTables.DefaultScan4x4, scan));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanPicker_GetIntraScan_VPred_4x4_RowScan()
     {
         CpuOnlyTest();
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
         Equal(true, ReferenceEquals(Vp9ScanTables.RowScan4x4, scan));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanPicker_GetIntraScan_HPred_4x4_ColScan()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         Equal(true, ReferenceEquals(Vp9ScanTables.ColScan4x4, scan));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanPicker_GetIntraScan_TmPred_8x8_DefaultScan()
     {
         CpuOnlyTest();
@@ -72,7 +72,7 @@ public abstract partial class CodecsTestBase
         Equal(true, ReferenceEquals(Vp9ScanTables.DefaultScan8x8, scan));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanPicker_GetIntraScan_VPred_16x16_RowScan()
     {
         CpuOnlyTest();
@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
         Equal(true, ReferenceEquals(Vp9ScanTables.RowScan16x16, scan));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanPicker_GetIntraScan_32x32_AlwaysDefault()
     {
         CpuOnlyTest();
@@ -95,7 +95,7 @@ public abstract partial class CodecsTestBase
             Vp9ScanTables.GetIntraScan(Vp9TxSize.Tx32x32, Vp9IntraMode.TmPred)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanPicker_GetIntraScan_RejectsOutOfRangeMode()
     {
         CpuOnlyTest();

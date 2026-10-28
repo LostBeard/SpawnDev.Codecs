@@ -17,7 +17,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompleteUncompressedHeader_BbbFirstKeyframe_ParsesAllFields()
     {
         CpuOnlyTest();
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
             $"must not exceed frame length {firstFrame.Length}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompleteUncompressedHeader_AllVisibleBbbFrames_ParseWithoutThrowing()
     {
         CpuOnlyTest();
@@ -108,7 +108,7 @@ public abstract partial class CodecsTestBase
         True(interFrames >= 1, "fixture must contain at least one inter frame");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompleteUncompressedHeader_FirstPartitionSize_FitsInFrame()
     {
         CpuOnlyTest();

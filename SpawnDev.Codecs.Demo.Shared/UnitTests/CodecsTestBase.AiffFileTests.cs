@@ -11,7 +11,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Aiff_Write_Read_16Bit_Mono_Roundtrips()
     {
         CpuOnlyTest();
@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
         EqualInts(samples, parsed.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Aiff_Write_Read_24Bit_Stereo_Roundtrips()
     {
         CpuOnlyTest();
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
         EqualInts(samples, parsed.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Aiff_Write_Read_8Bit_Roundtrips()
     {
         CpuOnlyTest();
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
         EqualInts(samples, parsed.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Aiff_Write_Read_32Bit_Roundtrips()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         EqualInts(samples, parsed.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Aiff_ExtendedFloat_SampleRate_RoundsCorrectly()
     {
         CpuOnlyTest();
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Aiff_BadForm_Throws()
     {
         CpuOnlyTest();
@@ -86,7 +86,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Aiff_NonAlignedSize_Throws()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Aiff_ToFlacToAiff_RoundtripsLosslessly()
     {
         CpuOnlyTest();
@@ -113,7 +113,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, reparsed.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Aiff_5Channels_Roundtrips()
     {
         CpuOnlyTest();

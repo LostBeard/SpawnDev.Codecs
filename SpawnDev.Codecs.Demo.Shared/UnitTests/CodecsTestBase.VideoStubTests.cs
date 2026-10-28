@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp8Decoder_Codec_IsVp8()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         Equal(VideoCodec.Vp8, dec.Codec);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9Decoder_Codec_IsVp9()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         Equal(VideoCodec.Vp9, dec.Codec);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Av1Decoder_Codec_IsAv1()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         Equal(VideoCodec.Av1, dec.Codec);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp8Decoder_DecodesOwnEncoderKeyframe()
     {
         CpuOnlyTest();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
         True(Math.Abs(mean - 128) <= 8);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp8Decoder_InterFrame_ThrowsDescriptive()
     {
         CpuOnlyTest();
@@ -116,7 +116,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Vp9Decoder_DecodesOwnEncoderKeyframe()
     {
         CpuOnlyTest();
@@ -145,7 +145,7 @@ public abstract partial class CodecsTestBase
         True(Math.Abs(mean - 128) <= 4);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public async Task Av1Decoder_DecodesOwnEncoderKeyframe()
     {
         CpuOnlyTest();

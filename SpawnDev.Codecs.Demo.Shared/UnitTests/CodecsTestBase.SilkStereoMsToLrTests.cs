@@ -11,7 +11,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StereoMsToLr_ConstantMidZeroSide_ConvergesToMidOnBothChannels()
     {
         CpuOnlyTest();
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StereoMsToLr_ZeroMidChannel_SideOnly_ProducesMirroredLR()
     {
         CpuOnlyTest();
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StereoMsToLr_StateCarriesAcrossFrames()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
         Equal(400, state.PredPrevQ13[1]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StereoMsToLr_Reset_ClearsAllState()
     {
         CpuOnlyTest();
@@ -120,7 +120,7 @@ public abstract partial class CodecsTestBase
         Equal(0, state.PredPrevQ13[1]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StereoMsToLr_NullState_Throws()
     {
         CpuOnlyTest();
@@ -130,7 +130,7 @@ public abstract partial class CodecsTestBase
             SilkStereoMsToLr.Apply(null!, x1, x2, new int[] { 0, 0 }, 8, 160));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StereoMsToLr_UndersizedBuffers_Throw()
     {
         CpuOnlyTest();

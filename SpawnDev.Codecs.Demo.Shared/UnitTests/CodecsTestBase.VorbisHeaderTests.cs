@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Ident header tests --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisIdent_Canonical_StereoFullband_Parses()
     {
         CpuOnlyTest();
@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
         Equal(2048, h.BlockSize1); // 2^11
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisIdent_FreqAtNarrowband_Parses()
     {
         CpuOnlyTest();
@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
         Equal(8192, h.BlockSize1);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisIdent_WrongVersion_Throws()
     {
         CpuOnlyTest();
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisIdent_ZeroChannels_Throws()
     {
         CpuOnlyTest();
@@ -95,7 +95,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisIdent_Bs0LargerThanBs1_Throws()
     {
         CpuOnlyTest();
@@ -106,7 +106,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisIdent_FramingFlagClear_Throws()
     {
         CpuOnlyTest();
@@ -117,7 +117,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisIdent_WrongPacketType_Throws()
     {
         CpuOnlyTest();
@@ -129,7 +129,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisIdent_BadMagic_Throws()
     {
         CpuOnlyTest();
@@ -143,7 +143,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Comment header tests --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisComment_VendorAndThreeComments_Parses()
     {
         CpuOnlyTest();
@@ -158,7 +158,7 @@ public abstract partial class CodecsTestBase
         Equal("ALBUM=Phase 1a", h.UserComments[2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisComment_Utf8Content_RoundTrips()
     {
         CpuOnlyTest();
@@ -171,7 +171,7 @@ public abstract partial class CodecsTestBase
         Equal(comments[1], h.UserComments[1]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisComment_EmptyCommentList_Parses()
     {
         CpuOnlyTest();
@@ -181,7 +181,7 @@ public abstract partial class CodecsTestBase
         Equal(0, h.UserComments.Count);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisComment_FramingFlagOptional_ForNonVorbisUsers()
     {
         CpuOnlyTest();
@@ -192,7 +192,7 @@ public abstract partial class CodecsTestBase
         Equal("A=1", h.UserComments[0]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisComment_WrongPacketType_Throws()
     {
         CpuOnlyTest();
@@ -204,7 +204,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisComment_BadMagic_Throws()
     {
         CpuOnlyTest();

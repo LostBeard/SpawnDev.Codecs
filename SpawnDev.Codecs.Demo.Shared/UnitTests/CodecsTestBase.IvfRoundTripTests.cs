@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
         return ms.ToArray();
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IvfRoundTrip_EmptyStream_ReadsHeaderOnly()
     {
         CpuOnlyTest();
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         Equal(0, frameCount);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IvfRoundTrip_SingleFrame_RecoversBytes()
     {
         CpuOnlyTest();
@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
             $"payload mismatch: expected {payload.Length}B, got {frames[0].Data.Length}B");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IvfRoundTrip_MultipleFrames_PreservesPtsOrder()
     {
         CpuOnlyTest();
@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IvfRoundTrip_LargeFrame_RecoversBytes()
     {
         CpuOnlyTest();
@@ -104,7 +104,7 @@ public abstract partial class CodecsTestBase
         True(frames[0].Data.Span.SequenceEqual(payload), "large payload mismatch");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IvfRoundTrip_ZeroLengthFrame_ReadsAsZeroBytes()
     {
         CpuOnlyTest();
@@ -125,7 +125,7 @@ public abstract partial class CodecsTestBase
         Equal(2, frames[2].Data.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IvfRoundTrip_FourCcVariants_AllAccepted()
     {
         CpuOnlyTest();
@@ -140,7 +140,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IvfRoundTrip_FrameRateAndTimeScale_Preserved()
     {
         CpuOnlyTest();
@@ -151,7 +151,7 @@ public abstract partial class CodecsTestBase
         Equal(1001u, hdr.TimeScale);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IvfRoundTrip_FrameCountPatchedByFinish()
     {
         CpuOnlyTest();

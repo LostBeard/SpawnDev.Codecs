@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
 
     // -------- BitReader unit tests ----------------------------------------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BitReader_ReadsMsbFirst_AcrossByteBoundaries()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
         Equal(0, r.BitsRemaining);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BitReader_ReadsZeroBits_ReturnsZero()
     {
         CpuOnlyTest();
@@ -110,7 +110,7 @@ public abstract partial class CodecsTestBase
         Equal(8, r.BitsRemaining);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9BitReader_ReadingPastEnd_Throws()
     {
         CpuOnlyTest();
@@ -123,7 +123,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Frame-header parse: synthetic ------------------------------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameHeader_Parse_Profile0_Keyframe_640x480()
     {
         CpuOnlyTest();
@@ -145,7 +145,7 @@ public abstract partial class CodecsTestBase
         Equal(0, h.RenderHeight);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameHeader_Parse_Profile0_Keyframe_1920x1080()
     {
         CpuOnlyTest();
@@ -155,7 +155,7 @@ public abstract partial class CodecsTestBase
         Equal(1080, h.FrameHeight);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameHeader_Parse_InvalidFrameMarker_Throws()
     {
         CpuOnlyTest();
@@ -166,7 +166,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameHeader_Parse_ShowExistingFrame_EarlyReturns()
     {
         CpuOnlyTest();
@@ -183,7 +183,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9ColorSpace.Unknown, h.ColorSpace);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameHeader_Parse_EmptyBuffer_Throws()
     {
         CpuOnlyTest();
@@ -195,7 +195,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Frame-header parse: real-world integration -----------------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameHeader_Parse_BigBuckBunny_KeyframesHaveConsistentDimensions()
     {
         CpuOnlyTest();
@@ -237,7 +237,7 @@ public abstract partial class CodecsTestBase
         True(keyframesSeen >= 1, "expected at least one keyframe in the fixture");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameHeader_Parse_BigBuckBunny_ProfileIsZero_BitDepthEight()
     {
         CpuOnlyTest();

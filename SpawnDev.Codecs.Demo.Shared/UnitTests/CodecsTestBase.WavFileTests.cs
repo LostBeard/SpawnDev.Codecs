@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Wav_Write_Read_16Bit_Mono_Roundtrips()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         EqualInts(samples, parsed.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Wav_Write_Read_16Bit_Stereo_Roundtrips()
     {
         CpuOnlyTest();
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         EqualInts(samples, parsed.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Wav_Write_Read_24Bit_Roundtrips()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         EqualInts(samples, parsed.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Wav_Write_Read_32Bit_Roundtrips()
     {
         CpuOnlyTest();
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
         EqualInts(samples, parsed.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Wav_Write_Read_8Bit_UnsignedOffset()
     {
         CpuOnlyTest();
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
         EqualInts(samples, parsed.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Wav_Write_Read_8Channels()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
         EqualInts(samples, parsed.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Wav_Write_NonAlignedSize_Throws()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
         True(threw, "Odd count with 2 channels should throw.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Wav_Read_BadRiff_Throws()
     {
         CpuOnlyTest();
@@ -113,7 +113,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Wav_Read_MissingFmt_Throws()
     {
         CpuOnlyTest();
@@ -131,7 +131,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Wav_WavToFlacToWav_RoundtripsLosslessly()
     {
         CpuOnlyTest();
@@ -150,7 +150,7 @@ public abstract partial class CodecsTestBase
         EqualInts(input, finalWav.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Wav_SkipsUnknownChunks()
     {
         CpuOnlyTest();

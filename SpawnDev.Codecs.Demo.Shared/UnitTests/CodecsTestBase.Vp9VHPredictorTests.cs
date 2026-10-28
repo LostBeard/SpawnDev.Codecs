@@ -9,7 +9,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9VHPredictor_VPredict_4x4_CopiesAboveToEveryRow()
     {
         CpuOnlyTest();
@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9VHPredictor_VPredict_8x8_AllSamplesAtFullRange()
     {
         CpuOnlyTest();
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
             Equal(above[col], dst[row * 8 + col]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9VHPredictor_HPredict_4x4_ReplicatesLeftColumnAcrossRow()
     {
         CpuOnlyTest();
@@ -51,7 +51,7 @@ public abstract partial class CodecsTestBase
             Equal(left[row], dst[row * 4 + col]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9VHPredictor_HPredict_16x16_FlatLeftAtBoundaryValues()
     {
         CpuOnlyTest();
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
             Equal(left[row], dst[row * 16 + col]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9VHPredictor_VPredict_32x32_StridedDest_OnlyTouchesBlock()
     {
         CpuOnlyTest();
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9VHPredictor_HPredict_8x8_WithLargeStride_DoesNotOverwriteOutOfBlock()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9VHPredictor_RejectsInvalidSize()
     {
         CpuOnlyTest();
@@ -113,7 +113,7 @@ public abstract partial class CodecsTestBase
             Vp9VHPredictor.HPredict(new byte[5], new byte[25], n: 5, stride: 5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9VHPredictor_RejectsTooSmallEdgeSpans()
     {
         CpuOnlyTest();

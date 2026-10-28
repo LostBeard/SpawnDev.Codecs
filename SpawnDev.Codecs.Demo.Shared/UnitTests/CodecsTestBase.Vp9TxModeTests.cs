@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
         return _ => values[idx++];
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TxMode_EnumValuesMatchLibvpxOrdering()
     {
         CpuOnlyTest();
@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)4, (byte)Vp9TxMode.TxModeSelect);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_ReadTxMode_LosslessForcesOnly4x4()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9TxMode.Only4x4, mode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_ReadTxMode_LiteralZeroProducesOnly4x4()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9TxMode.Only4x4, mode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_ReadTxMode_LiteralOneProducesAllowOnly8x8()
     {
         CpuOnlyTest();
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9TxMode.AllowOnly8x8, mode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_ReadTxMode_LiteralTwoProducesAllowOnly16x16()
     {
         CpuOnlyTest();
@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9TxMode.AllowOnly16x16, mode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_ReadTxMode_LiteralThreeWithExtensionZeroProducesAllow32x32()
     {
         CpuOnlyTest();
@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9TxMode.Allow32x32, mode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_ReadTxMode_LiteralThreeWithExtensionOneProducesTxModeSelect()
     {
         CpuOnlyTest();
@@ -93,7 +93,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9TxMode.TxModeSelect, mode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CompressedHeader_ReadTxMode_BoolDecoderOverload_AllZeroBufferProducesOnly4x4()
     {
         CpuOnlyTest();

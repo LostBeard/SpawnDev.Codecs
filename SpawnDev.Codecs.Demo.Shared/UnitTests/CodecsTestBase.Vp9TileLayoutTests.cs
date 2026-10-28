@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileLayout_MiBlockSize_Is8()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(8, Vp9TileLayout.MiBlockSize);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileLayout_MiAligned_RoundsUpToMultipleOf8()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         Equal(80, Vp9TileLayout.MiAlignedToSb(73));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileLayout_GetTileOffset_SingleTile_FullFrame()
     {
         CpuOnlyTest();
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         Equal(64, Vp9TileLayout.GetTileOffset(1, 64, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileLayout_GetTileOffset_TwoTiles_HalfEach()
     {
         CpuOnlyTest();
@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
         Equal(64, Vp9TileLayout.GetTileOffset(2, 64, 1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileLayout_GetTileOffset_NonAlignedFrame_ClampsToMis()
     {
         CpuOnlyTest();
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
         Equal(73, Vp9TileLayout.GetTileOffset(2, 73, 1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileLayout_Compute_FullFrame_OneTileBounds()
     {
         CpuOnlyTest();
@@ -72,7 +72,7 @@ public abstract partial class CodecsTestBase
         Equal(64, bounds.MiWidth);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileLayout_Compute_4ColumnTiles()
     {
         CpuOnlyTest();
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
         Equal(48, t3.MiColStart); Equal(64, t3.MiColEnd);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileLayout_Compute_RejectsNegativeMis()
     {
         CpuOnlyTest();
@@ -95,7 +95,7 @@ public abstract partial class CodecsTestBase
             Vp9TileLayout.GetTileOffset(0, -1, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileLayout_Compute_RejectsNegativeLog2()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
             Vp9TileLayout.GetTileOffset(0, 64, -1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileLayout_TileWidthConstants()
     {
         CpuOnlyTest();
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
         Equal(64, Vp9TileLayout.MaxTileWidthSb);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileLayout_Log2TileColsBounds_SmallFrame_BothZero()
     {
         CpuOnlyTest();
@@ -122,7 +122,7 @@ public abstract partial class CodecsTestBase
         Equal(0, max);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileLayout_Log2TileColsBounds_HD()
     {
         CpuOnlyTest();
@@ -134,7 +134,7 @@ public abstract partial class CodecsTestBase
         Equal(2, max);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileLayout_Log2TileColsBounds_VeryWide()
     {
         CpuOnlyTest();
@@ -146,7 +146,7 @@ public abstract partial class CodecsTestBase
         Equal(8, max);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9TileLayout_Log2TileColsBounds_RejectsNegativeMis()
     {
         CpuOnlyTest();

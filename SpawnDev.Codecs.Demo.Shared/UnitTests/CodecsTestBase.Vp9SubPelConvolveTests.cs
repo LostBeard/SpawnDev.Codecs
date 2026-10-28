@@ -8,14 +8,14 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_FilterBits_Is7()
     {
         CpuOnlyTest();
         Equal(7, Vp9SubPelConvolve.FilterBits);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_Identity_PassesCenter()
     {
         CpuOnlyTest();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
             src, 0, Vp9InterpFilter.EightTap, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_Bilinear_HalfPel_AveragesCenters()
     {
         CpuOnlyTest();
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
             src, 0, Vp9InterpFilter.Bilinear, 8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_Constant_PreservedAcrossAllSubPel()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_Identity_AllZerosReturnZero()
     {
         CpuOnlyTest();
@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
             src, 0, Vp9InterpFilter.EightTap, 8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_Identity_AllMaxReturnMax()
     {
         CpuOnlyTest();
@@ -86,7 +86,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_Clamps_NegativeOvershoot()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
             src, 0, Vp9InterpFilter.EightTap, 1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_Clamps_PositiveOvershoot()
     {
         CpuOnlyTest();
@@ -114,7 +114,7 @@ public abstract partial class CodecsTestBase
             src, 0, Vp9InterpFilter.EightTapSharp, 8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_RejectsBadFilterRowLength()
     {
         CpuOnlyTest();
@@ -123,7 +123,7 @@ public abstract partial class CodecsTestBase
             Vp9SubPelConvolve.ConvolveSample(src, 0, new short[] { 0, 0, 0, 128, 0, 0, 0 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_RejectsOutOfRangeSrcStart()
     {
         CpuOnlyTest();
@@ -133,7 +133,7 @@ public abstract partial class CodecsTestBase
             Vp9SubPelConvolve.ConvolveSample(src, 1, rowArr));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_Horiz_NoScale_IdentityCopiesPixels()
     {
         CpuOnlyTest();
@@ -171,7 +171,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_Horiz_ConstantInput_ConstantOutput()
     {
         CpuOnlyTest();
@@ -193,7 +193,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_Vert_NoScale_IdentityCopiesPixels()
     {
         CpuOnlyTest();
@@ -250,7 +250,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_Copy_RowMatchesSourceExactly()
     {
         CpuOnlyTest();
@@ -272,7 +272,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_Avg_AveragesSourceWithExistingDst()
     {
         CpuOnlyTest();
@@ -297,7 +297,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_2D_ConstantInput_ConstantOutput()
     {
         CpuOnlyTest();
@@ -321,7 +321,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_Vert_ConstantInput_ConstantOutput()
     {
         CpuOnlyTest();
@@ -342,7 +342,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubPelConvolve_Horiz_MultiRow_CopiesEachIndependently()
     {
         CpuOnlyTest();

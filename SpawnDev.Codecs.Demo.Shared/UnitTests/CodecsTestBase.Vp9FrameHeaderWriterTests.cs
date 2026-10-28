@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
         };
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameHeaderWriter_Keyframe_RoundTripsViaParser()
     {
         CpuOnlyTest();
@@ -59,7 +59,7 @@ public abstract partial class CodecsTestBase
         Equal(original.FrameHeight, parsed.FrameHeight);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameHeaderWriter_Keyframe_BytesMatchHandBuilt()
     {
         CpuOnlyTest();
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameHeaderWriter_DimensionRange_PreservesEdgeValues()
     {
         CpuOnlyTest();
@@ -88,7 +88,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameHeaderWriter_RenderSizeOverride_RoundTrips()
     {
         CpuOnlyTest();
@@ -120,7 +120,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9ColorSpace.Bt709, parsed.ColorSpace);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameHeaderWriter_ShowExistingFrame_RoundTrips()
     {
         CpuOnlyTest();

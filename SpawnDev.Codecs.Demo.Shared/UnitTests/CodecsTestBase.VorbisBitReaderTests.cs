@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
         return r.ReadBits(bits);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisBitReader_SingleBit_LSBFirst()
     {
         CpuOnlyTest();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         True(r.IsEnd);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisBitReader_BytePrimer_LsbFirstReverseOfFlac()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         Equal(1u, r.ReadBit()); // bit 7
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisBitReader_FullByteAligned_ReturnsRawByte()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         Equal(0x3Cu, r.ReadBits(8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisBitReader_CrossByteBoundary_PacksBitsLsbFirst()
     {
         CpuOnlyTest();
@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
         Equal(0x0Fu, r.ReadBits(4)); // high 4 bits of byte 1 (1111)
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisBitReader_24BitIntegerLe()
     {
         CpuOnlyTest();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
         Equal(0x564342u, r.ReadBits(24));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisBitReader_ReadBits_Zero_NoAdvance()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
         Equal(8, r.BitsRemaining);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisBitReader_Signed_NegativeInterpretation()
     {
         CpuOnlyTest();
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
         Equal(-1, r.ReadBitsSigned(5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisBitReader_Signed_PositiveInterpretation()
     {
         CpuOnlyTest();
@@ -121,7 +121,7 @@ public abstract partial class CodecsTestBase
         Equal(10, r.ReadBitsSigned(5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisBitReader_AlignToByte_DiscardsPartialByte()
     {
         CpuOnlyTest();
@@ -133,7 +133,7 @@ public abstract partial class CodecsTestBase
         Equal(0xAAu, r.ReadBits(8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisBitReader_InsufficientBits_Throws()
     {
         CpuOnlyTest();
@@ -148,7 +148,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisBitReader_32BitMax_ReadsWithoutOverflow()
     {
         CpuOnlyTest();

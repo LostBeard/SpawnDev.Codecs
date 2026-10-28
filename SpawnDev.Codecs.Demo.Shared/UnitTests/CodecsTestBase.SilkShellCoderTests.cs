@@ -14,7 +14,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- Trivial boundaries --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ShellCoder_ZeroPulses_AllZeros()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ShellCoder_SinglePulseAtEachPosition_RoundTrip()
     {
         CpuOnlyTest();
@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Full range of pulse totals --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ShellCoder_EvenlyDistributedPulses_AllTotals_RoundTrip()
     {
         CpuOnlyTest();
@@ -93,7 +93,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Randomized distributions --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ShellCoder_RandomizedDistributions_RoundTrip()
     {
         CpuOnlyTest();
@@ -133,7 +133,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Argument validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ShellCoder_Decode_NullRangeDecoder_Throws()
     {
         CpuOnlyTest();
@@ -141,7 +141,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentNullException>(() => SilkShellCoder.Decode(pulses, null!, 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ShellCoder_Decode_PulsesSpanTooSmall_Throws()
     {
         CpuOnlyTest();
@@ -152,7 +152,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => SilkShellCoder.Decode(pulses, dec, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ShellCoder_Encode_PulseSumMismatch_Throws()
     {
         CpuOnlyTest();
@@ -164,7 +164,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Shell code tables sanity --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ShellCoder_Offsets_HasExpectedShape()
     {
         CpuOnlyTest();
@@ -174,7 +174,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)135, SilkShellCodeTables.Offsets[16]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ShellCoder_Tables_AllOneFiftyTwoBytes()
     {
         CpuOnlyTest();

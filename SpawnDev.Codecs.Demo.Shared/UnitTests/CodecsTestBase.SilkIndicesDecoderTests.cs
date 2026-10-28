@@ -99,7 +99,7 @@ public abstract partial class CodecsTestBase
         enc.EncodeIcdf(indices.Seed, SilkIcdfTables.Uniform4, 8);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IndicesDecoder_Inactive_NoVad_Independent_NbMb_RoundTrip()
     {
         CpuOnlyTest();
@@ -145,7 +145,7 @@ public abstract partial class CodecsTestBase
         Equal((sbyte)0, decoded.LtpScaleIndex);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IndicesDecoder_Unvoiced_Vad_Conditional_NbMb_RoundTrip()
     {
         CpuOnlyTest();
@@ -181,7 +181,7 @@ public abstract partial class CodecsTestBase
         Equal(indices.Seed, decoded.Seed);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IndicesDecoder_Voiced_Vad_Independent_Wb_RoundTrip()
     {
         CpuOnlyTest();
@@ -228,7 +228,7 @@ public abstract partial class CodecsTestBase
         Equal(indices.Seed, decoded.Seed);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IndicesDecoder_Voiced_DeltaPitchFromPrev_RoundTrip()
     {
         CpuOnlyTest();
@@ -275,7 +275,7 @@ public abstract partial class CodecsTestBase
         Equal(indices.Seed, decoded.Seed);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IndicesDecoder_Voiced_TenMs_UsesNarrowPitchContour()
     {
         CpuOnlyTest();
@@ -323,7 +323,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Arg validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IndicesDecoder_NullIndices_Throws()
     {
         CpuOnlyTest();
@@ -335,7 +335,7 @@ public abstract partial class CodecsTestBase
                 false, false, 8, 4, 0, 0, false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IndicesDecoder_NullRangeDecoder_Throws()
     {
         CpuOnlyTest();
@@ -345,7 +345,7 @@ public abstract partial class CodecsTestBase
                 false, false, 8, 4, 0, 0, false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void IndicesDecoder_NullCodebook_Throws()
     {
         CpuOnlyTest();

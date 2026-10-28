@@ -11,7 +11,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StateConfigure_NbMb20Ms_SetsExpectedDimensions()
     {
         CpuOnlyTest();
@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         Equal(160, state.LtpMemLength);   // 20 * 8
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StateConfigure_Wb20Ms_SetsExpectedDimensions()
     {
         CpuOnlyTest();
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         Equal(320, state.LtpMemLength);   // 20 * 16
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StateConfigure_Wb10Ms_HalfFrame()
     {
         CpuOnlyTest();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         Equal(320, state.LtpMemLength);   // LTP mem is independent of frame size
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StateConfigure_Mb20Ms_SetsExpectedDimensions()
     {
         CpuOnlyTest();
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
         Equal(240, state.LtpMemLength);   // 20 * 12
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StateConfigure_InvalidFsKHz_Throws()
     {
         CpuOnlyTest();
@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => state.Configure(fsKHz: 24, nbSubfr: 4, lpcOrder: 16));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StateConfigure_InvalidNbSubfr_Throws()
     {
         CpuOnlyTest();
@@ -81,7 +81,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => state.Configure(fsKHz: 16, nbSubfr: 3, lpcOrder: 16));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StateConfigure_InvalidLpcOrder_Throws()
     {
         CpuOnlyTest();
@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => state.Configure(fsKHz: 16, nbSubfr: 4, lpcOrder: 12));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StateReset_ClearsAllScalarsAndBuffers()
     {
         CpuOnlyTest();
@@ -130,7 +130,7 @@ public abstract partial class CodecsTestBase
         Equal(100, state.LagPrev);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void StateBuffers_SizedForWorstCaseWb20Ms()
     {
         CpuOnlyTest();

@@ -8,14 +8,14 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ChromaBlockSize_Lookup_Length13()
     {
         CpuOnlyTest();
         Equal(13, Vp9ChromaBlockSize.For420.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ChromaBlockSize_SubEightBlocks_AllMapTo4x4()
     {
         CpuOnlyTest();
@@ -27,21 +27,21 @@ public abstract partial class CodecsTestBase
         Equal(Vp9BlockSize.Block4x4, Vp9ChromaBlockSize.ForLumaBlock(Vp9BlockSize.Block8x8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ChromaBlockSize_64x64_MapsTo32x32()
     {
         CpuOnlyTest();
         Equal(Vp9BlockSize.Block32x32, Vp9ChromaBlockSize.ForLumaBlock(Vp9BlockSize.Block64x64));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ChromaBlockSize_16x16_MapsTo8x8()
     {
         CpuOnlyTest();
         Equal(Vp9BlockSize.Block8x8, Vp9ChromaBlockSize.ForLumaBlock(Vp9BlockSize.Block16x16));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ChromaBlockSize_NonSquare_PreservesAspectRatio()
     {
         CpuOnlyTest();
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9BlockSize.Block32x16, Vp9ChromaBlockSize.ForLumaBlock(Vp9BlockSize.Block64x32));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ChromaBlockSize_GetChromaTxSize_SubEightBlock_Force4x4()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
             Vp9TxSize.Tx16x16, Vp9BlockSize.Block4x8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ChromaBlockSize_GetChromaTxSize_8x8_ChromaIs4x4_TxClampedTo4x4()
     {
         CpuOnlyTest();
@@ -70,7 +70,7 @@ public abstract partial class CodecsTestBase
             Vp9TxSize.Tx8x8, Vp9BlockSize.Block8x8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ChromaBlockSize_GetChromaTxSize_16x16_ChromaIs8x8_TxClampedTo8x8()
     {
         CpuOnlyTest();
@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
             Vp9TxSize.Tx16x16, Vp9BlockSize.Block16x16));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ChromaBlockSize_GetChromaTxSize_64x64_ChromaIs32x32()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
             Vp9TxSize.Tx16x16, Vp9BlockSize.Block64x64));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ChromaBlockSize_RejectsOutOfRange()
     {
         CpuOnlyTest();

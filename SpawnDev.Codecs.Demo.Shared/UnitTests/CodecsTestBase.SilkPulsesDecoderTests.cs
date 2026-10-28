@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- Baseline: all-zero excitation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesDecoder_AllZero_RoundTrip_NbFrame()
     {
         CpuOnlyTest();
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Single non-zero pulse --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesDecoder_SinglePositivePulse_RoundTrip()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < frameLength; i++) Equal(pulses[i], decoded[i], $"pos {i}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesDecoder_SingleNegativePulse_RoundTrip()
     {
         CpuOnlyTest();
@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Distributed pulses across blocks --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesDecoder_DistributedAcrossBlocks_RoundTrip()
     {
         CpuOnlyTest();
@@ -108,7 +108,7 @@ public abstract partial class CodecsTestBase
 
     // -------- LSB-extension path (large pulses) --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesDecoder_LargePulseRequiringLsbExtension_RoundTrip()
     {
         CpuOnlyTest();
@@ -135,7 +135,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Randomized small-magnitude distributions --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesDecoder_RandomSmallDistributions_RoundTrip()
     {
         CpuOnlyTest();
@@ -210,7 +210,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Argument validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesDecoder_NullRangeDecoder_Throws()
     {
         CpuOnlyTest();
@@ -219,7 +219,7 @@ public abstract partial class CodecsTestBase
             SilkPulsesDecoder.Decode(pulses, null!, 1, 0, 160));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesDecoder_InvalidSignalType_Throws()
     {
         CpuOnlyTest();
@@ -231,7 +231,7 @@ public abstract partial class CodecsTestBase
             SilkPulsesDecoder.Decode(pulses, dec, signalType: 3, quantOffsetType: 0, frameLength: 160));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void PulsesDecoder_InvalidQuantOffset_Throws()
     {
         CpuOnlyTest();

@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1KeyframeEncoder_FlatGray16x16_HeadersParseAndDecode()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         Equal(32, cfh.Quant.BaseQindex);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1KeyframeEncoder_FlatGray16x16_RoundTripsThroughWalker()
     {
         CpuOnlyTest();
@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
         True(Math.Abs(vMean - 128.0) < tolerance, $"V mean {vMean:F2} not within {tolerance} of 128");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1KeyframeEncoder_OutputWrapsValidIvf()
     {
         CpuOnlyTest();

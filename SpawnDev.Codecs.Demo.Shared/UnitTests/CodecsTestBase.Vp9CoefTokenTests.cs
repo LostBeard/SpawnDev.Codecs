@@ -10,7 +10,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefToken_ValuesMatchLibvpxDefines()
     {
         CpuOnlyTest();
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)11, (byte)Vp9CoefToken.Eob);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefTrees_CoefConTree_HasCorrectShape()
     {
         CpuOnlyTest();
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
         Equal((sbyte)(-10), Vp9CoefTrees.CoefConTree[15]); // CAT6_token = 10
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefTrees_DecodeConToken_BitSequenceLeadsToTwoToken()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9CoefToken.Two, tok);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefTrees_DecodeConToken_BitSequenceLeadsToThreeToken()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9CoefToken.Three, tok);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefTrees_DecodeConToken_BitSequenceLeadsToFourToken()
     {
         CpuOnlyTest();
@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9CoefToken.Four, tok);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefTrees_DecodeConToken_BitSequenceLeadsToCategory1()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9CoefToken.Category1, tok);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefTrees_DecodeConToken_BitSequenceLeadsToCategory6()
     {
         CpuOnlyTest();
@@ -102,7 +102,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9CoefToken.Category6, tok);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefTrees_DecodeConToken_RejectsUndersizedProbs()
     {
         CpuOnlyTest();

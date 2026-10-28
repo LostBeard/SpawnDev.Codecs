@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvReferenceFrame_NumericValues_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -19,7 +19,7 @@ public abstract partial class CodecsTestBase
         Equal(4, Vp9MvReferenceFrames.MaxRefFrames);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvReferenceFrame_IsInter_ExcludesIntra()
     {
         CpuOnlyTest();
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
         Equal(true, Vp9MvReferenceFrames.IsInter(Vp9MvReferenceFrame.AltRef));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvReferenceFrame_ToReferenceSlot_Mapping()
     {
         CpuOnlyTest();
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9ReferenceSlot.AltRef, Vp9MvReferenceFrames.ToReferenceSlot(Vp9MvReferenceFrame.AltRef));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvReferenceFrame_ToReferenceSlot_RejectsIntra()
     {
         CpuOnlyTest();

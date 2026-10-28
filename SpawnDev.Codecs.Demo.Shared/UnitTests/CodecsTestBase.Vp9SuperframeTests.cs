@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         return packet;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Superframe_NoIndex_ReturnsSingleFrame()
     {
         CpuOnlyTest();
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
         Equal(packet.Length, sf.Frames[0].Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Superframe_TwoFrames_1ByteSize_Unpacks()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)0x11, packet[sf.Frames[1].Offset]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Superframe_EightFrames_2ByteSize_Unpacks()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Superframe_4ByteSize_HandlesLargeFrames()
     {
         CpuOnlyTest();
@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
         Equal(50_000, sf.Frames[1].Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Superframe_EmptyPacket_Throws()
     {
         CpuOnlyTest();
@@ -125,7 +125,7 @@ public abstract partial class CodecsTestBase
         True(threw, "empty packet must throw");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Superframe_IndexOverrunsPacket_Throws()
     {
         CpuOnlyTest();
@@ -140,7 +140,7 @@ public abstract partial class CodecsTestBase
         True(threw, "index overrun must throw");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Superframe_FrameSizeOverrunsBeforeIndex_Throws()
     {
         CpuOnlyTest();
@@ -157,7 +157,7 @@ public abstract partial class CodecsTestBase
         True(threw, "frame-size overrun must throw");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Superframe_SingleFrame_WithIndex_Unpacks()
     {
         CpuOnlyTest();
@@ -170,7 +170,7 @@ public abstract partial class CodecsTestBase
         Equal(42, sf.Frames[0].Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Superframe_RealBigBuckBunnyVideoFrames_AllParseCleanly()
     {
         CpuOnlyTest();

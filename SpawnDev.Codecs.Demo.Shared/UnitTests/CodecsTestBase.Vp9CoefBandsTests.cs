@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefBands_4x4_Has16EntriesAcrossSixBands()
     {
         CpuOnlyTest();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)5, t[15]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefBands_4x4_BandSizesMatchLibvpx()
     {
         CpuOnlyTest();
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 1, 2, 3, 4, 3, 3 }, counts);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefBands_8x8Plus_Has1024EntriesAcrossSixBands()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)5, t[1023]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefBands_8x8Plus_BandSizesMatchLibvpx()
     {
         CpuOnlyTest();
@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 1, 2, 3, 4, 11, 1003 }, counts);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefBands_GetBand_DispatchesBySize()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9CoefBands.CoefBandTrans8x8Plus[1023], Vp9CoefBands.GetBand(Vp9TxSize.Tx32x32, 1023));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9CoefBands_GetBand_ThrowsOnOutOfRange()
     {
         CpuOnlyTest();

@@ -11,7 +11,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_ParsesWithoutThrowing()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         Equal(180, complete.Prefix.FrameHeight);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_HasReasonableTileInfo()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         Equal(true, complete.TileInfo.UniformSpacing);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_QuantBaseQindex_MatchesLibdav1d()
     {
         CpuOnlyTest();
@@ -72,7 +72,7 @@ public abstract partial class CodecsTestBase
         InRange(complete.Quant.BaseQindex, 0, 32);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_TileGroupExtraction_Succeeds()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
             $"single-tile payload should be most of the frame ({tg.Tiles[0].Length}B)");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_QuantInBand()
     {
         CpuOnlyTest();
@@ -108,7 +108,7 @@ public abstract partial class CodecsTestBase
         InRange(complete.Quant.VAcDeltaQ, -63, 63);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_SegmentationDisabled()
     {
         CpuOnlyTest();
@@ -118,7 +118,7 @@ public abstract partial class CodecsTestBase
         Equal(false, complete.Segmentation.Enabled);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_LoopFilterLevelsValid()
     {
         CpuOnlyTest();
@@ -129,7 +129,7 @@ public abstract partial class CodecsTestBase
         InRange(complete.LoopFilter.FilterLevel1, 0, 63);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_HasCdefParamsWhenEnabled()
     {
         CpuOnlyTest();
@@ -143,7 +143,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_TxModeAndReducedTxSet()
     {
         CpuOnlyTest();
@@ -156,7 +156,7 @@ public abstract partial class CodecsTestBase
         Equal(Av1ReferenceMode.SingleReference, complete.ReferenceMode);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1CompleteFrameHeader_BbbFirstKeyframe_HeaderSizeIsReasonable()
     {
         CpuOnlyTest();

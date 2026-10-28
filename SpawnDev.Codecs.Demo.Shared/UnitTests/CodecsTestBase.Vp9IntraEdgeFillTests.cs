@@ -9,7 +9,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraEdgeFill_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -19,7 +19,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)129, Vp9IntraEdgeFill.CornerFillAboveOnly);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraEdgeFill_FillMissingAbove_FillsNSamplesWith127()
     {
         CpuOnlyTest();
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
         for (int i = 4; i < 8; i++) Equal((byte)99, above[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraEdgeFill_FillMissingAbove_With2N_FillsExtension()
     {
         CpuOnlyTest();
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal((byte)127, above[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraEdgeFill_FillMissingLeft_FillsNSamplesWith129()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         for (int i = 4; i < 6; i++) Equal((byte)99, left[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraEdgeFill_ResolveCorner_CoversAllBranches()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)5, Vp9IntraEdgeFill.ResolveCorner(hasAbove: true, hasLeft: true, refValue: 5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraEdgeFill_ReplicateAboveRight_FillsExtensionWithLastInBlockSample()
     {
         CpuOnlyTest();
@@ -89,7 +89,7 @@ public abstract partial class CodecsTestBase
         for (int i = 4; i < 8; i++) Equal((byte)50, above[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraEdgeFill_ReplicateAboveRight_AllSizes()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraEdgeFill_FullPipeline_EdgesMissing_ProducesDcCorner()
     {
         CpuOnlyTest();
@@ -122,7 +122,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)127, corner);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraEdgeFill_RejectsInvalidArgs()
     {
         CpuOnlyTest();

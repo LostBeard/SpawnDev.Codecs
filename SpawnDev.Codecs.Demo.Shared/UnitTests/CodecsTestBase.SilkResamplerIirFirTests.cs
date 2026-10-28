@@ -12,7 +12,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerIirFir_16To48_ZeroInput_ProducesZeroOutput()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < output.Length; i++) Equal((short)0, output[i], $"output[{i}]");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerIirFir_16To48_OutputCountIs3x()
     {
         CpuOnlyTest();
@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerIirFir_16To24_NonIntegerRatio()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerIirFir_12To48_4xRatio()
     {
         CpuOnlyTest();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerIirFir_8To48_6xRatio()
     {
         CpuOnlyTest();
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerIirFir_16To48_StateCarriesAcrossCalls()
     {
         CpuOnlyTest();
@@ -137,7 +137,7 @@ public abstract partial class CodecsTestBase
         True(jump < 2500, $"Batch-boundary jump {jump} too large");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ResamplerInit_AllStubPaths_NowImplemented()
     {
         CpuOnlyTest();

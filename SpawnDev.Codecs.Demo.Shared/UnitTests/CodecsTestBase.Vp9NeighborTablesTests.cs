@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborTables_4x4_AllThreeShapesValid()
     {
         CpuOnlyTest();
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         AssertNeighborTableShape(Vp9NeighborTables.ColScan4x4Neighbors,     16, "ColScan4x4Neighbors");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborTables_8x8_AllThreeShapesValid()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         AssertNeighborTableShape(Vp9NeighborTables.ColScan8x8Neighbors,     64, "ColScan8x8Neighbors");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborTables_4x4DefaultScan_PinnedFirstFewPairs()
     {
         CpuOnlyTest();
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
         Equal((ushort)4, t[8]);  Equal((ushort)4, t[9]);   // pos 4 -> (4,4)
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborTables_4x4ColScan_PinnedFirstFewPairs()
     {
         CpuOnlyTest();
@@ -78,7 +78,7 @@ public abstract partial class CodecsTestBase
         Equal((ushort)8, t[8]);  Equal((ushort)8, t[9]);   // pos 4 -> (8,8)
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborTables_GetNeighbors4x4_DispatchesByScanType()
     {
         CpuOnlyTest();
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
         True(ReferenceEquals(Vp9NeighborTables.ColScan4x4Neighbors,     Vp9NeighborTables.GetNeighbors4x4(Vp9ScanType.Col)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborTables_GetNeighbors8x8_DispatchesByScanType()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
         True(ReferenceEquals(Vp9NeighborTables.ColScan8x8Neighbors,     Vp9NeighborTables.GetNeighbors8x8(Vp9ScanType.Col)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborTables_16x16_AllThreeShapesValid()
     {
         CpuOnlyTest();
@@ -105,14 +105,14 @@ public abstract partial class CodecsTestBase
         AssertNeighborTableShape(Vp9NeighborTables.ColScan16x16Neighbors,     256, "ColScan16x16Neighbors");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborTables_32x32_DefaultScanShapeValid()
     {
         CpuOnlyTest();
         AssertNeighborTableShape(Vp9NeighborTables.DefaultScan32x32Neighbors, 1024, "DefaultScan32x32Neighbors");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborTables_16x16DefaultScan_PinnedFirstFewPairs()
     {
         CpuOnlyTest();
@@ -129,7 +129,7 @@ public abstract partial class CodecsTestBase
         Equal((ushort)17, t[14]); Equal((ushort)32, t[15]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborTables_32x32DefaultScan_PinnedFirstAndLastPairs()
     {
         CpuOnlyTest();
@@ -149,7 +149,7 @@ public abstract partial class CodecsTestBase
         Equal((ushort)0,    t[2049]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborTables_GetNeighbors16x16_DispatchesByScanType()
     {
         CpuOnlyTest();
@@ -158,7 +158,7 @@ public abstract partial class CodecsTestBase
         True(ReferenceEquals(Vp9NeighborTables.ColScan16x16Neighbors,     Vp9NeighborTables.GetNeighbors16x16(Vp9ScanType.Col)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborTables_GetNeighbors32x32_AlwaysReturnsDefault()
     {
         CpuOnlyTest();

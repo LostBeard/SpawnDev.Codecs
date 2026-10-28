@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubsizeLookup_LookupShape()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(13, Vp9SubsizeLookup.Lookup.GetLength(1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubsizeLookup_None_PreservesParent()
     {
         CpuOnlyTest();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubsizeLookup_Horz_SquareParents()
     {
         CpuOnlyTest();
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
             Vp9SubsizeLookup.Subsize(Vp9BlockSize.Block64x64, Vp9PartitionType.Horz));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubsizeLookup_Vert_SquareParents()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
             Vp9SubsizeLookup.Subsize(Vp9BlockSize.Block64x64, Vp9PartitionType.Vert));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubsizeLookup_Split_SquareParents()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
             Vp9SubsizeLookup.Subsize(Vp9BlockSize.Block64x64, Vp9PartitionType.Split));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubsizeLookup_NonSquareParent_HorzVertSplit_AreInvalid()
     {
         CpuOnlyTest();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SubsizeLookup_RejectsOutOfRange()
     {
         CpuOnlyTest();

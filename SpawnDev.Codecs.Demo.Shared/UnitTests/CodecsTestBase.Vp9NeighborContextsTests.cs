@@ -8,14 +8,14 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_Skip_BothMissing()
     {
         CpuOnlyTest();
         Equal(0, Vp9NeighborContexts.GetSkipContext(null, null));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_Skip_OnlyOneSide_Skipped()
     {
         CpuOnlyTest();
@@ -23,14 +23,14 @@ public abstract partial class CodecsTestBase
         Equal(1, Vp9NeighborContexts.GetSkipContext(null, true));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_Skip_BothPresent_NeitherSkipped()
     {
         CpuOnlyTest();
         Equal(0, Vp9NeighborContexts.GetSkipContext(false, false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_Skip_BothPresent_OneSkipped()
     {
         CpuOnlyTest();
@@ -38,21 +38,21 @@ public abstract partial class CodecsTestBase
         Equal(1, Vp9NeighborContexts.GetSkipContext(false, true));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_Skip_BothPresent_BothSkipped()
     {
         CpuOnlyTest();
         Equal(2, Vp9NeighborContexts.GetSkipContext(true, true));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_IntraInter_BothMissing()
     {
         CpuOnlyTest();
         Equal(0, Vp9NeighborContexts.GetIntraInterContext(null, null));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_IntraInter_OneEdge_Inter()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         Equal(0, Vp9NeighborContexts.GetIntraInterContext(null, false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_IntraInter_OneEdge_Intra()
     {
         CpuOnlyTest();
@@ -68,14 +68,14 @@ public abstract partial class CodecsTestBase
         Equal(2, Vp9NeighborContexts.GetIntraInterContext(null, true));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_IntraInter_BothInter()
     {
         CpuOnlyTest();
         Equal(0, Vp9NeighborContexts.GetIntraInterContext(false, false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_IntraInter_OneIntraOneInter()
     {
         CpuOnlyTest();
@@ -83,14 +83,14 @@ public abstract partial class CodecsTestBase
         Equal(1, Vp9NeighborContexts.GetIntraInterContext(false, true));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_IntraInter_BothIntra()
     {
         CpuOnlyTest();
         Equal(3, Vp9NeighborContexts.GetIntraInterContext(true, true));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_TxSize_BothMissing_ReturnsZero()
     {
         CpuOnlyTest();
@@ -100,7 +100,7 @@ public abstract partial class CodecsTestBase
             Vp9BlockSize.Block16x16, null, null));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_TxSize_BothSkippedNeighbors_ReturnsContext1()
     {
         CpuOnlyTest();
@@ -112,7 +112,7 @@ public abstract partial class CodecsTestBase
             (Vp9TxSize.Tx4x4, true)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_TxSize_BothSmall_ReturnsZero()
     {
         CpuOnlyTest();
@@ -124,7 +124,7 @@ public abstract partial class CodecsTestBase
             (Vp9TxSize.Tx4x4, false)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_TxSize_NeighborSumEqualsMax_ReturnsZero()
     {
         CpuOnlyTest();
@@ -136,7 +136,7 @@ public abstract partial class CodecsTestBase
             (Vp9TxSize.Tx8x8, false)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_TxSize_NeighborSumExceedsMax_ReturnsOne()
     {
         CpuOnlyTest();
@@ -147,7 +147,7 @@ public abstract partial class CodecsTestBase
             (Vp9TxSize.Tx8x8, false)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_TxSize_OnlyOneNeighbor_InheritsToOther()
     {
         CpuOnlyTest();
@@ -160,7 +160,7 @@ public abstract partial class CodecsTestBase
             null));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_TxSize_OnlyOneNeighborAt16x16_ReturnsOne()
     {
         CpuOnlyTest();
@@ -173,7 +173,7 @@ public abstract partial class CodecsTestBase
             (Vp9TxSize.Tx16x16, false)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_PartitionPlane_Block8x8_BothZero()
     {
         CpuOnlyTest();
@@ -182,7 +182,7 @@ public abstract partial class CodecsTestBase
             0, 0, Vp9BlockSize.Block8x8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_PartitionPlane_Block8x8_AboveSplit()
     {
         CpuOnlyTest();
@@ -191,7 +191,7 @@ public abstract partial class CodecsTestBase
             0b00000001, 0, Vp9BlockSize.Block8x8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_PartitionPlane_Block8x8_LeftSplit()
     {
         CpuOnlyTest();
@@ -200,7 +200,7 @@ public abstract partial class CodecsTestBase
             0, 0b00000001, Vp9BlockSize.Block8x8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_PartitionPlane_Block8x8_BothSplit()
     {
         CpuOnlyTest();
@@ -209,7 +209,7 @@ public abstract partial class CodecsTestBase
             0b00000001, 0b00000001, Vp9BlockSize.Block8x8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_PartitionPlane_Block16x16_GroupOffset()
     {
         CpuOnlyTest();
@@ -219,7 +219,7 @@ public abstract partial class CodecsTestBase
             0b00000010, 0, Vp9BlockSize.Block16x16));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_PartitionPlane_Block32x32_BaseAt8()
     {
         CpuOnlyTest();
@@ -228,7 +228,7 @@ public abstract partial class CodecsTestBase
             0, 0, Vp9BlockSize.Block32x32));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_PartitionPlane_Block64x64_BaseAt12()
     {
         CpuOnlyTest();
@@ -237,7 +237,7 @@ public abstract partial class CodecsTestBase
             0, 0, Vp9BlockSize.Block64x64));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_PartitionPlane_Block64x64_BothSplitMaxContext()
     {
         CpuOnlyTest();
@@ -247,7 +247,7 @@ public abstract partial class CodecsTestBase
             0b00001000, 0b00001000, Vp9BlockSize.Block64x64));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_PartitionPlane_Block16x16_OnlyBit1Counts()
     {
         CpuOnlyTest();
@@ -258,7 +258,7 @@ public abstract partial class CodecsTestBase
             0b11111101, 0b11111101, Vp9BlockSize.Block16x16));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_PartitionPlane_RejectsOutOfRangeBlock()
     {
         CpuOnlyTest();
@@ -266,7 +266,7 @@ public abstract partial class CodecsTestBase
             Vp9NeighborContexts.GetPartitionPlaneContext(0, 0, (Vp9BlockSize)99));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_SwitchableInterp_BothMissing_ReturnsSentinel()
     {
         CpuOnlyTest();
@@ -274,7 +274,7 @@ public abstract partial class CodecsTestBase
         Equal(3, Vp9NeighborContexts.GetSwitchableInterpContext(null, null));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_SwitchableInterp_BothIntra_ReturnsSentinel()
     {
         CpuOnlyTest();
@@ -284,7 +284,7 @@ public abstract partial class CodecsTestBase
             (false, Vp9InterpFilter.EightTap)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_SwitchableInterp_BothMatchEightTap()
     {
         CpuOnlyTest();
@@ -294,7 +294,7 @@ public abstract partial class CodecsTestBase
                 (true, Vp9InterpFilter.EightTap)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_SwitchableInterp_BothMatchSmooth()
     {
         CpuOnlyTest();
@@ -304,7 +304,7 @@ public abstract partial class CodecsTestBase
                 (true, Vp9InterpFilter.EightTapSmooth)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_SwitchableInterp_OnlyAboveInter_ReturnsAboveFilter()
     {
         CpuOnlyTest();
@@ -319,7 +319,7 @@ public abstract partial class CodecsTestBase
                 (false, Vp9InterpFilter.EightTap)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_SwitchableInterp_OnlyLeftInter_ReturnsLeftFilter()
     {
         CpuOnlyTest();
@@ -329,7 +329,7 @@ public abstract partial class CodecsTestBase
                 (true, Vp9InterpFilter.EightTapSmooth)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_SwitchableInterp_BothInterDifferent_ReturnsSentinel()
     {
         CpuOnlyTest();
@@ -338,14 +338,14 @@ public abstract partial class CodecsTestBase
             (true, Vp9InterpFilter.EightTapSharp)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_SegId_BothMissing()
     {
         CpuOnlyTest();
         Equal(0, Vp9NeighborContexts.GetSegIdContext(null, null));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_SegId_OneSidePredicted()
     {
         CpuOnlyTest();
@@ -355,14 +355,14 @@ public abstract partial class CodecsTestBase
         Equal(1, Vp9NeighborContexts.GetSegIdContext(false, true));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_SegId_BothPredicted()
     {
         CpuOnlyTest();
         Equal(2, Vp9NeighborContexts.GetSegIdContext(true, true));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9NeighborContexts_SegId_BothPresentNeitherPredicted()
     {
         CpuOnlyTest();

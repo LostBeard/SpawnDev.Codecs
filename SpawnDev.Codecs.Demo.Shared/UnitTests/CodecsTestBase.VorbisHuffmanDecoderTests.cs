@@ -19,7 +19,7 @@ public abstract partial class CodecsTestBase
             w.Write((code >> bitIdx) & 1u, 1);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffmanDecoder_AllEqualLengths_RoundtripsEverySymbol()
     {
         CpuOnlyTest();
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
             Equal(s, decoder.Decode(ref reader));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffmanDecoder_VariableLengths_RoundtripsCanonicalExample()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
             Equal(s, decoder.Decode(ref reader));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffmanDecoder_SparseCodebook_SkipsUnusedEntries()
     {
         CpuOnlyTest();
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
             Equal(s, decoder.Decode(ref reader));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffmanDecoder_DeepTree_8Entries3Bits()
     {
         CpuOnlyTest();
@@ -93,7 +93,7 @@ public abstract partial class CodecsTestBase
             Equal(s, decoder.Decode(ref reader));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffmanDecoder_MixedLengthEntries_DecodesInOrder()
     {
         CpuOnlyTest();
@@ -122,7 +122,7 @@ public abstract partial class CodecsTestBase
             Equal(s, decoder.Decode(ref reader));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisHuffmanDecoder_SingleEntryCodebook_AlwaysDecodesZero()
     {
         CpuOnlyTest();

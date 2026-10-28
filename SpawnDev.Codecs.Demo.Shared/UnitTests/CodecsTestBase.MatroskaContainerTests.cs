@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         return stream;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MatroskaContainer_OnBigBuckBunnyWebM_ReportsWebMDocType()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         False(container.IsMatroska, "must not also be flagged as Matroska");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MatroskaContainer_OnBigBuckBunnyWebM_EnumeratesTracks()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MatroskaContainer_BigBuckBunny_HasVideoTrack_WithVp9Codec()
     {
         CpuOnlyTest();
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
         Equal("V_VP9", video!.CodecId);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MatroskaContainer_OnBigBuckBunnyWebM_YieldsVideoFrames()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MatroskaContainer_Frames_AreTimestampOrdered_WithinTrack()
     {
         CpuOnlyTest();
@@ -117,7 +117,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MatroskaContainer_SegmentInfo_ExposesTimestampScale_ForBigBuckBunny()
     {
         CpuOnlyTest();
@@ -129,7 +129,7 @@ public abstract partial class CodecsTestBase
         True(info.TimestampScaleNs > 0, "TimestampScale must be > 0");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MatroskaContainer_SegmentInfo_DurationConvertsToRealTimeSpan()
     {
         CpuOnlyTest();
@@ -145,7 +145,7 @@ public abstract partial class CodecsTestBase
             $"Duration must be < 60s, got {info.DurationTimeSpan.Value.TotalSeconds}s");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MatroskaContainer_SegmentInfo_DefaultsTimestampScale_WhenElementAbsent()
     {
         CpuOnlyTest();
@@ -165,7 +165,7 @@ public abstract partial class CodecsTestBase
         True(info.DurationTicks is null, "Duration must be null when absent");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MatroskaContainer_Frames_FirstVideoFrame_IsKeyframe()
     {
         CpuOnlyTest();
@@ -180,7 +180,7 @@ public abstract partial class CodecsTestBase
             "first video frame must be a keyframe (SimpleBlock with bit 7 set)");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MatroskaContainer_ThrowsOnNullStream()
     {
         CpuOnlyTest();
@@ -190,7 +190,7 @@ public abstract partial class CodecsTestBase
         True(threw, "null stream must throw");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MatroskaContainer_ThrowsOnNonEbmlStream()
     {
         CpuOnlyTest();

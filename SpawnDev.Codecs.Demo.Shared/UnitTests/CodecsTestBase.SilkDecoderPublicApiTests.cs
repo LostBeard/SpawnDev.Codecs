@@ -11,7 +11,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoder_Nb20Ms_ExposesCorrectDimensions()
     {
         CpuOnlyTest();
@@ -22,7 +22,7 @@ public abstract partial class CodecsTestBase
         Equal(160, dec.FrameLength);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoder_Wb20Ms_ExposesCorrectDimensions()
     {
         CpuOnlyTest();
@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
         Equal(320, dec.FrameLength);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoder_Mb10Ms_ExposesCorrectDimensions()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         Equal(120, dec.FrameLength);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoder_InvalidSampleRate_Throws()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => new SilkDecoder(internalSampleRateHz: 48000));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoder_InvalidFrameLength_Throws()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => new SilkDecoder(internalSampleRateHz: 16000, frameLengthMs: 40));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoder_DecodeInactiveFrame_ProducesValidPcm()
     {
         CpuOnlyTest();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoder_ResetRestoresFirstFrameBehavior()
     {
         CpuOnlyTest();
@@ -123,7 +123,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoder_EmptyPayload_Throws()
     {
         CpuOnlyTest();
@@ -133,7 +133,7 @@ public abstract partial class CodecsTestBase
             dec.DecodeFrame(ReadOnlySpan<byte>.Empty, pcm, false, false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoder_SmallOutputBuffer_Throws()
     {
         CpuOnlyTest();
@@ -144,7 +144,7 @@ public abstract partial class CodecsTestBase
             dec.DecodeFrame(payload, tooSmall, false, false));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoder_DecodeFromRange_MatchesDecodeFrame()
     {
         CpuOnlyTest();
@@ -181,7 +181,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoder_DecodeFromRange_NullDecoder_Throws()
     {
         CpuOnlyTest();

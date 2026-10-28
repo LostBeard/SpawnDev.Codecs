@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
         return hash == expectedHash ? null : $"sha256 {hash} != expected {expectedHash}";
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8IntraPredictor4x4_VerticalLeft_LastTwoValuesFollowRfc6386()
     {
         CpuOnlyTest();
@@ -98,7 +98,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)((40 + 2 * 50 + 60 + 2) >> 2), dst[1 * 4 + 3], "B[1][3]");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8LossyFixtures_Manifest_CoversEveryKeyframeFeature()
     {
         CpuOnlyTest();
@@ -255,7 +255,7 @@ public abstract partial class CodecsTestBase
         True(failures.Count == 0, string.Join("\n", failures));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8FullKeyframeDecoderGpu_WavefrontSchedule_RespectsEveryDependency()
     {
         CpuOnlyTest();
@@ -436,7 +436,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp8LossyFixtures_CpuReference_MatchesFfmpeg_AllFixtures()
     {
         CpuOnlyTest();

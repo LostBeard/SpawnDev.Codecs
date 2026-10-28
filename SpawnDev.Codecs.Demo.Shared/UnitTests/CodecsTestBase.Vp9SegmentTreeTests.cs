@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentTree_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
         Equal(14, Vp9SegmentTree.Tree.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentTree_Decode_AllZeros_PicksSegment0()
     {
         CpuOnlyTest();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         Equal(0, Vp9SegmentTree.Decode(p => bits[callIdx++], BuildSegProbs()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentTree_Decode_PicksSegment7()
     {
         CpuOnlyTest();
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         Equal(7, Vp9SegmentTree.Decode(p => bits[callIdx++], BuildSegProbs()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentTree_Decode_PicksSegment3()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         Equal(3, Vp9SegmentTree.Decode(p => bits[callIdx++], BuildSegProbs()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentTree_Decode_PicksSegment4()
     {
         CpuOnlyTest();
@@ -57,7 +57,7 @@ public abstract partial class CodecsTestBase
         Equal(4, Vp9SegmentTree.Decode(p => bits[callIdx++], BuildSegProbs()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentTree_Decode_RejectsShortProbs()
     {
         CpuOnlyTest();
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
             Vp9SegmentTree.Decode(p => 0, new byte[6]));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9SegmentTree_Decode_RejectsNullReader()
     {
         CpuOnlyTest();

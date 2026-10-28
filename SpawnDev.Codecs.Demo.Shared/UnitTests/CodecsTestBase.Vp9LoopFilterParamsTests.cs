@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         return bytes;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterParams_Disabled_ParsesMinimalLayout()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         Equal(0, p.ModeDeltas.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterParams_EnabledWithoutUpdate_ParsesEnabledFlag()
     {
         CpuOnlyTest();
@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
         Equal(0, p.ModeDeltas.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterParams_UpdateAllRefAndModeDeltas_PositiveValues()
     {
         CpuOnlyTest();
@@ -122,7 +122,7 @@ public abstract partial class CodecsTestBase
         Equal(2, p.ModeDeltas[1]!.Value);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterParams_NegativeDeltas_SignBitFlipsValue()
     {
         CpuOnlyTest();
@@ -152,7 +152,7 @@ public abstract partial class CodecsTestBase
         True(p.ModeDeltas[1] == null);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterParams_PartialRefUpdate_OnlyMarkedSlotsCarryValues()
     {
         CpuOnlyTest();
@@ -182,7 +182,7 @@ public abstract partial class CodecsTestBase
         Equal(5, p.ModeDeltas[1]!.Value);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterParams_FilterLevelMaxValue()
     {
         CpuOnlyTest();

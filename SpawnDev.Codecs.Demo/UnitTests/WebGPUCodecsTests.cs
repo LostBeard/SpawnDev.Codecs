@@ -1,3 +1,4 @@
+using SpawnDev.UnitTesting;
 using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.Codecs.Demo.Shared.UnitTests;
@@ -10,6 +11,8 @@ namespace SpawnDev.Codecs.Demo.UnitTests;
 /// every cross-platform test from <see cref="CodecsTestBase"/> and runs ILGPU
 /// kernel tests on the browser's WebGPU backend (WGSL codegen).
 /// </summary>
+// CPU-only tests (Category = "CpuOnly") run once, in CpuCodecsTests: discovery leaves them out here.
+[ExcludeCategories("CpuOnly")]
 public class WebGPUCodecsTests : CodecsTestBase
 {
     protected override async ValueTask<(Context, Accelerator)> CreateKernelAcceleratorAsync()

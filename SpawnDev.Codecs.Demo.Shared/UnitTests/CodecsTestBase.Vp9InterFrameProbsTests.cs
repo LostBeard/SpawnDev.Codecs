@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterFrameProbs_DefaultInterModeProbs_HasCorrectShape()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(7, Vp9InterFrameProbs.InterModeContexts);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterFrameProbs_DefaultInterModeProbs_FirstAndLastContextsMatchLibvpx()
     {
         CpuOnlyTest();
@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)30, t[20]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterFrameProbs_DefaultSkipProbs_MatchesLibvpx()
     {
         CpuOnlyTest();
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)64,  Vp9InterFrameProbs.DefaultSkipProbs[2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterFrameProbs_DefaultIntraInterProb_MatchesLibvpx()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)225, Vp9InterFrameProbs.DefaultIntraInterProb[3]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterFrameProbs_InterModeProbsHelper_ReturnsExpectedSlices()
     {
         CpuOnlyTest();
@@ -70,7 +70,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)46, c4[2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterFrameProbs_InterModeProbsHelper_RejectsOutOfRange()
     {
         CpuOnlyTest();
@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
             Vp9InterFrameProbs.InterModeProbs(-1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9InterFrameProbs_DriveInterModeProbsIntoTree_DecodesZeroMvOnFirstZeroBit()
     {
         CpuOnlyTest();

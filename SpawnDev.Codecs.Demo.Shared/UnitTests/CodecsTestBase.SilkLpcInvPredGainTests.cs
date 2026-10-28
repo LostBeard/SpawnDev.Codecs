@@ -20,7 +20,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- Analytic reference vectors --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcInvPredGain_AllZeroOrder1_ReturnsOneQ30()
     {
         CpuOnlyTest();
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
         Equal(1 << 30, SilkLpcInvPredGain.Compute(new short[] { 0 }, 1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcInvPredGain_AllZeroOrder16_ReturnsOneQ30()
     {
         CpuOnlyTest();
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
         Equal(1 << 30, SilkLpcInvPredGain.Compute(a, 16));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcInvPredGain_Order1_PositiveHalf_ReturnsThreeQuarters()
     {
         CpuOnlyTest();
@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
         Equal(805306368, SilkLpcInvPredGain.Compute(new short[] { 2048 }, 1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcInvPredGain_Order1_NegativeHalf_ReturnsThreeQuarters()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
 
     // -------- DC instability and magnitude edge cases --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcInvPredGain_Order1_DcSumAtFourThousandNinetySix_ReturnsZero()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         Equal(0, SilkLpcInvPredGain.Compute(new short[] { 4096 }, 1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcInvPredGain_Order2_DcSumAtFourThousandNinetySix_ReturnsZero()
     {
         CpuOnlyTest();
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
         Equal(0, SilkLpcInvPredGain.Compute(new short[] { 2048, 2048 }, 2));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcInvPredGain_Order1_JustBelowALimit_IsStable()
     {
         CpuOnlyTest();
@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
         True(gain <= (1 << 30), "Gain must be <= 2^30");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcInvPredGain_Order1_JustAboveALimit_ReturnsZero()
     {
         CpuOnlyTest();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
         Equal(0, SilkLpcInvPredGain.Compute(new short[] { 4095 }, 1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcInvPredGain_Order1_NegativeAtLimit_ReturnsZero()
     {
         CpuOnlyTest();
@@ -105,7 +105,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Output bounds --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcInvPredGain_Output_IsAlwaysInInclusiveRangeZeroToTwoToThe30()
     {
         CpuOnlyTest();
@@ -174,7 +174,7 @@ public abstract partial class CodecsTestBase
         return true;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcInvPredGain_StableClaim_IsBackedByImpulseResponse()
     {
         CpuOnlyTest();
@@ -217,7 +217,7 @@ public abstract partial class CodecsTestBase
         True(stableCount > 0, "Expected at least some random filters to be classified stable");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcInvPredGain_UnstableClaim_IsPermitted()
     {
         CpuOnlyTest();
@@ -241,7 +241,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Deterministic multi-order known-stable fixture --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcInvPredGain_KnownStable_MatchesExpectedSample()
     {
         CpuOnlyTest();

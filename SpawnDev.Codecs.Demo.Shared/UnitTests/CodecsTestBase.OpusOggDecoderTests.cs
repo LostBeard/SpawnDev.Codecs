@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
         return bytes;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusHead_Stereo_48kHz_NoGain_ParsesCanonical()
     {
         CpuOnlyTest();
@@ -55,7 +55,7 @@ public abstract partial class CodecsTestBase
         True(h.ChannelMapping is null, "Family 0 has no mapping table.");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusHead_Gain_SignedDecoding()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         Equal(-768, h.OutputGainQ7_8);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusHead_Surround51_Family1_WithMappingTable()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
         EqualBytes(map, h.ChannelMapping.Mapping);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusHead_WrongMagic_Throws()
     {
         CpuOnlyTest();
@@ -93,7 +93,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusHead_ZeroChannels_Throws()
     {
         CpuOnlyTest();
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
         return bytes;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusTags_VendorAndComments_Parse()
     {
         CpuOnlyTest();
@@ -138,7 +138,7 @@ public abstract partial class CodecsTestBase
         Equal("TITLE=BWV 1060", t.UserComments[1]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusTags_EmptyComments_Parse()
     {
         CpuOnlyTest();
@@ -148,7 +148,7 @@ public abstract partial class CodecsTestBase
         Equal(0, t.UserComments.Count);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusTags_WrongMagic_Throws()
     {
         CpuOnlyTest();
@@ -211,7 +211,7 @@ public abstract partial class CodecsTestBase
         return list.ToArray();
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusOggDecoder_ConcentusEncodedSilk_RoundtripDecodes()
     {
         CpuOnlyTest();
@@ -259,7 +259,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusOggDecoder_EmptyStream_Throws()
     {
         CpuOnlyTest();
@@ -270,7 +270,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void OpusOggDecoder_MultiStreamMapping_ThrowsNotSupported()
     {
         CpuOnlyTest();

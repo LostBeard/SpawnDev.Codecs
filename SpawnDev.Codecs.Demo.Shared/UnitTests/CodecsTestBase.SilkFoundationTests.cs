@@ -15,7 +15,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- SilkMacros --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Smulwb_Basics()
     {
         CpuOnlyTest();
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
         Equal(-1, silk_SMULWB(1 << 16, -1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Smulbb_Basics()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         Equal(1, silk_SMULBB(0x00010001, 0x00010001));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Smlawb_AccumulatesCorrectly()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         Equal(10, silk_SMLAWB(5, 1 << 16, 5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Mla_AccumulatesProduct()
     {
         CpuOnlyTest();
@@ -61,7 +61,7 @@ public abstract partial class CodecsTestBase
         Equal(-5, silk_MLA(-5, 1, 0));      // -5 + 1*0 = -5
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Shifts_WorkLikeC()
     {
         CpuOnlyTest();
@@ -72,7 +72,7 @@ public abstract partial class CodecsTestBase
         Equal(-2, silk_RSHIFT(-16, 3));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_AddShifts_WorkLikeC()
     {
         CpuOnlyTest();
@@ -80,7 +80,7 @@ public abstract partial class CodecsTestBase
         Equal(10, silk_ADD_LSHIFT32(2, 1, 3));   // 2 + (1 << 3) = 10
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Limit_Clamps()
     {
         CpuOnlyTest();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
         Equal(3, silk_LIMIT_int(3, 3, 3));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_MinMax_MatchesMath()
     {
         CpuOnlyTest();
@@ -99,7 +99,7 @@ public abstract partial class CodecsTestBase
         Equal(-5, silk_min_int(-5, 5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_ClzFrac_HandTracedValues()
     {
         CpuOnlyTest();
@@ -132,7 +132,7 @@ public abstract partial class CodecsTestBase
 
     // -------- SilkLog2 --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkLog2_Log2lin_KnownPoints()
     {
         CpuOnlyTest();
@@ -146,7 +146,7 @@ public abstract partial class CodecsTestBase
         Equal(8, SilkLog2.silk_log2lin(384));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkLog2_Log2lin_ClampsOutOfRange()
     {
         CpuOnlyTest();
@@ -156,7 +156,7 @@ public abstract partial class CodecsTestBase
         Equal(silk_int32_MAX, SilkLog2.silk_log2lin(10000));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkLog2_Lin2log_KnownPoints()
     {
         CpuOnlyTest();
@@ -166,7 +166,7 @@ public abstract partial class CodecsTestBase
         Equal(384, SilkLog2.silk_lin2log(8));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkLog2_RoundTrip_WithinTolerance()
     {
         CpuOnlyTest();
@@ -186,7 +186,7 @@ public abstract partial class CodecsTestBase
 
     // -------- SilkGainDecoder --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkGainDecoder_UnconditionalFirst_ProducesExpectedGain()
     {
         CpuOnlyTest();
@@ -200,7 +200,7 @@ public abstract partial class CodecsTestBase
         True(gains[0] > 0, $"gain should be positive, got {gains[0]}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkGainDecoder_UnconditionalFirst_LimitsDownwardJump()
     {
         CpuOnlyTest();
@@ -213,7 +213,7 @@ public abstract partial class CodecsTestBase
         Equal((sbyte)24, prev, "prev_ind after downward-limited unconditional decode");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkGainDecoder_DeltaCoded_AccumulatesCorrectly()
     {
         CpuOnlyTest();
@@ -237,7 +237,7 @@ public abstract partial class CodecsTestBase
         Equal(gains[2], gains[3], "gain[2] == gain[3]");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkGainDecoder_InvalidNbSubfr_Throws()
     {
         CpuOnlyTest();
@@ -256,7 +256,7 @@ public abstract partial class CodecsTestBase
         });
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkGainDecoder_BufferTooSmall_Throws()
     {
         CpuOnlyTest();
@@ -272,7 +272,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Constants sanity --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkConstants_DerivedValues_MatchLibopusPreprocessor()
     {
         CpuOnlyTest();

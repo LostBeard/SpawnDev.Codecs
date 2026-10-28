@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         dest[offset + 1] = (byte)value;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSeekTable_EmptyPayload_ParsesToZeroPoints()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         Equal(0, tbl.Points.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSeekTable_SinglePoint_Parses()
     {
         CpuOnlyTest();
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         False(tbl.Points[0].IsPlaceholder);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSeekTable_PlaceholderPoint_FlaggedCorrectly()
     {
         CpuOnlyTest();
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
         True(tbl.Points[0].IsPlaceholder);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSeekTable_MultiplePoints_PreservesOrder()
     {
         CpuOnlyTest();
@@ -86,7 +86,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSeekTable_MalformedLength_Throws()
     {
         CpuOnlyTest();
@@ -97,7 +97,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSeekTable_FindNearest_PicksLargestNotExceedingTarget()
     {
         CpuOnlyTest();
@@ -121,7 +121,7 @@ public abstract partial class CodecsTestBase
         Equal(12288UL, nearest!.Value.SampleNumber);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSeekTable_FindNearest_SkipsPlaceholders()
     {
         CpuOnlyTest();
@@ -138,7 +138,7 @@ public abstract partial class CodecsTestBase
         Equal(0UL, nearest!.Value.SampleNumber);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacSeekTable_FindNearest_AllPlaceholders_ReturnsNull()
     {
         CpuOnlyTest();

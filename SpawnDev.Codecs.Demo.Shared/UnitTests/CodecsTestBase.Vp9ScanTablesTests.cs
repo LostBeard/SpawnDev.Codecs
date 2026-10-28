@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
             True(seen[p], $"raster position {p} missing from scan");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanTables_4x4_AllThreeScansAreValidPermutations()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         AssertValidScanPermutation(Vp9ScanTables.ColScan4x4, 16);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanTables_8x8_AllThreeScansAreValidPermutations()
     {
         CpuOnlyTest();
@@ -51,7 +51,7 @@ public abstract partial class CodecsTestBase
         AssertValidScanPermutation(Vp9ScanTables.ColScan8x8, 64);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanTables_16x16_AllThreeScansAreValidPermutations()
     {
         CpuOnlyTest();
@@ -60,14 +60,14 @@ public abstract partial class CodecsTestBase
         AssertValidScanPermutation(Vp9ScanTables.ColScan16x16, 256);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanTables_32x32_DefaultScanIsValidPermutation()
     {
         CpuOnlyTest();
         AssertValidScanPermutation(Vp9ScanTables.DefaultScan32x32, 1024);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanTables_4x4DefaultScan_PinnedFirstAndLastEntries()
     {
         CpuOnlyTest();
@@ -81,7 +81,7 @@ public abstract partial class CodecsTestBase
         Equal((ushort)15, Vp9ScanTables.DefaultScan4x4[15]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanTables_4x4RowScan_PinnedFirstAndLastEntries()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
         Equal((ushort)15, Vp9ScanTables.RowScan4x4[15]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanTables_4x4ColScan_PinnedFirstAndLastEntries()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
         Equal((ushort)15, Vp9ScanTables.ColScan4x4[15]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanTables_32x32DefaultScan_LastEntryIs1023()
     {
         CpuOnlyTest();
@@ -112,7 +112,7 @@ public abstract partial class CodecsTestBase
         Equal((ushort)1023, Vp9ScanTables.DefaultScan32x32[1023]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanTables_ScanTypeForTxType4x4_MapsCorrectly()
     {
         CpuOnlyTest();
@@ -122,7 +122,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9ScanType.Default, Vp9ScanTables.ScanTypeForTxType4x4(Vp9TxType4x4.AdstAdst));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanTables_ScanTypeForTxType8x8_MapsCorrectly()
     {
         CpuOnlyTest();
@@ -132,7 +132,7 @@ public abstract partial class CodecsTestBase
         Equal(Vp9ScanType.Default, Vp9ScanTables.ScanTypeForTxType8x8(Vp9TxType8x8.AdstAdst));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9ScanTables_GetScan_DispatchesByTxSizeAndScanType()
     {
         CpuOnlyTest();

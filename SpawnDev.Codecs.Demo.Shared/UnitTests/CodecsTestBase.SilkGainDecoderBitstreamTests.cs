@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GainDecoder_IndependentCoding_RoundTripsAllSignalTypes()
     {
         CpuOnlyTest();
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GainDecoder_ConditionalCoding_RoundTrips()
     {
         CpuOnlyTest();
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GainDecoder_TwoSubframes_RoundTrips()
     {
         CpuOnlyTest();
@@ -105,7 +105,7 @@ public abstract partial class CodecsTestBase
         Equal(original[1], decoded[1]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GainDecoder_Dequantize_AfterDecodeIndices_ProducesNonZeroGains()
     {
         CpuOnlyTest();
@@ -129,7 +129,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GainDecoder_InvalidSignalType_Throws()
     {
         CpuOnlyTest();
@@ -143,7 +143,7 @@ public abstract partial class CodecsTestBase
             SilkGainDecoder.DecodeIndices(indices, dec, signalType: -1, conditional: 0, nbSubfr: 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GainDecoder_InvalidSubframeCount_Throws()
     {
         CpuOnlyTest();
@@ -157,7 +157,7 @@ public abstract partial class CodecsTestBase
             SilkGainDecoder.DecodeIndices(indices, dec, signalType: 0, conditional: 0, nbSubfr: 5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void GainDecoder_NullRangeDecoder_Throws()
     {
         CpuOnlyTest();

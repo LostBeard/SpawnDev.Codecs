@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionProbs_BothTablesAre48Bytes()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(48, Vp9PartitionProbs.DefaultPartitionProbs.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionProbs_KfFirstContextMatchesLibvpx()
     {
         CpuOnlyTest();
@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)94,  Vp9PartitionProbs.KfPartitionProbs[2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionProbs_KfLastContextMatchesLibvpx()
     {
         CpuOnlyTest();
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)3,  Vp9PartitionProbs.KfPartitionProbs[47]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionProbs_DefaultFirstAndLastContextMatchLibvpx()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)6,  Vp9PartitionProbs.DefaultPartitionProbs[47]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionProbs_Index_ProducesCorrectFlatOffset()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         Equal(47, Vp9PartitionProbs.Index(3, 3, 2));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionProbs_Index_RejectsOutOfRangeArgs()
     {
         CpuOnlyTest();
@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => Vp9PartitionProbs.Index(-1, 0, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionProbs_KeyframeProbsHelper_ReturnsExpectedSlice()
     {
         CpuOnlyTest();
@@ -86,7 +86,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)11, probs[2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionProbs_DefaultProbsHelper_ReturnsExpectedSlice()
     {
         CpuOnlyTest();
@@ -99,7 +99,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)87,  probs[2]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9PartitionProbs_DriveProbabilityIntoPartitionTree_DecodesNoneAtFirstZeroBit()
     {
         CpuOnlyTest();

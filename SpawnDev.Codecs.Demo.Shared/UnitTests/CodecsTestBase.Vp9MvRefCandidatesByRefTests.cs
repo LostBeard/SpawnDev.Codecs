@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefCandidatesByRef_AllRefs_StartEmpty()
     {
         CpuOnlyTest();
@@ -19,7 +19,7 @@ public abstract partial class CodecsTestBase
         Equal(0, store.ForRef(Vp9MvReferenceFrame.AltRef).Count);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefCandidatesByRef_PerRefIsolation()
     {
         CpuOnlyTest();
@@ -31,7 +31,7 @@ public abstract partial class CodecsTestBase
         Equal(0, store.ForRef(Vp9MvReferenceFrame.AltRef).Count);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefCandidatesByRef_Clear_ResetsAll()
     {
         CpuOnlyTest();
@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
         Equal(0, store.ForRef(Vp9MvReferenceFrame.AltRef).Count);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvRefCandidatesByRef_FillToCapacity()
     {
         CpuOnlyTest();

@@ -16,7 +16,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ForwardDct4_AllZero_ProducesAllZero()
     {
         CpuOnlyTest();
@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 4; i++) Equal(0, output[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ForwardDct4_Determinism()
     {
         CpuOnlyTest();
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 4; i++) Equal(a[i], b[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ForwardDct4_FwdInv_RoundTripWithinTolerance()
     {
         CpuOnlyTest();
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
             $"Av1Dct4 round-trip: scale1 err={maxAbsErrAtScale1}, scale2 err={maxAbsErrAtScale2}, scale4 err={maxAbsErrAtScale4} - none within tolerance");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ForwardDct8_FwdInv_RoundTripWithinTolerance()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
             $"Av1Dct8 round-trip: scale1 err={err1}, scale2 err={err2}, scale4 err={err4} - none within tolerance");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ForwardDct16_FwdInv_RoundTripWithinTolerance()
     {
         CpuOnlyTest();
@@ -131,7 +131,7 @@ public abstract partial class CodecsTestBase
             $"Av1Dct16 fwd+inv on constant input: inv[0]={inv[0]}, max deviation = {maxDeviation}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ForwardAdst8_FwdInv_RoundTripWithinTolerance()
     {
         CpuOnlyTest();
@@ -158,7 +158,7 @@ public abstract partial class CodecsTestBase
             $"Av1Adst8 round-trip: scale1 err={err1}, scale2 err={err2}, scale4 err={err4}, scale8 err={err8} - none within tolerance");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ForwardAdst8_AllZero_ProducesAllZero()
     {
         CpuOnlyTest();
@@ -168,7 +168,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 8; i++) Equal(0, output[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ForwardAdst16_FwdInv_RoundTripWithinTolerance()
     {
         CpuOnlyTest();
@@ -196,7 +196,7 @@ public abstract partial class CodecsTestBase
             $"Av1Adst16 round-trip: scale1 err={err1}, scale2 err={err2}, scale4 err={err4}, scale8 err={err8}, scale16 err={err16} - none within tolerance");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ForwardAdst16_AllZero_ProducesAllZero()
     {
         CpuOnlyTest();
@@ -206,7 +206,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal(0, output[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ForwardDct32_AllZero_ProducesAllZero()
     {
         CpuOnlyTest();
@@ -216,7 +216,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 32; i++) Equal(0, output[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ForwardDct32_Determinism()
     {
         CpuOnlyTest();
@@ -230,7 +230,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 32; i++) Equal(a[i], b[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ForwardDct32_ConstantInput_ConcentratesEnergyInDc()
     {
         CpuOnlyTest();
@@ -250,7 +250,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ForwardAdst4_FwdInv_RoundTripWithinTolerance()
     {
         CpuOnlyTest();
@@ -276,7 +276,7 @@ public abstract partial class CodecsTestBase
             $"Av1Adst4 round-trip: scale1 err={err1}, scale2 err={err2}, scale4 err={err4} - none within tolerance");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1ForwardDct4_DcOnly_NonZeroDcCoefficient()
     {
         CpuOnlyTest();

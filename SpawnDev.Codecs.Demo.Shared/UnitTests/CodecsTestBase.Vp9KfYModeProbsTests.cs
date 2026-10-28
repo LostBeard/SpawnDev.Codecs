@@ -10,14 +10,14 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9KfYModeProbs_HasCorrect900EntryLength()
     {
         CpuOnlyTest();
         Equal(900, Vp9IntraModeProbs.KfYModeProbs.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9KfYModeProbs_FirstContextMatchesLibvpx()
     {
         CpuOnlyTest();
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)91,  t[8]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9KfYModeProbs_LastContextMatchesLibvpx()
     {
         CpuOnlyTest();
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)72, t[899]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9KfYModeProbs_MidContextMatchesLibvpx()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)50,  t[296]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9KfYModeProbs_KeyframeYProbsHelper_ReturnsExpectedSlice()
     {
         CpuOnlyTest();
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)105, probs[8]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9KfYModeProbs_KeyframeYProbsHelper_CoversFull10x10ContextDomain()
     {
         CpuOnlyTest();
@@ -91,7 +91,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9KfYModeProbs_KeyframeYProbsHelper_RejectsOutOfRangeArgs()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
             Vp9IntraModeProbs.KeyframeYProbs(Vp9IntraMode.DcPred, (Vp9IntraMode)10));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9KfYModeProbs_DriveProbsIntoIntraModeTree_DecodesDcPredOnFirstZeroBit()
     {
         CpuOnlyTest();

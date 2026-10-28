@@ -11,7 +11,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoderResample_Wb20Ms_Internal16_Output48_FrameLengthIsTripled()
     {
         CpuOnlyTest();
@@ -22,7 +22,7 @@ public abstract partial class CodecsTestBase
         Equal(960, dec.FrameLength); // 48 * 20 = 960 samples
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoderResample_Nb20Ms_Internal8_Output48_FrameLengthIs6x()
     {
         CpuOnlyTest();
@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
         Equal(960, dec.FrameLength); // 48 * 20
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoderResample_16To48_DecodesAndResamplesCleanly()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoderResample_8To48_MaxUpsampleFactor()
     {
         CpuOnlyTest();
@@ -98,7 +98,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoderResample_Reset_ReinitializesResampler()
     {
         CpuOnlyTest();
@@ -134,7 +134,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoderResample_InvalidOutputRate_Throws()
     {
         CpuOnlyTest();
@@ -142,7 +142,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => new SilkDecoder(16000, 20, 44100));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkDecoderResample_EveryValidSilkToApiCombination_Works()
     {
         CpuOnlyTest();

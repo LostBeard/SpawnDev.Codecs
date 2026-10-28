@@ -14,7 +14,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- New SilkMacros helpers --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Clz32_HandTracedValues()
     {
         CpuOnlyTest();
@@ -29,7 +29,7 @@ public abstract partial class CodecsTestBase
         Equal(0, silk_CLZ32(unchecked((int)0x80000000))); // sign bit set
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Max32_ReturnsLargerValue()
     {
         CpuOnlyTest();
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
         Equal(int.MaxValue, silk_max_32(int.MaxValue, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Add32Ovflw_WrapsAroundInt32()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         Equal(int.MaxValue, silk_ADD32_ovflw(int.MinValue, -1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_Smlabb_Ovflw_BasicAccumulate()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         Equal(int.MinValue, silk_SMLABB_ovflw(int.MaxValue, 1, 1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SilkMacros_AddRshiftUint_UnsignedSemantics()
     {
         CpuOnlyTest();
@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
 
     // -------- SilkSumSqrShift --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SumSqrShift_ZeroVector_ZeroEnergy()
     {
         CpuOnlyTest();
@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
         True(shift >= 0, $"shift should be non-negative, got {shift}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SumSqrShift_SingleNonzeroSample_MatchesSquare()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
         Equal(0, shift);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SumSqrShift_KnownVector_ExactValue()
     {
         CpuOnlyTest();
@@ -119,7 +119,7 @@ public abstract partial class CodecsTestBase
         Equal(0, shift);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SumSqrShift_LargeValues_ShiftsRightToFit()
     {
         CpuOnlyTest();
@@ -140,7 +140,7 @@ public abstract partial class CodecsTestBase
         True(energy >= 0, $"Energy must be non-negative after shift, got {energy}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SumSqrShift_OddLength_HandlesTrailingSample()
     {
         CpuOnlyTest();
@@ -154,7 +154,7 @@ public abstract partial class CodecsTestBase
         Equal(0, shift);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void SumSqrShift_MixedSignInput_OnlyAbsMatters()
     {
         CpuOnlyTest();

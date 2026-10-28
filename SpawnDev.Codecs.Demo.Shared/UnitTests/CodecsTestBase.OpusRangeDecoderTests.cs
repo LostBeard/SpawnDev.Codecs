@@ -11,14 +11,14 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_Ctor_NullBuffer_Throws()
     {
         CpuOnlyTest();
         Throws<ArgumentNullException>(() => new OpusRangeDecoder(null!));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_Ctor_NegativeOffset_Throws()
     {
         CpuOnlyTest();
@@ -26,7 +26,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => new OpusRangeDecoder(buf, -1, 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_Ctor_OffsetPastEnd_Throws()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => new OpusRangeDecoder(buf, 5, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_Ctor_NegativeLength_Throws()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => new OpusRangeDecoder(buf, 0, -1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_Ctor_LengthPastEnd_Throws()
     {
         CpuOnlyTest();
@@ -50,7 +50,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => new OpusRangeDecoder(buf, 2, 5));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_Ctor_EmptyBuffer_ConstructsWithoutThrow()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         Equal(0, dec.Error, "Error after empty-buffer init");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_Ctor_SingleByteBuffer_ConstructsWithoutThrow()
     {
         CpuOnlyTest();
@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         Equal(0, dec.Error);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_InitialState_ErrorIsZero()
     {
         CpuOnlyTest();
@@ -74,7 +74,7 @@ public abstract partial class CodecsTestBase
         Equal(0, dec.Error);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_InitialState_TellIsNonNegative()
     {
         CpuOnlyTest();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
         True(dec.Tell >= 0, $"Tell={dec.Tell} should be non-negative");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_InitialState_TellFracIsPositive()
     {
         CpuOnlyTest();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
         True(dec.TellFrac > 0, $"TellFrac={dec.TellFrac} should be positive");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_TwoInstances_SameInput_ProduceSameInitialState()
     {
         CpuOnlyTest();
@@ -103,7 +103,7 @@ public abstract partial class CodecsTestBase
         Equal(a.Error, b.Error, "Error");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_TwoInstances_SameSequence_ProduceSameResults()
     {
         CpuOnlyTest();
@@ -118,7 +118,7 @@ public abstract partial class CodecsTestBase
         Equal(a.RangeBytes, b.RangeBytes, "RangeBytes after 2 steps");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_DecodeBitLogP_ReturnsZeroOrOne()
     {
         CpuOnlyTest();
@@ -127,7 +127,7 @@ public abstract partial class CodecsTestBase
         InRange(result, 0, 1);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_DecodeBitLogP_MultipleCalls_ProduceValidBits()
     {
         CpuOnlyTest();
@@ -140,7 +140,7 @@ public abstract partial class CodecsTestBase
         Equal(0, dec.Error, "Error after 10 decode-bit calls");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_DecodeIcdf_TwoSymbolCdf_ReturnsValidSymbol()
     {
         CpuOnlyTest();
@@ -149,7 +149,7 @@ public abstract partial class CodecsTestBase
         InRange(dec.DecodeIcdf(icdf, 8), 0, 1);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_DecodeIcdf_ThreeSymbolCdf_ReturnsValidSymbol()
     {
         CpuOnlyTest();
@@ -158,7 +158,7 @@ public abstract partial class CodecsTestBase
         InRange(dec.DecodeIcdf(icdf, 8), 0, 2);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_DecodeIcdf16_SmokeTest()
     {
         CpuOnlyTest();
@@ -167,7 +167,7 @@ public abstract partial class CodecsTestBase
         InRange(dec.DecodeIcdf16(icdf, 15), 0, 2);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_DecodeBits_ReturnsValueWithinRange()
     {
         CpuOnlyTest();
@@ -176,7 +176,7 @@ public abstract partial class CodecsTestBase
         InRange(value, 0u, 0xFFu);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_DecodeBits_ZeroBits_ReturnsZero()
     {
         CpuOnlyTest();
@@ -184,7 +184,7 @@ public abstract partial class CodecsTestBase
         Equal(0u, dec.DecodeBits(0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_DecodeUint_FtOne_Throws()
     {
         CpuOnlyTest();
@@ -192,7 +192,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => dec.DecodeUint(1));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_DecodeUint_FtZero_Throws()
     {
         CpuOnlyTest();
@@ -200,7 +200,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => dec.DecodeUint(0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_DecodeUint_SmallFt_ReturnsValueInRange()
     {
         CpuOnlyTest();
@@ -208,7 +208,7 @@ public abstract partial class CodecsTestBase
         InRange(dec.DecodeUint(10), 0u, 9u);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_DecodeUint_LargeFt_ReturnsValueInRange()
     {
         CpuOnlyTest();
@@ -217,7 +217,7 @@ public abstract partial class CodecsTestBase
         InRange(dec.DecodeUint(ft), 0u, ft - 1u);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_DecodeUpdate_SmokeTest()
     {
         CpuOnlyTest();
@@ -229,7 +229,7 @@ public abstract partial class CodecsTestBase
         Equal(0, dec.Error);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Decoder_DecodeBin_SmokeTest()
     {
         CpuOnlyTest();

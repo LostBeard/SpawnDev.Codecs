@@ -10,7 +10,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D45_4x4_KnownPattern()
     {
         CpuOnlyTest();
@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)40, dst[12]); Equal((byte)40, dst[13]); Equal((byte)40, dst[14]); Equal((byte)40, dst[15]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D45_4x4_FlatInput_ProducesFlatOutput()
     {
         CpuOnlyTest();
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 16; i++) Equal((byte)100, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D45_8x8_FlatInputProducesFlatOutput()
     {
         CpuOnlyTest();
@@ -57,7 +57,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 64; i++) Equal((byte)50, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D63_4x4_KnownPattern()
     {
         CpuOnlyTest();
@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)30, dst[12]); Equal((byte)40, dst[13]); Equal((byte)40, dst[14]); Equal((byte)40, dst[15]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D63_FlatInputProducesFlatOutput()
     {
         CpuOnlyTest();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 64; i++) Equal((byte)200, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D45_StridedDest_OnlyTouchesBlock()
     {
         CpuOnlyTest();
@@ -113,7 +113,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D45_RejectsInvalidArgs()
     {
         CpuOnlyTest();
@@ -123,7 +123,7 @@ public abstract partial class CodecsTestBase
             Vp9DirectionalPredictor.D45Predict(new byte[7], new byte[16], n: 4, stride: 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D63_RejectsInvalidArgs()
     {
         CpuOnlyTest();
@@ -133,7 +133,7 @@ public abstract partial class CodecsTestBase
             Vp9DirectionalPredictor.D63Predict(new byte[7], new byte[16], n: 4, stride: 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D135_4x4_KnownPattern()
     {
         CpuOnlyTest();
@@ -160,7 +160,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)70, dst[12]); Equal((byte)60, dst[13]); Equal((byte)41, dst[14]); Equal((byte)18, dst[15]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D135_FlatInputProducesFlatOutput()
     {
         CpuOnlyTest();
@@ -172,7 +172,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 64; i++) Equal((byte)100, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D135_StridedDest_OnlyTouchesBlock()
     {
         CpuOnlyTest();
@@ -192,7 +192,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D135_RejectsInvalidArgs()
     {
         CpuOnlyTest();
@@ -204,7 +204,7 @@ public abstract partial class CodecsTestBase
             Vp9DirectionalPredictor.D135Predict(0, new byte[4], new byte[3], new byte[16], n: 4, stride: 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D117_4x4_KnownPattern()
     {
         CpuOnlyTest();
@@ -226,7 +226,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)60, dst[12]); Equal((byte)18, dst[13]); Equal((byte)11, dst[14]); Equal((byte)20, dst[15]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D117_FlatInputProducesFlatOutput()
     {
         CpuOnlyTest();
@@ -238,7 +238,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 64; i++) Equal((byte)100, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D117_RejectsInvalidArgs()
     {
         CpuOnlyTest();
@@ -250,7 +250,7 @@ public abstract partial class CodecsTestBase
             Vp9DirectionalPredictor.D117Predict(0, new byte[4], new byte[3], new byte[16], n: 4, stride: 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D153_4x4_KnownPattern()
     {
         CpuOnlyTest();
@@ -274,7 +274,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)75, dst[12]); Equal((byte)70, dst[13]); Equal((byte)65, dst[14]); Equal((byte)60, dst[15]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D153_FlatInputProducesFlatOutput()
     {
         CpuOnlyTest();
@@ -286,7 +286,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 64; i++) Equal((byte)100, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D153_RejectsInvalidArgs()
     {
         CpuOnlyTest();
@@ -298,7 +298,7 @@ public abstract partial class CodecsTestBase
             Vp9DirectionalPredictor.D153Predict(0, new byte[4], new byte[3], new byte[16], n: 4, stride: 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D207_4x4_KnownPattern()
     {
         CpuOnlyTest();
@@ -320,7 +320,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)80, dst[12]); Equal((byte)80, dst[13]); Equal((byte)80, dst[14]); Equal((byte)80, dst[15]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D207_FlatInputProducesFlatOutput()
     {
         CpuOnlyTest();
@@ -331,7 +331,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 64; i++) Equal((byte)100, dst[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D207_StridedDest_OnlyTouchesBlock()
     {
         CpuOnlyTest();
@@ -350,7 +350,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DirectionalPredictor_D207_RejectsInvalidArgs()
     {
         CpuOnlyTest();

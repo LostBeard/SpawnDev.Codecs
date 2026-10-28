@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         return bytes.ToArray();
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacDecoder_Mono_SingleConstantFrame_DecodesToInterleavedPcm()
     {
         CpuOnlyTest();
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 1234, 1234, 1234, 1234 }, result.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacDecoder_Mono_MultipleFrames_ConcatenatesPcm()
     {
         CpuOnlyTest();
@@ -108,7 +108,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { 100, 100, 100, 100, -200, -200, -200, -200 }, result.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacDecoder_Stereo_MidSide_InterleavesLr()
     {
         CpuOnlyTest();
@@ -143,7 +143,7 @@ public abstract partial class CodecsTestBase
         EqualInts(new[] { L[0], R[0], L[1], R[1], L[2], R[2], L[3], R[3] }, result.InterleavedSamples);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacDecoder_FrameByFrame_ReadsExactlyOnce()
     {
         CpuOnlyTest();
@@ -166,7 +166,7 @@ public abstract partial class CodecsTestBase
         Equal<FlacFrame?>(null, dec.ReadNextFrame());
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacDecoder_MetadataOnly_NoFrames_ReturnsEmpty()
     {
         CpuOnlyTest();
@@ -178,7 +178,7 @@ public abstract partial class CodecsTestBase
         Equal(0, result.InterleavedSamples.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void FlacDecoder_BadMarker_Throws()
     {
         CpuOnlyTest();

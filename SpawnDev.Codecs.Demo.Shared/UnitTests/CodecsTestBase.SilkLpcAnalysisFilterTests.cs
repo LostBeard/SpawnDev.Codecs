@@ -12,7 +12,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- Trivial cases --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcAnalysisFilter_AllZeroInput_ProducesAllZeroOutput()
     {
         CpuOnlyTest();
@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 100; i++) Equal((short)0, output[i], $"pos {i}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcAnalysisFilter_ZeroCoefficients_PassesInputThrough()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Known analytic case --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcAnalysisFilter_SingleTapCoefficient_MatchesManualCalculation()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         for (int i = 6; i < 20; i++) Equal((short)0, output[i], $"pos {i}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcAnalysisFilter_SingleTapCoefficient_OnRampInput_ProducesConstantDelta()
     {
         CpuOnlyTest();
@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Argument validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcAnalysisFilter_OddOrder_Throws()
     {
         CpuOnlyTest();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
             SilkLpcAnalysisFilter.Apply(output, input, bQ12, len: 20, d: 7));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcAnalysisFilter_OrderBelowSix_Throws()
     {
         CpuOnlyTest();
@@ -101,7 +101,7 @@ public abstract partial class CodecsTestBase
             SilkLpcAnalysisFilter.Apply(output, input, bQ12, len: 20, d: 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcAnalysisFilter_OrderGreaterThanLen_Throws()
     {
         CpuOnlyTest();
@@ -112,7 +112,7 @@ public abstract partial class CodecsTestBase
             SilkLpcAnalysisFilter.Apply(output, input, bQ12, len: 10, d: 16));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcAnalysisFilter_BQ12TooSmall_Throws()
     {
         CpuOnlyTest();
@@ -125,7 +125,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Order 10 and 16 (realistic SILK orders) --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcAnalysisFilter_Order10_RampInput_ProducesSmoothOutput()
     {
         CpuOnlyTest();
@@ -144,7 +144,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void LpcAnalysisFilter_Order16_DoesNotCrash()
     {
         CpuOnlyTest();

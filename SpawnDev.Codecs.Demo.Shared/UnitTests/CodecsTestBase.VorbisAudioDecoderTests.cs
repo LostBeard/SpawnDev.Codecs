@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         };
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisAudioDecoder_Construct_SetupWithNoCodebooks_Succeeds()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         True(dec is not null);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisAudioDecoder_EmptyPacket_ReturnsZeroFrames()
     {
         CpuOnlyTest();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         Equal(0, frames);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisAudioDecoder_NullHeaders_Throws()
     {
         CpuOnlyTest();

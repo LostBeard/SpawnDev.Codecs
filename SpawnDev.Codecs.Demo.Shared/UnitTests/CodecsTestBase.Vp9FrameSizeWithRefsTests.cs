@@ -15,7 +15,7 @@ public abstract partial class CodecsTestBase
         (640, 480),   // ALTREF
     };
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameSizeWithRefs_LastRefSelected_FirstBitOne()
     {
         CpuOnlyTest();
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
         Equal(false, info.RenderSizeOverride);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameSizeWithRefs_GoldenRefSelected_FirstBitZero_SecondOne()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         Equal(1080, info.FrameHeight);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameSizeWithRefs_AltRefSelected_TwoZerosThenOne()
     {
         CpuOnlyTest();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         Equal(480, info.FrameHeight);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameSizeWithRefs_NoRefSelected_ReadsExplicitSize()
     {
         CpuOnlyTest();
@@ -78,7 +78,7 @@ public abstract partial class CodecsTestBase
         Equal(false, info.RenderSizeOverride);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameSizeWithRefs_RenderOverride_ReadsRenderSize()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
         Equal(600, info.RenderHeight);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameSizeWithRefs_RejectsTooFewRefs()
     {
         CpuOnlyTest();
@@ -105,7 +105,7 @@ public abstract partial class CodecsTestBase
             Vp9FrameSizeWithRefsParser.Parse(data, new (int, int)[] { (1, 1) }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9FrameSizeWithRefs_Constants_MatchLibvpx()
     {
         CpuOnlyTest();

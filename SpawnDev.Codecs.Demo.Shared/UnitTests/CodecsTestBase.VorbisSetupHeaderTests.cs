@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
         return full;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisSetupHeader_Minimal_ParsesEverySection()
     {
         CpuOnlyTest();
@@ -93,7 +93,7 @@ public abstract partial class CodecsTestBase
         False(setup.Modes[0].BlockFlag);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisSetupHeader_BadPacketType_Throws()
     {
         CpuOnlyTest();
@@ -104,7 +104,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisSetupHeader_BadMagic_Throws()
     {
         CpuOnlyTest();
@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void VorbisSetupHeader_FloorType0_ThrowsNotSupported()
     {
         CpuOnlyTest();

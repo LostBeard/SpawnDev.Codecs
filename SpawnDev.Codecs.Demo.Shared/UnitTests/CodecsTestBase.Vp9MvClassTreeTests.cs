@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvClassTree_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(20, Vp9MvClassTree.Tree.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvClassTree_Decode_AllZero_PicksClass0()
     {
         CpuOnlyTest();
@@ -25,7 +25,7 @@ public abstract partial class CodecsTestBase
             Vp9MvClassTree.Decode(p => 0, BuildProbs()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvClassTree_Decode_BitsOneZero_PicksClass1()
     {
         CpuOnlyTest();
@@ -36,7 +36,7 @@ public abstract partial class CodecsTestBase
             Vp9MvClassTree.Decode(p => bits[callIdx++], BuildProbs()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvClassTree_Decode_BitsOnesThenZeros_PicksClass2()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
             Vp9MvClassTree.Decode(p => bits[callIdx++], BuildProbs()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvClassTree_Decode_AllOnes_PicksClass10()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
             Vp9MvClassTree.Decode(p => bits[callIdx++], BuildProbs()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvClassTree_Decode_PicksClass6()
     {
         CpuOnlyTest();
@@ -71,7 +71,7 @@ public abstract partial class CodecsTestBase
             Vp9MvClassTree.Decode(p => bits[callIdx++], BuildProbs()));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvClassTree_Decode_RejectsShortProbs()
     {
         CpuOnlyTest();
@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
             Vp9MvClassTree.Decode(p => 0, new byte[] { 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvClassTree_Decode_RejectsNullReader()
     {
         CpuOnlyTest();

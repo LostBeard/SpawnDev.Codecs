@@ -17,7 +17,7 @@ public abstract partial class CodecsTestBase
         return dest;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct32x32_ZeroCoefficients_LeavesPredictorUnchanged()
     {
         CpuOnlyTest();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 1024; i++) Equal((byte)128, dest[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct32x32_Clips_HighResidualToUpper255()
     {
         CpuOnlyTest();
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 1024; i++) Equal((byte)255, dest[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct32x32_Clips_NegativeResidualToZero()
     {
         CpuOnlyTest();
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < 1024; i++) Equal((byte)0, dest[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct32x32_StridedDest_OnlyTouches32x32Block()
     {
         CpuOnlyTest();
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
                 Equal((byte)77, canvas[row * 64 + col]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct32x32_IsDeterministic_ForRandomInputs()
     {
         CpuOnlyTest();
@@ -81,7 +81,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct32x32_SingleDcCoefficient_ProducesNonZeroResidual()
     {
         CpuOnlyTest();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
         True(changed, "DC coefficient must produce non-zero residual somewhere");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct32x32_Throws_OnShortInput()
     {
         CpuOnlyTest();
@@ -105,7 +105,7 @@ public abstract partial class CodecsTestBase
         True(threw);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9Idct32x32_Throws_OnBadStride()
     {
         CpuOnlyTest();

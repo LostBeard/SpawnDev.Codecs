@@ -12,7 +12,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DiffUpdateProb_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -21,7 +21,7 @@ public abstract partial class CodecsTestBase
         Equal(255, Vp9DiffUpdateProb.InvMapTable.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DiffUpdateProb_InvMapTable_FirstFewEntries()
     {
         CpuOnlyTest();
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
         Equal((byte)253, Vp9DiffUpdateProb.InvMapTable[254]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DiffUpdateProb_InvRecenterNonneg_OverflowBranch()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         Equal(50, Vp9DiffUpdateProb.InvRecenterNonneg(50, 10));    // 50 > 20
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DiffUpdateProb_InvRecenterNonneg_OddBranch()
     {
         CpuOnlyTest();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         Equal(7, Vp9DiffUpdateProb.InvRecenterNonneg(5, 10));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DiffUpdateProb_InvRecenterNonneg_EvenBranch()
     {
         CpuOnlyTest();
@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
         Equal(12, Vp9DiffUpdateProb.InvRecenterNonneg(4, 10));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DiffUpdateProb_InvRemapProb_LowerHalf()
     {
         CpuOnlyTest();
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
         Equal(96, Vp9DiffUpdateProb.InvRemapProb(0, 100));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DiffUpdateProb_InvRemapProb_UpperHalf()
     {
         CpuOnlyTest();
@@ -96,7 +96,7 @@ public abstract partial class CodecsTestBase
         Equal(204, Vp9DiffUpdateProb.InvRemapProb(0, 200));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DiffUpdateProb_InvRemapProb_Symmetry()
     {
         CpuOnlyTest();
@@ -108,7 +108,7 @@ public abstract partial class CodecsTestBase
         Equal(124, Vp9DiffUpdateProb.InvRemapProb(0, 128));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9DiffUpdateProb_InvRemapProb_RejectsOutOfRangeV()
     {
         CpuOnlyTest();

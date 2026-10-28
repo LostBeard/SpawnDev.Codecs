@@ -15,7 +15,7 @@ public abstract partial class CodecsTestBase
 {
     // -------- Stage-2 NB 20 ms --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_Nb20Ms_ContourZero_AllSubframesEqualBaseLag()
     {
         CpuOnlyTest();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         for (int k = 0; k < 4; k++) Equal(26, lags[k], $"subframe {k}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_Nb20Ms_ContourOne_AppliesExpectedDeltas()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         Equal(26 - 1, lags[3]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_Nb20Ms_AllContours_WithinLagRange()
     {
         CpuOnlyTest();
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Stage-2 NB 10 ms --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_Nb10Ms_ContourZero_BothSubframesEqualBaseLag()
     {
         CpuOnlyTest();
@@ -76,7 +76,7 @@ public abstract partial class CodecsTestBase
         Equal(21, lags[1]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_Nb10Ms_ContourOne_FirstSubframeOffsetPlusOne()
     {
         CpuOnlyTest();
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
         Equal(21, lags[1]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_Nb10Ms_ContourTwo_SecondSubframeOffsetPlusOne()
     {
         CpuOnlyTest();
@@ -100,7 +100,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Stage-3 non-NB 20 ms --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_Wb20Ms_ContourZero_AllSubframesEqualBaseLag()
     {
         CpuOnlyTest();
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
         for (int k = 0; k < 4; k++) Equal(expected, lags[k]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_Wb20Ms_LastContour_AppliesExpectedDeltas()
     {
         CpuOnlyTest();
@@ -127,7 +127,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Stage-3 non-NB 10 ms --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_Mb10Ms_LastContour_AppliesExpectedDeltas()
     {
         CpuOnlyTest();
@@ -141,7 +141,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Clamping --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_Nb20Ms_SmallLagWithNegativeDelta_ClampsToMinLag()
     {
         CpuOnlyTest();
@@ -159,7 +159,7 @@ public abstract partial class CodecsTestBase
         Equal(minLag + 2, lags[3]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_Nb20Ms_LargeLagWithPositiveDelta_ClampsToMaxLag()
     {
         CpuOnlyTest();
@@ -179,7 +179,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Arg validation --------
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_UnsupportedFsKHz_Throws()
     {
         CpuOnlyTest();
@@ -188,7 +188,7 @@ public abstract partial class CodecsTestBase
             SilkPitchDecoder.ComputeLags(lags, 0, 0, fsKHz: 11, nbSubfr: 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_InvalidNbSubfr_Throws()
     {
         CpuOnlyTest();
@@ -197,7 +197,7 @@ public abstract partial class CodecsTestBase
             SilkPitchDecoder.ComputeLags(lags, 0, 0, fsKHz: 16, nbSubfr: 3));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_ContourIndexOutOfRange_Throws()
     {
         CpuOnlyTest();
@@ -207,7 +207,7 @@ public abstract partial class CodecsTestBase
             SilkPitchDecoder.ComputeLags(lags, 0, 34, fsKHz: 16, nbSubfr: 4));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void ComputeLags_OutputTooSmall_Throws()
     {
         CpuOnlyTest();

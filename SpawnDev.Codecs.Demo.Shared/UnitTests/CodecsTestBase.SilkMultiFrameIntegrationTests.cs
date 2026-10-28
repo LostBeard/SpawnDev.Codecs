@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
         return enc.ToArray();
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MultiFrame_TwoIndependentInactiveFrames_StateAdvances()
     {
         CpuOnlyTest();
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
         True(lpcStable2 > 0, "frame 2 LPC should be stable");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MultiFrame_SecondFrameInterpolatesFromFirst_LpcDiffersAcrossHalves()
     {
         CpuOnlyTest();
@@ -137,7 +137,7 @@ public abstract partial class CodecsTestBase
         True(differing > 0, "interpolated first-half LPC should differ from second-half LPC in at least one coefficient");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MultiFrame_ConditionalGain_DeltaEncodingFromPrevLastIndex()
     {
         CpuOnlyTest();
@@ -174,7 +174,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MultiFrame_VoicedPitchDelta_UsesPrevLagIndex()
     {
         CpuOnlyTest();
@@ -243,7 +243,7 @@ public abstract partial class CodecsTestBase
         Equal(15565, params2.LtpScaleQ14);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void MultiFrame_StateReset_RestoresFirstFrameBehavior()
     {
         CpuOnlyTest();

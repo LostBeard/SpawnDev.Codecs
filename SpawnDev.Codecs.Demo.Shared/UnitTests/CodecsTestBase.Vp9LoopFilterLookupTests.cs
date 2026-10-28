@@ -8,14 +8,14 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_MaxLoopFilter_Is63()
     {
         CpuOnlyTest();
         Equal(63, Vp9LoopFilterLookup.MaxLoopFilter);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_NoSegmentation_PassesThrough()
     {
         CpuOnlyTest();
@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
         Equal(20, Vp9LoopFilterLookup.ResolveSegmentLevel(seg, 0, 20));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_AltLfInactive_PassesThrough()
     {
         CpuOnlyTest();
@@ -32,7 +32,7 @@ public abstract partial class CodecsTestBase
         Equal(35, Vp9LoopFilterLookup.ResolveSegmentLevel(seg, 0, 35));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_AltLfDeltaMode_AddsToBase()
     {
         CpuOnlyTest();
@@ -42,7 +42,7 @@ public abstract partial class CodecsTestBase
         Equal(45, Vp9LoopFilterLookup.ResolveSegmentLevel(seg, 2, 40));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_AltLfDeltaMode_NegativeDelta()
     {
         CpuOnlyTest();
@@ -52,7 +52,7 @@ public abstract partial class CodecsTestBase
         Equal(20, Vp9LoopFilterLookup.ResolveSegmentLevel(seg, 0, 30));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_AltLfAbsoluteMode_IgnoresBase()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         Equal(17, Vp9LoopFilterLookup.ResolveSegmentLevel(seg, 3, 50));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_ClampsToZero()
     {
         CpuOnlyTest();
@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
         Equal(0, Vp9LoopFilterLookup.ResolveSegmentLevel(seg, 0, 30));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_ClampsToMaxLoopFilter()
     {
         CpuOnlyTest();
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
         Equal(63, Vp9LoopFilterLookup.ResolveSegmentLevel(seg, 0, 30));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_RejectsNullSegmentation()
     {
         CpuOnlyTest();
@@ -92,7 +92,7 @@ public abstract partial class CodecsTestBase
             Vp9LoopFilterLookup.ResolveSegmentLevel(null!, 0, 30));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_BlockLevel_NoModeRefDelta_PassesSegmentLevel()
     {
         CpuOnlyTest();
@@ -106,7 +106,7 @@ public abstract partial class CodecsTestBase
             interMode: Vp9InterMode.ZeroMv));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_BlockLevel_IntraOnlyAddsRefDelta()
     {
         CpuOnlyTest();
@@ -123,7 +123,7 @@ public abstract partial class CodecsTestBase
             interMode: null));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_BlockLevel_InterAddsBothRefAndModeDelta()
     {
         CpuOnlyTest();
@@ -141,7 +141,7 @@ public abstract partial class CodecsTestBase
             interMode: Vp9InterMode.ZeroMv));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_BlockLevel_NewMvUsesIndex1OfModeDeltas()
     {
         CpuOnlyTest();
@@ -157,7 +157,7 @@ public abstract partial class CodecsTestBase
             interMode: Vp9InterMode.NewMv));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_BlockLevel_ScaleAtLevel32_Is2()
     {
         CpuOnlyTest();
@@ -172,7 +172,7 @@ public abstract partial class CodecsTestBase
             interMode: Vp9InterMode.NewMv));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_BlockLevel_RejectsNullInterModeForInterRef()
     {
         CpuOnlyTest();
@@ -187,7 +187,7 @@ public abstract partial class CodecsTestBase
                 interMode: null));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9LoopFilterLookup_BlockLevel_RejectsShortRefDeltas()
     {
         CpuOnlyTest();

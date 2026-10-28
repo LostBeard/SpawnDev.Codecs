@@ -14,7 +14,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1SequenceHeaderWriter_BbbConfig_RoundTripsThroughParser()
     {
         CpuOnlyTest();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         Equal(false, sh.ColorRangeFull);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1SequenceHeaderWriter_HighBitDepth10_RoundTrips()
     {
         CpuOnlyTest();
@@ -69,7 +69,7 @@ public abstract partial class CodecsTestBase
         Equal(false, sh.Monochrome);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1SequenceHeaderWriter_4kFrame_RoundTrips()
     {
         CpuOnlyTest();
@@ -88,7 +88,7 @@ public abstract partial class CodecsTestBase
         Equal(2160, sh.MaxFrameHeight);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1SequenceHeaderWriter_Monochrome_RoundTrips()
     {
         CpuOnlyTest();
@@ -108,7 +108,7 @@ public abstract partial class CodecsTestBase
         Equal(8, sh.BitDepth);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1SequenceHeaderWriter_WrappedAsObu_StreamHasValidShape()
     {
         CpuOnlyTest();
@@ -132,7 +132,7 @@ public abstract partial class CodecsTestBase
         Equal(payload.Length, parsedObus[0].PayloadLength);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1SequenceHeaderWriter_BbbConfig_BitExactMatchesLibaomBytes()
     {
         CpuOnlyTest();
@@ -200,7 +200,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1SequenceHeaderWriter_BbbSh_ParseToConfigEchoesBitExact()
     {
         CpuOnlyTest();
@@ -235,7 +235,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Av1SequenceHeaderWriter_RejectsInvalidConfigs()
     {
         CpuOnlyTest();

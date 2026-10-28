@@ -10,84 +10,84 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraTxType_Lookup_HasTenEntries()
     {
         CpuOnlyTest();
         Equal(10, Vp9IntraTxType.Lookup.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraTxType_DcMode_IsDctDct()
     {
         CpuOnlyTest();
         Equal(Vp9TxType.DctDct, Vp9IntraTxType.ForMode(Vp9IntraMode.DcPred));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraTxType_VMode_IsAdstDct()
     {
         CpuOnlyTest();
         Equal(Vp9TxType.AdstDct, Vp9IntraTxType.ForMode(Vp9IntraMode.VPred));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraTxType_HMode_IsDctAdst()
     {
         CpuOnlyTest();
         Equal(Vp9TxType.DctAdst, Vp9IntraTxType.ForMode(Vp9IntraMode.HPred));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraTxType_D45Mode_IsDctDct()
     {
         CpuOnlyTest();
         Equal(Vp9TxType.DctDct, Vp9IntraTxType.ForMode(Vp9IntraMode.D45Pred));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraTxType_D135Mode_IsAdstAdst()
     {
         CpuOnlyTest();
         Equal(Vp9TxType.AdstAdst, Vp9IntraTxType.ForMode(Vp9IntraMode.D135Pred));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraTxType_D117Mode_IsAdstDct()
     {
         CpuOnlyTest();
         Equal(Vp9TxType.AdstDct, Vp9IntraTxType.ForMode(Vp9IntraMode.D117Pred));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraTxType_D153Mode_IsDctAdst()
     {
         CpuOnlyTest();
         Equal(Vp9TxType.DctAdst, Vp9IntraTxType.ForMode(Vp9IntraMode.D153Pred));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraTxType_D207Mode_IsDctAdst()
     {
         CpuOnlyTest();
         Equal(Vp9TxType.DctAdst, Vp9IntraTxType.ForMode(Vp9IntraMode.D207Pred));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraTxType_D63Mode_IsAdstDct()
     {
         CpuOnlyTest();
         Equal(Vp9TxType.AdstDct, Vp9IntraTxType.ForMode(Vp9IntraMode.D63Pred));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraTxType_TmMode_IsAdstAdst()
     {
         CpuOnlyTest();
         Equal(Vp9TxType.AdstAdst, Vp9IntraTxType.ForMode(Vp9IntraMode.TmPred));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraTxType_RowAndColumnBitsMatchSemantics()
     {
         CpuOnlyTest();
@@ -110,7 +110,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9IntraTxType_RejectsOutOfRangeMode()
     {
         CpuOnlyTest();

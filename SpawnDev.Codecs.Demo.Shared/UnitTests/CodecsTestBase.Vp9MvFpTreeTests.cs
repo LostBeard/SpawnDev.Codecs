@@ -8,7 +8,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvFpTree_Constants_MatchLibvpx()
     {
         CpuOnlyTest();
@@ -16,7 +16,7 @@ public abstract partial class CodecsTestBase
         Equal(6, Vp9MvFpTree.Tree.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvFpTree_Decode_AllZero_PicksFp0()
     {
         CpuOnlyTest();
@@ -24,7 +24,7 @@ public abstract partial class CodecsTestBase
             Vp9MvFpTree.Decode(p => 0, new byte[] { 128, 128, 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvFpTree_Decode_OneZero_PicksFp1()
     {
         CpuOnlyTest();
@@ -34,7 +34,7 @@ public abstract partial class CodecsTestBase
             Vp9MvFpTree.Decode(p => bits[callIdx++], new byte[] { 128, 128, 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvFpTree_Decode_TwoZero_PicksFp2()
     {
         CpuOnlyTest();
@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
             Vp9MvFpTree.Decode(p => bits[callIdx++], new byte[] { 128, 128, 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvFpTree_Decode_AllOnes_PicksFp3()
     {
         CpuOnlyTest();
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
             Vp9MvFpTree.Decode(p => bits[callIdx++], new byte[] { 128, 128, 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvFpTree_Decode_RejectsShortProbs()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
             Vp9MvFpTree.Decode(p => 0, new byte[] { 128, 128 }));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Vp9MvFpTree_Decode_RejectsNullReader()
     {
         CpuOnlyTest();

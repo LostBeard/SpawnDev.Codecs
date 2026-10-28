@@ -9,7 +9,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mdct_ZeroInput_ZeroOutput()
     {
         CpuOnlyTest();
@@ -19,7 +19,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < output.Length; i++) Equal(0.0f, output[i]);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mdct_OutputLength_IsHalfInput()
     {
         CpuOnlyTest();
@@ -28,7 +28,7 @@ public abstract partial class CodecsTestBase
         Equal(16, output.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mdct_Linearity()
     {
         CpuOnlyTest();
@@ -54,21 +54,21 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mdct_OddInputLength_Throws()
     {
         CpuOnlyTest();
         Throws<ArgumentException>(() => MdctReference.Transform(new float[9], new float[4]));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mdct_WrongOutputLength_Throws()
     {
         CpuOnlyTest();
         Throws<ArgumentException>(() => MdctReference.Transform(new float[16], new float[10]));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mdct_Imdct_Roundtrip_TdacSymmetry()
     {
         CpuOnlyTest();
@@ -102,7 +102,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mdct_InputOf2_RunsWithoutError()
     {
         CpuOnlyTest();
@@ -113,7 +113,7 @@ public abstract partial class CodecsTestBase
         True(float.IsFinite(output[0]));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void Mdct_LargerSizes_ProduceFiniteOutput()
     {
         CpuOnlyTest();

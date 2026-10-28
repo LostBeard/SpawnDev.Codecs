@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         };
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfUnpack_AllZeros_ProducesZeroIndicesAndPredEntry0()
     {
         CpuOnlyTest();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < order; i++) Equal((byte)i, pred[i], $"pred[{i}]");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfUnpack_EntryOne_SelectsPredictorUpperHalf()
     {
         CpuOnlyTest();
@@ -98,7 +98,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfUnpack_MaxEntropyIndex_ProducesBoundMultiple()
     {
         CpuOnlyTest();
@@ -121,7 +121,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfUnpack_CodebookIndexOutOfRange_Throws()
     {
         CpuOnlyTest();
@@ -134,7 +134,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentOutOfRangeException>(() => SilkNlsfUnpack.Unpack(ecIx, pred, cb, 1)); // NVectors=1
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfUnpack_OutputBuffersTooSmall_Throws()
     {
         CpuOnlyTest();
@@ -150,7 +150,7 @@ public abstract partial class CodecsTestBase
         Throws<ArgumentException>(() => SilkNlsfUnpack.Unpack(ecIx, shortPred, cb, 0));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "CpuOnly")]
     public void NlsfUnpack_SecondCodebookVector_UsesCorrectEcSelOffset()
     {
         CpuOnlyTest();
