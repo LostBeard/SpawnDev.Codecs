@@ -16,31 +16,31 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8KeyframeEncoderGpu_SingleMbFrame_MatchesCpuEncoder()
     {
         await RunEncoderMatchesCpuTest(width: 16, height: 16, seed: 0x60D6);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8KeyframeEncoderGpu_MultiMb_2x2_MatchesCpuEncoder()
     {
         await RunEncoderMatchesCpuTest(width: 32, height: 32, seed: 0x60D7);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8KeyframeEncoderGpu_MultiMb_4x4_MatchesCpuEncoder()
     {
         await RunEncoderMatchesCpuTest(width: 64, height: 64, seed: 0x60D8);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8KeyframeEncoderGpu_MultiMb_8x8_MatchesCpuEncoder()
     {
         await RunEncoderMatchesCpuTest(width: 128, height: 128, seed: 0x60D9);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8KeyframeEncoderGpu_StridedSource_2x2_MatchesCpuEncoder()
     {
         // Exercises the GPU-side strided-plane pack path
@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
             seed: 0x60DA);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8KeyframeEncoderGpu_StridedSource_4x4_MatchesCpuEncoder()
     {
         await RunEncoderMatchesCpuTestStrided(
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
             seed: 0x60DB);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8KeyframeEncoderGpu_NoiseLowQ_320x176_MatchesCpuEncoder()
     {
         // White noise at quantizer 4 needs ~790 token bytes per macroblock: more than the token partition the
@@ -74,6 +74,7 @@ public abstract partial class CodecsTestBase
     private async Task RunEncoderMatchesCpuTest(int width, int height, int seed, int baseQIndex = 30)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Vp8KeyframeEncoderGpu(acc);
@@ -123,6 +124,7 @@ public abstract partial class CodecsTestBase
         if (uvstride < width / 2) throw new ArgumentException("uvstride must be >= width/2");
 
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Vp8KeyframeEncoderGpu(acc);

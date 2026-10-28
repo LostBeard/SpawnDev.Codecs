@@ -212,13 +212,14 @@ public abstract partial class CodecsTestBase
                 throw new Exception($"V self-consistency mismatch at {i}: encoder={encVRecon[i]} decoder={decFrame.VPlane[i]}");
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp9KeyframeEncoderDecoderGpu_128x128_SelfConsistent()
     {
         // Self-consistency test that bypasses the CPU walker oracle.
         // If this passes for 128x128, the GPU encoder + GPU decoder
         // are mutually consistent at SB row boundaries.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             int width = 128, height = 128;

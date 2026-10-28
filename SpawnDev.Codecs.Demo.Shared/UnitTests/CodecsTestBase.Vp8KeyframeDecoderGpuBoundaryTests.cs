@@ -58,10 +58,11 @@ public abstract partial class CodecsTestBase
         Equal(0, mismatches, $"{what}: first mismatch at {firstBad}");
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp8KeyframeDecoderGpu_ArrayViewOverload_WritesCallerPlanesAndMatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Vp8KeyframeEncoderGpu(acc);
@@ -103,13 +104,13 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp8KeyframeDecoderGpu_Unaligned_33x17_MatchesCroppedCpuWalker()
     {
         await RunUnalignedDecodeMatchesCpu(width: 33, height: 17, seed: 0x71C2);
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp8KeyframeDecoderGpu_Unaligned_47x32_MatchesCroppedCpuWalker()
     {
         await RunUnalignedDecodeMatchesCpu(width: 47, height: 32, seed: 0x71C3);
@@ -118,6 +119,7 @@ public abstract partial class CodecsTestBase
     private async Task RunUnalignedDecodeMatchesCpu(int width, int height, int seed)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Vp8KeyframeEncoderGpu(acc);
@@ -141,12 +143,13 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Category = "BrowserOnly")]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task Vp8KeyframeDecoderGpu_TypedArrayOverload_MatchesManaged()
     {
         if (!OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Vp8KeyframeEncoderGpu(acc);

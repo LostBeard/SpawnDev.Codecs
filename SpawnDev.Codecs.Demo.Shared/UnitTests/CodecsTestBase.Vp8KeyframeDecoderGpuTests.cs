@@ -16,19 +16,19 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8KeyframeDecoderGpu_SingleMbFrame_MatchesCpuDecoder()
     {
         await RunDecoderRoundTripTest(width: 16, height: 16, seed: unchecked((int)0xDEC0DE10));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8KeyframeDecoderGpu_MultiMb_2x2_MatchesCpuDecoder()
     {
         await RunDecoderRoundTripTest(width: 32, height: 32, seed: unchecked((int)0xDEC0DE20));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8KeyframeDecoderGpu_MultiMb_4x4_MatchesCpuDecoder()
     {
         await RunDecoderRoundTripTest(width: 64, height: 64, seed: unchecked((int)0xDEC0DE40));
@@ -37,6 +37,7 @@ public abstract partial class CodecsTestBase
     private async Task RunDecoderRoundTripTest(int width, int height, int seed)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var dec = new Vp8KeyframeDecoderGpu(acc);

@@ -24,10 +24,11 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp9KeyframeEncoderGpu_ArrayViewOverload_WritesCallerBufferAndMatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Vp9KeyframeEncoderGpu(acc);
@@ -62,13 +63,13 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp9KeyframeEncoderGpu_Batch_ArrayViewOverload_EqualsSingleFrameEncodes()
     {
         await RunVp9BatchMatchesSingles(frameCount: 3, width: 64, height: 64, seed: 0x71D2);
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp9KeyframeEncoderGpu_Batch_Unaligned_EqualsSingleFrameEncodes()
     {
         await RunVp9BatchMatchesSingles(frameCount: 2, width: 70, height: 50, seed: 0x71D3);
@@ -77,6 +78,7 @@ public abstract partial class CodecsTestBase
     private async Task RunVp9BatchMatchesSingles(int frameCount, int width, int height, int seed)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Vp9KeyframeEncoderGpu(acc);
@@ -173,12 +175,13 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Category = "BrowserOnly")]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task Vp9KeyframeGpu_TypedArrayOverloads_MatchManaged()
     {
         if (!OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Vp9KeyframeEncoderGpu(acc);

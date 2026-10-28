@@ -89,13 +89,6 @@ public abstract partial class CodecsTestBase
         RequireFeatures(acc, SerialStreamKernels);
         try
         {
-            if (acc.AcceleratorType == AcceleratorType.WebGPU)
-                throw new UnsupportedTestException(
-                    "TEMPORARY: DecodeUint LargeRanges still hits 30s PMT timeout on WebGPU after rc.14 "
-                    + "(SmallRanges PASSES, so Div/Rem fix landed; the long-form path uses additional "
-                    + "DecodeBits end-window reads which may be slow). Filed at "
-                    + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc14-decodeuint-largeranges-webgpu-timeout-2026-05-04.md. "
-                    + "RETRY when WebGPU end-window read codegen / cold-start kernel-compile speeds up.");
             // Large ranges (ft > 2^EC_UINT_BITS = 256) take the long-form
             // split path: divisive decode for the top + raw bits for the
             // bottom. Exercises the more complex branch of DecodeUint.
@@ -238,12 +231,6 @@ public abstract partial class CodecsTestBase
         RequireFeatures(acc, SerialStreamKernels);
         try
         {
-            if (acc.AcceleratorType == AcceleratorType.Wasm)
-                throw new UnsupportedTestException(
-                    "TEMPORARY: Wasm DecodeIcdf STILL hits PMT 30s timeout on rc.14 (rc.13 snapshot allocator "
-                    + "fix didn't fully resolve - cold-start kernel-compile + per-dispatch overhead). Filed at "
-                    + "_DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc14-wasm-decodeicdf-still-timeout-2026-05-04.md. "
-                    + "RETRY when Wasm cold-start kernel-compile speed improves further OR PMT raises per-test timeout.");
             // Encode a known sequence of 4-symbol uniform values on CPU,
             // decode on GPU, verify bit-exact.
             int[] symbols = new[] { 0, 1, 2, 3, 1, 0, 3, 2, 0, 2, 1, 3 };
@@ -285,12 +272,6 @@ public abstract partial class CodecsTestBase
         RequireFeatures(acc, SerialStreamKernels);
         try
         {
-            if (acc.AcceleratorType == AcceleratorType.Wasm)
-                throw new UnsupportedTestException(
-                    "TEMPORARY: Wasm DecodeIcdf STILL hits PMT 30s timeout on rc.14 (rc.13 snapshot allocator "
-                    + "fix didn't fully resolve). Cold-start kernel-compile time + per-dispatch overhead remains. "
-                    + "Filed at _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc14-wasm-decodeicdf-still-timeout-2026-05-04.md. "
-                    + "RETRY when Wasm cold-start kernel-compile speed improves further OR PMT raises per-test timeout.");
             // Mix of all 4 symbols using a realistic SILK iCDF shape.
             int[] symbols = new[] { 1, 2, 0, 3, 1, 1, 2, 0, 3, 1, 2 };
             byte[] icdf = OpusTestIcdf_TypeOffsetVad;
@@ -320,12 +301,6 @@ public abstract partial class CodecsTestBase
         RequireFeatures(acc, SerialStreamKernels);
         try
         {
-            if (acc.AcceleratorType == AcceleratorType.Wasm)
-                throw new UnsupportedTestException(
-                    "TEMPORARY: Wasm DecodeIcdf STILL hits PMT 30s timeout on rc.14 (rc.13 snapshot allocator "
-                    + "fix didn't fully resolve). Cold-start kernel-compile time + per-dispatch overhead remains. "
-                    + "Filed at _DevComms/SpawnDev.ILGPU/tuvok-to-geordi-rc14-wasm-decodeicdf-still-timeout-2026-05-04.md. "
-                    + "RETRY when Wasm cold-start kernel-compile speed improves further OR PMT raises per-test timeout.");
             // 256 symbols stresses Normalize byte-refill + buffer pointer
             // walk + ensures multi-byte normalization fires repeatedly.
             const int n = 256;

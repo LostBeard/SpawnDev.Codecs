@@ -44,10 +44,11 @@ public abstract partial class CodecsTestBase
         return dst;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8KeyframeEncoderGpu_ArrayViewOverload_WritesCallerBufferAndMatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Vp8KeyframeEncoderGpu(acc);
@@ -84,13 +85,13 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8KeyframeEncoderGpu_OddDimensions_EqualsExplicitlyZeroPaddedPicture()
     {
         await RunOddDimensionsMatchesPaddedPicture(width: 33, height: 17, seed: 0x71B2);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8KeyframeEncoderGpu_OddWidthEvenHeight_EqualsExplicitlyZeroPaddedPicture()
     {
         await RunOddDimensionsMatchesPaddedPicture(width: 47, height: 32, seed: 0x71B3);
@@ -99,6 +100,7 @@ public abstract partial class CodecsTestBase
     private async Task RunOddDimensionsMatchesPaddedPicture(int width, int height, int seed)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Vp8KeyframeEncoderGpu(acc);
@@ -137,13 +139,13 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp8KeyframeEncoderGpu_Batch_ArrayViewOverload_EqualsSingleFrameEncodes()
     {
         await RunBatchMatchesSingles(frameCount: 3, width: 48, height: 32, seed: 0x71B4);
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp8KeyframeEncoderGpu_Batch_OddDimensions_EqualsSingleFrameEncodes()
     {
         await RunBatchMatchesSingles(frameCount: 2, width: 33, height: 17, seed: 0x71B5);
@@ -152,6 +154,7 @@ public abstract partial class CodecsTestBase
     private async Task RunBatchMatchesSingles(int frameCount, int width, int height, int seed)
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Vp8KeyframeEncoderGpu(acc);
@@ -207,12 +210,13 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Category = "BrowserOnly")]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task Vp8KeyframeEncoderGpu_TypedArrayOverload_MatchesManaged()
     {
         if (!OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Vp8KeyframeEncoderGpu(acc);

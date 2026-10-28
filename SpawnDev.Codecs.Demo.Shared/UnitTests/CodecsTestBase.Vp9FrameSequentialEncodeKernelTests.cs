@@ -274,12 +274,13 @@ public abstract partial class CodecsTestBase
                 throw new Exception($"vCoefs mismatch at {i}: cpu={cpuVCoefs[i]} gpu={gpuVCoefs[i]}");
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp9FrameSequentialEncodeKernel_SingleMB_FlatGray_MatchesCpu()
     {
         // 1x1 MB frame: 16x16 luma + 8x8 U + 8x8 V. Top-left corner -
         // variant = None for every plane.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var y = new byte[256];
@@ -301,10 +302,11 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9FrameSequentialEncodeKernel_SingleMB_RandomContent_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var rng = new Random(unchecked((int)0xF9E12001u));
@@ -327,7 +329,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9FrameSequentialEncodeKernel_TwoByTwoMBs_MatchesCpu()
     {
         // 2x2 MB frame (32x32 luma): exercises the per-MB walk plus
@@ -335,6 +337,7 @@ public abstract partial class CodecsTestBase
         // recon, MB(1,0) uses above edge from MB(0,0)'s recon, MB(1,1)
         // uses both.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             int mbCols = 2, mbRows = 2;
@@ -360,12 +363,13 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9FrameSequentialEncodeKernel_QuantizerSweep_MatchesCpu()
     {
         // Sweep across a few baseQ values to flag any quantizer-
         // dependent drift.
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             int[] baseQs = { 1, 30, 64, 128, 200 };

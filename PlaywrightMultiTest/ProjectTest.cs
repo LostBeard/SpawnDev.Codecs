@@ -58,10 +58,10 @@ public class ProjectTest
     }
 
     /// <summary>
-    /// Dismisses the Blazor error UI by reloading the page if it's visible.
-    /// Returns the error text if one was found, null otherwise.
+    /// The Blazor error UI's text if it is visible, null otherwise. It does not reload the page: the caller marks the
+    /// page's runtime dead so the next test gets a fresh page.
     /// </summary>
-    private static async Task<string?> DismissBlazorErrorIfVisible(IPage page)
+    private static async Task<string?> ReadBlazorError(IPage page)
     {
         var visible = await IsBlazorErrorVisible(page);
         if (!visible) return null;
@@ -92,6 +92,7 @@ public class ProjectTest
         "MONO_WASM: Assert failed",             // any mono-level assert takes the runtime with it
         "[MONO] * Assertion",                   // the runtime's own assert line, the FIRST fatal line
         "Aborted(",                             // emscripten abort
+        "FATAL UNHANDLED EXCEPTION",            // mono: an unhandled exception ends the runtime (e.g. stack overflow)
     };
 
     private static PageRuntime WatchRuntime(IPage page)
@@ -176,6 +177,11 @@ public class ProjectTest
             if (!string.IsNullOrEmpty(exitBefore) && Name.EndsWith(exitBefore, StringComparison.Ordinal))
                 await page.EvaluateAsync("() => { try { globalThis.getDotnetRuntime(0).exit(1, 'PMT self-test'); } catch (e) { console.error('MONO_WASM: Assert failed: PMT self-test exit threw ' + e); } }");
 
+            // The row's state before the run: a test whose row is unchanged afterwards never ran (a frozen page keeps its
+            // Run button enabled, so the wait below returns at once and the stale row would read as PASS).
+            var stateBefore = await row.Locator(".test-state").TextContentAsync();
+            var classBefore = await row.GetAttributeAsync("class");
+
             // click the button to start the process for this row (button will be disabled)
             await runButton.ClickAsync();
 
@@ -195,10 +201,21 @@ public class ProjectTest
             // Only flag a Blazor error if it appeared NEW during this test (wasn't already there)
             string? blazorError = null;
             if (!hadPreExistingBlazorError)
-                blazorError = await DismissBlazorErrorIfVisible(page);
+                blazorError = await ReadBlazorError(page);
+            // After a Blazor unhandled error the app is in an unknown state, and a fatal one (a StackOverflowException in
+            // the page, 2026-10-28) leaves the DOM frozen: the Run buttons stay enabled and later rows read as PASS. So
+            // the next test always gets a fresh page.
+            if (blazorError != null)
+                runtime.DeadReason ??= $"Blazor error during {Name}";
 
             // current state text
             var stateMessage = await row.Locator(".test-state").TextContentAsync();
+            var classAfter = await row.GetAttributeAsync("class");
+            if (stateMessage == stateBefore && classAfter == classBefore)
+            {
+                runtime.DeadReason ??= $"{Name} never ran (its row did not change)";
+                throw new Exception($"The test never ran: its row is unchanged after Run (the page's runtime is not responding). {blazorError}");
+            }
 
             // An out-of-memory in the page leaves the .NET heap unusable (2026-10-25: the next tiny test hung 10 min):
             // report this test as it is, but give the next one a fresh page.
