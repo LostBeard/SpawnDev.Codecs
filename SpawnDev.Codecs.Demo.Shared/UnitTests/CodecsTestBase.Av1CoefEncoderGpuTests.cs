@@ -83,10 +83,11 @@ public abstract partial class CodecsTestBase
         return (bytes, eob, culLevel);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Av1CoefEncoderGpu_AllZero_Tx16x16_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             var constsByte = Av1KeyframeConstantsGpu.BuildByteConstsBuffer();

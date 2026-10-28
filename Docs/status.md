@@ -60,10 +60,10 @@ lanes (VP9 batch encode at unaligned sizes).
 
 | Codec | CPU | CUDA | OpenCL | WebGPU | WebGL | Wasm | Evidence |
 |-------|-----|------|--------|--------|-------|------|----------|
-| VP8 keyframe encode | green | green (10-23) | green | green (10-28, ILGPU 5.4.10; the entropy step was split 10-26) | open | **partial** (10-28, 3 / 10): wrong bitstream (the coefficient coder's tokens beyond ONE); Wasm-only, with Data | ffmpeg decodes our frames; bit-exact with the CPU reference encoder |
-| VP8 full keyframe decode | green | green (10-25) | green | green (10-28) | open | green (10-28, full decoder 5 / 0); the older Vp8KeyframeDecoderGpu path 1 / 6 on Wasm, with Data | 182 files, identical planes to ffmpeg; one CUDA failure in 24 runs on 10-25 traced to an unpinned host copy, fixed in ILGPU 5.4.5 |
-| VP9 keyframe encode / decode | green | green (10-23) | green | **partial** (10-28): 265 of 267 green; Batch_Unaligned and TypedArrayOverloads each reset the GPU driver (a kernel that does not finish), with Data | open | **partial** (10-28): decoder green; encoder 2 / 5 and the block coefficient encoder fail beyond the ONE token (Wasm-only, with Data) | ffmpeg / CPU reference |
-| AV1 keyframe encode / decode | green | green (10-23) | green | green (10-28, all 144 AV1 tests) | open | green (10-28, all 144 AV1 tests) | libdav1d decodes our frames; CPU reference |
+| VP8 keyframe encode | green | green (10-23) | green | green (10-28, ILGPU 5.4.10; the entropy step was split 10-26) | green (10-28, all VP8 / VP9 tests listed for WebGL) | green (10-28, ILGPU 5.4.11-local.1: a view's Length was 0 inside non-inlined helpers on Wasm) | ffmpeg decodes our frames; bit-exact with the CPU reference encoder |
+| VP8 full keyframe decode | green | green (10-25) | green | green (10-28) | open | green (10-28, full decoder 5 / 0); the older Vp8KeyframeDecoderGpu path 0 / 6 on Wasm (almost every Y sample wrong), with Data | 182 files, identical planes to ffmpeg; one CUDA failure in 24 runs on 10-25 traced to an unpinned host copy, fixed in ILGPU 5.4.5 |
+| VP9 keyframe encode / decode | green | green (10-23) | green | **partial** (10-28): 265 of 267 green; Batch_Unaligned and TypedArrayOverloads each reset the GPU driver (a kernel that does not finish), with Data | green (10-28) | green (10-28, ILGPU 5.4.11-local.1) | ffmpeg / CPU reference |
+| AV1 keyframe encode / decode | green | green (10-23) | green | green (10-28, all 144 AV1 tests) | **partial** (10-28): the frame step kernels need 972 transform-feedback outputs (WebGL captures 120) and are gated off WebGL like the other serial coders (restructure planned, PLAN-Oversized-Kernels.md); the 16 / 32-point transform kernels come back wrong from output 11 (ILGPU WebGL, with Data) | green (10-28, all 144 AV1 tests) | libdav1d decodes our frames; CPU reference |
 
 ## Audio
 

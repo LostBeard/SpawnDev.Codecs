@@ -24,10 +24,11 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Av1KeyframeEncoderGpu_ArrayViewOverload_WritesCallerBufferAndMatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Av1KeyframeEncoderGpu(acc);
@@ -62,10 +63,11 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Av1KeyframeEncoderGpu_Batch_ArrayViewOverload_EqualsSingleFrameEncodes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Av1KeyframeEncoderGpu(acc);
@@ -125,10 +127,11 @@ public abstract partial class CodecsTestBase
     /// "frames of one batch interfere" (only batches of 2+ differ). WebGPU showed frame 0 of a 3-frame batch 63 bytes
     /// longer than its single-frame encode while every single-frame size passed.
     /// </summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Av1KeyframeEncoderGpu_BatchOfOneTwoThree_EqualsSingleFrameEncodes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Av1KeyframeEncoderGpu(acc);
@@ -167,10 +170,11 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Av1KeyframeEncoderGpu_Rejects_UnalignedSizeAndBadQuantizer()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Av1KeyframeEncoderGpu(acc);
@@ -187,12 +191,13 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Category = "BrowserOnly")]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task Av1KeyframeEncoderGpu_TypedArrayOverloads_MatchManaged()
     {
         if (!OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
         try
         {
             using var enc = new Av1KeyframeEncoderGpu(acc);

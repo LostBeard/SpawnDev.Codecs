@@ -29,8 +29,9 @@ if (args.Length > 0 && args[0] == "zlib-encode")
 if (args.Length > 0 && args[0] == "bcn-encode")
     return await BcnEncode.Run(args);
 
-// `dump-ptx <Namespace.Type> <MethodName> <out.ptx>`: the PTX of one kernel, for ptxas -v.
-if (args.Length > 0 && args[0] == "dump-ptx")
+// `dump-ptx|dump-glsl <Namespace.Type> <MethodName> <out>`: one kernel's PTX (for ptxas -v) or WebGL GLSL (+ its
+// transform-feedback output count).
+if (args.Length > 0 && (args[0] == "dump-ptx" || args[0] == "dump-glsl"))
     return DumpPtx.Run(args);
 
 // Run SpawnDev.UnitTesting unit tests on desktop .NET via PlaywrightMultiTest harness.

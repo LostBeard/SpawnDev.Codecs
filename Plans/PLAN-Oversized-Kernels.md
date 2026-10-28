@@ -90,3 +90,22 @@ fixtures) as the gate.
 - GIF decode / encode fixture tests 52-73 s on WebGPU.
 - AV1 batch encode differs from the single-frame encode on WebGPU (11445 vs 11382 bytes, frame 0); single-frame
   Random64x128 / Random128x128 tests added to separate size from batching - run them on WebGPU.
+
+## 2026-10-28: AV1 frame step kernels on WebGL (enhancement, not started)
+
+WebGL captures at most 120 output components per thread (MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS on the RTX 4070
+in Chrome); every store site of an output view is one. VP8 and VP9 fit (their encoders pass on WebGL); the AV1 step
+kernels do not: `Av1EncodeFrameStepKernel` has 972 (browser) / 941 (offline, `DemoConsole dump-glsl`) and 20 MB of GLSL.
+By parameter (offline): scratchInt 376, scratchByte 201, tileBytes 88, scratchShort 48, recon 24. So the AV1 tests that
+compile them are gated off WebGL like the other serial stream coders (NotOnWebGL + RequireFeatures(SerialStreamKernels)).
+
+To make them fit (and shrink the shader for every browser backend):
+1. Per-block working memory (residual, coefficients, transform scratch, edges, prediction, levels) in LocalMemory
+   instead of scratchInt / scratchShort / scratchByte: only the cross-launch contexts and the resumable state stay in
+   output views.
+2. Range encoder output staged in a LocalMemory buffer for the launch (state gains Base = absolute index of stage[0]),
+   flushed to tileBytes once at the end of the launch (one store site). A carry that runs past stage[0] can happen at
+   most once per launch (it leaves zeros behind, which stop later carries): record it in the state and apply it to
+   tileBytes in one loop at the end. Callers that write straight to global memory keep Base = 0 (unchanged).
+3. One call site per heavy helper (the three EncodePlane calls as one loop over planes).
+Measure with `dump-glsl` (target well under 120), then the real WebGL lane.
