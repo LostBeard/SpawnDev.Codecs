@@ -14,7 +14,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacFixedReconstructGpu_Order0_NoOp_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacFixedReconstructGpu_Order1_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacFixedReconstructGpu_Order2_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -51,7 +51,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacFixedReconstructGpu_Order3_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacFixedReconstructGpu_Order4_FullBlock_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

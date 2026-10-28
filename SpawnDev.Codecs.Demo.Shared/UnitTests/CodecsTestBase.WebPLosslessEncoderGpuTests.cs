@@ -180,14 +180,14 @@ public abstract partial class CodecsTestBase
         return stdout;
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_AllSources_DecodeBitExact_InOurDecoder_AtEveryQuality()
     {
         var failures = await EncodeAllSourcesAsync(new[] { 0, 30, 55, 75, 95 }, null, exact: true);
         True(failures.Count == 0, $"{failures.Count} encoder round-trip failures:\n" + string.Join("\n", failures));
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "DesktopOnly,NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_AllSources_OpenInLibwebp_AndDecodeBitExact()
     {
         RequirePillowVerify(); // our decoder alone is AllSources_DecodeBitExact_InOurDecoder
@@ -198,7 +198,7 @@ public abstract partial class CodecsTestBase
         True(report.Contains("SUMMARY"), "verification script did not finish");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_ExactFalse_ClearsRgbUnderTransparentAlpha_Only()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -225,7 +225,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_Metadata_IsWrittenAndOpensInLibwebp()
     {
         byte[] icc = new byte[301];
@@ -271,7 +271,7 @@ public abstract partial class CodecsTestBase
         await RunPillowVerifyAsync(dir);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_ArrayViewOverload_WritesOnlyTheFile()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -318,7 +318,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_IncompressibleNoise_StaysWithinGetMaxEncodedSize()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -342,7 +342,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "DesktopOnly,NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_FeaturesAreActuallyUsed_AsSeenByAnIndependentBitstreamParser()
     {
         // A degenerate encoder that wrote only literals would pass every round-trip test. scripts/images/webp_ref.py, an
@@ -425,7 +425,7 @@ public abstract partial class CodecsTestBase
         return m.Success ? int.Parse(m.Groups[1].Value) : 0;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_ExtremeShapes_RoundTrip_AndOpenInLibwebp()
     {
         // The VP8L header has 14-bit sizes: 16384 is the largest. Also sizes around the transform block boundaries.
@@ -479,7 +479,7 @@ public abstract partial class CodecsTestBase
         if (dir != null) await RunPillowVerifyAsync(dir);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_BadArguments_AreRejected()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

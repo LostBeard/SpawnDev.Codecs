@@ -172,7 +172,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly")]
     public async Task ShuffleFilterGpu_TypedArrayOverloads_MatchFixtures()
     {
         if (!OperatingSystem.IsBrowser())

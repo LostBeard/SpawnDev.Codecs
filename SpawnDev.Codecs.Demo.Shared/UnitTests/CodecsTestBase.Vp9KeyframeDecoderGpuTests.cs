@@ -108,7 +108,7 @@ public abstract partial class CodecsTestBase
                 throw new Exception($"V plane mismatch at {i}: cpu={cpuV[i]} gpu={gpuFrame.VPlane[i]}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9KeyframeDecoderGpu_64x64_FlatGray_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -129,7 +129,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9KeyframeDecoderGpu_64x64_RandomContent_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -152,7 +152,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9KeyframeDecoderGpu_64x64_BaseQSweep_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

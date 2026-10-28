@@ -80,20 +80,20 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task GDeflateDecompressorGpu_ReferenceStreams_DecodeToTheContent() =>
         await AssertGDeflateCasesAsync(_ => true, GDeflateDecompressorGpu.DefaultWave, 30);
 
     /// <summary>The one-thread-per-tile mode (the reference decoder's order) on every reference stream.</summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task GDeflateDecompressorGpu_ThreadPerTile_DecodeToTheContent() =>
         await AssertGDeflateCasesAsync(_ => true, GDeflateDecompressorGpu.DefaultWave, 30, GDeflateDecodeMode.ThreadPerTile);
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task GDeflateDecompressorGpu_SmallWaves_DecodeToTheContent() =>
         await AssertGDeflateCasesAsync(c => c.Name is "text_8000000_l6" or "struct_1000003_l12" or "far_700000_l12", 7, 3);
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task GDeflateDecompressorGpu_DamagedStreams_RefusedWithTheReason()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -138,7 +138,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GDeflateDecompressorGpu_ManagedOverload_AndOutputTooSmall()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -170,7 +170,7 @@ public abstract partial class CodecsTestBase
     /// level-6 stream of the same input (a different matcher; the reference itself is checked offline by
     /// scripts/compression/check_gdeflate_encoder.py).
     /// </summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task GDeflateCompressorGpu_AllLevels_RoundTripThroughBothDecoders()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -205,7 +205,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GDeflateCompressorGpu_ManagedOverload_AndEmptyInputRefused()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -222,7 +222,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task GDeflateDecompressorGpu_TypedArrayOverload()
     {
         if (!OperatingSystem.IsBrowser())

@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8IntraPredict8x8UvKernel_AllModesAndAvailabilities_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

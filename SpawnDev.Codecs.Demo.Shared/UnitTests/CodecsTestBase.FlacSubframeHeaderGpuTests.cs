@@ -14,7 +14,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacSubframeHeaderGpu_Constant_NoWasted_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacSubframeHeaderGpu_Verbatim_2WastedBits_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -40,7 +40,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacSubframeHeaderGpu_Fixed_Order3_NoWasted_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -53,7 +53,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacSubframeHeaderGpu_Lpc_Order8_5WastedBits_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -67,7 +67,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacSubframeHeaderGpu_Lpc_Order32_MaxWastedBits_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

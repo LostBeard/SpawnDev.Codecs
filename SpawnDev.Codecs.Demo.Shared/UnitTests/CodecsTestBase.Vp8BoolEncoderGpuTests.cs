@@ -14,7 +14,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8BoolEncoderGpu_FixedSequence_MatchesCpu()
     {
         // Hand-picked sequence covering: 50/50 prob, very-skewed-toward-0,
@@ -100,7 +100,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8BoolEncoderGpu_RandomSequence_MatchesCpu()
     {
         // Random sequence stress test. 1024 bits with random probabilities

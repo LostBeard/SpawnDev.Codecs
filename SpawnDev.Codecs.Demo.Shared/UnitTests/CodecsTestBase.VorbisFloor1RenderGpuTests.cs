@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task VorbisFloor1RenderGpu_RenderLine_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

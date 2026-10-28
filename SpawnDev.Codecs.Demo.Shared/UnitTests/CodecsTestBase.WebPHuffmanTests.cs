@@ -51,7 +51,7 @@ public abstract partial class CodecsTestBase
         return cost;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPEncoder_HuffmanLengths_FibonacciHistogram_AreLimitedAndComplete()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPEncoder_HuffmanLengths_EdgeHistograms()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

@@ -17,8 +17,8 @@ namespace SpawnDev.Codecs.Demo.UnitTests;
 /// that reason; every other test runs. (Until 2026-10-26 this class threw for EVERY test, so no Codecs kernel had ever
 /// run on WebGL.)
 /// </remarks>
-// CPU-only tests (Category = "CpuOnly") run once, in CpuCodecsTests: discovery leaves them out here.
-[ExcludeCategories("CpuOnly")]
+// Discovery leaves out tests this lane can only skip: CpuOnly (CPU-only tests run once, in CpuCodecsTests); DesktopOnly (the Pillow / libwebp oracles need a desktop process); NotOnWebGL (WebGL has no scatter stores or atomics).
+[ExcludeCategories("CpuOnly", "DesktopOnly", "NotOnWebGL")]
 public class WebGLCodecsTests : CodecsTestBase
 {
     protected override async ValueTask<(Context, Accelerator)> CreateKernelAcceleratorAsync()

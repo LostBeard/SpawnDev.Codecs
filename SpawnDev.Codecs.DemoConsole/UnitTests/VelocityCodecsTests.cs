@@ -13,8 +13,8 @@ namespace SpawnDev.Codecs.DemoConsole.UnitTests;
 /// AllAccelerators / HostCompute pick: <c>Velocity()</c> alone registers Scalar2 (two scalar lanes) first, and device 0 of
 /// that is not what applications run.
 /// </summary>
-// CPU-only tests (Category = "CpuOnly") run once, in CpuCodecsTests: discovery leaves them out here.
-[ExcludeCategories("CpuOnly")]
+// Discovery leaves out tests this lane can only skip: CpuOnly (CPU-only tests run once, in CpuCodecsTests); BrowserOnly (TypedArray overloads need a browser).
+[ExcludeCategories("CpuOnly", "BrowserOnly")]
 public class VelocityCodecsTests : CodecsTestBase
 {
     protected override ValueTask<(Context, Accelerator)> CreateKernelAcceleratorAsync()

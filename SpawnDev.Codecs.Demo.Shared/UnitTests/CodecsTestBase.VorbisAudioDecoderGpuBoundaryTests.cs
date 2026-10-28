@@ -16,7 +16,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 /// </summary>
 public abstract partial class CodecsTestBase
 {
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task VorbisAudioDecoderGpu_ArrayViewOverload_MatchesManaged_WritesOnlyItsFrames()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task VorbisAudioDecoderGpu_ArrayViewOverload_RejectsAShortPcmView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "BrowserOnly,NotOnWebGL")]
     public async Task VorbisAudioDecoderGpu_TypedArrayOverload_MatchesManaged()
     {
         if (!OperatingSystem.IsBrowser())

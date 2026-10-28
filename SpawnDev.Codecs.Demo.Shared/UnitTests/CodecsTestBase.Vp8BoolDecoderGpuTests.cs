@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8BoolDecoderGpu_RandomSequence_RoundTripsCpuEncoder()
     {
         // For each of N streams: pick random bits + random probs,

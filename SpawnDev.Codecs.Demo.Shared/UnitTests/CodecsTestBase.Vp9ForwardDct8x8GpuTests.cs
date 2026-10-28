@@ -44,7 +44,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9ForwardDct8x8Gpu_AllZero_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp9ForwardDct8x8Gpu_Impulses_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -75,7 +75,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9ForwardDct8x8Gpu_RandomResiduals_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9ForwardDct8x8Gpu_SaturationLimits_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
         return "identical";
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task GifEncoderGpu_Fixtures_ProduceTheReferenceFileByteForByte_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -128,7 +128,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifEncoderGpu_Fixtures_DecodeBackToTheCanvas_InBothDecoderModes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -188,7 +188,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "DesktopOnly,NotOnWebGL")]
     public async Task GifEncoderGpu_PillowDecodesOurFiles_ToTheSamePixels()
     {
         PillowOracle.RequireAvailable();
@@ -231,7 +231,7 @@ public abstract partial class CodecsTestBase
     /// <summary>Squared RGB distance.</summary>
     private static int GifDist2(int r0, int g0, int b0, int r1, int g1, int b1) => (r0 - r1) * (r0 - r1) + (g0 - g1) * (g0 - g1) + (b0 - b1) * (b0 - b1);
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifEncoderGpu_QuantizedPictures_MapEveryPixelToANearestPaletteColour_AndBeatPillowMedianCut()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -314,7 +314,7 @@ public abstract partial class CodecsTestBase
         return e;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifEncoderGpu_RandomExactInputs_RoundTripLosslessly_AcrossSizesFramesAndSegments()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -383,7 +383,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task GifEncoderGpu_WorstCaseNoise_StaysInsideGetMaxEncodedSize_AndDecodesExactly()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -419,7 +419,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifEncoderGpu_ArgumentValidation_RejectsBadInputsWithTheRightExceptions()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -465,7 +465,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifEncoderGpu_InstanceIsReusable_AcrossSizesFramesAndModes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -497,7 +497,7 @@ public abstract partial class CodecsTestBase
         return rgba;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifEncoderGpu_LargePicture_ManySegments_RoundTripsThroughOurDecoder()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -517,7 +517,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "DesktopOnly,NotOnWebGL")]
     public async Task GifEncoderGpu_LargePicture_PillowAgrees()
     {
         PillowOracle.RequireAvailable();

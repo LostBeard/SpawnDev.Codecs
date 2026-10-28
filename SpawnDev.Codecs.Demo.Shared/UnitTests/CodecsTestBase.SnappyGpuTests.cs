@@ -144,19 +144,19 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task SnappyCompressorGpu_AllSmallFixtures_ByteIdenticalWithSnap() =>
         await AssertSnappyCasesAsync(c => c.Length <= 1_100_000, SnappyCompressorGpu.DefaultWaveBlocks, 27);
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task SnappyCompressorGpu_ManySmallWaves_ByteIdenticalWithSnap() =>
         await AssertSnappyCasesAsync(c => c.Name is "struct_1000003" or "mixed_200000" or "noise_300000", 3, 3);
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task SnappyCompressorGpu_40MB_TwoWaves_ByteIdenticalWithSnap() =>
         await AssertSnappyCasesAsync(c => c.Length > 1_100_000, SnappyCompressorGpu.DefaultWaveBlocks, 1);
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task SnappyCompressorGpu_ManagedOverload_MatchesSnap()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -174,7 +174,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task SnappyCompressorGpu_TypedArrayOverload_MatchesSnap()
     {
         if (!OperatingSystem.IsBrowser())
@@ -203,7 +203,7 @@ public abstract partial class CodecsTestBase
             }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task SnappyCompressorGpu_RejectsBadArguments()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -258,7 +258,7 @@ public abstract partial class CodecsTestBase
         return diff == null ? null : $"{name}: {diff}";
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task SnappyDecompressorGpu_GoodStreams_DecodeToTheContent()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -279,7 +279,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task SnappyDecompressorGpu_DamagedStreams_RefusedWithTheReason()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -317,7 +317,7 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>Every snap stream of the compressor's fixtures (raw and framed, real files included) decodes to its input.</summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task SnappyDecompressorGpu_CompressorFixtures_DecodeToTheirInputs()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -345,7 +345,7 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>40 MB round trips on the accelerator in both formats: our compressor, then our decompressor, compared with the input on the device.</summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Snappy_RoundTrip40MB_OnTheAccelerator()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -371,7 +371,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task SnappyDecompressorGpu_ManagedOverload_AndOutputTooSmall()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -397,7 +397,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task SnappyDecompressorGpu_TypedArrayOverload()
     {
         if (!OperatingSystem.IsBrowser())

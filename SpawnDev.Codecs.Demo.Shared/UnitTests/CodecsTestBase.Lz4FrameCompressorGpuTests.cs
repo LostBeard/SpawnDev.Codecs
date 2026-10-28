@@ -163,19 +163,19 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Lz4FrameCompressorGpu_AllSmallFixtures_ByteIdenticalWithLiblz4() =>
         await AssertLz4CasesAsync(c => c.Length <= 1_100_000, Lz4FrameCompressorGpu.DefaultWaveBlocks, 25);
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Lz4FrameCompressorGpu_ManySmallWaves_ByteIdenticalWithLiblz4() =>
         await AssertLz4CasesAsync(c => c.Name is "struct_1000003" or "text_300000_accel3_cc" or "text_150001_bc_cc_nosize", 3, 3);
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Lz4FrameCompressorGpu_40MB_TwoWaves_ByteIdenticalWithLiblz4() =>
         await AssertLz4CasesAsync(c => c.Length > 1_100_000, Lz4FrameCompressorGpu.DefaultWaveBlocks, 1);
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Lz4FrameCompressorGpu_ManagedOverload_MatchesLiblz4()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -192,7 +192,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task Lz4FrameCompressorGpu_TypedArrayOverload_MatchesLiblz4()
     {
         if (!OperatingSystem.IsBrowser())
@@ -220,7 +220,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Lz4FrameCompressorGpu_RejectsBadArguments()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

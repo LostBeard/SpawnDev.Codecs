@@ -123,7 +123,7 @@ public abstract partial class CodecsTestBase
         return failures;
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "DesktopOnly,NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_Animation_AllSources_MatchLibwebpAndOurDecoder_AtSeveralQualities()
     {
         string dir = WebPEncoderOutputDir("animation");
@@ -159,7 +159,7 @@ public abstract partial class CodecsTestBase
         True(verify.Contains("SUMMARY"), "verification script did not finish");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_Animation_ExactFalse_ClearsRgbUnderAlpha0_Only()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -183,7 +183,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "DesktopOnly,NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_Animation_Metadata_IsWrittenAndOpensInLibwebp()
     {
         byte[] icc = new byte[301];
@@ -236,7 +236,7 @@ public abstract partial class CodecsTestBase
         await RunPillowVerifyAsync(dir);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_Animation_ArrayViewOverload_WritesOnlyTheFile()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -275,7 +275,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_Animation_BadArguments_AreRejected()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

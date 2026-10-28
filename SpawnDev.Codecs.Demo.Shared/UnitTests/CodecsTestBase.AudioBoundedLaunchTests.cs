@@ -16,7 +16,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task OpusRangeDecoderGpu_DecodeIcdf_SpansLaunches_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -37,7 +37,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacBitRoundTripGpu_SpansLaunches_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task VorbisBitRoundTripGpu_SpansLaunches_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -146,7 +146,7 @@ public abstract partial class CodecsTestBase
     /// 2100 frames: frame numbers past 2047 take the 3-byte UTF-8 header (longer header, different piece split of
     /// the CRC-16), and the de-interleave / pack / CRC launches all run over many frames.
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacEncoderGpu_LongStream_RoundTripsViaCpuDecoder()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -173,7 +173,7 @@ public abstract partial class CodecsTestBase
     /// The parallel frame reader keeps the serial reader's verdicts: a damaged subframe header is status 4, a damaged
     /// sample (CRC-16) is status 3, a damaged header byte (CRC-8) is status 2.
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacDecoderGpu_DamagedFrames_ReportSerialStatusCodes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -222,7 +222,7 @@ public abstract partial class CodecsTestBase
     /// An 8192-sample block: 4096 residue codewords of 10 bits each are about 50k work units, so the resumable
     /// packet decode spans several launches; the PCM must still match the CPU decoder.
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task VorbisAudioDecoderGpu_LongBlock_SpansLaunches_MatchesCpuDecoder()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

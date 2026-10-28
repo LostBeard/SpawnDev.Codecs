@@ -1,3 +1,4 @@
+using SpawnDev.UnitTesting;
 using ILGPU;
 using ILGPU.Runtime;
 using ILGPU.Runtime.CPU;
@@ -10,6 +11,8 @@ namespace SpawnDev.Codecs.DemoConsole.UnitTests;
 /// cross-platform test from <see cref="CodecsTestBase"/> and runs ILGPU kernel
 /// tests on the ILGPU CPU backend (IR interpreter).
 /// </summary>
+// Discovery leaves out tests this lane can only skip: BrowserOnly (TypedArray overloads need a browser).
+[ExcludeCategories("BrowserOnly")]
 public class CpuCodecsTests : CodecsTestBase
 {
     /// <summary>The CPU-only tests (no accelerator) run here and nowhere else.</summary>

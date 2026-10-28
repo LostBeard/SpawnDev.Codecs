@@ -265,7 +265,7 @@ public abstract partial class CodecsTestBase
         await AssertBmpRejectedAsync(bmp, "not contiguous", "red mask 0xF0F0");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task BmpDecoderGpu_RleOutOfBounds_IsRejected()
     {
         var bmp = BmpFixture("rle8_basic");
@@ -274,7 +274,7 @@ public abstract partial class CodecsTestBase
         await AssertBmpRejectedAsync(bmp, "draws outside the image", "RLE run past the row", decodesRle: true);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task BmpDecoderGpu_RleTruncated_IsRejected()
     {
         var bmp = BmpFixture("rle8_basic");

@@ -74,36 +74,36 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_Empty() => await AssertZlibRoundTripAsync(System.Array.Empty<byte>(), 2, 65536, "empty");
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_OneByte() => await AssertZlibRoundTripAsync(new byte[] { 0x42 }, 2, 65536, "one byte");
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_SmallText_Level1() => await AssertZlibRoundTripAsync(TextData(500, 1), 1, 65536, "small text L1");
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_Text_Level1() => await AssertZlibRoundTripAsync(TextData(150_000, 2), 1, 65536, "text L1", 0.45);
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_Text_Level2() => await AssertZlibRoundTripAsync(TextData(150_000, 3), 2, 65536, "text L2", 0.40);
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_Text_Level3_Lazy() => await AssertZlibRoundTripAsync(TextData(150_000, 4), 3, 65536, "text L3", 0.40);
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_Stored_Level0() => await AssertZlibRoundTripAsync(TextData(70_000, 5), 0, 65536, "stored L0");
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_Structured_ManySmallBlocks() =>
         await AssertZlibRoundTripAsync(StructuredData(120_000, 0x2B01), 2, 4096, "structured, 4 KiB blocks (sync-flush concatenation)");
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_Structured_Level3() =>
         await AssertZlibRoundTripAsync(StructuredData(250_000, 0x2B02), 3, 65536, "structured L3");
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_RepeatedByte_OverlappingMatches() =>
         await AssertZlibRoundTripAsync(Enumerable.Repeat((byte)0x7A, 200_000).ToArray(), 2, 65536, "repeated byte", 0.01);
 
@@ -113,7 +113,7 @@ public abstract partial class CodecsTestBase
     /// of an optimal Huffman code of every 64 KiB block, built in the test from the data (the order-0 entropy is NOT a
     /// bound a Huffman coder can reach on skewed data): stored blocks or a broken code-length builder fail it.
     /// </summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_HuffmanOnly_Level4_NearOptimalHuffman()
     {
         var rng = new Random(0x4F11);
@@ -131,7 +131,7 @@ public abstract partial class CodecsTestBase
             maxRatio: (optimal * 1.01 + blocks * 120 + 6) / raw.Length);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_IncompressibleRandom_FallsBackToStored()
     {
         var rng = new Random(0x2B03);
@@ -140,7 +140,7 @@ public abstract partial class CodecsTestBase
         await AssertZlibRoundTripAsync(raw, 2, 65536, "random");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_ArrayViewOverload_WritesCallerBuffer()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -165,11 +165,11 @@ public abstract partial class CodecsTestBase
 
     // ---- bounded launches: inputs that need many launches of every resumable stage ----
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_LargeInput_ManyWaves() =>
         await AssertZlibRoundTripAsync(TextData(3_000_000, 11), 2, 65536, "3 MB text, 46 blocks in waves of 4", 0.40);
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_LargeBlocks_Level3_ManyParseAndEmitLaunches() =>
         await AssertZlibRoundTripAsync(StructuredData(2_500_000, 0x2B05), 3, 1 << 20, "2.5 MB structured, 1 MiB blocks, lazy");
 
@@ -179,7 +179,7 @@ public abstract partial class CodecsTestBase
     /// lazy parse runs with a compare budget far below what the blocks need, so it finishes only through the host's
     /// unfinished-parse loop.
     /// </summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task ZlibCompressorGpu_ParallelParse_SameBytesAsSerialParse()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

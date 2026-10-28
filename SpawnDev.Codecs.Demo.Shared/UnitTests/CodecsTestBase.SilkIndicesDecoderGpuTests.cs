@@ -203,7 +203,7 @@ public abstract partial class CodecsTestBase
         return slice;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task SilkIndicesDecoderGpu_VoicedNbWb20msIndependent_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -276,7 +276,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task SilkIndicesDecoderGpu_UnvoicedNb10msIndependent_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

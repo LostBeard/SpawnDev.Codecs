@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
         return null;
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task JpegEncoderGpu_AllFixtures_ByteIdenticalToPillow_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -167,7 +167,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task JpegEncoderGpu_ProductionScale_1024x768_ByteIdenticalToPillowSha256()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -199,7 +199,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task JpegEncoderGpu_TypedArrayOverload_ByteIdenticalToPillow()
     {
         if (!OperatingSystem.IsBrowser())
@@ -230,7 +230,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task JpegEncoderGpu_WorstCaseNoise_FitsGetMaxEncodedSize_AndEveryModeDecodesToTheSamePixels()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -283,7 +283,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task JpegEncoderGpu_FlatPicture_LongEobRuns_ByteIdenticalToPillowSha256()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -313,7 +313,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task JpegEncoderGpu_OptimalHuffmanTables_AreValidAndLengthLimited()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -396,7 +396,7 @@ public abstract partial class CodecsTestBase
         return 10 * Math.Log10(255.0 * 255.0 * n / se);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task JpegEncoderGpu_RoundTrip_PsnrPerQuality_AndDecoderMatchesPillowDecodeOfSameBytes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -441,7 +441,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task JpegEncoderGpu_ExifOrientation_IsReadBackByTheDecoder()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -466,7 +466,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task JpegEncoderGpu_InvalidArguments_AreRejected()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

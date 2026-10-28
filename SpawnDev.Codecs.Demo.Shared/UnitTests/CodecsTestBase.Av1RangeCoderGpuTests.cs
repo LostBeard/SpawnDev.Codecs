@@ -54,7 +54,7 @@ public abstract partial class CodecsTestBase
         return (bytes, decodedSlice);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Av1RangeCoderGpu_RoundTrip_AllZeros_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Av1RangeCoderGpu_RoundTrip_RandomBits_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -116,7 +116,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Av1RangeCoderGpu_RoundTrip_ExtremeProbs_MatchesCpu()
     {
         // Probabilities near the q15 boundaries (1 and 32767) push the

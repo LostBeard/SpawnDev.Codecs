@@ -17,7 +17,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task ImageDecoderGpu_PngAndJpegFixtures_DispatchAndMatchPillow()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -78,7 +78,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task ImageDecoderGpu_GifBmpWebPFixtures_DispatchAndMatchTruth()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9ForwardQuantizerGpu_AllSignsAllSizes_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -72,7 +72,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9ForwardQuantizerGpu_RoundingBoundaries_MatchesCpu()
     {
         // Pin the rounding-half-up boundary cases explicitly. For divisor q
@@ -95,7 +95,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9ForwardQuantizerGpu_LargeNegativeAndPositive_MatchesCpu()
     {
         // Saturation extremes - large coef magnitudes test the negative-
@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9ForwardQuantizerGpu_AllZeroInput_StaysZero()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

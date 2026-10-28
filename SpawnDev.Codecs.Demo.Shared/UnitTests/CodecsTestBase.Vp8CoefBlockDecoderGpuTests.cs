@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8CoefBlockDecoderGpu_RandomBlocks_RoundTripsCpuEncoder()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

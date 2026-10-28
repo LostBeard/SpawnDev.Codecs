@@ -121,7 +121,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly")]
     public async Task BcnDecoderGpu_TypedArrayOverload()
     {
         if (!OperatingSystem.IsBrowser())

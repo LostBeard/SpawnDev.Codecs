@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task WebPDecoderGpu_TypedArrayOverloads_MatchManaged()
     {
         if (!OperatingSystem.IsBrowser())
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_TypedArrayOverloads_MatchManaged()
     {
         if (!OperatingSystem.IsBrowser())

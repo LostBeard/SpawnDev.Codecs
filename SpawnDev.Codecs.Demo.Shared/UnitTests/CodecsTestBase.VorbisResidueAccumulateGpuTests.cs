@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task VorbisResidueAccumulateGpu_Type2_AccumulatesMatchCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

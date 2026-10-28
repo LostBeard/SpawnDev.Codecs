@@ -95,7 +95,7 @@ public abstract partial class CodecsTestBase
         return c;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_CraftedStream_ValidControl_Decodes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -112,14 +112,14 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_CraftedStream_BackwardReferenceBeforeTheFirstPixel_IsRejected()
     {
         // 4x1: one literal, then a copy from one row up = 4 pixels back, but only 1 pixel exists
         await AssertWebPRejectedAsync(CraftedCopyStream(1, 1).ToFile(4, 1), "invalid backward reference", "copy reaches before the image");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_CraftedStream_TransformUsedTwice_IsRejected()
     {
         var c = new Vp8lCraft();
@@ -128,7 +128,7 @@ public abstract partial class CodecsTestBase
         await AssertWebPRejectedAsync(c.ToFile(4, 4), "transform is used twice", "duplicate transform");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_CraftedStream_ColourCacheSize12_IsRejected()
     {
         var c = new Vp8lCraft();
@@ -137,7 +137,7 @@ public abstract partial class CodecsTestBase
         await AssertWebPRejectedAsync(c.ToFile(4, 4), "colour cache size", "cache bits 12");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_CraftedStream_OverSubscribedPrefixCode_IsRejected()
     {
         var c = new Vp8lCraft();
@@ -148,7 +148,7 @@ public abstract partial class CodecsTestBase
         await AssertWebPRejectedAsync(c.ToFile(4, 4), "invalid prefix", "over-subscribed code-length code");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_CraftedStream_IncompletePrefixCode_IsRejected()
     {
         var c = new Vp8lCraft();

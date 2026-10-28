@@ -14,7 +14,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task VorbisAudioEncoderGpu_OnePacketSilence_MatchesCpu()
     {
         // Vorbis emit kernel uses atomics; backends without atomics (WebGL)
@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task VorbisAudioEncoderGpu_BatchSilence_MatchesSequential()
     {
         // Verifies EncodeAudioPacketsBatchAsync (Phase B frame-batch) produces
@@ -85,7 +85,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task VorbisAudioEncoderGpu_EncodeStreamSilence_OggBytesValid()
     {
         // Full-stream encode test: silence PCM -> .ogg bytes.

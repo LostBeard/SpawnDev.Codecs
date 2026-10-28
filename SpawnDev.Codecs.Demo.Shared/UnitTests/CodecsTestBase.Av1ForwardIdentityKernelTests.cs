@@ -268,7 +268,7 @@ public abstract partial class CodecsTestBase
 
     // -------- Identity 32 --------
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Av1ForwardIdentity32Kernel_ZeroInput_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -293,7 +293,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Av1ForwardIdentity32Kernel_RandomBatch_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -327,7 +327,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Av1ForwardIdentity32Kernel_DcOnlyInput_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

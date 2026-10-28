@@ -66,7 +66,7 @@ public abstract partial class CodecsTestBase
         return diff == null ? null : $"{name}: {diff}";
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Lz4FrameDecompressorGpu_Liblz4Frames_AllConfigurations_DecodeToTheContent()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -87,7 +87,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Lz4FrameDecompressorGpu_DamagedFrames_RefusedWithTheReason()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -125,7 +125,7 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>Every liblz4 frame of the compressor's fixtures (independent 64 KB blocks, all options, real files) decodes to its input.</summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Lz4FrameDecompressorGpu_CompressorFixtures_DecodeToTheirInputs()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -146,7 +146,7 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>40 MB round trip on the accelerator: our compressor, then our decompressor, compared with the input on the device.</summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Lz4Frame_RoundTrip40MB_OnTheAccelerator()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -169,7 +169,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Lz4FrameDecompressorGpu_ManagedOverload_AndOutputTooSmall()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -194,7 +194,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task Lz4FrameDecompressorGpu_TypedArrayOverload()
     {
         if (!OperatingSystem.IsBrowser())

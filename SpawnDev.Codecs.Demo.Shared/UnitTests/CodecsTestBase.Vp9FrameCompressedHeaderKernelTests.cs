@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         return result;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9FrameCompressedHeaderKernel_Allow32x32_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

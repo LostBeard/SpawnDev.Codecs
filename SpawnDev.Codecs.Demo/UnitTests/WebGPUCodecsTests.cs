@@ -11,8 +11,8 @@ namespace SpawnDev.Codecs.Demo.UnitTests;
 /// every cross-platform test from <see cref="CodecsTestBase"/> and runs ILGPU
 /// kernel tests on the browser's WebGPU backend (WGSL codegen).
 /// </summary>
-// CPU-only tests (Category = "CpuOnly") run once, in CpuCodecsTests: discovery leaves them out here.
-[ExcludeCategories("CpuOnly")]
+// Discovery leaves out tests this lane can only skip: CpuOnly (CPU-only tests run once, in CpuCodecsTests); DesktopOnly (the Pillow / libwebp oracles need a desktop process).
+[ExcludeCategories("CpuOnly", "DesktopOnly")]
 public class WebGPUCodecsTests : CodecsTestBase
 {
     protected override async ValueTask<(Context, Accelerator)> CreateKernelAcceleratorAsync()

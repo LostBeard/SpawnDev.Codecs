@@ -41,7 +41,7 @@ public abstract partial class CodecsTestBase
         return names;
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task JpegDecoderGpu_AllFixtures_Rgba8_MatchPillow_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task JpegDecoderGpu_Rgba16_IsRgba8Replicated()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -115,7 +115,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task JpegDecoderGpu_ReadInfo_ReportsHeaderFacts()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -157,7 +157,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task JpegDecoderGpu_ApplyOrientation_MatchesPillowTranspose()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -196,7 +196,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task JpegDecoderGpu_BaselineWithoutEoi_DecodesWhenAllDataIsPresent()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -220,7 +220,7 @@ public abstract partial class CodecsTestBase
     private static string ReadEmbeddedText(string resourceName) =>
         System.Text.Encoding.ASCII.GetString(ReadEmbedded(resourceName)).Trim();
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task JpegDecoderGpu_ProductionScale_1024x768_MatchesPillowSha256()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -243,7 +243,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task JpegDecoderGpu_ExifOrientation_LittleEndianAndAfterOtherAppSegments()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -262,7 +262,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task JpegDecoderGpu_TypedArrayOverload_MatchesPillow()
     {
         if (!OperatingSystem.IsBrowser())
@@ -310,7 +310,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task JpegDecoderGpu_BrokenFiles_ReportSpecificReasons()
     {
         var expectations = new (string Fixture, string Reason)[]

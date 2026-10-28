@@ -90,7 +90,7 @@ public abstract partial class CodecsTestBase
         return data;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_FixedHuffmanVector_Hello()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -106,7 +106,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_EmptyStream()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -122,11 +122,11 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_SingleByte() =>
         await AssertInflateMatchesAsync(new byte[] { 0x5A }, CompressionLevel.Optimal, "single byte");
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_StoredBlocks_NoCompression() =>
         await AssertInflateMatchesAsync(StructuredData(200_000, 0x1F01), CompressionLevel.NoCompression, "stored blocks");
 
@@ -138,7 +138,7 @@ public abstract partial class CodecsTestBase
     /// a 3-symbol alphabet give it 2 bits. Pieces of 1 .. 3000 bytes so the blocks end at every bit position; plus
     /// ordinary Optimal blocks.
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_SyncFlushes_StoredBlocksAfterHuffmanBlocks()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -178,7 +178,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_IncompressibleRandom_Optimal()
     {
         var rng = new Random(0x1F02);
@@ -187,11 +187,11 @@ public abstract partial class CodecsTestBase
         await AssertInflateMatchesAsync(raw, CompressionLevel.Optimal, "incompressible random");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_RepeatedByte_OverlappingBackReferences() =>
         await AssertInflateMatchesAsync(Enumerable.Repeat((byte)0x61, 100_000).ToArray(), CompressionLevel.Optimal, "repeated byte (dist 1, len 258)");
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_Text_Optimal()
     {
         var sb = new System.Text.StringBuilder();
@@ -201,19 +201,19 @@ public abstract partial class CodecsTestBase
         await AssertInflateMatchesAsync(System.Text.Encoding.ASCII.GetBytes(sb.ToString()), CompressionLevel.Optimal, "text optimal");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_Structured_Fastest() =>
         await AssertInflateMatchesAsync(StructuredData(300_000, 0x1F04), CompressionLevel.Fastest, "structured fastest");
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_Structured_Optimal() =>
         await AssertInflateMatchesAsync(StructuredData(300_000, 0x1F05), CompressionLevel.Optimal, "structured optimal");
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_Structured_SmallestSize() =>
         await AssertInflateMatchesAsync(StructuredData(300_000, 0x1F06), CompressionLevel.SmallestSize, "structured smallest");
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_BadAdlerTrailer_ReportsAdlerMismatch()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -234,7 +234,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_TruncatedInput_ReportsInputTruncated()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -250,7 +250,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_BadHeader_ReportsBadZlibHeader()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -265,7 +265,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task InflateGpu_OutputCapacityTooSmall_ReportsOutputOverflow()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -282,16 +282,16 @@ public abstract partial class CodecsTestBase
 
     // ---- bounded launches: streams that need many resumable Step launches ----
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task InflateGpu_LargeStoredBlocks_SplitAcrossLaunches() =>
         await AssertInflateMatchesAsync(StructuredData(3_000_000, 0x1F0B), CompressionLevel.NoCompression, "3 MB stored blocks");
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task InflateGpu_LargeDynamic_ManyLaunches() =>
         await AssertInflateMatchesAsync(StructuredData(4_000_000, 0x1F0C), CompressionLevel.Optimal, "4 MB dynamic blocks");
 
     /// <summary>The Adler-32 is folded launch by launch: a corrupted trailer on a many-launch stream must still be caught.</summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task InflateGpu_LargeStream_BadAdlerTrailer_ReportsAdlerMismatch()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

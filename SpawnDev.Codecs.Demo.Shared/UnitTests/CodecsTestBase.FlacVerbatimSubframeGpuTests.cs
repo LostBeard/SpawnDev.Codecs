@@ -14,7 +14,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacVerbatimSubframeGpu_RoundTrip_Constant_16bit()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -30,7 +30,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacVerbatimSubframeGpu_RoundTrip_Random_16bit()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacVerbatimSubframeGpu_RoundTrip_Random_24bit()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacVerbatimSubframeGpu_RoundTrip_Random_8bit()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

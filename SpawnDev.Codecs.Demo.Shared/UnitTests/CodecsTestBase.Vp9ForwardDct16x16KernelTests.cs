@@ -13,7 +13,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9ForwardDct16x16Kernel_ZeroInput_ProducesAllZeroCoefs()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -35,7 +35,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9ForwardDct16x16Kernel_DcOnlyInput_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9ForwardDct16x16Kernel_RandomInput_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

@@ -12,7 +12,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8FrameLayoutKernels_GatherScatterY16_RoundTrip()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8FrameLayoutKernels_GatherScatterUv8_RoundTrip()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -81,7 +81,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8FrameLayoutKernels_GatherY16_MatchesCpuLayout()
     {
         // Verify the GPU gather produces the exact byte layout the FDCT

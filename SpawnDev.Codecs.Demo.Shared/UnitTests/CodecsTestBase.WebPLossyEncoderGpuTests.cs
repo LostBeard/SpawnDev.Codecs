@@ -20,7 +20,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPLossyEncoderGpu_Methods3And4_ByteIdenticalWithLibwebp()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPLossyEncoderGpu_UnportedMethods_AreRefused()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -153,7 +153,7 @@ public abstract partial class CodecsTestBase
         return null;
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPLossyEncoderGpu_Transparency_Vp8ChunkIdenticalWithLibwebp_AlphaExact()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -186,7 +186,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPLossyEncoderGpu_Transparency_ArrayViewOverload_WritesOnlyTheFile()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -222,7 +222,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "DesktopOnly,NotOnWebGL")]
     public async Task WebPLossyEncoderGpu_Transparency_PillowDecodesOurFiles_LikeLibwebpsOwn()
     {
         PillowOracle.RequireAvailable();

@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         return slice;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task OpusRangeDecoderGpu_DecodeUint_SmallRanges_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task OpusRangeDecoderGpu_DecodeUint_LargeRanges_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -137,7 +137,7 @@ public abstract partial class CodecsTestBase
         return slice;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task OpusRangeDecoderGpu_DecodeBitLogP_LogP15Mixed_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -163,7 +163,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task OpusRangeDecoderGpu_DecodeBitLogP_LogP1FairCoin_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -231,7 +231,7 @@ public abstract partial class CodecsTestBase
     /// </summary>
     private static readonly byte[] OpusTestIcdf_TypeOffsetVad = new byte[] { 232, 158, 10, 0 };
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task OpusRangeDecoderGpu_DecodeIcdf_Uniform4_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -278,7 +278,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task OpusRangeDecoderGpu_DecodeIcdf_TypeOffsetVad_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -313,7 +313,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task OpusRangeDecoderGpu_DecodeIcdf_LongSequence_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

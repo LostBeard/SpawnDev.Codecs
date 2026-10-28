@@ -12,19 +12,19 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Av1ForwardQuantizerKernel_4x4Blocks_MatchesCpuReference()
     {
         await RunAv1QuantizerMatchesCpu(coefsPerBlock: 16, blockCount: 16, seed: 0xA1FE);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Av1ForwardQuantizerKernel_8x8Blocks_MatchesCpuReference()
     {
         await RunAv1QuantizerMatchesCpu(coefsPerBlock: 64, blockCount: 8, seed: 0xA1ED);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Av1ForwardQuantizerKernel_16x16Blocks_MatchesCpuReference()
     {
         await RunAv1QuantizerMatchesCpu(coefsPerBlock: 256, blockCount: 4, seed: 0xA1DC);

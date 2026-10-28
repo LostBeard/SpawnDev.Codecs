@@ -12,7 +12,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacCrcGpu_EmptyInput_BothZero()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -27,7 +27,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacCrcGpu_SingleByte_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -43,7 +43,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacCrcGpu_FrameHeaderTypical_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -60,7 +60,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacCrcGpu_RandomBatch_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -82,7 +82,7 @@ public abstract partial class CodecsTestBase
     /// Ranges around the piece size and past one combine launch (more than FlacCrcGpu.CombinePieces pieces):
     /// the piece-parallel CRCs must equal the serial CPU ones at every cut.
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacCrcGpu_LongRanges_PieceCombine_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

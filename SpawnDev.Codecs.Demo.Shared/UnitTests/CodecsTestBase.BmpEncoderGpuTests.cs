@@ -64,7 +64,7 @@ public abstract partial class CodecsTestBase
 
     private static uint Le32At(byte[] b, int o) => (uint)(b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24));
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task BmpEncoderGpu_Bgra32_RoundTrips_AndWritesTheDocumentedHeader()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -98,7 +98,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task BmpEncoderGpu_Bgr24_RoundTrips_AlphaDropped_RowsPadded()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -133,7 +133,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task BmpEncoderGpu_Indexed8_RoundTrips_WithASortedExactPalette()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -170,7 +170,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task BmpEncoderGpu_Indexed8_MoreThan256Colours_IsRejected()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -200,7 +200,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task BmpEncoderGpu_ArrayViewOverload_MatchesManaged_AndStaysInsideItsRange()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -236,7 +236,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "DesktopOnly")]
     public async Task BmpEncoderGpu_PillowDecodesOurFiles_ToTheSamePixels()
     {
         PillowOracle.RequireAvailable();

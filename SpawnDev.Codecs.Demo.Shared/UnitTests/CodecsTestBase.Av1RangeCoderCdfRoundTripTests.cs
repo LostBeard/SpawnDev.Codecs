@@ -15,7 +15,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Av1RangeCoderGpu_CdfQ15_RoundTrip_AllBackends()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

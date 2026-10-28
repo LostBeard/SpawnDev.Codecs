@@ -14,7 +14,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacDecoderGpu_Mono_RoundTrip_GpuEncodeGpuDecode()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -46,7 +46,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task FlacDecoderGpu_Stereo_MultiFrame_RoundTrip_GpuEncodeGpuDecode()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

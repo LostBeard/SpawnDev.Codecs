@@ -65,7 +65,7 @@ public abstract partial class CodecsTestBase
         return null;
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task PngDecoderGpu_AllFixtures_Rgba8_MatchTruth_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -111,7 +111,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task PngDecoderGpu_AllFixtures_Rgba16_MatchTruth()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -145,7 +145,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task PngDecoderGpu_ReadInfo_ReportsHeaderFacts()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -186,7 +186,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task PngDecoderGpu_BadSignature_IsRejected()
     {
         var png = ReadEmbedded(PngFixturePrefix + "rgba8.png");
@@ -194,7 +194,7 @@ public abstract partial class CodecsTestBase
         await AssertPngRejectedAsync(png, "bad signature", "bad signature");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task PngDecoderGpu_CorruptIdatByte_ReportsBadCrc()
     {
         var png = ReadEmbedded(PngFixturePrefix + "rgba8.png");
@@ -203,7 +203,7 @@ public abstract partial class CodecsTestBase
         await AssertPngRejectedAsync(png, "bad CRC", "corrupt IDAT payload");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task PngDecoderGpu_Truncated_IsRejected()
     {
         var png = ReadEmbedded(PngFixturePrefix + "rgba8.png");
@@ -282,13 +282,13 @@ public abstract partial class CodecsTestBase
     /// 1600x1450 RGBA8 noise in ONE 9.3 MB IDAT chunk: inflate runs thousands of bounded launches, unfilter about 70
     /// (launch ranges end mid-row), the chunk's CRC is over 1024 pieces so its combine takes two launches.
     /// </summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task PngDecoderGpu_LargeImage_OneBigIdat_MatchesHostReader() =>
         await AssertPngMatchesHostReaderAsync(
             BuildHostPng(1600, 1450, 6, 8, 0x7A01, 0, System.IO.Compression.CompressionLevel.Fastest), false, "1600x1450 RGBA8, one IDAT");
 
     /// <summary>The CRC of a 1000+-piece chunk is checked after a multi-launch combine: a flipped byte in its last piece must be caught.</summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task PngDecoderGpu_LargeImage_CorruptBigIdat_ReportsBadCrc()
     {
         var png = BuildHostPng(1600, 1450, 6, 8, 0x7A02, 0, System.IO.Compression.CompressionLevel.Fastest);
@@ -298,19 +298,19 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>RGB16 (6 filter-byte lanes), 700x500: unfilter launch ranges of 6 lanes end mid-row; RGBA16 output.</summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task PngDecoderGpu_LargeRgb16_SixLanes_MatchesHostReader() =>
         await AssertPngMatchesHostReaderAsync(
             BuildHostPng(700, 500, 2, 16, 0x7A03, 0, System.IO.Compression.CompressionLevel.Optimal), true, "700x500 RGB16");
 
     /// <summary>Gray8 (one lane), 2000x1000: the single-lane unfilter over many launches.</summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task PngDecoderGpu_LargeGray8_OneLane_MatchesHostReader() =>
         await AssertPngMatchesHostReaderAsync(
             BuildHostPng(2000, 1000, 0, 8, 0x7A04, 65536, System.IO.Compression.CompressionLevel.Optimal), false, "2000x1000 gray8");
 
     /// <summary>The IDAT stream cut into 8-byte chunks: over 9000 chunks, so the chunk scan takes three launches.</summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task PngDecoderGpu_ManySmallIdatChunks_MatchesHostReader()
     {
         var png = BuildHostPng(160, 120, 6, 8, 0x7A05, 8, System.IO.Compression.CompressionLevel.Optimal);

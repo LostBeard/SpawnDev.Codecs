@@ -92,7 +92,7 @@ public abstract partial class CodecsTestBase
         True(failures.Count == 0, string.Join("\n", failures));
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task VorbisAudioDecoderGpu_LibvorbisStreams_MatchLibvorbis()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

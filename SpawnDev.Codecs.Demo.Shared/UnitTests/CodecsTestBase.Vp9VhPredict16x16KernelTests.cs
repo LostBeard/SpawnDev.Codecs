@@ -10,7 +10,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9VhPredict16x16Kernel_V_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -33,7 +33,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9VhPredict16x16Kernel_H_MatchesCpuReference()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -56,7 +56,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9VhPredict16x16Kernel_V_RandomInputs_BitExact()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -83,7 +83,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9VhPredict16x16Kernel_H_RandomInputs_BitExact()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -110,7 +110,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9VhPredict16x16Kernel_BatchedDispatch_AllBlocksBitExact()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

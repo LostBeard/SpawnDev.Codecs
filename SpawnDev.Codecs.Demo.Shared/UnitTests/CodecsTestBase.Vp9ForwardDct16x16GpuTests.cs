@@ -45,7 +45,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9ForwardDct16x16Gpu_AllZeroInput_ProducesZeroOutput()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9ForwardDct16x16Gpu_DcImpulse_MatchesCpu()
     {
         // Single non-zero in spatial domain - exercises every butterfly
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9ForwardDct16x16Gpu_RandomResiduals_MatchesCpu()
     {
         // Sweep 16 random 16x16 blocks across the typical residual range.
@@ -106,7 +106,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9ForwardDct16x16Gpu_SaturationLimits_MatchesCpu()
     {
         // Worst-case residuals at int16 saturation - extreme inputs flag

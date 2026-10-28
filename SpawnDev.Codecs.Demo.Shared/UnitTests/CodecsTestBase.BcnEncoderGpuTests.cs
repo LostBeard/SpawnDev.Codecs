@@ -208,7 +208,7 @@ public abstract partial class CodecsTestBase
         return 10 * Math.Log10(255.0 * 255.0 * a.Length / se);
     }
 
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly")]
     public async Task BcnEncoderGpu_TypedArrayOverload()
     {
         if (!OperatingSystem.IsBrowser())

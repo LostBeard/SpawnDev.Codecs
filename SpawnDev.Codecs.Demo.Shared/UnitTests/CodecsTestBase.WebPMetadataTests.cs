@@ -48,7 +48,7 @@ public abstract partial class CodecsTestBase
         return HasEmbedded(resource) ? ReadEmbedded(resource) : null;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_Metadata_EveryCase_MatchesLibwebpDemuxer_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -122,7 +122,7 @@ public abstract partial class CodecsTestBase
         True(failures.Count == 0, $"{failures.Count} metadata mismatches:\n" + string.Join("\n", failures));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "DesktopOnly,NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_Metadata_EverySubset_RoundTripsAndOpensInLibwebp()
     {
         byte[] exifBare = new byte[] { (byte)'I', (byte)'I', 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0 };

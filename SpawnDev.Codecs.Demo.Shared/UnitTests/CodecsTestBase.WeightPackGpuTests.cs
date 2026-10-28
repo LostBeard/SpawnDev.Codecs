@@ -100,7 +100,7 @@ public abstract partial class CodecsTestBase
         return n;
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WeightPackGpu_Bf16Fp16Fp32_RoundTrip_NearPerChunkEntropy()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -120,7 +120,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WeightPackGpu_OddElementSizes_Empty_AndTiny()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -146,7 +146,7 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>The format is standard DEFLATE behind a table: .NET's DeflateStream reads every chunk, and a host un-shuffle gives the input.</summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WeightPackGpu_EveryChunk_InflatesWithDotNetDeflate()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -185,7 +185,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WeightPackGpu_DamagedBlobs_AreRefused()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -220,7 +220,7 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>64 MiB of BF16 (1024 chunks = 16 compress waves) and an FP32 tensor of 20M elements (1220 chunks).</summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WeightPackGpu_Large_ManyWaves_RoundTrip()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -238,7 +238,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task WeightPackGpu_TypedArrayOverloads()
     {
         if (!OperatingSystem.IsBrowser())
@@ -267,7 +267,7 @@ public abstract partial class CodecsTestBase
         EqualBytes(data, back.ReadBytes(), "TypedArray unpack");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WeightPackGpu_RejectsBadArguments()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

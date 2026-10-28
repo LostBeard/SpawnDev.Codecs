@@ -142,7 +142,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_Alpha_EveryPlaneAndFilter_DecodeBitExact_InLibwebpAndBothDecoders()
     {
         bool pillow = PillowAvailable();
@@ -236,7 +236,7 @@ public abstract partial class CodecsTestBase
         True(verify.Contains("SUMMARY"), "verification script did not finish");
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_Alpha_IncompressiblePlane_FallsBackToRaw_WithinTheBound()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -268,7 +268,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_Alpha_ArrayViewOverload_WritesOnlyThePayload()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -300,7 +300,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_Alpha_BadArguments_AreRejected()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

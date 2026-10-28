@@ -11,8 +11,8 @@ namespace SpawnDev.Codecs.DemoConsole.UnitTests;
 /// cross-platform test from <see cref="CodecsTestBase"/> and runs ILGPU kernel
 /// tests on the first available NVIDIA GPU via PTX codegen.
 /// </summary>
-// CPU-only tests (Category = "CpuOnly") run once, in CpuCodecsTests: discovery leaves them out here.
-[ExcludeCategories("CpuOnly")]
+// Discovery leaves out tests this lane can only skip: CpuOnly (CPU-only tests run once, in CpuCodecsTests); BrowserOnly (TypedArray overloads need a browser).
+[ExcludeCategories("CpuOnly", "BrowserOnly")]
 public class CudaCodecsTests : CodecsTestBase
 {
     protected override ValueTask<(Context, Accelerator)> CreateKernelAcceleratorAsync()

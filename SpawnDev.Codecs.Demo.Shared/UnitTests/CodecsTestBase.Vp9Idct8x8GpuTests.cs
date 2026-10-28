@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9Idct8x8Gpu_AllZeroCoefs_LeavesPredictorUnchanged()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -62,7 +62,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9Idct8x8Gpu_DcOnly_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -84,7 +84,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9Idct8x8Gpu_RandomCoefs_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -107,7 +107,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9Idct8x8Gpu_ClampsAtPredictorBoundaries_MatchesCpu()
     {
         // Push the residual past 0 / 255 boundary to verify clip3

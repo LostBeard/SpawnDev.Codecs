@@ -120,7 +120,7 @@ public abstract partial class CodecsTestBase
         True(rows.Any(r => r.Width >= 640 && r.Height >= 480), "640x480");
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp8FullKeyframeDecoderGpu_AllFixtures_MatchFfmpeg_ManagedOverload()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -151,7 +151,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp8FullKeyframeDecoderGpu_AllFixtures_MatchFfmpeg_ArrayViewOverload_IntoPoisonedBuffers()
     {
         // The accelerator-resident overload: frame already on the device (the buffer longer than the frame, garbage after it),
@@ -223,7 +223,7 @@ public abstract partial class CodecsTestBase
 
     private static byte[] Vp8Prefix(byte[] frame, int length) => frame.AsSpan(0, length).ToArray();
 
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly,NotOnWebGL")]
     public async Task Vp8FullKeyframeDecoderGpu_TypedArrayOverload_MatchesFfmpeg()
     {
         if (!OperatingSystem.IsBrowser())
@@ -296,7 +296,7 @@ public abstract partial class CodecsTestBase
         True(failures.Count == 0, string.Join("\n", failures.Take(20)));
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp8FullKeyframeDecoderGpu_HostileInputs_ThrowTheSpecificReason()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -380,7 +380,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp8FullKeyframeDecoderGpu_RandomCorruption_NeverHangsOrThrowsAnythingElse()
     {
         // Flip bytes, truncate, and splice random data into real frames: every outcome must be a normal decode (garbage

@@ -14,7 +14,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task VorbisBitWriterGpu_WriteCodebookEntry_SequenceMatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

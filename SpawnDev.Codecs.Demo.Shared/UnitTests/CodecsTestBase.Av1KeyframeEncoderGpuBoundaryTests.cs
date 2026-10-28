@@ -187,7 +187,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "BrowserOnly")]
     public async Task Av1KeyframeEncoderGpu_TypedArrayOverloads_MatchManaged()
     {
         if (!OperatingSystem.IsBrowser())

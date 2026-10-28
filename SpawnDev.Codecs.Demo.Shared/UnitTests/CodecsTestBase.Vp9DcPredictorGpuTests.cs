@@ -63,7 +63,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9DcPredictorGpu_AllVariants_AllSizes_MatchesCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -94,7 +94,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Vp9DcPredictorGpu_RandomSweep_MatchesCpu()
     {
         // Stress sweep: 32 random (above, left) pairs across all
@@ -128,7 +128,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Vp9DcPredictorGpu_Boundary_AllOnesAllZeros_MatchesCpu()
     {
         // Pin the rounding boundary cases: all-zeros must give DC=0,

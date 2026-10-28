@@ -219,7 +219,7 @@ public abstract partial class CodecsTestBase
                 throw new Exception($"{name}[{i}] mismatch: cpu={cpu[i]} gpu={gpu[i]}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task SilkParametersDecoderGpu_VoicedNbWb20msIndependent_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -281,7 +281,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task SilkParametersDecoderGpu_UnvoicedNb10msIndependent_BitExactVsCpu()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

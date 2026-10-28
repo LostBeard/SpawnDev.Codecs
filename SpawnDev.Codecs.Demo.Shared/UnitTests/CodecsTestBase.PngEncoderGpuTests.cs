@@ -228,7 +228,7 @@ public abstract partial class CodecsTestBase
                 throw new Exception($"{what}: first mismatch at byte {i} (pixel {i / 4}, channel {i % 4}): got {actual[i]}, expected {expected[i]}");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task PngEncoderGpu_Rgba8_Auto_RoundTripsOnHostReader()
     {
         const int w = 70, h = 45;
@@ -241,7 +241,7 @@ public abstract partial class CodecsTestBase
         AssertPixelsEqual(src, png.Rgba8, "RGBA8 round trip");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task PngEncoderGpu_Auto_ReducesOpaqueToRgb_GrayToGray_GrayAlphaToGrayAlpha()
     {
         const int w = 33, h = 21;
@@ -261,7 +261,7 @@ public abstract partial class CodecsTestBase
         AssertPixelsEqual(grayA, p3.Rgba8, "gray alpha");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task PngEncoderGpu_Rgba16_Input_Makes16BitPng()
     {
         const int w = 29, h = 19;
@@ -280,7 +280,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task PngEncoderGpu_FixedFilterModes_UseExactlyThatFilter_AndAdaptiveMixes()
     {
         const int w = 64, h = 40;
@@ -297,7 +297,7 @@ public abstract partial class CodecsTestBase
         AssertPixelsEqual(src, adaptive.Rgba8, "adaptive pixels");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task PngEncoderGpu_ManyBlocks_MakeOneIdatChunkEach()
     {
         const int w = 100, h = 100;
@@ -309,7 +309,7 @@ public abstract partial class CodecsTestBase
         AssertPixelsEqual(src, png.Rgba8, "multi-block pixels");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task PngEncoderGpu_CompressionLevels_AllValid_AndCompressionHappens()
     {
         const int w = 120, h = 80;
@@ -324,7 +324,7 @@ public abstract partial class CodecsTestBase
         }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task PngEncoderGpu_TextChunks_RoundTrip_AndHostReaderSeesThem()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -356,7 +356,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task PngEncoderGpu_ArrayViewOverload_WritesCallerBuffer_AndGpuDecoderReadsItBack()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -396,7 +396,7 @@ public abstract partial class CodecsTestBase
     /// 1500x900 RGBA: rows wider than one filter-cost segment, 83 blocks in three waves, layout and CRC pieces per chunk;
     /// the host reader checks every chunk CRC, the Adler-32 and the pixels, and the GPU decoder reads it back too.
     /// </summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task PngEncoderGpu_LargeImage_ManyBlocks_RoundTripsOnHostReader()
     {
         const int w = 1500, h = 900;
@@ -422,7 +422,7 @@ public abstract partial class CodecsTestBase
     /// ParseStep oracle, run with a lazy-parse compare budget far below what the blocks need (it finishes only through the
     /// host's unfinished-parse loop).
     /// </summary>
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task PngEncoderGpu_Level3_BigBlocks_ParallelParse_SameBytesAsSerialParse()
     {
         const int w = 1200, h = 700;

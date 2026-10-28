@@ -124,15 +124,15 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_AllStillFixtures_MatchTruth_ManagedAndArrayView()
         => await CheckWebPStillFixturesAsync(1 << 18, "default pool");
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_TinyPool_GrowsAndStillMatchesTruth()
         => await CheckWebPStillFixturesAsync(16, "pool starting at 16 ints");
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_ReadInfo_ReportsFacts_ForEveryFixture()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -164,7 +164,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_FileInfoAndMetadata_MatchEmbeddedChunks()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -219,7 +219,7 @@ public abstract partial class CodecsTestBase
         return frames;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_ReadFrames_MatchesTheRiffChunks()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -248,7 +248,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_Animations_EveryCanvasMatchesLibwebp_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -295,7 +295,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_FrameIndexOutOfRange_Throws()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -336,7 +336,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_BadRiffSignature_IsRejected()
     {
         var file = WebPFile("photo_80x60_m4");
@@ -348,7 +348,7 @@ public abstract partial class CodecsTestBase
         await AssertWebPRejectedAsync(new byte[] { 1, 2, 3 }, "not a WebP file", "3 bytes");
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_TruncatedFile_IsRejected()
     {
         var file = WebPFile("photo_80x60_m4");
@@ -368,7 +368,7 @@ public abstract partial class CodecsTestBase
         return cut;
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_BitstreamEndsEarly_IsRejected()
     {
         var file = WebPFile("mosaic_96x72");
@@ -377,7 +377,7 @@ public abstract partial class CodecsTestBase
         await AssertWebPRejectedAsync(CutVp8lStream(file, (file.Length - 20) - 3), "truncated", "VP8L stream missing its last bytes");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_BadVp8lHeader_IsRejected()
     {
         var file = WebPFile("photo_80x60_m4");
@@ -389,7 +389,7 @@ public abstract partial class CodecsTestBase
         await AssertWebPRejectedAsync(file, "invalid VP8L", "VP8L version != 0");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_Rgba16Request_IsRejected()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

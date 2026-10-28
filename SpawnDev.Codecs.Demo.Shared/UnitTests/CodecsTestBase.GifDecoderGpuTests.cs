@@ -142,11 +142,11 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public Task GifDecoderGpu_PillowCompositing_EveryFrameOfEveryFixture_MatchesPillow()
         => GifEveryFrameMatchesAsync(GifCompositing.Pillow, "pil", 450);
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public Task GifDecoderGpu_WebCompositing_EveryFrameOfEveryFixture_MatchesSpecTruth()
         => GifEveryFrameMatchesAsync(GifCompositing.Web, "web", 430);
 
@@ -170,7 +170,7 @@ public abstract partial class CodecsTestBase
             True(differing.Any(d => d.StartsWith(must + "#", StringComparison.Ordinal)), $"{must} must differ between the modes");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifDecoderGpu_DefaultMode_IsPillow_AndFirstFrameMatchesViaDecodeAsync()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -221,7 +221,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifDecoderGpu_Rgba16_WidensEverySample_BothModes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -264,7 +264,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task GifDecoderGpu_ReadFrames_ReadInfo_And_LoopCount_ReportTheFileStructure()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -336,7 +336,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifDecoderGpu_LoopExtension_OnlyBeforeTheFirstImageCounts()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -374,7 +374,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifDecoderGpu_HostileFixtures_AreRejectedWithTheSpecificReason()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -468,7 +468,7 @@ public abstract partial class CodecsTestBase
         return bytes.ToArray();
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifDecoderGpu_HandWrittenLzw_DecodesIncludingTheKwKwKCaseAndWidthChange()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -493,7 +493,7 @@ public abstract partial class CodecsTestBase
     /// <c>python -I scripts/images/make_gif_fixtures.py --fuzz-dir DIR COUNT SEED0</c> and point SPAWNDEV_GIF_FUZZ_DIR at DIR.
     /// Skipped (reported as Unsupported, never as passed) when the variable is not set.
     /// </summary>
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifDecoderGpu_FuzzDirectory_MatchesPillow()
     {
         string? dir = Environment.GetEnvironmentVariable("SPAWNDEV_GIF_FUZZ_DIR");
@@ -539,7 +539,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifDecoderGpu_BadSignature_And_TinyInputs_AreRejected()
     {
         var gif = GifFixture("pal16_19x7");
@@ -549,7 +549,7 @@ public abstract partial class CodecsTestBase
         await AssertGifRejectedAsync(new byte[] { (byte)'G', (byte)'I', (byte)'F', (byte)'8', (byte)'9', (byte)'a', 1, 0, 1 }, "truncated", "9 bytes");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifDecoderGpu_TooManyFrames_IsRejected()
     {
         // 16385 one-pixel frames: the 16385th one is one more than a file may hold.
@@ -578,7 +578,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifDecoderGpu_FrameIndexOutOfRange_Throws()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -597,7 +597,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifDecoderGpu_OutputViewTooSmall_Throws_AndFileLengthIsValidated()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -618,7 +618,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task GifDecoderGpu_InstanceIsReusable_AcrossFilesSizesAndModes()
     {
         // One decoder instance decodes a big file, a tiny one, then the big one again (grow-only buffers must not leak state).

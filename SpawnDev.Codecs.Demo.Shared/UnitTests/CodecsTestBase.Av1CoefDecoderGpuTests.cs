@@ -73,7 +73,7 @@ public abstract partial class CodecsTestBase
         return (decodedSlice, encLen, info[0], info[1]);
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Av1CoefDecoderGpu_RoundTrip_AllZero_Tx16x16()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -99,7 +99,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task Av1CoefDecoderGpu_RoundTrip_DcOnly_Tx8x8()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -127,7 +127,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Av1CoefDecoderGpu_RoundTrip_NegativeDc_Tx8x8()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -154,7 +154,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Av1CoefDecoderGpu_RoundTrip_RandomSparse_Tx16x16()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -183,7 +183,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task Av1CoefDecoderGpu_RoundTrip_HighMagnitude_Golomb()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

@@ -58,7 +58,7 @@ public abstract partial class CodecsTestBase
         return Sha256Hex(pixels) == r.Hashes[k] ? null : $"canvas SHA-256 differs from libwebp's ({pixels.Length} bytes)";
     }
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_Lossy_AllFixtures_MatchLibwebp()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -110,7 +110,7 @@ public abstract partial class CodecsTestBase
     /// <summary>Offset of the first VP8 payload byte in a simple lossy file (RIFF header 12 + "VP8 " + size 8).</summary>
     private const int SimpleLossyPayload = 20;
 
-    [TestMethod(Timeout = 600000)]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_Lossy_CorruptVp8Data_IsRejectedAsImageDecodeException()
     {
         var good = ReadEmbedded(WebPLossyFolderPrefix("WebPYuv") + "yuv_64x64_q90.webp");
@@ -131,7 +131,7 @@ public abstract partial class CodecsTestBase
         await AssertWebPRejectedAsync(hugePartition, "invalid VP8", "first partition larger than the frame");
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPDecoderGpu_Lossy_DecoderStaysUsableAcrossKindsAndSizes()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

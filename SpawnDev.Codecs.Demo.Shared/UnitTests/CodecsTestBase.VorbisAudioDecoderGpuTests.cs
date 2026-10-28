@@ -21,7 +21,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task VorbisAudioDecoderGpu_SilenceRoundTrip_MatchesCpuDecoder()
     {
         // Vorbis decoder kernels lean on atomics; backends without atomics
@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task VorbisAudioDecoderGpu_SilenceOutput_IsSilent()
     {
         // Sanity: silence in -> silence out (sample magnitudes near zero).
@@ -120,7 +120,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task VorbisAudioDecoderGpu_ToneRoundTrip_MatchesCpuDecoder()
     {
         // Non-silence: 440 Hz mono tone. Same packets feed BOTH the CPU
