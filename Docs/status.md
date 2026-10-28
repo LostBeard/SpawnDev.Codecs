@@ -60,10 +60,10 @@ lanes (VP9 batch encode at unaligned sizes).
 
 | Codec | CPU | CUDA | OpenCL | WebGPU | WebGL | Wasm | Evidence |
 |-------|-----|------|--------|--------|-------|------|----------|
-| VP8 keyframe encode | green | green (10-23) | green | **open**: the wavefront encode kernel is too large for Chrome's shader compiler (the transcode test never finishes) | open | open | ffmpeg decodes our frames; bit-exact with the CPU reference encoder |
-| VP8 full keyframe decode | green | green (10-25) | green | green (10-26: all fixtures, ArrayView into poisoned buffers, random corruption) | open | open | 182 files, identical planes to ffmpeg; one CUDA failure in 24 runs on 10-25 traced to an unpinned host copy, fixed in ILGPU 5.4.5 |
-| VP9 keyframe encode / decode | green | green (10-23) | green | **partial** (10-26): every decoder / transform / predictor kernel test green (226 + 30); the encoder still kills Chrome's GPU process while compiling (`Vp9KeyframeGpu_TypedArrayOverloads_MatchManaged`) | open | open | ffmpeg / CPU reference |
-| AV1 keyframe encode / decode | green | green (10-23) | green | **partial** (10-25, 142 passed): encode and decode kernels oversized (GPU process lost while compiling, or 110 s compiles); batch vs single-frame output differs | open | open | libdav1d decodes our frames; CPU reference |
+| VP8 keyframe encode | green | green (10-23) | green | green (10-28, ILGPU 5.4.10; the entropy step was split 10-26) | open | **partial** (10-28, 3 / 10): wrong bitstream (the coefficient coder's tokens beyond ONE); Wasm-only, with Data | ffmpeg decodes our frames; bit-exact with the CPU reference encoder |
+| VP8 full keyframe decode | green | green (10-25) | green | green (10-28) | open | green (10-28, full decoder 5 / 0); the older Vp8KeyframeDecoderGpu path 1 / 6 on Wasm, with Data | 182 files, identical planes to ffmpeg; one CUDA failure in 24 runs on 10-25 traced to an unpinned host copy, fixed in ILGPU 5.4.5 |
+| VP9 keyframe encode / decode | green | green (10-23) | green | **partial** (10-28): 265 of 267 green; Batch_Unaligned and TypedArrayOverloads each reset the GPU driver (a kernel that does not finish), with Data | open | **partial** (10-28): decoder green; encoder 2 / 5 and the block coefficient encoder fail beyond the ONE token (Wasm-only, with Data) | ffmpeg / CPU reference |
+| AV1 keyframe encode / decode | green | green (10-23) | green | green (10-28, all 144 AV1 tests) | open | green (10-28, all 144 AV1 tests) | libdav1d decodes our frames; CPU reference |
 
 ## Audio
 
