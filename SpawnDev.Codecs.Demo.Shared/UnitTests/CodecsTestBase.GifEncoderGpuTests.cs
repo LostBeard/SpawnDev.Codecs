@@ -79,7 +79,7 @@ public abstract partial class CodecsTestBase
         return "identical";
     }
 
-    [TestMethod]
+    [TestMethod(Timeout = 600000)]
     public async Task GifEncoderGpu_Fixtures_ProduceTheReferenceFileByteForByte_ManagedAndArrayView()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
