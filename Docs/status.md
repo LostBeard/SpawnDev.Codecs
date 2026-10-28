@@ -2,7 +2,7 @@
 
 What is verified, on which backend, and how. "Verified" means a test that compares against a reference
 implementation (never against this library's own output) passed on that backend, with its guard red-checked. Dates are
-the last run of the named lane. Updated 2026-10-26.
+the last run of the named lane. Updated 2026-10-27.
 
 Legend: **green** = the codec's suite passes on that lane; **partial** = runs, with the open items named; **open** = not
 yet passing or not yet run on the current build; **n/a** = the backend cannot run it (WebGL has no atomics or scatter
@@ -53,7 +53,7 @@ lanes (VP9 batch encode at unaligned sizes).
 |-------|-----|------|--------|--------|-------|------|----------|
 | BCn decode (BC1, BC3, BC4, BC5, BC7) | green (10-27, also Velocity) | green | green | green | green | green | 29 fixtures bit-exact with the reference decoders (texture2ddecoder, cross-checked with Pillow): reference-encoder blocks (etcpak, bc7enc per mode) over a real frame and an RGBA picture, random blocks (every BC7 mode, partition, rotation, the reserved mode), partial edge blocks. Spec choices where the references disagree: BC3 colour always 4-colour, BC1 3-colour index 3 = (0,0,0,0), BC7 reserved mode = (0,0,0,0) |
 | BCn encode BC1, BC3, BC4, BC5 | green (10-27, also Velocity) | green | green | green | green | green | 19 fixtures byte-identical with etcpak 0.9.15 (the portable paths its Windows wheel runs; ported, BSD 3-clause in NOTICE.md): a real frame at two widths, an RGBA picture, noise, flat / nearly flat blocks. Sizes that are not a multiple of 4 repeat the edge pixels |
-| BCn encode BC7 | open | open | open | open | open | open | next (PLAN-Texture-Compression.md) |
+| BCn encode BC7 | green (10-27, also Velocity) | green | green | green | green | green | port of bc7enc (MIT, NOTICE.md) at its default settings, 9 fixtures / 8435 blocks: CPU, Velocity and Wasm byte-identical with bc7enc on every block (required); CUDA 98.97 %, OpenCL 94.5 %, WebGPU 94.7 % identical (ILGPU's GPU float contracts multiply-add / rounds differently; PSNR never more than 0.01 dB lower; GPU gate = PSNR within 0.05 dB + 90 %). ILGPU 5.4.9-local.3 fixed WebGL (unsigned 64-bit compares) and worked around an NVIDIA D3D12 driver miscompile on WebGPU (local.2). Speed 2048x2048 (RTX 4070): CUDA 384 (424 at O2), OpenCL 655 Mpixel/s; bc7enc on one CPU thread 2.2 |
 
 ## Video
 
