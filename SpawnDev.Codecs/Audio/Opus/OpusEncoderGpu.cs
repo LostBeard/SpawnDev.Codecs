@@ -96,6 +96,17 @@ public sealed class OpusEncoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<short>, ArrayView<short>, int, int, int, int> _stereoFadeKernel;
     private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>, int, int, int, int, ArrayView<byte>, ArrayView<int>> _assembleKernel;
 
+    // The CELT encoder (CeltEncoderGpu: celt_encode_with_ec, one thread per call) and its persistent state.
+    private readonly CeltModeGpu _celtMode;
+    private readonly IDisposable _celtModeBuffer;
+    private readonly MemoryBuffer1D<uint, Stride1D.Dense> _pvqU;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _celtState;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _celtWork;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _celtCtl;
+    private readonly int[] _celtCtlHost = new int[(int)CeltEncoderGpu.Ctl.Count];
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>> _celtEncodeKernel;
+    private readonly Action<Index1D, ArrayView<int>> _celtResetKernel;
+
     // libopus OpusEncoder state the dispatch keeps (st->...).
     private int _streamChannels;
     private int _mode = ModeHybrid;                                            // opus_encoder_init sets MODE_HYBRID
@@ -154,6 +165,15 @@ public sealed class OpusEncoderGpu : IDisposable
         _delayUpdateKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<short>, int, int, int, int>(DelayUpdateKernel);
         _stereoFadeKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<short>, int, int, int, int>(StereoFadeKernel);
         _assembleKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, ArrayView<int>, int, int, int, int, ArrayView<byte>, ArrayView<int>>(AssembleKernel);
+
+        (_celtMode, _celtModeBuffer) = CeltModeGpu.Upload(accelerator);
+        _pvqU = accelerator.Allocate1D(CeltPvqTables.Data);
+        _celtState = accelerator.Allocate1D<int>(CeltEncoderGpu.StateInts);
+        _celtWork = accelerator.Allocate1D<int>(CeltEncoderGpu.WorkInts);
+        _celtCtl = accelerator.Allocate1D<int>((int)CeltEncoderGpu.Ctl.Count);
+        _celtEncodeKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>(CeltEncoderGpu.EncodeKernel);
+        _celtResetKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(CeltEncoderGpu.ResetKernel);
+        _celtResetKernel(1, _celtState.View);
     }
 
     /// <summary>Input sample rate in Hz.</summary>
@@ -222,6 +242,28 @@ public sealed class OpusEncoderGpu : IDisposable
     /// <summary>OPUS_SET_PREDICTION_DISABLED: frames independent of the previous ones (no pitch prefilter, intra energy).</summary>
     public bool PredictionDisabled { get; set; }
 
+    /// <summary>OPUS_SET_PHASE_INVERSION_DISABLED: no stereo phase inversion in CELT's band coding (better for downmixing
+    /// decoders, slightly worse stereo).</summary>
+    public bool PhaseInversionDisabled { get; set; }
+
+    /// <summary>
+    /// libopus OPUS_RESET_STATE: the encoder starts over as freshly created (delay buffer, filters, CELT state, mode and
+    /// bandwidth history), keeping its settings.
+    /// </summary>
+    public void Reset()
+    {
+        _streamChannels = ChannelCount;
+        _hybridStereoWidthQ14 = 1 << 14;
+        _first = true;
+        _mode = ModeHybrid;
+        _bandwidth = BwFull;
+        _autoBandwidth = 0;
+        _rangeValid = false;
+        _delay.MemSetToZero();
+        _hpMem.MemSetToZero();
+        _celtResetKernel(1, _celtState.View);
+    }
+
     /// <summary>The input's significant bits (OPUS_SET_LSB_DEPTH), 8..24; int16 input caps it at 16 as libopus does.</summary>
     public int LsbDepth
     {
@@ -236,11 +278,74 @@ public sealed class OpusEncoderGpu : IDisposable
     internal readonly record struct CeltFrameCall(
         int Call, int FrameSize, int Channels, int NbCompressedBytes, int Bitrate, bool Vbr, bool ConstrainedVbr, int Complexity,
         int StartBand, int EndBand, int StreamChannels, int LsbDepth, bool DisablePrefilter, bool ForceIntra, int LossRate,
-        ArrayView<short> Pcm, ArrayView<byte> Out, int OutAt, ArrayView<int> Length, int LengthAt);
+        bool DisableInv, ArrayView<short> Pcm, ArrayView<byte> Out, int OutAt, ArrayView<int> Length, int LengthAt);
 
-    /// <summary>The CELT frame encoder the Opus layer calls. It must encode <see cref="CeltFrameCall.Pcm"/> into
-    /// Out[OutAt..] (at most NbCompressedBytes bytes) and store the byte count at Length[LengthAt].</summary>
+    /// <summary>Replaces the CELT frame encode (tests stand libopus' CELT bytes in here). It must encode
+    /// <see cref="CeltFrameCall.Pcm"/> into Out[OutAt..] (at most NbCompressedBytes bytes) and store the byte count at
+    /// Length[LengthAt]. Null = CeltEncoderGpu.</summary>
     internal Func<CeltFrameCall, Task>? CeltEncode { get; set; }
+
+    // celt_encode_with_ec on the accelerator: the CTLs go up as one small int view, the frame is coded in place.
+    private void CeltEncodeOnDevice(in CeltFrameCall call)
+    {
+        var c = _celtCtlHost;
+        c[(int)CeltEncoderGpu.Ctl.PcmAt] = 0;
+        c[(int)CeltEncoderGpu.Ctl.FrameSize] = call.FrameSize;
+        c[(int)CeltEncoderGpu.Ctl.CC] = call.Channels;
+        c[(int)CeltEncoderGpu.Ctl.NbCompressedBytes] = call.NbCompressedBytes;
+        c[(int)CeltEncoderGpu.Ctl.Bitrate] = call.Bitrate;
+        c[(int)CeltEncoderGpu.Ctl.Vbr] = call.Vbr ? 1 : 0;
+        c[(int)CeltEncoderGpu.Ctl.ConstrainedVbr] = call.ConstrainedVbr ? 1 : 0;
+        c[(int)CeltEncoderGpu.Ctl.Complexity] = call.Complexity;
+        c[(int)CeltEncoderGpu.Ctl.Start] = call.StartBand;
+        c[(int)CeltEncoderGpu.Ctl.End] = call.EndBand;
+        c[(int)CeltEncoderGpu.Ctl.C] = call.StreamChannels;
+        c[(int)CeltEncoderGpu.Ctl.LsbDepth] = call.LsbDepth;
+        c[(int)CeltEncoderGpu.Ctl.DisablePf] = call.DisablePrefilter ? 1 : 0;
+        c[(int)CeltEncoderGpu.Ctl.ForceIntra] = call.ForceIntra ? 1 : 0;
+        c[(int)CeltEncoderGpu.Ctl.Lfe] = 0;
+        c[(int)CeltEncoderGpu.Ctl.DisableInv] = call.DisableInv ? 1 : 0;
+        c[(int)CeltEncoderGpu.Ctl.LossRate] = call.LossRate;
+        c[(int)CeltEncoderGpu.Ctl.Upsample] = 48000 / SampleRateHz;
+        c[(int)CeltEncoderGpu.Ctl.OutAt] = call.OutAt;
+        c[(int)CeltEncoderGpu.Ctl.LengthAt] = call.LengthAt;
+        _celtCtl.View.CopyFromCPU(c);
+        _celtEncodeKernel(1, _celtCtl.View, call.Pcm, _celtState.View, _celtWork.View, call.Out, call.Length, _celtMode, _pvqU.View);
+    }
+
+    /// <summary>
+    /// Encode one packet of <paramref name="frameSize"/> samples per channel (2.5, 5, 10, 20, 40, 60, 80, 100 or 120 ms)
+    /// of interleaved int16 PCM. <paramref name="maxPacketBytes"/> is libopus' out_data_bytes (the packet never exceeds
+    /// it, nor 1276 bytes per 20 ms frame). Returns the packet; only its bytes come back from the accelerator.
+    /// </summary>
+    public Task<byte[]> EncodePacketAsync(ReadOnlyMemory<short> pcm, int frameSize, int maxPacketBytes = 4000)
+        => EncodeAsync(pcm, frameSize, maxPacketBytes);
+
+    /// <summary>
+    /// Encode one packet whose interleaved int16 PCM is already on the accelerator (<paramref name="frameSize"/> samples
+    /// per channel at the start of <paramref name="pcm"/>). The packet stays on the accelerator in
+    /// <paramref name="packetOut"/> (at least <paramref name="maxPacketBytes"/> bytes, capped at 1276 * frames); returns
+    /// its length.
+    /// </summary>
+    public async Task<int> EncodePacketAsync(ArrayView1D<short, Stride1D.Dense> pcm, int frameSize, ArrayView1D<byte, Stride1D.Dense> packetOut,
+        int maxPacketBytes = 4000)
+    {
+        if (pcm.Length < (long)frameSize * ChannelCount) throw new ArgumentException("pcm holds fewer than frameSize samples per channel.", nameof(pcm));
+        int length = await EncodeDeviceAsync(pcm, frameSize, maxPacketBytes);
+        if (packetOut.Length < length) throw new ArgumentException($"packetOut must hold {length} bytes.", nameof(packetOut));
+        packetOut.SubView(0, length).CopyFrom(_packet.View.SubView(0, length));
+        return length;
+    }
+
+    /// <summary>The encoder's final range after the last packet (libopus OPUS_GET_FINAL_RANGE): a decoder's final range
+    /// on the same packet must equal it. 0 after a packet too small to code anything.</summary>
+    public async Task<uint> GetFinalRangeAsync()
+    {
+        if (!_rangeValid) return 0;
+        var r = await _celtState.View.SubView(CeltEncoderGpu.SRng, 1).CopyToHostAsync();
+        return (uint)r[0];
+    }
+    private bool _rangeValid;
 
     private int _celtCalls;
 
@@ -250,7 +355,7 @@ public sealed class OpusEncoderGpu : IDisposable
     /// Encode one packet of <paramref name="frameSize"/> samples per channel (2.5, 5, 10, 20, 40, 60, 80, 100 or 120 ms)
     /// from interleaved int16 PCM; at most <paramref name="maxPacketBytes"/> bytes (libopus' out_data_bytes).
     /// </summary>
-    internal async Task<byte[]> EncodeAsync(ReadOnlyMemory<short> pcm, int frameSize, int maxPacketBytes = 1500)
+    internal async Task<byte[]> EncodeAsync(ReadOnlyMemory<short> pcm, int frameSize, int maxPacketBytes)
     {
         if (pcm.Length < (long)frameSize * ChannelCount) throw new ArgumentException("pcm holds fewer than frameSize samples per channel.", nameof(pcm));
         var dPcm = _dInput.Ensure((long)frameSize * ChannelCount);
@@ -279,6 +384,7 @@ public sealed class OpusEncoderGpu : IDisposable
             bitrate = cbrBytes * frameRate12 * 8 / 12;
             maxDataBytes = Math.Max(1, cbrBytes);
         }
+        _rangeValid = false;                                                       // st->rangeFinal = 0
         if (maxDataBytes < 3 || bitrate < 3 * frameRate * 8 || (frameRate < 50 && (maxDataBytes * frameRate < 300 || bitrate < 2400)))
             return EncodeTooSmall(frameRate, maxDataBytes, outDataBytes);
 
@@ -354,6 +460,7 @@ public sealed class OpusEncoderGpu : IDisposable
         }
         var len = await _packetLength.View.SubView(0, 1).CopyToHostAsync();
         if (len[0] <= 0) throw new InvalidOperationException($"Opus packet assembly failed ({len[0]}).");
+        _rangeValid = true;
         return len[0];
     }
 
@@ -402,10 +509,11 @@ public sealed class OpusEncoderGpu : IDisposable
         // libopus skips CELT when ec_tell (1 bit) exceeds the budget; the too-small-packet path above already took every
         // budget under 3 bytes, so CELT always runs here. CELT never writes past nbCompressedBytes, so libopus' "SILK
         // busted its target" PLC fallback cannot trigger in CELT-only mode.
-        var hook = CeltEncode ?? throw new InvalidOperationException("The CELT frame encoder is not attached.");
-        await hook(new CeltFrameCall(_celtCalls++, frameSize, ch, nbComprBytes, _celtBitrate, _celtVbr != 0, _celtConstrainedVbr != 0,
-            _complexity, 0, _celtEnd, _streamChannels, lsbDepth, disablePf, forceIntra, _lossPercent,
-            _pcmBuf.View, slots, slotAt, _frameLengths.View, frame));
+        var call = new CeltFrameCall(_celtCalls++, frameSize, ch, nbComprBytes, _celtBitrate, _celtVbr != 0, _celtConstrainedVbr != 0,
+            _complexity, 0, _celtEnd, _streamChannels, lsbDepth, disablePf, forceIntra, _lossPercent, PhaseInversionDisabled,
+            _pcmBuf.View, slots, slotAt, _frameLengths.View, frame);
+        if (CeltEncode is { } hook) await hook(call);
+        else CeltEncodeOnDevice(call);
         _first = false;
     }
 
@@ -615,6 +723,8 @@ public sealed class OpusEncoderGpu : IDisposable
     private static void AssembleKernel(Index1D _, ArrayView<byte> slots, int slotSize, ArrayView<int> lengths, int count, int toc, int pad,
         int maxlen, ArrayView<byte> data, ArrayView<int> outLen)
     {
+        for (int f = 0; f < count; f++)
+            if (lengths[f] < 0) { outLen[0] = -3; return; }                 // CELT reported an internal error
         int len0 = lengths[0];
         int totSize = 0;
         int ptr = 0;
@@ -720,5 +830,10 @@ public sealed class OpusEncoderGpu : IDisposable
         _dInput.Dispose();
         _frames.Dispose();
         _packet.Dispose();
+        _celtModeBuffer.Dispose();
+        _pvqU.Dispose();
+        _celtState.Dispose();
+        _celtWork.Dispose();
+        _celtCtl.Dispose();
     }
 }

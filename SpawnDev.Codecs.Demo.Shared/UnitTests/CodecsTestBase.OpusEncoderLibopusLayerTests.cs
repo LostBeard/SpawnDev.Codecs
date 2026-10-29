@@ -54,6 +54,25 @@ public abstract partial class CodecsTestBase
             int.Parse(c[8]), c[9], int.Parse(c[11]), packets, input, calls);
     }
 
+    // An encoder with the stream's libopus settings.
+    private static OpusEncoderGpu CreateFixtureEncoder(Accelerator acc, OpusEncFixture fx)
+    {
+        var app = fx.Application switch
+        {
+            "voip" => OpusEncoderApplication.Voip, "lowdelay" => OpusEncoderApplication.RestrictedLowDelay, _ => OpusEncoderApplication.Audio,
+        };
+        return new OpusEncoderGpu(acc, fx.Rate, fx.Channels, app)
+        {
+            Bitrate = fx.Bitrate, Vbr = fx.Vbr, VbrConstraint = fx.Cvbr, Complexity = fx.Complexity,
+            Bandwidth = fx.Bandwidth switch
+            {
+                "NB" => OpusBandwidth.Narrowband, "WB" => OpusBandwidth.Wideband, "SWB" => OpusBandwidth.Superwideband,
+                "FB" => OpusBandwidth.Fullband, _ => null,
+            },
+            ForceChannels = fx.ForceChannels == -1000 ? null : fx.ForceChannels,
+        };
+    }
+
     private async Task RunOpusEncoderLibopusLayer(string name)
     {
         var fx = LoadOpusEncFixture(name);
@@ -61,20 +80,7 @@ public abstract partial class CodecsTestBase
         RequireFeatures(acc, SerialStreamKernels);
         try
         {
-            var app = fx.Application switch
-            {
-                "voip" => OpusEncoderApplication.Voip, "lowdelay" => OpusEncoderApplication.RestrictedLowDelay, _ => OpusEncoderApplication.Audio,
-            };
-            using var enc = new OpusEncoderGpu(acc, fx.Rate, fx.Channels, app)
-            {
-                Bitrate = fx.Bitrate, Vbr = fx.Vbr, VbrConstraint = fx.Cvbr, Complexity = fx.Complexity,
-                Bandwidth = fx.Bandwidth switch
-                {
-                    "NB" => OpusBandwidth.Narrowband, "WB" => OpusBandwidth.Wideband, "SWB" => OpusBandwidth.Superwideband,
-                    "FB" => OpusBandwidth.Fullband, _ => null,
-                },
-                ForceChannels = fx.ForceChannels == -1000 ? null : fx.ForceChannels,
-            };
+            using var enc = CreateFixtureEncoder(acc, fx);
             int packet = 0, frameInPacket = 0, calls = 0;
             string Where(int call) => $"{name} packet {packet} CELT call {call}";
             enc.CeltEncode = async call =>
@@ -101,6 +107,7 @@ public abstract partial class CodecsTestBase
                 Same("lsb_depth", call.LsbDepth, h[13]);
                 Same("disable_pf", call.DisablePrefilter ? 1 : 0, h[14]);
                 Same("force_intra", call.ForceIntra ? 1 : 0, h[15]);
+                Same("disable_inv", call.DisableInv ? 1 : 0, h[17]);
                 Same("loss_rate", call.LossRate, h[18]);
                 var pcm = await call.Pcm.SubView(0, want.Pcm.Length).CopyToHostAsync();
                 for (int i = 0; i < pcm.Length; i++)
