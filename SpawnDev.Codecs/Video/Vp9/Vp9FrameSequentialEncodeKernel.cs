@@ -272,6 +272,14 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
                 yCoefs, uCoefs, vCoefs,
                 dequant, p, frameCount, dEnd);
             await pacer.LaunchedAsync();
+            // WORKAROUND: drain each group-kernel slice. In Chrome WebGPU (D3D12, NVIDIA RTX 4070) a
+            // Vp9EntropyStepKernel queued while this barrier kernel still runs leaves the device in a state
+            // where a LATER launch (the next encoder's first Vp9EncodeWavefrontBatchKernel) dies with
+            // DXGI_ERROR_DEVICE_HUNG. Toggling ILGPU dispatch batching, single pass, caches or the compile
+            // path changes nothing; a raw WebGPU replay without ILGPU did not reproduce, so the root cause
+            // is unproven. Approved by TJ 2026-10-29; tracked in Docs/status.md (VP9 WebGPU device hang).
+            // Regression test: WebGPU Batch_ArrayViewOverload then Batch_Unaligned in one page.
+            await _accelerator.SynchronizeAsync();
             await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_accelerator, $"wavefront single-dispatch diagonals {dStart}..{dEnd} of {totalDiagonals} ({frameCount} frames x {peakDiag})");
         }
         return true;

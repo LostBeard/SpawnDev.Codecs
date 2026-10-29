@@ -2,7 +2,7 @@
 
 What is verified, on which backend, and how. "Verified" means a test that compares against a reference
 implementation (never against this library's own output) passed on that backend, with its guard red-checked. Dates are
-the last run of the named lane. Updated 2026-10-28 (browser Images and Audio refreshed on ILGPU 5.4.9-local.4; counts are
+the last run of the named lane. Updated 2026-10-29 (WebGPU video on ILGPU 5.4.11; browser Images and Audio refreshed on ILGPU 5.4.9-local.4; counts are
 passed / failed, skips are gated or CPU-only tests).
 
 Legend: **green** = the codec's suite passes on that lane; **partial** = runs, with the open items named; **open** = not
@@ -66,9 +66,9 @@ lanes (VP9 batch encode at unaligned sizes).
 
 | Codec | CPU | CUDA | OpenCL | WebGPU | WebGL | Wasm | Evidence |
 |-------|-----|------|--------|--------|-------|------|----------|
-| VP8 keyframe encode | green | green (10-23) | green | green (10-28, ILGPU 5.4.10; the entropy step was split 10-26) | n/a for the frame-level coders (serial stream coders: 416 / 159 / 184 transform-feedback outputs, WebGL captures 120); the building blocks (transforms, predictors, bool and coefficient coders) green (10-28, ILGPU 5.4.11-local.2) | green (10-28, ILGPU 5.4.11-local.1: a view's Length was 0 inside non-inlined helpers on Wasm) | ffmpeg decodes our frames; bit-exact with the CPU reference encoder |
+| VP8 keyframe encode | green | green (10-23) | green | green (10-29, ILGPU 5.4.11; the entropy step was split 10-26) | n/a for the frame-level coders (serial stream coders: 416 / 159 / 184 transform-feedback outputs, WebGL captures 120); the building blocks (transforms, predictors, bool and coefficient coders) green (10-28, ILGPU 5.4.11-local.2) | green (10-28, ILGPU 5.4.11-local.1: a view's Length was 0 inside non-inlined helpers on Wasm) | ffmpeg decodes our frames; bit-exact with the CPU reference encoder |
 | VP8 full keyframe decode | green | green (10-25) | green | green (10-28) | n/a (serial decoder: the full and the older decoder step kernels need scatter stores; the older one is refused at 159 transform-feedback outputs, WebGL captures 120) | green (10-28, ILGPU 5.4.11-local.4: the older decoder path read stream bytes sign-extended inside helpers on Wasm) | 182 files, identical planes to ffmpeg; one CUDA failure in 24 runs on 10-25 traced to an unpinned host copy, fixed in ILGPU 5.4.5 |
-| VP9 keyframe encode / decode | green | green (10-23) | green | **partial** (10-28): 265 of 267 green; Batch_Unaligned and TypedArrayOverloads each reset the GPU driver (a kernel that does not finish), with Data | n/a for the frame encoder and decoder (serial coders; batch wavefront 561 transform-feedback outputs, WebGL captures 120); the building blocks (transforms, predictors, coefficient coders) green (10-28) | green (10-28, ILGPU 5.4.11-local.1) | ffmpeg / CPU reference |
+| VP9 keyframe encode / decode | green | green (10-23) | green | green (10-29, ILGPU 5.4.11, 267 / 0; video lane 468 / 0) with one **workaround**: a drain after each wavefront group-kernel slice (see Notes, VP9 WebGPU device hang) | n/a for the frame encoder and decoder (serial coders; batch wavefront 561 transform-feedback outputs, WebGL captures 120); the building blocks (transforms, predictors, coefficient coders) green (10-28) | green (10-28, ILGPU 5.4.11-local.1) | ffmpeg / CPU reference |
 | AV1 keyframe encode / decode | green | green (10-23) | green | green (10-28, all 144 AV1 tests) | n/a for the frame step kernels (972 transform-feedback outputs, WebGL captures 120; restructure planned, PLAN-Oversized-Kernels.md); transforms and the rest green (10-28, 93 / 0, ILGPU 5.4.11-local.2) | green (10-28, all 144 AV1 tests) | libdav1d decodes our frames; CPU reference |
 
 ## Audio
@@ -82,6 +82,17 @@ lanes (VP9 batch encode at unaligned sizes).
 | SILK GPU primitives | green | green (10-25) | green | green (10-28, 139 / 0) | green (10-28, 202 / 0) | green (10-28, 202 / 0) | Concentus |
 
 ## Notes
+
+- **VP9 WebGPU device hang (open, workaround in place, TJ-approved 2026-10-29).** In Chrome WebGPU (D3D12, NVIDIA RTX
+  4070), a `Vp9EntropyStepKernel` queued while `Vp9EncodeWavefrontGroupKernel` (the single-dispatch barrier kernel of the
+  batch encode) still runs leaves the device in a state where a LATER launch (the next encoder's first
+  `Vp9EncodeWavefrontBatchKernel`) dies with DXGI_ERROR_DEVICE_HUNG. Found with Data by 9 pair-run probes (2026-10-28):
+  dispatch batching, single pass, the shader caches and the compile path change nothing; one drain after the group
+  kernel, or before the entropy step, prevents it. A raw WebGPU replay without ILGPU did not reproduce, so the root cause
+  is unproven. Workaround: `SynchronizeAsync` after each group-kernel slice in
+  `Vp9FrameSequentialEncodeKernel.TryRunBatchSingleDispatchAsync` (`// WORKAROUND:`). Next: Data's WebGPU call-trace
+  replay of the failing page, for an upstream report; the drain comes out once the cause is fixed. Regression test:
+  WebGPU `Batch_ArrayViewOverload` then `Batch_Unaligned` in one page (the order the suite runs them).
 
 - **ILGPU 5.4.6-local.2** (2026-10-26): integer divisions no longer hoisted out of their guards (Wasm traps), WebGL sends a
   program's GLSL once (not per dispatch) and refuses kernels over the device's Transform Feedback varying limit at load,
