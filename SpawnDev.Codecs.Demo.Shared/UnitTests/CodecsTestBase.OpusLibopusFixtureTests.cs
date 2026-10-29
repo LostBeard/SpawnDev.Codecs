@@ -14,7 +14,7 @@ public abstract partial class CodecsTestBase
 {
     private const string OpusFixturePrefix = "SpawnDev.Codecs.Demo.Shared.TestData.Opus.";
 
-    private sealed record OpusFixture(string Name, int ApiRate, int ApiChannels, int PacketMs, List<byte[]?> Packets, short[] Pcm);
+    private sealed record OpusFixture(string Name, int ApiRate, int ApiChannels, int PacketUs, List<byte[]?> Packets, short[] Pcm);
 
     private static OpusFixture LoadOpusFixture(string name)
     {
@@ -49,7 +49,7 @@ public abstract partial class CodecsTestBase
             {
                 var pkt = fx.Packets[p];
                 float[] got;
-                if (pkt is null) { got = await gpu.DecodeLostAsync(fx.ApiRate * fx.PacketMs / 1000); lost++; }
+                if (pkt is null) { got = await gpu.DecodeLostAsync((int)((long)fx.ApiRate * fx.PacketUs / 1_000_000)); lost++; }
                 else { got = await gpu.DecodePacketAsync(pkt); if (pkt.Length == 1) dtx++; }
                 for (int i = 0; i < got.Length; i++)
                 {

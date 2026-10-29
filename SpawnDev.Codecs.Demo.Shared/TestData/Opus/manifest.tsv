@@ -1,8 +1,23 @@
 # libopus 1.5.2-fixed, fixed point, intrinsics off
-name	api_rate	api_channels	packet_ms	packets	lost	notes
-silk_wb20_mono_48k_loss	48000	1	20	40	6,13,14,22,31	SILK WB 20 ms mono, FEC on, single and burst losses
-silk_mb20_stereo_48k_loss	48000	2	20	40	5,11,12,25	SILK MB 20 ms forced stereo -> 48 kHz stereo, losses
-silk_nb60_mono_16kst_loss	16000	2	60	14	4,9	SILK NB 60 ms (3 SILK frames) mono -> 16 kHz stereo, losses (concealed in 20 ms steps)
-silk_wb40_switch_24k_loss	24000	2	40	24	3,8,16	SILK WB 40 ms, stereo / mono switches, losses
-silk_wb20_dtx_16k	16000	1	20	50		SILK WB 20 ms with DTX over a 500 ms silence (TOC-only packets run PLC + CNG)
-silk_10ms_mono_8k_clean	8000	1	10	60		SILK WB 10 ms -> 8 kHz, no loss (normal decode vs libopus)
+name	api_rate	api_channels	packet_us	packets	lost	notes
+silk_wb20_mono_48k_loss	48000	1	20000	40	6,13,14,22,31	SILK WB 20 ms mono, FEC on, single and burst losses (libopus switches MB -> WB itself)
+silk_mb20_stereo_48k_loss	48000	2	20000	40	5,11,12,25	SILK MB 20 ms forced stereo -> 48 kHz stereo, losses
+silk_nb60_mono_16kst_loss	16000	2	60000	14	4,9	SILK NB 60 ms (3 SILK frames) mono -> 16 kHz stereo, losses (concealed in 20 ms steps)
+silk_wb40_switch_24k_loss	24000	2	40000	24	3,8,16	SILK WB 40 ms, stereo / mono switches, losses
+silk_wb20_dtx_16k	16000	1	20000	50		SILK WB 20 ms with DTX over a 500 ms silence (TOC-only packets run PLC + CNG)
+silk_10ms_mono_8k_clean	8000	1	10000	60		SILK WB 10 ms -> 8 kHz, no loss (normal decode vs libopus)
+celt_fb20_stereo_96k_loss	48000	2	20000	40	7,15,16,28	CELT FB 20 ms stereo 96 kb/s, transients, losses (CELT PLC)
+celt_fb20_mono_12k_low	48000	1	20000	40		CELT FB 20 ms mono 12 kb/s: bands skip and fold
+celt_fb10_mono_48k_loss	48000	1	10000	60	9,31	CELT FB 10 ms mono 48 kb/s, losses
+celt_fb10_stereo_24k_low	48000	2	10000	60		CELT FB 10 ms stereo 24 kb/s (intensity / dual stereo decisions at a low rate)
+celt_fb5_stereo_128k	48000	2	5000	120		CELT FB 5 ms stereo 128 kb/s
+celt_fb5_mono_32k_loss	48000	1	5000	120	40,77,78	CELT FB 5 ms mono 32 kb/s, losses
+celt_fb2p5_mono_64k	48000	1	2500	200		CELT FB 2.5 ms mono 64 kb/s (LM 0)
+celt_fb2p5_stereo_96k_loss	48000	2	2500	200	50,120,121	CELT FB 2.5 ms stereo 96 kb/s, losses
+celt_wb20_mono_16k	16000	1	20000	30		CELT WB 20 ms mono at 16 kHz (end band 17, downsampled output)
+celt_swb20_stereo_24k	24000	2	20000	30		CELT SWB 20 ms stereo at 24 kHz (end band 19)
+hybrid_swb20_mono_24k_loss	24000	1	20000	40	8,19,20	Hybrid SWB 20 ms mono at 24 kHz, FEC, losses
+hybrid_fb20_stereo_48k_loss	48000	2	20000	40	11,25	Hybrid FB 20 ms stereo 64 kb/s, losses
+hybrid_fb10_mono_48k	48000	1	10000	60		Hybrid FB 10 ms mono (celt_accum: frame >= 10 ms)
+hybrid_swb10_stereo_48k_low	48000	2	10000	60		Hybrid SWB 10 ms stereo 28 kb/s
+switch_modes_48k_stereo_loss	48000	2	20000	54	13,30,37	SILK / hybrid / CELT switches every 6 packets (redundancy, transitions), losses next to switches
