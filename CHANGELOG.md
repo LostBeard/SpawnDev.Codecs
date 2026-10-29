@@ -23,6 +23,20 @@
 - **CELT GPU primitives (Data):** PVQ (cwrs.c + vq.c: decode, encoder pulse search, spread rotation, stereo theta), bit
   allocation (rate.c, decode side) with the 48 kHz mode tables on the accelerator, anti-collapse / intensity / mid-side /
   Haar / Hadamard (bands.c), comb pre/post-filter. Each bit-exact with Concentus.
+- **New `OpusDecoderGpu`** (`SpawnDev.Codecs.Audio.Opus`, three overloads + `DecodeLostAsync` + `GetFinalRangeAsync`): the whole
+  libopus 1.5.2 decoder (fixed point) on the accelerator. `SilkPacketDecoderGpu` (silk_Decode: VAD / LBRR header and LBRR
+  skip, stereo, indices / pulses / parameters / decode_core, MS->LR, resampler; PLC, comfort noise and the glue after a loss;
+  DTX), Data's `CeltDecoderGpu` (celt_decode_with_ec + concealment), and the opus_decode_frame glue: hybrid on the shared range
+  decoder with CELT accumulating into the SILK PCM, redundancy frames both ways with smooth_fade, the transition concealment and
+  fades, the hybrid -> SILK silence frame, CELT / SILK resets. The host parses the TOC / frame packing and reads back four
+  redundancy ints per SILK / hybrid frame; every other bit decodes on the accelerator. **Equal to libopus 1.5.2 on every packet
+  of 21 real streams** (PCM and final range): SILK, CELT-only at 2.5 / 5 / 10 / 20 ms, hybrid, a mode-switching stream; losses,
+  FEC, DTX, stereo / mono and bandwidth switches. The reference is libopus 1.5.2 itself, built from source
+  (`scripts/audio/make_opus_fixtures.py`, `TestData/Opus`): Concentus ports libopus ~1.1 and differs from 1.5.2 (CNG, PLC,
+  decode_core's voiced-PLC transition, several CELT details, 64-bit MULT32_32 on Win64), and its silk_CNG never fills
+  CNG_exc_buf_Q14.
+- **ILGPU 5.4.12-local.1** (Data: Velocity hung on a loop exiting from both arms of an if; WebGPU if-arm back edge without
+  `continue`, both found by the CELT band recursion). Full Velocity desktop lane 1008 / 0.
 - **VP9 on WebGPU green** (267 / 0; WebGPU video 468 / 0) with a TJ-approved workaround: a drain after each wavefront
   group-kernel slice. The device hang it avoids reproduces in Chrome with no ILGPU (a replay of the recorded WebGPU calls), so
   it is below ILGPU (Dawn D3D12 or the NVIDIA driver); upstream report drafted. See Docs/status.md.
