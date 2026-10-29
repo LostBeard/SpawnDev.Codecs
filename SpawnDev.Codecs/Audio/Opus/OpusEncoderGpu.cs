@@ -104,7 +104,9 @@ public sealed class OpusEncoderGpu : IDisposable
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _celtWork;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _celtCtl;
     private readonly int[] _celtCtlHost = new int[(int)CeltEncoderGpu.Ctl.Count];
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>> _celtEncodeKernel;
+    // celt_encode_with_ec as four stage kernels (analysis, coding decisions + energies, bands, finish): each stays small
+    // enough for the browser backends' shader compilers, and every backend runs the same path.
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>[] _celtStageKernels;
     private readonly Action<Index1D, ArrayView<int>> _celtResetKernel;
 
     // libopus OpusEncoder state the dispatch keeps (st->...).
@@ -171,7 +173,13 @@ public sealed class OpusEncoderGpu : IDisposable
         _celtState = accelerator.Allocate1D<int>(CeltEncoderGpu.StateInts);
         _celtWork = accelerator.Allocate1D<int>(CeltEncoderGpu.WorkInts);
         _celtCtl = accelerator.Allocate1D<int>((int)CeltEncoderGpu.Ctl.Count);
-        _celtEncodeKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>(CeltEncoderGpu.EncodeKernel);
+        _celtStageKernels = new[]
+        {
+            accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>(CeltEncoderGpu.AnalysisKernel),
+            accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>(CeltEncoderGpu.CodingKernel),
+            accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>(CeltEncoderGpu.BandsKernel),
+            accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>(CeltEncoderGpu.FinishKernel),
+        };
         _celtResetKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(CeltEncoderGpu.ResetKernel);
         _celtResetKernel(1, _celtState.View);
     }
@@ -310,7 +318,8 @@ public sealed class OpusEncoderGpu : IDisposable
         c[(int)CeltEncoderGpu.Ctl.OutAt] = call.OutAt;
         c[(int)CeltEncoderGpu.Ctl.LengthAt] = call.LengthAt;
         _celtCtl.View.CopyFromCPU(c);
-        _celtEncodeKernel(1, _celtCtl.View, call.Pcm, _celtState.View, _celtWork.View, call.Out, call.Length, _celtMode, _pvqU.View);
+        foreach (var stage in _celtStageKernels)
+            stage(1, _celtCtl.View, call.Pcm, _celtState.View, _celtWork.View, call.Out, call.Length, _celtMode, _pvqU.View);
     }
 
     /// <summary>
