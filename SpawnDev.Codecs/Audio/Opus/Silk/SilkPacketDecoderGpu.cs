@@ -115,6 +115,8 @@ public sealed class SilkPacketDecoderGpu : IDisposable
     public const int TransitionResetResamplers = 16;
     /// <summary>Transition flag: stereo starts (predictors / side history zeroed, right resampler = left).</summary>
     public const int TransitionStereoStart = 32;
+    /// <summary>Transition flag: silk_ResetDecoder's stereo part (predictors, MS->LR history, prev_decode_only_middle).</summary>
+    public const int TransitionResetStereo = 64;
 
     // libopus BWE_AFTER_LOSS_Q16 (silk/define.h): 0.97 in Q16.
     private const int BweAfterLossQ16 = 63570;
@@ -163,6 +165,8 @@ public sealed class SilkPacketDecoderGpu : IDisposable
     private int _prevStreamChannels;
     private int _midFsKHz, _sideFsKHz; // 0 = not yet initialised
     private SilkResamplerGpuConfig _resL, _resR;
+    private bool _pendingResetStereo;
+    private int _lostKHz;              // DecControl.internalSampleRate kept for concealment across a reset
 
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkIndicesInputs, SilkPulsesInputs, ArrayView<short>, SilkFrameGeometry, SilkLbrrTableOffsets> _headerKernel;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, ArrayView<byte>, ArrayView<short>, SilkResetTargets, SilkFrameGeometry, SilkStereoTableOffsets> _stereoKernel;
@@ -173,7 +177,7 @@ public sealed class SilkPacketDecoderGpu : IDisposable
     private readonly Action<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry> _finalizeKernel;
     private readonly Action<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry> _concealKernel;
     private readonly Action<Index1D, SilkResetTargets, ArrayView<int>, SilkFrameGeometry> _lostPrepKernel;
-    private readonly Action<Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<short>, ArrayView<short>, ArrayView<float>, SilkFrameGeometry, SilkOutputParams> _outputKernel;
+    private readonly Action<Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<short>, ArrayView<short>, ArrayView<short>, SilkFrameGeometry, SilkOutputParams> _outputKernel;
     private readonly Action<Index1D, SilkResetTargets, ArrayView<short>, ArrayView<int>, ArrayView<short>, ArrayView<int>, SilkFrameGeometry, SilkOutputParams> _transitionKernel;
 
     /// <summary>A SILK decoder producing <paramref name="apiChannels"/> channels at <paramref name="apiRateHz"/>.</summary>
@@ -368,7 +372,7 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         _finalizeKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry>(FinalizeKernel);
         _concealKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry>(ConcealKernel);
         _lostPrepKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkResetTargets, ArrayView<int>, SilkFrameGeometry>(LostPrepKernel);
-        _outputKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<short>, ArrayView<short>, ArrayView<float>, SilkFrameGeometry, SilkOutputParams>(OutputKernel);
+        _outputKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<short>, ArrayView<short>, ArrayView<short>, SilkFrameGeometry, SilkOutputParams>(OutputKernel);
         _transitionKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkResetTargets, ArrayView<short>, ArrayView<int>, ArrayView<short>, ArrayView<int>, SilkFrameGeometry, SilkOutputParams>(TransitionKernel);
     }
 
@@ -387,10 +391,10 @@ public sealed class SilkPacketDecoderGpu : IDisposable
     /// of <paramref name="packet"/>; TOC already removed) whose TOC gives <paramref name="internalKHz"/>, the SILK frame
     /// length <paramref name="frameLengthMs"/> (10 or 20), <paramref name="frameCount"/> SILK frames and
     /// <paramref name="streamChannels"/>. Writes <c>frameCount * frameLengthMs * apiRate / 1000</c> samples per API channel,
-    /// interleaved, as float in [-1, 1) at <paramref name="pcmOutBase"/>.
+    /// interleaved, as int16 (libopus' SILK output) at <paramref name="pcmOutBase"/>.
     /// </summary>
     public void Decode(ArrayView<byte> packet, int packetStart, int packetLength, int internalKHz, int frameLengthMs,
-        int frameCount, int streamChannels, ArrayView<float> pcmOut, long pcmOutBase)
+        int frameCount, int streamChannels, ArrayView<short> pcmOut, long pcmOutBase)
     {
         if (internalKHz != 8 && internalKHz != 12 && internalKHz != 16) throw new ArgumentOutOfRangeException(nameof(internalKHz));
         if (frameLengthMs != 10 && frameLengthMs != 20) throw new ArgumentOutOfRangeException(nameof(frameLengthMs));
@@ -404,7 +408,8 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         // ---- stream transitions (silk_Decode before the frame header; host bookkeeping, state work on the GPU) ----
         bool monoToStereo = streamChannels > _prevStreamChannels;
         bool stereoToMono = streamChannels == 1 && _prevStreamChannels == 2 && internalKHz == _internalKHz;
-        int flags = 0;
+        int flags = _pendingResetStereo ? TransitionResetStereo : 0;
+        _pendingResetStereo = false;
         if (_midFsKHz == 0) { flags |= TransitionResetMid; _midFsKHz = internalKHz; }
         if (monoToStereo || _sideFsKHz == 0) { flags |= TransitionResetSide; _sideFsKHz = internalKHz; }
         if (_midFsKHz != internalKHz) { flags |= TransitionPredMemMid; _midFsKHz = internalKHz; }
@@ -418,6 +423,7 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         }
         if (_apiChannels == 2 && streamChannels == 2 && _prevStreamChannels == 1) flags |= TransitionStereoStart;
         _internalKHz = internalKHz;
+        _lostKHz = internalKHz;
         _prevStreamChannels = streamChannels;
 
         int frameLength = internalKHz * frameLengthMs;
@@ -474,11 +480,23 @@ public sealed class SilkPacketDecoderGpu : IDisposable
     /// same MS->LR / buffering and resampling as a decoded frame. Writes <c>frameLengthMs * apiRate / 1000</c> samples per
     /// API channel at <paramref name="pcmOutBase"/>. Requires a decoded frame before (the caller returns silence otherwise).
     /// </summary>
-    public void DecodeLost(int frameLengthMs, ArrayView<float> pcmOut, long pcmOutBase)
+    public void DecodeLost(int frameLengthMs, ArrayView<short> pcmOut, long pcmOutBase)
     {
         if (frameLengthMs != 10 && frameLengthMs != 20) throw new ArgumentOutOfRangeException(nameof(frameLengthMs));
-        if (_internalKHz == 0) throw new InvalidOperationException("Nothing to conceal before the first decoded SILK frame.");
-        int internalKHz = _internalKHz, streamChannels = _prevStreamChannels;
+        if (_lostKHz == 0) throw new InvalidOperationException("Nothing to conceal before the first decoded SILK frame.");
+        int internalKHz = _lostKHz, streamChannels = _prevStreamChannels;
+        int flags = _pendingResetStereo ? TransitionResetStereo : 0;
+        _pendingResetStereo = false;
+        if (_midFsKHz == 0) { flags |= TransitionResetMid; _midFsKHz = internalKHz; }
+        if (_sideFsKHz == 0) { flags |= TransitionResetSide; _sideFsKHz = internalKHz; }
+        if (_internalKHz != internalKHz)
+        {
+            flags |= TransitionResetResamplers;
+            _resL = SilkResamplerGpu.InitDecoder(internalKHz * 1000, _apiRateHz, _resTableOffsets, 0, 0);
+            _resR = SilkResamplerGpu.InitDecoder(internalKHz * 1000, _apiRateHz, _resTableOffsets,
+                SilkResamplerGpu.IntsPerResampler, SilkResamplerGpu.ShortsPerResampler);
+            _internalKHz = internalKHz;
+        }
         int nbSubfr = frameLengthMs == 20 ? SilkConstants.MAX_NB_SUBFR : SilkConstants.MAX_NB_SUBFR / 2;
         int order = internalKHz == 16 ? 16 : 10;
         var g = new SilkFrameGeometry
@@ -490,6 +508,11 @@ public sealed class SilkPacketDecoderGpu : IDisposable
             OutLength = _apiRateHz / 1000 * frameLengthMs, ApiChannels = _apiChannels, Lost = 1,
         };
         var outParams = new SilkOutputParams { Left = _resL, Right = _resR, PcmOutBase = pcmOutBase };
+        if (flags != 0)
+        {
+            g.TransitionFlags = flags;
+            _transitionKernel(1, ResetTargets, _mix.View, _work.View, _resShorts.View, _resInts.View, g, outParams);
+        }
         _lostPrepKernel(1, ResetTargets, _work.View, g);
         for (int c = 0; c < streamChannels; c++)
         {
@@ -498,6 +521,23 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         }
         _outputKernel(1, _mix.View, _work.View, _resInts.View, _resShorts.View, _shortTables.View, pcmOut, g, outParams);
     }
+
+    /// <summary>
+    /// libopus silk_ResetDecoder (the Opus layer calls it when SILK resumes after CELT-only frames): both channel decoders
+    /// reset, the stereo state cleared, and the next frame re-initialises the resamplers (silk_decoder_set_fs sees fs 0).
+    /// The stream's channel count is kept, as libopus keeps psDec->nChannelsInternal.
+    /// </summary>
+    public void ResetDecoder()
+    {
+        _midFsKHz = 0;
+        _sideFsKHz = 0;
+        _internalKHz = 0;
+        _pendingResetStereo = true;
+    }
+
+    /// <summary>The range decoder SILK reads and leaves behind (one element): the Opus layer continues it (redundancy flags,
+    /// the hybrid CELT layer).</summary>
+    public ArrayView<OpusRangeDecoderGpuState> RangeDecoder => _ec.View;
 
     /// <summary>The work ints (flags, per-channel scalar state); tests read the decoded flags.</summary>
     internal ArrayView<int> WorkView => _work.View;
@@ -617,7 +657,7 @@ public sealed class SilkPacketDecoderGpu : IDisposable
     // SilkChannelDecoderState.Reset (silk_init_decoder).
     private static void ResetChannel(SilkResetTargets r, ArrayView<int> work, int c)
     {
-        r.ParamsInts[c == 0 ? r.MidLastGainAt : r.SideLastGainAt] = 0;
+        r.ParamsInts[c == 0 ? r.MidLastGainAt : r.SideLastGainAt] = 10; // silk_decoder_set_fs after the reset (fs 0 -> fs)
         work[Chan(c, CPrevLagIndex)] = 0;
         work[Chan(c, CPrevVoiced)] = 0;
         int nlsf = c == 0 ? r.MidPrevNlsfAt : r.SidePrevNlsfAt;
@@ -791,9 +831,9 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         work[Chan(c, CLagPrev)] = lag;
     }
 
-    // MS->LR (stereo) or the mono buffering, the resamplers, float PCM out (silk_Decode's tail).
+    // MS->LR (stereo) or the mono buffering, the resamplers, int16 PCM out (silk_Decode's tail).
     private static void OutputKernel(Index1D _, ArrayView<short> mix, ArrayView<int> work, ArrayView<int> resInts, ArrayView<short> resShorts,
-        ArrayView<short> tables, ArrayView<float> pcmOut, SilkFrameGeometry g, SilkOutputParams p)
+        ArrayView<short> tables, ArrayView<short> pcmOut, SilkFrameGeometry g, SilkOutputParams p)
     {
         int len = g.FrameLength;
         int mid = 0, side = MixChannelStride;
@@ -825,12 +865,12 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         {
             if (g.ApiChannels == 2)
             {
-                pcmOut[baseAt + 2 * i] = mix[MixOutL + i] / 32768.0f;
-                pcmOut[baseAt + 2 * i + 1] = mix[MixOutR + i] / 32768.0f;
+                pcmOut[baseAt + 2 * i] = mix[MixOutL + i];
+                pcmOut[baseAt + 2 * i + 1] = mix[MixOutR + i];
             }
             else
             {
-                pcmOut[baseAt + i] = mix[MixOutL + i] / 32768.0f;
+                pcmOut[baseAt + i] = mix[MixOutL + i];
             }
         }
     }
@@ -867,6 +907,16 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         ArrayView<short> resShorts, ArrayView<int> resInts, SilkFrameGeometry g, SilkOutputParams p)
     {
         int f = g.TransitionFlags;
+        if ((f & TransitionResetStereo) != 0)
+        {
+            work[WPredPrevQ13] = 0;
+            work[WPredPrevQ13 + 1] = 0;
+            work[WPrevDecodeOnlyMiddle] = 0;
+            mix[MixSMid] = 0;
+            mix[MixSMid + 1] = 0;
+            mix[MixSSide] = 0;
+            mix[MixSSide + 1] = 0;
+        }
         if ((f & TransitionResetMid) != 0) ResetChannel(r, work, 0);
         if ((f & TransitionResetSide) != 0) ResetChannel(r, work, 1);
         if ((f & TransitionPredMemMid) != 0) ResetPredictionMemory(r, work, 0);

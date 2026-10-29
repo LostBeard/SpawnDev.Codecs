@@ -14,7 +14,7 @@ public abstract partial class CodecsTestBase
 {
     private const string OpusFixturePrefix = "SpawnDev.Codecs.Demo.Shared.TestData.Opus.";
 
-    private sealed record OpusFixture(string Name, int ApiRate, int ApiChannels, int PacketUs, List<byte[]?> Packets, short[] Pcm);
+    private sealed record OpusFixture(string Name, int ApiRate, int ApiChannels, int PacketUs, List<byte[]?> Packets, short[] Pcm, uint[] Ranges);
 
     private static OpusFixture LoadOpusFixture(string name)
     {
@@ -33,7 +33,10 @@ public abstract partial class CodecsTestBase
         byte[] raw = ReadEmbedded(OpusFixturePrefix + name + ".pcm16");
         var pcm = new short[raw.Length / 2];
         Buffer.BlockCopy(raw, 0, pcm, 0, raw.Length);
-        return new OpusFixture(name, int.Parse(row[1]), int.Parse(row[2]), int.Parse(row[3]), packets, pcm);
+        byte[] rngRaw = ReadEmbedded(OpusFixturePrefix + name + ".rng");
+        var ranges = new uint[rngRaw.Length / 4];
+        Buffer.BlockCopy(rngRaw, 0, ranges, 0, rngRaw.Length);
+        return new OpusFixture(name, int.Parse(row[1]), int.Parse(row[2]), int.Parse(row[3]), packets, pcm, ranges);
     }
 
     private async Task RunOpusLibopusFixture(string name)
@@ -60,6 +63,9 @@ public abstract partial class CodecsTestBase
                             $"sample {i / fx.ApiChannels} ch {i % fx.ApiChannels}: GPU {got[i] * 32768} vs libopus {fx.Pcm[at + i]}");
                 }
                 at += got.Length;
+                uint rng = await gpu.GetFinalRangeAsync();
+                if (rng != fx.Ranges[p])
+                    throw new Exception($"{name} packet {p}: final range {rng:X8} vs libopus {fx.Ranges[p]:X8} (PCM equal so far)");
             }
             Equal(fx.Pcm.Length, at, $"{name} total samples");
             if (name.Contains("loss") && lost == 0) throw new Exception($"{name}: no lost packet");
@@ -85,6 +91,53 @@ public abstract partial class CodecsTestBase
 
     [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
     public async Task OpusDecoderGpu_Libopus_Silk10msClean() => await RunOpusLibopusFixture("silk_10ms_mono_8k_clean");
+
+    // CELT-only and hybrid streams (the names carry "Celt" / "Hybrid": the WebGPU lane leaves them out until the CELT band
+    // kernel is split; see PLAN-Opus-GPU-Pair).
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_CeltFb20StereoLoss() => await RunOpusLibopusFixture("celt_fb20_stereo_96k_loss");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_CeltFb20MonoLowRate() => await RunOpusLibopusFixture("celt_fb20_mono_12k_low");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_CeltFb10MonoLoss() => await RunOpusLibopusFixture("celt_fb10_mono_48k_loss");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_CeltFb10StereoLowRate() => await RunOpusLibopusFixture("celt_fb10_stereo_24k_low");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_CeltFb5Stereo() => await RunOpusLibopusFixture("celt_fb5_stereo_128k");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_CeltFb5MonoLoss() => await RunOpusLibopusFixture("celt_fb5_mono_32k_loss");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_CeltFb2p5Mono() => await RunOpusLibopusFixture("celt_fb2p5_mono_64k");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_CeltFb2p5StereoLoss() => await RunOpusLibopusFixture("celt_fb2p5_stereo_96k_loss");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_CeltWb20Mono16k() => await RunOpusLibopusFixture("celt_wb20_mono_16k");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_CeltSwb20Stereo24k() => await RunOpusLibopusFixture("celt_swb20_stereo_24k");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_HybridSwb20MonoLoss() => await RunOpusLibopusFixture("hybrid_swb20_mono_24k_loss");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_HybridFb20StereoLoss() => await RunOpusLibopusFixture("hybrid_fb20_stereo_48k_loss");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_HybridFb10Mono() => await RunOpusLibopusFixture("hybrid_fb10_mono_48k");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_HybridSwb10StereoLowRate() => await RunOpusLibopusFixture("hybrid_swb10_stereo_48k_low");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_Libopus_HybridCeltModeSwitchesLoss() => await RunOpusLibopusFixture("switch_modes_48k_stereo_loss");
 
     /// <summary>The CPU OpusDecoder (References) on the clean libopus stream: equal to libopus.</summary>
     [TestMethod(Category = "CpuOnly")]

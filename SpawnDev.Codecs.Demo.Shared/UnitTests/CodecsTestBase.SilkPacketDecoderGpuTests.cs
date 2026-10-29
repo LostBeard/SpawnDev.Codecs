@@ -77,7 +77,7 @@ public abstract partial class CodecsTestBase
             var cpu = OpusCodec.CreateDecoder(new OpusDecoderConfig { SampleRateHz = sc.ApiRateHz, ChannelCount = sc.ApiChannels });
             using var gpu = new SilkPacketDecoderGpu(acc, sc.ApiRateHz, sc.ApiChannels);
             int maxOut = sc.ApiRateHz * 60 / 1000 * sc.ApiChannels;
-            using var dOut = acc.Allocate1D<float>(maxOut);
+            using var dOut = acc.Allocate1D<short>(maxOut);
             using var dPacket = acc.Allocate1D<byte>(1275);
             var packetBuf = new byte[1275];
             int lbrrPackets = 0, stereoPackets = 0, monoPackets = 0;
@@ -128,9 +128,9 @@ public abstract partial class CodecsTestBase
                     await acc.SynchronizeAsync();
                     var gpuOut = await dOut.View.SubView(0, cpuOut.Length).CopyToHostAsync();
                     for (int i = 0; i < cpuOut.Length; i++)
-                        if (gpuOut[i] != cpuOut[i])
+                        if (gpuOut[i] / 32768.0f != cpuOut[i])
                             throw new Exception($"{sc.Label} packet {p} ({ms} ms, {internalKHz} kHz, {streamChannels} ch): GPU vs CPU at sample {i} " +
-                                $"(channel {i % sc.ApiChannels}): {gpuOut[i] * 32768} vs {cpuOut[i] * 32768}");
+                                $"(channel {i % sc.ApiChannels}): {gpuOut[i]} vs {cpuOut[i] * 32768}");
                     var flags = await gpu.WorkView.SubView(SilkPacketDecoderGpu.WLbrrFlag, 2).CopyToHostAsync();
                     if (flags[0] != 0 || flags[1] != 0) lbrrPackets++;
                 }
