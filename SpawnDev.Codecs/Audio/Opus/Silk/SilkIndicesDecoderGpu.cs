@@ -90,6 +90,8 @@ public static class SilkIndicesDecoderGpu
     /// <param name="prevLagIndex">Previous frame's pitch lag (delta-coded path).</param>
     /// <param name="prevSignalTypeWasVoiced">1 if prev frame voiced, 0 otherwise.</param>
     /// <param name="firstFrameAfterReset">1 if first frame after reset (suppresses NLSF interpolation).</param>
+    /// <param name="skipLtpScale">1 for libopus CODE_INDEPENDENTLY_NO_LTP_SCALING (the side channel right after a
+    /// mid-only frame): independent gains, but no LTP scale index.</param>
     /// <param name="output">Output ArrayView&lt;int&gt; of length &gt;= SilkDecodedIndicesLayout.TotalSlots.</param>
     /// <param name="outputBase">Offset into <paramref name="output"/>.</param>
     public static void Decode(
@@ -100,7 +102,8 @@ public static class SilkIndicesDecoderGpu
         int vadFlag, int decodeLbrr, int conditional,
         int prevLagIndex, int prevSignalTypeWasVoiced,
         int firstFrameAfterReset,
-        ArrayView<int> output, long outputBase)
+        ArrayView<int> output, long outputBase,
+        int skipLtpScale = 0)
     {
         // Step 1: Signal type + quantizer offset.
         bool useVadTable = (vadFlag != 0) || (decodeLbrr != 0);
@@ -176,7 +179,7 @@ public static class SilkIndicesDecoderGpu
                 inputs.Bytes, inputs.LtpGainIcdfFlatAt,
                 inputs.LtpGainOffsets, 0,
                 inputs.Bytes, inputs.LtpScaleIcdfAt,
-                conditional, nbSubfr,
+                conditional != 0 || skipLtpScale != 0 ? 1 : 0, nbSubfr,
                 output, ltpTempBase);
             int perIndex = output[ltpTempBase + 0];
             int ltpScaleIndex = output[ltpTempBase + 1];

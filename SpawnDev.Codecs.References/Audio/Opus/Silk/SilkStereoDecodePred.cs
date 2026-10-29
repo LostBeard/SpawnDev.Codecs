@@ -28,28 +28,17 @@ internal static class SilkStereoDecodePred
     /// Q13 quantization points for the stereo predictor. Ported verbatim from
     /// libopus <c>silk_stereo_pred_quant_Q13</c>.
     /// </summary>
-    internal static readonly short[] StereoPredQuantQ13 =
-    {
-        -13732, -10050, -8266, -7526, -6500, -5000, -2950, -820,
-           820,   2950,  5000,  6500,  7526,  8266, 10050, 13732,
-    };
+    internal static readonly short[] StereoPredQuantQ13 = SilkStereoTables.StereoPredQuantQ13;
 
     /// <summary>
     /// 25-symbol iCDF for the joint distribution of the two predictor "cell-index
     /// high-bits" values (used as <c>5 * ix[0][2] + ix[1][2]</c>). Ported from libopus
     /// <c>silk_stereo_pred_joint_iCDF</c>.
     /// </summary>
-    internal static readonly byte[] StereoPredJointIcdf =
-    {
-        249, 247, 246, 245, 244,
-        234, 210, 202, 201, 200,
-        197, 174,  82,  59,  56,
-         55,  54,  46,  22,  12,
-         11,  10,   9,   7,   0,
-    };
+    internal static readonly byte[] StereoPredJointIcdf = SilkStereoTables.StereoPredJointIcdf;
 
     /// <summary>2-symbol iCDF for the mid-only flag. Libopus <c>silk_stereo_only_code_mid_iCDF</c>.</summary>
-    internal static readonly byte[] StereoOnlyCodeMidIcdf = { 64, 0 };
+    internal static readonly byte[] StereoOnlyCodeMidIcdf = SilkStereoTables.StereoOnlyCodeMidIcdf;
 
     /// <summary>
     /// Decode the two mid/side predictor coefficients into Q13. The decoded
