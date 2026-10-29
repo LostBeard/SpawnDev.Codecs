@@ -2,8 +2,35 @@
 
 ## Unreleased
 
+### Opus GPU pair: `OpusEncoderGpu` (CELT-only) byte-identical with libopus 1.5.2 on every backend (2026-10-29)
+- **New `OpusEncoderGpu`** (`SpawnDev.Codecs.Audio.Opus`: `EncodePacketAsync` managed and device-resident, `GetFinalRangeAsync`,
+  `Reset`; libopus' settings: bitrate incl. OPUS_AUTO / OPUS_BITRATE_MAX, VBR / constrained VBR / CBR, complexity 0..9,
+  bandwidth, max bandwidth, signal, forced channels, packet loss, prediction disabled, phase inversion disabled, lsb depth;
+  applications VOIP / AUDIO / RESTRICTED_LOWDELAY; 2.5 .. 120 ms packets; 8 .. 48 kHz, mono / stereo). libopus 1.5.2's
+  opus_encode_native + opus_encode_frame_native for CELT-only coding (OPUS_SET_FORCE_MODE(MODE_CELT_ONLY) or
+  RESTRICTED_LOWDELAY) around Data's `CeltEncoderGpu` (celt_encode_with_ec, four stage kernels: analysis, coding, bands,
+  finish). The host only decides from the settings (CBR budget, equivalent rate, mono / stereo stream with hysteresis,
+  bandwidth, the 20 ms split of 40..120 ms packets, TOC value); kernels run the delay buffer, the DC reject / VOIP high-pass,
+  the low-rate stereo width fade, CELT and the packet assembly (code 0 / 1 / 2 / 3, CBR padding).
+- **Equal to libopus 1.5.2 on every packet of 49 real streams, bytes and final range** (`TestData/OpusEnc`,
+  `scripts/audio/make_opus_encoder_fixtures.py`): every frame size, CBR / VBR / CVBR, complexity 0..9 (theta RDO at 8+),
+  8 / 12 / 16 / 24 / 48 kHz input, VOIP and low delay, forced mono and stereo coded as mono, silent gaps, OPUS_AUTO and
+  OPUS_BITRATE_MAX, the TOC-only too-small packets. CPU, Velocity, CUDA and OpenCL. A second set of 49 tests checks the Opus
+  layer alone against the exact input and CTLs of every libopus `celt_encode_with_ec` call (recorded by an instrumented
+  libopus build), so a mismatch splits cleanly between the Opus layer and CELT.
+- **Scope for 1.0.0:** CELT-only. SILK and hybrid encoding come after 1.0.0; complexity 10 needs libopus' tonality analysis
+  (not ported). Browser backends: the CELT stage kernels are being measured in Chrome (Data) before the WebGPU / WebGL / Wasm
+  lanes include CELT.
+- **SpawnDev.ILGPU 5.4.12-local.8** (Data; every bug below was found by the Opus encoder or decoder): struct-held views in
+  local allocas typed local (CUDA / OpenCL), sub-word integer conversion chains, Velocity kernels over 65,536 IR values
+  (invalid IL), neg / not of a comparison, multiplicative-loop trip counts, PTX / OpenCL branch-edge phi moves (the
+  CUDA / OpenCL stereo CELT encode), OpenCL switch phis, and byte / ushort return values widened by the wrong sign (the FLAC GPU
+  decoder's header CRC on the IR backends). Full Codecs desktop lanes: CUDA, OpenCL, Velocity 1131 / 0 each, CPU 3281 / 0.
+- `OpusEncoderApplication` moved from SpawnDev.Codecs.References to the library (same values).
+
 ### Toward 1.0.0: project split done, Opus GPU range encoder, CELT GPU primitives, VP9 WebGPU green (2026-10-29)
-- **Where the "Path to 1.0.0 stable" bar stands** (0.3.0-rc.1 section below): (1) the Opus GPU pair is in progress (below);
+- **Where the "Path to 1.0.0 stable" bar stands** (0.3.0-rc.1 section below): (1) the Opus GPU pair: decoder done, encoder
+  (CELT-only) done on the desktop backends (above), browser lanes for CELT pending;
   (2) Vorbis decoder v2 is DONE (`VorbisAudioDecoderGpu.DecodePacketAsync` runs `VorbisPacketDecodeKernel.Step` on every
   backend; the host reads back only the packet header / floor flags it needs to orchestrate); (3) the project split is DONE
   (below); (4) the May ILGPU bugs (WebGPU `SubViewValue`, Wasm OOB) are long fixed.
