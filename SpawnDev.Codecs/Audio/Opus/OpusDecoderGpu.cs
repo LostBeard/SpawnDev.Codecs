@@ -37,6 +37,7 @@ public sealed class OpusDecoderGpu : IDisposable
     private readonly SilkPacketDecoderGpu _silk;
     private readonly StageBuffer<byte> _dPacket;
     private readonly MemoryBuffer1D<float, Stride1D.Dense> _dPcm;
+    private OpusMode? _prevMode; // libopus st->prev_mode (null before the first packet)
 
     /// <summary>A decoder producing <paramref name="channelCount"/> channels at <paramref name="sampleRateHz"/>
     /// (8000, 12000, 16000, 24000 or 48000).</summary>
@@ -113,6 +114,51 @@ public sealed class OpusDecoderGpu : IDisposable
         return await DeviceTransfer.DownloadFloat32ArrayAsync(_dPcm.View, (long)samples * ChannelCount);
     }
 
+    /// <summary>
+    /// Conceal <paramref name="samplesPerChannel"/> samples of a lost packet (libopus opus_decode with data = NULL):
+    /// the previous packet's mode extrapolates. Before the first packet the result is silence. Returns the PCM.
+    /// </summary>
+    public async Task<float[]> DecodeLostAsync(int samplesPerChannel)
+    {
+        int n = await DecodeLostAsync(samplesPerChannel, _dPcm.View);
+        return await _dPcm.View.SubView(0, (long)n * ChannelCount).CopyToHostAsync();
+    }
+
+    /// <summary>Conceal a lost packet into a caller-owned view (at least <see cref="MaxSamplesPerPacket"/> floats).
+    /// Returns the samples per channel written.</summary>
+    public Task<int> DecodeLostAsync(int samplesPerChannel, ArrayView1D<float, Stride1D.Dense> pcmOut)
+    {
+        if (samplesPerChannel <= 0 || samplesPerChannel > MaxSamplesPerChannel) throw new ArgumentOutOfRangeException(nameof(samplesPerChannel));
+        if (pcmOut.Length < MaxSamplesPerPacket)
+            throw new ArgumentException($"pcmOut must hold {MaxSamplesPerPacket} floats (MaxSamplesPerPacket).", nameof(pcmOut));
+        QueueLost(samplesPerChannel, pcmOut, 0);
+        return Task.FromResult(samplesPerChannel);
+    }
+
+    // libopus opus_decode_native / opus_decode_frame with data == NULL: the previous mode conceals in pieces of at most
+    // 20 ms (a remainder over 10 ms is cut to 10 ms; SILK conceals whole 10 / 20 ms frames).
+    private void QueueLost(int samples, ArrayView1D<float, Stride1D.Dense> pcmOut, long pcmOutBase)
+    {
+        if (_prevMode is null)
+        {
+            pcmOut.SubView(pcmOutBase, (long)samples * ChannelCount).MemSetToZero();
+            return;
+        }
+        if (_prevMode != OpusMode.Silk)
+            throw new NotSupportedException($"Concealing after an Opus {_prevMode} frame needs the GPU CELT decoder (in progress).");
+        int f20 = SampleRateHz / 50, f10 = f20 / 2;
+        int done = 0;
+        while (done < samples)
+        {
+            int audiosize = Math.Min(samples - done, f20);
+            if (audiosize < f20) audiosize = audiosize > f10 ? f10 : audiosize;
+            if (audiosize != f20 && audiosize != f10)
+                throw new NotSupportedException($"SILK concealment of {audiosize} samples (not 10 or 20 ms).");
+            _silk.DecodeLost(audiosize == f20 ? 20 : 10, pcmOut, pcmOutBase + (long)done * ChannelCount);
+            done += audiosize;
+        }
+    }
+
     private static OpusPacket Parse(byte[] bytes)
     {
         if (!OpusPacketParser.TryParse(bytes, selfDelimited: false, out var packet, out var error) || packet is null)
@@ -148,9 +194,14 @@ public sealed class OpusDecoderGpu : IDisposable
             if (!MemoryMarshal.TryGetArray(packet.Frames[f], out var seg) || !ReferenceEquals(seg.Array, layoutBytes))
                 throw new InvalidOperationException("Opus frame slice is not a view of the packet bytes.");
             if (seg.Count == 0)
-                throw new NotSupportedException("An empty Opus frame asks for packet-loss concealment, which this decoder does not do.");
+            {
+                // A frame of 0 bytes (DTX: a TOC-only packet) runs the concealment for the frame's duration.
+                QueueLost(samplesPerFrame, pcmOut, (long)f * samplesPerFrame * ChannelCount);
+                continue;
+            }
             _silk.Decode(dPacket, seg.Offset, seg.Count, internalKHz, silkMs, silkCount, streamChannels,
                 pcmOut, (long)f * samplesPerFrame * ChannelCount);
+            _prevMode = OpusMode.Silk;
         }
         return samplesPerFrame * packet.FrameCount;
     }

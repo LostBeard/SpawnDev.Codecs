@@ -1,0 +1,8 @@
+# libopus 1.5.2-fixed, fixed point, intrinsics off
+name	api_rate	api_channels	packet_ms	packets	lost	notes
+silk_wb20_mono_48k_loss	48000	1	20	40	6,13,14,22,31	SILK WB 20 ms mono, FEC on, single and burst losses
+silk_mb20_stereo_48k_loss	48000	2	20	40	5,11,12,25	SILK MB 20 ms forced stereo -> 48 kHz stereo, losses
+silk_nb60_mono_16kst_loss	16000	2	60	14	4,9	SILK NB 60 ms (3 SILK frames) mono -> 16 kHz stereo, losses (concealed in 20 ms steps)
+silk_wb40_switch_24k_loss	24000	2	40	24	3,8,16	SILK WB 40 ms, stereo / mono switches, losses
+silk_wb20_dtx_16k	16000	1	20	50		SILK WB 20 ms with DTX over a 500 ms silence (TOC-only packets run PLC + CNG)
+silk_10ms_mono_8k_clean	8000	1	10	60		SILK WB 10 ms -> 8 kHz, no loss (normal decode vs libopus)

@@ -116,6 +116,12 @@ public struct SilkDecodeCoreScalars
     /// <summary>1 if NLSF interpolation was active for this frame
     /// (gates the k==2 LTP rewhitening), 0 otherwise.</summary>
     public int NlsfInterpEnabled;
+    /// <summary>Concealed frames since the last decoded one (libopus psDec->lossCnt); 0 without packet loss.</summary>
+    public int LossCnt;
+    /// <summary>The previous frame's signal type (libopus psDec->prevSignalType).</summary>
+    public int PrevSignalType;
+    /// <summary>The previous frame's last pitch lag (libopus psDec->lagPrev).</summary>
+    public int LagPrev;
 }
 
 /// <summary>
@@ -184,7 +190,19 @@ public static class SilkDecodeCoreGpu
 
             int lag = 0;
 
-            if (signalType == TypeVoiced)
+            // libopus decode_core: avoid an abrupt transition from voiced PLC to unvoiced normal decoding. The first two
+            // subframes of an unvoiced frame right after concealing a voiced one decode as voiced with a 0.25 centre tap
+            // at the previous lag (written back into the decoder control, as libopus does).
+            int sigK = signalType;
+            if (scalars.LossCnt != 0 && scalars.PrevSignalType == TypeVoiced && signalType != TypeVoiced && k < 2)
+            {
+                for (int j = 0; j < LtpOrder; j++) inputs.ParamsShort[inputs.LtpCoefQ14At + bBase + j] = 0;
+                inputs.ParamsShort[inputs.LtpCoefQ14At + bBase + LtpOrder / 2] = 4096; // SILK_FIX_CONST(0.25, 14)
+                sigK = TypeVoiced;
+                inputs.ParamsInt[inputs.PitchLAt + k] = scalars.LagPrev;
+            }
+
+            if (sigK == TypeVoiced)
             {
                 lag = inputs.ParamsInt[inputs.PitchLAt + k];
                 bool rewhitenSubframe = (k == 0) || (k == 2 && nlsfInterpEnabled);
@@ -253,7 +271,7 @@ public static class SilkDecodeCoreGpu
             }
 
             // ---- Compute residual presQ14. ----
-            if (signalType == TypeVoiced)
+            if (sigK == TypeVoiced)
             {
                 // 5-tap LTP prediction + residual + sLtpQ15 state update.
                 long predLagPtrOff = sLtpBufIdx - lag + (LtpOrder >> 1);

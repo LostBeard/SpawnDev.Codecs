@@ -59,6 +59,8 @@ public struct SilkFrameGeometry
     public int StereoToMonoFirst;
     /// <summary>Flags for the transition kernel (<c>Transition*</c> constants).</summary>
     public int TransitionFlags;
+    /// <summary>1 when this SILK frame is lost (concealed), 0 when decoded.</summary>
+    public int Lost;
 }
 
 /// <summary>Where one channel's parameter state lives (offsets into the shared parameter buffers).</summary>
@@ -114,6 +116,9 @@ public sealed class SilkPacketDecoderGpu : IDisposable
     /// <summary>Transition flag: stereo starts (predictors / side history zeroed, right resampler = left).</summary>
     public const int TransitionStereoStart = 32;
 
+    // libopus BWE_AFTER_LOSS_Q16 (silk/define.h): 0.97 in Q16.
+    private const int BweAfterLossQ16 = 63570;
+
     // libopus silk_LBRR_flags_2_iCDF / silk_LBRR_flags_3_iCDF.
     private static readonly byte[] LbrrFlags2Icdf = { 203, 150, 0 };
     private static readonly byte[] LbrrFlags3Icdf = { 215, 195, 166, 125, 110, 82, 0 };
@@ -149,6 +154,7 @@ public sealed class SilkPacketDecoderGpu : IDisposable
     private readonly SilkPulsesInputs _pulsesInputs;
     private readonly SilkChannelParamsState[] _chanParams = new SilkChannelParamsState[2];
     private readonly SilkDecodeCoreInputs[] _chanCore = new SilkDecodeCoreInputs[2];
+    private readonly SilkPlcChannel[] _chanPlc = new SilkPlcChannel[2];
     private readonly int _lbrr2At, _lbrr3At, _jointAt, _uniform3At, _uniform5At, _midOnlyAt, _stereoQuantAt;
     private readonly int[] _resTableOffsets = new int[7];
 
@@ -164,7 +170,9 @@ public sealed class SilkPacketDecoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkPulsesInputs, ArrayView<short>, SilkFrameGeometry> _pulsesKernel;
     private readonly Action<Index1D, ArrayView<int>, SilkParametersInputs, SilkParametersState, ArrayView<int>, ArrayView<short>, SilkFrameGeometry> _paramsKernel;
     private readonly Action<Index1D, SilkDecodeCoreInputs, ArrayView<int>, SilkFrameGeometry> _coreKernel;
-    private readonly Action<Index1D, SilkDecodeCoreInputs, ArrayView<int>, ArrayView<short>, SilkFrameGeometry> _finalizeKernel;
+    private readonly Action<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry> _finalizeKernel;
+    private readonly Action<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry> _concealKernel;
+    private readonly Action<Index1D, SilkResetTargets, ArrayView<int>, SilkFrameGeometry> _lostPrepKernel;
     private readonly Action<Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<short>, ArrayView<short>, ArrayView<float>, SilkFrameGeometry, SilkOutputParams> _outputKernel;
     private readonly Action<Index1D, SilkResetTargets, ArrayView<short>, ArrayView<int>, ArrayView<short>, ArrayView<int>, SilkFrameGeometry, SilkOutputParams> _transitionKernel;
 
@@ -295,14 +303,17 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         var cs = new PackedDeviceBuffer<short>();
         var ci = new PackedDeviceBuffer<int>();
         const int MaxLtp = SilkConstants.MAX_LTP_MEM_LENGTH, MaxFrame = SilkConstants.MAX_FRAME_LENGTH, MaxSubfr = SilkConstants.MAX_FRAME_LENGTH / SilkConstants.MAX_NB_SUBFR;
-        int excAt = ci.Reserve(MaxFrame), sLpcScratch = ci.Reserve(SilkConstants.MAX_LPC_ORDER + MaxSubfr);
+        int sLpcScratch = ci.Reserve(SilkConstants.MAX_LPC_ORDER + MaxSubfr);
         int sLtpQ15 = ci.Reserve(MaxLtp + MaxFrame), presQ14 = ci.Reserve(MaxSubfr), gainAdj = ci.Reserve(1);
         int sLtp = cs.Reserve(MaxLtp), xq = cs.Reserve(MaxFrame);
         _paramsIntOut = accelerator.Allocate1D<int>(SilkDecodedParametersLayout.IntTotalSlots);
         _paramsShortOut = accelerator.Allocate1D<short>(SilkDecodedParametersLayout.ShortTotalSlots);
         _pulses = accelerator.Allocate1D<short>(MaxFrame + SilkConstants.SHELL_CODEC_FRAME_LENGTH);
-        var coreAt = new (int OutBuf, int SLpc, int PrevGain)[2];
-        for (int c = 0; c < 2; c++) coreAt[c] = (cs.Reserve(MaxLtp + MaxFrame), ci.Reserve(SilkConstants.MAX_LPC_ORDER), ci.Reserve(1));
+        var coreAt = new (int OutBuf, int SLpc, int PrevGain, int Exc, int PlcInts, int PlcShorts)[2];
+        for (int c = 0; c < 2; c++)
+            coreAt[c] = (cs.Reserve(MaxLtp + MaxFrame), ci.Reserve(SilkConstants.MAX_LPC_ORDER), ci.Reserve(1), ci.Reserve(MaxFrame),
+                ci.Reserve(SilkPlcGpu.IntsPerChannel), cs.Reserve(SilkPlcGpu.ShortsPerChannel));
+        int plcScratchShorts = cs.Reserve(SilkPlcGpu.ScratchShorts), plcScratchInts = ci.Reserve(SilkPlcGpu.ScratchInts);
         _coreShorts = cs.Upload(accelerator);
         _coreInts = ci.Upload(accelerator);
         for (int c = 0; c < 2; c++)
@@ -316,8 +327,18 @@ public sealed class SilkPacketDecoderGpu : IDisposable
                 PitchLAt = SilkDecodedParametersLayout.IntPitchLOffset,
                 LtpCoefQ14At = SilkDecodedParametersLayout.ShortLtpCoefQ14Offset,
                 OutBufInOutAt = coreAt[c].OutBuf, SLpcQ14BufInOutAt = coreAt[c].SLpc, PrevGainQ16InOutAt = coreAt[c].PrevGain,
-                ExcQ14OutAt = excAt, SLpcScratchAt = sLpcScratch, SLtpQ15ScratchAt = sLtpQ15, SLtpScratchAt = sLtp,
+                ExcQ14OutAt = coreAt[c].Exc, SLpcScratchAt = sLpcScratch, SLtpQ15ScratchAt = sLtpQ15, SLtpScratchAt = sLtp,
                 PresQ14ScratchAt = presQ14, GainAdjScratchAt = gainAdj, XqOutAt = xq,
+            };
+        }
+
+        for (int c = 0; c < 2; c++)
+        {
+            _chanPlc[c] = new SilkPlcChannel
+            {
+                IntsAt = coreAt[c].PlcInts, ShortsAt = coreAt[c].PlcShorts, OutBufAt = coreAt[c].OutBuf, SLpcAt = coreAt[c].SLpc,
+                ExcAt = coreAt[c].Exc, PrevNlsfAt = _chanParams[c].Params.PrevNlsfQ15At, LsfCosAt = lsfCos,
+                ScratchShortsAt = plcScratchShorts, ScratchIntsAt = plcScratchInts,
             };
         }
 
@@ -344,7 +365,9 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         _pulsesKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkPulsesInputs, ArrayView<short>, SilkFrameGeometry>(PulsesKernel);
         _paramsKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, SilkParametersInputs, SilkParametersState, ArrayView<int>, ArrayView<short>, SilkFrameGeometry>(ParamsKernel);
         _coreKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkDecodeCoreInputs, ArrayView<int>, SilkFrameGeometry>(CoreKernel);
-        _finalizeKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkDecodeCoreInputs, ArrayView<int>, ArrayView<short>, SilkFrameGeometry>(FinalizeKernel);
+        _finalizeKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry>(FinalizeKernel);
+        _concealKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry>(ConcealKernel);
+        _lostPrepKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkResetTargets, ArrayView<int>, SilkFrameGeometry>(LostPrepKernel);
         _outputKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<short>, ArrayView<short>, ArrayView<float>, SilkFrameGeometry, SilkOutputParams>(OutputKernel);
         _transitionKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkResetTargets, ArrayView<short>, ArrayView<int>, ArrayView<short>, ArrayView<int>, SilkFrameGeometry, SilkOutputParams>(TransitionKernel);
     }
@@ -356,6 +379,7 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         SideOutBufAt = _chanCore[1].OutBufInOutAt, SideSLpcAt = _chanCore[1].SLpcQ14BufInOutAt, SidePrevGainAt = _chanCore[1].PrevGainQ16InOutAt,
         MidPrevNlsfAt = _chanParams[0].Params.PrevNlsfQ15At, MidLastGainAt = _chanParams[0].Params.LastGainIndexAt,
         SidePrevNlsfAt = _chanParams[1].Params.PrevNlsfQ15At, SideLastGainAt = _chanParams[1].Params.LastGainIndexAt,
+        MidPlc = _chanPlc[0], SidePlc = _chanPlc[1],
     };
 
     /// <summary>
@@ -432,10 +456,47 @@ public sealed class SilkPacketDecoderGpu : IDisposable
                 _pulsesKernel(1, packet, _ec.View, _work.View, _pulsesInputs, _pulses.View, g);
                 _paramsKernel(1, _work.View, paramsInputs, _chanParams[c].Params, _paramsIntOut.View, _paramsShortOut.View, g);
                 _coreKernel(1, _chanCore[c], _work.View, g);
-                _finalizeKernel(1, _chanCore[c], _work.View, _mix.View, g);
+                _finalizeKernel(1, FrameViews, _work.View, _mix.View, _chanPlc[c], g);
             }
             _outputKernel(1, _mix.View, _work.View, _resInts.View, _resShorts.View, _shortTables.View, pcmOut, g, outParams);
         }
+    }
+
+    private SilkFrameViews FrameViews => new SilkFrameViews
+    {
+        CoreShorts = _coreShorts.View, CoreInts = _coreInts.View, ParamsShorts = _paramsShorts.View,
+        ParamsShortOut = _paramsShortOut.View, ParamsIntOut = _paramsIntOut.View, XqAt = _chanCore[0].XqOutAt,
+    };
+
+    /// <summary>
+    /// Queue the concealment of one LOST SILK frame of <paramref name="frameLengthMs"/> (10 or 20) ms (libopus silk_Decode
+    /// with FLAG_PACKET_LOST): the previous frame's internal rate and channels, silk_PLC + silk_CNG per channel, then the
+    /// same MS->LR / buffering and resampling as a decoded frame. Writes <c>frameLengthMs * apiRate / 1000</c> samples per
+    /// API channel at <paramref name="pcmOutBase"/>. Requires a decoded frame before (the caller returns silence otherwise).
+    /// </summary>
+    public void DecodeLost(int frameLengthMs, ArrayView<float> pcmOut, long pcmOutBase)
+    {
+        if (frameLengthMs != 10 && frameLengthMs != 20) throw new ArgumentOutOfRangeException(nameof(frameLengthMs));
+        if (_internalKHz == 0) throw new InvalidOperationException("Nothing to conceal before the first decoded SILK frame.");
+        int internalKHz = _internalKHz, streamChannels = _prevStreamChannels;
+        int nbSubfr = frameLengthMs == 20 ? SilkConstants.MAX_NB_SUBFR : SilkConstants.MAX_NB_SUBFR / 2;
+        int order = internalKHz == 16 ? 16 : 10;
+        var g = new SilkFrameGeometry
+        {
+            FsKHz = internalKHz, NbSubfr = nbSubfr, FrameLength = internalKHz * frameLengthMs,
+            SubfrLength = SilkConstants.SUB_FRAME_LENGTH_MS * internalKHz,
+            LtpMemLength = SilkConstants.LTP_MEM_LENGTH_MS * internalKHz,
+            LpcOrder = order, FrameCount = 1, StreamChannels = streamChannels,
+            OutLength = _apiRateHz / 1000 * frameLengthMs, ApiChannels = _apiChannels, Lost = 1,
+        };
+        var outParams = new SilkOutputParams { Left = _resL, Right = _resR, PcmOutBase = pcmOutBase };
+        _lostPrepKernel(1, ResetTargets, _work.View, g);
+        for (int c = 0; c < streamChannels; c++)
+        {
+            g.Channel = c;
+            _concealKernel(1, FrameViews, _work.View, _mix.View, _chanPlc[c], g);
+        }
+        _outputKernel(1, _mix.View, _work.View, _resInts.View, _resShorts.View, _shortTables.View, pcmOut, g, outParams);
     }
 
     /// <summary>The work ints (flags, per-channel scalar state); tests read the decoded flags.</summary>
@@ -570,6 +631,7 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         work[Chan(c, CPrevSignalType)] = SilkConstants.TYPE_NO_VOICE_ACTIVITY;
         work[Chan(c, CFirstFrameAfterReset)] = 1;
         work[Chan(c, CLagPrev)] = 100;
+        SilkPlcGpu.Reset(c == 0 ? r.MidPlc : r.SidePlc, r.CoreShorts, r.CoreInts);
     }
 
     // silk_decode_indices for channel g.Channel of SILK frame g.Frame (skipped for a mid-only side).
@@ -624,6 +686,12 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         if (work[Chan(c, CSkipped)] != 0) return;
         SilkParametersDecoderGpu.Decode(work, WIndices + c * SilkDecodedIndicesLayout.TotalSlots, inputs, g.ContourCbSize, state,
             g.QuantStepSizeQ16, g.LpcOrder, g.NbSubfr, g.FsKHz, work[Chan(c, CConditional)], intOut, 0, shortOut, 0);
+        // silk_decode_parameters: after a packet loss, bandwidth-expand both LPC coefficient sets.
+        if (work[Chan(c, CLossCnt)] != 0)
+        {
+            SilkBwexpanderGpu.Expand16(shortOut, SilkDecodedParametersLayout.ShortPredCoefQ12Half1Offset, g.LpcOrder, BweAfterLossQ16);
+            SilkBwexpanderGpu.Expand16(shortOut, SilkDecodedParametersLayout.ShortPredCoefQ12Half2Offset, g.LpcOrder, BweAfterLossQ16);
+        }
     }
 
     // silk_decode_core.
@@ -641,12 +709,16 @@ public sealed class SilkPacketDecoderGpu : IDisposable
             LtpMemLength = g.LtpMemLength,
             LtpScaleQ14 = inputs.ParamsShort[SilkDecodedParametersLayout.ShortLtpScaleQ14Offset],
             NlsfInterpEnabled = work[ix + SilkDecodedIndicesLayout.NlsfInterpCoefQ2Offset] < 4 ? 1 : 0,
+            LossCnt = work[Chan(c, CLossCnt)],
+            PrevSignalType = work[Chan(c, CPrevSignalType)],
+            LagPrev = work[Chan(c, CLagPrev)],
         };
         SilkDecodeCoreGpu.Decode(inputs, s);
     }
 
-    // silk_decode_frame's tail: outBuf slide, the frame into the mix buffer (after the 2-sample prefix), state update.
-    private static void FinalizeKernel(Index1D _, SilkDecodeCoreInputs inputs, ArrayView<int> work, ArrayView<short> mix, SilkFrameGeometry g)
+    // silk_decode_frame's tail for a decoded frame: outBuf slide, silk_PLC update, state, the frame into the mix buffer
+    // (after the 2-sample prefix), silk_CNG, silk_PLC_glue_frames, lagPrev.
+    private static void FinalizeKernel(Index1D _, SilkFrameViews v, ArrayView<int> work, ArrayView<short> mix, SilkPlcChannel plc, SilkFrameGeometry g)
     {
         int c = g.Channel;
         int mixAt = c * MixChannelStride + 2;
@@ -656,21 +728,67 @@ public sealed class SilkPacketDecoderGpu : IDisposable
             return;
         }
         int mvLen = g.LtpMemLength - g.FrameLength;
-        for (int i = 0; i < mvLen; i++) inputs.Shorts[inputs.OutBufInOutAt + i] = inputs.Shorts[inputs.OutBufInOutAt + g.FrameLength + i];
+        for (int i = 0; i < mvLen; i++) v.CoreShorts[plc.OutBufAt + i] = v.CoreShorts[plc.OutBufAt + g.FrameLength + i];
         for (int i = 0; i < g.FrameLength; i++)
         {
-            short v = inputs.Shorts[inputs.XqOutAt + i];
-            inputs.Shorts[inputs.OutBufInOutAt + mvLen + i] = v;
-            mix[mixAt + i] = v;
+            short x = v.CoreShorts[v.XqAt + i];
+            v.CoreShorts[plc.OutBufAt + mvLen + i] = x;
+            mix[mixAt + i] = x;
         }
         int ix = WIndices + c * SilkDecodedIndicesLayout.TotalSlots;
         int signalType = work[ix + SilkDecodedIndicesLayout.SignalTypeOffset];
+        SilkPlcGpu.Update(plc, v.CoreShorts, v.CoreInts, v.ParamsShortOut, v.ParamsIntOut,
+            g.FsKHz, g.FrameLength, g.NbSubfr, g.SubfrLength, g.LpcOrder, signalType);
         work[Chan(c, CLossCnt)] = 0;
         work[Chan(c, CPrevSignalType)] = signalType;
         work[Chan(c, CPrevVoiced)] = signalType == SilkConstants.TYPE_VOICED ? 1 : 0;
         work[Chan(c, CPrevLagIndex)] = work[ix + SilkDecodedIndicesLayout.LagIndexOffset];
         work[Chan(c, CFirstFrameAfterReset)] = 0;
-        work[Chan(c, CLagPrev)] = inputs.ParamsInt[SilkDecodedParametersLayout.IntPitchLOffset + g.NbSubfr - 1];
+        SilkPlcGpu.Cng(plc, v.CoreShorts, v.CoreInts, v.ParamsShorts, v.ParamsIntOut, mix, mixAt,
+            g.FsKHz, g.FrameLength, g.NbSubfr, g.SubfrLength, g.LpcOrder, 0, signalType);
+        SilkPlcGpu.Glue(plc, v.CoreInts, mix, mixAt, g.FrameLength, 0);
+        work[Chan(c, CLagPrev)] = v.ParamsIntOut[SilkDecodedParametersLayout.IntPitchLOffset + g.NbSubfr - 1];
+    }
+
+    // silk_Decode before the frames of a LOST packet: the previous predictors, no mid-only flag (the side channel's
+    // prediction memory resets after a mid-only frame), the side decodes only if the last frame coded it, LastGainIndex 10.
+    private static void LostPrepKernel(Index1D _, SilkResetTargets r, ArrayView<int> work, SilkFrameGeometry g)
+    {
+        work[WDecodeOnlyMiddle] = 0;
+        work[Chan(0, CSkipped)] = 0;
+        if (g.StreamChannels == 2)
+        {
+            work[WPredQ13] = work[WPredPrevQ13];
+            work[WPredQ13 + 1] = work[WPredPrevQ13 + 1];
+            if (work[WPrevDecodeOnlyMiddle] == 1) ResetPredictionMemory(r, work, 1);
+            work[Chan(1, CSkipped)] = work[WPrevDecodeOnlyMiddle] == 0 ? 0 : 1;
+        }
+        for (int c = 0; c < g.StreamChannels; c++) r.ParamsInts[c == 0 ? r.MidLastGainAt : r.SideLastGainAt] = 10;
+    }
+
+    // silk_decode_frame for a lost frame: silk_PLC conceal, outBuf slide, silk_CNG, silk_PLC_glue_frames, lagPrev.
+    private static void ConcealKernel(Index1D _, SilkFrameViews v, ArrayView<int> work, ArrayView<short> mix, SilkPlcChannel plc, SilkFrameGeometry g)
+    {
+        int c = g.Channel;
+        int mixAt = c * MixChannelStride + 2;
+        if (work[Chan(c, CSkipped)] != 0)
+        {
+            for (int i = 0; i < g.FrameLength; i++) mix[mixAt + i] = 0;
+            return;
+        }
+        int lossCnt = work[Chan(c, CLossCnt)];
+        int prevSignalType = work[Chan(c, CPrevSignalType)];
+        int lag = SilkPlcGpu.Conceal(plc, v.CoreShorts, v.CoreInts, mix, mixAt, g.FsKHz, g.FrameLength, g.NbSubfr, g.SubfrLength,
+            g.LtpMemLength, g.LpcOrder, lossCnt, prevSignalType, work[Chan(c, CFirstFrameAfterReset)]);
+        lossCnt++;
+        work[Chan(c, CLossCnt)] = lossCnt;
+        int mvLen = g.LtpMemLength - g.FrameLength;
+        for (int i = 0; i < mvLen; i++) v.CoreShorts[plc.OutBufAt + i] = v.CoreShorts[plc.OutBufAt + g.FrameLength + i];
+        for (int i = 0; i < g.FrameLength; i++) v.CoreShorts[plc.OutBufAt + mvLen + i] = mix[mixAt + i];
+        SilkPlcGpu.Cng(plc, v.CoreShorts, v.CoreInts, v.ParamsShorts, v.ParamsIntOut, mix, mixAt,
+            g.FsKHz, g.FrameLength, g.NbSubfr, g.SubfrLength, g.LpcOrder, lossCnt, prevSignalType);
+        SilkPlcGpu.Glue(plc, v.CoreInts, mix, mixAt, g.FrameLength, lossCnt);
+        work[Chan(c, CLagPrev)] = lag;
     }
 
     // MS->LR (stereo) or the mono buffering, the resamplers, float PCM out (silk_Decode's tail).
@@ -700,7 +818,7 @@ public sealed class SilkPacketDecoderGpu : IDisposable
                     for (int i = 0; i < g.OutLength; i++) mix[MixOutR + i] = mix[MixOutL + i];
             }
         }
-        work[WPrevDecodeOnlyMiddle] = work[WDecodeOnlyMiddle];
+        if (g.Lost == 0) work[WPrevDecodeOnlyMiddle] = work[WDecodeOnlyMiddle];
 
         long baseAt = p.PcmOutBase + (long)g.Frame * g.OutLength * g.ApiChannels;
         for (int i = 0; i < g.OutLength; i++)
@@ -833,6 +951,10 @@ public struct SilkResetTargets
     public int SidePrevNlsfAt;
     /// <summary>Side LastGainIndex.</summary>
     public int SideLastGainAt;
+    /// <summary>Mid PLC / CNG state.</summary>
+    public SilkPlcChannel MidPlc;
+    /// <summary>Side PLC / CNG state.</summary>
+    public SilkPlcChannel SidePlc;
 }
 
 /// <summary>The two output resamplers and where the PCM goes.</summary>
@@ -844,4 +966,22 @@ public struct SilkOutputParams
     public SilkResamplerGpuConfig Right;
     /// <summary>First float of this Opus frame's PCM.</summary>
     public long PcmOutBase;
+}
+
+/// <summary>The buffers the frame-tail kernels touch: decode-core state + PLC / CNG state (core shorts / ints), the
+/// parameter state (prevNLSF, the LSF cosine table) and the parameter decoder's outputs.</summary>
+public struct SilkFrameViews
+{
+    /// <summary>Decode-core shorts.</summary>
+    public ArrayView<short> CoreShorts;
+    /// <summary>Decode-core ints.</summary>
+    public ArrayView<int> CoreInts;
+    /// <summary>Parameter state + tables (shorts).</summary>
+    public ArrayView<short> ParamsShorts;
+    /// <summary>Parameter decoder short outputs.</summary>
+    public ArrayView<short> ParamsShortOut;
+    /// <summary>Parameter decoder int outputs.</summary>
+    public ArrayView<int> ParamsIntOut;
+    /// <summary>decode_core's frame output (core shorts).</summary>
+    public int XqAt;
 }
