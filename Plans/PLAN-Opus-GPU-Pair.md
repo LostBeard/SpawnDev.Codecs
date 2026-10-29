@@ -211,7 +211,11 @@ Bit-exact testing strategy: each primitive ships with NUnit tests against the CP
   `StereoSplit` / `StereoMerge`, `Haar1`, `DeinterleaveHadamard` / `InterleaveHadamard` (the TF-resolution block reordering),
   `ComputeQn`, `BitexactCos`, `BitexactLog2tan`, `CeltLcgRand`. Bit-exact vs Concentus. Still to port from bands.c: the
   band recursion itself (quant_all_bands / quant_band / quant_partition / compute_theta), which drives PVQ and these helpers.
-- Next: the comb pre/post-filter (celt.c comb_filter), then quant_all_bands.
+- **2026-10-29: comb pre/post-filter done** (item 6): `Celt/CeltCombFilterGpu.cs` = celt.c `CombFilter` + `CombFilterConst` (the
+  encoder pre-filter is the same call with negated gains); window `CeltModeTables.Window`. Bit-exact vs Concentus, in place too.
+  **All 7 primitives of this list are in.** What the CELT integration still needs from bands.c / quant_bands.c / mdct.c: the band
+  recursion (quant_all_bands, quant_band, quant_partition, compute_theta), energy (un)quantization with the Laplace coder
+  (coarse / fine / final), tf_decode, denormalise_bands, the backward MDCT (KissFFT) and de-emphasis.
 
 ### Step 3 - CELT integration kernel
 

@@ -106,6 +106,17 @@ public static class CeltModeTables
         36, 36, 37, 37,
     };
 
+    /// <summary>The MDCT overlap window, 120 samples in Q15 (libopus window120).</summary>
+    public static readonly int[] Window =
+    {
+        2, 20, 55, 108, 178, 266, 372, 494, 635, 792, 966, 1157, 1365, 1590, 1831, 2089, 2362, 2651, 2956, 3276,
+        3611, 3961, 4325, 4703, 5094, 5499, 5916, 6346, 6788, 7241, 7705, 8179, 8663, 9156, 9657, 10167, 10684, 11207, 11736, 12271,
+        12810, 13353, 13899, 14447, 14997, 15547, 16098, 16648, 17197, 17744, 18287, 18827, 19363, 19893, 20418, 20936, 21447, 21950, 22445, 22931,
+        23407, 23874, 24330, 24774, 25208, 25629, 26039, 26435, 26819, 27190, 27548, 27893, 28224, 28541, 28845, 29135, 29411, 29674, 29924, 30160,
+        30384, 30594, 30792, 30977, 31151, 31313, 31463, 31602, 31731, 31849, 31958, 32057, 32148, 32229, 32303, 32370, 32429, 32481, 32528, 32568,
+        32604, 32634, 32661, 32683, 32701, 32717, 32729, 32740, 32748, 32754, 32758, 32762, 32764, 32766, 32767, 32767, 32767, 32767, 32767, 32767,
+    };
+
     /// <summary>Hadamard ordering of the interleaved short blocks, rows for stride 2, 4, 8, 16 at stride - 2 (libopus ordery_table).</summary>
     public static readonly int[] OrderyTable =
     {
@@ -137,6 +148,8 @@ public struct CeltModeGpu
     public int CacheCapsAt;
     /// <summary>Offset of <see cref="CeltModeTables.Log2FracTable"/> in <see cref="Data"/>.</summary>
     public int Log2FracTableAt;
+    /// <summary>Offset of <see cref="CeltModeTables.Window"/> in <see cref="Data"/>.</summary>
+    public int WindowAt;
     /// <summary>Offset of <see cref="CeltModeTables.OrderyTable"/> in <see cref="Data"/>.</summary>
     public int OrderyTableAt;
 
@@ -152,6 +165,7 @@ public struct CeltModeGpu
         mode.CacheBitsAt = all.Count; foreach (var v in CeltModeTables.CacheBits) all.Add(v);
         mode.CacheCapsAt = all.Count; foreach (var v in CeltModeTables.CacheCaps) all.Add(v);
         mode.Log2FracTableAt = all.Count; foreach (var v in CeltModeTables.Log2FracTable) all.Add(v);
+        mode.WindowAt = all.Count; foreach (var v in CeltModeTables.Window) all.Add(v);
         mode.OrderyTableAt = all.Count; foreach (var v in CeltModeTables.OrderyTable) all.Add(v);
         var buffer = accelerator.Allocate1D(all.ToArray());
         mode.Data = buffer.View;
@@ -172,6 +186,8 @@ public struct CeltModeGpu
     public int CacheCapsOf(int i) => Data[CacheCapsAt + i];
     /// <summary><see cref="CeltModeTables.Log2FracTable"/>[i].</summary>
     public int Log2FracTableOf(int i) => Data[Log2FracTableAt + i];
+    /// <summary><see cref="CeltModeTables.Window"/>[i].</summary>
+    public int WindowOf(int i) => Data[WindowAt + i];
     /// <summary><see cref="CeltModeTables.OrderyTable"/>[i].</summary>
     public int OrderyTableOf(int i) => Data[OrderyTableAt + i];
 }

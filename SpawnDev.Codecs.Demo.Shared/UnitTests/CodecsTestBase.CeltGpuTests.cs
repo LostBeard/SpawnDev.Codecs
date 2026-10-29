@@ -128,6 +128,15 @@ public abstract partial class CodecsTestBase
             int[] prev2, int[] pulses, uint seed) =>
             AntiCollapseM.Invoke(null, new object[] { Mode, x, masks, lm, c, size, start, end, logE, prev1, prev2, pulses, seed });
 
+        // celt.c comb_filter
+        public delegate void CombFilterFn(Span<int> y, int yPtr, Span<int> x, int xPtr, int t0, int t1, int n, int g0, int g1,
+            int tapset0, int tapset1, int[] window, int overlap);
+        public static readonly CombFilterFn CombFilter = (CombFilterFn)Delegate.CreateDelegate(typeof(CombFilterFn),
+            M("CeltCommon", "comb_filter", typeof(Span<int>), typeof(int), typeof(Span<int>), typeof(int), typeof(int), typeof(int), typeof(int),
+                typeof(int), typeof(int), typeof(int), typeof(int), typeof(int[]), typeof(int)));
+        /// <summary>Concentus' 120-sample overlap window (Tables.window120).</summary>
+        public static readonly int[] Window120 = (int[])A.GetType("Concentus.Celt.Tables", true)!.GetField("window120", Any)!.GetValue(null)!;
+
         /// <summary>A Concentus range decoder over <paramref name="packet"/>.</summary>
         public static object Decoder(byte[] packet)
         {
@@ -675,6 +684,55 @@ public abstract partial class CodecsTestBase
                 for (int j = 0; j < want[c].Length; j++)
                     if (x2[c * CeltBandsStride + j] != want[c][j])
                         throw new Exception($"anti_collapse LM={cases[c].A} C={cases[c].B} bands {cases[c].C}..{cases[c].D}: x[{j}] {x2[c * CeltBandsStride + j]}, Concentus {want[c][j]}");
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    [TestMethod]
+    public async Task CeltCombFilterGpu_PostFilter_BitExactVsConcentus()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            const int n = 80, history = CeltBandsGpuTestKernel.CombHistory;
+            var rng = new Random(0xC334);
+            var cases = new CeltBandsCase[n];
+            var xIn = new int[n * CeltBandsStride]; var yIn = new int[n * CeltBandsStride];
+            var want = new int[n][]; var inPlace = new bool[n];
+            for (int c = 0; c < n; c++)
+            {
+                // Q12 signal, every frame size, periods 15..1023, gains up to 0.75, every tapset; some frames repeat the previous
+                // frame's parameters (no cross-fade), some have a zero gain; half run in place as the decoder does
+                int frame = 120 << rng.Next(4), t0 = rng.Next(15, 1024), t1 = rng.Next(4) == 0 ? t0 : rng.Next(15, 1024);
+                int g0 = rng.Next(5) == 0 ? 0 : rng.Next(0, 24577), g1 = rng.Next(5) == 0 ? 0 : rng.Next(0, 24577);
+                int tapset0 = rng.Next(3), tapset1 = rng.Next(3);
+                if (rng.Next(6) == 0) { g1 = g0; t1 = t0; tapset1 = tapset0; }
+                inPlace[c] = rng.Next(2) == 0;
+                var x = new int[history + frame]; for (int i = 0; i < x.Length; i++) x[i] = rng.Next(-(1 << 27), 1 << 27);
+                var y = new int[history + frame]; for (int i = 0; i < y.Length; i++) y[i] = rng.Next(-(1 << 27), 1 << 27);
+                Array.Copy(x, 0, xIn, c * CeltBandsStride, x.Length);
+                Array.Copy(y, 0, yIn, c * CeltBandsStride, y.Length);
+                cases[c] = new CeltBandsCase { A = t0, B = t1, C = frame, D = g0, E = g1, F = tapset0, G = tapset1, H = inPlace[c] ? 1 : 0 };
+                if (inPlace[c])
+                {
+                    ConcentusCeltOracle.CombFilter(x, history, x, history, t0, t1, frame, g0, g1, tapset0, tapset1, ConcentusCeltOracle.Window120, 120);
+                    want[c] = x;
+                }
+                else
+                {
+                    ConcentusCeltOracle.CombFilter(y, history, x, history, t0, t1, frame, g0, g1, tapset0, tapset1, ConcentusCeltOracle.Window120, 120);
+                    want[c] = y;
+                }
+            }
+            var (x2, y2, _) = await CeltBandsLaunchAsync(acc, CeltBandsGpuTestKernel.Op.CombFilter, cases, xIn, yIn, new int[xIn.Length]);
+            for (int c = 0; c < n; c++)
+            {
+                var got = inPlace[c] ? x2 : y2;
+                for (int j = 0; j < want[c].Length; j++)
+                    if (got[c * CeltBandsStride + j] != want[c][j])
+                        throw new Exception($"comb_filter T0={cases[c].A} T1={cases[c].B} N={cases[c].C} g0={cases[c].D} g1={cases[c].E} " +
+                            $"tapsets {cases[c].F}/{cases[c].G} in place={inPlace[c]}: y[{j - history}] {got[c * CeltBandsStride + j]}, Concentus {want[c][j]}");
+            }
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }

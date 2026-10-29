@@ -60,7 +60,15 @@ public sealed class CeltBandsGpuTestKernel : IDisposable
         /// logE, prev1logE, prev2logE (2 * NbEBands each) and pulses (NbEBands), in that order.
         /// </summary>
         AntiCollapse = 9,
+        /// <summary>
+        /// CeltCombFilterGpu.CombFilter(T0 = A, T1 = B, N = C, g0 = D, g1 = E, tapset0 = F, tapset1 = G, overlap 120): X holds
+        /// <see cref="CombHistory"/> samples of history, then the frame; H = 1 filters X in place, 0 writes Y.
+        /// </summary>
+        CombFilter = 10,
     }
+
+    /// <summary>History samples before the frame in the CombFilter op (libopus COMBFILTER_MAXPERIOD + 2).</summary>
+    public const int CombHistory = 1026;
 
     private readonly Action<Index1D, int, ArrayView<CeltBandsCase>, CeltModeGpu, ArrayView<int>, ArrayView<int>, ArrayView<int>,
         ArrayView<int>, ArrayView<int>, int> _kernel;
@@ -96,6 +104,13 @@ public sealed class CeltBandsGpuTestKernel : IDisposable
         else if (op == (int)Op.AntiCollapse)
             CeltBandsGpu.AntiCollapse(mode, x, at, k.F, aux, at, k.A, k.B, k.C, k.D,
                 aux, at + 2 * nb, aux, at + 4 * nb, aux, at + 6 * nb, aux, at + 8 * nb, (uint)k.E);
+        else if (op == (int)Op.CombFilter)
+        {
+            if (k.H != 0)
+                CeltCombFilterGpu.CombFilter(mode, x, at + CombHistory, x, at + CombHistory, k.A, k.B, k.C, k.D, k.E, k.F, k.G, 120);
+            else
+                CeltCombFilterGpu.CombFilter(mode, y, at + CombHistory, x, at + CombHistory, k.A, k.B, k.C, k.D, k.E, k.F, k.G, 120);
+        }
     }
 
     /// <summary>Release.</summary>
