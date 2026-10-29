@@ -106,6 +106,13 @@ public static class CeltModeTables
         36, 36, 37, 37,
     };
 
+    /// <summary>Hadamard ordering of the interleaved short blocks, rows for stride 2, 4, 8, 16 at stride - 2 (libopus ordery_table).</summary>
+    public static readonly int[] OrderyTable =
+    {
+        1, 0, 3, 0, 2, 1, 7, 0, 4, 3, 6, 1, 5, 2, 15, 0, 8, 7, 12, 3,
+        11, 4, 14, 1, 9, 6, 13, 2, 10, 5,
+    };
+
 }
 
 /// <summary>
@@ -130,6 +137,8 @@ public struct CeltModeGpu
     public int CacheCapsAt;
     /// <summary>Offset of <see cref="CeltModeTables.Log2FracTable"/> in <see cref="Data"/>.</summary>
     public int Log2FracTableAt;
+    /// <summary>Offset of <see cref="CeltModeTables.OrderyTable"/> in <see cref="Data"/>.</summary>
+    public int OrderyTableAt;
 
     /// <summary>Upload the tables; the returned buffer backs <see cref="Data"/> (dispose it after the last kernel).</summary>
     public static (CeltModeGpu Mode, MemoryBuffer1D<int, Stride1D.Dense> Buffer) Upload(Accelerator accelerator)
@@ -143,6 +152,7 @@ public struct CeltModeGpu
         mode.CacheBitsAt = all.Count; foreach (var v in CeltModeTables.CacheBits) all.Add(v);
         mode.CacheCapsAt = all.Count; foreach (var v in CeltModeTables.CacheCaps) all.Add(v);
         mode.Log2FracTableAt = all.Count; foreach (var v in CeltModeTables.Log2FracTable) all.Add(v);
+        mode.OrderyTableAt = all.Count; foreach (var v in CeltModeTables.OrderyTable) all.Add(v);
         var buffer = accelerator.Allocate1D(all.ToArray());
         mode.Data = buffer.View;
         return (mode, buffer);
@@ -162,4 +172,6 @@ public struct CeltModeGpu
     public int CacheCapsOf(int i) => Data[CacheCapsAt + i];
     /// <summary><see cref="CeltModeTables.Log2FracTable"/>[i].</summary>
     public int Log2FracTableOf(int i) => Data[Log2FracTableAt + i];
+    /// <summary><see cref="CeltModeTables.OrderyTable"/>[i].</summary>
+    public int OrderyTableOf(int i) => Data[OrderyTableAt + i];
 }

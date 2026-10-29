@@ -96,6 +96,38 @@ public abstract partial class CodecsTestBase
             return cap;
         }
 
+        // bands.c
+        public delegate void IntensityStereoFn(object m, Span<int> x, int xPtr, Span<int> y, int yPtr, int[][] bandE, int bandID, int n);
+        public delegate void StereoSplitFn(Span<int> x, int xPtr, Span<int> y, int yPtr, int n);
+        public delegate void StereoMergeFn(Span<int> x, Span<int> y, int mid, int n);
+        public delegate void Haar1Fn(Span<int> x, int xPtr, int n0, int stride);
+        public delegate void HadamardFn(Span<int> x, int xPtr, int n0, int stride, int hadamard);
+        private static readonly MethodInfo BitexactCosM = M("Bands", "bitexact_cos", typeof(int));
+        private static readonly MethodInfo BitexactLog2tanM = M("Bands", "bitexact_log2tan", typeof(int), typeof(int));
+        private static readonly MethodInfo ComputeQnM = M("Bands", "compute_qn", typeof(int), typeof(int), typeof(int), typeof(int), typeof(int));
+        private static readonly MethodInfo AntiCollapseM = M("Bands", "anti_collapse", ModeT, typeof(int[][]), typeof(byte[]), typeof(int),
+            typeof(int), typeof(int), typeof(int), typeof(int), typeof(int[]), typeof(int[]), typeof(int[]), typeof(int[]), typeof(uint));
+        public static readonly IntensityStereoFn IntensityStereo = (IntensityStereoFn)Emit(typeof(IntensityStereoFn),
+            M("Bands", "intensity_stereo", ModeT, typeof(Span<int>), typeof(int), typeof(Span<int>), typeof(int), typeof(int[][]), typeof(int), typeof(int)),
+            new Dictionary<int, Type> { [0] = ModeT });
+        public static readonly StereoSplitFn StereoSplit = (StereoSplitFn)Delegate.CreateDelegate(typeof(StereoSplitFn),
+            M("Bands", "stereo_split", typeof(Span<int>), typeof(int), typeof(Span<int>), typeof(int), typeof(int)));
+        public static readonly StereoMergeFn StereoMerge = (StereoMergeFn)Delegate.CreateDelegate(typeof(StereoMergeFn),
+            M("Bands", "stereo_merge", typeof(Span<int>), typeof(Span<int>), typeof(int), typeof(int)));
+        public static readonly Haar1Fn Haar1 = (Haar1Fn)Delegate.CreateDelegate(typeof(Haar1Fn),
+            M("Bands", "haar1", typeof(Span<int>), typeof(int), typeof(int), typeof(int)));
+        public static readonly HadamardFn DeinterleaveHadamard = (HadamardFn)Delegate.CreateDelegate(typeof(HadamardFn),
+            M("Bands", "deinterleave_hadamard", typeof(Span<int>), typeof(int), typeof(int), typeof(int), typeof(int)));
+        public static readonly HadamardFn InterleaveHadamard = (HadamardFn)Delegate.CreateDelegate(typeof(HadamardFn),
+            M("Bands", "interleave_hadamard", typeof(Span<int>), typeof(int), typeof(int), typeof(int), typeof(int)));
+        public static int BitexactCos(int x) => (int)BitexactCosM.Invoke(null, new object[] { x })!;
+        public static int BitexactLog2tan(int s, int c) => (int)BitexactLog2tanM.Invoke(null, new object[] { s, c })!;
+        public static int ComputeQn(int n, int b, int offset, int pulseCap, int stereo) =>
+            (int)ComputeQnM.Invoke(null, new object[] { n, b, offset, pulseCap, stereo })!;
+        public static void AntiCollapse(int[][] x, byte[] masks, int lm, int c, int size, int start, int end, int[] logE, int[] prev1,
+            int[] prev2, int[] pulses, uint seed) =>
+            AntiCollapseM.Invoke(null, new object[] { Mode, x, masks, lm, c, size, start, end, logE, prev1, prev2, pulses, seed });
+
         /// <summary>A Concentus range decoder over <paramref name="packet"/>.</summary>
         public static object Decoder(byte[] packet)
         {
@@ -468,6 +500,181 @@ public abstract partial class CodecsTestBase
                     throw new Exception($"compute_allocation {where}: coded/balance/intensity/dual {got[r]}/{got[r + 1]}/{got[r + 2]}/{got[r + 3]}, " +
                         $"Concentus {w.Coded}/{w.Balance}/{w.Intensity}/{w.Dual}");
             }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    private const int CeltBandsStride = 2048;
+
+    /// <summary>Run one <see cref="CeltBandsGpuTestKernel"/> op over <paramref name="cases"/>; returns X, Y and the per-case scalars.</summary>
+    private static async Task<(int[] X, int[] Y, int[] Scalar)> CeltBandsLaunchAsync(Accelerator acc, CeltBandsGpuTestKernel.Op op,
+        CeltBandsCase[] cases, int[] x, int[] y, int[] aux)
+    {
+        var (mode, modeBuffer) = CeltModeGpu.Upload(acc);
+        using var _ = modeBuffer;
+        using var dCases = acc.Allocate1D(cases);
+        using var dX = acc.Allocate1D(x);
+        using var dY = acc.Allocate1D(y);
+        using var dAux = acc.Allocate1D(aux);
+        using var dScratch = acc.Allocate1D<int>(x.Length);
+        using var dS = acc.Allocate1D<int>(cases.Length);
+        using var kernel = new CeltBandsGpuTestKernel(acc);
+        kernel.Run(op, dCases.View, mode, dX.View, dY.View, dAux.View, dScratch.View, dS.View, CeltBandsStride);
+        await acc.SynchronizeAsync();
+        return (await dX.CopyToHostAsync(), await dY.CopyToHostAsync(), await dS.CopyToHostAsync());
+    }
+
+    [TestMethod]
+    public async Task CeltBandsGpu_SplitHelpers_BitExactVsConcentus()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            var rng = new Random(0xC330);
+            const int n = 200;
+            var cos = new CeltBandsCase[n]; var log2tan = new CeltBandsCase[n]; var qn = new CeltBandsCase[n];
+            var wantCos = new int[n]; var wantLog2tan = new int[n]; var wantQn = new int[n];
+            for (int c = 0; c < n; c++)
+            {
+                int a = rng.Next(0, 16385);
+                cos[c] = new CeltBandsCase { A = a }; wantCos[c] = ConcentusCeltOracle.BitexactCos(a);
+                int s = rng.Next(1, 32768), k = rng.Next(1, 32768);
+                log2tan[c] = new CeltBandsCase { A = s, B = k }; wantLog2tan[c] = ConcentusCeltOracle.BitexactLog2tan(s, k);
+                int bandN = 1 + rng.Next(176), b = rng.Next(-100, 3000), offset = rng.Next(-30, 60), cap = rng.Next(0, 600), stereo = rng.Next(2);
+                qn[c] = new CeltBandsCase { A = bandN, B = b, C = offset, D = cap, E = stereo };
+                wantQn[c] = ConcentusCeltOracle.ComputeQn(bandN, b, offset, cap, stereo);
+            }
+            var empty = new int[n * CeltBandsStride];
+            var (_, _, s1) = await CeltBandsLaunchAsync(acc, CeltBandsGpuTestKernel.Op.BitexactCos, cos, empty, empty, empty);
+            var (_, _, s2) = await CeltBandsLaunchAsync(acc, CeltBandsGpuTestKernel.Op.BitexactLog2tan, log2tan, empty, empty, empty);
+            var (_, _, s3) = await CeltBandsLaunchAsync(acc, CeltBandsGpuTestKernel.Op.ComputeQn, qn, empty, empty, empty);
+            for (int c = 0; c < n; c++)
+            {
+                if (s1[c] != wantCos[c]) throw new Exception($"bitexact_cos({cos[c].A}): {s1[c]}, Concentus {wantCos[c]}");
+                if (s2[c] != wantLog2tan[c]) throw new Exception($"bitexact_log2tan({log2tan[c].A}, {log2tan[c].B}): {s2[c]}, Concentus {wantLog2tan[c]}");
+                if (s3[c] != wantQn[c]) throw new Exception($"compute_qn(N={qn[c].A}, b={qn[c].B}, offset={qn[c].C}, cap={qn[c].D}, stereo={qn[c].E}): {s3[c]}, Concentus {wantQn[c]}");
+            }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    [TestMethod]
+    public async Task CeltBandsGpu_StereoOps_BitExactVsConcentus()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            var rng = new Random(0xC331);
+            foreach (var op in new[] { CeltBandsGpuTestKernel.Op.IntensityStereo, CeltBandsGpuTestKernel.Op.StereoSplit, CeltBandsGpuTestKernel.Op.StereoMerge })
+            {
+                const int n = 80;
+                var cases = new CeltBandsCase[n];
+                var xIn = new int[n * CeltBandsStride]; var yIn = new int[n * CeltBandsStride]; var aux = new int[n * CeltBandsStride];
+                var wantX = new int[n][]; var wantY = new int[n][];
+                for (int c = 0; c < n; c++)
+                {
+                    int bandN = 1 + rng.Next(176);
+                    var x = CeltRandomShape(rng, bandN); var y = CeltRandomShape(rng, bandN);
+                    Array.Copy(x, 0, xIn, c * CeltBandsStride, bandN);
+                    Array.Copy(y, 0, yIn, c * CeltBandsStride, bandN);
+                    int mid = rng.Next(0, 32768);
+                    cases[c] = new CeltBandsCase { A = bandN, B = mid };
+                    if (op == CeltBandsGpuTestKernel.Op.IntensityStereo)
+                    {
+                        int e0 = rng.Next(1, 1 << rng.Next(1, 30)), e1 = rng.Next(1, 1 << rng.Next(1, 30));
+                        aux[c * CeltBandsStride] = e0; aux[c * CeltBandsStride + 1] = e1;
+                        ConcentusCeltOracle.IntensityStereo(ConcentusCeltOracle.Mode, x, 0, y, 0, new[] { new[] { e0 }, new[] { e1 } }, 0, bandN);
+                    }
+                    else if (op == CeltBandsGpuTestKernel.Op.StereoSplit) ConcentusCeltOracle.StereoSplit(x, 0, y, 0, bandN);
+                    else ConcentusCeltOracle.StereoMerge(x, y, mid, bandN);
+                    wantX[c] = x; wantY[c] = y;
+                }
+                var (x2, y2, _) = await CeltBandsLaunchAsync(acc, op, cases, xIn, yIn, aux);
+                for (int c = 0; c < n; c++)
+                    for (int j = 0; j < cases[c].A; j++)
+                        if (x2[c * CeltBandsStride + j] != wantX[c][j] || y2[c * CeltBandsStride + j] != wantY[c][j])
+                            throw new Exception($"{op} N={cases[c].A}: [{j}] x {x2[c * CeltBandsStride + j]} y {y2[c * CeltBandsStride + j]}, Concentus x {wantX[c][j]} y {wantY[c][j]}");
+            }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    [TestMethod]
+    public async Task CeltBandsGpu_HaarAndInterleave_BitExactVsConcentus()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            var rng = new Random(0xC332);
+            foreach (var op in new[] { CeltBandsGpuTestKernel.Op.Haar1, CeltBandsGpuTestKernel.Op.Deinterleave, CeltBandsGpuTestKernel.Op.Interleave })
+            {
+                const int n = 80;
+                var cases = new CeltBandsCase[n]; var xIn = new int[n * CeltBandsStride]; var want = new int[n][]; var len = new int[n];
+                for (int c = 0; c < n; c++)
+                {
+                    // strides 2..16 (the Hadamard order table covers exactly those), N0 * stride inside the per-case window
+                    int stride = 1 << rng.Next(1, 5), hadamard = op == CeltBandsGpuTestKernel.Op.Haar1 ? 0 : rng.Next(2);
+                    int n0 = op == CeltBandsGpuTestKernel.Op.Haar1 ? 2 * (1 + rng.Next(60)) : 1 + rng.Next(CeltBandsStride / stride / 2);
+                    len[c] = n0 * stride;
+                    var x = CeltRandomShape(rng, len[c]);
+                    Array.Copy(x, 0, xIn, c * CeltBandsStride, len[c]);
+                    cases[c] = new CeltBandsCase { A = n0, B = stride, C = hadamard };
+                    if (op == CeltBandsGpuTestKernel.Op.Haar1) ConcentusCeltOracle.Haar1(x, 0, n0, stride);
+                    else if (op == CeltBandsGpuTestKernel.Op.Deinterleave) ConcentusCeltOracle.DeinterleaveHadamard(x, 0, n0, stride, hadamard);
+                    else ConcentusCeltOracle.InterleaveHadamard(x, 0, n0, stride, hadamard);
+                    want[c] = x;
+                }
+                var (x2, _, _) = await CeltBandsLaunchAsync(acc, op, cases, xIn, new int[xIn.Length], new int[xIn.Length]);
+                for (int c = 0; c < n; c++)
+                    for (int j = 0; j < len[c]; j++)
+                        if (x2[c * CeltBandsStride + j] != want[c][j])
+                            throw new Exception($"{op} N0={cases[c].A} stride={cases[c].B} hadamard={cases[c].C}: x[{j}] {x2[c * CeltBandsStride + j]}, Concentus {want[c][j]}");
+            }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    [TestMethod]
+    public async Task CeltBandsGpu_AntiCollapse_BitExactVsConcentus()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            const int nb = CeltModeTables.NbEBands, n = 60;
+            var rng = new Random(0xC333);
+            var cases = new CeltBandsCase[n]; var xIn = new int[n * CeltBandsStride]; var aux = new int[n * CeltBandsStride];
+            var want = new int[n][];
+            for (int c = 0; c < n; c++)
+            {
+                // a frame of C channels x (120 << LM) bins, random collapse masks (one bit per short block), energy history, pulses
+                int lm = rng.Next(4), C = 1 + rng.Next(2), size = 120 << lm;
+                int start = rng.Next(3) == 0 ? 17 : 0, end = new[] { 13, 17, 19, 21 }[rng.Next(4)];
+                if (end <= start) end = nb;
+                uint seed = (uint)rng.NextInt64(uint.MaxValue);
+                var x = new int[C][];
+                for (int ch = 0; ch < C; ch++) x[ch] = CeltRandomShape(rng, size);
+                var masks = new byte[nb * C];
+                for (int i = 0; i < masks.Length; i++) masks[i] = (byte)rng.Next(Math.Min(256, 1 << (1 << lm)));
+                int[] Energies() { var e = new int[2 * nb]; for (int i = 0; i < e.Length; i++) e[i] = rng.Next(-10 << 10, 20 << 10); return e; }
+                var logE = Energies(); var prev1 = Energies(); var prev2 = Energies();
+                var pulses = new int[nb];
+                for (int i = 0; i < nb; i++) pulses[i] = rng.Next(0, 300);
+                int o = c * CeltBandsStride;
+                for (int ch = 0; ch < C; ch++) Array.Copy(x[ch], 0, xIn, o + ch * size, size);
+                for (int i = 0; i < masks.Length; i++) aux[o + i] = masks[i];
+                Array.Copy(logE, 0, aux, o + 2 * nb, 2 * nb);
+                Array.Copy(prev1, 0, aux, o + 4 * nb, 2 * nb);
+                Array.Copy(prev2, 0, aux, o + 6 * nb, 2 * nb);
+                Array.Copy(pulses, 0, aux, o + 8 * nb, nb);
+                cases[c] = new CeltBandsCase { A = lm, B = C, C = start, D = end, E = (int)seed, F = size };
+                ConcentusCeltOracle.AntiCollapse(x, masks, lm, C, size, start, end, logE, prev1, prev2, pulses, seed);
+                want[c] = x.SelectMany(v => v).ToArray();
+            }
+            var (x2, _, _) = await CeltBandsLaunchAsync(acc, CeltBandsGpuTestKernel.Op.AntiCollapse, cases, xIn, new int[xIn.Length], aux);
+            for (int c = 0; c < n; c++)
+                for (int j = 0; j < want[c].Length; j++)
+                    if (x2[c * CeltBandsStride + j] != want[c][j])
+                        throw new Exception($"anti_collapse LM={cases[c].A} C={cases[c].B} bands {cases[c].C}..{cases[c].D}: x[{j}] {x2[c * CeltBandsStride + j]}, Concentus {want[c][j]}");
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }

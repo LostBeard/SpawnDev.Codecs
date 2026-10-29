@@ -207,7 +207,11 @@ Bit-exact testing strategy: each primitive ships with NUnit tests against the CP
   `Celt/CeltModeTables.cs`, on the accelerator as `CeltModeGpu` (one int view + offsets). Bit-exact vs Concentus (caps, shape bits,
   fine bits, fine priorities, coded bands, balance, intensity, dual stereo; mono / stereo, LM 0..3, hybrid start band). The
   encode side (the same decisions written with enc_bit_logp / enc_uint) waits for the GPU range encoder.
-- Next: anti-collapse and stereo (bands.c), then the comb pre/post-filter.
+- **2026-10-29: anti-collapse + stereo done** (items 4 and 7): `Celt/CeltBandsGpu.cs` = bands.c `AntiCollapse`, `IntensityStereo`,
+  `StereoSplit` / `StereoMerge`, `Haar1`, `DeinterleaveHadamard` / `InterleaveHadamard` (the TF-resolution block reordering),
+  `ComputeQn`, `BitexactCos`, `BitexactLog2tan`, `CeltLcgRand`. Bit-exact vs Concentus. Still to port from bands.c: the
+  band recursion itself (quant_all_bands / quant_band / quant_partition / compute_theta), which drives PVQ and these helpers.
+- Next: the comb pre/post-filter (celt.c comb_filter), then quant_all_bands.
 
 ### Step 3 - CELT integration kernel
 

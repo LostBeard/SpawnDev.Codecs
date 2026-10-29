@@ -57,6 +57,18 @@ internal static class CeltFixed
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static short DIV32_16(int a, short b)
+    {
+        return (short)(a / b);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int DIV32_16(int a, int b)
+    {
+        return a / b;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int EC_ILOG(uint x)
     {
         if (x == 0)
@@ -92,6 +104,12 @@ internal static class CeltFixed
     internal static short EXTRACT16(int x)
     {
         return (short)x;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int FRAC_MUL16(int a, int b)
+    {
+        return 16384 + (short)a * (short)b >> 15;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -155,6 +173,36 @@ internal static class CeltFixed
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static short MAX16(short a, short b)
+    {
+        if (a <= b)
+        {
+            return b;
+        }
+        return a;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int MAX16(int a, int b)
+    {
+        if (a <= b)
+        {
+            return b;
+        }
+        return a;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static float MAX16(float a, float b)
+    {
+        if (!(a > b))
+        {
+            return b;
+        }
+        return a;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int MAX32(int a, int b)
     {
         if (a <= b)
@@ -168,6 +216,36 @@ internal static class CeltFixed
     internal static float MAX32(float a, float b)
     {
         if (!(a > b))
+        {
+            return b;
+        }
+        return a;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static short MIN16(short a, short b)
+    {
+        if (a >= b)
+        {
+            return b;
+        }
+        return a;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int MIN16(int a, int b)
+    {
+        if (a >= b)
+        {
+            return b;
+        }
+        return a;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static float MIN16(float a, float b)
+    {
+        if (!(a < b))
         {
             return b;
         }
@@ -237,6 +315,18 @@ internal static class CeltFixed
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static short MULT16_16_Q14(short a, short b)
+    {
+        return (short)SHR(MULT16_16(a, b), 14);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int MULT16_16_Q14(int a, int b)
+    {
+        return SHR(MULT16_16(a, b), 14);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static short MULT16_16_Q15(short a, short b)
     {
         return (short)SHR(MULT16_16(a, b), 15);
@@ -246,6 +336,18 @@ internal static class CeltFixed
     internal static int MULT16_16_Q15(int a, int b)
     {
         return SHR(MULT16_16(a, b), 15);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int MULT16_32_Q15(short a, int b)
+    {
+        return (a * (b >> 16) << 1) + (a * (b & 0xFFFF) >> 15);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int MULT16_32_Q15(int a, int b)
+    {
+        return (a * (b >> 16) << 1) + (a * (b & 0xFFFF) >> 15);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -455,6 +557,28 @@ internal static class CeltFixed
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int celt_exp2(int x)
+    {
+        int num = SHR16(x, 10);
+        if (num > 14)
+        {
+            return 2130706432;
+        }
+        if (num < -15)
+        {
+            return 0;
+        }
+        return VSHR32(EXTEND32((int)(short)celt_exp2_frac((short)(x - SHL16((short)num, 10)))), -num - 2);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int celt_exp2_frac(int x)
+    {
+        int num = SHL16(x, 4);
+        return ADD16(16383, MULT16_16_Q15(num, ADD16(22804, MULT16_16_Q15(num, ADD16(14819, MULT16_16_Q15(10204, num))))));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int celt_ilog2(int x)
     {
         return EC_ILOG((uint)x) - 1;
@@ -499,6 +623,12 @@ internal static class CeltFixed
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int celt_sudiv(int n, int d)
+    {
+        return n / d;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static uint celt_udiv(uint n, uint d)
     {
         return n / d;
@@ -508,6 +638,16 @@ internal static class CeltFixed
     internal static int celt_udiv(int n, int d)
     {
         return n / d;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int celt_zlog2(int x)
+    {
+        if (x > 0)
+        {
+            return celt_ilog2(x);
+        }
+        return 0;
     }
 
 }
