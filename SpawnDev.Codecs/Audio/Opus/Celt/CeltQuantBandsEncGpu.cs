@@ -28,6 +28,10 @@ public struct CeltBandEncCtx
     public int DisableInv;
     /// <summary>1 while coding the first band of a frame with short blocks (libopus avoid_split_noise).</summary>
     public int AvoidSplitNoise;
+    /// <summary>Theta rounding of a stereo split: 0 nearest, -1 down, 1 up (libopus theta_round, theta RDO).</summary>
+    public int ThetaRound;
+    /// <summary>The folding noise seed (resynthesis only).</summary>
+    public uint Seed;
 }
 
 /// <summary>The CELT band recursion, encode side without resynthesis (libopus 1.5.2, GPU-callable).</summary>
@@ -50,8 +54,9 @@ public static class CeltQuantBandsEncGpu
 
     private static int FRAC_MUL16(int a, int b) => (16384 + (short)a * (short)b) >> 15;
 
-    /// <summary>libopus compute_theta (encoder, theta_round 0): quantizes and codes the split angle of a band (or of a mid /
-    /// side pair, which it mixes in place), and how many bits that took.</summary>
+    /// <summary>libopus compute_theta (encoder): quantizes (nearest, or for a stereo split of theta RDO down / up by
+    /// <see cref="CeltBandEncCtx.ThetaRound"/>) and codes the split angle of a band (or of a mid / side pair, which it mixes
+    /// in place), and how many bits that took.</summary>
     public static void ComputeThetaEncode(CeltModeGpu m, ref CeltBandEncCtx ctx, ref OpusRangeEncoderGpuState ec,
         ArrayView<byte> buf, int bufAt, uint storage, ArrayView<int> x, int xAt, int yAt, ArrayView<int> bandE, int bandEAt,
         int N, ref int b, int B, int B0, int LM, int stereo, ref int fill,
@@ -68,7 +73,14 @@ public static class CeltQuantBandsEncGpu
         int tell = (int)OpusRangeEncoderGpu.TellFrac(ref ec);
         if (qn != 1)
         {
-            itheta = (itheta * qn + 8192) >> 14;
+            if (stereo != 0 && ctx.ThetaRound != 0)
+            {
+                // Bias quantization towards itheta=0 and itheta=16384.
+                int bias = itheta > 8192 ? 32767 / qn : -32767 / qn;
+                int down = IMIN(qn - 1, IMAX(0, (itheta * qn + bias) >> 14));
+                itheta = ctx.ThetaRound < 0 ? down : down + 1;
+            }
+            else itheta = (itheta * qn + 8192) >> 14;
             if (stereo == 0 && ctx.AvoidSplitNoise != 0 && itheta > 0 && itheta < qn)
             {
                 // Check if the selected value of theta will cause the bit allocation to inject noise on one side. If so,

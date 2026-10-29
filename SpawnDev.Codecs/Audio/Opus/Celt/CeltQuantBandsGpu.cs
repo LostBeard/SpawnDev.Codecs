@@ -71,7 +71,7 @@ public static class CeltQuantBandsGpu
         }
     }
 
-    private static uint BitDeinterleave(uint i)
+    internal static uint BitDeinterleave(uint i)
     {
         switch (i)
         {
@@ -504,7 +504,7 @@ public static class CeltQuantBandsGpu
     /// libopus 1.5.2 special_hybrid_folding: duplicate enough of the first band's folding data (at <paramref name="normAt"/>, and
     /// at <paramref name="norm2At"/> with dual stereo) to fold the second band. Copies nothing when the start band is 0.
     /// </summary>
-    private static void SpecialHybridFolding(CeltModeGpu m, ArrayView<int> buf, int normAt, int norm2At, int start, int M, int dual_stereo)
+    internal static void SpecialHybridFolding(CeltModeGpu m, ArrayView<int> buf, int normAt, int norm2At, int start, int M, int dual_stereo)
     {
         int n1 = M * (m.EBandsOf(start + 1) - m.EBandsOf(start));
         int n2 = M * (m.EBandsOf(start + 2) - m.EBandsOf(start + 1));
