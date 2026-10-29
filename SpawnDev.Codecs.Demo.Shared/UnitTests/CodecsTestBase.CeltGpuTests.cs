@@ -23,7 +23,6 @@ public abstract partial class CodecsTestBase
     {
         public delegate void NormaliseResidualFn(int[] iy, Span<int> x, int xPtr, int n, int ryy, int gain);
         public delegate void RenormaliseVectorFn(Span<int> x, int n, int gain);
-        public delegate int StereoIthetaFn(Span<int> x, Span<int> y, int stereo, int n);
         public delegate uint AlgQuantFn(Span<int> x, int xPtr, int n, int k, int spread, int b, object enc, Span<byte> buf);
         public delegate void EncDoneFn(object enc, Span<byte> buf);
 
@@ -107,8 +106,43 @@ public abstract partial class CodecsTestBase
             M("VQ", "normalise_residual", typeof(int[]), typeof(Span<int>), typeof(int), typeof(int), typeof(int), typeof(int)));
         public static readonly RenormaliseVectorFn RenormaliseVector = (RenormaliseVectorFn)Delegate.CreateDelegate(typeof(RenormaliseVectorFn),
             M("VQ", "renormalise_vector", typeof(Span<int>), typeof(int), typeof(int)));
-        public static readonly StereoIthetaFn StereoItheta = (StereoIthetaFn)Delegate.CreateDelegate(typeof(StereoIthetaFn),
-            M("VQ", "stereo_itheta", typeof(Span<int>), typeof(Span<int>), typeof(int), typeof(int)));
+        private static readonly MethodInfo CeltSqrtM = InlinesT.GetMethod("celt_sqrt", Any, null, new[] { typeof(int) }, null)!;
+        private static readonly MethodInfo CeltAtan01M = InlinesT.GetMethod("celt_atan01", Any, null, new[] { typeof(int) }, null)!;
+        private static int Rcp(int x) => (int)CeltRcpM.Invoke(null, new object[] { x })!;
+        private static int Sqrt(int x) => (int)CeltSqrtM.Invoke(null, new object[] { x })!;
+        private static int Atan01(int x) => (int)CeltAtan01M.Invoke(null, new object[] { x })!;
+
+        /// <summary>
+        /// libopus 1.5.2 vq.c stereo_itheta + mathops.h celt_atan2p, transcribed (Concentus' celt_rcp, celt_sqrt and
+        /// celt_atan01 are unchanged since 1.1). Not Concentus' stereo_itheta: its celt_div uses libopus 1.1's 32-bit split
+        /// MULT32_32_Q31, where 1.5.2 on a 64-bit build multiplies exactly.
+        /// </summary>
+        public static int StereoItheta(Span<int> x, Span<int> y, int stereo, int n)
+        {
+            int emid = 1, eside = 1;   // EPSILON
+            if (stereo != 0)
+                for (int i = 0; i < n; i++)
+                {
+                    short m = (short)((short)(x[i] >> 1) + (short)(y[i] >> 1));
+                    short s = (short)((short)(x[i] >> 1) - (short)(y[i] >> 1));
+                    emid += m * m;
+                    eside += s * s;
+                }
+            else
+                for (int i = 0; i < n; i++)
+                {
+                    emid += (short)x[i] * (short)x[i];
+                    eside += (short)y[i] * (short)y[i];
+                }
+            int mid = (short)Sqrt(emid), side = (short)Sqrt(eside);
+            int Div(int a, int b) => (int)(((long)a * Rcp(b)) >> 31);   // celt_div, MULT32_32_Q31 in 64 bits
+            int atan2p;
+            if (side < mid)
+                atan2p = Atan01((short)Math.Min(32767, Div(side << 15, mid))) >> 1;
+            else
+                atan2p = 25736 - (Atan01((short)Math.Min(32767, Div(mid << 15, side))) >> 1);
+            return ((short)20861 * (short)atan2p) >> 15;   // MULT16_16_Q15(QCONST16(0.63662f, 15), ...)
+        }
         private static readonly AlgQuantFn AlgQuant = (AlgQuantFn)Emit(typeof(AlgQuantFn),
             M("VQ", "alg_quant", typeof(Span<int>), typeof(int), typeof(int), typeof(int), typeof(int), typeof(int), Ec, typeof(Span<byte>)),
             new Dictionary<int, Type> { [6] = Ec });
@@ -475,7 +509,9 @@ public abstract partial class CodecsTestBase
             {
                 var (n, k) = pairs[c];
                 int b = new[] { 1, 2, 4 }[rng.Next(3)]; if (n % b != 0) b = 1;
-                int spread = rng.Next(4);
+                // spread 0: Concentus' alg_quant rotates with libopus 1.1's 32-bit celt_div, libopus 1.5.2 multiplies in 64 bits;
+                // the search itself moves to 1.5.2 (op_pvq_search) with the CELT encoder, checked against its fixtures
+                int spread = 0;
                 var x = CeltRandomShape(rng, n);
                 ConcentusCeltOracle.RenormaliseVector(x, n, 32767);   // a unit-norm band, as alg_quant receives
                 Array.Copy(x, 0, xIn, c * CeltPvqStride, n);
@@ -1118,33 +1154,43 @@ public abstract partial class CodecsTestBase
                 // mono / stereo, every frame size, full band and the hybrid start band, intra and inter, transient or not; packets
                 // from 2 to 80 bytes so the coarse energy runs out of bits (the 2-bit icdf and 1-bit fallbacks) as well as Laplace-
                 // decodes; the previous frame's energies, fine_quant (0..8) and fine_priority at random, the same on both sides
-                int C = 1 + rng.Next(2), lm = rng.Next(4);
-                int start = rng.Next(4) == 0 ? 17 : 0;
-                int end = new[] { 13, 17, 19, 21 }[rng.Next(4)]; if (end <= start) end = nb;
-                int intra = rng.Next(2), transient = rng.Next(2), bitsLeft = rng.Next(48);
-                var oldE = new int[2 * nb]; for (int i = 0; i < oldE.Length; i++) oldE[i] = rng.Next(-12000, 20000);
-                var fine = new int[nb]; for (int i = 0; i < nb; i++) fine[i] = rng.Next(3) == 0 ? 0 : rng.Next(9);
-                var prio = new int[nb]; for (int i = 0; i < nb; i++) prio[i] = rng.Next(2);
-                var packet = new byte[2 + rng.Next(79)]; rng.NextBytes(packet);
-                cases[c] = new CeltEnergyCase { C = C, LM = lm, Start = start, End = end, Intra = intra, IsTransient = transient,
-                    BitsLeft = bitsLeft, PacketAt = packets.Count, PacketLength = packet.Length };
-                packets.AddRange(packet);
-                int o = c * B;
-                Array.Copy(oldE, 0, blocks, o + CeltEnergyGpuTestKernel.OldEAt, oldE.Length);
-                Array.Copy(fine, 0, blocks, o + CeltEnergyGpuTestKernel.FineAt, nb);
-                Array.Copy(prio, 0, blocks, o + CeltEnergyGpuTestKernel.PrioAt, nb);
-                var dec = ConcentusCeltOracle.Decoder(packet);
-                var tell = new uint[4];
-                var tf = new int[nb];
-                ConcentusCeltOracle.UnquantCoarseEnergy(ConcentusCeltOracle.Mode, start, end, oldE, intra, dec, packet, C, lm);
-                tell[0] = ConcentusCeltOracle.TellFrac(dec);
-                ConcentusCeltOracle.TfDecode(start, end, transient, tf, lm, dec, packet);
-                tell[1] = ConcentusCeltOracle.TellFrac(dec);
-                ConcentusCeltOracle.UnquantFineEnergy(ConcentusCeltOracle.Mode, start, end, oldE, fine, dec, packet, C);
-                tell[2] = ConcentusCeltOracle.TellFrac(dec);
-                ConcentusCeltOracle.UnquantEnergyFinalise(ConcentusCeltOracle.Mode, start, end, oldE, fine, prio, bitsLeft, dec, packet, C);
-                tell[3] = ConcentusCeltOracle.TellFrac(dec);
-                want[c] = (oldE, tf, tell, ConcentusCeltOracle.Rng(dec));
+                for (;;)
+                {
+                    int C = 1 + rng.Next(2), lm = rng.Next(4);
+                    int start = rng.Next(4) == 0 ? 17 : 0;
+                    int end = new[] { 13, 17, 19, 21 }[rng.Next(4)]; if (end <= start) end = nb;
+                    int intra = rng.Next(2), transient = rng.Next(2), bitsLeft = rng.Next(48);
+                    var oldE = new int[2 * nb]; for (int i = 0; i < oldE.Length; i++) oldE[i] = rng.Next(-12000, 12000);
+                    var fine = new int[nb]; for (int i = 0; i < nb; i++) fine[i] = rng.Next(3) == 0 ? 0 : rng.Next(9);
+                    var prio = new int[nb]; for (int i = 0; i < nb; i++) prio[i] = rng.Next(2);
+                    var packet = new byte[2 + rng.Next(79)]; rng.NextBytes(packet);
+                    // libopus 1.5.2 keeps oldEBands (and its MULT16_16 in the coarse prediction) in 16 bits, Concentus in 32: a
+                    // random packet can Laplace-decode energies past int16, where the two decoders part. Keep the cases whose
+                    // energies all stay within +-27000 (the fine and finalise offsets add under 1024), where both agree.
+                    var want0 = (int[])oldE.Clone();
+                    var dec = ConcentusCeltOracle.Decoder(packet);
+                    var tell = new uint[4];
+                    var tf = new int[nb];
+                    ConcentusCeltOracle.UnquantCoarseEnergy(ConcentusCeltOracle.Mode, start, end, want0, intra, dec, packet, C, lm);
+                    tell[0] = ConcentusCeltOracle.TellFrac(dec);
+                    ConcentusCeltOracle.TfDecode(start, end, transient, tf, lm, dec, packet);
+                    tell[1] = ConcentusCeltOracle.TellFrac(dec);
+                    ConcentusCeltOracle.UnquantFineEnergy(ConcentusCeltOracle.Mode, start, end, want0, fine, dec, packet, C);
+                    tell[2] = ConcentusCeltOracle.TellFrac(dec);
+                    ConcentusCeltOracle.UnquantEnergyFinalise(ConcentusCeltOracle.Mode, start, end, want0, fine, prio, bitsLeft, dec, packet, C);
+                    tell[3] = ConcentusCeltOracle.TellFrac(dec);
+                    bool fits = true; foreach (var e in want0) if (Math.Abs(e) > 27000) fits = false;
+                    if (!fits) continue;
+                    want[c] = (want0, tf, tell, ConcentusCeltOracle.Rng(dec));
+                    cases[c] = new CeltEnergyCase { C = C, LM = lm, Start = start, End = end, Intra = intra, IsTransient = transient,
+                        BitsLeft = bitsLeft, PacketAt = packets.Count, PacketLength = packet.Length };
+                    packets.AddRange(packet);
+                    int o = c * B;
+                    Array.Copy(oldE, 0, blocks, o + CeltEnergyGpuTestKernel.OldEAt, oldE.Length);
+                    Array.Copy(fine, 0, blocks, o + CeltEnergyGpuTestKernel.FineAt, nb);
+                    Array.Copy(prio, 0, blocks, o + CeltEnergyGpuTestKernel.PrioAt, nb);
+                    break;
+                }
             }
             var (mode, modeBuffer) = CeltModeGpu.Upload(acc);
             using var _ = modeBuffer;

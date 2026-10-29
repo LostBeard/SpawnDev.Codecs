@@ -393,6 +393,18 @@ public static class CeltModeTables
         -28431, -28848, -29245, -29622, -29979, -30315, -30630, -30924, -31197, -31449, -31679, -31887, -32074, -32239, -32381, -32501, -32600, -32675, -32729, -32759,
     };
 
+    /// <summary>transient_analysis inverse table, 6 * 64 / x (libopus 1.5.2 celt_encoder.c inv_table).</summary>
+    public static readonly byte[] TransientInvTable =
+    {
+        255, 255, 156, 110, 86, 70, 59, 51, 45, 40, 37, 33, 31, 28, 26, 25, 23, 22, 21, 20,
+        19, 18, 17, 16, 16, 15, 15, 14, 13, 13, 12, 12, 12, 12, 11, 11, 11, 10, 10, 10,
+        9, 9, 9, 9, 9, 9, 8, 8, 8, 8, 8, 7, 7, 7, 7, 7, 7, 6, 6, 6,
+        6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 5, 5, 5, 5, 5, 5, 5,
+        5, 5, 5, 5, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+        3, 3, 3, 3, 3, 3, 3, 2,
+    };
+
     /// <summary>Hadamard ordering of the interleaved short blocks, rows for stride 2, 4, 8, 16 at stride - 2 (libopus ordery_table).</summary>
     public static readonly int[] OrderyTable =
     {
@@ -452,6 +464,8 @@ public struct CeltModeGpu
     public int FftFactorsAt;
     /// <summary>Offset of <see cref="CeltModeTables.MdctTrig"/> in <see cref="Data"/>.</summary>
     public int MdctTrigAt;
+    /// <summary>Offset of <see cref="CeltModeTables.TransientInvTable"/> in <see cref="Data"/>.</summary>
+    public int TransientInvTableAt;
     /// <summary>Offset of <see cref="CeltModeTables.OrderyTable"/> in <see cref="Data"/>.</summary>
     public int OrderyTableAt;
 
@@ -481,6 +495,7 @@ public struct CeltModeGpu
         mode.FftBitrev60At = all.Count; foreach (var v in CeltModeTables.FftBitrev60) all.Add(v);
         mode.FftFactorsAt = all.Count; foreach (var v in CeltModeTables.FftFactors) all.Add(v);
         mode.MdctTrigAt = all.Count; foreach (var v in CeltModeTables.MdctTrig) all.Add(v);
+        mode.TransientInvTableAt = all.Count; foreach (var v in CeltModeTables.TransientInvTable) all.Add(v);
         mode.OrderyTableAt = all.Count; foreach (var v in CeltModeTables.OrderyTable) all.Add(v);
         var buffer = accelerator.Allocate1D(all.ToArray());
         mode.Data = buffer.View;
@@ -529,6 +544,8 @@ public struct CeltModeGpu
     public int FftFactorsOf(int i) => Data[FftFactorsAt + i];
     /// <summary><see cref="CeltModeTables.MdctTrig"/>[i].</summary>
     public int MdctTrigOf(int i) => Data[MdctTrigAt + i];
+    /// <summary><see cref="CeltModeTables.TransientInvTable"/>[i].</summary>
+    public int TransientInvTableOf(int i) => Data[TransientInvTableAt + i];
     /// <summary><see cref="CeltModeTables.OrderyTable"/>[i].</summary>
     public int OrderyTableOf(int i) => Data[OrderyTableAt + i];
 }

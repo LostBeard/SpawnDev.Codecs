@@ -272,18 +272,31 @@ public static class CeltPlcGpu
     /// </summary>
     public static int PitchSearchPlc(CeltModeGpu m, ArrayView<int> st, int C, ArrayView<int> w)
     {
-        int len = DecodeBufferSize;
-        // pitch_downsample
-        int d0 = DecodeMemAt, d1 = DecodeMemAt + ChannelStride;
+        PitchDownsample(m, st, DecodeMemAt, DecodeMemAt + ChannelStride, DecodeBufferSize, C, w, LpAt, AcAt, Lpc4At, LpcMemAt, XxAt);
+        int pitch_index = PitchSearch(w, LpAt + (PlcPitchLagMax >> 1), LpAt, DecodeBufferSize - PlcPitchLagMax,
+            PlcPitchLagMax - PlcPitchLagMin, Xlp4At, Ylp4At, XcorrAt);
+        return PlcPitchLagMax - pitch_index;
+    }
+
+    /// <summary>
+    /// libopus pitch_downsample (fixed point): the C channels' <paramref name="len"/> 32-bit samples at <paramref name="x0At"/> /
+    /// <paramref name="x1At"/>, low-passed and decimated by 2 to the len / 2 16-bit samples at <paramref name="lpAt"/> in
+    /// <paramref name="w"/>, then whitened by a 4-tap LPC with a zero. Scratch in w: <paramref name="acAt"/> 5 ints,
+    /// <paramref name="lpc4At"/> 4, <paramref name="lpcMemAt"/> 4, <paramref name="xxAt"/> len / 2.
+    /// </summary>
+    public static void PitchDownsample(CeltModeGpu m, ArrayView<int> x, int x0At, int x1At, int len, int C, ArrayView<int> w,
+        int lpAt, int acAt, int lpc4At, int lpcMemAt, int xxAt)
+    {
+        int d0 = x0At, d1 = x1At;
         int maxabs = 0;
         for (int c = 0; c < C; c++)
         {
             int maxval = 0, minval = 0;
             for (int i = 0; i < len; i++)
             {
-                int x = st[DecodeMemAt + c * ChannelStride + i];
-                maxval = IMAX(maxval, x);
-                minval = IMIN(minval, x);
+                int xi = x[(c == 0 ? x0At : x1At) + i];
+                maxval = IMAX(maxval, xi);
+                minval = IMIN(minval, xi);
             }
             maxabs = IMAX(maxabs, IMAX(maxval, -minval));
         }
@@ -292,29 +305,29 @@ public static class CeltPlcGpu
         if (shift < 0) shift = 0;
         if (C == 2) shift++;
         for (int i = 1; i < len >> 1; i++)
-            w[LpAt + i] = S16((st[d0 + 2 * i - 1] >> (shift + 2)) + (st[d0 + 2 * i + 1] >> (shift + 2)) + (st[d0 + 2 * i] >> (shift + 1)));
-        w[LpAt] = S16((st[d0 + 1] >> (shift + 2)) + (st[d0] >> (shift + 1)));
+            w[lpAt + i] = S16((x[d0 + 2 * i - 1] >> (shift + 2)) + (x[d0 + 2 * i + 1] >> (shift + 2)) + (x[d0 + 2 * i] >> (shift + 1)));
+        w[lpAt] = S16((x[d0 + 1] >> (shift + 2)) + (x[d0] >> (shift + 1)));
         if (C == 2)
         {
             for (int i = 1; i < len >> 1; i++)
-                w[LpAt + i] = S16(w[LpAt + i] + (st[d1 + 2 * i - 1] >> (shift + 2)) + (st[d1 + 2 * i + 1] >> (shift + 2)) + (st[d1 + 2 * i] >> (shift + 1)));
-            w[LpAt] = S16(w[LpAt] + (st[d1 + 1] >> (shift + 2)) + (st[d1] >> (shift + 1)));
+                w[lpAt + i] = S16(w[lpAt + i] + (x[d1 + 2 * i - 1] >> (shift + 2)) + (x[d1 + 2 * i + 1] >> (shift + 2)) + (x[d1 + 2 * i] >> (shift + 1)));
+            w[lpAt] = S16(w[lpAt] + (x[d1 + 1] >> (shift + 2)) + (x[d1] >> (shift + 1)));
         }
-        Autocorr(m, w, LpAt, AcAt, 0, 4, len >> 1, XxAt);
+        Autocorr(m, w, lpAt, acAt, 0, 4, len >> 1, xxAt);
         // Noise floor -40 dB
-        w[AcAt] += w[AcAt] >> 13;
+        w[acAt] += w[acAt] >> 13;
         // Lag windowing
-        for (int i = 1; i <= 4; i++) w[AcAt + i] -= Mult16_32Q15(2 * i * i, w[AcAt + i]);
-        Lpc(w, Lpc4At, w, AcAt, 4, LpcMemAt);
+        for (int i = 1; i <= 4; i++) w[acAt + i] -= Mult16_32Q15(2 * i * i, w[acAt + i]);
+        Lpc(w, lpc4At, w, acAt, 4, lpcMemAt);
         int tmp = 32767;
         for (int i = 0; i < 4; i++)
         {
             tmp = S16(Mult16_16Q15(29491, tmp));                     // QCONST16(.9f, 15)
-            w[Lpc4At + i] = S16(Mult16_16Q15(w[Lpc4At + i], tmp));
+            w[lpc4At + i] = S16(Mult16_16Q15(w[lpc4At + i], tmp));
         }
         // Add a zero: lpc2 (5 taps) after the 4 lpc values
         const int c1 = 26214;                                         // QCONST16(.8f, 15)
-        int l0 = w[Lpc4At], l1 = w[Lpc4At + 1], l2 = w[Lpc4At + 2], l3 = w[Lpc4At + 3];
+        int l0 = w[lpc4At], l1 = w[lpc4At + 1], l2 = w[lpc4At + 2], l3 = w[lpc4At + 3];
         int num0 = S16(l0 + 3277);                                    // QCONST16(.8f, SIG_SHIFT)
         int num1 = S16(l1 + Mult16_16Q15(c1, l0));
         int num2 = S16(l2 + Mult16_16Q15(c1, l1));
@@ -324,8 +337,8 @@ public static class CeltPlcGpu
         int mem0 = 0, mem1 = 0, mem2 = 0, mem3 = 0, mem4 = 0;
         for (int i = 0; i < len >> 1; i++)
         {
-            int x = w[LpAt + i];
-            int sum = x << SigShift;
+            int xi = w[lpAt + i];
+            int sum = xi << SigShift;
             sum = Mac16_16(sum, num0, mem0);
             sum = Mac16_16(sum, num1, mem1);
             sum = Mac16_16(sum, num2, mem2);
@@ -335,21 +348,29 @@ public static class CeltPlcGpu
             mem3 = mem2;
             mem2 = mem1;
             mem1 = mem0;
-            mem0 = x;
-            w[LpAt + i] = Round16(sum, SigShift);
+            mem0 = xi;
+            w[lpAt + i] = Round16(sum, SigShift);
         }
-        // pitch_search(lp + (PLC_PITCH_LAG_MAX >> 1), lp, DECODE_BUFFER_SIZE - PLC_PITCH_LAG_MAX, PLC_PITCH_LAG_MAX - PLC_PITCH_LAG_MIN)
-        int xlp = LpAt + (PlcPitchLagMax >> 1), y = LpAt;
-        int slen = DecodeBufferSize - PlcPitchLagMax, max_pitch = PlcPitchLagMax - PlcPitchLagMin;
-        int lag = slen + max_pitch;
-        for (int j = 0; j < slen >> 2; j++) w[Xlp4At + j] = w[xlp + 2 * j];
-        for (int j = 0; j < lag >> 2; j++) w[Ylp4At + j] = w[y + 2 * j];
-        int xmax = MaxAbs16(w, Xlp4At, slen >> 2), ymax = MaxAbs16(w, Ylp4At, lag >> 2);
+    }
+
+    /// <summary>
+    /// libopus pitch_search (fixed point): the lag in 0..<paramref name="max_pitch"/> (at the decimated-by-2 rate, doubled) that
+    /// best correlates the <paramref name="len"/> / 2 16-bit samples at <paramref name="xlpAt"/> with those at
+    /// <paramref name="yAt"/> + lag / 2, in <paramref name="w"/>. Scratch in w: <paramref name="xlp4At"/> len / 4 ints,
+    /// <paramref name="ylp4At"/> (len + max_pitch) / 4, <paramref name="xcorrAt"/> max_pitch / 2.
+    /// </summary>
+    public static int PitchSearch(ArrayView<int> w, int xlpAt, int yAt, int len, int max_pitch, int xlp4At, int ylp4At, int xcorrAt)
+    {
+        int xlp = xlpAt, y = yAt;
+        int lag = len + max_pitch;
+        for (int j = 0; j < len >> 2; j++) w[xlp4At + j] = w[xlp + 2 * j];
+        for (int j = 0; j < lag >> 2; j++) w[ylp4At + j] = w[y + 2 * j];
+        int xmax = MaxAbs16(w, xlp4At, len >> 2), ymax = MaxAbs16(w, ylp4At, lag >> 2);
         int sh = Ilog2(IMAX(1, IMAX(xmax, ymax))) - 11;
         if (sh > 0)
         {
-            for (int j = 0; j < slen >> 2; j++) w[Xlp4At + j] = S16(w[Xlp4At + j] >> sh);
-            for (int j = 0; j < lag >> 2; j++) w[Ylp4At + j] = S16(w[Ylp4At + j] >> sh);
+            for (int j = 0; j < len >> 2; j++) w[xlp4At + j] = S16(w[xlp4At + j] >> sh);
+            for (int j = 0; j < lag >> 2; j++) w[ylp4At + j] = S16(w[ylp4At + j] >> sh);
             // Use double the shift for a MAC
             sh *= 2;
         }
@@ -359,36 +380,35 @@ public static class CeltPlcGpu
         for (int i = 0; i < max_pitch >> 2; i++)
         {
             int sum = 0;
-            for (int j = 0; j < slen >> 2; j++) sum = Mac16_16(sum, w[Xlp4At + j], w[Ylp4At + i + j]);
-            w[XcorrAt + i] = sum;
+            for (int j = 0; j < len >> 2; j++) sum = Mac16_16(sum, w[xlp4At + j], w[ylp4At + i + j]);
+            w[xcorrAt + i] = sum;
             maxcorr = IMAX(maxcorr, sum);
         }
         int best0 = 0, best1 = 0;
-        FindBestPitch(w, XcorrAt, Ylp4At, slen >> 2, max_pitch >> 2, ref best0, ref best1, 0, maxcorr);
+        FindBestPitch(w, xcorrAt, ylp4At, len >> 2, max_pitch >> 2, ref best0, ref best1, 0, maxcorr);
         // Finer search with 2x decimation
         maxcorr = 1;
         for (int i = 0; i < max_pitch >> 1; i++)
         {
-            w[XcorrAt + i] = 0;
+            w[xcorrAt + i] = 0;
             if (Abs32(i - 2 * best0) > 2 && Abs32(i - 2 * best1) > 2) continue;
             int sum = 0;
-            for (int j = 0; j < slen >> 1; j++) sum += Mult16_16(w[xlp + j], w[y + i + j]) >> sh;
-            w[XcorrAt + i] = IMAX(-1, sum);
+            for (int j = 0; j < len >> 1; j++) sum += Mult16_16(w[xlp + j], w[y + i + j]) >> sh;
+            w[xcorrAt + i] = IMAX(-1, sum);
             maxcorr = IMAX(maxcorr, sum);
         }
-        FindBestPitch(w, XcorrAt, y, slen >> 1, max_pitch >> 1, ref best0, ref best1, sh + 1, maxcorr);
+        FindBestPitch(w, xcorrAt, y, len >> 1, max_pitch >> 1, ref best0, ref best1, sh + 1, maxcorr);
         // Refine by pseudo-interpolation
         int offset;
         if (best0 > 0 && best0 < (max_pitch >> 1) - 1)
         {
-            int a = w[XcorrAt + best0 - 1], b = w[XcorrAt + best0], c = w[XcorrAt + best0 + 1];
+            int a = w[xcorrAt + best0 - 1], b = w[xcorrAt + best0], c = w[xcorrAt + best0 + 1];
             if ((c - a) > Mult16_32Q15(22938, b - a)) offset = 1;          // QCONST16(.7f, 15)
             else if ((a - c) > Mult16_32Q15(22938, b - c)) offset = -1;
             else offset = 0;
         }
         else offset = 0;
-        int pitch_index = 2 * best0 - offset;
-        return PlcPitchLagMax - pitch_index;
+        return 2 * best0 - offset;
     }
 
     /// <summary>
