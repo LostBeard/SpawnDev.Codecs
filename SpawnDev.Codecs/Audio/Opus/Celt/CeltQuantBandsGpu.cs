@@ -56,7 +56,7 @@ public static class CeltQuantBandsGpu
     private const int FX = 0, FN = 1, FBits = 2, FB = 3, FLow = 4, FLM = 5, FGain = 6, FFill = 7, FStage = 8, FMidFirst = 9,
         FB0 = 10, FXSide = 11, FLow2 = 12, FRem = 13, FItheta = 14, FImid = 15, FIside = 16, FMbits = 17, FSbits = 18, FResult = 19;
 
-    private static int BitInterleave(int i)
+    internal static int BitInterleave(int i)
     {
         switch (i)
         {
