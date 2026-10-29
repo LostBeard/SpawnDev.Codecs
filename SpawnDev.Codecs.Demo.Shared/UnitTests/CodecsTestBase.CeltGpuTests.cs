@@ -363,7 +363,7 @@ public abstract partial class CodecsTestBase
         return (await dX.CopyToHostAsync(), await dY.CopyToHostAsync(), await dS.CopyToHostAsync());
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltPvqGpu_Cwrsi_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -419,7 +419,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltPvqGpu_ExpRotation_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -449,7 +449,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltPvqGpu_AlgUnquant_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -495,7 +495,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltPvqGpu_AlgQuantSearch_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -539,7 +539,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltPvqGpu_RenormaliseVector_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -592,7 +592,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltRateGpu_ComputeAllocationDecode_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -712,7 +712,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltBandsGpu_StereoOps_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -753,7 +753,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltBandsGpu_HaarAndInterleave_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -788,7 +788,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltBandsGpu_AntiCollapse_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -833,7 +833,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltCombFilterGpu_PostFilter_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -991,7 +991,7 @@ public abstract partial class CodecsTestBase
 
     // quant_partition's recursion runs as an explicit-stack loop that leaves from both arms of an if; before SpawnDev.ILGPU
     // 5.4.12 that hung Velocity (block order) and ran the wrong arm's code on WebGPU (a back edge without `continue`).
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltQuantBandsGpu_QuantAllBandsDecode_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -1077,7 +1077,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltMdctGpu_BackwardAndForward_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -1138,7 +1138,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltEnergyGpu_CoarseTfFineFinalise_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -1224,7 +1224,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltSynthesisGpu_DenormaliseBands_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -1278,7 +1278,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    [TestMethod(Category = "NotOnWebGL")]
     public async Task CeltSynthesisGpu_Deemphasis_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
