@@ -195,11 +195,16 @@ public abstract partial class CodecsTestBase
         return y;
     }
 
-    /// <summary>A band-shape-like Q14 vector, well inside int16.</summary>
+    /// <summary>
+    /// A band-shape-like Q14 vector: inside int16, and small enough that its energy (sum of squares) fits int32, as CELT's
+    /// normalised bands always do. Larger vectors overflow the int accumulators of renormalise_vector / stereo_merge /
+    /// stereo_itheta: C# wraps, OpenCL C leaves signed overflow undefined, and the results differ (outside CELT's domain).
+    /// </summary>
     private static int[] CeltRandomShape(Random rng, int n)
     {
+        int amp = (int)Math.Min(12000, Math.Sqrt((1 << 30) / (double)Math.Max(1, n)));
         var x = new int[n];
-        for (int i = 0; i < n; i++) x[i] = rng.Next(-12000, 12001);
+        for (int i = 0; i < n; i++) x[i] = rng.Next(-amp, amp + 1);
         return x;
     }
 
