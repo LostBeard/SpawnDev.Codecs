@@ -137,6 +137,69 @@ public abstract partial class CodecsTestBase
         /// <summary>Concentus' 120-sample overlap window (Tables.window120).</summary>
         public static readonly int[] Window120 = (int[])A.GetType("Concentus.Celt.Tables", true)!.GetField("window120", Any)!.GetValue(null)!;
 
+        // quant_bands.c, celt.c tf_decode, bands.c denormalise_bands, celt_decoder.c deemphasis
+        public delegate void UnquantCoarseEnergyFn(object m, int start, int end, int[] oldEBands, int intra, object dec, ReadOnlySpan<byte> data,
+            int c, int lm);
+        public delegate void TfDecodeFn(int start, int end, int isTransient, int[] tfRes, int lm, object dec, ReadOnlySpan<byte> data);
+        public delegate void UnquantFineEnergyFn(object m, int start, int end, int[] oldEBands, int[] fineQuant, object dec, ReadOnlySpan<byte> data,
+            int c);
+        public delegate void UnquantEnergyFinaliseFn(object m, int start, int end, int[] oldEBands, int[] fineQuant, int[] finePriority,
+            int bitsLeft, object dec, ReadOnlySpan<byte> data, int c);
+        public delegate void DenormaliseBandsFn(object m, int[] x, Span<int> freq, int freqPtr, Span<int> bandLogE, int bandLogEPtr, int start,
+            int end, int bigM, int downsample, int silence);
+        public delegate void DeemphasisFn(int[][] input, int[] inputPtrs, Span<short> pcm, int pcmPtr, int n, int c, int downsample, int[] coef,
+            int[] mem, int accum);
+        public static readonly UnquantCoarseEnergyFn UnquantCoarseEnergy = (UnquantCoarseEnergyFn)Emit(typeof(UnquantCoarseEnergyFn),
+            M("QuantizeBands", "unquant_coarse_energy", ModeT, typeof(int), typeof(int), typeof(int[]), typeof(int), Ec, typeof(ReadOnlySpan<byte>),
+                typeof(int), typeof(int)),
+            new Dictionary<int, Type> { [0] = ModeT, [5] = Ec });
+        public static readonly TfDecodeFn TfDecode = (TfDecodeFn)Emit(typeof(TfDecodeFn),
+            M("CeltCommon", "tf_decode", typeof(int), typeof(int), typeof(int), typeof(int[]), typeof(int), Ec, typeof(ReadOnlySpan<byte>)),
+            new Dictionary<int, Type> { [5] = Ec });
+        public static readonly UnquantFineEnergyFn UnquantFineEnergy = (UnquantFineEnergyFn)Emit(typeof(UnquantFineEnergyFn),
+            M("QuantizeBands", "unquant_fine_energy", ModeT, typeof(int), typeof(int), typeof(int[]), typeof(int[]), Ec, typeof(ReadOnlySpan<byte>),
+                typeof(int)),
+            new Dictionary<int, Type> { [0] = ModeT, [5] = Ec });
+        public static readonly UnquantEnergyFinaliseFn UnquantEnergyFinalise = (UnquantEnergyFinaliseFn)Emit(typeof(UnquantEnergyFinaliseFn),
+            M("QuantizeBands", "unquant_energy_finalise", ModeT, typeof(int), typeof(int), typeof(int[]), typeof(int[]), typeof(int[]), typeof(int),
+                Ec, typeof(ReadOnlySpan<byte>), typeof(int)),
+            new Dictionary<int, Type> { [0] = ModeT, [7] = Ec });
+        public static readonly DenormaliseBandsFn DenormaliseBands = (DenormaliseBandsFn)Emit(typeof(DenormaliseBandsFn),
+            M("Bands", "denormalise_bands", ModeT, typeof(int[]), typeof(Span<int>), typeof(int), typeof(Span<int>), typeof(int), typeof(int),
+                typeof(int), typeof(int), typeof(int), typeof(int)),
+            new Dictionary<int, Type> { [0] = ModeT });
+        public static readonly DeemphasisFn Deemphasis = (DeemphasisFn)Delegate.CreateDelegate(typeof(DeemphasisFn),
+            M("CeltCommon", "deemphasis", typeof(int[][]), typeof(int[]), typeof(Span<short>), typeof(int), typeof(int), typeof(int), typeof(int),
+                typeof(int[]), typeof(int[]), typeof(int)));
+        public delegate void QuantAllBandsDecodeFn(int encode, object m, int start, int end, int[] x, int[] y, byte[] masks, int[][] bandE,
+            int[] pulses, int shortBlocks, int spread, int dualStereo, int intensity, int[] tfRes, int totalBits, int balance, object ec,
+            ReadOnlySpan<byte> data, int lm, int codedBands, ref uint seed);
+        public static readonly QuantAllBandsDecodeFn QuantAllBandsDecode = (QuantAllBandsDecodeFn)Emit(typeof(QuantAllBandsDecodeFn),
+            M("Bands", "quant_all_bands_decode", typeof(int), ModeT, typeof(int), typeof(int), typeof(int[]), typeof(int[]), typeof(byte[]),
+                typeof(int[][]), typeof(int[]), typeof(int), typeof(int), typeof(int), typeof(int), typeof(int[]), typeof(int), typeof(int), Ec,
+                typeof(ReadOnlySpan<byte>), typeof(int), typeof(int), typeof(uint).MakeByRefType()),
+            new Dictionary<int, Type> { [1] = ModeT, [16] = Ec });
+        // mdct.c
+        public delegate void MdctFn(object l, Span<int> input, int inputPtr, Span<int> output, int outputPtr, int[] window, int overlap,
+            int shift, int stride);
+        private static readonly Type MdctT = A.GetType("Concentus.Celt.Structs.MDCTLookup", true)!;
+        /// <summary>The static mode's MDCT lookup (CeltMode.mdct).</summary>
+        public static readonly object Mdct = ModeT.GetField("mdct", Any)!.GetValue(Mode)!;
+        public static readonly MdctFn MdctBackward = (MdctFn)Emit(typeof(MdctFn),
+            M("MDCT", "clt_mdct_backward", MdctT, typeof(Span<int>), typeof(int), typeof(Span<int>), typeof(int), typeof(int[]), typeof(int),
+                typeof(int), typeof(int)),
+            new Dictionary<int, Type> { [0] = MdctT });
+        public static readonly MdctFn MdctForward = (MdctFn)Emit(typeof(MdctFn),
+            M("MDCT", "clt_mdct_forward", MdctT, typeof(Span<int>), typeof(int), typeof(Span<int>), typeof(int), typeof(int[]), typeof(int),
+                typeof(int), typeof(int)),
+            new Dictionary<int, Type> { [0] = MdctT });
+        private static readonly MethodInfo TellFracM = Ec.GetMethod("tell_frac", Any, null, Type.EmptyTypes, null)!;
+        private static readonly FieldInfo RngF = Ec.GetField("rng", Any)!;
+        /// <summary>The decoder's position in 1/8 bits (ec_tell_frac).</summary>
+        public static uint TellFrac(object ec) => (uint)TellFracM.Invoke(ec, null)!;
+        /// <summary>The decoder's range (the final range once a frame is done).</summary>
+        public static uint Rng(object ec) => (uint)RngF.GetValue(ec)!;
+
         /// <summary>A Concentus range decoder over <paramref name="packet"/>.</summary>
         public static object Decoder(byte[] packet)
         {
@@ -737,6 +800,346 @@ public abstract partial class CodecsTestBase
                     if (got[c * CeltBandsStride + j] != want[c][j])
                         throw new Exception($"comb_filter T0={cases[c].A} T1={cases[c].B} N={cases[c].C} g0={cases[c].D} g1={cases[c].E} " +
                             $"tapsets {cases[c].F}/{cases[c].G} in place={inPlace[c]}: y[{j - history}] {got[c * CeltBandsStride + j]}, Concentus {want[c][j]}");
+            }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    // quant_partition's recursion runs as an explicit-stack loop that leaves from both arms of an if; before SpawnDev.ILGPU
+    // 5.4.12 that hung Velocity (block order) and ran the wrong arm's code on WebGPU (a back edge without `continue`).
+    [TestMethod]
+    public async Task CeltQuantBandsGpu_QuantAllBandsDecode_BitExactVsConcentus()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            const int nb = CeltModeTables.NbEBands, count = 200, B = CeltQuantBandsGpuTestKernel.BlockInts;
+            var rng = new Random(0xC343);
+            var cases = new CeltQuantBandsCase[count]; var blocks = new int[count * B];
+            var packets = new List<byte>();
+            var want = new (int[] X, int[] Y, byte[] Masks, int Coded, int Balance, int Intensity, int Dual, uint Seed, int Tell)[count];
+            for (int c = 0; c < count; c++)
+            {
+                // the allocation then every band of a frame on one decoder, as celt_decode_with_ec runs them: mono / stereo, every
+                // frame size, long and short blocks, every spread and trim, full band and the hybrid start band, 20..219-byte
+                // packets of random bytes (the same on both sides), random dynalloc offsets and tf_res from tf_select_table
+                int C = 1 + rng.Next(2), lm = rng.Next(4), bigM = 1 << lm;
+                int start = rng.Next(4) == 0 ? 17 : 0, end = new[] { 13, 17, 19, 21 }[rng.Next(4)]; if (end <= start) end = nb;
+                int trim = rng.Next(11), spread = rng.Next(4);
+                int isTransient = lm > 0 && rng.Next(3) == 0 ? 1 : 0, shortBlocks = isTransient != 0 ? bigM : 0, tfSel = rng.Next(2);
+                int len = 20 + rng.Next(200);
+                var packet = new byte[len]; rng.NextBytes(packet);
+                int prev = rng.Next(nb + 1), signalBandwidth = rng.Next(end);
+                uint seed = (uint)rng.NextInt64(uint.MaxValue);
+                var offsets = new int[nb]; for (int i = start; i < end; i++) if (rng.Next(6) == 0) offsets[i] = 8 * (1 + rng.Next(4)) * C;
+                var tf = new int[nb];
+                for (int i = start; i < end; i++) tf[i] = CeltModeTables.TfSelectTable[lm * 8 + 4 * isTransient + 2 * tfSel + rng.Next(2)];
+                int totalBits = len * 8 << 3;
+                object dec = ConcentusCeltOracle.Decoder(packet);
+                int allocTotal = totalBits - (int)ConcentusCeltOracle.TellFrac(dec) - 1;
+                var cap = ConcentusCeltOracle.InitCaps(lm, C);
+                var pulses = new int[nb]; var ebits = new int[nb]; var fine = new int[nb];
+                int intensity = 0, dual = 0;
+                int coded = ConcentusCeltOracle.ComputeAllocationDecode(ConcentusCeltOracle.Mode, start, end, offsets, cap, trim, ref intensity,
+                    ref dual, allocTotal, out int balance, pulses, ebits, fine, C, lm, dec, packet, prev, signalBandwidth);
+                var x = new int[bigM * 100]; var y = C == 2 ? new int[bigM * 100] : null; var masks = new byte[nb * C];
+                uint seedOut = seed;
+                ConcentusCeltOracle.QuantAllBandsDecode(0, ConcentusCeltOracle.Mode, start, end, x, y, masks, new[] { new int[nb], new int[nb] },
+                    pulses, shortBlocks, spread, dual, intensity, tf, totalBits, balance, dec, packet, lm, coded, ref seedOut);
+                want[c] = (x, y, masks, coded, balance, intensity, dual, seedOut, (int)ConcentusCeltOracle.TellFrac(dec));
+                cases[c] = new CeltQuantBandsCase { C = C, LM = lm, Start = start, End = end, AllocTrim = trim, Spread = spread,
+                    ShortBlocks = shortBlocks, Seed = seed, Total = allocTotal, TotalBits = totalBits, Prev = prev,
+                    SignalBandwidth = signalBandwidth, PacketAt = packets.Count, PacketLength = len };
+                packets.AddRange(packet); while (packets.Count % 4 != 0) packets.Add(0);
+                Array.Copy(offsets, 0, blocks, c * B + CeltQuantBandsGpuTestKernel.OffsetsAt, nb);
+                Array.Copy(tf, 0, blocks, c * B + CeltQuantBandsGpuTestKernel.TfAt, nb);
+            }
+            var (mode, modeBuffer) = CeltModeGpu.Upload(acc);
+            using var _ = modeBuffer;
+            using var dU = acc.Allocate1D(CeltPvqTables.Data);
+            using var dCases = acc.Allocate1D(cases);
+            using var dBlocks = acc.Allocate1D(blocks);
+            using var dScratch = acc.Allocate1D<int>(count * CeltQuantBandsGpuTestKernel.ScratchPerCase);
+            using var dPackets = acc.Allocate1D(packets.ToArray());
+            using var kernel = new CeltQuantBandsGpuTestKernel(acc);
+            kernel.Run(dCases.View, mode, dBlocks.View, dScratch.View, dPackets.View, dU.View);
+            await acc.SynchronizeAsync();
+            var got = await dBlocks.CopyToHostAsync();
+            for (int c = 0; c < count; c++)
+            {
+                int o = c * B, r = o + CeltQuantBandsGpuTestKernel.ResultsAt;
+                var w = want[c];
+                var k = cases[c];
+                string where = $"C={k.C} LM={k.LM} bands {k.Start}..{k.End} short={k.ShortBlocks} spread={k.Spread} trim={k.AllocTrim} {k.PacketLength} bytes";
+                if (got[r] != w.Coded || got[r + 1] != w.Balance || got[r + 2] != w.Intensity || got[r + 3] != w.Dual)
+                    throw new Exception($"compute_allocation {where}: coded/balance/intensity/dual {got[r]}/{got[r + 1]}/{got[r + 2]}/{got[r + 3]}, " +
+                        $"Concentus {w.Coded}/{w.Balance}/{w.Intensity}/{w.Dual}");
+                for (int j = 0; j < w.X.Length; j++)
+                    if (got[o + CeltQuantBandsGpuTestKernel.XAt + j] != w.X[j])
+                        throw new Exception($"quant_all_bands {where}: X[{j}] {got[o + CeltQuantBandsGpuTestKernel.XAt + j]}, Concentus {w.X[j]}");
+                for (int j = 0; w.Y != null && j < w.Y.Length; j++)
+                    if (got[o + CeltQuantBandsGpuTestKernel.YAt + j] != w.Y[j])
+                        throw new Exception($"quant_all_bands {where}: Y[{j}] {got[o + CeltQuantBandsGpuTestKernel.YAt + j]}, Concentus {w.Y[j]}");
+                for (int j = 0; j < w.Masks.Length; j++)
+                    if (got[o + CeltQuantBandsGpuTestKernel.MasksAt + j] != w.Masks[j])
+                        throw new Exception($"quant_all_bands {where}: collapse mask[{j}] {got[o + CeltQuantBandsGpuTestKernel.MasksAt + j]}, Concentus {w.Masks[j]}");
+                if ((uint)got[r + 4] != w.Seed || got[r + 5] != w.Tell)
+                    throw new Exception($"quant_all_bands {where}: seed / tell_frac {(uint)got[r + 4]} / {got[r + 5]}, Concentus {w.Seed} / {w.Tell}");
+            }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    [TestMethod]
+    public async Task CeltMdctGpu_BackwardAndForward_BitExactVsConcentus()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            const int count = 64, B = CeltMdctGpuTestKernel.BlockInts, overlap = CeltMdctGpuTestKernel.Overlap;
+            var (mode, modeBuffer) = CeltModeGpu.Upload(acc);
+            using var _ = modeBuffer;
+            using var kernel = new CeltMdctGpuTestKernel(acc);
+            foreach (bool backward in new[] { true, false })
+            {
+                var rng = new Random(backward ? 0xC344 : 0xC345);
+                var cases = new CeltMdctCase[count]; var blocks = new int[count * B];
+                var want = new int[count][];
+                for (int c = 0; c < count; c++)
+                {
+                    // every frame size, one long block or 1 << LM short blocks (every FFT size: 480, 240, 120, 60 points);
+                    // coefficients of up to 2^18 and Q12 samples of up to 2^26, which no butterfly can push past int32; the
+                    // inverse also reads the previous frame's overlap already in its output (random here, the same on both sides)
+                    int lm = rng.Next(4), transient = lm > 0 && rng.Next(2) == 0 ? 1 : 0;
+                    int shift = transient != 0 ? 3 : 3 - lm, blocksN = transient != 0 ? 1 << lm : 1;
+                    int half = (CeltMdctGpu.MdctN >> shift) >> 1, frame = half * blocksN;
+                    int amp = backward ? (rng.Next(2) == 0 ? 1 << 18 : 1 << 12) : (rng.Next(2) == 0 ? 1 << 26 : 1 << 16);
+                    var input = new int[backward ? frame : frame + overlap];
+                    for (int i = 0; i < input.Length; i++) input[i] = rng.Next(-amp, amp);
+                    var output = new int[backward ? frame + overlap : frame];
+                    if (backward) for (int i = 0; i < output.Length; i++) output[i] = rng.Next(-(1 << 26), 1 << 26);
+                    cases[c] = new CeltMdctCase { Shift = shift, Blocks = blocksN };
+                    int o = c * B;
+                    Array.Copy(input, 0, blocks, o + CeltMdctGpuTestKernel.InAt, input.Length);
+                    Array.Copy(output, 0, blocks, o + CeltMdctGpuTestKernel.OutAt, output.Length);
+                    for (int b = 0; b < blocksN; b++)
+                    {
+                        if (backward)
+                            ConcentusCeltOracle.MdctBackward(ConcentusCeltOracle.Mdct, input, b, output, half * b, ConcentusCeltOracle.Window120,
+                                overlap, shift, blocksN);
+                        else
+                            ConcentusCeltOracle.MdctForward(ConcentusCeltOracle.Mdct, input, half * b, output, b, ConcentusCeltOracle.Window120,
+                                overlap, shift, blocksN);
+                    }
+                    want[c] = output;
+                }
+                using var dCases = acc.Allocate1D(cases);
+                using var dBlocks = acc.Allocate1D(blocks);
+                kernel.Run(backward, dCases.View, mode, dBlocks.View);
+                await acc.SynchronizeAsync();
+                var got = await dBlocks.CopyToHostAsync();
+                for (int c = 0; c < count; c++)
+                {
+                    int o = c * B + CeltMdctGpuTestKernel.OutAt;
+                    for (int i = 0; i < want[c].Length; i++)
+                        if (got[o + i] != want[c][i])
+                            throw new Exception($"clt_mdct_{(backward ? "backward" : "forward")} shift={cases[c].Shift} blocks={cases[c].Blocks}: " +
+                                $"out[{i}] {got[o + i]}, Concentus {want[c][i]}");
+                }
+            }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    [TestMethod]
+    public async Task CeltEnergyGpu_CoarseTfFineFinalise_BitExactVsConcentus()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            const int nb = CeltModeTables.NbEBands, count = 200, B = CeltEnergyGpuTestKernel.BlockInts;
+            var rng = new Random(0xC340);
+            var cases = new CeltEnergyCase[count]; var blocks = new int[count * B];
+            var packets = new List<byte>();
+            var want = new (int[] OldE, int[] Tf, uint[] Tell, uint Rng)[count];
+            for (int c = 0; c < count; c++)
+            {
+                // mono / stereo, every frame size, full band and the hybrid start band, intra and inter, transient or not; packets
+                // from 2 to 80 bytes so the coarse energy runs out of bits (the 2-bit icdf and 1-bit fallbacks) as well as Laplace-
+                // decodes; the previous frame's energies, fine_quant (0..8) and fine_priority at random, the same on both sides
+                int C = 1 + rng.Next(2), lm = rng.Next(4);
+                int start = rng.Next(4) == 0 ? 17 : 0;
+                int end = new[] { 13, 17, 19, 21 }[rng.Next(4)]; if (end <= start) end = nb;
+                int intra = rng.Next(2), transient = rng.Next(2), bitsLeft = rng.Next(48);
+                var oldE = new int[2 * nb]; for (int i = 0; i < oldE.Length; i++) oldE[i] = rng.Next(-12000, 20000);
+                var fine = new int[nb]; for (int i = 0; i < nb; i++) fine[i] = rng.Next(3) == 0 ? 0 : rng.Next(9);
+                var prio = new int[nb]; for (int i = 0; i < nb; i++) prio[i] = rng.Next(2);
+                var packet = new byte[2 + rng.Next(79)]; rng.NextBytes(packet);
+                cases[c] = new CeltEnergyCase { C = C, LM = lm, Start = start, End = end, Intra = intra, IsTransient = transient,
+                    BitsLeft = bitsLeft, PacketAt = packets.Count, PacketLength = packet.Length };
+                packets.AddRange(packet);
+                int o = c * B;
+                Array.Copy(oldE, 0, blocks, o + CeltEnergyGpuTestKernel.OldEAt, oldE.Length);
+                Array.Copy(fine, 0, blocks, o + CeltEnergyGpuTestKernel.FineAt, nb);
+                Array.Copy(prio, 0, blocks, o + CeltEnergyGpuTestKernel.PrioAt, nb);
+                var dec = ConcentusCeltOracle.Decoder(packet);
+                var tell = new uint[4];
+                var tf = new int[nb];
+                ConcentusCeltOracle.UnquantCoarseEnergy(ConcentusCeltOracle.Mode, start, end, oldE, intra, dec, packet, C, lm);
+                tell[0] = ConcentusCeltOracle.TellFrac(dec);
+                ConcentusCeltOracle.TfDecode(start, end, transient, tf, lm, dec, packet);
+                tell[1] = ConcentusCeltOracle.TellFrac(dec);
+                ConcentusCeltOracle.UnquantFineEnergy(ConcentusCeltOracle.Mode, start, end, oldE, fine, dec, packet, C);
+                tell[2] = ConcentusCeltOracle.TellFrac(dec);
+                ConcentusCeltOracle.UnquantEnergyFinalise(ConcentusCeltOracle.Mode, start, end, oldE, fine, prio, bitsLeft, dec, packet, C);
+                tell[3] = ConcentusCeltOracle.TellFrac(dec);
+                want[c] = (oldE, tf, tell, ConcentusCeltOracle.Rng(dec));
+            }
+            var (mode, modeBuffer) = CeltModeGpu.Upload(acc);
+            using var _ = modeBuffer;
+            using var dCases = acc.Allocate1D(cases);
+            using var dBlocks = acc.Allocate1D(blocks);
+            using var dPackets = acc.Allocate1D(packets.ToArray());
+            using var kernel = new CeltEnergyGpuTestKernel(acc);
+            kernel.Run(dCases.View, mode, dBlocks.View, dPackets.View);
+            await acc.SynchronizeAsync();
+            var got = await dBlocks.CopyToHostAsync();
+            string[] stage = { "unquant_coarse_energy", "tf_decode", "unquant_fine_energy", "unquant_energy_finalise" };
+            for (int c = 0; c < count; c++)
+            {
+                int o = c * B;
+                var w = want[c];
+                var k = cases[c];
+                string where = $"C={k.C} LM={k.LM} bands {k.Start}..{k.End} intra={k.Intra} transient={k.IsTransient} {k.PacketLength} bytes";
+                for (int s = 0; s < 4; s++)
+                    if ((uint)got[o + CeltEnergyGpuTestKernel.ResultsAt + s] != w.Tell[s])
+                        throw new Exception($"{stage[s]} {where}: tell_frac {(uint)got[o + CeltEnergyGpuTestKernel.ResultsAt + s]}, Concentus {w.Tell[s]}");
+                for (int i = k.Start; i < k.End; i++)
+                    if (got[o + CeltEnergyGpuTestKernel.TfAt + i] != w.Tf[i])
+                        throw new Exception($"tf_decode {where}: tf_res[{i}] {got[o + CeltEnergyGpuTestKernel.TfAt + i]}, Concentus {w.Tf[i]}");
+                for (int i = 0; i < 2 * nb; i++)
+                    if (got[o + CeltEnergyGpuTestKernel.OldEAt + i] != w.OldE[i])
+                        throw new Exception($"band energies {where}: oldEBands[{i}] {got[o + CeltEnergyGpuTestKernel.OldEAt + i]}, Concentus {w.OldE[i]}");
+                if ((uint)got[o + CeltEnergyGpuTestKernel.ResultsAt + 4] != w.Rng)
+                    throw new Exception($"energy decode {where}: rng {(uint)got[o + CeltEnergyGpuTestKernel.ResultsAt + 4]:X8}, Concentus {w.Rng:X8}");
+            }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    [TestMethod]
+    public async Task CeltSynthesisGpu_DenormaliseBands_BitExactVsConcentus()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            const int nb = CeltModeTables.NbEBands, count = 120, B = CeltSynthesisGpuTestKernel.BlockInts;
+            var rng = new Random(0xC341);
+            var cases = new CeltSynthesisCase[count]; var blocks = new int[count * B];
+            var want = new int[count][];
+            int[] downsamples = { 1, 1, 1, 2, 3, 4, 6 };
+            for (int c = 0; c < count; c++)
+            {
+                // every frame size, full band and the hybrid start band, every decimation, some silence frames; Q15 shapes and band
+                // energies from below the zero-gain cut (shift > 31) up to the largest gain whose shift stays >= 0 (above it
+                // Concentus 2.2.2 and libopus differ, see CeltSynthesisGpu.DenormaliseBands)
+                int lm = rng.Next(4), bigM = 1 << lm;
+                int start = rng.Next(4) == 0 ? 17 : 0;
+                int end = new[] { 13, 17, 19, 21 }[rng.Next(4)]; if (end <= start) end = nb;
+                int downsample = downsamples[rng.Next(downsamples.Length)], silence = rng.Next(8) == 0 ? 1 : 0;
+                var x = new int[120 * bigM]; for (int i = 0; i < x.Length; i++) x[i] = rng.Next(-32768, 32768);
+                var e = new int[nb];
+                for (int i = 0; i < nb; i++) e[i] = rng.Next(-20000, 17408 - (CeltModeTables.EMeans[i] << 6));
+                cases[c] = new CeltSynthesisCase { LM = lm, Start = start, End = end, Downsample = downsample, Silence = silence };
+                int o = c * B;
+                Array.Copy(x, 0, blocks, o + CeltSynthesisGpuTestKernel.XAt, x.Length);
+                Array.Copy(e, 0, blocks, o + CeltSynthesisGpuTestKernel.EAt, nb);
+                var freq = new int[120 * bigM]; for (int i = 0; i < freq.Length; i++) freq[i] = 0x5A5A5A5;
+                for (int i = 0; i < freq.Length; i++) blocks[o + CeltSynthesisGpuTestKernel.FreqAt + i] = freq[i];
+                ConcentusCeltOracle.DenormaliseBands(ConcentusCeltOracle.Mode, x, freq, 0, e, 0, start, end, bigM, downsample, silence);
+                want[c] = freq;
+            }
+            var (mode, modeBuffer) = CeltModeGpu.Upload(acc);
+            using var _ = modeBuffer;
+            using var dCases = acc.Allocate1D(cases);
+            using var dBlocks = acc.Allocate1D(blocks);
+            using var dPcm = acc.Allocate1D<short>(count * CeltSynthesisGpuTestKernel.PcmShorts);
+            using var kernel = new CeltSynthesisGpuTestKernel(acc);
+            kernel.Run(CeltSynthesisGpuTestKernel.Op.Denormalise, dCases.View, mode, dBlocks.View, dPcm.View);
+            await acc.SynchronizeAsync();
+            var got = await dBlocks.CopyToHostAsync();
+            for (int c = 0; c < count; c++)
+            {
+                int o = c * B + CeltSynthesisGpuTestKernel.FreqAt;
+                var k = cases[c];
+                for (int i = 0; i < want[c].Length; i++)
+                    if (got[o + i] != want[c][i])
+                        throw new Exception($"denormalise_bands LM={k.LM} bands {k.Start}..{k.End} downsample={k.Downsample} silence={k.Silence}: " +
+                            $"freq[{i}] {got[o + i]}, Concentus {want[c][i]}");
+            }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    [TestMethod]
+    public async Task CeltSynthesisGpu_Deemphasis_BitExactVsConcentus()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            const int count = 120, B = CeltSynthesisGpuTestKernel.BlockInts, P = CeltSynthesisGpuTestKernel.PcmShorts;
+            var rng = new Random(0xC342);
+            var cases = new CeltSynthesisCase[count]; var blocks = new int[count * B]; var pcm = new short[count * P];
+            var want = new (short[] Pcm, int[] Mem)[count];
+            int[] downsamples = { 1, 1, 1, 2, 3, 4, 6 };
+            for (int c = 0; c < count; c++)
+            {
+                // mono / stereo (the stereo fast path: downsample 1, no accum), every frame size and decimation, accumulating into
+                // the PCM there (hybrid) or not; the real coefficient (0.85 in Q15) or a random one up to 0.9; a signal of up to
+                // 2^26 (Q12, so samples saturate to int16 too) and filter memory of up to 2^27: with a gain of at most 1 / (1 - 0.9)
+                // the sums stay inside int32 (an overflow wraps in C# and is undefined in OpenCL C)
+                int lm = rng.Next(4), n = 120 << lm, C = 1 + rng.Next(2);
+                int downsample = downsamples[rng.Next(downsamples.Length)], accum = rng.Next(3) == 0 ? 1 : 0;
+                int coef0 = rng.Next(2) == 0 ? 27853 : rng.Next(0, 29492);
+                var input = new int[2][];
+                for (int ch = 0; ch < 2; ch++)
+                {
+                    input[ch] = new int[n];
+                    int amp = rng.Next(2) == 0 ? 1 << 26 : 1 << 16;
+                    for (int i = 0; i < n; i++) input[ch][i] = rng.Next(-amp, amp);
+                }
+                var mem = new[] { rng.Next(-(1 << 27), 1 << 27), rng.Next(-(1 << 27), 1 << 27) };
+                var outPcm = new short[P]; for (int i = 0; i < P; i++) outPcm[i] = (short)rng.Next(-32768, 32768);
+                cases[c] = new CeltSynthesisCase { LM = lm, C = C, Downsample = downsample, Accum = accum, Coef0 = coef0 };
+                int o = c * B;
+                for (int ch = 0; ch < 2; ch++)
+                    Array.Copy(input[ch], 0, blocks, o + CeltSynthesisGpuTestKernel.InAt + ch * CeltSynthesisGpuTestKernel.InStride, n);
+                blocks[o + CeltSynthesisGpuTestKernel.MemAt] = mem[0];
+                blocks[o + CeltSynthesisGpuTestKernel.MemAt + 1] = mem[1];
+                Array.Copy(outPcm, 0, pcm, c * P, P);
+                ConcentusCeltOracle.Deemphasis(input, new int[2], outPcm, 0, n, C, downsample, new[] { coef0, 0, 0, 0 }, mem, accum);
+                want[c] = (outPcm, mem);
+            }
+            var (mode, modeBuffer) = CeltModeGpu.Upload(acc);
+            using var _ = modeBuffer;
+            using var dCases = acc.Allocate1D(cases);
+            using var dBlocks = acc.Allocate1D(blocks);
+            using var dPcm = acc.Allocate1D(pcm);
+            using var kernel = new CeltSynthesisGpuTestKernel(acc);
+            kernel.Run(CeltSynthesisGpuTestKernel.Op.Deemphasis, dCases.View, mode, dBlocks.View, dPcm.View);
+            await acc.SynchronizeAsync();
+            var gotPcm = await dPcm.CopyToHostAsync();
+            var gotBlocks = await dBlocks.CopyToHostAsync();
+            for (int c = 0; c < count; c++)
+            {
+                var k = cases[c];
+                string where = $"C={k.C} N={120 << k.LM} downsample={k.Downsample} accum={k.Accum} coef={k.Coef0}";
+                for (int i = 0; i < P; i++)
+                    if (gotPcm[c * P + i] != want[c].Pcm[i])
+                        throw new Exception($"deemphasis {where}: pcm[{i}] {gotPcm[c * P + i]}, Concentus {want[c].Pcm[i]}");
+                for (int ch = 0; ch < k.C; ch++)
+                    if (gotBlocks[c * B + CeltSynthesisGpuTestKernel.MemAt + ch] != want[c].Mem[ch])
+                        throw new Exception($"deemphasis {where}: mem[{ch}] {gotBlocks[c * B + CeltSynthesisGpuTestKernel.MemAt + ch]}, Concentus {want[c].Mem[ch]}");
             }
         }
         finally { ReleaseAccelerator(ctx, acc); }

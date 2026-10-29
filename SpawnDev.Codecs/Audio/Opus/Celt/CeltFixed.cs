@@ -125,6 +125,12 @@ internal static class CeltFixed
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int HALF32(int x)
+    {
+        return SHR32(x, 1);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int IMAX(int a, int b)
     {
         if (a <= b)
@@ -393,6 +399,12 @@ internal static class CeltFixed
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static short SAT16(int x)
+    {
+        return (x > 32767) ? short.MaxValue : ((x < -32768) ? short.MinValue : ((short)x));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int SHL(int a, int shift)
     {
         return SHL32(a, shift);
@@ -450,6 +462,15 @@ internal static class CeltFixed
     internal static int SHR32(int a, int shift)
     {
         return a >> shift;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static short SIG2WORD16(int x)
+    {
+        x = PSHR32(x, 12);
+        x = MAX32(x, -32768);
+        x = MIN32(x, 32767);
+        return EXTRACT16(x);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

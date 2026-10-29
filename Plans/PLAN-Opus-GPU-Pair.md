@@ -216,6 +216,19 @@ Bit-exact testing strategy: each primitive ships with NUnit tests against the CP
   **All 7 primitives of this list are in.** What the CELT integration still needs from bands.c / quant_bands.c / mdct.c: the band
   recursion (quant_all_bands, quant_band, quant_partition, compute_theta), energy (un)quantization with the Laplace coder
   (coarse / fine / final), tf_decode, denormalise_bands, the backward MDCT (KissFFT) and de-emphasis.
+- **2026-10-29: all of that list is in, decode side.** `Celt/CeltQuantBandsGpu.cs` = the band recursion (`QuantAllBandsDecode`,
+  `QuantBandDecode` / `QuantBandStereoDecode`, `QuantPartitionDecode` as an explicit-stack loop, `ComputeThetaDecode`);
+  `Celt/CeltEnergyGpu.cs` = `LaplaceDecode`, `UnquantCoarseEnergy` / `UnquantFineEnergy` / `UnquantEnergyFinalise`;
+  `Celt/CeltSynthesisGpu.cs` = `TfDecode`, `DenormaliseBands`, `Deemphasis`; `Celt/CeltMdctGpu.cs` = KissFFT + `Backward` /
+  `Forward`; `Celt/CeltEntropyGpu.cs` = the decoder calls CELT needs beyond `OpusRangeDecoderGpu` (`Decode`, `DecodeBin`,
+  `DecUpdate`, `Tell`, `TellFrac`). Bit-exact vs Concentus on CPU, Velocity, CUDA and OpenCL (123 CELT test runs, 0 failed).
+  The band recursion found two SpawnDev.ILGPU bugs (fixed in 5.4.12-local.1): Velocity hung on a loop that leaves from both
+  arms of an if, and WebGPU ran the wrong arm's code after an if-arm's back edge. One deliberate difference from Concentus:
+  `DenormaliseBands` follows libopus when a band's gain shift is negative (Concentus does not advance there).
+  **Next:** the libopus 1.5.2 fixtures (Geordi, TestData/Opus: CELT-only and hybrid streams with losses) are the reference
+  for the decoder; Concentus is libopus ~1.1, so any primitive 1.5.2 changed gets fixed to 1.5.2 there. Then the header reads
+  of celt_decode_with_ec (silence, post-filter, transient, intra, spread, dynalloc, trim, anti-collapse bit), the
+  synthesis + post-filter + state updates, and `CeltDecoderGpu`; then PLC (celt_decode_lost); then the encoder.
 
 ### 2026-10-29 status and the full decode glue (Geordi)
 
