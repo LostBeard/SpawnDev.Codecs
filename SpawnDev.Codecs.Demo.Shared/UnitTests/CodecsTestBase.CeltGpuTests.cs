@@ -34,7 +34,13 @@ public abstract partial class CodecsTestBase
             A.GetType("Concentus.Celt." + type, true)!.GetMethod(name, Any, null, args, null)
             ?? throw new MissingMethodException("Concentus.Celt." + type, name);
 
-        private static Delegate Emit(Type delegateType, MethodInfo target, int entropyCoderArg)
+        private static readonly Type ModeT = A.GetType("Concentus.Celt.Structs.CeltMode", true)!;
+        /// <summary>Concentus' static 48 kHz / 960 mode (CeltMode.mode48000_960_120).</summary>
+        public static readonly object Mode = ModeT.GetField("mode48000_960_120", Any)!.GetValue(null)!;
+
+        /// <summary>A DynamicMethod calling <paramref name="target"/> with the arguments at the <paramref name="casts"/> indices cast
+        /// to Concentus' internal types (the delegate passes them as object).</summary>
+        private static Delegate Emit(Type delegateType, MethodInfo target, Dictionary<int, Type> casts)
         {
             var parameters = delegateType.GetMethod("Invoke")!.GetParameters().Select(p => p.ParameterType).ToArray();
             var dm = new DynamicMethod("oracle_" + target.Name, delegateType.GetMethod("Invoke")!.ReturnType, parameters,
@@ -43,7 +49,7 @@ public abstract partial class CodecsTestBase
             for (int i = 0; i < parameters.Length; i++)
             {
                 il.Emit(OpCodes.Ldarg, (short)i);
-                if (i == entropyCoderArg) il.Emit(OpCodes.Castclass, Ec);
+                if (casts.TryGetValue(i, out var castTo)) il.Emit(OpCodes.Castclass, castTo);
             }
             il.Emit(target.IsStatic ? OpCodes.Call : OpCodes.Callvirt, target);
             il.Emit(OpCodes.Ret);
@@ -63,9 +69,40 @@ public abstract partial class CodecsTestBase
         public static readonly StereoIthetaFn StereoItheta = (StereoIthetaFn)Delegate.CreateDelegate(typeof(StereoIthetaFn),
             M("VQ", "stereo_itheta", typeof(Span<int>), typeof(Span<int>), typeof(int), typeof(int)));
         private static readonly AlgQuantFn AlgQuant = (AlgQuantFn)Emit(typeof(AlgQuantFn),
-            M("VQ", "alg_quant", typeof(Span<int>), typeof(int), typeof(int), typeof(int), typeof(int), typeof(int), Ec, typeof(Span<byte>)), 6);
+            M("VQ", "alg_quant", typeof(Span<int>), typeof(int), typeof(int), typeof(int), typeof(int), typeof(int), Ec, typeof(Span<byte>)),
+            new Dictionary<int, Type> { [6] = Ec });
         private static readonly EncDoneFn EncDone = (EncDoneFn)Emit(typeof(EncDoneFn),
-            Ec.GetMethod("enc_done", Any, null, new[] { typeof(Span<byte>) }, null)!, 0);
+            Ec.GetMethod("enc_done", Any, null, new[] { typeof(Span<byte>) }, null)!, new Dictionary<int, Type> { [0] = Ec });
+
+        public delegate int ComputeAllocationDecodeFn(object m, int start, int end, int[] offsets, int[] cap, int allocTrim,
+            ref int intensity, ref int dualStereo, int total, out int balance, int[] pulses, int[] ebits, int[] finePriority,
+            int c, int lm, object ec, ReadOnlySpan<byte> data, int prev, int signalBandwidth);
+        public delegate void DecInitFn(object ec, ReadOnlySpan<byte> buf, uint storage);
+        private static readonly Type IntRef = typeof(int).MakeByRefType();
+        public static readonly ComputeAllocationDecodeFn ComputeAllocationDecode = (ComputeAllocationDecodeFn)Emit(typeof(ComputeAllocationDecodeFn),
+            M("Rate", "compute_allocation_decode", ModeT, typeof(int), typeof(int), typeof(int[]), typeof(int[]), typeof(int), IntRef, IntRef,
+                typeof(int), IntRef, typeof(int[]), typeof(int[]), typeof(int[]), typeof(int), typeof(int), Ec, typeof(ReadOnlySpan<byte>),
+                typeof(int), typeof(int)),
+            new Dictionary<int, Type> { [0] = ModeT, [15] = Ec });
+        private static readonly DecInitFn DecInit = (DecInitFn)Emit(typeof(DecInitFn),
+            Ec.GetMethod("dec_init", Any, null, new[] { typeof(ReadOnlySpan<byte>), typeof(uint) }, null)!, new Dictionary<int, Type> { [0] = Ec });
+        private static readonly MethodInfo InitCapsM = M("CeltCommon", "init_caps", ModeT, typeof(int[]), typeof(int), typeof(int));
+
+        /// <summary>Concentus init_caps for the static mode.</summary>
+        public static int[] InitCaps(int lm, int c)
+        {
+            var cap = new int[CeltModeTables.NbEBands];
+            InitCapsM.Invoke(null, new object[] { Mode, cap, lm, c });
+            return cap;
+        }
+
+        /// <summary>A Concentus range decoder over <paramref name="packet"/>.</summary>
+        public static object Decoder(byte[] packet)
+        {
+            object ec = Activator.CreateInstance(Ec, true)!;
+            DecInit(ec, packet, (uint)packet.Length);
+            return ec;
+        }
 
         public static int Cwrsi(int n, int k, uint i, int[] y) => (int)CwrsiM.Invoke(null, new object[] { n, k, i, y })!;
         public static uint Icwrs(int n, int[] y) => (uint)IcwrsM.Invoke(null, new object[] { n, y })!;
@@ -365,6 +402,72 @@ public abstract partial class CodecsTestBase
             var (_, _, s) = await CeltPvqLaunchAsync(acc, CeltPvqGpuTestKernel.Op.StereoItheta, cases, xIn, yIn, new uint[count]);
             for (int c = 0; c < count; c++)
                 if ((int)s[c] != want[c]) throw new Exception($"stereo_itheta N={cases[c].N} stereo={cases[c].Gain}: {(int)s[c]}, Concentus {want[c]}");
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    [TestMethod]
+    public async Task CeltRateGpu_ComputeAllocationDecode_BitExactVsConcentus()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            const int nb = CeltModeTables.NbEBands, count = 150;
+            var rng = new Random(0xC320);
+            var cases = new CeltRateCase[count]; var blocks = new int[count * CeltRateGpuTestKernel.OutInts];
+            var packets = new List<byte>();
+            var want = new (int[] Cap, int[] Pulses, int[] Ebits, int[] Fine, int Coded, int Balance, int Intensity, int Dual)[count];
+            for (int c = 0; c < count; c++)
+            {
+                // mono / stereo, every frame size, full band and the hybrid start band, every trim, small and large budgets;
+                // the allocation decisions (skip, intensity, dual stereo) decode from random bytes, the same bytes on both sides
+                int C = 1 + rng.Next(2), lm = rng.Next(4);
+                int start = rng.Next(4) == 0 ? 17 : 0;
+                int end = new[] { 13, 17, 19, 21 }[rng.Next(4)]; if (end <= start) end = nb;
+                int trim = rng.Next(11), total = rng.Next(rng.Next(2) == 0 ? 2000 : 16000);
+                int prev = rng.Next(nb + 1), signalBandwidth = rng.Next(end);
+                var offsets = new int[nb];
+                for (int i = start; i < end; i++) if (rng.Next(5) == 0) offsets[i] = 8 * (1 + rng.Next(6)) * C;
+                var packet = new byte[64]; rng.NextBytes(packet);
+                cases[c] = new CeltRateCase { Start = start, End = end, AllocTrim = trim, Total = total, C = C, LM = lm, Prev = prev,
+                    SignalBandwidth = signalBandwidth, PacketAt = packets.Count, PacketLength = packet.Length };
+                packets.AddRange(packet);
+                Array.Copy(offsets, 0, blocks, c * CeltRateGpuTestKernel.OutInts, nb);
+                var cap = ConcentusCeltOracle.InitCaps(lm, C);
+                var pulses = new int[nb]; var ebits = new int[nb]; var fine = new int[nb];
+                int intensity = 0, dual = 0;
+                int coded = ConcentusCeltOracle.ComputeAllocationDecode(ConcentusCeltOracle.Mode, start, end, offsets, (int[])cap.Clone(), trim,
+                    ref intensity, ref dual, total, out int balance, pulses, ebits, fine, C, lm, ConcentusCeltOracle.Decoder(packet), packet,
+                    prev, signalBandwidth);
+                want[c] = (cap, pulses, ebits, fine, coded, balance, intensity, dual);
+            }
+            var (mode, modeBuffer) = CeltModeGpu.Upload(acc);
+            using var _ = modeBuffer;
+            using var dCases = acc.Allocate1D(cases);
+            using var dBlocks = acc.Allocate1D(blocks);
+            using var dScratch = acc.Allocate1D<int>(count * 4 * nb);
+            using var dPackets = acc.Allocate1D(packets.ToArray());
+            using var kernel = new CeltRateGpuTestKernel(acc);
+            kernel.Run(dCases.View, mode, dBlocks.View, dScratch.View, dPackets.View);
+            await acc.SynchronizeAsync();
+            var got = await dBlocks.CopyToHostAsync();
+            for (int c = 0; c < count; c++)
+            {
+                int o = c * CeltRateGpuTestKernel.OutInts;
+                var w = want[c];
+                string where = $"C={cases[c].C} LM={cases[c].LM} bands {cases[c].Start}..{cases[c].End} trim={cases[c].AllocTrim} total={cases[c].Total}";
+                for (int i = 0; i < nb; i++)
+                {
+                    if (got[o + nb + i] != w.Cap[i]) throw new Exception($"init_caps {where}: cap[{i}] {got[o + nb + i]}, Concentus {w.Cap[i]}");
+                    if (got[o + 2 * nb + i] != w.Pulses[i]) throw new Exception($"compute_allocation {where}: pulses[{i}] {got[o + 2 * nb + i]}, Concentus {w.Pulses[i]}");
+                    if (got[o + 3 * nb + i] != w.Ebits[i]) throw new Exception($"compute_allocation {where}: ebits[{i}] {got[o + 3 * nb + i]}, Concentus {w.Ebits[i]}");
+                    if (got[o + 4 * nb + i] != w.Fine[i]) throw new Exception($"compute_allocation {where}: fine_priority[{i}] {got[o + 4 * nb + i]}, Concentus {w.Fine[i]}");
+                }
+                int r = o + 5 * nb;
+                if (got[r] != w.Coded || got[r + 1] != w.Balance || got[r + 2] != w.Intensity || got[r + 3] != w.Dual)
+                    throw new Exception($"compute_allocation {where}: coded/balance/intensity/dual {got[r]}/{got[r + 1]}/{got[r + 2]}/{got[r + 3]}, " +
+                        $"Concentus {w.Coded}/{w.Balance}/{w.Intensity}/{w.Dual}");
+            }
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }

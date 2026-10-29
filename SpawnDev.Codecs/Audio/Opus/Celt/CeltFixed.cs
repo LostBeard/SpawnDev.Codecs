@@ -155,6 +155,26 @@ internal static class CeltFixed
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static int MAX32(int a, int b)
+    {
+        if (a <= b)
+        {
+            return b;
+        }
+        return a;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static float MAX32(float a, float b)
+    {
+        if (!(a > b))
+        {
+            return b;
+        }
+        return a;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int MIN32(int a, int b)
     {
         if (a >= b)

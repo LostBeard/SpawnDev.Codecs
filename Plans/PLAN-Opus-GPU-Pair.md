@@ -202,7 +202,12 @@ Bit-exact testing strategy: each primitive ships with NUnit tests against the CP
   `RenormaliseVector`, `StereoItheta`), table `Celt/CeltPvqTables.cs`. Bit-exact vs Concentus on the CPU and Velocity
   accelerators (300-400 random cases per function in the dev loop; 100-120 per test in the suite). The encoder side codes the
   band with `ec_enc_uint(Icwrs(n, pulses), PvqV(n, k))`, which needs a GPU `EncodeUint` in `OpusRangeCoderGpu` (Geordi).
-- Next: bit allocation (rate.c `compute_allocation`), then anti-collapse and stereo (bands.c), then the comb pre/post-filter.
+- **2026-10-29: bit allocation done, decode side** (item 1): `Celt/CeltRateGpu.cs` = rate.c (`ComputeAllocationDecode` +
+  `InterpBits2PulsesDecode`, `Bits2Pulses` / `Pulses2Bits` / `GetPulses`) + `InitCaps`; the static 48 kHz mode's tables in
+  `Celt/CeltModeTables.cs`, on the accelerator as `CeltModeGpu` (one int view + offsets). Bit-exact vs Concentus (caps, shape bits,
+  fine bits, fine priorities, coded bands, balance, intensity, dual stereo; mono / stereo, LM 0..3, hybrid start band). The
+  encode side (the same decisions written with enc_bit_logp / enc_uint) waits for the GPU range encoder.
+- Next: anti-collapse and stereo (bands.c), then the comb pre/post-filter.
 
 ### Step 3 - CELT integration kernel
 
