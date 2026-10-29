@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Toward 1.0.0: project split done, Opus GPU range encoder, CELT GPU primitives, VP9 WebGPU green (2026-10-29)
+- **Where the "Path to 1.0.0 stable" bar stands** (0.3.0-rc.1 section below): (1) the Opus GPU pair is in progress (below);
+  (2) Vorbis decoder v2 is DONE (`VorbisAudioDecoderGpu.DecodePacketAsync` runs `VorbisPacketDecodeKernel.Step` on every
+  backend; the host reads back only the packet header / floor flags it needs to orchestrate); (3) the project split is DONE
+  (below); (4) the May ILGPU bugs (WebGPU `SubViewValue`, Wasm OOB) are long fixed.
+- **Project split:** the CPU implementations still in the main library moved to `SpawnDev.Codecs.References` (same
+  namespaces): the AV1 CPU keyframe encoder and its pipeline (coefficient coder, 2D transforms, Dct32 / Dct64 / identity,
+  intra predictors, quantizer, mode-info reader, partition context), the VP9 Idct / Iadst / Iht Reference transforms, bool
+  decoder and compressed-header parsers, the VP8 CPU predictors / transforms / frame buffer, and the Vorbis CPU floor /
+  residue decoders. What the GPU paths needed from them stays in main: `Av1KeyframeFraming` (the TD + SH OBUs and the
+  uncompressed header `Av1KeyframeEncoderGpu` uploads), `Av1IntraModeContext.Table`, the `Vp9TxType4x4` / `Vp9TxType8x8` and
+  `Vp8IntraMode4x4` enums, `Vp9SkipProbs.DefaultProbs`. What remains in main besides kernels is tables, stream-header
+  parsers / writers and the 1D transforms the kernels share.
+- **`OpusRangeEncoderGpu`** (was scaffolding that produced AV1 bytes): libopus `celt/entenc.c` statement for statement on the
+  accelerator, every entry point (encode, encode_bin, bit_logp, icdf 8 / 16-bit, uint, bits, patch_initial_bits, shrink,
+  tell, tell_frac, done). Byte-identical with Concentus' EntropyCoder on random scripts incl. overflow, ec_tell / tell_frac
+  equal after every op (CPU, Velocity, CUDA, OpenCL). Concentus 2.2.2's `enc_shrink` moves the raw-bit tail the wrong way
+  (its MemMoveByte takes (src, dst)); ours follows libopus.
+- **CELT GPU primitives (Data):** PVQ (cwrs.c + vq.c: decode, encoder pulse search, spread rotation, stereo theta), bit
+  allocation (rate.c, decode side) with the 48 kHz mode tables on the accelerator, anti-collapse / intensity / mid-side /
+  Haar / Hadamard (bands.c), comb pre/post-filter. Each bit-exact with Concentus.
+- **VP9 on WebGPU green** (267 / 0; WebGPU video 468 / 0) with a TJ-approved workaround: a drain after each wavefront
+  group-kernel slice. The device hang it avoids reproduces in Chrome with no ILGPU (a replay of the recorded WebGPU calls), so
+  it is below ILGPU (Dawn D3D12 or the NVIDIA driver); upstream report drafted. See Docs/status.md.
+- **ILGPU 5.4.11** (released; forks 2.4.10). **PlaywrightMultiTest:** `PMT_INIT_SCRIPT` adds a JS file to every page.
+
 ### Lossless model-weight packing; WebGL lane runs for real; ILGPU 5.4.6-local.1 (2026-10-26)
 - **New `WeightPackGpu`** (`SpawnDev.Codecs.Compression`, three overloads, format "SDWP" v1): lossless tensors (BF16 / FP16 / FP32 / any element size 1..16) as byte planes (`ShuffleFilterGpu`) cut into 64 KiB chunks, each ONE standard raw DEFLATE stream at the new Huffman-only level, plus a length table; any zlib reads every chunk. Compression: one thread per chunk in waves (DeflateGpu phases as bounded launches); decompression: chunk offsets from the table on the accelerator, one InflateGpu thread per chunk in waves, un-shuffle. Measured on our models (same samples, ratio = packed / original): BF16 0.677 (ZipNN 0.719, zstd -3 0.788), FP16 0.662 (ZipNN 0.675), FP32 0.833 (ZipNN 0.771: its zstd stage finds long-range repeats this coder does not).
 - **`DeflateGpu.LevelHuffmanOnly` (4)** = zlib Z_HUFFMAN_ONLY (literals only, the block's own dynamic code); `ZlibCompressorGpu` takes level 4. Only level 3 is the lazy parse now (was `>= 3`).

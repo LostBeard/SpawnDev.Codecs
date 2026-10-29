@@ -92,8 +92,9 @@ lanes (VP9 batch encode at unaligned sizes).
   recorded WebGPU calls of the failing page DOES hang in a fresh Chrome with no ILGPU (2 of 2, 2026-10-29), so the fault is
   below ILGPU (Dawn D3D12 or the NVIDIA driver). Minimal so far: one 64x64 single-frame encode's submit, then the batch
   group kernel + one entropy step (both required), then one 1-workgroup `Vp9EncodeWavefrontBatchKernel` dispatch. Workaround: `SynchronizeAsync` after each group-kernel slice in
-  `Vp9FrameSequentialEncodeKernel.TryRunBatchSingleDispatchAsync` (`// WORKAROUND:`). Next: shrink the replay further (each
-  try resets the GPU) for an upstream report; the drain comes out once the cause is fixed. Regression test:
+  `Vp9FrameSequentialEncodeKernel.TryRunBatchSingleDispatchAsync` (`// WORKAROUND:`). Upstream report drafted with a reduced trace that still hangs (SpawnDev.ILGPU
+  Plans/webgpu-d3d12-device-hung-trace-replay-upstream-report.md, attachment _upstream_reports/vp9-webgpu-device-hung.zip);
+  TJ files it. The drain comes out once the cause is fixed. Regression test:
   WebGPU `Batch_ArrayViewOverload` then `Batch_Unaligned` in one page (the order the suite runs them).
 
 - **ILGPU 5.4.6-local.2** (2026-10-26): integer divisions no longer hoisted out of their guards (Wasm traps), WebGL sends a
