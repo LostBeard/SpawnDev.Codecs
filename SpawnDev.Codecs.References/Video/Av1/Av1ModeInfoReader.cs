@@ -63,16 +63,6 @@ public static class Av1ModeInfoReader
     /// <summary>libaom <c>FILTER_INTRA_MODES</c>: 5.</summary>
     public const int FilterIntraModes = 5;
 
-    /// <summary>
-    /// libaom <c>intra_mode_context[INTRA_MODES]</c> from
-    /// av1/common/common_data.h line 411. Maps a PREDICTION_MODE to a 0..4
-    /// "context bucket" used by <c>get_y_mode_cdf</c> to pick the
-    /// <see cref="Av1DefaultIntraModeCdfs.DefaultKfYModeCdf"/> row.
-    /// </summary>
-    public static readonly int[] IntraModeContext = new int[]
-    {
-        0, 1, 2, 3, 4, 4, 4, 4, 3, 0, 1, 2, 0,
-    };
 
     /// <summary>
     /// Decode the per-block mode info for one keyframe block at (miRow, miCol)
@@ -150,8 +140,8 @@ public static class Av1ModeInfoReader
         // 5. read_intra_mode (Y) - uses kf_y CDF with above+left intra mode context.
         Av1IntraMode aboveYMode = above is not null ? above.YMode : Av1IntraMode.Dc;
         Av1IntraMode leftYMode = left is not null ? left.YMode : Av1IntraMode.Dc;
-        int aboveCtx = IntraModeContext[(int)aboveYMode];
-        int leftCtx = IntraModeContext[(int)leftYMode];
+        int aboveCtx = Av1IntraModeContext.Table[(int)aboveYMode];
+        int leftCtx = Av1IntraModeContext.Table[(int)leftYMode];
         var yModeCdf = Av1DefaultIntraModeCdfs.DefaultKfYModeCdf[aboveCtx][leftCtx];
         mi.YMode = (Av1IntraMode)rd.DecodeCdfQ15(yModeCdf, IntraModes);
 

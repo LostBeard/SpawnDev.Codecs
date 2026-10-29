@@ -215,7 +215,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         ArrayView1D<byte, global::ILGPU.Stride1D.Dense> output, ArrayView1D<int, global::ILGPU.Stride1D.Dense> outLen,
         int maxTile)
     {
-        byte[] blob = Av1KeyframeEncoder.BuildFramingBlob(width, height, baseQIndex, out int aLen, out int bLen);
+        byte[] blob = Av1KeyframeFraming.BuildFramingBlob(width, height, baseQIndex, out int aLen, out int bLen);
         if (blob.Length > BlobCapacity) throw new InvalidOperationException("AV1 framing blob exceeds its buffer (internal error).");
         DeviceTransfer.Upload(_blob.View, blob);
         _obu.Run(_blob.View, tile, tileLen, output, outLen, aLen, bLen, aLen + 1 + 5 + bLen + maxTile);
@@ -337,7 +337,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
             p, frameCount, strides);
 
         // One shared framing blob; one assemble dispatch per frame straight into the caller's slot (paced).
-        byte[] blob = Av1KeyframeEncoder.BuildFramingBlob(width, height, baseQIndex, out int aLen, out int bLen);
+        byte[] blob = Av1KeyframeFraming.BuildFramingBlob(width, height, baseQIndex, out int aLen, out int bLen);
         DeviceTransfer.Upload(_blob.View, blob);
         var obuPacer = new LaunchPacer(_accelerator);
         for (int f = 0; f < frameCount; f++)

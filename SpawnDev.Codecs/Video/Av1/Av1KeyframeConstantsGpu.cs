@@ -307,7 +307,7 @@ public static class Av1KeyframeConstantsGpu
         }
 
         // IntraModeContext (each value fits 0..4, safe in byte storage).
-        var imc = Av1ModeInfoReader.IntraModeContext;
+        var imc = Av1IntraModeContext.Table;
         for (int i = 0; i < IntraModeContextLength && i < imc.Length; i++)
             buf[IntraModeContextOffset + i] = (byte)imc[i];
 

@@ -105,9 +105,9 @@ public abstract partial class CodecsTestBase
             ?.GetMethod("LookupVector", BindingFlags.NonPublic | BindingFlags.Static);
         if (lookupMethod is null)
         {
-            // The internal helper is in a separate type within the same file;
+            // The internal helper is a separate type in the same file (SpawnDev.Codecs.References);
             // try the file-level assembly directly.
-            lookupMethod = typeof(VorbisCodebook).Assembly
+            lookupMethod = typeof(VorbisResidueDecoder).Assembly
                 .GetTypes()
                 .FirstOrDefault(t => t.Name == "VorbisCodebookVector")
                 ?.GetMethod("LookupVector", BindingFlags.NonPublic | BindingFlags.Static);

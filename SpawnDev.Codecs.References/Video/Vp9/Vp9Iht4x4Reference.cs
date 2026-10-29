@@ -17,19 +17,6 @@
 
 namespace SpawnDev.Codecs.Video.Vp9;
 
-/// <summary>VP9 4x4 transform-type code (spec sec 8.7.1.6).</summary>
-public enum Vp9TxType4x4
-{
-    /// <summary>Both dimensions use iDCT.</summary>
-    DctDct = 0,
-    /// <summary>Rows use iADST, columns use iDCT.</summary>
-    AdstDct = 1,
-    /// <summary>Rows use iDCT, columns use iADST.</summary>
-    DctAdst = 2,
-    /// <summary>Both dimensions use iADST.</summary>
-    AdstAdst = 3,
-}
-
 /// <summary>
 /// CPU reference for VP9 inverse 2D 4x4 hybrid transform. Matches libvpx
 /// <c>vp9_iht4x4_16_add_c</c> bit-exactly across all four tx_types.

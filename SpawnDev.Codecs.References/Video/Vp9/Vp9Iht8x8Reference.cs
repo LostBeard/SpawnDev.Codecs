@@ -18,19 +18,6 @@
 
 namespace SpawnDev.Codecs.Video.Vp9;
 
-/// <summary>VP9 8x8 transform-type code.</summary>
-public enum Vp9TxType8x8
-{
-    /// <summary>Both dimensions iDCT.</summary>
-    DctDct = 0,
-    /// <summary>Rows iADST, columns iDCT.</summary>
-    AdstDct = 1,
-    /// <summary>Rows iDCT, columns iADST.</summary>
-    DctAdst = 2,
-    /// <summary>Both dimensions iADST.</summary>
-    AdstAdst = 3,
-}
-
 /// <summary>CPU oracle for VP9 inverse 2D 8x8 hybrid transform.</summary>
 public static class Vp9Iht8x8Reference
 {

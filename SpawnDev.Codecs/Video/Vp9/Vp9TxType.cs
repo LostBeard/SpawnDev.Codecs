@@ -90,3 +90,29 @@ public static class Vp9IntraTxType
         return Lookup[idx];
     }
 }
+
+/// <summary>VP9 4x4 transform-type code (spec sec 8.7.1.6).</summary>
+public enum Vp9TxType4x4
+{
+    /// <summary>Both dimensions use iDCT.</summary>
+    DctDct = 0,
+    /// <summary>Rows use iADST, columns use iDCT.</summary>
+    AdstDct = 1,
+    /// <summary>Rows use iDCT, columns use iADST.</summary>
+    DctAdst = 2,
+    /// <summary>Both dimensions use iADST.</summary>
+    AdstAdst = 3,
+}
+
+/// <summary>VP9 8x8 transform-type code.</summary>
+public enum Vp9TxType8x8
+{
+    /// <summary>Both dimensions iDCT.</summary>
+    DctDct = 0,
+    /// <summary>Rows iADST, columns iDCT.</summary>
+    AdstDct = 1,
+    /// <summary>Rows iDCT, columns iADST.</summary>
+    DctAdst = 2,
+    /// <summary>Both dimensions iADST.</summary>
+    AdstAdst = 3,
+}

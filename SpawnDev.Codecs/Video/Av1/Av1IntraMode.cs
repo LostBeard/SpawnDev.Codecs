@@ -35,3 +35,18 @@ public enum Av1IntraMode : byte
     /// <summary>PAETH_PRED: per-pixel "minimum gradient" prediction.</summary>
     Paeth = 12,
 }
+
+/// <summary>AV1 intra-mode context buckets (libaom <c>intra_mode_context</c>).</summary>
+public static class Av1IntraModeContext
+{
+    /// <summary>
+    /// libaom <c>intra_mode_context[INTRA_MODES]</c> from
+    /// av1/common/common_data.h line 411. Maps a PREDICTION_MODE to a 0..4
+    /// "context bucket" used by <c>get_y_mode_cdf</c> to pick the
+    /// <see cref="Av1DefaultIntraModeCdfs.DefaultKfYModeCdf"/> row.
+    /// </summary>
+    public static readonly int[] Table = new int[]
+    {
+        0, 1, 2, 3, 4, 4, 4, 4, 3, 0, 1, 2, 0,
+        };
+}
