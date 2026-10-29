@@ -172,3 +172,93 @@ public abstract partial class CodecsTestBase
         => await RunSilkPacketDecoderGpuStream(new("10ms-bw-switch-8k", 16000, 1, CBandwidth.OPUS_BANDWIDTH_WIDEBAND, 10, 8000, 1, false, 48, 16000,
             BandwidthAt: p => ((p / 8) % 3) switch { 0 => CBandwidth.OPUS_BANDWIDTH_WIDEBAND, 1 => CBandwidth.OPUS_BANDWIDTH_NARROWBAND, _ => CBandwidth.OPUS_BANDWIDTH_MEDIUMBAND }));
 }
+
+public abstract partial class CodecsTestBase
+{
+    /// <summary>
+    /// OpusDecoderGpu on a SILK stream whose packets are regrouped by Concentus' repacketizer into 1-, 2- and 3-frame
+    /// packets (frame packing codes 0, 1 / 2 and 3; every fourth one padded), decoded through both the managed and the
+    /// device-resident overloads: equal to the CPU OpusDecoder on every packet.
+    /// </summary>
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OpusDecoderGpu_SilkRepacketizedStream_MatchesCpu()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            const int rate = 16000, channels = 2, frameSamples = 320, packets = 36;
+            float[] signal = SilkTestSignal(rate, channels, frameSamples * packets, seed: 77);
+            using var enc = OpusCodecFactory.CreateEncoder(rate, channels, OpusApplication.OPUS_APPLICATION_VOIP);
+            enc.ForceMode = CMode.MODE_SILK_ONLY;
+            enc.Bitrate = 40000;
+            enc.ForceChannels = 2;
+            enc.UseInbandFEC = true;
+            enc.PacketLossPercent = 20;
+            var single = new List<byte[]>();
+            var buf = new byte[1275];
+            for (int p = 0; p < packets; p++)
+            {
+                int n = enc.Encode(signal.AsSpan(p * frameSamples * channels, frameSamples * channels), frameSamples, buf, buf.Length);
+                if (n <= 0) throw new Exception($"Concentus encoder returned {n}");
+                single.Add(buf.AsSpan(0, n).ToArray());
+            }
+            // Regroup: 1, 2, 3, 1, 2, 3, ... frames per packet; every fourth packet padded by 300 bytes.
+            var merged = new List<byte[]>();
+            int at = 0, group = 0;
+            var codes = new HashSet<int>();
+            while (at < single.Count)
+            {
+                int take = Math.Min(1 + group % 3, single.Count - at);
+                var rp = new Concentus.Structs.OpusRepacketizer();
+                for (int k = 0; k < take; k++)
+                    if (rp.AddPacket(single[at + k], 0, single[at + k].Length) != 0) throw new Exception("repacketizer refused a packet");
+                var outBuf = new byte[4000];
+                int len = rp.CreatePacket(outBuf, 0, outBuf.Length);
+                if (len <= 0) throw new Exception($"repacketizer returned {len}");
+                if (group % 4 == 3)
+                {
+                    if (Concentus.Structs.OpusRepacketizer.PadPacket(outBuf, 0, len, len + 300) != 0) throw new Exception("pad failed");
+                    len += 300;
+                }
+                merged.Add(outBuf.AsSpan(0, len).ToArray());
+                codes.Add(outBuf[0] & 3);
+                at += take;
+                group++;
+            }
+            if (!codes.Contains(0) || !codes.Contains(3) || !(codes.Contains(1) || codes.Contains(2)))
+                throw new Exception($"test setup: packing codes {string.Join(",", codes)}");
+
+            var cpu = OpusCodec.CreateDecoder(new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 2 });
+            using var gpu = new OpusDecoderGpu(acc, 48000, 2);
+            using var dPacket = acc.Allocate1D<byte>(4000);
+            using var dPcm = acc.Allocate1D<float>(gpu.MaxSamplesPerPacket);
+            try
+            {
+                for (int i = 0; i < merged.Count; i++)
+                {
+                    var pkt = merged[i];
+                    var cpuOut = new float[OpusDecoderGpu.MaxSamplesPerChannel * 2];
+                    int cpuSamples = await cpu.DecodePacketAsync(pkt, cpuOut);
+                    float[] gpuOut;
+                    if (i % 2 == 0)
+                    {
+                        gpuOut = await gpu.DecodePacketAsync(pkt);
+                    }
+                    else
+                    {
+                        dPacket.View.SubView(0, pkt.Length).CopyFromCPU(pkt);
+                        int samples = await gpu.DecodePacketAsync(dPacket.View, pkt.Length, dPcm.View);
+                        gpuOut = await dPcm.View.SubView(0, samples * 2).CopyToHostAsync();
+                    }
+                    Equal(cpuSamples * 2, gpuOut.Length, $"packet {i} (code {pkt[0] & 3}) sample count");
+                    for (int k = 0; k < gpuOut.Length; k++)
+                        if (gpuOut[k] != cpuOut[k])
+                            throw new Exception($"packet {i} (code {pkt[0] & 3}, {pkt.Length} B): GPU vs CPU at {k}: {gpuOut[k] * 32768} vs {cpuOut[k] * 32768}");
+                }
+            }
+            finally { await cpu.DisposeAsync(); }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+}
