@@ -153,6 +153,10 @@ CASES = [
     case("enc_cbr20_mono_64k_c5_bwswb", "music", 48000, 1, 20000, bw="SWB", notes="forced SWB at 48 kHz"),
     case("enc_lowdelay20_stereo_64k_c5", "music", 48000, 2, 20000, app="lowdelay", notes="OPUS_APPLICATION_RESTRICTED_LOWDELAY"),
     case("enc_lowdelay5_mono_32k_vbr_c5", "music", 48000, 1, 5000, app="lowdelay", bitrate=32000, vbr=1),
+    # VOIP (the variable high-pass instead of dc_reject) and the rate-dependent stereo -> mono stream decision.
+    case("enc_voip20_mono_32k_c5", "speech", 48000, 1, 20000, app="voip", bitrate=32000, notes="VOIP: hp_cutoff at the CELT-only cutoff"),
+    case("enc_voip10_stereo_48k_cvbr_c6", "speech", 48000, 2, 10000, app="voip", bitrate=48000, vbr=1, cvbr=1, cx=6),
+    case("enc_cbr20_stereo_12k_c5_tomono", "music", 48000, 2, 20000, bitrate=12000, notes="stereo input coded as a mono stream (equiv rate below the stereo threshold)"),
 ]
 
 
