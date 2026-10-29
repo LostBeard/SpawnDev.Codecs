@@ -88,10 +88,12 @@ lanes (VP9 batch encode at unaligned sizes).
   batch encode) still runs leaves the device in a state where a LATER launch (the next encoder's first
   `Vp9EncodeWavefrontBatchKernel`) dies with DXGI_ERROR_DEVICE_HUNG. Found with Data by 9 pair-run probes (2026-10-28):
   dispatch batching, single pass, the shader caches and the compile path change nothing; one drain after the group
-  kernel, or before the entropy step, prevents it. A raw WebGPU replay without ILGPU did not reproduce, so the root cause
-  is unproven. Workaround: `SynchronizeAsync` after each group-kernel slice in
-  `Vp9FrameSequentialEncodeKernel.TryRunBatchSingleDispatchAsync` (`// WORKAROUND:`). Next: Data's WebGPU call-trace
-  replay of the failing page, for an upstream report; the drain comes out once the cause is fixed. Regression test:
+  kernel, or before the entropy step, prevents it. A hand-built WebGPU repro did not hang, but Data's replay of the
+  recorded WebGPU calls of the failing page DOES hang in a fresh Chrome with no ILGPU (2 of 2, 2026-10-29), so the fault is
+  below ILGPU (Dawn D3D12 or the NVIDIA driver). Minimal so far: one 64x64 single-frame encode's submit, then the batch
+  group kernel + one entropy step (both required), then one 1-workgroup `Vp9EncodeWavefrontBatchKernel` dispatch. Workaround: `SynchronizeAsync` after each group-kernel slice in
+  `Vp9FrameSequentialEncodeKernel.TryRunBatchSingleDispatchAsync` (`// WORKAROUND:`). Next: shrink the replay further (each
+  try resets the GPU) for an upstream report; the drain comes out once the cause is fixed. Regression test:
   WebGPU `Batch_ArrayViewOverload` then `Batch_Unaligned` in one page (the order the suite runs them).
 
 - **ILGPU 5.4.6-local.2** (2026-10-26): integer divisions no longer hoisted out of their guards (Wasm traps), WebGL sends a
