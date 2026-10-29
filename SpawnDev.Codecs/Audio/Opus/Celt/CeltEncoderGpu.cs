@@ -50,12 +50,31 @@ public static class CeltEncoderGpu
     public const int WIn = 0, WFreq = WIn + 2 * (960 + Overlap), WX = WFreq + 2 * 960, WBandE = WX + 2 * 960, WBandLogE = WBandE + 2 * Nb,
         WBandLogE2 = WBandLogE + 2 * Nb, WError = WBandLogE2 + 2 * Nb, WOffsets = WError + 2 * Nb, WImportance = WOffsets + Nb,
         WSpreadWeight = WImportance + Nb, WTfRes = WSpreadWeight + Nb, WCap = WTfRes + Nb, WPulses = WCap + Nb, WFineQuant = WPulses + Nb,
-        WFinePriority = WFineQuant + Nb, WRes = WFinePriority + Nb, WScr = WRes + 32, WorkInts = WScr + 8192;
+        WFinePriority = WFineQuant + Nb, WRes = WFinePriority + Nb, WVars = WRes + 32, WScr = WVars + 48, WorkInts = WScr + 8192;
     /// <summary>Decision slots at <see cref="WRes"/>.</summary>
     public const int RPfOn = 0, RPitch = 1, RGain = 2, RQg = 3, RTransient = 4, RShortBlocks = 5, RTfEstimate = 6, RTfSelect = 7,
         RSpread = 8, RTotBoost = 9, RTotalBoost = 10, RDual = 11, RIntensity = 12, RTrim = 13, RCodedBands = 14, RBalance = 15,
         RAntiCollapse = 16, RMaxDepth = 17, RBytes = 18, RError = 19, RSilence = 20, RTfChan = 21, REquivRate = 22, RBits = 23,
         RTellCoarse = 24, RTellAlloc = 25;
+    // Per-frame values carried from one stage kernel to the next, at WVars: the range coder (10 ints) and the frame's decisions
+    private const int VEnc = 0, VStorage = 10, VNb = 11, VNbAvail = 12, VTotalBits = 13, VEffBytes = 14, VVbrRate = 15, VEquivRate = 16,
+        VLM = 17, VSilence = 18, VPitch = 19, VGain1 = 20, VTapset = 21, VPfOn = 22, VTransient = 23, VShortBlocks = 24, VTfEstimate = 25,
+        VTransDisabled = 26, VTemporalVbr = 27, VMaxDepth = 28, VTotBoost = 29, VTfSelect = 30, VDual = 31, VIntensity = 32, VCoded = 33,
+        VBalance = 34, VAntiCollapseRsv = 35, VValid = 36;
+
+    private static void SaveEnc(ArrayView<int> w, int at, ref OpusRangeEncoderGpuState e)
+    {
+        w[at] = (int)e.Offs; w[at + 1] = (int)e.EndOffs; w[at + 2] = (int)e.EndWindow; w[at + 3] = e.NEndBits; w[at + 4] = e.NBitsTotal;
+        w[at + 5] = (int)e.Rng; w[at + 6] = (int)e.Val; w[at + 7] = (int)e.Ext; w[at + 8] = e.Rem; w[at + 9] = e.Error;
+    }
+
+    private static OpusRangeEncoderGpuState LoadEnc(ArrayView<int> w, int at)
+    {
+        var e = OpusRangeEncoderGpu.Init();
+        e.Offs = (uint)w[at]; e.EndOffs = (uint)w[at + 1]; e.EndWindow = (uint)w[at + 2]; e.NEndBits = w[at + 3]; e.NBitsTotal = w[at + 4];
+        e.Rng = (uint)w[at + 5]; e.Val = (uint)w[at + 6]; e.Ext = (uint)w[at + 7]; e.Rem = w[at + 8]; e.Error = w[at + 9];
+        return e;
+    }
 
     internal static int MaxAbs16(ArrayView<short> v, int at, int len)
     {
@@ -142,13 +161,8 @@ public static class CeltEncoderGpu
         return IMIN(2 * base_target, target);
     }
 
-    /// <summary>
-    /// libopus 1.5.2 celt_encode_with_ec (enc == NULL): codes one frame of the CC channels' interleaved int16 input at
-    /// ctl[PcmAt] into the out view at ctl[OutAt] and writes the byte count (or -1 on an internal error) to len[ctl[LengthAt]].
-    /// <paramref name="st"/> holds the encoder state at <paramref name="stAt"/> (<see cref="StateInts"/>, set up by
-    /// <see cref="ResetState"/>), <paramref name="w"/> the work at <paramref name="wAt"/> (<see cref="WorkInts"/>).
-    /// </summary>
-    public static void EncodeFrame(CeltModeGpu mode, ArrayView<int> ctl, int ctlAt, ArrayView<short> pcm, ArrayView<int> st, int stAt,
+    /// <summary>Stage 1 of celt_encode_with_ec: the budget, silence, pre-emphasis, pitch pre-filter, transient analysis, MDCTs, band energies, normalisation, dynalloc and tf analysis.</summary>
+    public static void EncodeAnalysis(CeltModeGpu mode, ArrayView<int> ctl, int ctlAt, ArrayView<short> pcm, ArrayView<int> st, int stAt,
         ArrayView<int> w, int wAt, ArrayView<byte> outv, ArrayView<int> len, ArrayView<uint> pvqU)
     {
         int pcmAt = ctl[ctlAt + (int)Ctl.PcmAt], frame_size = ctl[ctlAt + (int)Ctl.FrameSize], CC = ctl[ctlAt + (int)Ctl.CC];
@@ -159,9 +173,11 @@ public static class CeltEncoderGpu
         int lfe = ctl[ctlAt + (int)Ctl.Lfe], disable_inv = ctl[ctlAt + (int)Ctl.DisableInv], loss_rate = ctl[ctlAt + (int)Ctl.LossRate];
         int upsample = ctl[ctlAt + (int)Ctl.Upsample], outAt = ctl[ctlAt + (int)Ctl.OutAt], lengthAt = ctl[ctlAt + (int)Ctl.LengthAt];
         int s = stAt, R = wAt + WRes, scr = wAt + WScr;
+        int V = wAt + WVars;
         for (int i = 0; i < 32; i++) w[R + i] = 0;
         int hybrid = start != 0 ? 1 : 0;
         int tf_estimate = 0;
+        w[V + VValid] = 0;
         if (nbCompressedBytes < 2) { len[lengthAt] = -1; return; }
         frame_size *= upsample;
         int LM;
@@ -283,60 +299,61 @@ public static class CeltEncoderGpu
         }
         int freqAt = wAt + WFreq, bandE = wAt + WBandE, bandLogE = wAt + WBandLogE, bandLogE2 = wAt + WBandLogE2;
         int secondMdct = shortBlocks != 0 && complexity >= 8 ? 1 : 0;
-        if (secondMdct != 0)
-        {
-            CeltEncoderAnalysisGpu.ComputeMdcts(mode, 0, w, inAt, freqAt, C, CC, LM, upsample, scr);
-            CeltEncoderAnalysisGpu.ComputeBandEnergies(mode, w, freqAt, w, bandE, effEnd, C, LM);
-            CeltEncoderAnalysisGpu.Amp2Log2(mode, effEnd, end, w, bandE, w, bandLogE2, C);
-            for (int c = 0; c < C; c++)
-                for (int i = 0; i < end; i++) w[bandLogE2 + Nb * c + i] = S16(w[bandLogE2 + Nb * c + i] + HALF16(SHL16(LM, DB_SHIFT)));
-        }
-        CeltEncoderAnalysisGpu.ComputeMdcts(mode, shortBlocks, w, inAt, freqAt, C, CC, LM, upsample, scr);
-        if (CC == 2 && C == 1) tf_chan = 0;
-        CeltEncoderAnalysisGpu.ComputeBandEnergies(mode, w, freqAt, w, bandE, effEnd, C, LM);
-        if (lfe != 0)
-        {
-            for (int i = 2; i < end; i++)
-            {
-                w[bandE + i] = IMIN(w[bandE + i], MULT16_32_Q15(3, w[bandE]));   // QCONST16(1e-4f, 15)
-                w[bandE + i] = IMAX(w[bandE + i], EPSILON);
-            }
-        }
-        CeltEncoderAnalysisGpu.Amp2Log2(mode, effEnd, end, w, bandE, w, bandLogE, C);
-        // Temporal VBR (but not for LFE)
         int temporal_vbr = 0;
-        if (lfe == 0)
+        // The MDCT passes through one call site (WGSL inlines each): the long-block MDCT of the second-MDCT analysis (into
+        // bandLogE2), the frame's own, and the short-block one when the energies show a transient after all
+        int patched = 0;
+        for (int pass = 0; pass < 3; pass++)
         {
-            int follow = -10240;   // -QCONST16(10.0f, DB_SHIFT)
-            int frame_avg = 0;
-            int offset = shortBlocks != 0 ? HALF16(SHL16(LM, DB_SHIFT)) : 0;
-            for (int i = start; i < end; i++)
+            if (pass == 0 && secondMdct == 0) continue;
+            if (pass == 2 && patched == 0) break;
+            int target = pass == 0 ? bandLogE2 : bandLogE;
+            CeltEncoderAnalysisGpu.ComputeMdcts(mode, pass == 0 ? 0 : shortBlocks, w, inAt, freqAt, C, CC, LM, upsample, scr);
+            if (pass == 1 && CC == 2 && C == 1) tf_chan = 0;
+            CeltEncoderAnalysisGpu.ComputeBandEnergies(mode, w, freqAt, w, bandE, effEnd, C, LM);
+            if (pass == 1 && lfe != 0)
             {
-                follow = S16(IMAX(follow - 1024, w[bandLogE + i] - offset));
-                if (C == 2) follow = S16(IMAX(follow, w[bandLogE + i + Nb] - offset));
-                frame_avg += follow;
+                for (int i = 2; i < end; i++)
+                {
+                    w[bandE + i] = IMIN(w[bandE + i], MULT16_32_Q15(3, w[bandE]));   // QCONST16(1e-4f, 15)
+                    w[bandE + i] = IMAX(w[bandE + i], EPSILON);
+                }
             }
-            frame_avg /= end - start;
-            temporal_vbr = S16(SUB16(frame_avg, st[s + SSpecAvg]));
-            temporal_vbr = S16(IMIN(3072, IMAX(-1536, temporal_vbr)));
-            st[s + SSpecAvg] = S16(st[s + SSpecAvg] + MULT16_16_Q15(655, temporal_vbr));   // QCONST16(.02f, 15)
-        }
-        if (secondMdct == 0)
-            for (int i = 0; i < C * Nb; i++) w[bandLogE2 + i] = w[bandLogE + i];
-        // Last chance to catch any transient we might have missed in the time-domain analysis
-        if (LM > 0 && OpusRangeEncoderGpu.Tell(ref enc) + 3 <= total_bits && isTransient == 0 && complexity >= 5 && lfe == 0 && hybrid == 0)
-        {
-            if (CeltEncoderAnalysisGpu.PatchTransientDecision(w, bandLogE, st, s + OldBandEAt, start, end, C, w, scr) != 0)
-            {
-                isTransient = 1;
-                shortBlocks = M;
-                CeltEncoderAnalysisGpu.ComputeMdcts(mode, shortBlocks, w, inAt, freqAt, C, CC, LM, upsample, scr);
-                CeltEncoderAnalysisGpu.ComputeBandEnergies(mode, w, freqAt, w, bandE, effEnd, C, LM);
-                CeltEncoderAnalysisGpu.Amp2Log2(mode, effEnd, end, w, bandE, w, bandLogE, C);
-                // Compensate for the scaling of short vs long mdcts
+            CeltEncoderAnalysisGpu.Amp2Log2(mode, effEnd, end, w, bandE, w, target, C);
+            // Compensate for the scaling of short vs long mdcts (the second MDCT's long energies; the patched frame's bandLogE2)
+            if (pass != 1)
                 for (int c = 0; c < C; c++)
                     for (int i = 0; i < end; i++) w[bandLogE2 + Nb * c + i] = S16(w[bandLogE2 + Nb * c + i] + HALF16(SHL16(LM, DB_SHIFT)));
-                tf_estimate = 3277;   // QCONST16(.2f, 14)
+            if (pass == 2) tf_estimate = 3277;   // QCONST16(.2f, 14)
+            if (pass == 1)
+            {
+                // Temporal VBR (but not for LFE)
+                if (lfe == 0)
+                {
+                    int follow = -10240;   // -QCONST16(10.0f, DB_SHIFT)
+                    int frame_avg = 0;
+                    int offset = shortBlocks != 0 ? HALF16(SHL16(LM, DB_SHIFT)) : 0;
+                    for (int i = start; i < end; i++)
+                    {
+                        follow = S16(IMAX(follow - 1024, w[bandLogE + i] - offset));
+                        if (C == 2) follow = S16(IMAX(follow, w[bandLogE + i + Nb] - offset));
+                        frame_avg += follow;
+                    }
+                    frame_avg /= end - start;
+                    temporal_vbr = S16(SUB16(frame_avg, st[s + SSpecAvg]));
+                    temporal_vbr = S16(IMIN(3072, IMAX(-1536, temporal_vbr)));
+                    st[s + SSpecAvg] = S16(st[s + SSpecAvg] + MULT16_16_Q15(655, temporal_vbr));   // QCONST16(.02f, 15)
+                }
+                if (secondMdct == 0)
+                    for (int i = 0; i < C * Nb; i++) w[bandLogE2 + i] = w[bandLogE + i];
+                // Last chance to catch any transient we might have missed in the time-domain analysis
+                if (LM > 0 && OpusRangeEncoderGpu.Tell(ref enc) + 3 <= total_bits && isTransient == 0 && complexity >= 5 && lfe == 0 && hybrid == 0
+                    && CeltEncoderAnalysisGpu.PatchTransientDecision(w, bandLogE, st, s + OldBandEAt, start, end, C, w, scr) != 0)
+                {
+                    isTransient = 1;
+                    shortBlocks = M;
+                    patched = 1;
+                }
             }
         }
         if (LM > 0 && OpusRangeEncoderGpu.Tell(ref enc) + 3 <= total_bits)
@@ -367,7 +384,42 @@ public static class CeltEncoderGpu
             tf_select = 0;
         }
         w[R + RTfSelect] = tf_select;
-        int error = wAt + WError;
+        SaveEnc(w, V + VEnc, ref enc);
+        w[V + VStorage] = (int)storage; w[V + VNb] = nbCompressedBytes; w[V + VNbAvail] = nbAvailableBytes; w[V + VTotalBits] = total_bits;
+        w[V + VEffBytes] = effectiveBytes; w[V + VVbrRate] = vbr_rate; w[V + VEquivRate] = equiv_rate; w[V + VLM] = LM;
+        w[V + VSilence] = silence; w[V + VPitch] = pitch_index; w[V + VGain1] = gain1; w[V + VTapset] = prefilter_tapset; w[V + VPfOn] = pf_on;
+        w[V + VTransient] = isTransient; w[V + VShortBlocks] = shortBlocks; w[V + VTfEstimate] = tf_estimate;
+        w[V + VTransDisabled] = transient_got_disabled; w[V + VTemporalVbr] = temporal_vbr; w[V + VMaxDepth] = maxDepth;
+        w[V + VTotBoost] = tot_boost; w[V + VTfSelect] = tf_select; w[V + VValid] = 1;
+    }
+
+    /// <summary>Stage 2: coarse energy, tf, spreading, dynalloc boosts, stereo decisions, trim, VBR, the allocation and fine energy.</summary>
+    public static void EncodeCoding(CeltModeGpu mode, ArrayView<int> ctl, int ctlAt, ArrayView<short> pcm, ArrayView<int> st, int stAt,
+        ArrayView<int> w, int wAt, ArrayView<byte> outv, ArrayView<int> len, ArrayView<uint> pvqU)
+    {
+        int pcmAt = ctl[ctlAt + (int)Ctl.PcmAt], frame_size = ctl[ctlAt + (int)Ctl.FrameSize], CC = ctl[ctlAt + (int)Ctl.CC];
+        int nbCompressedBytes = ctl[ctlAt + (int)Ctl.NbCompressedBytes], bitrate = ctl[ctlAt + (int)Ctl.Bitrate];
+        int vbr = ctl[ctlAt + (int)Ctl.Vbr], constrained_vbr = ctl[ctlAt + (int)Ctl.ConstrainedVbr], complexity = ctl[ctlAt + (int)Ctl.Complexity];
+        int start = ctl[ctlAt + (int)Ctl.Start], end = ctl[ctlAt + (int)Ctl.End], C = ctl[ctlAt + (int)Ctl.C];
+        int lsb_depth = ctl[ctlAt + (int)Ctl.LsbDepth], disable_pf = ctl[ctlAt + (int)Ctl.DisablePf], force_intra = ctl[ctlAt + (int)Ctl.ForceIntra];
+        int lfe = ctl[ctlAt + (int)Ctl.Lfe], disable_inv = ctl[ctlAt + (int)Ctl.DisableInv], loss_rate = ctl[ctlAt + (int)Ctl.LossRate];
+        int upsample = ctl[ctlAt + (int)Ctl.Upsample], outAt = ctl[ctlAt + (int)Ctl.OutAt], lengthAt = ctl[ctlAt + (int)Ctl.LengthAt];
+        int s = stAt, R = wAt + WRes, scr = wAt + WScr;
+        int V = wAt + WVars;
+        if (w[V + VValid] == 0) return;
+        var enc = LoadEnc(w, V + VEnc);
+        uint storage = (uint)w[V + VStorage];
+        nbCompressedBytes = w[V + VNb];
+        int LM = w[V + VLM];
+        int M = 1 << LM, N = M * ShortMdctSize, effEnd = IMIN(end, Nb), hybrid = start != 0 ? 1 : 0;
+        int X = wAt + WX, bandE = wAt + WBandE, bandLogE = wAt + WBandLogE, error = wAt + WError, offsets = wAt + WOffsets;
+        int spread_weight = wAt + WSpreadWeight, tf_res = wAt + WTfRes, pulses = wAt + WPulses, fine_quant = wAt + WFineQuant;
+        int fine_priority = wAt + WFinePriority;
+        int nbAvailableBytes = w[V + VNbAvail], total_bits = w[V + VTotalBits], effectiveBytes = w[V + VEffBytes], vbr_rate = w[V + VVbrRate];
+        int equiv_rate = w[V + VEquivRate], silence = w[V + VSilence], pf_on = w[V + VPfOn], isTransient = w[V + VTransient];
+        int shortBlocks = w[V + VShortBlocks], tf_estimate = w[V + VTfEstimate], temporal_vbr = w[V + VTemporalVbr], maxDepth = w[V + VMaxDepth];
+        int tot_boost = w[V + VTotBoost], tf_select = w[V + VTfSelect];
+        int tell;
         for (int c = 0; c < C; c++)
         {
             for (int i = start; i < end; i++)
@@ -527,7 +579,6 @@ public static class CeltEncoderGpu
         int signalBandwidth = end - 1;
         if (lfe != 0) signalBandwidth = 1;
         w[R + RBits] = bits;
-        int pulses = wAt + WPulses, fine_quant = wAt + WFineQuant, fine_priority = wAt + WFinePriority;
         int intensity = st[s + SIntensity];
         int codedBands = CeltRateEncGpu.ComputeAllocationEncode(mode, start, end, w.SubView(offsets, Nb), w.SubView(cap, Nb), alloc_trim,
             ref intensity, ref dual_stereo, bits, out int balance, w.SubView(pulses, Nb), w.SubView(fine_quant, Nb), w.SubView(fine_priority, Nb),
@@ -539,7 +590,35 @@ public static class CeltEncoderGpu
             st[s + SLastCodedBands] = IMIN(st[s + SLastCodedBands] + 1, IMAX(st[s + SLastCodedBands] - 1, codedBands));
         else st[s + SLastCodedBands] = codedBands;
         CeltEnergyEncGpu.QuantFineEnergy(start, end, st, s + OldBandEAt, w, error, w, fine_quant, ref enc, outv, outAt, storage, C);
+        SaveEnc(w, V + VEnc, ref enc);
+        w[V + VStorage] = (int)storage; w[V + VNb] = nbCompressedBytes; w[V + VDual] = dual_stereo; w[V + VIntensity] = intensity;
+        w[V + VCoded] = codedBands; w[V + VBalance] = balance; w[V + VAntiCollapseRsv] = anti_collapse_rsv;
+    }
 
+    /// <summary>Stage 3: the band shapes (quant_all_bands).</summary>
+    public static void EncodeBands(CeltModeGpu mode, ArrayView<int> ctl, int ctlAt, ArrayView<short> pcm, ArrayView<int> st, int stAt,
+        ArrayView<int> w, int wAt, ArrayView<byte> outv, ArrayView<int> len, ArrayView<uint> pvqU)
+    {
+        int pcmAt = ctl[ctlAt + (int)Ctl.PcmAt], frame_size = ctl[ctlAt + (int)Ctl.FrameSize], CC = ctl[ctlAt + (int)Ctl.CC];
+        int nbCompressedBytes = ctl[ctlAt + (int)Ctl.NbCompressedBytes], bitrate = ctl[ctlAt + (int)Ctl.Bitrate];
+        int vbr = ctl[ctlAt + (int)Ctl.Vbr], constrained_vbr = ctl[ctlAt + (int)Ctl.ConstrainedVbr], complexity = ctl[ctlAt + (int)Ctl.Complexity];
+        int start = ctl[ctlAt + (int)Ctl.Start], end = ctl[ctlAt + (int)Ctl.End], C = ctl[ctlAt + (int)Ctl.C];
+        int lsb_depth = ctl[ctlAt + (int)Ctl.LsbDepth], disable_pf = ctl[ctlAt + (int)Ctl.DisablePf], force_intra = ctl[ctlAt + (int)Ctl.ForceIntra];
+        int lfe = ctl[ctlAt + (int)Ctl.Lfe], disable_inv = ctl[ctlAt + (int)Ctl.DisableInv], loss_rate = ctl[ctlAt + (int)Ctl.LossRate];
+        int upsample = ctl[ctlAt + (int)Ctl.Upsample], outAt = ctl[ctlAt + (int)Ctl.OutAt], lengthAt = ctl[ctlAt + (int)Ctl.LengthAt];
+        int s = stAt, R = wAt + WRes, scr = wAt + WScr;
+        int V = wAt + WVars;
+        if (w[V + VValid] == 0) return;
+        var enc = LoadEnc(w, V + VEnc);
+        uint storage = (uint)w[V + VStorage];
+        nbCompressedBytes = w[V + VNb];
+        int LM = w[V + VLM];
+        int M = 1 << LM, N = M * ShortMdctSize, effEnd = IMIN(end, Nb), hybrid = start != 0 ? 1 : 0;
+        int X = wAt + WX, bandE = wAt + WBandE, bandLogE = wAt + WBandLogE, error = wAt + WError, offsets = wAt + WOffsets;
+        int spread_weight = wAt + WSpreadWeight, tf_res = wAt + WTfRes, pulses = wAt + WPulses, fine_quant = wAt + WFineQuant;
+        int fine_priority = wAt + WFinePriority;
+        int shortBlocks = w[V + VShortBlocks], dual_stereo = w[V + VDual], intensity = w[V + VIntensity], codedBands = w[V + VCoded];
+        int balance = w[V + VBalance], anti_collapse_rsv = w[V + VAntiCollapseRsv];
         // Residual quantisation (libopus resynthesises the bands only for theta RDO: stereo, no dual stereo, complexity >= 8)
         {
             uint seed = (uint)st[s + SRng];
@@ -547,6 +626,33 @@ public static class CeltEncoderGpu
                 dual_stereo, intensity, w, tf_res, nbCompressedBytes * (8 << BITRES) - anti_collapse_rsv, balance, ref enc, outv, outAt,
                 storage, LM, codedBands, ref seed, complexity, disable_inv, scr, pvqU);
         }
+        SaveEnc(w, V + VEnc, ref enc);
+    }
+
+    /// <summary>Stage 4: anti-collapse, the final energy bits, the state update and ec_enc_done; writes the byte count.</summary>
+    public static void EncodeFinish(CeltModeGpu mode, ArrayView<int> ctl, int ctlAt, ArrayView<short> pcm, ArrayView<int> st, int stAt,
+        ArrayView<int> w, int wAt, ArrayView<byte> outv, ArrayView<int> len, ArrayView<uint> pvqU)
+    {
+        int pcmAt = ctl[ctlAt + (int)Ctl.PcmAt], frame_size = ctl[ctlAt + (int)Ctl.FrameSize], CC = ctl[ctlAt + (int)Ctl.CC];
+        int nbCompressedBytes = ctl[ctlAt + (int)Ctl.NbCompressedBytes], bitrate = ctl[ctlAt + (int)Ctl.Bitrate];
+        int vbr = ctl[ctlAt + (int)Ctl.Vbr], constrained_vbr = ctl[ctlAt + (int)Ctl.ConstrainedVbr], complexity = ctl[ctlAt + (int)Ctl.Complexity];
+        int start = ctl[ctlAt + (int)Ctl.Start], end = ctl[ctlAt + (int)Ctl.End], C = ctl[ctlAt + (int)Ctl.C];
+        int lsb_depth = ctl[ctlAt + (int)Ctl.LsbDepth], disable_pf = ctl[ctlAt + (int)Ctl.DisablePf], force_intra = ctl[ctlAt + (int)Ctl.ForceIntra];
+        int lfe = ctl[ctlAt + (int)Ctl.Lfe], disable_inv = ctl[ctlAt + (int)Ctl.DisableInv], loss_rate = ctl[ctlAt + (int)Ctl.LossRate];
+        int upsample = ctl[ctlAt + (int)Ctl.Upsample], outAt = ctl[ctlAt + (int)Ctl.OutAt], lengthAt = ctl[ctlAt + (int)Ctl.LengthAt];
+        int s = stAt, R = wAt + WRes, scr = wAt + WScr;
+        int V = wAt + WVars;
+        if (w[V + VValid] == 0) return;
+        var enc = LoadEnc(w, V + VEnc);
+        uint storage = (uint)w[V + VStorage];
+        nbCompressedBytes = w[V + VNb];
+        int LM = w[V + VLM];
+        int M = 1 << LM, N = M * ShortMdctSize, effEnd = IMIN(end, Nb), hybrid = start != 0 ? 1 : 0;
+        int X = wAt + WX, bandE = wAt + WBandE, bandLogE = wAt + WBandLogE, error = wAt + WError, offsets = wAt + WOffsets;
+        int spread_weight = wAt + WSpreadWeight, tf_res = wAt + WTfRes, pulses = wAt + WPulses, fine_quant = wAt + WFineQuant;
+        int fine_priority = wAt + WFinePriority;
+        int anti_collapse_rsv = w[V + VAntiCollapseRsv], silence = w[V + VSilence], pitch_index = w[V + VPitch], gain1 = w[V + VGain1];
+        int prefilter_tapset = w[V + VTapset], isTransient = w[V + VTransient], transient_got_disabled = w[V + VTransDisabled];
         int anti_collapse_on = 0;
         if (anti_collapse_rsv > 0)
         {
@@ -604,6 +710,23 @@ public static class CeltEncoderGpu
         len[lengthAt] = enc.Error != 0 ? -1 : nbCompressedBytes;
     }
 
+    /// <summary>
+    /// libopus 1.5.2 celt_encode_with_ec (enc == NULL): codes one frame of the CC channels' interleaved int16 input at
+    /// ctl[PcmAt] into the out view at ctl[OutAt] and writes the byte count (or -1 on an internal error) to len[ctl[LengthAt]].
+    /// <paramref name="st"/> holds the encoder state at <paramref name="stAt"/> (<see cref="StateInts"/>, set up by
+    /// <see cref="ResetState"/>), <paramref name="w"/> the work at <paramref name="wAt"/> (<see cref="WorkInts"/>). The four
+    /// stages in a row; <see cref="AnalysisKernel"/> .. <see cref="FinishKernel"/> run them as separate kernels (each a
+    /// WGSL shader of its own size).
+    /// </summary>
+    public static void EncodeFrame(CeltModeGpu mode, ArrayView<int> ctl, int ctlAt, ArrayView<short> pcm, ArrayView<int> st, int stAt,
+        ArrayView<int> w, int wAt, ArrayView<byte> outv, ArrayView<int> len, ArrayView<uint> pvqU)
+    {
+        EncodeAnalysis(mode, ctl, ctlAt, pcm, st, stAt, w, wAt, outv, len, pvqU);
+        EncodeCoding(mode, ctl, ctlAt, pcm, st, stAt, w, wAt, outv, len, pvqU);
+        EncodeBands(mode, ctl, ctlAt, pcm, st, stAt, w, wAt, outv, len, pvqU);
+        EncodeFinish(mode, ctl, ctlAt, pcm, st, stAt, w, wAt, outv, len, pvqU);
+    }
+
     /// <summary>One celt_encode_with_ec call per thread: thread i codes the call whose CTLs are at ctl[i * Ctl.Count], with the
     /// encoder state at st[i * StateInts] and work at w[i * WorkInts] (independent encoders, one call each).</summary>
     public static void EncodeKernel(Index1D i, ArrayView<int> ctl, ArrayView<short> pcm, ArrayView<int> st, ArrayView<int> w,
@@ -611,6 +734,27 @@ public static class CeltEncoderGpu
     {
         EncodeFrame(mode, ctl, i * (int)Ctl.Count, pcm, st, i * StateInts, w, i * WorkInts, outv, len, pvqU);
     }
+
+    /// <summary>Stage kernels: launch AnalysisKernel, CodingKernel, BandsKernel, FinishKernel in order (same arguments as
+    /// <see cref="EncodeKernel"/>) to code the calls the way EncodeKernel does, each stage its own shader.</summary>
+    public static void AnalysisKernel(Index1D i, ArrayView<int> ctl, ArrayView<short> pcm, ArrayView<int> st, ArrayView<int> w,
+        ArrayView<byte> outv, ArrayView<int> len, CeltModeGpu mode, ArrayView<uint> pvqU) =>
+        EncodeAnalysis(mode, ctl, i * (int)Ctl.Count, pcm, st, i * StateInts, w, i * WorkInts, outv, len, pvqU);
+
+    /// <summary>Stage 2 kernel (see <see cref="AnalysisKernel"/>).</summary>
+    public static void CodingKernel(Index1D i, ArrayView<int> ctl, ArrayView<short> pcm, ArrayView<int> st, ArrayView<int> w,
+        ArrayView<byte> outv, ArrayView<int> len, CeltModeGpu mode, ArrayView<uint> pvqU) =>
+        EncodeCoding(mode, ctl, i * (int)Ctl.Count, pcm, st, i * StateInts, w, i * WorkInts, outv, len, pvqU);
+
+    /// <summary>Stage 3 kernel (see <see cref="AnalysisKernel"/>).</summary>
+    public static void BandsKernel(Index1D i, ArrayView<int> ctl, ArrayView<short> pcm, ArrayView<int> st, ArrayView<int> w,
+        ArrayView<byte> outv, ArrayView<int> len, CeltModeGpu mode, ArrayView<uint> pvqU) =>
+        EncodeBands(mode, ctl, i * (int)Ctl.Count, pcm, st, i * StateInts, w, i * WorkInts, outv, len, pvqU);
+
+    /// <summary>Stage 4 kernel (see <see cref="AnalysisKernel"/>).</summary>
+    public static void FinishKernel(Index1D i, ArrayView<int> ctl, ArrayView<short> pcm, ArrayView<int> st, ArrayView<int> w,
+        ArrayView<byte> outv, ArrayView<int> len, CeltModeGpu mode, ArrayView<uint> pvqU) =>
+        EncodeFinish(mode, ctl, i * (int)Ctl.Count, pcm, st, i * StateInts, w, i * WorkInts, outv, len, pvqU);
 
     /// <summary>Resets the encoder states (one per thread) on the device.</summary>
     public static void ResetKernel(Index1D i, ArrayView<int> st) => ResetState(st, i * StateInts);
