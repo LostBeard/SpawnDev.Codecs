@@ -50,6 +50,7 @@
 		<EmbeddedResource Include="TestData\Png\*" />
 		<EmbeddedResource Include="TestData\Jpeg\*" />
 		<EmbeddedResource Include="TestData\Opus\*" />
+		<EmbeddedResource Include="TestData\OpusEnc\*.pcmin;TestData\OpusEnc\*.opusp;TestData\OpusEnc\*.rng;TestData\OpusEnc\*.celtin;TestData\OpusEnc\manifest.tsv" />
 		<EmbeddedResource Include="TestData\WebPYuv\*" />
 		<EmbeddedResource Include="TestData\WebPLossy\*" />
 		<EmbeddedResource Include="TestData\WebPRgbToYuv\*" />

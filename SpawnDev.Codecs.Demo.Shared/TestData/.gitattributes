@@ -17,3 +17,5 @@ BcnEnc/manifest.tsv text eol=lf
 Opus/*.opusp binary
 Opus/*.pcm16 binary
 Opus/*.rng binary
+OpusEnc/* binary
+OpusEnc/manifest.tsv text eol=lf

@@ -382,3 +382,6 @@ bbb_frame0.yuv
 /_*.cs
 # Old PMT run artifacts
 /playwright-*.json
+
+# Opus encoder decision dumps from the instrumented libopus (regenerate with scripts/audio/make_opus_encoder_fixtures.py)
+*.celtdbg
