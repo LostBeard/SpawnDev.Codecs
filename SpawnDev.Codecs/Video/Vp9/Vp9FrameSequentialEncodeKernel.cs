@@ -221,6 +221,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
                 yCoefs, uCoefs, vCoefs,
                 dequant, p);
             await pacer.LaunchedAsync();
+            await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_accelerator, $"wavefront diagonal {d} of {totalDiagonals} ({frameCount} frames x {diagCount})");
         }
     }
 
@@ -271,6 +272,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
                 yCoefs, uCoefs, vCoefs,
                 dequant, p, frameCount, dEnd);
             await pacer.LaunchedAsync();
+            await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_accelerator, $"wavefront single-dispatch diagonals {dStart}..{dEnd} of {totalDiagonals} ({frameCount} frames x {peakDiag})");
         }
         return true;
     }

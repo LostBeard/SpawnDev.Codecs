@@ -204,6 +204,20 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
     /// <param name="output">Receives the encoded frame; at least <see cref="GetMaxEncodedSize"/> bytes.</param>
     /// <param name="baseQIndex">VP9 base quantizer index, 1..255.</param>
     /// <returns>The number of bytes written to <paramref name="output"/>.</returns>
+    /// <summary>
+    /// Diagnostics: when set, every launch of the encode (the wave-front and entropy steps included) is synchronized and
+    /// named here, so the launch after the last name is the one that hangs. Zero cost while null. Tests only.
+    /// </summary>
+    internal static Action<string>? Trace;
+
+    /// <summary>Synchronize and name the launch just queued when <see cref="Trace"/> is set.</summary>
+    internal static async ValueTask TraceLaunchAsync(Accelerator accelerator, string what)
+    {
+        if (Trace == null) return;
+        await accelerator.SynchronizeAsync();
+        Trace(what);
+    }
+
     public async Task<int> EncodeKeyFrameAsync(
         ArrayView1D<byte, Stride1D.Dense> yPlane,
         ArrayView1D<byte, Stride1D.Dense> uPlane,
@@ -275,6 +289,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
 
         // ---- 3. Compressed header ----
         _compressedHeaderKernel.Run(_dCompressedHeader!.View, _dCompressedHeaderLen!.View);
+        await TraceLaunchAsync(_accelerator, "single: dequant + compressed header");
 
         // Display mi dims: the sequential encoder and the entropy walker both need them to handle SBs
         // that straddle the frame boundary spec-correctly (e.g. 1920x1080: bottom-edge SB16 at
@@ -425,6 +440,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         _dequantKernel.RunBatch(_dDcQLookup.View, _dAcQLookup.View, dAllDQ.View,
             baseQIndex, 0, 0, 0, 0,
             frameCount, dequantStride);
+        await TraceLaunchAsync(_accelerator, "batch: pad + dequant");
         _compressedHeaderKernel.RunBatch(
             dAllCH.View, dAllCHLen.View,
             frameCount, 64);
@@ -434,6 +450,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         // displayMiRows drives boundary forced-split MB encoding (top BLOCK_16X8
         // with 2 Tx8x8 luma + 2 Tx4x4 chroma) at the bottom-edge MB row.
         int seqFrameMiRows = (height + 7) >> 3;
+        await TraceLaunchAsync(_accelerator, "batch: compressed header");
         bool wavefrontSingleDispatched = await _sequentialKernel.TryRunBatchSingleDispatchAsync(
             dAllY.View, dAllU.View, dAllV.View,
             dAllYR.View, dAllUR.View, dAllVR.View,
@@ -475,6 +492,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
 
         // Phase 4: BATCH uncompressed header + assemble. Bitstream signals
         // original display dims; entropy walker handles boundary forced-split.
+        await TraceLaunchAsync(_accelerator, "batch: entropy done");
         _uncompressedHeaderKernel.RunBatch(
             dAllUH.View, dAllUHLen.View, dAllCHLen.View,
             width, height, baseQIndex,

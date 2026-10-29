@@ -270,6 +270,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
                 byteConsts, ushortConsts,
                 ctx, state, strides, LeavesPerLaunch);
             await pacer.LaunchedAsync();
+            await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_accelerator, $"entropy step {s} of {steps} ({frameCount} frames)");
         }
     }
 
