@@ -217,6 +217,37 @@ Bit-exact testing strategy: each primitive ships with NUnit tests against the CP
   recursion (quant_all_bands, quant_band, quant_partition, compute_theta), energy (un)quantization with the Laplace coder
   (coarse / fine / final), tf_decode, denormalise_bands, the backward MDCT (KissFFT) and de-emphasis.
 
+### 2026-10-29 status and the full decode glue (Geordi)
+
+**Landed:** `OpusRangeEncoderGpu` (entenc.c, 7f50a2b), `SilkPacketDecoderGpu` (silk_Decode FLAG_DECODE_NORMAL: header +
+LBRR skip, stereo, indices / pulses / parameters / decode_core, MS->LR, resampler; 45831d0), `OpusDecoderGpu` (TOC +
+packing codes 0-3, SILK frames; d7e9914). Equal to the CPU OpusDecoder on Concentus SILK streams (FEC, channel and
+bandwidth switches, repacketized 1-3 frame packets) on CPU, Velocity, CUDA, OpenCL.
+
+**What opus_decode_frame needs beyond the per-mode decoders** (read from Concentus OpusDecoder.opus_decode_frame; the
+whole list is the bar for byte-identical output on real streams, which switch modes):
+1. **Redundancy frames.** After the SILK part of a SILK-only OR hybrid frame, when `ec_tell + 17 (+ 20 hybrid) <= 8 * len`:
+   hybrid reads `redundancy = bit_logp(12)`; SILK-only has redundancy = 1. Then `celt_to_silk = bit_logp(1)`, the
+   redundant bytes (`dec_uint(256) + 2` hybrid, the rest of the packet otherwise) are cut off the end and the range
+   decoder's storage shrinks. A 5 ms CELT frame (start band 0) decodes from those bytes: celt_to_silk -> before the main
+   frame, its first 2.5 ms replace the output and the next 2.5 ms cross-fade (`smooth_fade` with the CELT window);
+   SILK->CELT -> after a CELT ResetState, cross-faded into the last 2.5 ms. Neither the CPU OpusDecoder's SILK path nor
+   SilkPacketDecoderGpu reads it yet: a SILK packet that carries redundancy (the encoder's last SILK packet before a
+   switch to CELT) decodes differently from libopus today.
+2. **Hybrid:** SILK at 16 kHz internal, then CELT on the SAME range decoder with start band 17 and end band by bandwidth
+   (NB 13, MB / WB 17, SWB 19, FB 21); with frame_size >= 10 ms, `celt_accum` = CELT adds its output onto the SILK PCM
+   inside its de-emphasis (`SAT16(ADD32(y, x))`), else a separate SAT16 add.
+3. **Mode transitions:** CELT ResetState when the mode changes and the previous frame had no redundancy; silk_InitDecoder
+   when the previous mode was CELT-only; hybrid -> SILK: CELT decodes the 2-byte SILENCE frame for 2.5 ms (start band 0)
+   as a fade-out (unless a celt_to_silk redundancy already did it); without redundancy a CELT <-> SILK/Hybrid switch
+   decodes a 5 ms PLC frame of the PREVIOUS mode (pcm_transition) and cross-fades it in.
+4. **Packet loss (data == NULL / len <= 1):** SILK PLC (silk_PLC + silk_CNG + glue frames, with silk_PLC_update /
+   CNG state updates on every good frame), CELT PLC (celt_decode_lost: pitch search, LPC extrapolation). Needed by item 3
+   and by any lossy stream.
+5. **decode_gain** (OpusHead output gain, Q8 dB) and the final range (`rng ^ redundant_rng`).
+Split: Data: CELT decode (+ accum, start/end band, ResetState, SILENCE frame, final range), then CELT PLC; Geordi: the
+glue above in OpusDecoderGpu, SILK PLC / CNG, then the encoder shell.
+
 ### Step 3 - CELT integration kernel
 
 `CeltDecodeKernel` chains the 7 primitives + IMDCT in libopus order.
