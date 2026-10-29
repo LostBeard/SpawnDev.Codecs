@@ -14,3 +14,5 @@ Bcn/* binary
 Bcn/manifest.tsv text eol=lf
 BcnEnc/* binary
 BcnEnc/manifest.tsv text eol=lf
+Opus/*.opusp binary
+Opus/*.pcm16 binary
