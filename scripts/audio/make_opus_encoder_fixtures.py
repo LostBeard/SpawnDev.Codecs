@@ -5,7 +5,8 @@ Truth:
   <name>.pcmin      the interleaved int16 PCM given to opus_encode(), frame after frame (exactly what the encoder saw).
   <name>.opusp      the packets: per packet a little-endian uint16 length then the bytes.
   <name>.rng        per packet the encoder's OPUS_GET_FINAL_RANGE after it (uint32 LE).
-  manifest.tsv      name, rate, channels, frame_us, application, bitrate, vbr, cvbr, complexity, bandwidth, packets, notes
+  manifest.tsv      name, rate, channels, frame_us, application, bitrate (-1000 auto, -1 max), vbr, cvbr, complexity,
+                    bandwidth, packets, force_channels (-1000 auto), notes
 With the instrumented debug build (_refs/opus-dbg: celt_encoder.c exports opus_dbg_celt_open), also, per stream:
   <name>.celtin     per celt_encode_with_ec call, 20 int32: call, frame_size, CC, nbCompressedBytes, tell on entry,
                     standalone (enc == NULL), then the CELT CTLs on entry: bitrate, vbr, cvbr, complexity, start, end,
@@ -117,11 +118,11 @@ class Opus:
         return out.raw[:n], rng.value
 
 
-def case(name, sig, rate, ch, us, app="audio", bitrate=64000, vbr=0, cvbr=0, cx=5, bw="auto", packets=None, notes=""):
+def case(name, sig, rate, ch, us, app="audio", bitrate=64000, vbr=0, cvbr=0, cx=5, bw="auto", packets=None, notes="", fc=-1000):
     frames_per_s = 1_000_000 // us if us >= 1000 else 400
     n = packets if packets is not None else max(12, min(120, int(0.6 * 1_000_000 / us)))
     return dict(name=name, sig=sig, rate=rate, ch=ch, us=us, app=app, bitrate=bitrate, vbr=vbr, cvbr=cvbr, cx=cx, bw=bw, packets=n,
-                notes=notes)
+                notes=notes, fc=fc)
 
 
 CASES = [
@@ -157,6 +158,21 @@ CASES = [
     case("enc_voip20_mono_32k_c5", "speech", 48000, 1, 20000, app="voip", bitrate=32000, notes="VOIP: hp_cutoff at the CELT-only cutoff"),
     case("enc_voip10_stereo_48k_cvbr_c6", "speech", 48000, 2, 10000, app="voip", bitrate=48000, vbr=1, cvbr=1, cx=6),
     case("enc_cbr20_stereo_12k_c5_tomono", "music", 48000, 2, 20000, bitrate=12000, notes="stereo input coded as a mono stream (equiv rate below the stereo threshold)"),
+    # Packet framings beyond CBR padding, the too-small-packet path, NB / 8 and 12 kHz input, forced channels, auto / max rate.
+    case("enc_vbr40_mono_48k_c5", "music", 48000, 1, 40000, bitrate=48000, vbr=1, notes="VBR 2 x 20 ms: code 2 (unequal frames)"),
+    case("enc_vbr60_stereo_64k_c7", "music", 48000, 2, 60000, vbr=1, cx=7, notes="VBR 3 x 20 ms: code 3 VBR"),
+    case("enc_cvbr120_mono_32k_c5", "speech", 48000, 1, 120000, bitrate=32000, vbr=1, cvbr=1, notes="6 x 20 ms"),
+    case("enc_cbr100_stereo_48k_c5", "music", 48000, 2, 100000, bitrate=48000, notes="CBR 5 x 20 ms, padded"),
+    case("enc_cbr2p5_mono_6k_toosmall", "music", 48000, 1, 2500, bitrate=6000, packets=40, notes="below 3 bytes/frame: libopus' TOC-only 'PLC' packets, CBR padded"),
+    case("enc_vbr2p5_stereo_6k_toosmall", "music", 48000, 2, 2500, bitrate=6000, vbr=1, packets=40, notes="TOC-only packets, VBR"),
+    case("enc_cbr20_mono_16k_rate8k_c5", "speech", 8000, 1, 20000, bitrate=16000, notes="8 kHz input: NB, end band 13"),
+    case("enc_vbr10_stereo_32k_rate12k_c5", "music", 12000, 2, 10000, bitrate=32000, vbr=1, notes="12 kHz input: MB -> WB"),
+    case("enc_cbr20_stereo_32k_c5_forcemono", "music", 48000, 2, 20000, bitrate=32000, fc=1, notes="OPUS_SET_FORCE_CHANNELS(1)"),
+    case("enc_default20_stereo", "music", 48000, 2, 20000, bitrate=-1000, vbr=1, cvbr=1, cx=9, notes="libopus defaults: OPUS_AUTO bitrate, CVBR, complexity 9"),
+    case("enc_bmax20_mono_cbr_c5", "music", 48000, 1, 20000, bitrate=-1, notes="OPUS_BITRATE_MAX, CBR: the whole 1276-byte budget"),
+    case("enc_vbr40_stereo_96k_c5_gap", "music_gap", 48000, 2, 40000, bitrate=96000, vbr=1, notes="VBR 2 x 20 ms over a silent gap: code 2"),
+    case("enc_vbr60_mono_64k_c5_gap", "music_gap", 48000, 1, 60000, vbr=1, notes="VBR 3 x 20 ms over a silent gap: code 3 VBR"),
+    case("enc_cbr20_mono_64k_c5_gap", "music_gap", 48000, 1, 20000, notes="CBR over a silent gap: CELT silence frames"),
 ]
 
 
@@ -171,12 +187,18 @@ def main():
     if dbg is not None:
         dbg.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
     os.makedirs(out, exist_ok=True)
-    manifest = ["name\trate\tchannels\tframe_us\tapplication\tbitrate\tvbr\tcvbr\tcomplexity\tbandwidth\tpackets\tnotes"]
+    manifest = ["name\trate\tchannels\tframe_us\tapplication\tbitrate\tvbr\tcvbr\tcomplexity\tbandwidth\tpackets\tforce_channels\tnotes"]
     for c in CASES:
         frame = c["rate"] * c["us"] // 1_000_000
         total = frame * c["packets"]
-        pcm = (music if c["sig"] == "music" else speech)(c["rate"], c["ch"], total, seed=len(c["name"]))
+        pcm = (speech if c["sig"] == "speech" else music)(c["rate"], c["ch"], total, seed=len(c["name"]))
+        if c["sig"] == "music_gap":
+            # digital silence over the middle third: CELT codes silent frames in 2 bytes, so VBR frame sizes differ
+            for i in range((total // 3 + c["rate"] // 100) * c["ch"], (2 * total // 3 + c["rate"] // 100) * c["ch"]):  # off the 20 ms grid
+                pcm[i] = 0
         ctl = {OPUS_SET_BITRATE: c["bitrate"], OPUS_SET_VBR: c["vbr"], OPUS_SET_VBR_CONSTRAINT: c["cvbr"], OPUS_SET_COMPLEXITY: c["cx"]}
+        if c["fc"] != -1000:
+            ctl[OPUS_SET_FORCE_CHANNELS] = c["fc"]
         if c["app"] != "lowdelay":
             ctl[OPUS_SET_FORCE_MODE] = MODE_CELT_ONLY
         if c["bw"] != "auto":
@@ -200,7 +222,7 @@ def main():
             f.write(bytes(stream))
         with open(os.path.join(out, c["name"] + ".rng"), "wb") as f:
             f.write(struct.pack(f"<{len(ranges)}I", *ranges))
-        manifest.append("\t".join(str(c[k]) for k in ("name", "rate", "ch", "us", "app", "bitrate", "vbr", "cvbr", "cx", "bw", "packets"))
+        manifest.append("\t".join(str(c[k]) for k in ("name", "rate", "ch", "us", "app", "bitrate", "vbr", "cvbr", "cx", "bw", "packets", "fc"))
                         + "\t" + c["notes"])
         print(f"{c['name']}: {c['packets']} packets, {len(stream)} bytes")
     with open(os.path.join(out, "manifest.tsv"), "w", newline="\n") as f:

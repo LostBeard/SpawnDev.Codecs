@@ -288,6 +288,24 @@ Top-level dispatch + per-packet routing. Uses the existing OPUS Ogg parsing type
 
 Mirror of decoder. Mode selection + encode dispatch.
 
+**2026-10-29 (Geordi + Data): 1.0.0 scope = CELT-only**, byte-identical with libopus 1.5.2 fixed point at
+OPUS_SET_FORCE_MODE(MODE_CELT_ONLY) (or RESTRICTED_LOWDELAY), complexity 0..9 (complexity 10 needs tonality analysis,
+not ported). SILK / hybrid encoding after 1.0.0. Split: Data = `CeltEncoderGpu` (celt_encode_with_ec); Geordi =
+`OpusEncoderGpu` (opus_encode_native + opus_encode_frame_native).
+- Fixtures: `TestData/OpusEnc` (35 streams, `scripts/audio/make_opus_encoder_fixtures.py`): input PCM, packets, final
+  range per packet, and `.celtin` = the exact input + CTLs of every celt_encode_with_ec call, recorded inside libopus by
+  the instrumented `_refs/opus-dbg` build (its packets are byte-identical to the pristine build). The per-call decision
+  dump `.celtdbg` stays local (gitignored).
+- OpusEncoderGpu host decisions read no samples: CBR byte budget, equivalent rate, mono / stereo stream decision (with
+  hysteresis), bandwidth (end band), the 20 ms split of 40..120 ms packets, TOC value, the too-small-packet path. Kernels:
+  delay-compensation buffer (4 ms; none for low delay), dc_reject (3 Hz) or the VOIP hp_cutoff biquad (fixed 60 Hz cutoff
+  in CELT-only), the low-rate stereo width fade, packet assembly (repacketizer out_range: code 0 / 1 / 2 / 3, CBR padding).
+- Multi-frame VBR: libopus' `curr_max = IMIN(max_len_sum - tot_size, ...)` never binds (each frame is at most the other
+  term), so every 20 ms frame gets a fixed slot of curr_max bytes and the frame lengths stay on the device.
+- Seam: `OpusEncoderGpu.CeltEncode` (internal) gets a `CeltFrameCall` (CTLs + pcm_buf view + output slot + length slot).
+  The libopus-layer tests (`OpusEncoderGpu_LibopusLayer_*`) stand in libopus' CELT bytes there and check every CELT
+  input / CTL against `.celtin` and every packet byte against libopus.
+
 ### Step 7 - Bit-exact verification
 
 PMT sweep: every existing OpusDecoder CPU-vs-GPU bit-exact test passes on the GPU pair. Plus PMT cross-validation against ffmpeg's libopus on real Opus streams.

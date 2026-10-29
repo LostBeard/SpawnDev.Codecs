@@ -56,21 +56,6 @@ public sealed record OpusEncoderConfig
 }
 
 /// <summary>
-/// Opus application hint (matches libopus <c>OPUS_APPLICATION_*</c>). Distinct
-/// name from Concentus's <c>OpusApplication</c> so test projects that reference
-/// both have no ambiguity.
-/// </summary>
-public enum OpusEncoderApplication
-{
-    /// <summary>VoIP - prioritises speech intelligibility.</summary>
-    Voip = 2048,
-    /// <summary>General audio - balances speech and music.</summary>
-    Audio = 2049,
-    /// <summary>Restricted low-delay - removes algorithmic delay introducing modes.</summary>
-    RestrictedLowDelay = 2051,
-}
-
-/// <summary>
 /// Top-level Opus encoder. Encodes float PCM frames into RFC 6716 Opus
 /// packets. The current implementation delegates the per-frame work to the
 /// BSD-3 Concentus pure-C# port of libopus so the encoder is fully working
