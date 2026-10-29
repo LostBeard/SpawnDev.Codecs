@@ -7,7 +7,9 @@ Truth:
   <name>.rng        per packet the encoder's OPUS_GET_FINAL_RANGE after it (uint32 LE).
   manifest.tsv      name, rate, channels, frame_us, application, bitrate, vbr, cvbr, complexity, bandwidth, packets, notes
 With the instrumented debug build (_refs/opus-dbg: celt_encoder.c exports opus_dbg_celt_open), also, per stream:
-  <name>.celtin     per celt_encode_with_ec call: int32 call, frame_size, CC, nbCompressedBytes, tell, standalone, then
+  <name>.celtin     per celt_encode_with_ec call, 20 int32: call, frame_size, CC, nbCompressedBytes, tell on entry,
+                    standalone (enc == NULL), then the CELT CTLs on entry: bitrate, vbr, cvbr, complexity, start, end,
+                    C (stream channels), lsb_depth, disable_pf, force_intra, lfe, disable_inv, loss_rate, upsample; then
                     CC*frame_size interleaved int16 = the exact CELT input after the Opus layer (delay, dc_reject, ...).
   <name>.celtdbg    per call, text: the CTL values and encoder state on entry, then every decision (budget, silence, pitch,
                     transient, energies, dynalloc, tf, spread, boosts, stereo, trim, vbr, allocation, tells, final range).
