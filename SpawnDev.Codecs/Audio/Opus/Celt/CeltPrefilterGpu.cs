@@ -33,7 +33,7 @@ public static class CeltPrefilterGpu
     }
 
     /// <summary>libopus compute_pitch_gain (fixed point): xy / sqrt(xx * yy) in Q15.</summary>
-    private static int ComputePitchGain(int xy, int xx, int yy)
+    internal static int ComputePitchGain(int xy, int xx, int yy)
     {
         if (xy == 0 || xx == 0 || yy == 0) return 0;
         int sx = celt_ilog2(xx) - 14;
