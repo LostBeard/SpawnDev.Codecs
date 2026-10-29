@@ -189,6 +189,21 @@ Plus shared MDCT (Vorbis has `VorbisFwdMdctScaledGpu` - reusable architecture; t
 
 Bit-exact testing strategy: each primitive ships with NUnit tests against the CPU reference (Concentus or libopus output) on real Opus packets.
 
+**Progress (Data):**
+
+- **How the primitives are built.** Concentus 2.2.2 (the libopus fixed-point build in C#) is the oracle, so each primitive is a
+  statement-for-statement port of its Concentus function into a GPU-callable static helper (arrays -> `ArrayView` + offset,
+  libopus' stack arrays -> caller scratch views, tables -> uploaded views). `Celt/CeltFixed.cs` carries every overload of the
+  libopus fixed-point helpers (generated from Concentus' `Inlines`), so each ported call resolves to the overload Concentus uses
+  (`int` and `short` variants truncate differently). Tests (`CodecsTestBase.CeltGpuTests.cs`) call Concentus' internal functions
+  directly (reflection, delegates for `Span` arguments, DynamicMethods where its internal `EntropyCoder` is an argument).
+- **2026-10-29: PVQ done** (items 2, 3 and 5): `Celt/CeltPvqGpu.cs` = cwrs.c (`Cwrsi`, `Icwrs`, `PvqV`, `DecodePulses`) + vq.c
+  (`AlgUnquant`, `AlgQuantSearch`, `ExpRotation` = the spread rotation, `NormaliseResidual`, `ExtractCollapseMask`,
+  `RenormaliseVector`, `StereoItheta`), table `Celt/CeltPvqTables.cs`. Bit-exact vs Concentus on the CPU and Velocity
+  accelerators (300-400 random cases per function in the dev loop; 100-120 per test in the suite). The encoder side codes the
+  band with `ec_enc_uint(Icwrs(n, pulses), PvqV(n, k))`, which needs a GPU `EncodeUint` in `OpusRangeCoderGpu` (Geordi).
+- Next: bit allocation (rate.c `compute_allocation`), then anti-collapse and stereo (bands.c), then the comb pre/post-filter.
+
 ### Step 3 - CELT integration kernel
 
 `CeltDecodeKernel` chains the 7 primitives + IMDCT in libopus order.
