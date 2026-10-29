@@ -8,7 +8,7 @@
 //
 // Scope: the Opus layer's CELT calls (enc == NULL here: the Opus layer's CELT-only frames start the range coder at tell 1),
 // no custom modes (signalling 0), no tonality analysis (libopus' fixed-point build runs it only at complexity 10), no
-// surround energy mask. Theta RDO (stereo, no dual stereo, complexity >= 8) codes the bands through CeltQuantBandsRdoGpu.
+// surround energy mask.
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -540,19 +540,12 @@ public static class CeltEncoderGpu
         else st[s + SLastCodedBands] = codedBands;
         CeltEnergyEncGpu.QuantFineEnergy(start, end, st, s + OldBandEAt, w, error, w, fine_quant, ref enc, outv, outAt, storage, C);
 
-        // Residual quantisation: libopus resynthesises the bands only for theta RDO (stereo, no dual stereo, complexity >= 8)
-        if (C == 2 && dual_stereo == 0 && complexity >= 8)
+        // Residual quantisation (libopus resynthesises the bands only for theta RDO: stereo, no dual stereo, complexity >= 8)
         {
             uint seed = (uint)st[s + SRng];
-            CeltQuantBandsRdoGpu.QuantAllBandsEncodeRdo(mode, start, end, w, X, X + N, w, bandE, w, pulses, shortBlocks, st[s + SSpread],
-                intensity, w, tf_res, nbCompressedBytes * (8 << BITRES) - anti_collapse_rsv, balance, ref enc, outv, outAt, storage, LM,
-                codedBands, ref seed, disable_inv, w, scr, pvqU);
-        }
-        else
-        {
-            CeltQuantBandsEncGpu.QuantAllBandsEncode(mode, start, end, w, X, C == 2 ? X + N : -1, w, bandE, w, pulses, shortBlocks,
-                st[s + SSpread], dual_stereo, intensity, w, tf_res, nbCompressedBytes * (8 << BITRES) - anti_collapse_rsv, balance, ref enc,
-                outv, outAt, storage, LM, codedBands, disable_inv, w, scr, pvqU, 0);
+            CeltBandsEncGpu.QuantAllBands(mode, start, end, w, X, C == 2 ? X + N : -1, w, bandE, w, pulses, shortBlocks, st[s + SSpread],
+                dual_stereo, intensity, w, tf_res, nbCompressedBytes * (8 << BITRES) - anti_collapse_rsv, balance, ref enc, outv, outAt,
+                storage, LM, codedBands, ref seed, complexity, disable_inv, scr, pvqU);
         }
         int anti_collapse_on = 0;
         if (anti_collapse_rsv > 0)
