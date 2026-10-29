@@ -3,8 +3,9 @@
 // The CELT pitch comb filter on the accelerator (libopus celt/celt.c comb_filter + comb_filter_const), fixed-point build: the
 // decoder's post-filter and the encoder's pre-filter (the encoder runs it with negated gains). Over the first `overlap` samples
 // it cross-fades from the previous frame's (period T0, gain g0, tapset0) to this frame's (T1, g1, tapset1) with the squared
-// MDCT window, then runs the constant filter. Ported statement for statement from Concentus 2.2.2 (BSD-3) so the results are
-// bit-exact with it, including in place (y and x the same view and offset, as the decoder calls it).
+// MDCT window, then runs the constant filter. Ported statement for statement from Concentus 2.2.2 (BSD-3, libopus ~1.1) and
+// brought to libopus 1.5.2: the output saturates at SIG_SAT, the periods are at least COMBFILTER_MINPERIOD, and a zero gain
+// copies x to y (a no-op in place, as the decoder calls it: y and x the same view and offset).
 
 using ILGPU;
 using static SpawnDev.Codecs.Audio.Opus.Celt.CeltFixed;
@@ -22,6 +23,10 @@ public static class CeltCombFilterGpu
         return tap == 0 ? (short)26208 : tap == 1 ? (short)3280 : (short)0;
     }
 
+    private const int SigSat = 300000000;   // SIG_SAT
+
+    private static int Saturate(int v) => v > SigSat ? SigSat : v < -SigSat ? -SigSat : v;
+
     /// <summary>The constant-period part of the filter (libopus comb_filter_const). Reads x from <c>xAt - T - 2</c>.</summary>
     public static void CombFilterConst(ArrayView<int> y, int yAt, ArrayView<int> x, int xAt, int T, int N, int g10, int g11, int g12)
     {
@@ -33,7 +38,7 @@ public static class CeltCombFilterGpu
         for (int i = 0; i < N; i++)
         {
             int num5 = x[num + i + 2];
-            y[yAt + i] = x[xAt + i] + MULT16_32_Q15(g10, num3) + MULT16_32_Q15(g11, ADD32(num4, num2)) + MULT16_32_Q15(g12, ADD32(num5, b));
+            y[yAt + i] = Saturate(x[xAt + i] + MULT16_32_Q15(g10, num3) + MULT16_32_Q15(g11, ADD32(num4, num2)) + MULT16_32_Q15(g12, ADD32(num5, b)));
             b = num2;
             num2 = num3;
             num3 = num4;
@@ -43,15 +48,22 @@ public static class CeltCombFilterGpu
 
     /// <summary>
     /// The comb filter (libopus comb_filter): N samples at <paramref name="yAt"/> from x at <paramref name="xAt"/> (x must hold
-    /// max(T0, T1) + 2 samples of history before <paramref name="xAt"/>). Nothing is written when both gains are 0.
+    /// max(T0, T1, 15) + 2 samples of history before <paramref name="xAt"/>). With both gains 0, y is a copy of x.
     /// <paramref name="overlap"/> is the cross-fade length (the mode's overlap, 120); the window is the mode's
     /// (<see cref="CeltModeTables.Window"/>).
     /// </summary>
     public static void CombFilter(CeltModeGpu m, ArrayView<int> y, int yAt, ArrayView<int> x, int xAt, int T0, int T1, int N,
         int g0, int g1, int tapset0, int tapset1, int overlap)
     {
-        if (g0 != 0 || g1 != 0)
+        if (g0 == 0 && g1 == 0)
         {
+            for (int k = 0; k < N; k++) y[yAt + k] = x[xAt + k];
+            return;
+        }
+        {
+            // When the gain is zero, T0 and / or T1 is set to zero; at least COMBFILTER_MINPERIOD avoids reading garbage.
+            T0 = IMAX(T0, 15);
+            T1 = IMAX(T1, 15);
             int b = MULT16_16_P15(g0, Gain(tapset0, 0));
             int b2 = MULT16_16_P15(g0, Gain(tapset0, 1));
             int b3 = MULT16_16_P15(g0, Gain(tapset0, 2));
@@ -77,15 +89,18 @@ public static class CeltCombFilterGpu
                     + MULT16_32_Q15(MULT16_16_Q15(num8, num), num5)
                     + MULT16_32_Q15(MULT16_16_Q15(num8, num2), ADD32(num4, num6))
                     + MULT16_32_Q15(MULT16_16_Q15(num8, num3), ADD32(num7, b4));
+                y[yAt + i] = Saturate(y[yAt + i]);
                 b4 = num6;
                 num6 = num5;
                 num5 = num4;
                 num4 = num7;
             }
-            if (g1 != 0)
+            if (g1 == 0)
             {
-                CombFilterConst(y, yAt + i, x, xAt + i, T1, N - i, num, num2, num3);
+                for (int k = i; k < N; k++) y[yAt + k] = x[xAt + k];
+                return;
             }
+            CombFilterConst(y, yAt + i, x, xAt + i, T1, N - i, num, num2, num3);
         }
     }
 }

@@ -2,7 +2,8 @@
 //
 // CELT band energy decoding on the accelerator (libopus celt/quant_bands.c unquant_coarse_energy / unquant_fine_energy /
 // unquant_energy_finalise and celt/laplace.c ec_laplace_decode), fixed-point build. Ported statement for statement from
-// Concentus 2.2.2 (BSD-3) so the results are bit-exact with it.
+// Concentus 2.2.2 (BSD-3, libopus ~1.1); as in libopus 1.5.2 each band energy store wraps to 16 bits (oldEBands is opus_val16),
+// which only a corrupt stream can tell from Concentus' 32-bit ints.
 //
 // GPU shape: oldEBands is a view at an offset, channel c at + c * NbEBands; fine_quant / fine_priority are per-band views at an
 // offset; the coarse-energy Laplace model comes from CeltModeGpu (EProbModel).
@@ -134,7 +135,7 @@ public static class CeltEnergyGpu
                 int prev = num2 == 0 ? prev0 : prev1;
                 int b = PSHR32(MULT16_16(a, oldEBands[e]), 8) + prev + SHL32(a4, 7);
                 b = MAX32(-3670016, b);
-                oldEBands[e] = PSHR32(b, 7);
+                oldEBands[e] = (short)PSHR32(b, 7);   // libopus stores oldEBands as opus_val16
                 int next = prev + SHL32(a4, 7) - MULT16_16(a2, PSHR32(a4, 8));
                 if (num2 == 0) prev0 = next; else prev1 = next;
             }
@@ -155,7 +156,7 @@ public static class CeltEnergyGpu
                 do
                 {
                     int num2 = SUB16(SHR32(SHL32((int)OpusRangeDecoderGpu.DecodeBits(ref dec, pkt, pktAt, storage, fineQuant[fqAt + i]), 10) + 512, fineQuant[fqAt + i]), 512);
-                    oldEBands[eAt + i + num * nb] += num2;
+                    oldEBands[eAt + i + num * nb] = (short)(oldEBands[eAt + i + num * nb] + num2);
                 }
                 while (++num < C);
             }
@@ -182,7 +183,7 @@ public static class CeltEnergyGpu
                     do
                     {
                         int num2 = SHR16(SHL16((int)OpusRangeDecoderGpu.DecodeBits(ref dec, pkt, pktAt, storage, 1), 10) - 512, fineQuant[fqAt + j] + 1);
-                        oldEBands[eAt + j + num * nb] += num2;
+                        oldEBands[eAt + j + num * nb] = (short)(oldEBands[eAt + j + num * nb] + num2);
                         bits_left--;
                     }
                     while (++num < C);

@@ -2,7 +2,8 @@
 //
 // CELT decoder stages around the band decode, on the accelerator (libopus celt/celt.c tf_decode, celt/bands.c
 // denormalise_bands, celt/celt_decoder.c deemphasis), fixed-point build. Ported statement for statement from Concentus 2.2.2
-// (BSD-3), with one deliberate difference noted at DenormaliseBands.
+// (BSD-3, libopus ~1.1) and brought to libopus 1.5.2 where it changed: denormalise_bands saturates the log gain and caps an
+// extreme gain at 16384, and deemphasis adds the decimated output in when accumulating and has no overflow special case.
 
 using ILGPU;
 using static SpawnDev.Codecs.Audio.Opus.Celt.CeltFixed;
@@ -12,6 +13,9 @@ namespace SpawnDev.Codecs.Audio.Opus.Celt;
 /// <summary>CELT decoder stages: TF decode, band denormalisation, de-emphasis (GPU-callable).</summary>
 public static class CeltSynthesisGpu
 {
+    // libopus SATURATE16 (fixed_generic.h); not among the Concentus Inlines CeltFixed is generated from.
+    private static int Saturate16(int x) => x > 32767 ? 32767 : x < -32768 ? -32768 : x;
+
     /// <summary>
     /// Per-band TF resolution changes (libopus tf_decode): one bit per band (differential), then the tf_select bit, mapped
     /// through tf_select_table into <paramref name="tfRes"/>.
@@ -82,7 +86,7 @@ public static class CeltSynthesisGpu
         {
             int num4 = M * m.EBandsOf(i);
             int num5 = M * m.EBandsOf(i + 1);
-            int num6 = ADD16(bandLogE[eAt + i], SHL16(m.EMeansOf(i), 6));
+            int num6 = Saturate16(ADD32(bandLogE[eAt + i], SHL32(m.EMeansOf(i), 6)));
             int num7 = 16 - (num6 >> 10);
             int b;
             if (num7 > 31)
@@ -96,9 +100,10 @@ public static class CeltSynthesisGpu
             }
             if (num7 < 0)
             {
-                if (num7 < -2)
+                // libopus 1.5.2 caps the gain at shift <= -2 (an lg of 18; corrupt streams only)
+                if (num7 <= -2)
                 {
-                    b = 32767;
+                    b = 16384;
                     num7 = -2;
                 }
                 do
@@ -179,24 +184,23 @@ public static class CeltSynthesisGpu
                 for (int i = 0; i < N; i++)
                 {
                     int num9 = input[num5 + i] + num4;
-                    if (input[num5 + i] > 0 && num4 > 0 && num9 < 0)
-                    {
-                        num9 = int.MaxValue;
-                        num4 = int.MaxValue;
-                    }
-                    else
-                    {
-                        num4 = MULT16_32_Q15(a, num9);
-                    }
+                    num4 = MULT16_32_Q15(a, num9);
                     pcm[num6 + i * C] = SIG2WORD16(num9);
                 }
             }
             mem[memAt + num3] = num4;
             if (num != 0)
             {
-                for (int i = 0; i < num2; i++)
+                // libopus 1.5.2 adds the decimated output in too when accumulating (Concentus / libopus 1.1 overwrote it)
+                if (accum != 0)
                 {
-                    pcm[num6 + i * C] = SIG2WORD16(scratch[scratchAt + i * downsample]);
+                    for (int i = 0; i < num2; i++)
+                        pcm[num6 + i * C] = SAT16(ADD32(pcm[num6 + i * C], SIG2WORD16(scratch[scratchAt + i * downsample])));
+                }
+                else
+                {
+                    for (int i = 0; i < num2; i++)
+                        pcm[num6 + i * C] = SIG2WORD16(scratch[scratchAt + i * downsample]);
                 }
             }
         }

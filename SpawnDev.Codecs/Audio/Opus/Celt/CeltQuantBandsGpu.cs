@@ -3,8 +3,9 @@
 // The CELT band recursion on the accelerator, decode side (libopus celt/bands.c quant_all_bands, quant_band,
 // quant_band_stereo, quant_band_n1, quant_partition, compute_theta), fixed-point build: per band, the shape bits are split
 // recursively (an angle theta decides how they divide between the halves / between mid and side) down to PVQ codes, with
-// folding from lower bands where a band gets no pulses. Ported statement for statement from Concentus 2.2.2 (BSD-3) so the
-// results are bit-exact with it.
+// folding from lower bands where a band gets no pulses. Ported statement for statement from Concentus 2.2.2 (BSD-3, libopus
+// ~1.1) and brought to libopus 1.5.2: disable_inv, the hybrid second-band folding (special_hybrid_folding, the lowband_offset
+// and fold_end changes) and, through CeltFixed, 1.5.2's 64-bit MULT32_32_Q31 in exp_rotation's gain.
 //
 // GPU shape:
 // - X_, Y_ and libopus' normalised-band history `_norm` live in ONE int view (`buf`) at caller offsets, so every libopus
@@ -35,6 +36,8 @@ public struct CeltBandCtx
     public int RemainingBits;
     /// <summary>The folding noise seed.</summary>
     public uint Seed;
+    /// <summary>1 forces the stereo inversion flag off (libopus disable_inv: a mono decoder of a stereo stream).</summary>
+    public int DisableInv;
 }
 
 /// <summary>The CELT band recursion (bands.c quant_all_bands and its callees), decode side (GPU-callable).</summary>
@@ -153,6 +156,8 @@ public static class CeltQuantBandsGpu
         else if (stereo != 0)
         {
             inv = ((b > 16 && ctx.RemainingBits > 16) ? OpusRangeDecoderGpu.DecodeBitLogP(ref ec, pkt, pktAt, storage, 2) : 0);
+            // inv flag override to avoid problems with downmixing (libopus 1.5.2)
+            if (ctx.DisableInv != 0) inv = 0;
             num = 0;
         }
         int num13 = (int)CeltEntropyGpu.TellFrac(ref ec) - num4;
@@ -495,118 +500,17 @@ public static class CeltQuantBandsGpu
         return num4;
     }
 
-    /// <summary>libopus quant_band_stereo (decoder): a band of both channels, coded as mid / side with a split angle.</summary>
-    public static uint QuantBandStereoDecode(CeltModeGpu m, ref CeltBandCtx ctx,
-        ref OpusRangeDecoderGpuState ec, ArrayView<byte> pkt, int pktAt, uint storage,
-        ArrayView<int> buf, int xAt, int yAt, int N, int b, int B, int lowbandAt, int LM, int lowbandOutAt, int lowbandScratchAt, int fill,
-        ArrayView<int> scratch, int scratchAt, ArrayView<uint> pvqU, int pvqUAt)
+    /// <summary>
+    /// libopus 1.5.2 special_hybrid_folding: duplicate enough of the first band's folding data (at <paramref name="normAt"/>, and
+    /// at <paramref name="norm2At"/> with dual stereo) to fold the second band. Copies nothing when the start band is 0.
+    /// </summary>
+    private static void SpecialHybridFolding(CeltModeGpu m, ArrayView<int> buf, int normAt, int norm2At, int start, int M, int dual_stereo)
     {
-        uint num5 = 0u;
-        int num6 = 1;
-        if (N == 1)
-        {
-            return QuantBandN1Decode(ref ctx, ref ec, pkt, pktAt, storage, buf, xAt, yAt, b, lowbandOutAt);
-        }
-        int fill2 = fill;
-        ComputeThetaDecode(m, ref ctx, ref ec, pkt, pktAt, storage, N, ref b, B, B, LM, 1, ref fill,
-            out int num2, out int num, out int iside, out int delta, out int itheta, out int qalloc);
-        int num3 = num;
-        int num4 = iside;
-        if (N == 2)
-        {
-            int num7 = 0;
-            int num8 = b;
-            int num9 = 0;
-            if (itheta != 0 && itheta != 16384)
-            {
-                num9 = 8;
-            }
-            num8 -= num9;
-            bool flag = itheta > 8192;
-            ctx.RemainingBits -= qalloc + num9;
-            int num10;
-            int span;
-            if (flag)
-            {
-                num10 = yAt;
-                span = xAt;
-            }
-            else
-            {
-                num10 = xAt;
-                span = yAt;
-            }
-            if (num9 != 0)
-            {
-                num7 = (int)OpusRangeDecoderGpu.DecodeBits(ref ec, pkt, pktAt, storage, 1);
-            }
-            num7 = 1 - 2 * num7;
-            num5 = QuantBandDecode(m, ref ctx, ref ec, pkt, pktAt, storage, buf, num10, N, num8, B, lowbandAt, LM, lowbandOutAt, 32767,
-                lowbandScratchAt, fill2, scratch, scratchAt, pvqU, pvqUAt);
-            // libopus writes the other channel's two bins at Y_ptr into whichever array `span` is (span[Y_ptr]): keep that
-            int spanBase = span - yAt;   // `span` names an array; its element Y_ptr is at array base + Y_ptr
-            buf[spanBase + yAt] = -num7 * buf[num10 + 1];
-            buf[spanBase + yAt + 1] = num7 * buf[num10];
-            if (num6 != 0)
-            {
-                buf[xAt] = MULT16_16_Q15(num3, buf[xAt]);
-                buf[xAt + 1] = MULT16_16_Q15(num3, buf[xAt + 1]);
-                buf[yAt] = MULT16_16_Q15(num4, buf[yAt]);
-                buf[yAt + 1] = MULT16_16_Q15(num4, buf[yAt + 1]);
-                int a = buf[xAt];
-                buf[xAt] = SUB16(a, buf[yAt]);
-                buf[yAt] = ADD16(a, buf[yAt]);
-                a = buf[xAt + 1];
-                buf[xAt + 1] = SUB16(a, buf[yAt + 1]);
-                buf[yAt + 1] = ADD16(a, buf[yAt + 1]);
-            }
-        }
-        else
-        {
-            int num8 = IMAX(0, IMIN(b, (b - delta) / 2));
-            int num9 = b - num8;
-            ctx.RemainingBits -= qalloc;
-            int remaining_bits = ctx.RemainingBits;
-            if (num8 >= num9)
-            {
-                num5 = QuantBandDecode(m, ref ctx, ref ec, pkt, pktAt, storage, buf, xAt, N, num8, B, lowbandAt, LM, lowbandOutAt, 32767,
-                    lowbandScratchAt, fill, scratch, scratchAt, pvqU, pvqUAt);
-                remaining_bits = num8 - (remaining_bits - ctx.RemainingBits);
-                if (remaining_bits > 24 && itheta != 0)
-                {
-                    num9 += remaining_bits - 24;
-                }
-                num5 |= QuantBandDecode(m, ref ctx, ref ec, pkt, pktAt, storage, buf, yAt, N, num9, B, -1, LM, -1, num4, -1, fill >> B,
-                    scratch, scratchAt, pvqU, pvqUAt);
-            }
-            else
-            {
-                num5 = QuantBandDecode(m, ref ctx, ref ec, pkt, pktAt, storage, buf, yAt, N, num9, B, -1, LM, -1, num4, -1, fill >> B,
-                    scratch, scratchAt, pvqU, pvqUAt);
-                remaining_bits = num9 - (remaining_bits - ctx.RemainingBits);
-                if (remaining_bits > 24 && itheta != 16384)
-                {
-                    num8 += remaining_bits - 24;
-                }
-                num5 |= QuantBandDecode(m, ref ctx, ref ec, pkt, pktAt, storage, buf, xAt, N, num8, B, lowbandAt, LM, lowbandOutAt, 32767,
-                    lowbandScratchAt, fill, scratch, scratchAt, pvqU, pvqUAt);
-            }
-        }
-        if (num6 != 0)
-        {
-            if (N != 2)
-            {
-                CeltBandsGpu.StereoMerge(buf, xAt, buf, yAt, num3, N);
-            }
-            if (num2 != 0)
-            {
-                for (int i = yAt; i < N + yAt; i++)
-                {
-                    buf[i] = (short)(-buf[i]);
-                }
-            }
-        }
-        return num5;
+        int n1 = M * (m.EBandsOf(start + 1) - m.EBandsOf(start));
+        int n2 = M * (m.EBandsOf(start + 2) - m.EBandsOf(start + 1));
+        for (int j = 0; j < n2 - n1; j++) buf[normAt + n1 + j] = buf[normAt + 2 * n1 - n2 + j];
+        if (dual_stereo != 0)
+            for (int j = 0; j < n2 - n1; j++) buf[norm2At + n1 + j] = buf[norm2At + 2 * n1 - n2 + j];
     }
 
     /// <summary>
@@ -623,7 +527,7 @@ public static class CeltQuantBandsGpu
         int total_bits, int balance,
         ref OpusRangeDecoderGpuState ec, ArrayView<byte> pkt, int pktAt, uint storage,
         int LM, int codedBands, ref uint seed,
-        ArrayView<int> scratch, int scratchAt, ArrayView<uint> pvqU, int pvqUAt)
+        ArrayView<int> scratch, int scratchAt, ArrayView<uint> pvqU, int pvqUAt, int disableInv)
     {
         int nb = CeltModeTables.NbEBands;
         int num = 1;
@@ -640,6 +544,7 @@ public static class CeltQuantBandsGpu
         band_ctx2.Intensity = intensity;
         band_ctx2.Seed = seed;
         band_ctx2.Spread = spread;
+        band_ctx2.DisableInv = disableInv;
         for (int i = start; i < end; i++)
         {
             int num9 = -1;
@@ -676,10 +581,13 @@ public static class CeltQuantBandsGpu
             {
                 num17 = 0;
             }
-            if (num3 != 0 && num4 * m.EBandsOf(i) - num13 >= num4 * m.EBandsOf(start) && (num != 0 || num8 == 0))
+            // libopus 1.5.2 (DISABLE_UPDATE_DRAFT off): the second band of a hybrid frame folds too, from a copy of the first's data
+            if (num3 != 0 && (num4 * m.EBandsOf(i) - num13 >= num4 * m.EBandsOf(start) || i == start + 1) && (num != 0 || num8 == 0))
             {
                 num8 = i;
             }
+            if (i == start + 1)
+                SpecialHybridFolding(m, buf, normAt, normAt + num7, start, num4, dual_stereo);
             num11 = (band_ctx2.TfChange = tfRes[tfAt + i]);
             if (i >= nb)   // m.effEBands == nbEBands in the static mode
             {
@@ -706,7 +614,7 @@ public static class CeltQuantBandsGpu
                 {
                 }
                 int num19 = num8 - 1;
-                while (num4 * m.EBandsOf(++num19) < num9 + num6 + num13)
+                while (++num19 < i && num4 * m.EBandsOf(num19) < num9 + num6 + num13)   // libopus 1.5.2 stops at i
                 {
                 }
                 num20 = (num21 = 0u);
@@ -736,24 +644,125 @@ public static class CeltQuantBandsGpu
             int scr = array2 >= 0 ? array2 + lowband_scratch_ptr : -1;
             int low = num9 != -1 ? normAt + num9 : -1;
             int lowOut = num12 != 0 ? -1 : normAt + (num4 * m.EBandsOf(i) - num6);
-            if (dual_stereo != 0)
+            // The band's QuantBandDecode calls, as up to two jobs through ONE call site: every call site inlines the whole
+            // partition recursion (WGSL helpers cannot take views, so WebGPU inlines every view-taking helper), and libopus'
+            // quant_all_bands + quant_band_stereo have eight. Jobs, in libopus order: mono X; dual stereo X then Y; stereo
+            // (quant_band_stereo) the N == 2 mid, or mid and side in the order of their bit budgets, rebalanced in between.
+            int bandMode;   // 0 mono, 1 dual stereo, 2 stereo N == 2, 3 stereo split, 4 stereo N == 1 (no job)
+            int njobs;
+            int xBand = array3 + x_ptr, yBand = array4 + num10;
+            int sFill = (int)(num20 | num21), sInv = 0, sImid = 0, sIside = 0, sItheta = 0, mbits = 0, sbits = 0, rebalance = 0;
+            int n2Sign = 1, n2X = 0, n2Y = 0;
+            uint cmX = 0u, cmY = 0u;
+            if (dual_stereo != 0) { bandMode = 1; njobs = 2; }
+            else if (array4 < 0) { bandMode = 0; njobs = 1; }
+            else if (num13 == 1)
             {
-                num20 = QuantBandDecode(m, ref band_ctx2, ref ec, pkt, pktAt, storage, buf, array3 + x_ptr, num13, num17 / 2, num5,
-                    low, LM, lowOut, 32767, scr, (int)num20, scratch, scratchAt, pvqU, pvqUAt);
-                num21 = QuantBandDecode(m, ref band_ctx2, ref ec, pkt, pktAt, storage, buf, array4 + num10, num13, num17 / 2, num5,
-                    num9 != -1 ? normAt + num7 + num9 : -1, LM, num12 != 0 ? -1 : normAt + num7 + (num4 * m.EBandsOf(i) - num6), 32767, scr,
-                    (int)num21, scratch, scratchAt, pvqU, pvqUAt);
+                bandMode = 4; njobs = 0;
+                cmX = QuantBandN1Decode(ref band_ctx2, ref ec, pkt, pktAt, storage, buf, xBand, yBand, num17, lowOut);
             }
             else
             {
-                if (array4 < 0)
-                    num20 = QuantBandDecode(m, ref band_ctx2, ref ec, pkt, pktAt, storage, buf, array3 + x_ptr, num13, num17, num5,
-                        low, LM, lowOut, 32767, scr, (int)(num20 | num21), scratch, scratchAt, pvqU, pvqUAt);
+                int sb = num17;
+                int fill2 = sFill;
+                ComputeThetaDecode(m, ref band_ctx2, ref ec, pkt, pktAt, storage, num13, ref sb, num5, num5, LM, 1, ref sFill,
+                    out sInv, out sImid, out sIside, out int sDelta, out sItheta, out int sQalloc);
+                if (num13 == 2)
+                {
+                    bandMode = 2; njobs = 1;
+                    sbits = sItheta != 0 && sItheta != 16384 ? 8 : 0;
+                    mbits = sb - sbits;
+                    band_ctx2.RemainingBits -= sQalloc + sbits;
+                    bool c = sItheta > 8192;
+                    n2X = c ? yBand : xBand;   // libopus x2 / y2
+                    n2Y = c ? xBand : yBand;
+                    int sign = 0;
+                    if (sbits != 0) sign = (int)OpusRangeDecoderGpu.DecodeBits(ref ec, pkt, pktAt, storage, 1);
+                    n2Sign = 1 - 2 * sign;
+                    sFill = fill2;
+                }
                 else
-                    num20 = QuantBandStereoDecode(m, ref band_ctx2, ref ec, pkt, pktAt, storage, buf, array3 + x_ptr, array4 + num10, num13,
-                        num17, num5, low, LM, lowOut, scr, (int)(num20 | num21), scratch, scratchAt, pvqU, pvqUAt);
-                num21 = num20;
+                {
+                    bandMode = 3; njobs = 2;
+                    mbits = IMAX(0, IMIN(sb, (sb - sDelta) / 2));
+                    sbits = sb - mbits;
+                    band_ctx2.RemainingBits -= sQalloc;
+                    rebalance = band_ctx2.RemainingBits;
+                }
             }
+            for (int job = 0; job < njobs; job++)
+            {
+                int jX, jB, jLow, jLowOut, jGain, jScr, jFill;
+                if (bandMode == 0)
+                {
+                    jX = xBand; jB = num17; jLow = low; jLowOut = lowOut; jGain = 32767; jScr = scr; jFill = sFill;
+                }
+                else if (bandMode == 1)
+                {
+                    jB = num17 / 2; jGain = 32767; jScr = scr;
+                    if (job == 0) { jX = xBand; jLow = low; jLowOut = lowOut; jFill = (int)num20; }
+                    else
+                    {
+                        jX = yBand;
+                        jLow = num9 != -1 ? normAt + num7 + num9 : -1;
+                        jLowOut = num12 != 0 ? -1 : normAt + num7 + (num4 * m.EBandsOf(i) - num6);
+                        jFill = (int)num21;
+                    }
+                }
+                else if (bandMode == 2)
+                {
+                    jX = n2X; jB = mbits; jLow = low; jLowOut = lowOut; jGain = 32767; jScr = scr; jFill = sFill;
+                }
+                else
+                {
+                    bool midFirst = mbits >= sbits;
+                    if (job == 1)
+                    {
+                        // Rebalance what the first half did not use into the second.
+                        int used = (midFirst ? mbits : sbits) - (rebalance - band_ctx2.RemainingBits);
+                        if (used > 24 && sItheta != (midFirst ? 0 : 16384))
+                        {
+                            if (midFirst) sbits += used - 24;
+                            else mbits += used - 24;
+                        }
+                    }
+                    if ((job == 0) == midFirst)
+                    {
+                        jX = xBand; jB = mbits; jLow = low; jLowOut = lowOut; jGain = 32767; jScr = scr; jFill = sFill;
+                    }
+                    else
+                    {
+                        jX = yBand; jB = sbits; jLow = -1; jLowOut = -1; jGain = sIside; jScr = -1; jFill = sFill >> num5;
+                    }
+                }
+                uint r = QuantBandDecode(m, ref band_ctx2, ref ec, pkt, pktAt, storage, buf, jX, num13, jB, num5, jLow, LM, jLowOut,
+                    jGain, jScr, jFill, scratch, scratchAt, pvqU, pvqUAt);
+                if (bandMode == 1 && job == 1) cmY = r;
+                else cmX |= r;
+            }
+            if (bandMode == 2)
+            {
+                // The side of a 2-bin band from the mid's bins and the sign, then the mid / side mix (libopus quant_band_stereo).
+                buf[n2Y] = -n2Sign * buf[n2X + 1];
+                buf[n2Y + 1] = n2Sign * buf[n2X];
+                buf[xBand] = MULT16_16_Q15(sImid, buf[xBand]);
+                buf[xBand + 1] = MULT16_16_Q15(sImid, buf[xBand + 1]);
+                buf[yBand] = MULT16_16_Q15(sIside, buf[yBand]);
+                buf[yBand + 1] = MULT16_16_Q15(sIside, buf[yBand + 1]);
+                int a = buf[xBand];
+                buf[xBand] = SUB16(a, buf[yBand]);
+                buf[yBand] = ADD16(a, buf[yBand]);
+                a = buf[xBand + 1];
+                buf[xBand + 1] = SUB16(a, buf[yBand + 1]);
+                buf[yBand + 1] = ADD16(a, buf[yBand + 1]);
+            }
+            if (bandMode == 3)
+                CeltBandsGpu.StereoMerge(buf, xBand, buf, yBand, sImid, num13);
+            if ((bandMode == 2 || bandMode == 3) && sInv != 0)
+                for (int k = yBand; k < num13 + yBand; k++)
+                    buf[k] = (short)(-buf[k]);
+            num20 = cmX;
+            num21 = bandMode == 1 ? cmY : cmX;
             masks[masksAt + i * num2] = (int)(num20 & 0xFF);
             masks[masksAt + i * num2 + num2 - 1] = (int)(num21 & 0xFF);
             balance += pulses[pulsesAt + i] + num14;

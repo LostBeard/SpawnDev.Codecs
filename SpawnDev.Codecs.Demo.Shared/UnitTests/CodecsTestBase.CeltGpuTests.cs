@@ -7,10 +7,12 @@ using System.Reflection;
 using System.Reflection.Emit;
 using ILGPU;
 using ILGPU.Runtime;
+using SpawnDev.Codecs.Audio.Opus;
 using SpawnDev.Codecs.Audio.Opus.Celt;
 using SpawnDev.Codecs.EntropyCoders;
 using SpawnDev.ILGPU;
 using SpawnDev.UnitTesting;
+using static SpawnDev.Codecs.Demo.Shared.UnitTests.TestHelpers;
 
 namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
@@ -19,7 +21,6 @@ public abstract partial class CodecsTestBase
     /// <summary>Concentus' CELT internals as callable oracles.</summary>
     private static class ConcentusCeltOracle
     {
-        public delegate void ExpRotationFn(Span<int> x, int xPtr, int len, int dir, int stride, int k, int spread);
         public delegate void NormaliseResidualFn(int[] iy, Span<int> x, int xPtr, int n, int ryy, int gain);
         public delegate void RenormaliseVectorFn(Span<int> x, int n, int gain);
         public delegate int StereoIthetaFn(Span<int> x, Span<int> y, int stereo, int n);
@@ -60,8 +61,48 @@ public abstract partial class CodecsTestBase
         private static readonly MethodInfo IcwrsM = M("CWRS", "icwrs", typeof(int), typeof(int[]));
         private static readonly MethodInfo PvqVM = M("CWRS", "CELT_PVQ_V", typeof(int), typeof(int));
         private static readonly MethodInfo CollapseM = M("VQ", "extract_collapse_mask", typeof(int[]), typeof(int), typeof(int));
-        public static readonly ExpRotationFn ExpRotation = (ExpRotationFn)Delegate.CreateDelegate(typeof(ExpRotationFn),
-            M("VQ", "exp_rotation", typeof(Span<int>), typeof(int), typeof(int), typeof(int), typeof(int), typeof(int), typeof(int)));
+        public delegate void ExpRotation1Fn(Span<int> x, int xPtr, int len, int stride, int c, int s);
+        private static readonly ExpRotation1Fn ExpRotation1 = (ExpRotation1Fn)Delegate.CreateDelegate(typeof(ExpRotation1Fn),
+            M("VQ", "exp_rotation1", typeof(Span<int>), typeof(int), typeof(int), typeof(int), typeof(int), typeof(int)));
+        private static readonly Type InlinesT = A.GetType("Concentus.Common.Inlines", true)!;
+        private static readonly MethodInfo CeltRcpM = InlinesT.GetMethod("celt_rcp", Any, null, new[] { typeof(int) }, null)!;
+        private static readonly MethodInfo CeltCosNormM = InlinesT.GetMethod("celt_cos_norm", Any, null, new[] { typeof(int) }, null)!;
+
+        /// <summary>
+        /// libopus 1.5.2 vq.c exp_rotation, transcribed (Concentus' exp_rotation1, celt_rcp and celt_cos_norm are unchanged since
+        /// 1.1). Not Concentus' exp_rotation: its celt_div multiplies with libopus 1.1's 32-bit split MULT32_32_Q31, and libopus
+        /// 1.5.2 on a 64-bit build (OPUS_FAST_INT64) multiplies exactly, which moves the gain by 1-3 LSB in most cases.
+        /// </summary>
+        public static void ExpRotation(Span<int> x, int xPtr, int len, int dir, int stride, int k, int spread)
+        {
+            if (2 * k >= len || spread == 0) return;
+            int factor = new[] { 15, 10, 5 }[spread - 1];
+            int rcp = (int)CeltRcpM.Invoke(null, new object[] { len + factor * k })!;
+            int gain = (int)(((long)(32767 * len) * rcp) >> 31);            // celt_div, MULT32_32_Q31 in 64 bits
+            int theta = ((short)gain * (short)gain >> 15) >> 1;              // HALF16(MULT16_16_Q15(gain, gain))
+            int c = (int)CeltCosNormM.Invoke(null, new object[] { theta })!;
+            int s = (int)CeltCosNormM.Invoke(null, new object[] { 32767 - theta })!;
+            int stride2 = 0;
+            if (len >= 8 * stride)
+            {
+                stride2 = 1;
+                while ((stride2 * stride2 + stride2) * stride + (stride >> 2) < len) stride2++;
+            }
+            len /= stride;
+            for (int i = 0; i < stride; i++)
+            {
+                if (dir < 0)
+                {
+                    if (stride2 != 0) ExpRotation1(x, xPtr + i * len, len, stride2, s, c);
+                    ExpRotation1(x, xPtr + i * len, len, 1, c, s);
+                }
+                else
+                {
+                    ExpRotation1(x, xPtr + i * len, len, 1, c, -s);
+                    if (stride2 != 0) ExpRotation1(x, xPtr + i * len, len, stride2, s, -c);
+                }
+            }
+        }
         public static readonly NormaliseResidualFn NormaliseResidual = (NormaliseResidualFn)Delegate.CreateDelegate(typeof(NormaliseResidualFn),
             M("VQ", "normalise_residual", typeof(int[]), typeof(Span<int>), typeof(int), typeof(int), typeof(int), typeof(int)));
         public static readonly RenormaliseVectorFn RenormaliseVector = (RenormaliseVectorFn)Delegate.CreateDelegate(typeof(RenormaliseVectorFn),
@@ -789,6 +830,9 @@ public abstract partial class CodecsTestBase
                 else
                 {
                     ConcentusCeltOracle.CombFilter(y, history, x, history, t0, t1, frame, g0, g1, tapset0, tapset1, ConcentusCeltOracle.Window120, 120);
+                    // libopus 1.5.2 copies x to y where a gain is 0 (after the cross-fade for g1 alone); Concentus leaves y as it was
+                    if (g0 == 0 && g1 == 0) Array.Copy(x, history, y, history, frame);
+                    else if (g1 == 0) Array.Copy(x, history + 120, y, history + 120, frame - 120);
                     want[c] = y;
                 }
             }
@@ -804,6 +848,110 @@ public abstract partial class CodecsTestBase
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
+
+    /// <summary>
+    /// <see cref="CeltDecoderGpu"/> on a CELT-only libopus 1.5.2 fixture stream (TestData/Opus): every packet's int16 PCM and
+    /// final range must equal libopus'; a lost packet is concealed (celt_decode_lost, with the last packet's bands) and its PCM
+    /// must equal libopus' too.
+    /// </summary>
+    private async Task RunCeltLibopusFixture(string name)
+    {
+        var fx = LoadOpusFixture(name);
+        byte[] rngRaw = ReadEmbedded(OpusFixturePrefix + name + ".rng");
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            using var celt = new CeltDecoderGpu(acc, fx.ApiRate, fx.ApiChannels);
+            using var dPacket = acc.Allocate1D<byte>(4 * 1276);
+            using var dPcm = acc.Allocate1D<short>(OpusDecoderGpu.MaxSamplesPerChannel * fx.ApiChannels);
+            int at = 0, lost = 0, lastEnd = 21;
+            for (int p = 0; p < fx.Packets.Count; p++)
+            {
+                var pkt = fx.Packets[p];
+                if (pkt is null)
+                {
+                    int ls = (int)((long)fx.ApiRate * fx.PacketUs / 1_000_000);
+                    celt.DecodeLost(0, lastEnd, ls, false, dPcm.View, 0);
+                    var gotLost = await dPcm.View.SubView(0, ls * fx.ApiChannels).CopyToHostAsync();
+                    for (int i = 0; i < gotLost.Length; i++)
+                        if (gotLost[i] != fx.Pcm[at + i])
+                            throw new Exception($"{name} packet {p} (LOST): sample {i / fx.ApiChannels} ch {i % fx.ApiChannels}: GPU {gotLost[i]} vs libopus {fx.Pcm[at + i]}");
+                    at += gotLost.Length;
+                    lost++;
+                    continue;
+                }
+                if (!OpusPacketParser.TryParse(pkt, selfDelimited: false, out var parsed, out var error) || parsed is null)
+                    throw new Exception($"{name} packet {p}: {error}");
+                var toc = parsed.Toc;
+                if (toc.Mode != OpusMode.Celt) throw new Exception($"{name} packet {p}: {toc.Mode}, not a CELT-only stream");
+                int endBand = toc.Bandwidth switch
+                {
+                    OpusBandwidth.Narrowband => 13,
+                    OpusBandwidth.Mediumband or OpusBandwidth.Wideband => 17,
+                    OpusBandwidth.Superwideband => 19,
+                    _ => 21,
+                };
+                lastEnd = endBand;
+                int spf = toc.GetSamplesPerFrame(fx.ApiRate);
+                dPacket.View.SubView(0, pkt.Length).CopyFromCPU(pkt);
+                for (int f = 0; f < parsed.FrameCount; f++)
+                {
+                    if (!System.Runtime.InteropServices.MemoryMarshal.TryGetArray(parsed.Frames[f], out var seg) || !ReferenceEquals(seg.Array, pkt))
+                        throw new Exception($"{name} packet {p}: frame {f} is not a slice of the packet");
+                    celt.Decode(dPacket.View, seg.Offset, seg.Count, null, 0, endBand, toc.IsStereo ? 2 : 1, spf, false, dPcm.View,
+                        f * spf * fx.ApiChannels);
+                }
+                int count = spf * parsed.FrameCount * fx.ApiChannels;
+                var got = await dPcm.View.SubView(0, count).CopyToHostAsync();
+                uint gotRng = await celt.GetFinalRangeAsync();
+                uint wantRng = BitConverter.ToUInt32(rngRaw, 4 * p);
+                for (int i = 0; i < count; i++)
+                {
+                    if (at + i >= fx.Pcm.Length) throw new Exception($"{name} packet {p}: more samples than libopus ({fx.Pcm.Length})");
+                    if (got[i] != fx.Pcm[at + i])
+                        throw new Exception($"{name} packet {p} ({pkt.Length} B, {toc.Bandwidth}, {spf} samples x {parsed.FrameCount}, " +
+                            $"{(toc.IsStereo ? "stereo" : "mono")}): sample {i / fx.ApiChannels} ch {i % fx.ApiChannels}: GPU {got[i]} vs libopus " +
+                            $"{fx.Pcm[at + i]} (final range GPU {gotRng:X8}, libopus {wantRng:X8})");
+                }
+                if (gotRng != wantRng) throw new Exception($"{name} packet {p}: final range GPU {gotRng:X8} vs libopus {wantRng:X8} (PCM equal)");
+                at += count;
+            }
+            Equal(fx.Pcm.Length, at, $"{name} total samples");
+            if (name.Contains("loss") && lost == 0) throw new Exception($"{name}: no lost packet");
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task CeltDecoderGpu_Libopus_Fb20StereoLoss() => await RunCeltLibopusFixture("celt_fb20_stereo_96k_loss");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task CeltDecoderGpu_Libopus_Fb20MonoLow() => await RunCeltLibopusFixture("celt_fb20_mono_12k_low");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task CeltDecoderGpu_Libopus_Fb10MonoLoss() => await RunCeltLibopusFixture("celt_fb10_mono_48k_loss");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task CeltDecoderGpu_Libopus_Fb10StereoLow() => await RunCeltLibopusFixture("celt_fb10_stereo_24k_low");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task CeltDecoderGpu_Libopus_Fb5Stereo() => await RunCeltLibopusFixture("celt_fb5_stereo_128k");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task CeltDecoderGpu_Libopus_Fb5MonoLoss() => await RunCeltLibopusFixture("celt_fb5_mono_32k_loss");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task CeltDecoderGpu_Libopus_Fb2p5Mono() => await RunCeltLibopusFixture("celt_fb2p5_mono_64k");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task CeltDecoderGpu_Libopus_Fb2p5StereoLoss() => await RunCeltLibopusFixture("celt_fb2p5_stereo_96k_loss");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task CeltDecoderGpu_Libopus_Wb20Mono() => await RunCeltLibopusFixture("celt_wb20_mono_16k");
+
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task CeltDecoderGpu_Libopus_Swb20Stereo() => await RunCeltLibopusFixture("celt_swb20_stereo_24k");
 
     // quant_partition's recursion runs as an explicit-stack loop that leaves from both arms of an if; before SpawnDev.ILGPU
     // 5.4.12 that hung Velocity (block order) and ran the wrong arm's code on WebGPU (a back edge without `continue`).
@@ -821,11 +969,14 @@ public abstract partial class CodecsTestBase
             for (int c = 0; c < count; c++)
             {
                 // the allocation then every band of a frame on one decoder, as celt_decode_with_ec runs them: mono / stereo, every
-                // frame size, long and short blocks, every spread and trim, full band and the hybrid start band, 20..219-byte
+                // frame size, long and short blocks, every trim, every end band, 20..219-byte
                 // packets of random bytes (the same on both sides), random dynalloc offsets and tf_res from tf_select_table
                 int C = 1 + rng.Next(2), lm = rng.Next(4), bigM = 1 << lm;
-                int start = rng.Next(4) == 0 ? 17 : 0, end = new[] { 13, 17, 19, 21 }[rng.Next(4)]; if (end <= start) end = nb;
-                int trim = rng.Next(11), spread = rng.Next(4);
+                // Concentus (libopus ~1.1) is the oracle where libopus 1.5.2 decodes the same: start band 0 (1.5.2 folds the second
+                // band of a hybrid frame differently) and no spread rotation (1.5.2's exp_rotation gain multiplies in 64 bits); the
+                // rest is checked by CeltPvqGpu_ExpRotation (a 1.5.2 transcription) and the libopus 1.5.2 fixtures
+                int start = 0, end = new[] { 13, 17, 19, 21 }[rng.Next(4)];
+                int trim = rng.Next(11), spread = 0;
                 int isTransient = lm > 0 && rng.Next(3) == 0 ? 1 : 0, shortBlocks = isTransient != 0 ? bigM : 0, tfSel = rng.Next(2);
                 int len = 20 + rng.Next(200);
                 var packet = new byte[len]; rng.NextBytes(packet);
@@ -1099,7 +1250,10 @@ public abstract partial class CodecsTestBase
                 // 2^26 (Q12, so samples saturate to int16 too) and filter memory of up to 2^27: with a gain of at most 1 / (1 - 0.9)
                 // the sums stay inside int32 (an overflow wraps in C# and is undefined in OpenCL C)
                 int lm = rng.Next(4), n = 120 << lm, C = 1 + rng.Next(2);
-                int downsample = downsamples[rng.Next(downsamples.Length)], accum = rng.Next(3) == 0 ? 1 : 0;
+                int downsample = downsamples[rng.Next(downsamples.Length)];
+                // accumulating with decimation: libopus 1.5.2 adds the decimated output in, Concentus (libopus 1.1) overwrites it, so
+                // Concentus is the oracle only without decimation there (the hybrid libopus fixtures cover the rest)
+                int accum = downsample == 1 && rng.Next(3) == 0 ? 1 : 0;
                 int coef0 = rng.Next(2) == 0 ? 27853 : rng.Next(0, 29492);
                 var input = new int[2][];
                 for (int ch = 0; ch < 2; ch++)

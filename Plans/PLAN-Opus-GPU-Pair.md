@@ -225,10 +225,19 @@ Bit-exact testing strategy: each primitive ships with NUnit tests against the CP
   The band recursion found two SpawnDev.ILGPU bugs (fixed in 5.4.12-local.1): Velocity hung on a loop that leaves from both
   arms of an if, and WebGPU ran the wrong arm's code after an if-arm's back edge. One deliberate difference from Concentus:
   `DenormaliseBands` follows libopus when a band's gain shift is negative (Concentus does not advance there).
-  **Next:** the libopus 1.5.2 fixtures (Geordi, TestData/Opus: CELT-only and hybrid streams with losses) are the reference
-  for the decoder; Concentus is libopus ~1.1, so any primitive 1.5.2 changed gets fixed to 1.5.2 there. Then the header reads
-  of celt_decode_with_ec (silence, post-filter, transient, intra, spread, dynalloc, trim, anti-collapse bit), the
-  synthesis + post-filter + state updates, and `CeltDecoderGpu`; then PLC (celt_decode_lost); then the encoder.
+- **2026-10-29: `CeltDecoderGpu` = libopus 1.5.2 celt_decode_with_ec + celt_decode_lost, bit-exact vs real libopus 1.5.2.**
+  Four one-thread kernels per frame (header + energy + allocation; bands; synthesis; post-filter + state + de-emphasis) and a
+  concealment kernel (`Celt/CeltPlcGpu.cs`: pitch search, LPC, noise and pitch PLC, prefilter_and_fold). All 10 CELT-only
+  fixture streams equal libopus per packet in PCM and final range, losses included (CPU, Velocity); through Geordi's
+  OpusDecoderGpu glue all 21 fixture streams (SILK, CELT, hybrid, mode switches) equal libopus. libopus 1.5.2 differs from
+  Concentus (libopus ~1.1) in: MULT32_32_Q31 / Q16 exact in 64 bits (OPUS_FAST_INT64 on 64-bit builds; the cause of +-1 PCM in
+  exp_rotation's gain), disable_inv, the hybrid second-band folding, comb_filter saturation, denormalise_bands' gain cap,
+  deemphasis accumulating with decimation, celt_synthesis' downmix and saturation; all follow 1.5.2 now, and the Concentus
+  oracle tests are restricted to where the two agree. On WebGPU every view-taking helper is inlined at each call site, so the
+  band recursion and the synthesis have one call site per big function (BandsKernel WGSL 84k -> 16k lines). That shape found
+  SpawnDev.ILGPU 7fc182b (a struct-with-view method left a call broke the WGSL / GLSL).
+  **Next:** the CELT encoder, bit-exact vs libopus 1.5.2 at complexity <= 9 (the fixed-point Opus layer runs its float
+  tonality analysis only at complexity 10), with a C oracle DLL of 1.5.2's internal encoder functions for the unit tests.
 
 ### 2026-10-29 status and the full decode glue (Geordi)
 

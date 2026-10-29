@@ -36,6 +36,31 @@ public static class CeltEntropyGpu
         OpusRangeDecoderGpu.Normalize(ref state, buf, bufStart, storage);
     }
 
+    /// <summary>
+    /// libopus ec_dec_icdf over a table of <see cref="CeltModeGpu"/> (trim_icdf, spread_icdf, tapset_icdf at
+    /// <paramref name="icdfAt"/>); the same arithmetic as <see cref="OpusRangeDecoderGpu.DecodeIcdf"/>, which reads a byte view.
+    /// </summary>
+    public static int DecodeIcdfMode(ref OpusRangeDecoderGpuState state, ArrayView<byte> buf, int bufStart, uint storage,
+        CeltModeGpu m, int icdfAt, int ftb)
+    {
+        uint s = state.Rng;
+        uint d = state.Val;
+        uint r = s >> ftb;
+        int ret = -1;
+        uint t;
+        do
+        {
+            t = s;
+            ret++;
+            s = r * (uint)m.Data[icdfAt + ret];
+        }
+        while (d < s);
+        state.Val = d - s;
+        state.Rng = t - s;
+        OpusRangeDecoderGpu.Normalize(ref state, buf, bufStart, storage);
+        return ret;
+    }
+
     /// <summary>Whole bits used so far (libopus ec_tell).</summary>
     public static int Tell(ref OpusRangeDecoderGpuState state)
     {

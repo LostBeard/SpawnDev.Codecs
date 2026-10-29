@@ -93,7 +93,7 @@ public sealed class CeltQuantBandsGpuTestKernel : IDisposable
         CeltQuantBandsGpu.QuantAllBandsDecode(mode, k.Start, k.End, blocks, o + XAt, k.C == 2 ? o + YAt : -1, o + NormAt,
             blocks, o + MasksAt, blocks, o + PulsesAt, k.ShortBlocks, k.Spread, dualStereo, intensity, blocks, o + TfAt,
             k.TotalBits, balance, ref dec, packets, k.PacketAt, (uint)k.PacketLength, k.LM, coded, ref seed,
-            scratch, s + 4 * CeltModeTables.NbEBands, pvqU, 0);
+            scratch, s + 4 * CeltModeTables.NbEBands, pvqU, 0, 0);
         blocks[o + ResultsAt] = coded;
         blocks[o + ResultsAt + 1] = balance;
         blocks[o + ResultsAt + 2] = intensity;

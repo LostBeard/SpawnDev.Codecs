@@ -3,7 +3,8 @@
 // GENERATED (scratchpad celt/extract_inlines.py) from Concentus 2.2.2 Concentus.Common.Inlines (BSD-3, Logan Stromberg +
 // the libopus authors): the libopus fixed-point helpers, EVERY overload of each, so CELT code ported from Concentus
 // resolves each call to the overload Concentus uses. celt_sqrt's sqrt_C table is inlined as (short) literals (a short[]
-// element is a short: an int literal would select the int overloads). Plain integer arithmetic: identical on every ILGPU backend.
+// element is a short: an int literal would select the int overloads). Plain integer arithmetic: identical on every ILGPU backend. MULT32_32_Q31 follows libopus 1.5.2's 64-bit
+// form (OPUS_FAST_INT64), not Concentus' 32-bit split.
 
 using System.Runtime.CompilerServices;
 
@@ -371,7 +372,9 @@ internal static class CeltFixed
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static int MULT32_32_Q31(int a, int b)
     {
-        return ADD32(ADD32(SHL(MULT16_16(SHR(a, 16), SHR(b, 16)), 1), SHR(MULT16_16SU(SHR(a, 16), b & 0xFFFF), 15)), SHR(MULT16_16SU(SHR(b, 16), a & 0xFFFF), 15));
+        // libopus 1.5.2 with OPUS_FAST_INT64 (every 64-bit build): exact; Concentus / libopus 1.1's 32-bit split form drops
+        // the low x low product and comes out 1-3 LSB lower
+        return (int)(((long)a * b) >> 31);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
