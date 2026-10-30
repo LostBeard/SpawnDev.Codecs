@@ -3,6 +3,7 @@ using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.Codecs.Demo.Shared.UnitTests;
 using SpawnDev.ILGPU.WebGPU;
+using SpawnDev.ILGPU.WebGPU.Backend;
 
 namespace SpawnDev.Codecs.Demo.UnitTests;
 
@@ -15,6 +16,20 @@ namespace SpawnDev.Codecs.Demo.UnitTests;
 [ExcludeCategories("CpuOnly", "DesktopOnly")]
 public class WebGPUCodecsTests : CodecsTestBase
 {
+    /// <summary>
+    /// LRU cap on compiled shaders the shared accelerator keeps (<see cref="WebGPUBackend.MaxCachedShaders"/>; 0 = unlimited).
+    /// The whole lane is one class sharing ONE accelerator (<see cref="CodecsTestBase.AcquireAcceleratorOrSkipAsync"/>), so an
+    /// unbounded cache keeps every kernel of all ~1150 tests alive and Chrome's GPU process grows over the lane (3.77 GB peak
+    /// on 2026-10-30). An LRU cap keeps each test's working set warm and evicts the cold tail; clearing the cache per test
+    /// recompiles everything (SpawnDev.ILGPU's own suite measured that, and caps at 64).
+    /// Measured 2026-10-30, full lane, Chrome 156.0.8078.48: with no cap the GPU process climbed to 3.4 GB by the end; with
+    /// 128 it held at 1.3-1.8 GB, and the lane took the same time (27.1 vs 27.3 min). A ~3.3 GB transient spike remains in both
+    /// runs: a single compile of the VP8 GPU-pair kernels (GpuTranscodeDemo_Vp8), Plans/PLAN-Oversized-Kernels.md.
+    /// </summary>
+    public static int TestShaderCacheCap { get; set; } = 128;
+
+    static WebGPUCodecsTests() => WebGPUBackend.MaxCachedShaders = TestShaderCacheCap;
+
     protected override async ValueTask<(Context, Accelerator)> CreateKernelAcceleratorAsync()
     {
         // builder.WebGPU() is async: it probes the browser's GPU adapter
