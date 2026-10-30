@@ -36,8 +36,8 @@ and reads back the finished file or picture. The same library and the same kerne
   WebP and JPEG decode match libwebp and libjpeg-turbo pixel for pixel.
 - **Video:** VP8, VP9 and AV1 keyframe encoders and decoders, including a full-syntax VP8 keyframe decoder that matches
   ffmpeg pixel for pixel on 182 real files.
-- **Audio:** Vorbis decoders that match libvorbis on real streams, FLAC, and Opus (SILK GPU primitives, a CPU reference
-  path).
+- **Audio:** an Opus decoder (SILK, CELT, hybrid, loss concealment) and a CELT-only Opus encoder that are byte-identical
+  with libopus 1.5.2 on every packet of real streams, Vorbis decoders that match libvorbis, and FLAC.
 - **One API shape everywhere.** Every entry point has three overloads: data already on the accelerator (`ArrayView1D`),
   a JS typed array in the browser (`TypedArray`, never touching the .NET heap) and managed memory (`byte[]`).
 - **Bounded launches.** Serial stages (bit writers, entropy coders) are resumable chains of short launches, so no kernel
@@ -45,10 +45,10 @@ and reads back the finished file or picture. The same library and the same kerne
 
 ## Status
 
-Pre-release. The CPU, CUDA and OpenCL lanes are where the verification above was run. The browser lanes (WebGPU, WebGL,
-Wasm) run the same suite and are being brought to green: some video kernels are still too large for Chrome's shader
-compiler, and a few image tests run over their time limit there. [**Docs/status.md**](Docs/status.md) lists every codec
-by backend with the evidence; where it disagrees with this page, that file wins.
+Every test lane is green (2026-10-29): CPU 3281 / 0, CUDA, OpenCL and Velocity 1131 / 0 each on the desktop; WebGPU and
+Wasm 1150 / 0 each and WebGL 399 / 0 in Chrome. WebGL has no scatter stores, so the serial frame coders (the video frame
+coders, the Opus coders) are not offered there; their building blocks are. [**Docs/status.md**](Docs/status.md) lists
+every codec by backend with the evidence; where it disagrees with this page, that file wins.
 
 ## Install
 
@@ -138,6 +138,7 @@ from `fetch`, OPFS or a canvas goes to the GPU and back without entering the .NE
 
 ```csharp
 using SpawnDev.Codecs.Video.Vp8;
+using SpawnDev.Codecs.Audio.Opus;
 using SpawnDev.Codecs.Audio.Vorbis;
 
 using var vp8 = new Vp8KeyframeEncoderGpu(accelerator);
@@ -148,6 +149,12 @@ var decoded = await vp8Decoder.DecodeKeyFrameAsync(frame);   // YPlane, UPlane, 
 
 using var vorbis = new VorbisAudioDecoderGpu(accelerator, identificationHeader, setupHeader);
 float[] pcm = await vorbis.DecodePacketAsync(packet);        // interleaved samples of one packet
+
+using var opusEncoder = new OpusEncoderGpu(accelerator, 48000, 2, OpusEncoderApplication.Audio) { Bitrate = 96000 };
+byte[] opusPacket = await opusEncoder.EncodePacketAsync(pcm16, frameSize: 960);   // 20 ms of interleaved int16
+
+using var opusDecoder = new OpusDecoderGpu(accelerator, 48000, 2);
+float[] opusPcm = await opusDecoder.DecodePacketAsync(opusPacket);
 ```
 
 ## What is in the box
@@ -165,7 +172,7 @@ float[] pcm = await vorbis.DecodePacketAsync(packet);        // interleaved samp
 | **AV1** | `Av1KeyframeEncoderGpu` (keyframes: DC prediction, 16x16 blocks, OBU framing on the device) | `Av1KeyframeDecoderGpu` (single tile) |
 | **Vorbis** | `VorbisAudioEncoderGpu` (first version: mono, fixed block size) | `VorbisAudioDecoderGpu` (any channel count, block switching, libvorbis parity) |
 | **FLAC** | `FlacEncoderGpu` (first version: verbatim subframes) | `FlacDecoderGpu` (first version, same subset) |
-| **Opus** | CPU reference (Concentus) in `SpawnDev.Codecs.References`; SILK GPU primitives in the library | same |
+| **Opus** | `OpusEncoderGpu` (CELT-only: 2.5 .. 120 ms, CBR / VBR / constrained VBR, complexity 0..9, 8 .. 48 kHz; byte-identical with libopus 1.5.2) | `OpusDecoderGpu` (SILK, CELT, hybrid, mode switches, redundancy, loss concealment, DTX; equal to libopus 1.5.2) |
 | **Compression** | `ZlibCompressorGpu`, `DeflateGpu` | `InflateGpu` |
 | **Containers** | Ogg, IVF, RIFF/WAVE, AIFF; WebM / Matroska through SpawnDev.EBML | the same, plus an MP4 box reader |
 
@@ -217,7 +224,8 @@ Correctness is checked against the reference implementations, never against this
 | JPEG encode / decode | libjpeg-turbo (through Pillow) | byte-identical files / identical pixels |
 | VP8 keyframe decode | ffmpeg | identical planes on 182 files |
 | Vorbis decode | libvorbis (through libsndfile) | within 1e-4 per sample (observed 7.5e-7) |
-| SILK decode (CPU reference) | Concentus | matching the cross-validation streams |
+| Opus decode | libopus 1.5.2 (fixed point, built from source) | equal PCM and final range on every packet of 21 streams |
+| Opus encode (CELT-only) | libopus 1.5.2 (fixed point, built from source) | byte-identical packets and equal final range on 49 streams |
 
 Fixtures are made by scripts in [`scripts/`](scripts/) (the truth comes from the reference library), and every guard is
 red-checked: the fix is disabled and the test must fail by name.
@@ -227,7 +235,7 @@ red-checked: the fix is disabled and the test must fail by name.
 | Path | Contents |
 |------|----------|
 | `SpawnDev.Codecs/` | The library |
-| `SpawnDev.Codecs.References/` | CPU reference codecs (verification), Concentus for Opus |
+| `SpawnDev.Codecs.References/` | CPU reference codecs (verification), Concentus for the CPU Opus reference |
 | `SpawnDev.Codecs.Demo/` | Blazor WebAssembly demo and browser test host |
 | `SpawnDev.Codecs.Demo.Shared/` | The shared test suite (`CodecsTestBase`) and its fixtures (`TestData/`) |
 | `SpawnDev.Codecs.DemoConsole/` | Desktop host for the shared test suite |

@@ -30,7 +30,7 @@
 
 ### Toward 1.0.0: project split done, Opus GPU range encoder, CELT GPU primitives, VP9 WebGPU green (2026-10-29)
 - **Where the "Path to 1.0.0 stable" bar stands** (0.3.0-rc.1 section below): (1) the Opus GPU pair: decoder done, encoder
-  (CELT-only) done on the desktop backends (above), browser lanes for CELT pending;
+  (CELT-only) done on every backend (above; WebGL n/a for the serial coders);
   (2) Vorbis decoder v2 is DONE (`VorbisAudioDecoderGpu.DecodePacketAsync` runs `VorbisPacketDecodeKernel.Step` on every
   backend; the host reads back only the packet header / floor flags it needs to orchestrate); (3) the project split is DONE
   (below); (4) the May ILGPU bugs (WebGPU `SubViewValue`, Wasm OOB) are long fixed.
