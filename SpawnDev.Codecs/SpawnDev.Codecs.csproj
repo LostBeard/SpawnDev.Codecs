@@ -4,20 +4,20 @@
 		<TargetFramework>net10.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<Version>0.3.0-rc.7</Version>
+		<Version>1.0.0</Version>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<EmbedAllSources>true</EmbedAllSources>
 		<DebugType>Embedded</DebugType>
 		<Title>SpawnDev.Codecs</Title>
 		<Authors>LostBeard</Authors>
-		<Description>Pure-.NET, ILGPU-accelerated, patent-clean audio and video codecs (Opus, VP8, VP9, AV1, FLAC, Vorbis). Runs on every ILGPU backend - CUDA, OpenCL, CPU, WebGPU, WebGL, Wasm. Desktop AND Blazor WebAssembly.</Description>
+		<Description>GPU-accelerated, patent-clean codecs for .NET where the codec work runs on the accelerator: images (PNG, JPEG, WebP, GIF, BMP), video (VP8, VP9, AV1 keyframes), audio (Opus encode and decode byte-identical with libopus 1.5.2, Vorbis, FLAC) and compression. One library on every ILGPU backend: WebGPU, WebGL and Wasm in Blazor WebAssembly; CUDA, OpenCL and CPU on the desktop.</Description>
 		<PackageProjectUrl>https://github.com/LostBeard/SpawnDev.Codecs</PackageProjectUrl>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 		<RepositoryUrl>https://github.com/LostBeard/SpawnDev.Codecs.git</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
-		<PackageTags>Codec;Audio;Video;Opus;VP8;VP9;AV1;FLAC;Vorbis;WebRTC;Blazor;BlazorWebAssembly;WebGPU;ILGPU;GPU;CrossPlatform</PackageTags>
+		<PackageTags>Codec;Audio;Video;Image;Opus;VP8;VP9;AV1;FLAC;Vorbis;PNG;JPEG;WebP;GIF;Blazor;BlazorWebAssembly;WebGPU;ILGPU;GPU;CrossPlatform</PackageTags>
 		<NoPackageAnalysis>true</NoPackageAnalysis>
 		<EnableDefaultCompileItems>true</EnableDefaultCompileItems>
 		<IsPackable>true</IsPackable>
@@ -31,7 +31,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <PackageReference Include="SpawnDev.ILGPU" Version="5.4.12-local.9" />
+	  <PackageReference Include="SpawnDev.ILGPU" Version="5.4.12" />
 	  <PackageReference Include="SpawnDev.EBML" Version="3.0.1" />
 	  <!-- ZERO external dependencies past this line. The CPU reference Opus
 	       encoder + decoder (which use Concentus) live in

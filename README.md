@@ -52,11 +52,8 @@ every codec by backend with the evidence; where it disagrees with this page, tha
 
 ## Install
 
-The package is not on nuget.org yet (the first release follows green browser lanes). Until then, reference the project:
-
 ```bash
-git clone https://github.com/LostBeard/SpawnDev.Codecs.git
-dotnet add <your project> reference SpawnDev.Codecs/SpawnDev.Codecs/SpawnDev.Codecs.csproj
+dotnet add package SpawnDev.Codecs
 ```
 
 Requires **.NET 10**. Depends on [SpawnDev.ILGPU](https://github.com/LostBeard/SpawnDev.ILGPU),

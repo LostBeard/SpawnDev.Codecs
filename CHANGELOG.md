@@ -1,6 +1,13 @@
 # SpawnDev.Codecs CHANGELOG
 
-## Unreleased
+## 1.0.0 (2026-10-30)
+
+The first stable release, and the first on nuget.org. The 1.0.0 bar ("Path to 1.0.0 stable", 0.3.0-rc.1 below) is met:
+every codec ships as an encoder + decoder pair that runs entirely on the accelerator, the Opus pair byte-identical with
+libopus 1.5.2 (the encoder CELT-only); Vorbis decoder v2 decodes the bit stream on the device; the CPU reference
+implementations live in `SpawnDev.Codecs.References`; and every test lane is green on SpawnDev.ILGPU 5.4.12: CPU
+3281 / 0, CUDA, OpenCL and Velocity 1131 / 0, WebGPU and Wasm 1150 / 0, WebGL 399 / 0. The entries below are what changed
+since 0.3.0-rc.7.
 
 ### Opus GPU pair: `OpusEncoderGpu` (CELT-only) byte-identical with libopus 1.5.2 on every backend (2026-10-29)
 - **New `OpusEncoderGpu`** (`SpawnDev.Codecs.Audio.Opus`: `EncodePacketAsync` managed and device-resident, `GetFinalRangeAsync`,
