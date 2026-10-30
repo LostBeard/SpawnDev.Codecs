@@ -19,8 +19,9 @@
   layer alone against the exact input and CTLs of every libopus `celt_encode_with_ec` call (recorded by an instrumented
   libopus build), so a mismatch splits cleanly between the Opus layer and CELT.
 - **Scope for 1.0.0:** CELT-only. SILK and hybrid encoding come after 1.0.0; complexity 10 needs libopus' tonality analysis
-  (not ported). Browser backends: the CELT stage kernels are being measured in Chrome (Data) before the WebGPU / WebGL / Wasm
-  lanes include CELT.
+  (not ported). Browser: green on WebGPU and Wasm (full lanes 1150 / 0 each, the 49 libopus streams included; the four CELT
+  stage kernels compile in Chrome after ILGPU 5.4.12-local.9's WGSL loop-header fix); WebGL has no scatter stores, so the
+  serial coders are n/a there (WebGL lane 399 / 0).
 - **SpawnDev.ILGPU 5.4.12-local.8** (Data; every bug below was found by the Opus encoder or decoder): struct-held views in
   local allocas typed local (CUDA / OpenCL), sub-word integer conversion chains, Velocity kernels over 65,536 IR values
   (invalid IL), neg / not of a comparison, multiplicative-loop trip counts, PTX / OpenCL branch-edge phi moves (the
