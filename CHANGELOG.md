@@ -1,5 +1,20 @@
 # SpawnDev.Codecs CHANGELOG
 
+## 1.0.1 (2026-10-30)
+
+Dependency update; no API or codec changes.
+- **SpawnDev.ILGPU 5.4.13** (was 5.4.12). On Velocity at O2, the default, loop-invariant code no longer runs inside
+  loops. On OpenCL without `cl_khr_fp16` (NVIDIA among them), a `Half` sub-view passed to a kernel no longer starts at
+  twice its offset. ILGPU 5.4.13 depends on SpawnDev.SpawnJS 3.0.7. Codecs' dependencies are SpawnDev.ILGPU and
+  SpawnDev.EBML only; no Blazor.
+- Demo: SpawnDev.SpawnJS.Blazor 3.0.7 (was 3.0.4).
+- PlaywrightMultiTest: the fake camera / microphone flags are now Chromium launch args. Playwright .NET never read the
+  `PLAYWRIGHT_ARGS` environment variable that used to carry them.
+- Every lane green on the released packages: CUDA, OpenCL and Velocity 1131 / 0, CPU 3281 / 0, WebGPU and Wasm 1150 / 0,
+  WebGL 399 / 0, the same counts as 1.0.0. The test time summed over each lane, against the 10-29 run: Velocity
+  2801 s (was 4845 s), CUDA 1960 s (was 3720 s), OpenCL 2521 s (was 2968 s), CPU 4308 s (was 4146 s). The 10-29
+  run overlapped its lanes, so part of that change is contention.
+
 ## 1.0.0 (2026-10-30)
 
 The first stable release, and the first on nuget.org. The 1.0.0 bar ("Path to 1.0.0 stable", 0.3.0-rc.1 below) is met:

@@ -5,6 +5,10 @@ implementation (never against this library's own output) passed on that backend,
 the last run of the named lane. Updated 2026-10-29 (WebGPU video on ILGPU 5.4.11; browser Images and Audio refreshed on ILGPU 5.4.9-local.4; counts are
 passed / failed, skips are gated or CPU-only tests).
 
+**2026-10-30, 1.0.1 on SpawnDev.ILGPU 5.4.13:** every lane re-run in full with the same counts and nothing failing:
+CUDA, OpenCL and Velocity 1131 / 0, CPU 3281 / 0, WebGPU and Wasm 1150 / 0, WebGL 399 / 0. Every green cell below still
+holds on 5.4.13.
+
 Legend: **green** = the codec's suite passes on that lane; **partial** = runs, with the open items named; **open** = not
 yet passing or not yet run on the current build; **n/a** = the backend cannot run it (WebGL has no atomics or scatter
 stores: its Transform Feedback captures a thread's store only at the thread's own slot, so a serial stream coder, where

@@ -26,7 +26,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.4" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.4" PrivateAssets="all" />
-    <PackageReference Include="SpawnDev.SpawnJS.Blazor" Version="3.0.4" />
+    <PackageReference Include="SpawnDev.SpawnJS.Blazor" Version="3.0.7" />
     <PackageReference Include="SpawnDev.UnitTesting.Browser" Version="2.7.2-local.3" />
   </ItemGroup>
 
@@ -39,7 +39,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="SpawnDev.ILGPU" Version="5.4.12" />
+    <PackageReference Include="SpawnDev.ILGPU" Version="5.4.13" />
     <ProjectReference Include="..\SpawnDev.Codecs\SpawnDev.Codecs.csproj" />
     <ProjectReference Include="..\SpawnDev.Codecs.Demo.Shared\SpawnDev.Codecs.Demo.Shared.csproj" />
   </ItemGroup>

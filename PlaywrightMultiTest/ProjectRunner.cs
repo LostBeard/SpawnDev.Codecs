@@ -45,7 +45,11 @@ namespace PlaywrightMultiTest
                 "--enable-webgpu-developer-features",
                 "--no-sandbox",
                 "--disable-features=FileSystemAccessPermissionPrompt",
-                "--allow-file-access-from-files"
+                "--allow-file-access-from-files",
+                // Fake camera + microphone, no permission prompt. Playwright .NET ignores a PLAYWRIGHT_ARGS env var,
+                // so these must be launch args (matches SpawnDev.ILGPU.ML).
+                "--use-fake-ui-for-media-stream",
+                "--use-fake-device-for-media-stream"
             };
             // PMT_WEBGPU_ADAPTER=swiftshader runs WebGPU on Chrome's CPU adapter on purpose: a kernel that never ends then
             // spins CPU cores in the test browser's GPU process instead of hanging the real GPU (no watchdog reset, the desktop
