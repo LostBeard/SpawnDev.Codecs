@@ -172,6 +172,22 @@ public sealed class FlacDecoderGpu : IDisposable
         return si with { AudioStart = pos, Vendor = vendor };
     }
 
+    /// <summary>A 64-sample stereo 16-bit FLAC file (one LPC frame, FFmpeg level 5, metadata trimmed) for <see cref="WarmUpAsync"/>.</summary>
+    private const string WarmUpFile =
+        "ZkxhQ4AAACISABIAAACbAACbCsRC8AAAAECODGdxc8e8G0RiBWZwZIMt//hpmAA/CUoAAACJAIBgVdAwGBdLmMiaDjqWnU+izf5dhKvekL92xU/xxos8YGBgSCBwSYMS5GuzS2F5UdGJ08WPB6p17NGlx1suRMGRQ+JnycAAACpAU0B6AJ0gu8DVAOgcxeZRZ1f+2jo4/7QsTV/ZoAyGK6MXbVtNJJPaf58tm6RzCDHDiBhAgogpDqqLStJbzySzSSWgics=";
+
+    /// <summary>
+    /// Compile and load every kernel <see cref="DecodeAsync"/> and <see cref="DecodeFloatAsync"/> use (decodes a tiny
+    /// built-in file both ways), so the first real decode does not wait for them. On browser backends the first compile
+    /// of the shaders can take tens of seconds; call this early, for example when a page shows a node that loads audio.
+    /// </summary>
+    public async Task WarmUpAsync()
+    {
+        var file = Convert.FromBase64String(WarmUpFile);
+        await DecodeAsync(file);
+        await DecodeFloatAsync(file);
+    }
+
     /// <summary>Decode a FLAC file to interleaved integer samples (see the file header).</summary>
     public Task<FlacDecodeResult> DecodeAsync(ReadOnlyMemory<byte> file) => DecodeCoreAsync(file, toFloat: false);
 

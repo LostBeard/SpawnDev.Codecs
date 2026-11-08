@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Warm-ups for the audio coders (2026-11-08)
+- `FlacDecoderGpu.WarmUpAsync`, `FlacEncoderGpu.WarmUpAsync`, `OggOpusEncoder.WarmUpAsync`: compile and load every kernel
+  ahead of the first real call. Lore measured the first Ogg Opus save in Chrome on an RX 590 (WebGPU, D3D's FXC compiling
+  the WGSL) at 113 s and the second at 7.2 s; FLAC 57 s vs 4.5 s. A page can now start the compile when it shows an audio
+  node. Smaller CELT stage shaders remain the deeper fix.
+- FLAC decoder LPC: coefficients read once per subframe, 32-bit sums where libFLAC's bound allows (red-checked).
+
 ### Full FLAC decoder: `FlacDecoderGpu.DecodeAsync` (2026-11-08)
 - Any conforming FLAC stream (RFC 9639): fixed or variable block size, 4..32 bits per sample, 1..8 channels, constant /
   verbatim / fixed / LPC (order 1..32) subframes, Rice and Rice2 residuals with escaped partitions, wasted bits, every

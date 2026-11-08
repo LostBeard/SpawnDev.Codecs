@@ -127,6 +127,29 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
+    /// <summary>
+    /// The warm-ups (FlacDecoderGpu, FlacEncoderGpu, OggOpusEncoder) run on every backend (the decoder checks its built-in
+    /// file by CRC), and a real decode afterwards still matches its source.
+    /// </summary>
+    [TestMethod(Timeout = 900000, Category = "NotOnWebGL")]
+    public async Task AudioWarmUps_LoadTheKernels_LaterWorkIsUnchanged()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            using var dec = new FlacDecoderGpu(acc);
+            await dec.WarmUpAsync();
+            using (var enc = new FlacEncoderGpu(acc)) await enc.WarmUpAsync();
+            await SpawnDev.Codecs.Audio.Opus.OggOpusEncoder.WarmUpAsync(acc);
+            var c = FlacDecCases().First(x => x.Name == "ff_st16_l5");
+            var r = await dec.DecodeAsync(ReadEmbedded(FlacDecPrefix + c.Name + ".flac"));
+            int diff = FirstDifference(r.InterleavedSamples, FlacDecSource(c.Source));
+            True(diff < 0, $"decode after the warm-ups differs at sample {diff}");
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
     /// <summary>The first index where two sample arrays differ (or the shorter length), -1 when equal.</summary>
     private static int FirstDifference(int[] a, int[] b)
     {

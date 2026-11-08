@@ -110,6 +110,20 @@ public static class OggOpusEncoder
         });
     }
 
+    /// <summary>
+    /// Compile and load every kernel an encode at these settings uses (20 ms of silence, discarded), so the first real
+    /// encode does not wait for them. On browser backends (WebGPU / WebGL) the first compile of the CELT stage shaders can
+    /// take minutes (Chrome on D3D compiles WGSL through FXC: about 110 s on an RX 590); call this early, for example
+    /// when a page shows a node that will save Opus. <paramref name="floatInput"/> also loads the float to int16 kernel.
+    /// </summary>
+    public static async Task WarmUpAsync(Accelerator accelerator, int sampleRate = 48000, int channels = 2,
+        OggOpusEncodeOptions? options = null, bool floatInput = true)
+    {
+        int n = sampleRate / 50 * channels;
+        if (floatInput) await EncodeAsync(accelerator, new float[n], sampleRate, channels, Stream.Null, options);
+        else await EncodeAsync(accelerator, new short[n], sampleRate, channels, Stream.Null, options);
+    }
+
     private static void Validate(int length, int sampleRate, int channels)
     {
         if (channels is < 1 or > 2) throw new NotSupportedException("Ogg Opus mapping family 0 carries 1 or 2 channels.");

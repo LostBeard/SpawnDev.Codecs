@@ -196,6 +196,20 @@ public sealed partial class FlacEncoderGpu
     }
 
     /// <summary>
+    /// Compile and load every kernel <see cref="EncodeAsync(ReadOnlyMemory{int}, int, int, int, FlacEncodeOptions?)"/> uses
+    /// (a 0.1 s encode of a tone, discarded), so the first real encode does not wait for them. On browser backends
+    /// (WebGPU / WebGL) the first compile of the shaders can take tens of seconds (Chrome on D3D compiles WGSL through
+    /// FXC); call this early, for example when a page shows a node that will save audio.
+    /// </summary>
+    public async Task WarmUpAsync(int channels = 2, int sampleRate = 44100, int bitsPerSample = 16)
+    {
+        int n = sampleRate / 10;
+        var pcm = new int[n * channels];
+        for (int i = 0; i < pcm.Length; i++) pcm[i] = (int)(Math.Sin(i * 0.05) * (1 << (bitsPerSample - 3)));
+        await EncodeAsync(pcm, channels, sampleRate, bitsPerSample);
+    }
+
+    /// <summary>
     /// Encode interleaved PCM (channel 0[0], channel 1[0], ..., each a signed <paramref name="bitsPerSample"/>-bit value in
     /// an int) into a complete .flac file, as FFmpeg's FLAC encoder and muxer write it. Any length, any rate FLAC can
     /// carry, 1..8 channels, 16 or 24 bits. Returns the file (a terminal CPU sink).
