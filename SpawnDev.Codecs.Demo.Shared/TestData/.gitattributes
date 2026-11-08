@@ -37,3 +37,5 @@ OggOpus/*.json text eol=lf
 OggOpus/manifest.txt text eol=lf
 FlacDec/* binary
 FlacDec/manifest.tsv text eol=lf
+Mp3Dec/*.mp3 binary
+Mp3Dec/*.gz binary

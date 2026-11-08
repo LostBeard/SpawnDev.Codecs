@@ -183,6 +183,59 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
+    /// <summary>
+    /// ComfyUI Load Audio parity on files ComfyUI's Save Audio (MP3) wrote (PyAV 18.1 / libmp3lame: 128k, 320k, V0 of a 2 s
+    /// stereo 44.1 kHz signal; from Lore / SpawnGen). ComfyUI's load() hands on FFmpeg's "mp3float" fltp frames unchanged,
+    /// and PyAV's concatenated frames are bit-identical with the ffmpeg CLI's f32le output (measured 2026-11-08 on these
+    /// three files), so FFmpeg is the reference. <see cref="Mp3DecoderGpu.DecodeFloatAsync"/>: planar like ComfyUI's
+    /// tensor, exactly FFmpeg's length (encoder delay and padding trimmed the same way), close to its values (a different
+    /// decoder implementation: not bit-identical), and the TXXX prompt / workflow + TSSE tags read back.
+    /// </summary>
+    [TestMethod(Timeout = 900000, Category = "NotOnWebGL")]
+    public async Task Mp3DecoderGpu_ComfyUiFiles_LoadAudioParity()
+    {
+        FfmpegOracle.RequireAvailable();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            const double minSnr = 90;
+            using var dec = new Mp3DecoderGpu(acc);
+            var failures = new List<string>();
+            foreach (string name in new[] { "comfyui_128k", "comfyui_320k", "comfyui_V0" })
+            {
+                byte[] file = ReadEmbedded(Mp3DecPrefix + name + ".mp3");
+                var r = await dec.DecodeFloatAsync(file);
+                float[] ff = FfmpegOracle.DecodeFloat(file, ".mp3");   // interleaved
+                int ch = r.Channels;
+                long n = r.TotalSamplesPerChannel;
+                if (ch != 2 || r.SampleRateHz != 44100) failures.Add($"{name}: {ch} ch {r.SampleRateHz} Hz, want 2 ch 44100 Hz");
+                if (n * ch != ff.Length) failures.Add($"{name}: {n} samples per channel, FFmpeg (= ComfyUI) gives {ff.Length / Math.Max(ch, 1)}");
+                if (n != 88200) failures.Add($"{name}: {n} samples per channel, the source has 88200");
+                if (r.PlanarFloat is null || r.PlanarFloat.Length != n * ch) { failures.Add($"{name}: planar output missing or wrong size"); continue; }
+                long m = Math.Min(n, ff.Length / Math.Max(ch, 1));
+                double sig = 0, err = 0, max = 0;
+                for (int c = 0; c < ch; c++)
+                    for (long i = 0; i < m; i++)
+                    {
+                        double want = ff[i * ch + c], d = r.PlanarFloat[c * n + i] - want;
+                        sig += want * want;
+                        err += d * d;
+                        max = Math.Max(max, Math.Abs(d));
+                    }
+                double snr = 10 * Math.Log10(sig / Math.Max(err, 1e-30));
+                Console.WriteLine($"{name}: vs FFmpeg / ComfyUI max |diff| {max:G3}, SNR {snr:F1} dB, {n} samples, trim {r.StartTrim} / {r.EndTrim}");
+                if (snr < minSnr) failures.Add($"{name}: SNR vs FFmpeg {snr:F1} dB < {minSnr}");
+                var tags = r.Tags.ToDictionary(t => t.Key, t => t.Value);
+                if (tags.GetValueOrDefault("prompt") != "{\"1\": {\"x\": 1}}") failures.Add($"{name}: TXXX prompt = {tags.GetValueOrDefault("prompt")}");
+                if (tags.GetValueOrDefault("workflow") != "{\"nodes\": []}") failures.Add($"{name}: TXXX workflow = {tags.GetValueOrDefault("workflow")}");
+                if (tags.GetValueOrDefault("TSSE") != "Lavf62.12.102") failures.Add($"{name}: TSSE = {tags.GetValueOrDefault("TSSE")}");
+            }
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
     /// <summary>Files from our own encoder (Info frame: delay 528, padding frames * N - samples - 528) decode to exactly the
     /// source's length, aligned with it (no delay).</summary>
     [TestMethod(Timeout = 900000, Category = "NotOnWebGL")]
