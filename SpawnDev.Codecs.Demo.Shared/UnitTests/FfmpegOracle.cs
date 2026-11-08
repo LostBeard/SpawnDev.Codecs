@@ -29,9 +29,11 @@ internal static class FfmpegOracle
         }
     }
 
-    /// <summary>FFmpeg's decode of <paramref name="file"/> as interleaved float32 (<paramref name="ext"/> names the format).</summary>
+    /// <summary>FFmpeg's decode of <paramref name="file"/> as interleaved float32 (<paramref name="ext"/> names the format).
+    /// <paramref name="strict"/> (the default) turns on FFmpeg's error detection and fails on any message; without it
+    /// FFmpeg decodes as a player does (a third-party file it warns about still decodes) and only fatal errors fail.</summary>
     [UnsupportedOSPlatform("browser")]
-    public static float[] DecodeFloat(byte[] file, string ext)
+    public static float[] DecodeFloat(byte[] file, string ext, bool strict = true)
     {
         RequireAvailable();
         string work = Path.Combine(Path.GetTempPath(), "spawndev-ff-" + Guid.NewGuid().ToString("N"));
@@ -44,8 +46,9 @@ internal static class FfmpegOracle
             {
                 RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
             };
-            foreach (var arg in new[] { "-hide_banner", "-v", "error", "-err_detect", "crccheck+bitstream+buffer+explode", "-i", input,
-                         "-f", "f32le", "-y", output })
+            foreach (var arg in strict
+                         ? new[] { "-hide_banner", "-v", "error", "-err_detect", "crccheck+bitstream+buffer+explode", "-i", input, "-f", "f32le", "-y", output }
+                         : new[] { "-hide_banner", "-v", "fatal", "-i", input, "-f", "f32le", "-y", output })
                 psi.ArgumentList.Add(arg);
             using var proc = Process.Start(psi) ?? throw new InvalidOperationException("could not start ffmpeg");
             string stderr = proc.StandardError.ReadToEnd();
