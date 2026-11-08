@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Full FLAC decoder: `FlacDecoderGpu.DecodeAsync` (2026-11-08)
+- Any conforming FLAC stream (RFC 9639): fixed or variable block size, 4..32 bits per sample, 1..8 channels, constant /
+  verbatim / fixed / LPC (order 1..32) subframes, Rice and Rice2 residuals with escaped partitions, wasted bits, every
+  stereo decorrelation (the 33-bit side channel of 32-bit streams in an int64 view). An ID3v2 tag before the stream is
+  skipped; `FlacDecodeResult` carries rate / channels / bits / samples, the VORBIS_COMMENT vendor and tags, and the MD5
+  check against STREAMINFO.
+- All on the accelerator (`FlacStreamDecodeKernels`): frame headers found per byte (sync code, fields that agree with
+  STREAMINFO, CRC-8), put in file order, each frame's end found by CRC-16 at the next sync code, the chain walked on one
+  thread, one thread per frame decodes, one thread per sample decorrelates and interleaves. A damaged frame comes out as
+  silence of its length and the samples after it keep their time (from the coded frame / sample number), as libFLAC does.
+- `DecodeStreamAsync(byte[])` keeps its signature and now runs this decoder (it was limited to the v1 encoder's
+  verbatim streams and threw on a damaged frame).
+- 30 fixtures (`scripts/audio/make_flac_decoder_fixtures.py`): FFmpeg 8.1 (levels 0 / 5 / 8 / 12, fixed-only, every
+  stereo mode, exact Rice parameters, block sizes 192 / 1000 / 16384, 16 / 24 / 32 bits, 6 channels, noise, wasted bits,
+  constant runs), libFLAC (8 / 16 / 24 bits, 6 channels), a variable-block-size stream, hand-made frames (escapes of
+  0..16 raw bits, Rice2 parameter 20, LPC order 32 at precision 15, negative coefficients). Every file decodes to its
+  source; 29 MD5s checked. Red-checked (mid-side LSB, Rice2 escape code, wasted bits, coded-position gaps, ends at sync
+  codes past a damaged header, 33-bit side). CPU accelerator green; GPU and browser lanes not run yet.
+
 ### FLAC LPC analysis in strict IEEE f64 on WebGPU / WebGL (2026-11-08)
 - Lore saw SpawnGen's browser (WebGPU) FLAC files differ from the server's (OpenCL) and ComfyUI's for the same samples
   (still lossless). Cause: WGSL has no f64 and SpawnDev.ILGPU emulates it with Dekker double-float by default (~48
