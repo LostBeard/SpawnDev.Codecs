@@ -19,6 +19,21 @@
 - FFmpeg decodes every test file without errors and gaplessly (exact input length); SNR 37..64 dB on test tones (CBR),
   V0 about 164 kbps on the 44.1 kHz stereo tones; a tone 44 dB down keeps 26.8 dB local SNR at 128k; mid / side 8.8 dB
   better than left / right on a centred mix. CPU, CUDA and OpenCL. Not yet: short blocks, the CBR bit reservoir.
+### FLAC stream encoder, clean-room MIT (2026-11-08)
+- `FlacEncoderGpu.EncodeAsync` (managed `ReadOnlyMemory<int>`, JS `Int32Array`, `ArrayView1D<int>` into an
+  `ArrayView1D<byte>`), `FlacEncodeOptions` (level 0..8, block size, `FlacChannelMode`, padding, vendor, tags, channel
+  mask) and `FlacEncoderGpu.WarmUpAsync` are back, rewritten from RFC 9639 and the textbook linear prediction / Rice
+  coding literature (no FFmpeg or libFLAC code): `FlacEncoderGpu.Encode.cs`, `FlacEncodeKernels`. Any rate FLAC
+  carries, 1..8 channels, 4..24 bits, any length. Levels 0..2: fixed predictors in ~27 ms blocks; 3..8: LPC (Tukey
+  window, Levinson-Durbin, 15-bit coefficients, orders up to 12) in ~105 ms blocks. Exact Rice parameters per
+  partition, escape-coded partitions, wasted bits, constant / verbatim fallback, per-frame stereo choice, STREAMINFO with
+  frame sizes and the MD5 of the samples. Every stage that touches samples or bits is a kernel; launches are bounded
+  and paced (`LaunchPacer`), frames processed in chunks.
+- Tests (`CodecsTestBase.FlacStreamEncoderTests.cs`, back from `CleanRoomPending`): on all 65 FFmpeg fixtures our files
+  are lossless (our decoder, MD5, and libFLAC through `SPAWNDEV_IMG_PYTHON`), their metadata blocks equal FFmpeg's byte
+  for byte apart from STREAMINFO's min / max frame size (checked against our own frames instead), and their frames are
+  at most 2 % larger than FFmpeg's (measured: 0.80 .. 1.00, all files together 0.989). Plus options, depths 4..24 bits,
+  1..8 channels, odd block sizes and rates, multi-chunk streams, the ArrayView overload and the warm-up.
 
 ### REMOVED: code ported from FFmpeg (LGPL), to be rewritten clean-room (2026-11-08)
 - `WebMWriter`, `OggOpusWriter`, `OggOpusEncoder`, `PcmConvertKernels` and the FLAC stream encoder

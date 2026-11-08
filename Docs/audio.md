@@ -38,10 +38,20 @@ writes valid streams (our decoders and ffmpeg read them); a libvorbis-grade enco
 
 ## FLAC
 
-`FlacEncoderGpu` and `FlacDecoderGpu` are first versions with a fixed subset: 4096-sample blocks, 44.1 kHz, 16-bit,
-VERBATIM subframes, up to 8 channels. Frames are encoded and decoded in parallel on the accelerator. The full codec
-(FIXED and LPC prediction, Rice coding, stereo decorrelation, MD5) exists as the CPU reference (`FlacEncoder` /
-`FlacDecoder` in References) and is the next GPU port.
+`FlacEncoderGpu.EncodeAsync` encodes interleaved integer PCM (any rate FLAC carries, 1..8 channels, 4..24 bits, any
+length) to a complete FLAC file at compression levels 0..8 (`FlacEncodeOptions`: level, block size, stereo mode,
+padding, vendor, tags, channel mask). Levels 0..2 use the fixed polynomial predictors, 3..8 add LPC (windowed
+autocorrelation, Levinson-Durbin, 15-bit coefficients, orders up to 12); every subframe takes the cheapest of constant /
+verbatim / fixed / LPC with exact Rice parameters (escape-coded partitions included), every stereo frame the cheapest of
+independent / left-side / right-side / mid-side. STREAMINFO carries the frame sizes and the MD5 of the samples. All of it
+runs on the accelerator; on the test fixtures the files are lossless (our decoder and libFLAC), carry the same metadata
+blocks as FFmpeg's and are no larger than FFmpeg's at the same level. Overloads: managed, JS `Int32Array`, and
+`ArrayView1D` in and out; `WarmUpAsync` compiles the kernels ahead of time. The v1 `EncodeStreamAsync` (VERBATIM
+subframes, 4096-sample blocks) is kept.
+
+`FlacDecoderGpu.DecodeAsync` decodes any conforming FLAC stream (RFC 9639) on the accelerator: fixed or variable block
+size, 4..32 bits, 1..8 channels, every subframe type, Rice / Rice2 with escapes, wasted bits, every stereo mode, MD5
+check; `DecodeFloatAsync` gives float32 planar samples as ComfyUI's Load Audio sees them.
 
 ## Opus
 

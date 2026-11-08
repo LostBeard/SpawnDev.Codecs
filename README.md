@@ -168,7 +168,7 @@ float[] opusPcm = await opusDecoder.DecodePacketAsync(opusPacket);
 | **VP9** | `Vp9KeyframeEncoderGpu` (keyframes, batches) | `Vp9KeyframeDecoderGpu` (keyframes) |
 | **AV1** | `Av1KeyframeEncoderGpu` (keyframes: DC prediction, 16x16 blocks, OBU framing on the device) | `Av1KeyframeDecoderGpu` (single tile) |
 | **Vorbis** | `VorbisAudioEncoderGpu` (first version: mono, fixed block size) | `VorbisAudioDecoderGpu` (any channel count, block switching, libvorbis parity) |
-| **FLAC** | `FlacEncoderGpu` (first version: verbatim subframes) | `FlacDecoderGpu` (first version, same subset) |
+| **FLAC** | `FlacEncoderGpu` (levels 0..8: fixed and LPC prediction, Rice coding, stereo decorrelation, MD5; any rate, 1..8 channels, 4..24 bits) | `FlacDecoderGpu` (any conforming stream, 4..32 bits, MD5 check) |
 | **Opus** | `OpusEncoderGpu` (CELT-only: 2.5 .. 120 ms, CBR / VBR / constrained VBR, complexity 0..9, 8 .. 48 kHz; byte-identical with libopus 1.5.2) | `OpusDecoderGpu` (SILK, CELT, hybrid, mode switches, redundancy, loss concealment, DTX; equal to libopus 1.5.2) |
 | **Compression** | `ZlibCompressorGpu`, `DeflateGpu` | `InflateGpu` |
 | **Containers** | Ogg, IVF, RIFF/WAVE, AIFF; WebM / Matroska through SpawnDev.EBML | the same, plus an MP4 box reader |
