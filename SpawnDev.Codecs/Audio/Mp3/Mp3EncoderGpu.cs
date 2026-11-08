@@ -43,9 +43,9 @@ public sealed record Mp3EncodeOptions
     /// Default true.</summary>
     public bool WriteInfoFrame { get; init; } = true;
 
-    /// <summary>The 9-byte encoder string of the Info frame's LAME-format extension. Default "Lavc62.28", the value
-    /// ComfyUI's PyAV files carry.</summary>
-    public string InfoEncoder { get; init; } = "Lavc62.28";
+    /// <summary>The 9-byte encoder string of the Info frame's LAME-format extension (padded with NULs). Default "Lavf",
+    /// the value ComfyUI's PyAV files carry (Lore measured; the ffmpeg command-line tool writes "Lavc62.28").</summary>
+    public string InfoEncoder { get; init; } = "Lavf";
 }
 
 /// <summary>MP3 encoder on the accelerator (see the file header).</summary>

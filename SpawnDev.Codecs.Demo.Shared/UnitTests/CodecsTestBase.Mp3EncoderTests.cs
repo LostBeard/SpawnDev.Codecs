@@ -396,4 +396,32 @@ public abstract partial class CodecsTestBase
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
+
+    /// <summary>
+    /// Diagnostics (skipped unless MP3_COMFY_DIR names a folder with ComfyUI's input_stereo_44100_2s.f32): encodes it at
+    /// V0, 128k and 320k with ComfyUI's tags into that folder as ours_*.mp3, for a byte compare of the containers.
+    /// </summary>
+    [TestMethod(Timeout = 600000, Category = "DesktopOnly,NotOnWebGL")]
+    public async Task Mp3EncoderGpu_ComfyUiSamples_WriteForCompare()
+    {
+        string? dir = OperatingSystem.IsBrowser() ? null : Environment.GetEnvironmentVariable("MP3_COMFY_DIR");
+        if (string.IsNullOrEmpty(dir) || !File.Exists(Path.Combine(dir, "input_stereo_44100_2s.f32")))
+            throw new UnsupportedTestException("Set MP3_COMFY_DIR to a folder holding input_stereo_44100_2s.f32.");
+        var raw = File.ReadAllBytes(Path.Combine(dir, "input_stereo_44100_2s.f32"));
+        var planar = new float[raw.Length / 4];
+        Buffer.BlockCopy(raw, 0, planar, 0, raw.Length);
+        int n = planar.Length / 2;
+        var pcm = new float[planar.Length];
+        for (int i = 0; i < n; i++) { pcm[2 * i] = planar[i]; pcm[2 * i + 1] = planar[n + i]; }
+        var tags = new List<KeyValuePair<string, string>> { new("prompt", "{\"1\": {\"x\": 1}}"), new("workflow", "{\"nodes\": []}") };
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            using var enc = new Mp3EncoderGpu(acc);
+            File.WriteAllBytes(Path.Combine(dir, "ours_V0.mp3"), await enc.EncodeAsync(pcm, 2, 44100, new Mp3EncodeOptions { VbrQuality = 0, Tags = tags }));
+            File.WriteAllBytes(Path.Combine(dir, "ours_128k.mp3"), await enc.EncodeAsync(pcm, 2, 44100, new Mp3EncodeOptions { BitrateKbps = 128, Tags = tags }));
+            File.WriteAllBytes(Path.Combine(dir, "ours_320k.mp3"), await enc.EncodeAsync(pcm, 2, 44100, new Mp3EncodeOptions { BitrateKbps = 320, Tags = tags }));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
 }
