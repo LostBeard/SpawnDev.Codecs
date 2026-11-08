@@ -113,6 +113,10 @@ public abstract partial class CodecsTestBase
     private static (int Units, int WithScalefactors) Mp3ScalefactorUse(byte[] f)
     {
         int p = 0, units = 0, used = 0;
+        // skip an ID3v2 tag
+        if (f.Length > 10 && f[0] == 'I' && f[1] == 'D' && f[2] == '3')
+            p = 10 + ((f[6] & 0x7F) << 21 | (f[7] & 0x7F) << 14 | (f[8] & 0x7F) << 7 | (f[9] & 0x7F));
+        bool first = true;
         while (p + 4 <= f.Length && f[p] == 0xFF && (f[p + 1] & 0xE0) == 0xE0)
         {
             bool mpeg1 = (f[p + 1] & 0x18) == 0x18;
@@ -122,6 +126,15 @@ public abstract partial class CodecsTestBase
             int[] sr1 = { 44100, 48000, 32000 };
             if (!mpeg1) break;
             int size = 144000 * br1[brIdx] / sr1[srIdx] + pad;
+            // an Info / Xing frame carries no audio
+            int tagAt = p + (mono ? 21 : 36);
+            if (first && tagAt + 4 <= f.Length && ((f[tagAt] == 'I' && f[tagAt + 1] == 'n') || (f[tagAt] == 'X' && f[tagAt + 1] == 'i')))
+            {
+                first = false;
+                p += size;
+                continue;
+            }
+            first = false;
             // side info bits after the 4-byte header
             long bit = (p + 4) * 8L;
             int Read(int n) { int v = 0; for (int k = 0; k < n; k++, bit++) v = (v << 1) | ((f[bit >> 3] >> (7 - (int)(bit & 7))) & 1); return v; }
@@ -214,8 +227,8 @@ public abstract partial class CodecsTestBase
             var file = await enc.EncodeAsync(src, ch, rate, new Mp3EncodeOptions { BitrateKbps = 128 });
             var dec = FfmpegOracle.DecodeFloat(file, ".mp3");
             var (units, used) = Mp3ScalefactorUse(file);
-            double quiet = ToneSnr(src, dec, ch, Mp3EncoderGpu.CodecDelay, rate, 9000);
-            double loud = ToneSnr(src, dec, ch, Mp3EncoderGpu.CodecDelay, rate, 200);
+            double quiet = ToneSnr(src, dec, ch, 0, rate, 9000);
+            double loud = ToneSnr(src, dec, ch, 0, rate, 200);
             Console.WriteLine($"scalefactors in {used} of {units} granule-channels; local SNR 9 kHz {quiet:F1} dB, 200 Hz {loud:F1} dB");
             True(used > 0, "no granule used scalefactors");
             True(quiet >= 12, $"quiet 9 kHz tone local SNR {quiet:F1} dB < 12");
