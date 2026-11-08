@@ -42,8 +42,8 @@ Public API to provide (namespaces as listed):
   `Serial`, `InputSampleRate` int?) and static `OggOpusEncoder.EncodeAsync(Accelerator, ReadOnlyMemory<short> |
   ReadOnlyMemory<float>, int sampleRate, int channels, [Stream output], OggOpusEncodeOptions?)` (byte[] overloads and
   Stream overloads), `OggOpusEncoder.WarmUpAsync(...)`, and a float -> int16 kernel class `PcmConvertKernels`
-  (`FloatToS16Kernel`: lrintf(x * 32768) semantics, round half to even, clipped to int16; NaN and values beyond the int32
-  range -> -32768).
+  (`FloatToS16Kernel`: x * 32768 rounded half to even, clipped to int16, a property measured on the output
+  files (Lore, PyAV); NaN and values beyond the int32 range -> -32768).
 Observable behaviour to match (from the fixtures in TestData/OggOpus, made by `scripts/audio/make_ogg_opus_fixtures.py`):
 - Given the packets inside each fixture file, the writer reproduces the fixture file byte for byte (serial 0, vendor and
   tags as in the fixture's OpusTags). Derive the page packing rules from the fixtures and RFC 3533 / 7845 (granule
