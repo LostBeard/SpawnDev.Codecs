@@ -215,6 +215,26 @@ for k in range(7):
 case("semi_alpha_jitter_q80_m4_nokey", fr, 100, kmin=0, kmax=0)
 case("semi_alpha_jitter_q50_m4_nokey", fr, 100, quality=50, kmin=0, kmax=0)
 
+# 15. a faint layer (alpha 40) with slight colour jitter under a moving opaque sprite: every non-opaque pixel is
+# SIMILAR to the previous frame (lossy blending possible) but not EQUAL (lossless blending impossible)
+fr = []
+faint = np.zeros((40, 56, 4), np.uint8)
+faint[..., :3] = photo(56, 40, 90)
+faint[..., 3] = 40
+spr, m = sprite(10, 91)
+stamped = faint.copy()
+for k in range(6):
+    # opaque sprites are only ever ADDED (stamped, never erased), so no pixel goes from opaque back to faint
+    x, y = 3 + 7 * k, 5 + 3 * (k % 3)
+    stamped[y:y + 10, x:x + 10][m] = spr[m]
+    f = stamped.copy()
+    faint_px = f[..., 3] != 255
+    jit = np.clip(f[..., :3].astype(int) + rng.integers(-3, 4, f[..., :3].shape), 0, 255).astype(np.uint8)
+    f[..., :3][faint_px] = jit[faint_px]
+    fr.append(f)
+case("lowalpha_jitter_q80_m4", fr, 100)
+case("lowalpha_jitter_q80_m4_nokey", fr, 100, kmin=0, kmax=0)
+
 manifest = []
 sources = {}
 for (name, frames, durations, q, meth, kmin, kmax, exif, loop, background) in cases:
@@ -319,3 +339,35 @@ for nm, data in (("icc", icc), ("exif", exif_stripped), ("xmp", xmp)):
         fh.write(data)
 with open(os.path.join(META, "manifest.tsv"), "w", newline="\n") as fh:
     fh.write("\n".join(mman) + "\n")
+
+# ---- animated LOSSLESS (Pillow save_all=True, lossless=True: ComfyUI's Save Animated WEBP default), same sources.
+# TestData/WebPAnimLossless: <name>.webp (Pillow's file) + manifest.tsv in the lossy manifest's format; the frames are
+# the lossy fixtures' <source>.frames.gz.
+LL = os.path.join(ROOT, "WebPAnimLossless")
+os.makedirs(LL, exist_ok=True)
+lman = []
+for line in manifest:
+    c = line.split("\t")
+    name, source = c[0], c[1]
+    w, h, n = int(c[2]), int(c[3]), int(c[4])
+    durs = [int(x) for x in c[5].split(",")]
+    kmin, kmax = int(c[8]), int(c[9])
+    if int(c[7]) != 4 or name.startswith("jitter10"):
+        continue                                     # lossless: method 4 / quality 80 (ComfyUI's default)
+    raw = gzip.decompress(open(os.path.join(ANIM, source + ".frames.gz"), "rb").read())
+    frames = [np.frombuffer(raw, np.uint8, w * h * 4, k * w * h * 4).reshape(h, w, 4) for k in range(n)]
+    imgs = [Image.fromarray(np.ascontiguousarray(f), "RGBA") if (f[..., 3] != 255).any()
+            else Image.fromarray(np.ascontiguousarray(f[..., :3]), "RGB") for f in frames]
+    kw = dict(save_all=True, append_images=imgs[1:], duration=durs, lossless=True, quality=80, method=4,
+              loop=int(c[11]), background=tuple(int(c[12][i:i + 2], 16) for i in (2, 4, 6, 0)))
+    if kmin != -999: kw["kmin"] = kmin
+    if kmax != -999: kw["kmax"] = kmax
+    if c[10] == "1": kw["exif"] = open(os.path.join(ANIM, name + ".exif"), "rb").read()
+    buf = io.BytesIO()
+    imgs[0].save(buf, "WEBP", **kw)
+    with open(os.path.join(LL, name + ".webp"), "wb") as fh:
+        fh.write(buf.getvalue())
+    lman.append("\t".join([name, source] + c[2:6] + ["80", "4"] + c[8:]))
+    print("lossless", name, len(buf.getvalue()))
+with open(os.path.join(LL, "manifest.tsv"), "w", newline="\n") as fh:
+    fh.write("\n".join(lman) + "\n")

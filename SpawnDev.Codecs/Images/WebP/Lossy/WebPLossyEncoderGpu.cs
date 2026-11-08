@@ -431,6 +431,6 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
         _yuv.Dispose(); _work.Dispose(); _scratch.Dispose(); _stageIn.Dispose(); _stageOut.Dispose();
         _mbRecs.Dispose(); _state.Dispose(); _tokens.Dispose();
         _alphaEncoder?.Dispose(); _alphaPayload.Dispose();
-        _anim?.Dispose();
+        _animEncoder?.Dispose();
     }
 }

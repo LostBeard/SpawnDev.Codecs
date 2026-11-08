@@ -304,6 +304,24 @@ internal static class WebPAnimKernels
         }
     }
 
+    /// <summary>
+    /// IncreaseTransparency on the extracted picture of rectangle (x, y, w), one thread per pixel: a pixel equal to the
+    /// reference canvas (all four bytes) and not already transparent black becomes transparent black (0x00000000).
+    /// </summary>
+    public static void IncreaseTransparencyKernel(Index1D pixel, ArrayView<byte> reference, ArrayView<byte> picture, int canvasWidth, int x, int y, int w)
+    {
+        int px = pixel.X % w, py = pixel.X / w;
+        int s = ((y + py) * canvasWidth + x + px) * 4;
+        int d = pixel.X * 4;
+        int dr = picture[d], dg = picture[d + 1], db = picture[d + 2], da = picture[d + 3];
+        bool same = (reference[s] == dr) & (reference[s + 1] == dg) & (reference[s + 2] == db) & (reference[s + 3] == da);
+        bool transparentBlack = (dr | dg | db | da) == 0;
+        if (same & !transparentBlack)
+        {
+            picture[d] = 0; picture[d + 1] = 0; picture[d + 2] = 0; picture[d + 3] = 0;
+        }
+    }
+
     /// <summary>WebPCopyPixels of a whole canvas, one thread per pixel.</summary>
     public static void CopyCanvasKernel(Index1D pixel, ArrayView<byte> src, ArrayView<byte> dst)
     {

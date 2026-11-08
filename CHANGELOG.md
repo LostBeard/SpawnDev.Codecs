@@ -27,6 +27,26 @@
   Pillow checks are desktop-only). Lore checked SpawnGen's Save Animated WEBP against ComfyUI's own save (3 frames,
   q80 m4, ComfyUI's EXIF): byte-identical on the CPU accelerator and on OpenCL (RX 590).
 
+### Animated lossless WebP the WebPAnimEncoder way + one animation engine for both modes (2026-11-08)
+- **New `WebPLosslessEncoderGpu.EncodeAnimationAsync(frames, width, height, durationsMs, options, animation)`**
+  (managed / TypedArray / ArrayView1D): full-canvas frames in, libwebp's lossless WebPAnimEncoder decisions out - exact
+  change rectangles, disposal by the smaller rectangle, blending when it can reproduce the frame with the pixels equal
+  to the canvas made transparent (IncreaseTransparency), dropped repeats, Pillow's lossless key-frame defaults (kmin 9,
+  kmax 17), libwebp's lossless 1x1 split frame, lone frames as stills. Pillow's `save_all=True, lossless=True` (ComfyUI's
+  Save Animated WEBP default); pass `Exact = false` for libwebp's default. The caller-rectangle overloads are unchanged.
+- The WebPAnimEncoder port is now one internal engine (`WebPAnimEncoder`) driven by either encoder's still frames; the
+  animation options type is **`WebPAnimEncoderOptions`** (was `WebPLossyAnimationOptions` in 1.0.2-local.1), with
+  `KeyframeMin` / `KeyframeMax` null = Pillow's default for the mode.
+- Vs Pillow 13 / libwebp 1.6.0 (22 lossless fixtures from the lossy fixtures' sources, q80 m4): every displayed frame is
+  exactly its source frame (fully transparent pixels compared as transparent); where libwebp's choices are
+  size-independent (key frames off or all key, or no longer than kmin + 1 frames; 20 of 22) the container, every ANMF's
+  offset / size / duration / disposal / blending and each frame's own pixels match libwebp's file (alpha everywhere,
+  colour where alpha > 0: libwebp's VP8L predictor leaves the colour under alpha 0 to its prediction). The VP8L bytes
+  are ours, so files are not byte-identical and libwebp's size-based key-frame choice can differ on longer clips.
+- Red-checked: IncreaseTransparency off; the lossy blend test in lossless mode (caught only after adding a faint-layer
+  fixture where every non-opaque pixel is similar but not equal); the lossy 1x1 frame in lossless mode; lossy key-frame
+  defaults.
+
 ### ICCP / EXIF / XMP on lossy stills (2026-11-08)
 - `WebPLossyEncodeOptions.IccProfile`, `Exif`, `Xmp`: written verbatim in libwebp WebPMux's still layout (RIFF, VP8X,
   ICCP, [ALPH], VP8, EXIF, XMP), the file Pillow's still save writes (Pillow strips an `Exif\0\0` prefix before

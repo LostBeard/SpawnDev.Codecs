@@ -28,3 +28,5 @@ WebMMux/*.json text eol=lf
 WebMMux/manifest.txt text eol=lf
 WebPLossyMeta/* binary
 WebPLossyMeta/manifest.tsv text eol=lf
+WebPAnimLossless/* binary
+WebPAnimLossless/manifest.tsv text eol=lf

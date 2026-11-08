@@ -487,6 +487,12 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
     public async Task<int> EncodeAsync(
         ArrayView1D<byte, Stride1D.Dense> rgba, int width, int height,
         ArrayView1D<byte, Stride1D.Dense> output, WebPEncodeOptions? options = null)
+        => (await EncodeCoreAsync(rgba, width, height, output, options)).Length;
+
+    /// <summary>EncodeAsync, also reporting whether the image uses alpha (the VP8L header's alpha_is_used bit).</summary>
+    internal async Task<(int Length, bool HasAlpha)> EncodeCoreAsync(
+        ArrayView1D<byte, Stride1D.Dense> rgba, int width, int height,
+        ArrayView1D<byte, Stride1D.Dense> output, WebPEncodeOptions? options = null)
     {
         ValidateSize(width, height);
         options ??= new WebPEncodeOptions();
@@ -533,7 +539,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
         if (result[WebPEncMeta.Error] != 0 || result[WebPEncMeta.Total] > output.Length)
             throw new InvalidOperationException(
                 $"WebP encode overflowed the output buffer (needed {result[WebPEncMeta.Total]} bytes, GetMaxEncodedSize said {maxSize}).");
-        return result[WebPEncMeta.Total];
+        return (result[WebPEncMeta.Total], result[WebPEncMeta.HasAlpha] == 1);
     }
 
     // ------------------------------------------------------------------
@@ -583,6 +589,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
     /// <summary>Release kernel resources and buffers.</summary>
     public void Dispose()
     {
+        _animEncoder?.Dispose();
         _kernels.Dispose();
         _meta.Dispose();
         _tables.Dispose();

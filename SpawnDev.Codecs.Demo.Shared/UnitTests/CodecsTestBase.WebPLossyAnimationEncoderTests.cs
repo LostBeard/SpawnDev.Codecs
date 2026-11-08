@@ -35,10 +35,10 @@ public abstract partial class CodecsTestBase
     {
         public WebPLossyEncodeOptions Options => new() { Quality = Quality, Method = Method };
 
-        public WebPLossyAnimationOptions Animation(byte[]? exif) => new()
+        public WebPAnimEncoderOptions Animation(byte[]? exif) => new()
         {
             LoopCount = Loop, BackgroundColor = Background, Exif = exif,
-            KeyframeMin = Kmin ?? 3, KeyframeMax = Kmax ?? 5,   // Pillow's lossy defaults when not given
+            KeyframeMin = Kmin, KeyframeMax = Kmax,   // null = Pillow's defaults for the mode
         };
     }
 

@@ -24,3 +24,5 @@ jitter10_q30_m4	jitter10_q30_m4	96	72	6	100,100,100,100,100,100	30	4	-999	-999	0
 jitter10_q80_m4	jitter10_q30_m4	96	72	6	100,100,100,100,100,100	80	4	-999	-999	0	0	00000000
 semi_alpha_jitter_q80_m4_nokey	semi_alpha_jitter_q80_m4_nokey	64	40	7	100,100,100,100,100,100,100	80	4	0	0	0	0	00000000
 semi_alpha_jitter_q50_m4_nokey	semi_alpha_jitter_q80_m4_nokey	64	40	7	100,100,100,100,100,100,100	50	4	0	0	0	0	00000000
+lowalpha_jitter_q80_m4	lowalpha_jitter_q80_m4	56	40	6	100,100,100,100,100,100	80	4	-999	-999	0	0	00000000
+lowalpha_jitter_q80_m4_nokey	lowalpha_jitter_q80_m4	56	40	6	100,100,100,100,100,100	80	4	0	0	0	0	00000000
