@@ -31,8 +31,9 @@ public sealed class Mp3EncoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, long> _mdct;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, long> _alias;
     private readonly Action<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, long, long, int, int, int, int, int> _layout;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _quantize;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int> _writeGranule;
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, int> _psy;
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int> _quantize;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int> _writeGranule;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, int, int, int, int, int> _writeFrame;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<float>, long> _toFloat;
     private readonly MemoryBuffer1D<float, Stride1D.Dense> _consts;
@@ -51,8 +52,9 @@ public sealed class Mp3EncoderGpu : IDisposable
         _mdct = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, long>(K.MdctKernel);
         _alias = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, long>(K.AliasReduceKernel);
         _layout = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, long, long, int, int, int, int, int>(K.FrameLayoutKernel);
-        _quantize = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(K.QuantizeKernel);
-        _writeGranule = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int>(K.WriteGranuleKernel);
+        _psy = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, int>(K.PsyKernel);
+        _quantize = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int>(K.QuantizeKernel);
+        _writeGranule = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int>(K.WriteGranuleKernel);
         _writeFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, int, int, int, int, int>(K.WriteFrameKernel);
         _toFloat = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, long>(Int32ToFloatKernel);
 
@@ -136,6 +138,11 @@ public sealed class Mp3EncoderGpu : IDisposable
         using var ix = a.Allocate1D<int>((long)units * 576);
         using var side = a.Allocate1D<int>((long)units * K.SideInts);
         using var slotBuf = a.Allocate1D<byte>((long)units * K.SlotBytes);
+        using var psy = a.Allocate1D<float>(K.PsyConsts);
+        psy.View.CopyFromCPU(PsyTables(sampleRate));
+        using var psyScratch = a.Allocate1D<float>((long)units * 44);
+        using var xmin = a.Allocate1D<float>((long)units * 22);
+        using var work = a.Allocate1D<int>((long)units * K.WorkInts);
         using var frameOffsets = a.Allocate1D<long>(frames + 1);
         using var frameInfo = a.Allocate1D<int>(Math.Max(1, frames * 2));
         using var output = a.Allocate1D<byte>(Math.Max(1, totalBytes));
@@ -160,9 +167,10 @@ public sealed class Mp3EncoderGpu : IDisposable
         for (int first = 0; first < units; first += UnitChunk)
         {
             int n = Math.Min(UnitChunk, units - first);
-            _quantize(n, xr.View, ix.View, side.View, tables.View, first);
+            _psy(n, xr.View, tables.View, psy.View, psyScratch.View, xmin.View, 1f, first);
+            _quantize(n, xr.View, ix.View, side.View, tables.View, xmin.View, work.View, lsf ? 1 : 0, first);
             await pacer.LaunchedAsync();
-            _writeGranule(n, ix.View, side.View, tables.View, slotBuf.View, first);
+            _writeGranule(n, ix.View, side.View, tables.View, slotBuf.View, lsf ? 1 : 0, first);
             await pacer.LaunchedAsync();
         }
         for (int first = 0; first < frames; first += UnitChunk)
@@ -173,6 +181,35 @@ public sealed class Mp3EncoderGpu : IDisposable
         }
         await a.SynchronizeAsync();
         return await output.View.SubView(0, totalBytes).CopyToHostAsync();
+    }
+
+    /// <summary>
+    /// The psychoacoustic model's per-band constants for a rate: the Bark of each long band's centre (Zwicker:
+    /// 13 atan(0.00076 f) + 3.5 atan((f / 7500)^2)) and the threshold of hearing (Terhardt: 3.64 f^-0.8 - 6.5
+    /// e^(-0.6 (f - 3.3)^2) + 0.001 f^4 dB SPL, f in kHz; the lowest over the band's lines) as an MDCT energy, with a
+    /// full-scale sine (MDCT energy about 1 per granule) at 96 dB SPL.
+    /// </summary>
+    private static float[] PsyTables(int sampleRate)
+    {
+        var t = new float[K.PsyConsts];
+        int r = Mp3Tables.BandRateIndex(sampleRate);
+        int lo = 0;
+        for (int b = 0; b < 22; b++)
+        {
+            int hi = lo + Mp3Tables.LongBandWidths[r * 22 + b];
+            double fc = (lo + hi) / 2.0 * sampleRate / 1152.0;
+            t[K.PBark + b] = (float)(13 * Math.Atan(0.00076 * fc) + 3.5 * Math.Atan(Math.Pow(fc / 7500, 2)));
+            double athMin = double.MaxValue;
+            for (int i = lo; i < hi; i++)
+            {
+                double f = Math.Max((i + 0.5) * sampleRate / 1152.0, 20) / 1000.0;
+                double ath = 3.64 * Math.Pow(f, -0.8) - 6.5 * Math.Exp(-0.6 * (f - 3.3) * (f - 3.3)) + 0.001 * Math.Pow(f, 4);
+                athMin = Math.Min(athMin, ath);
+            }
+            t[K.PAth + b] = (float)Math.Pow(10, (athMin - 96) / 10);
+            lo = hi;
+        }
+        return t;
     }
 
     private static int[] IntTables(int sampleRate)

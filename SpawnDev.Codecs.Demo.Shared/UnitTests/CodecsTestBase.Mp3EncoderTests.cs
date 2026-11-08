@@ -106,4 +106,117 @@ public abstract partial class CodecsTestBase
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
+    /// <summary>MPEG-1 stereo / mono frames of an MP3: how many granule-channels have scalefac_compress != 0.</summary>
+    private static (int Units, int WithScalefactors) Mp3ScalefactorUse(byte[] f)
+    {
+        int p = 0, units = 0, used = 0;
+        while (p + 4 <= f.Length && f[p] == 0xFF && (f[p + 1] & 0xE0) == 0xE0)
+        {
+            bool mpeg1 = (f[p + 1] & 0x18) == 0x18;
+            int brIdx = f[p + 2] >> 4, srIdx = (f[p + 2] >> 2) & 3, pad = (f[p + 2] >> 1) & 1;
+            bool mono = (f[p + 3] >> 6) == 3;
+            int[] br1 = { 0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320 };
+            int[] sr1 = { 44100, 48000, 32000 };
+            if (!mpeg1) break;
+            int size = 144000 * br1[brIdx] / sr1[srIdx] + pad;
+            // side info bits after the 4-byte header
+            long bit = (p + 4) * 8L;
+            int Read(int n) { int v = 0; for (int k = 0; k < n; k++, bit++) v = (v << 1) | ((f[bit >> 3] >> (7 - (int)(bit & 7))) & 1); return v; }
+            int ch = mono ? 1 : 2;
+            Read(9); Read(mono ? 5 : 3); Read(4 * ch);
+            for (int g = 0; g < 2; g++)
+                for (int c = 0; c < ch; c++)
+                {
+                    Read(12); Read(9); Read(8);
+                    int compress = Read(4);
+                    int ws = Read(1);
+                    if (ws != 0) { Read(2); Read(1); Read(10); Read(9); } else { Read(15); Read(4); Read(3); }
+                    Read(3);
+                    units++;
+                    if (compress != 0) used++;
+                }
+            p += size;
+        }
+        return (units, used);
+    }
+
+    /// <summary>Local SNR (dB) of a tone at <paramref name="freq"/>: decoded vs source energy within +-60 Hz, channel 0.</summary>
+    private static double ToneSnr(float[] src, float[] dec, int channels, int delay, int rate, double freq)
+    {
+        int n = 1 << 14, start = 4096;
+        var a = new System.Numerics.Complex[n];
+        var e = new System.Numerics.Complex[n];
+        for (int i = 0; i < n; i++)
+        {
+            double w = 0.5 - 0.5 * Math.Cos(2 * Math.PI * i / n);
+            double x = src[(start + i) * channels], y = dec[(start + i + delay) * channels];
+            a[i] = x * w;
+            e[i] = (y - x) * w;
+        }
+        static void Fft(System.Numerics.Complex[] v)
+        {
+            int n = v.Length;
+            for (int i = 1, j = 0; i < n; i++)
+            {
+                int bit = n >> 1;
+                for (; (j & bit) != 0; bit >>= 1) j ^= bit;
+                j ^= bit;
+                if (i < j) (v[i], v[j]) = (v[j], v[i]);
+            }
+            for (int len = 2; len <= n; len <<= 1)
+            {
+                var wl = System.Numerics.Complex.FromPolarCoordinates(1, -2 * Math.PI / len);
+                for (int i = 0; i < n; i += len)
+                {
+                    var w = System.Numerics.Complex.One;
+                    for (int k = 0; k < len / 2; k++, w *= wl)
+                    {
+                        var u = v[i + k];
+                        var t = v[i + k + len / 2] * w;
+                        v[i + k] = u + t;
+                        v[i + k + len / 2] = u - t;
+                    }
+                }
+            }
+        }
+        Fft(a);
+        Fft(e);
+        int lo = (int)((freq - 60) * n / rate), hi = (int)((freq + 60) * n / rate);
+        double sig = 0, err = 0;
+        for (int k = lo; k <= hi; k++) { sig += a[k].Magnitude * a[k].Magnitude; err += e[k].Magnitude * e[k].Magnitude; }
+        return 10 * Math.Log10(sig / Math.Max(err, 1e-30));
+    }
+
+    /// <summary>
+    /// Noise shaping at 128 kbps: a loud 200 Hz tone, a quiet 9 kHz tone 44 dB down and faint noise. The psychoacoustic
+    /// model must keep the quiet tone above its own noise (local SNR), and the encoder must use scalefactors to do so.
+    /// </summary>
+    [TestMethod(Timeout = 900000, Category = "DesktopOnly,NotOnWebGL")]
+    public async Task Mp3EncoderGpu_NoiseShaping_KeepsQuietToneAboveItsNoise()
+    {
+        FfmpegOracle.RequireAvailable();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            const int rate = 44100, ch = 2;
+            int n = rate * 2;
+            var r = new Random(9);
+            var src = new float[n * ch];
+            for (int i = 0; i < n; i++)
+                for (int c = 0; c < ch; c++)
+                    src[i * ch + c] = (float)(0.5 * Math.Sin(2 * Math.PI * 200 * i / rate) + 0.003 * Math.Sin(2 * Math.PI * 9000 * i / rate)
+                        + 0.002 * (r.NextDouble() - 0.5));
+            using var enc = new Mp3EncoderGpu(acc);
+            var file = await enc.EncodeAsync(src, ch, rate, new Mp3EncodeOptions { BitrateKbps = 128 });
+            var dec = FfmpegOracle.DecodeFloat(file, ".mp3");
+            var (units, used) = Mp3ScalefactorUse(file);
+            double quiet = ToneSnr(src, dec, ch, Mp3EncoderGpu.CodecDelay, rate, 9000);
+            double loud = ToneSnr(src, dec, ch, Mp3EncoderGpu.CodecDelay, rate, 200);
+            Console.WriteLine($"scalefactors in {used} of {units} granule-channels; local SNR 9 kHz {quiet:F1} dB, 200 Hz {loud:F1} dB");
+            True(used > 0, "no granule used scalefactors");
+            True(quiet >= 12, $"quiet 9 kHz tone local SNR {quiet:F1} dB < 12");
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
 }

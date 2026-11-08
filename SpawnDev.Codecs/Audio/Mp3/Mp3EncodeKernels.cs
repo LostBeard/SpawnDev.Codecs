@@ -20,7 +20,17 @@ public static class Mp3EncodeKernels
 {
     /// <summary>Per-(granule, channel) side info ints.</summary>
     public const int SPart23 = 0, SBigValues = 1, SGlobalGain = 2, SScfCompress = 3, STable0 = 4, STable1 = 5, STable2 = 6,
-        SRegion0 = 7, SRegion1 = 8, SCount1Table = 9, SBudget = 10, SideInts = 11;
+        SRegion0 = 7, SRegion1 = 8, SCount1Table = 9, SBudget = 10, SScfScale = 11, SScf = 12, SideInts = 33;
+
+    /// <summary>The psychoacoustic constants view (floats per long band): Bark centre [0..22), the threshold of hearing as
+    /// an MDCT energy [22..44).</summary>
+    public const int PBark = 0, PAth = 22, PsyConsts = 44;
+
+    /// <summary>Ints of the quantizer's per-unit work view: band-over flags (22), best scalefactors (21).</summary>
+    public const int WorkInts = 43;
+
+    /// <summary>Largest scalefactor of a long band: 15 in bands 0..10, 7 in 11..20 (4 / 3 bits), none in band 21.</summary>
+    private static int ScfMax(int b) => b < 11 ? 15 : b < 21 ? 7 : 0;
 
     /// <summary>Bytes of one granule's main-data slot (part2_3_length is at most 4095 bits).</summary>
     public const int SlotBytes = 512;
@@ -137,6 +147,59 @@ public static class Mp3EncodeKernels
         for (int g = 0; g < granulesPerFrame; g++)
             for (int c = 0; c < channels; c++)
                 side[((f * granulesPerFrame + g) * channels + c) * SideInts + SBudget] = perGranule;
+    }
+
+    // ------------------------------------------------------------------ psychoacoustic model (MDCT domain)
+
+    /// <summary>
+    /// One thread per (granule, channel): the noise each long scalefactor band may carry (xmin, in MDCT energy), from the
+    /// granule's own spectrum. Band energies; tonality from the spectral flatness of a band's lines (white noise sits
+    /// near -5.5 dB, a tone far below); energy spread across bands with Schroeder's spreading function in Bark; the
+    /// threshold below the spread energy by ISO model 2's offsets (18 dB under tonal maskers, 6 dB under noise); never
+    /// below the threshold of hearing. <paramref name="quality"/> scales the result (1 = the model's threshold).
+    /// <paramref name="scratch"/> holds 44 floats per unit (energies, tonalities).
+    /// </summary>
+    public static void PsyKernel(Index1D i0, ArrayView<float> xr, ArrayView<int> tables, ArrayView<float> psy, ArrayView<float> scratch,
+        ArrayView<float> xmin, float quality, int first)
+    {
+        int index = first + i0;
+        long at = (long)index * 576;
+        long so = (long)index * 44;
+        for (int b = 0; b < 22; b++)
+        {
+            int lo = tables[IBounds + b], hi = tables[IBounds + b + 1];
+            float e = 0, logSum = 0;
+            for (int i = lo; i < hi; i++)
+            {
+                float v = xr[at + i] * xr[at + i];
+                e += v;
+                logSum += XMath.Log(v + 1e-30f);
+            }
+            int n = hi - lo;
+            float sfmDb = 10f * XMath.Log10(XMath.Exp(logSum / n) / (e / n + 1e-30f) + 1e-30f);
+            scratch[so + b] = e;
+            scratch[so + 22 + b] = XMath.Clamp((sfmDb + 5.5f) / -25f, 0f, 1f);
+        }
+        for (int b = 0; b < 22; b++)
+        {
+            float zb = psy[PBark + b];
+            float spread = 0, toneWeighted = 0;
+            for (int j = 0; j < 22; j++)
+            {
+                float ej = scratch[so + j];
+                if (ej <= 0) continue;
+                float dz = zb - psy[PBark + j] + 0.474f;
+                float sfDb = 15.81f + 7.5f * dz - 17.5f * XMath.Sqrt(1f + dz * dz);
+                if (sfDb < -60f) continue;
+                float w = ej * XMath.Pow(10f, sfDb / 10f);
+                spread += w;
+                toneWeighted += w * scratch[so + 22 + j];
+            }
+            float t = spread > 0 ? toneWeighted / spread : 0;
+            float offsetDb = 18f * t + 6f * (1 - t);
+            float thr = spread * XMath.Pow(10f, -offsetDb / 10f);
+            xmin[(long)index * 22 + b] = XMath.Max(thr, psy[PAth + b]) * quality;
+        }
     }
 
     // ------------------------------------------------------------------ quantization + bit counting
@@ -275,16 +338,100 @@ public static class Mp3EncodeKernels
         return best;
     }
 
+    /// <summary>Bits of the scalefactors (part2) and scalefac_compress for the current maxima; -1 when they do not fit.</summary>
+    private static int ScfBits(ArrayView<int> side, long s, int lsf, out int compress)
+    {
+        int m1 = 0, m2 = 0, m3 = 0, m4 = 0;
+        for (int b = 0; b < 21; b++)
+        {
+            int v = side[s + SScf + b];
+            if (b < 6) m1 = XMath.Max(m1, v);
+            else if (b < 11) m2 = XMath.Max(m2, v);
+            else if (b < 16) m3 = XMath.Max(m3, v);
+            else m4 = XMath.Max(m4, v);
+        }
+        compress = 0;
+        if (lsf == 0)
+        {
+            // MPEG-1: slen1 for bands 0..10, slen2 for 11..20; the scalefac_compress with the fewest bits that holds them
+            int best = -1;
+            for (int c = 0; c < 16; c++)
+            {
+                int s1 = Slen1(c), s2 = Slen2(c);
+                if ((1 << s1) <= XMath.Max(m1, m2) || (1 << s2) <= XMath.Max(m3, m4)) continue;
+                int bits = 11 * s1 + 10 * s2;
+                if (best < 0 || bits < best) { best = bits; compress = c; }
+            }
+            return best;
+        }
+        // MPEG-2 / 2.5 long blocks, no intensity stereo: partitions of 6, 5, 5, 5 bands, slen1 / slen2 0..4, slen3 / slen4 0..3
+        int l1 = BitsFor(m1), l2 = BitsFor(m2), l3 = BitsFor(m3), l4 = BitsFor(m4);
+        if (l1 > 4 || l2 > 4 || l3 > 3 || l4 > 3) return -1;
+        compress = ((l1 * 5 + l2) << 4) + (l3 << 2) + l4;
+        return 6 * l1 + 5 * l2 + 5 * l3 + 5 * l4;
+    }
+
+    private static int BitsFor(int v)
+    {
+        int n = 0;
+        while ((1 << n) <= v) n++;
+        return n;
+    }
+
+    private static int Slen1(int c) => c < 4 ? 0 : c == 4 ? 3 : c < 8 ? 1 : c < 11 ? 2 : c < 14 ? 3 : 4;
+    private static int Slen2(int c) => c < 4 ? c : c == 4 ? 0 : c < 8 ? c - 4 : c < 11 ? c - 7 : c < 14 ? c - 10 : c - 12;
+
+    /// <summary>The factor the quantizer applies to band b: 2^(multiplier * scalefactor), multiplier 0.5 or 1.</summary>
+    private static float Amp(ArrayView<int> side, long s, int b) =>
+        b >= 21 ? 1f : XMath.Pow(2f, (side[s + SScfScale] != 0 ? 1f : 0.5f) * side[s + SScf + b]);
+
+    /// <summary>Quantize the granule at gain g with the current scalefactors into ix.</summary>
+    private static void QuantizeAll(ArrayView<float> xr, ArrayView<int> ix, long at, ArrayView<int> side, long s, ArrayView<int> tables, int g)
+    {
+        float stepInv = XMath.Pow(2f, -(g - 210) / 4f);
+        for (int b = 0; b < 22; b++)
+        {
+            float k = stepInv * Amp(side, s, b);
+            int lo = tables[IBounds + b], hi = tables[IBounds + b + 1];
+            for (int i = lo; i < hi; i++) ix[at + i] = Quant(xr[at + i], k) * (xr[at + i] < 0 ? -1 : 1);
+        }
+    }
+
+    /// <summary>Inner loop: the smallest gain in [lo, 255] whose Huffman bits fit; -1 when none does.</summary>
+    private static int InnerLoop(ArrayView<float> xr, ArrayView<int> ix, long at, ArrayView<int> side, long s, ArrayView<int> tables,
+        int lo, int huffBudget)
+    {
+        int hi = 255, found = -1;
+        while (lo <= hi)
+        {
+            int g = (lo + hi) >> 1;
+            QuantizeAll(xr, ix, at, side, s, tables, g);
+            Regions(ix, at, tables, out int bv, out _, out _, out int c1Bits);
+            int bits = BigValueBits(ix, at, tables, bv, false, out _, out _, out _, out _, out _) + c1Bits;
+            if (bits <= huffBudget && MaxAbs(ix, at, 0, 576) <= 8206) { found = g; hi = g - 1; }
+            else lo = g + 1;
+        }
+        return found;
+    }
+
     /// <summary>
-    /// One thread per (granule, channel): the smallest global gain whose Huffman bits fit side[SBudget] (binary search over
-    /// a fixed region split), then the best split and tables at that gain; ix and the side info written.
+    /// One thread per (granule, channel): ISO 11172-3 Annex C's two loops. The inner loop finds the smallest global gain
+    /// whose bits (scalefactors + Huffman) fit side[SBudget]; the outer loop measures the noise in each long band against
+    /// its allowed noise xmin and amplifies (scalefactor + 1) every band over it, switching to scalefac_scale 1 when a
+    /// scalefactor would overflow, until no band is over or nothing can be amplified. The iteration with the fewest bands
+    /// over (then the least noise above the masks) is kept; ix and the side info written.
     /// </summary>
-    public static void QuantizeKernel(Index1D i0, ArrayView<float> xr, ArrayView<int> ix, ArrayView<int> side, ArrayView<int> tables, int first)
+    public static void QuantizeKernel(Index1D i0, ArrayView<float> xr, ArrayView<int> ix, ArrayView<int> side, ArrayView<int> tables,
+        ArrayView<float> xmin, ArrayView<int> work, int lsf, int first)
     {
         int index = first + i0;
         long at = (long)index * 576;
         long s = (long)index * SideInts;
-        int budget = side[s + SBudget];
+        long xo = (long)index * 22;
+        long wo = (long)index * WorkInts;   // [0..22) band over its mask, [22..43) the best iteration's scalefactors
+        int budget = XMath.Min(side[s + SBudget], 4095);
+        side[s + SScfScale] = 0;
+        for (int b = 0; b < 21; b++) side[s + SScf + b] = 0;
         float maxAbs = 0;
         for (int i = 0; i < 576; i++) maxAbs = XMath.Max(maxAbs, XMath.Abs(xr[at + i]));
         if (maxAbs < 1e-20f || budget <= 0)
@@ -295,40 +442,99 @@ public static class Mp3EncodeKernels
             side[s + SCount1Table] = 0;
             return;
         }
-        // the smallest gain that keeps every value within the escape range (8206)
+        // the smallest gain that keeps every value within the escape range (8206), before amplification
         float need = 4f * XMath.Log2(maxAbs / XMath.Pow(8206.5f + 0.0946f, 4f / 3f));
-        int lo = XMath.Max(0, (int)XMath.Ceiling(210 + need)), hi = 255;
-        if (lo > 255) lo = 255;
-        int found = 255;
-        while (lo <= hi)
+        int gMin = XMath.Clamp((int)XMath.Ceiling(210 + need), 0, 255);
+
+        // best iteration so far: (bands over, noise above the masks in dB), its gain, scalefac_scale and scalefactors
+        int bestOver = int.MaxValue, bestGain = 255, bestScale = 0;
+        float bestOverDb = float.MaxValue;
+        for (int b = 0; b < 21; b++) work[wo + 22 + b] = 0;
+        for (int iter = 0; iter < 64; iter++)
         {
-            int g = (lo + hi) >> 1;
-            float stepInv = XMath.Pow(2f, -(g - 210) / 4f);
-            for (int i = 0; i < 576; i++) ix[at + i] = Quant(xr[at + i], stepInv) * (xr[at + i] < 0 ? -1 : 1);
-            Regions(ix, at, tables, out int bv, out _, out _, out int c1Bits);
-            int bits = BigValueBits(ix, at, tables, bv, false, out _, out _, out _, out _, out _) + c1Bits;
-            if (bits <= budget && MaxAbs(ix, at, 0, 576) <= 8206) { found = g; hi = g - 1; }
-            else lo = g + 1;
+            int part2 = ScfBits(side, s, lsf, out _);
+            if (part2 < 0) break;
+            int g = InnerLoop(xr, ix, at, side, s, tables, gMin, budget - part2);
+            if (g < 0) break;
+            QuantizeAll(xr, ix, at, side, s, tables, g);
+            // noise per band against its mask
+            float step = XMath.Pow(2f, (g - 210) / 4f);
+            int over = 0;
+            float overDb = 0;
+            for (int b = 0; b < 22; b++)
+            {
+                float inv = step / Amp(side, s, b);
+                int lo = tables[IBounds + b], hi = tables[IBounds + b + 1];
+                float noise = 0;
+                for (int i = lo; i < hi; i++)
+                {
+                    float q = XMath.Pow(XMath.Abs(ix[at + i]), 4f / 3f) * inv;
+                    float d = XMath.Abs(xr[at + i]) - q;
+                    noise += d * d;
+                }
+                float allowed = xmin[xo + b];
+                bool isOver = noise > allowed;
+                if (isOver)
+                {
+                    over++;
+                    overDb += 10f * XMath.Log10(noise / allowed);
+                }
+                work[wo + b] = isOver ? 1 : 0;
+            }
+            if (over < bestOver || (over == bestOver && overDb < bestOverDb))
+            {
+                bestOver = over; bestOverDb = overDb; bestGain = g; bestScale = side[s + SScfScale];
+                for (int b = 0; b < 21; b++) work[wo + 22 + b] = side[s + SScf + b];
+            }
+            if (over == 0) break;
+            // amplify every band over its mask
+            bool overflow = false, amplified = false;
+            for (int b = 0; b < 21; b++)
+            {
+                if (work[wo + b] == 0) continue;
+                side[s + SScf + b]++;
+                amplified = true;
+                if (side[s + SScf + b] > ScfMax(b)) overflow = true;
+            }
+            if (!amplified) break;
+            if (overflow)
+            {
+                if (side[s + SScfScale] != 0) break;
+                // scalefac_scale 1 doubles the step of every scalefactor: halve them (rounding up keeps the amplification)
+                side[s + SScfScale] = 1;
+                for (int b = 0; b < 21; b++) side[s + SScf + b] = (side[s + SScf + b] + 1) >> 1;
+            }
         }
-        // final: that gain, the best split
+        // the best iteration, then the best region split and tables
+        side[s + SScfScale] = bestScale;
+        for (int b = 0; b < 21; b++) side[s + SScf + b] = work[wo + 22 + b];
+        int p2 = ScfBits(side, s, lsf, out int compress);
+        if (p2 < 0)
+        {
+            // cannot happen for a kept iteration; fall back to no scalefactors
+            side[s + SScfScale] = 0;
+            for (int b = 0; b < 21; b++) side[s + SScf + b] = 0;
+            p2 = 0; compress = 0;
+            bestGain = XMath.Max(InnerLoop(xr, ix, at, side, s, tables, gMin, budget), 0);
+        }
+        int gain = bestGain;
         while (true)
         {
-            float stepInv = XMath.Pow(2f, -(found - 210) / 4f);
-            for (int i = 0; i < 576; i++) ix[at + i] = Quant(xr[at + i], stepInv) * (xr[at + i] < 0 ? -1 : 1);
+            QuantizeAll(xr, ix, at, side, s, tables, gain);
             Regions(ix, at, tables, out int bv, out _, out int c1t, out int c1Bits);
             int bits = BigValueBits(ix, at, tables, bv, true, out int r0, out int r1, out int t0, out int t1, out int t2) + c1Bits;
-            if (bits <= XMath.Min(budget, 4095) || found == 255)
+            if (bits + p2 <= budget || gain == 255)
             {
-                side[s + SPart23] = bits;
+                side[s + SPart23] = bits + p2;
                 side[s + SBigValues] = bv;
-                side[s + SGlobalGain] = found;
-                side[s + SScfCompress] = 0;
+                side[s + SGlobalGain] = gain;
+                side[s + SScfCompress] = compress;
                 side[s + STable0] = t0; side[s + STable1] = t1; side[s + STable2] = t2;
                 side[s + SRegion0] = r0; side[s + SRegion1] = r1;
                 side[s + SCount1Table] = c1t;
                 return;
             }
-            found++;
+            gain++;
         }
     }
 
@@ -348,7 +554,8 @@ public static class Mp3EncodeKernels
     }
 
     /// <summary>One thread per (granule, channel): the Huffman-coded values into slot[index * SlotBytes] (zeroed first).</summary>
-    public static void WriteGranuleKernel(Index1D i0, ArrayView<int> ix, ArrayView<int> side, ArrayView<int> tables, ArrayView<byte> slots, int first)
+    public static void WriteGranuleKernel(Index1D i0, ArrayView<int> ix, ArrayView<int> side, ArrayView<int> tables, ArrayView<byte> slots,
+        int lsf, int first)
     {
         int index = first + i0;
         long at = (long)index * 576;
@@ -356,6 +563,19 @@ public static class Mp3EncodeKernels
         long slot = (long)index * SlotBytes;
         for (int i = 0; i < SlotBytes; i++) slots[slot + i] = 0;
         int bitPos = 0;
+        // part2: the scalefactors of long bands 0..20 (scfsi 0)
+        int compress = side[s + SScfCompress];
+        for (int b = 0; b < 21; b++)
+        {
+            int n;
+            if (lsf == 0) n = b < 11 ? Slen1(compress) : Slen2(compress);
+            else
+            {
+                int sl1 = (compress >> 4) / 5, sl2 = (compress >> 4) % 5, sl3 = (compress >> 2) & 3, sl4 = compress & 3;
+                n = b < 6 ? sl1 : b < 11 ? sl2 : b < 16 ? sl3 : sl4;
+            }
+            PutBits(slots, slot, ref bitPos, (uint)side[s + SScf + b], n);
+        }
         int bv = side[s + SBigValues];
         int end = bv * 2;
         int b0 = XMath.Min(tables[IBounds + XMath.Min(side[s + SRegion0] + 1, 22)], end);
@@ -446,7 +666,7 @@ public static class Mp3EncodeKernels
                 PutBits(output, baseByte, ref bitPos, (uint)side[s + SRegion0], 4);
                 PutBits(output, baseByte, ref bitPos, (uint)side[s + SRegion1], 3);
                 if (lsf == 0) PutBits(output, baseByte, ref bitPos, 0, 1);   // preflag
-                PutBits(output, baseByte, ref bitPos, 0, 1);        // scalefac_scale
+                PutBits(output, baseByte, ref bitPos, (uint)side[s + SScfScale], 1);   // scalefac_scale
                 PutBits(output, baseByte, ref bitPos, (uint)side[s + SCount1Table], 1);
             }
         }
