@@ -20,7 +20,10 @@ public static class Mp3EncodeKernels
 {
     /// <summary>Per-(granule, channel) side info ints.</summary>
     public const int SPart23 = 0, SBigValues = 1, SGlobalGain = 2, SScfCompress = 3, STable0 = 4, STable1 = 5, STable2 = 6,
-        SRegion0 = 7, SRegion1 = 8, SCount1Table = 9, SBudget = 10, SScfScale = 11, SScf = 12, SideInts = 33;
+        SRegion0 = 7, SRegion1 = 8, SCount1Table = 9, SBudget = 10, SScfScale = 11, SScf = 12, SRequant = 33, SideInts = 34;
+
+    /// <summary>The VBR layout's meta view (longs): total bytes of the audio frames.</summary>
+    public const int VAudioBytes = 0, VMeta = 1;
 
     /// <summary>The psychoacoustic constants view (floats per long band): Bark centre [0..22), the threshold of hearing as
     /// an MDCT energy [22..44).</summary>
@@ -500,11 +503,12 @@ public static class Mp3EncodeKernels
     /// over (then the least noise above the masks) is kept; ix and the side info written.
     /// </summary>
     public static void QuantizeKernel(Index1D i0, ArrayView<float> xr, ArrayView<int> ix, ArrayView<int> side, ArrayView<int> tables,
-        ArrayView<float> xmin, ArrayView<int> work, int lsf, int first)
+        ArrayView<float> xmin, ArrayView<int> work, int lsf, int requantOnly, int first)
     {
         int index = first + i0;
         long at = (long)index * 576;
         long s = (long)index * SideInts;
+        if (requantOnly != 0 && side[s + SRequant] == 0) return;
         long xo = (long)index * 22;
         long wo = (long)index * WorkInts;   // [0..22) band over its mask, [22..43) the best iteration's scalefactors
         int budget = XMath.Min(side[s + SBudget], 4095);
@@ -614,6 +618,151 @@ public static class Mp3EncodeKernels
             }
             gain++;
         }
+    }
+
+    // ------------------------------------------------------------------ variable bit rate
+
+    /// <summary>Noise of band b at gain g with amplification amp; float.MaxValue when a value leaves the escape range.</summary>
+    private static float BandNoise(ArrayView<float> xr, long at, int lo, int hi, float stepInv, float amp)
+    {
+        float k = stepInv * amp;
+        float back = 1f / k;   // dequantization: |ix|^(4/3) / (stepInv * amp)
+        float noise = 0;
+        for (int i = lo; i < hi; i++)
+        {
+            int q = Quant(xr[at + i], k);
+            if (q > 8206) return float.MaxValue;
+            float d = XMath.Abs(xr[at + i]) - XMath.Pow(q, 4f / 3f) * back;
+            noise += d * d;
+        }
+        return noise;
+    }
+
+    /// <summary>
+    /// At gain g: the smallest scalefactor of each band whose noise is within its mask (written to side), and whether every
+    /// band found one.
+    /// </summary>
+    private static bool FitScalefactors(ArrayView<float> xr, long at, ArrayView<int> side, long s, ArrayView<int> tables,
+        ArrayView<float> xmin, long xo, int g, bool commitBest)
+    {
+        float stepInv = XMath.Pow(2f, -(g - 210) / 4f);
+        bool all = true;
+        for (int b = 0; b < 22; b++)
+        {
+            int lo = tables[IBounds + b], hi = tables[IBounds + b + 1];
+            int max = ScfMax(b);
+            int chosen = -1;
+            for (int sf = 0; sf <= max; sf++)
+            {
+                if (BandNoise(xr, at, lo, hi, stepInv, XMath.Pow(2f, 0.5f * sf)) <= xmin[xo + b]) { chosen = sf; break; }
+            }
+            if (chosen < 0) { all = false; chosen = max; }
+            if (b < 21 && commitBest) side[s + SScf + b] = chosen;
+        }
+        return all;
+    }
+
+    /// <summary>
+    /// One thread per (granule, channel), variable bit rate: the coarsest global gain at which every band's noise can be
+    /// kept within its mask by a scalefactor (binary search; scalefac_scale 0), those scalefactors, then the best region
+    /// split and tables. side[SRequant] = 1 when the granule needs more than 4095 bits (the layout re-quantizes it to a
+    /// budget).
+    /// </summary>
+    public static void VbrQuantizeKernel(Index1D i0, ArrayView<float> xr, ArrayView<int> ix, ArrayView<int> side, ArrayView<int> tables,
+        ArrayView<float> xmin, int lsf, int first)
+    {
+        int index = first + i0;
+        long at = (long)index * 576;
+        long s = (long)index * SideInts;
+        long xo = (long)index * 22;
+        side[s + SScfScale] = 0;
+        side[s + SRequant] = 0;
+        for (int b = 0; b < 21; b++) side[s + SScf + b] = 0;
+        float maxAbs = 0;
+        for (int i = 0; i < 576; i++) maxAbs = XMath.Max(maxAbs, XMath.Abs(xr[at + i]));
+        if (maxAbs < 1e-20f)
+        {
+            for (int i = 0; i < 576; i++) ix[at + i] = 0;
+            side[s + SPart23] = 0; side[s + SBigValues] = 0; side[s + SGlobalGain] = 0; side[s + SScfCompress] = 0;
+            side[s + STable0] = 0; side[s + STable1] = 0; side[s + STable2] = 0; side[s + SRegion0] = 0; side[s + SRegion1] = 0;
+            side[s + SCount1Table] = 0;
+            return;
+        }
+        float need = 4f * XMath.Log2(maxAbs / XMath.Pow(8206.5f + 0.0946f, 4f / 3f));
+        int gMin = XMath.Clamp((int)XMath.Ceiling(210 + need), 0, 255);
+        // the largest gain that still satisfies every mask (coarser gains need fewer bits)
+        int lo = gMin, hi = 255, best = gMin;
+        while (lo <= hi)
+        {
+            int g = (lo + hi) >> 1;
+            if (FitScalefactors(xr, at, side, s, tables, xmin, xo, g, false)) { best = g; lo = g + 1; }
+            else hi = g - 1;
+        }
+        FitScalefactors(xr, at, side, s, tables, xmin, xo, best, true);
+        QuantizeAll(xr, ix, at, side, s, tables, best);
+        int p2 = ScfBits(side, s, lsf, out int compress);
+        Regions(ix, at, tables, out int bv, out _, out int c1t, out int c1Bits);
+        int bits = BigValueBits(ix, at, tables, bv, true, out int r0, out int r1, out int t0, out int t1, out int t2) + c1Bits;
+        side[s + SPart23] = bits + p2;
+        side[s + SBigValues] = bv;
+        side[s + SGlobalGain] = best;
+        side[s + SScfCompress] = compress;
+        side[s + STable0] = t0; side[s + STable1] = t1; side[s + STable2] = t2;
+        side[s + SRegion0] = r0; side[s + SRegion1] = r1;
+        side[s + SCount1Table] = c1t;
+        if (bits + p2 > 4095 || p2 < 0) side[s + SRequant] = 1;
+    }
+
+    /// <summary>
+    /// One thread: each frame's bit rate (the smallest whose frame holds its side info and granules), offsets after the
+    /// Info frame, and the frames that do not fit even at the highest rate: their granules get a budget (the highest
+    /// rate's main data split evenly) and SRequant = 1 for the re-quantization pass. meta[VAudioBytes] = the audio bytes.
+    /// </summary>
+    public static void VbrLayoutKernel(Index1D _, ArrayView<int> side, ArrayView<long> frameOffsets, ArrayView<int> frameInfo,
+        ArrayView<long> meta, ArrayView<int> bitrates, int frames, int sampleRate, int coeff, int sideBytes, int granulesPerFrame,
+        int channels, long baseOffset)
+    {
+        long offset = baseOffset;
+        int units = granulesPerFrame * channels;
+        for (int f = 0; f < frames; f++)
+        {
+            frameOffsets[f] = offset;
+            long bits = 0;
+            bool requant = false;
+            for (int u = 0; u < units; u++)
+            {
+                long su = ((long)f * units + u) * SideInts;
+                bits += side[su + SPart23];
+                requant |= side[su + SRequant] != 0;
+            }
+            long needBytes = 4 + sideBytes + (bits + 7) / 8;
+            int idx = 14;
+            if (!requant)
+            {
+                idx = -1;
+                for (int k = 1; k <= 14; k++)
+                {
+                    if ((long)coeff * bitrates[k] / sampleRate >= needBytes) { idx = k; break; }
+                }
+                if (idx < 0) { idx = 14; requant = true; }
+            }
+            long size = (long)coeff * bitrates[idx] / sampleRate;
+            frameInfo[f * 2] = idx;
+            frameInfo[f * 2 + 1] = 0;
+            if (requant)
+            {
+                int per = (int)XMath.Min(4095L, (size - 4 - sideBytes) * 8 / units);
+                for (int u = 0; u < units; u++)
+                {
+                    long su = ((long)f * units + u) * SideInts;
+                    side[su + SRequant] = 1;
+                    side[su + SBudget] = per;
+                }
+            }
+            offset += size;
+        }
+        frameOffsets[frames] = offset;
+        meta[VAudioBytes] = offset - baseOffset;
     }
 
     // ------------------------------------------------------------------ bit writing

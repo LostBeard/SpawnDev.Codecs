@@ -307,4 +307,46 @@ public abstract partial class CodecsTestBase
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
+
+    /// <summary>
+    /// Variable bit rate (V0 = ComfyUI's "V0", and V4): FFmpeg decodes every file gaplessly, the Info frame says "Xing",
+    /// V0 spends more bits than V4 and keeps a high SNR on the test tones.
+    /// </summary>
+    [TestMethod(Timeout = 900000, Category = "DesktopOnly,NotOnWebGL")]
+    public async Task Mp3EncoderGpu_Vbr_FfmpegDecodesGapless()
+    {
+        FfmpegOracle.RequireAvailable();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            using var enc = new Mp3EncoderGpu(acc);
+            var report = new List<string>();
+            var failures = new List<string>();
+            foreach (var (rate, ch) in new[] { (44100, 2), (48000, 1), (22050, 2), (8000, 1) })
+            {
+                var src = Mp3TestTone(rate * 2 + 321, ch, rate, rate + 7 * ch);
+                double seconds = (double)src.Length / ch / rate;
+                var kbps = new Dictionary<int, double>();
+                foreach (int q in new[] { 0, 4 })
+                {
+                    var file = await enc.EncodeAsync(src, ch, rate, new Mp3EncodeOptions { VbrQuality = q });
+                    float[] dec;
+                    try { dec = FfmpegOracle.DecodeFloat(file, ".mp3"); }
+                    catch (Exception e) { failures.Add($"{rate} Hz {ch} ch V{q}: {e.Message}"); continue; }
+                    var (snr, delay) = AlignedSnr(src, dec, ch, 3000);
+                    kbps[q] = file.Length * 8 / seconds / 1000;
+                    bool xing = file.AsSpan().IndexOf("Xing"u8) is >= 0 and < 400;
+                    report.Add($"{rate} Hz {ch} ch V{q}: {kbps[q]:F1} kbps, SNR {snr:F1} dB, delay {delay}, decoded {dec.Length / ch} of {src.Length / ch}, Xing {xing}");
+                    if (delay != 0 || dec.Length != src.Length) failures.Add($"{rate} Hz {ch} ch V{q}: not gapless (delay {delay}, {dec.Length / ch} samples)");
+                    if (!xing) failures.Add($"{rate} Hz {ch} ch V{q}: no Xing frame");
+                    if (q == 0 && snr < 25) failures.Add($"{rate} Hz {ch} ch V0: SNR {snr:F1} dB < 25");
+                }
+                if (kbps.Count == 2 && kbps[0] <= kbps[4]) failures.Add($"{rate} Hz {ch} ch: V0 {kbps[0]:F1} kbps not above V4 {kbps[4]:F1}");
+            }
+            Console.WriteLine(string.Join("\n", report));
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
 }

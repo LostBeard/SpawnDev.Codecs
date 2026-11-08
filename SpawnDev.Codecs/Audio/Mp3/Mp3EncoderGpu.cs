@@ -18,8 +18,14 @@ namespace SpawnDev.Codecs.Audio.Mp3;
 /// <summary>Settings of <see cref="Mp3EncoderGpu"/>.</summary>
 public sealed record Mp3EncodeOptions
 {
-    /// <summary>Constant bit rate in kbps: MPEG-1 (32 / 44.1 / 48 kHz) 32..320, MPEG-2 / 2.5 (8..24 kHz) 8..160.</summary>
+    /// <summary>Constant bit rate in kbps: MPEG-1 (32 / 44.1 / 48 kHz) 32..320, MPEG-2 / 2.5 (8..24 kHz) 8..160. Ignored
+    /// when <see cref="VbrQuality"/> is set.</summary>
     public int BitrateKbps { get; init; } = 128;
+
+    /// <summary>Variable bit rate at quality 0 (best, ComfyUI's "V0") .. 9 (smallest), or null for constant bit rate.
+    /// Each granule gets the fewest bits that keep its quantization noise within the psychoacoustic masks, scaled from
+    /// 6 dB below them (0) to 6 dB above (9); each frame takes the lowest bit rate that holds it.</summary>
+    public int? VbrQuality { get; init; }
 
     /// <summary>Write an ID3v2.4 tag first (the tags below as TXXX frames, then TSSE). Default true.</summary>
     public bool WriteId3 { get; init; } = true;
@@ -52,7 +58,9 @@ public sealed class Mp3EncoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>> _infoFrame;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _crcTable;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, int> _psy;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int> _quantize;
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int, int> _quantize;
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int> _vbrQuantize;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int, int, long> _vbrLayout;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int> _writeGranule;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, int, int, int, int, int> _writeFrame;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<float>, long> _toFloat;
@@ -84,7 +92,9 @@ public sealed class Mp3EncoderGpu : IDisposable
         _crcTable = a.Allocate1D<int>(256);
         _crcTable.View.CopyFromCPU(crc);
         _psy = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, int>(K.PsyKernel);
-        _quantize = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int>(K.QuantizeKernel);
+        _quantize = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int, int>(K.QuantizeKernel);
+        _vbrQuantize = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int>(K.VbrQuantizeKernel);
+        _vbrLayout = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int, int, long>(K.VbrLayoutKernel);
         _writeGranule = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int>(K.WriteGranuleKernel);
         _writeFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, int, int, int, int, int>(K.WriteFrameKernel);
         _toFloat = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, long>(Int32ToFloatKernel);
@@ -146,25 +156,34 @@ public sealed class Mp3EncoderGpu : IDisposable
         if (channels is < 1 or > 2) throw new NotSupportedException("MP3 carries 1 or 2 channels.");
         var o = options ?? new Mp3EncodeOptions();
         var (version, rateIndex, lsf) = RateInfo(sampleRate);
-        int bitrateIndex = Array.IndexOf(Mp3Tables.BitratesKbps, o.BitrateKbps, lsf ? 16 : 0, 15) - (lsf ? 16 : 0);
-        if (bitrateIndex < 1) throw new ArgumentOutOfRangeException(nameof(options), $"{o.BitrateKbps} kbps is not a Layer III bit rate at {sampleRate} Hz.");
+        bool vbr = o.VbrQuality is not null;
+        if (vbr && o.VbrQuality is < 0 or > 9) throw new ArgumentOutOfRangeException(nameof(options), "VbrQuality is 0..9.");
+        int brBase = lsf ? 16 : 0;
+        int bitrateIndex = vbr ? 0 : Array.IndexOf(Mp3Tables.BitratesKbps, o.BitrateKbps, brBase, 15) - brBase;
+        if (!vbr && bitrateIndex < 1) throw new ArgumentOutOfRangeException(nameof(options), $"{o.BitrateKbps} kbps is not a Layer III bit rate at {sampleRate} Hz.");
         int granulesPerFrame = lsf ? 1 : 2;
         int frameSamples = 576 * granulesPerFrame;
         int sideBytes = lsf ? (channels == 1 ? 9 : 17) : (channels == 1 ? 17 : 32);
+        int coeff = lsf ? 72000 : 144000;
         // a sample reaches the decoder's output CodecDelay samples later (polyphase analysis + synthesis 481, MDCT
         // overlap 576): enough frames that the last input sample comes out
         long frames = (samples + CodecDelay + frameSamples - 1) / frameSamples;
         int granules = (int)(frames * granulesPerFrame);
         int slots = granules * 18;
-        long num = (lsf ? 72000L : 144000L) * o.BitrateKbps;   // bytes per frame = num / rate
-        int infoBytes = o.WriteInfoFrame ? (int)(num / sampleRate) : 0;   // the Info frame: one unpadded frame of the rate
-        long audioBytes = frames * num / sampleRate;
-        long totalBytes = infoBytes + audioBytes;
         int units = granules * channels;
+        // the Info frame: CBR one unpadded frame of the stream's rate; VBR the lowest rate whose frame holds the tag
+        int infoIndex = bitrateIndex;
+        if (vbr)
+            for (infoIndex = 1; infoIndex < 14; infoIndex++)
+                if ((long)coeff * Mp3Tables.BitratesKbps[brBase + infoIndex] / sampleRate >= 4 + sideBytes + 156) break;
+        int infoBytes = o.WriteInfoFrame ? (int)((long)coeff * Mp3Tables.BitratesKbps[brBase + infoIndex] / sampleRate) : 0;
+        long num = (long)coeff * (vbr ? 0 : o.BitrateKbps);   // CBR bytes per frame = num / rate
         var a = _accelerator;
 
         using var tables = a.Allocate1D<int>(K.IntConsts);
         tables.View.CopyFromCPU(IntTables(sampleRate));
+        using var bitrates = a.Allocate1D<int>(15);
+        bitrates.View.CopyFromCPU(Mp3Tables.BitratesKbps.AsSpan(brBase, 15).ToArray());
         using var y = a.Allocate1D<float>((long)channels * slots * 64);
         using var sub = a.Allocate1D<float>((long)channels * slots * 32);
         using var xr = a.Allocate1D<float>((long)units * 576);
@@ -178,7 +197,8 @@ public sealed class Mp3EncoderGpu : IDisposable
         using var work = a.Allocate1D<int>((long)units * K.WorkInts);
         using var frameOffsets = a.Allocate1D<long>(frames + 1);
         using var frameInfo = a.Allocate1D<int>(Math.Max(1, frames * 2));
-        using var output = a.Allocate1D<byte>(Math.Max(1, totalBytes));
+        using var vmeta = a.Allocate1D<long>(K.VMeta);
+        side.MemSetToZero();
 
         var pacer = new LaunchPacer(a);
         const int Chunk = 1 << 18;
@@ -190,20 +210,54 @@ public sealed class Mp3EncoderGpu : IDisposable
                 await pacer.LaunchedAsync();
             }
         }
-        _layout((int)frames + 1, frameOffsets.View, frameInfo.View, side.View, frames, num, sampleRate, bitrateIndex, sideBytes,
-            granulesPerFrame, channels, infoBytes);
         await Launch((long)channels * slots * 64, (n, f) => _polyphase(n, pcm, _consts.View, y.View, channels, samples, slots, f));
         await Launch((long)channels * slots * 32, (n, f) => _matrix(n, y.View, _consts.View, sub.View, f));
         await Launch((long)channels * granules * 32, (n, f) => _mdct(n, sub.View, _consts.View, xr.View, granules, slots, channels, f));
         await Launch((long)units * 31 * 8, (n, f) => _alias(n, xr.View, _consts.View, f));
+
+        // masks: CBR at the model's threshold; VBR scaled by quality, 6 dB below (0) .. 6 dB above (9)
+        float maskScale = vbr ? (float)Math.Pow(10, (-6 + 12.0 * o.VbrQuality!.Value / 9) / 10) : 1f;
         const int UnitChunk = 1024;
         for (int first = 0; first < units; first += UnitChunk)
         {
             int n = Math.Min(UnitChunk, units - first);
-            _psy(n, xr.View, tables.View, psy.View, psyScratch.View, xmin.View, 1f, first);
-            _quantize(n, xr.View, ix.View, side.View, tables.View, xmin.View, work.View, lsf ? 1 : 0, first);
+            _psy(n, xr.View, tables.View, psy.View, psyScratch.View, xmin.View, maskScale, first);
             await pacer.LaunchedAsync();
-            _writeGranule(n, ix.View, side.View, tables.View, slotBuf.View, lsf ? 1 : 0, first);
+        }
+        long totalBytes;
+        if (!vbr)
+        {
+            _layout((int)frames + 1, frameOffsets.View, frameInfo.View, side.View, frames, num, sampleRate, bitrateIndex, sideBytes,
+                granulesPerFrame, channels, infoBytes);
+            for (int first = 0; first < units; first += UnitChunk)
+            {
+                _quantize(Math.Min(UnitChunk, units - first), xr.View, ix.View, side.View, tables.View, xmin.View, work.View, lsf ? 1 : 0, 0, first);
+                await pacer.LaunchedAsync();
+            }
+            totalBytes = infoBytes + frames * num / sampleRate;
+        }
+        else
+        {
+            for (int first = 0; first < units; first += UnitChunk)
+            {
+                _vbrQuantize(Math.Min(UnitChunk, units - first), xr.View, ix.View, side.View, tables.View, xmin.View, lsf ? 1 : 0, first);
+                await pacer.LaunchedAsync();
+            }
+            _vbrLayout(1, side.View, frameOffsets.View, frameInfo.View, vmeta.View, bitrates.View, (int)frames, sampleRate, coeff,
+                sideBytes, granulesPerFrame, channels, infoBytes);
+            // frames over the highest rate: their granules re-quantized to its budget (rare)
+            for (int first = 0; first < units; first += UnitChunk)
+            {
+                _quantize(Math.Min(UnitChunk, units - first), xr.View, ix.View, side.View, tables.View, xmin.View, work.View, lsf ? 1 : 0, 1, first);
+                await pacer.LaunchedAsync();
+            }
+            await a.SynchronizeAsync();
+            totalBytes = infoBytes + (await vmeta.View.SubView(K.VAudioBytes, 1).CopyToHostAsync())[0];
+        }
+        using var output = a.Allocate1D<byte>(Math.Max(1, totalBytes));
+        for (int first = 0; first < units; first += UnitChunk)
+        {
+            _writeGranule(Math.Min(UnitChunk, units - first), ix.View, side.View, tables.View, slotBuf.View, lsf ? 1 : 0, first);
             await pacer.LaunchedAsync();
         }
         for (int first = 0; first < frames; first += UnitChunk)
@@ -232,9 +286,9 @@ public sealed class Mp3EncoderGpu : IDisposable
             int delay = CodecDelay - 529;
             int padding = (int)(frames * frameSamples - samples - delay);
             var ip = new long[K.InfoParams];
-            ip[K.InfoVersion] = version; ip[K.InfoRate] = rateIndex; ip[K.InfoBitrate] = bitrateIndex; ip[K.InfoChannels] = channels;
+            ip[K.InfoVersion] = version; ip[K.InfoRate] = rateIndex; ip[K.InfoBitrate] = infoIndex; ip[K.InfoChannels] = channels;
             ip[K.InfoSide] = sideBytes; ip[K.InfoBytes] = infoBytes; ip[K.InfoFrames] = frames; ip[K.InfoTotal] = totalBytes;
-            ip[K.InfoVbr] = 0; ip[K.InfoDelay] = delay; ip[K.InfoPadding] = padding;
+            ip[K.InfoVbr] = vbr ? 1 : 0; ip[K.InfoDelay] = delay; ip[K.InfoPadding] = padding;
             using var ipView = a.Allocate1D<long>(K.InfoParams);
             ipView.View.CopyFromCPU(ip);
             _infoFrame(1, output.View, frameOffsets.View, nameView.View, _crcTable.View, crcState.View, ipView.View);
