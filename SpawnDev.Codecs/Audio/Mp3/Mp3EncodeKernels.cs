@@ -3,12 +3,23 @@
 // The MP3 (MPEG-1/2/2.5 Layer III) encoder's kernels, written from ISO/IEC 11172-3 / 13818-3 (no LAME code):
 //   * Analysis: the polyphase filterbank (2.4.3.2 / C.1.3: 512-tap window C[i], 64 partial sums, 32-band matrixing),
 //     one thread per (channel, time slot, band);
-//   * Mdct: frequency inversion of the odd bands, the long-block window and 36 -> 18 MDCT, one thread per
-//     (channel, granule, band); AliasReduce: the encoder's 8 butterflies between neighbouring bands, one thread each;
+//   * Attack / BlockType: transient detection per granule (both channels jointly) and the block type sequence
+//     (long 0, start 1, short 2, stop 3), one thread per granule;
+//   * Mdct: frequency inversion of the odd bands, the block type's window and 36 -> 18 MDCT (long, start, stop) or
+//     three 12 -> 6 MDCTs (short, stored in the decoder's order: short band, window, frequency), one thread per
+//     (channel, granule, band); AliasReduce: the encoder's 8 butterflies between neighbouring bands (not for short
+//     blocks), one thread each;
 //   * Quantize: one thread per (granule, channel): the global gain that fits the granule's bit budget (binary search),
 //     big_values / count1 regions, region split and Huffman tables by least bits;
 //   * WriteGranule: one thread per (granule, channel): the granule's Huffman bits into its slot;
-//   * WriteFrame: one thread per frame: header, side info, the granules' bits, stuffing.
+//   * ReservoirBudget (CBR): one thread: every granule's bit budget from its frame's perceptual entropy and the bit
+//     reservoir; MainData: one thread: each frame's main_data_begin from the bits really used;
+//   * WriteFrame: one thread per frame: header, side info, the granules' bits (into earlier frames' unused bytes when
+//     main_data_begin reaches back).
+//
+// A granule's "groups" are its scalefactor bands: 22 long bands, or for a short granule the 39 (short band, window)
+// pairs in the decoder's order (group q = short band * 3 + window), 36 of them with scalefactors (short band 12 has
+// none).
 
 using ILGPU;
 using ILGPU.Algorithms;
@@ -20,33 +31,56 @@ public static class Mp3EncodeKernels
 {
     /// <summary>Per-(granule, channel) side info ints.</summary>
     public const int SPart23 = 0, SBigValues = 1, SGlobalGain = 2, SScfCompress = 3, STable0 = 4, STable1 = 5, STable2 = 6,
-        SRegion0 = 7, SRegion1 = 8, SCount1Table = 9, SBudget = 10, SScfScale = 11, SScf = 12, SRequant = 33, SideInts = 34;
+        SRegion0 = 7, SRegion1 = 8, SCount1Table = 9, SBudget = 10, SScfScale = 11, SScf = 12, SRequant = 51, SBlockType = 52,
+        SSubGain = 53, SideInts = 56;
+
+    /// <summary>Allowed-noise floats per (granule, channel) (one per group: 22 long, 39 short).</summary>
+    public const int XStride = 39;
 
     /// <summary>The VBR layout's meta view (longs): total bytes of the audio frames.</summary>
     public const int VAudioBytes = 0, VMeta = 1;
 
-    /// <summary>The psychoacoustic constants view (floats per long band): Bark centre [0..22), the threshold of hearing as
-    /// an MDCT energy [22..44).</summary>
-    public const int PBark = 0, PAth = 22, PsyConsts = 44;
+    /// <summary>The psychoacoustic constants view (floats): per long band the Bark centre [0..22) and the threshold of
+    /// hearing as an MDCT energy [22..44); the same per short band [44..57), [57..70).</summary>
+    public const int PBark = 0, PAth = 22, PSBark = 44, PSAth = 57, PsyConsts = 70;
 
-    /// <summary>Ints of the quantizer's per-unit work view: band-over flags (22), best scalefactors (21).</summary>
-    public const int WorkInts = 43;
+    /// <summary>The psychoacoustic model's scratch floats per unit: group energies (39), tonalities (39).</summary>
+    public const int ScratchFloats = 78;
 
-    /// <summary>Largest scalefactor of a long band: 15 in bands 0..10, 7 in 11..20 (4 / 3 bits), none in band 21.</summary>
-    private static int ScfMax(int b) => b < 11 ? 15 : b < 21 ? 7 : 0;
+    /// <summary>Ints of the quantizer's per-unit work view: group-over flags (39), best scalefactors (36).</summary>
+    public const int WorkInts = 75;
+
+    /// <summary>
+    /// Largest scalefactor of a group: long bands 15 in 0..10, 7 in 11..20 (4 / 3 bits), none in band 21; short groups 15
+    /// in short bands 0..5, 7 in 6..11 (MPEG-1 slen1 / slen2; MPEG-2 partitions of 9 values, slen1 / slen2 up to 4 bits,
+    /// slen3 / slen4 up to 3), none in short band 12.
+    /// </summary>
+    private static int ScfMax(int bt, int q) => bt == 2 ? (q < 18 ? 15 : q < 36 ? 7 : 0) : (q < 11 ? 15 : q < 21 ? 7 : 0);
+
+    /// <summary>Groups of a granule: 22 long bands or 39 (short band, window) pairs.</summary>
+    private static int Groups(int bt) => bt == 2 ? 39 : 22;
+
+    /// <summary>Groups with a scalefactor: 21 long, 36 short.</summary>
+    private static int ScfCount(int bt) => bt == 2 ? 36 : 21;
+
+    /// <summary>First line of group q (q = Groups(bt) gives 576).</summary>
+    private static int GroupLo(ArrayView<int> tables, int bt, int q) => tables[(bt == 2 ? IGroup : IBounds) + q];
 
     /// <summary>Bytes of one granule's main-data slot (part2_3_length is at most 4095 bits).</summary>
     public const int SlotBytes = 512;
 
     /// <summary>The constants view (floats): C window [0..512), M matrix 32 x 64 [512..2560), MDCT cos 18 x 36
-    /// [2560..3208), long window sin 36 [3208..3244), cs 8 [3244..3252), ca 8 [3252..3260).</summary>
-    public const int FWin = 0, FMat = 512, FCos = 2560, FSin = 3208, FCs = 3244, FCa = 3252, FloatConsts = 3260;
+    /// [2560..3208), long window sin 36 [3208..3244), cs 8 [3244..3252), ca 8 [3252..3260), start window 36
+    /// [3260..3296), stop window 36 [3296..3332), short window 12 [3332..3344), short MDCT cos 6 x 12 [3344..3416).</summary>
+    public const int FWin = 0, FMat = 512, FCos = 2560, FSin = 3208, FCs = 3244, FCa = 3252, FStart = 3260, FStop = 3296,
+        FShortWin = 3332, FShortCos = 3344, FloatConsts = 3416;
 
     /// <summary>The int tables view: Huffman codes [0..8192) (32 x 256), lengths [8192..16384), linbits [16384..16416),
     /// max value [16416..16448), count1 codes [16448..16480), count1 lengths [16480..16512), long band bounds of the
-    /// stream's rate [16512..16535).</summary>
+    /// stream's rate [16512..16535), short band bounds within one window [16535..16549), the 39 short groups' first
+    /// lines in a granule (+ 576) [16549..16589).</summary>
     public const int IHCode = 0, IHLen = 8192, ILinbits = 16384, IMax = 16416, IC1Code = 16448, IC1Len = 16480, IBounds = 16512,
-        IntConsts = 16535;
+        IShort = 16535, IGroup = 16549, IntConsts = 16589;
 
     // ------------------------------------------------------------------ math through Exp2 / Log2 only
     // Every backend maps Exp2 / Log2 to a native instruction; Log, Log10, Exp and Pow need ILGPU.Algorithms on CUDA.
@@ -93,44 +127,150 @@ public static class Mp3EncodeKernels
         sub[id] = s;
     }
 
+    // ------------------------------------------------------------------ window switching
+
+    /// <summary>
+    /// One thread per granule: whether its signal holds an attack (both channels together, so mid / side keeps working).
+    /// Granule g's MDCT window spans input samples about 576 (g - 1) - 225 .. 576 (g + 1) - 225 (subband slot t's newest
+    /// sample is 32 t + 31, its 512-tap window centred 256 earlier); its three short windows cover the middle
+    /// 576 g - 608 .. 576 g + 160, a start window before them reaches 576 g - 416 and a stop window after them starts at
+    /// 576 g - 32. So an attack at [576 g - 416, 576 g + 160) belongs to granule g. Energies of 128-sample blocks at a hop
+    /// of 64 (block m = samples [64 m, 64 m + 128), centre 64 m + 64): block m is an attack when its energy is over 8 times
+    /// the mean of the four blocks of the 512 samples before it (m - 2, -4, -6, -8) and above a floor of about -70 dBFS,
+    /// either in the signal or in its first difference (a high-pass that catches a click over a loud bass note). Blocks
+    /// whose history starts before the input (m &lt; 8) are not judged. attack[g] = 1 / 0.
+    /// </summary>
+    public static void AttackKernel(Index1D index, ArrayView<float> pcm, ArrayView<int> attack, int channels, long samples, int first)
+    {
+        int g = first + index;
+        float floor = 1.3e-5f * channels;
+        int found = 0;
+        // a block whose history reaches before the input is not judged: the zeros there are padding, not a quiet passage
+        // (and pre-echo before sample 0 falls in the decoder delay that gapless decoding trims)
+        for (long m = XMath.Max(9L * g - 7, 8L); m <= 9L * g + 1 && found == 0; m++)
+        {
+            BlockEnergy(pcm, channels, samples, 64 * m, out float e, out float d);
+            float pe = 0, pd = 0;
+            for (int j = 2; j <= 8; j += 2)
+            {
+                BlockEnergy(pcm, channels, samples, 64 * (m - j), out float ej, out float dj);
+                pe += ej;
+                pd += dj;
+            }
+            pe *= 0.25f;
+            pd *= 0.25f;
+            if ((e > floor && e > 8f * pe) || (d > floor && d > 8f * pd)) found = 1;
+        }
+        attack[g] = found;
+    }
+
+    /// <summary>Energy of samples [start, start + 128) over the channels (zero outside the input), and of the first difference.</summary>
+    private static void BlockEnergy(ArrayView<float> pcm, int channels, long samples, long start, out float e, out float d)
+    {
+        e = 0;
+        d = 0;
+        for (long n = start; n < start + 128; n++)
+        {
+            if (n < 0 || n >= samples) continue;
+            for (int c = 0; c < channels; c++)
+            {
+                float x = pcm[n * channels + c];
+                float prev = n > 0 ? pcm[(n - 1) * channels + c] : 0f;
+                e += x * x;
+                d += (x - prev) * (x - prev);
+            }
+        }
+    }
+
+    /// <summary>
+    /// One thread per granule: the block type of every channel (side[SBlockType]). Short (2) where an attack is, and
+    /// between two attacks (a granule there could be neither a start nor a stop); start (1) before a short granule, stop
+    /// (3) after one, long (0) elsewhere. The window halves of neighbours then always match (the right half of a start or
+    /// a short granule is short, of a stop or a long granule long).
+    /// </summary>
+    public static void BlockTypeKernel(Index1D index, ArrayView<int> attack, ArrayView<int> side, int granules, int channels, int first)
+    {
+        int g = first + index;
+        int bt = IsShort(attack, g, granules) ? 2
+            : IsShort(attack, g + 1, granules) ? 1
+            : IsShort(attack, g - 1, granules) ? 3 : 0;
+        for (int c = 0; c < channels; c++) side[((long)g * channels + c) * SideInts + SBlockType] = bt;
+    }
+
+    private static bool IsShort(ArrayView<int> attack, int g, int granules)
+    {
+        if (g < 0 || g >= granules) return false;
+        if (attack[g] != 0) return true;
+        return g > 0 && g + 1 < granules && attack[g - 1] != 0 && attack[g + 1] != 0;
+    }
+
     // ------------------------------------------------------------------ MDCT
+
+    /// <summary>Subband sample i (0..35) of granule g's window: slot (g - 1) * 18 + i, odd bands' odd samples inverted.</summary>
+    private static float WindowSample(ArrayView<float> sub, int c, int slots, int sb, int g, int i)
+    {
+        int t = (g - 1) * 18 + i;
+        if (t < 0) return 0;
+        float v = sub[((long)c * slots + t) * 32 + sb];
+        return (sb & 1) != 0 && (i & 1) != 0 ? -v : v;   // frequency inversion (time index within the granule: i % 18)
+    }
 
     /// <summary>
     /// One thread per (channel, granule, band): the 36 subband samples of granules g - 1 and g (zeros before the first),
-    /// odd bands' odd time samples inverted, the long window, the MDCT; xr[(g * channels + c) * 576 + band * 18 + k].
+    /// odd bands' odd time samples inverted, then by the granule's block type: the long (0), start (1) or stop (3) window
+    /// and the 36 -> 18 MDCT into xr[unit * 576 + band * 18 + k]; or (short, 2) three 12-point MDCTs over samples
+    /// 6 + 6 w .. 17 + 6 w with the short sine window, X_w[k] = sum z_w[i] cos(pi / 24 (2 i + 7)(2 k + 1)) / 3, whose
+    /// frequency f = band * 6 + k goes to the decoder's order: short band, window, frequency.
     /// </summary>
-    public static void MdctKernel(Index1D index, ArrayView<float> sub, ArrayView<float> consts, ArrayView<float> xr,
-        int granules, int slots, int channels, long first)
+    public static void MdctKernel(Index1D index, ArrayView<float> sub, ArrayView<float> consts, ArrayView<float> xr, ArrayView<int> side,
+        ArrayView<int> tables, int granules, int slots, int channels, long first)
     {
         long id = first + index;
         int sb = (int)(id % 32);
         long rest = id / 32;
         int g = (int)(rest % granules);
         int c = (int)(rest / granules);
-        long outAt = ((long)g * channels + c) * 576 + sb * 18;
-        for (int k = 0; k < 18; k++)
+        long unit = (long)g * channels + c;
+        long outAt = unit * 576;
+        int bt = side[unit * SideInts + SBlockType];
+        if (bt != 2)
         {
-            float acc = 0;
-            for (int i = 0; i < 36; i++)
+            int win = bt == 1 ? FStart : bt == 3 ? FStop : FSin;
+            for (int k = 0; k < 18; k++)
             {
-                int t = (g - 1) * 18 + i;   // slot of this sample
-                if (t < 0) continue;
-                float v = sub[((long)c * slots + t) * 32 + sb];
-                if ((sb & 1) != 0 && (i & 1) != 0) v = -v;   // frequency inversion (time index within the granule: i % 18)
-                acc += v * consts[FSin + i] * consts[FCos + k * 36 + i];
+                float acc = 0;
+                for (int i = 0; i < 36; i++) acc += WindowSample(sub, c, slots, sb, g, i) * consts[win + i] * consts[FCos + k * 36 + i];
+                xr[outAt + sb * 18 + k] = acc;
             }
-            xr[outAt + k] = acc;
+            return;
+        }
+        for (int w = 0; w < 3; w++)
+        {
+            for (int k = 0; k < 6; k++)
+            {
+                float acc = 0;
+                for (int i = 0; i < 12; i++)
+                    acc += WindowSample(sub, c, slots, sb, g, 6 + 6 * w + i) * consts[FShortWin + i] * consts[FShortCos + k * 12 + i];
+                int f = sb * 6 + k;
+                int sfb = 0;
+                while (sfb < 12 && tables[IShort + sfb + 1] <= f) sfb++;
+                xr[outAt + tables[IGroup + sfb * 3 + w] + f - tables[IShort + sfb]] = acc;
+            }
         }
     }
 
-    /// <summary>One thread per (channel-granule, boundary sb 0..30, butterfly i 0..7): the encoder's alias reduction.</summary>
-    public static void AliasReduceKernel(Index1D index, ArrayView<float> xr, ArrayView<float> consts, long first)
+    /// <summary>
+    /// One thread per (channel-granule, boundary sb 0..30, butterfly i 0..7): the encoder's alias reduction (long, start
+    /// and stop granules; a short granule has none).
+    /// </summary>
+    public static void AliasReduceKernel(Index1D index, ArrayView<float> xr, ArrayView<float> consts, ArrayView<int> side, long first)
     {
         long id = first + index;
         int i = (int)(id % 8);
         long rest = id / 8;
         int sb = (int)(rest % 31);
         long cg = rest / 31;
+        if (side[cg * SideInts + SBlockType] == 2) return;
         long a = cg * 576 + sb * 18 + 17 - i, b = cg * 576 + (sb + 1) * 18 + i;
         float bu = xr[a], bd = xr[b];
         float cs = consts[FCs + i], ca = consts[FCa + i];
@@ -142,8 +282,8 @@ public static class Mp3EncodeKernels
 
     /// <summary>
     /// One thread per frame (and one more for the end): the frame's byte offset f * coeff * kbps / rate (a padding byte
-    /// where the running total needs it), its bit rate index and padding bit, and the bit budget of each of its granules
-    /// (the frame's main data split evenly, at most 4095 bits).
+    /// where the running total needs it), its bit rate index and padding bit, and the bit budget of each of its
+    /// granule-channels: the frame's main data shared by perceptual entropy (SplitBudget).
     /// </summary>
     public static void FrameLayoutKernel(Index1D index, ArrayView<long> frameOffsets, ArrayView<int> frameInfo, ArrayView<int> side,
         ArrayView<float> pe, long frames, long num, int sampleRate, int bitrateIndex, int sideBytes, int granulesPerFrame, int channels,
@@ -156,23 +296,60 @@ public static class Mp3EncodeKernels
         long size = (f + 1) * num / sampleRate - t0;
         frameInfo[f * 2] = bitrateIndex;
         frameInfo[f * 2 + 1] = (int)(size - num / sampleRate);
-        int perGranule = (int)((size - 4 - sideBytes) * 8 / granulesPerFrame);   // bits of one granule, all channels
-        for (int g = 0; g < granulesPerFrame; g++)
+        SplitBudget(side, pe, f * granulesPerFrame * channels, granulesPerFrame * channels, (int)((size - 4 - sideBytes) * 8));
+    }
+
+    /// <summary>
+    /// Share <paramref name="bits"/> among the <paramref name="count"/> granule-channels from unit <paramref name="u0"/> by
+    /// perceptual entropy (weight PE + a quarter of their mean PE + 1, so a near-silent one keeps a little), at most 4095
+    /// each: what a capped one cannot take goes to the others by their weights.
+    /// </summary>
+    private static void SplitBudget(ArrayView<int> side, ArrayView<float> pe, long u0, int count, int bits)
+    {
+        float mean = 0;
+        for (int u = 0; u < count; u++) mean += pe[u0 + u];
+        mean /= count;
+        int left = bits;
+        float weights = 0;
+        for (int u = 0; u < count; u++)
         {
-            long u = (f * granulesPerFrame + g) * channels;
-            if (channels == 1)
+            weights += pe[u0 + u] + 0.25f * mean + 1f;
+            side[(u0 + u) * SideInts + SBudget] = -1;   // not yet assigned
+        }
+        // assign in rounds: a unit whose share reaches the cap takes 4095 and leaves the round's rest to the others
+        for (int round = 0; round < count && left > 0 && weights > 0; round++)
+        {
+            bool capped = false;
+            for (int u = 0; u < count; u++)
             {
-                side[u * SideInts + SBudget] = XMath.Min(4095, perGranule);
-                continue;
+                long s = (u0 + u) * SideInts;
+                if (side[s + SBudget] >= 0) continue;
+                float wgt = pe[u0 + u] + 0.25f * mean + 1f;
+                if (left * (wgt / weights) >= 4095f)
+                {
+                    side[s + SBudget] = 4095;
+                    left -= 4095;
+                    weights -= wgt;
+                    capped = true;
+                }
             }
-            // two channels share the granule's bits by perceptual entropy, each keeping at least an eighth
-            float p0 = pe[u], p1 = pe[u + 1];
-            int floor = perGranule / 8;
-            int b0 = p0 + p1 > 0 ? (int)(perGranule * (p0 / (p0 + p1))) : perGranule / 2;
-            b0 = XMath.Clamp(b0, floor, perGranule - floor);
-            int b1 = perGranule - b0;
-            side[u * SideInts + SBudget] = XMath.Min(4095, b0);
-            side[(u + 1) * SideInts + SBudget] = XMath.Min(4095, b1);
+            if (!capped) break;
+        }
+        int given = 0, lastOpen = -1;
+        for (int u = 0; u < count; u++)
+        {
+            long s = (u0 + u) * SideInts;
+            if (side[s + SBudget] >= 0) continue;
+            int b = weights > 0 ? (int)(XMath.Max(left, 0) * ((pe[u0 + u] + 0.25f * mean + 1f) / weights)) : 0;
+            side[s + SBudget] = b;
+            given += b;
+            lastOpen = u;
+        }
+        // rounding remainder to the last open unit
+        if (lastOpen >= 0)
+        {
+            long s = (u0 + lastOpen) * SideInts;
+            side[s + SBudget] = XMath.Min(4095, side[s + SBudget] + XMath.Max(left, 0) - given);
         }
     }
 
@@ -184,17 +361,22 @@ public static class Mp3EncodeKernels
     /// near -5.5 dB, a tone far below); energy spread across bands with Schroeder's spreading function in Bark; the
     /// threshold below the spread energy by ISO model 2's offsets (18 dB under tonal maskers, 6 dB under noise); never
     /// below the threshold of hearing. <paramref name="quality"/> scales the result (1 = the model's threshold).
-    /// <paramref name="scratch"/> holds 44 floats per unit (energies, tonalities).
+    /// A short granule gets the same per (short band, window): each window's threshold comes from its own spectrum only,
+    /// so the quiet window before an attack keeps a low threshold (the pre-echo it may carry). xmin[unit * XStride + q].
+    /// <paramref name="scratch"/> holds ScratchFloats per unit (group energies, tonalities).
     /// </summary>
-    public static void PsyKernel(Index1D i0, ArrayView<float> xr, ArrayView<int> tables, ArrayView<float> psy, ArrayView<float> scratch,
-        ArrayView<float> xmin, float quality, int first)
+    public static void PsyKernel(Index1D i0, ArrayView<float> xr, ArrayView<int> tables, ArrayView<int> side, ArrayView<float> psy,
+        ArrayView<float> scratch, ArrayView<float> xmin, float quality, int first)
     {
         int index = first + i0;
         long at = (long)index * 576;
-        long so = (long)index * 44;
-        for (int b = 0; b < 22; b++)
+        long so = (long)index * ScratchFloats;
+        long xo = (long)index * XStride;
+        int bt = side[(long)index * SideInts + SBlockType];
+        int groups = Groups(bt);
+        for (int q = 0; q < groups; q++)
         {
-            int lo = tables[IBounds + b], hi = tables[IBounds + b + 1];
+            int lo = GroupLo(tables, bt, q), hi = GroupLo(tables, bt, q + 1);
             float e = 0, logSum = 0;
             for (int i = lo; i < hi; i++)
             {
@@ -204,29 +386,46 @@ public static class Mp3EncodeKernels
             }
             int n = hi - lo;
             float sfmDb = 10f * Lg10(Exp(logSum / n) / (e / n + 1e-30f) + 1e-30f);
-            scratch[so + b] = e;
-            scratch[so + 22 + b] = XMath.Clamp((sfmDb + 5.5f) / -25f, 0f, 1f);
+            scratch[so + q] = e;
+            scratch[so + 39 + q] = XMath.Clamp((sfmDb + 5.5f) / -25f, 0f, 1f);
         }
-        for (int b = 0; b < 22; b++)
+        // long: 22 bands, one "window"; short: 13 bands in each of 3 windows (group = band * 3 + window)
+        int bands = bt == 2 ? 13 : 22, windows = bt == 2 ? 3 : 1;
+        int barkAt = bt == 2 ? PSBark : PBark, athAt = bt == 2 ? PSAth : PAth;
+        for (int w = 0; w < windows; w++)
         {
-            float zb = psy[PBark + b];
-            float spread = 0, toneWeighted = 0;
-            for (int j = 0; j < 22; j++)
+            for (int b = 0; b < bands; b++)
             {
-                float ej = scratch[so + j];
-                if (ej <= 0) continue;
-                float dz = zb - psy[PBark + j] + 0.474f;
-                float sfDb = 15.81f + 7.5f * dz - 17.5f * XMath.Sqrt(1f + dz * dz);
-                if (sfDb < -60f) continue;
-                float w = ej * Exp10(sfDb / 10f);
-                spread += w;
-                toneWeighted += w * scratch[so + 22 + j];
+                float zb = psy[barkAt + b];
+                float spread = 0, toneWeighted = 0;
+                for (int j = 0; j < bands; j++)
+                {
+                    float ej = scratch[so + j * windows + w];
+                    if (ej <= 0) continue;
+                    float dz = zb - psy[barkAt + j] + 0.474f;
+                    float sfDb = 15.81f + 7.5f * dz - 17.5f * XMath.Sqrt(1f + dz * dz);
+                    if (sfDb < -60f) continue;
+                    float wt = ej * Exp10(sfDb / 10f);
+                    spread += wt;
+                    toneWeighted += wt * scratch[so + 39 + j * windows + w];
+                }
+                float t = spread > 0 ? toneWeighted / spread : 0;
+                float offsetDb = 18f * t + 6f * (1 - t);
+                float thr = spread * Exp10(-offsetDb / 10f);
+                xmin[xo + b * windows + w] = XMath.Max(thr, psy[athAt + b]) * quality;
             }
-            float t = spread > 0 ? toneWeighted / spread : 0;
-            float offsetDb = 18f * t + 6f * (1 - t);
-            float thr = spread * Exp10(-offsetDb / 10f);
-            xmin[(long)index * 22 + b] = XMath.Max(thr, psy[PAth + b]) * quality;
         }
+        // pre-echo control between short windows: a window's noise spreads over all of its 384 samples, the part before
+        // an attack included, so it may not exceed twice the previous window's allowed noise; backward masking covers a
+        // little pre-echo, so the window's own threshold drops by at most 15 dB (an onset from digital silence does not
+        // demand lossless coding)
+        for (int w = 1; w < windows; w++)
+            for (int b = 0; b < bands; b++)
+            {
+                float own = xmin[xo + b * windows + w];
+                xmin[xo + b * windows + w] = XMath.Max(XMath.Min(own, 2f * xmin[xo + b * windows + w - 1]), own * (1f / 32f));
+            }
+        for (int q = groups; q < XStride; q++) xmin[xo + q] = 0;
     }
 
     // ------------------------------------------------------------------ Info / Xing frame (gapless + seek data)
@@ -310,21 +509,23 @@ public static class Mp3EncodeKernels
     // ------------------------------------------------------------------ perceptual entropy
 
     /// <summary>
-    /// One thread per (granule, channel): the perceptual entropy of the granule, sum over long bands of
-    /// width * log2(1 + energy / allowed noise): an estimate of the bits it needs to keep its noise under the masks.
+    /// One thread per (granule, channel): the perceptual entropy of the granule, sum over its groups (long bands or short
+    /// band-windows) of width * log2(1 + energy / allowed noise): an estimate of the bits it needs to keep its noise
+    /// under the masks.
     /// </summary>
     public static void PerceptualEntropyKernel(Index1D i0, ArrayView<float> xr, ArrayView<float> xmin, ArrayView<int> tables,
-        ArrayView<float> pe, int first)
+        ArrayView<int> side, ArrayView<float> pe, int first)
     {
         int index = first + i0;
         long at = (long)index * 576;
+        int bt = side[(long)index * SideInts + SBlockType];
         float total = 0;
-        for (int b = 0; b < 22; b++)
+        for (int b = 0; b < Groups(bt); b++)
         {
-            int lo = tables[IBounds + b], hi = tables[IBounds + b + 1];
+            int lo = GroupLo(tables, bt, b), hi = GroupLo(tables, bt, b + 1);
             float e = 0;
             for (int i = lo; i < hi; i++) e += xr[at + i] * xr[at + i];
-            float allowed = xmin[(long)index * 22 + b];
+            float allowed = xmin[(long)index * XStride + b];
             if (allowed > 0 && e > allowed) total += (hi - lo) * XMath.Log2(1f + e / allowed);
         }
         pe[index] = total;
@@ -337,10 +538,11 @@ public static class Mp3EncodeKernels
     /// energies is below 40 % of the smaller of left and right (identical or opposite channels give a near-empty mid or side;
     /// independent channels of equal power do not). Then, for every granule of the frame, M = (L + R) / sqrt 2 and
     /// S = (L - R) / sqrt 2 in place, and each band's allowed noise becomes the smaller of the left and right masks.
-    /// ms[f] = 1 when the frame is coded mid / side.
+    /// ms[f] = 1 when the frame is coded mid / side. Both channels of a granule share its block type, so the coefficients
+    /// and groups line up.
     /// </summary>
-    public static void MidSideKernel(Index1D fIndex, ArrayView<float> xr, ArrayView<float> xmin, ArrayView<int> ms, int granulesPerFrame,
-        int enabled, int first)
+    public static void MidSideKernel(Index1D fIndex, ArrayView<float> xr, ArrayView<float> xmin, ArrayView<int> side, ArrayView<int> ms,
+        int granulesPerFrame, int enabled, int first)
     {
         int f = first + fIndex;
         float el = 0, er = 0, em = 0, es = 0;
@@ -369,11 +571,12 @@ public static class Mp3EncodeKernels
                 xr[l + i] = (a + b) * k;
                 xr[r + i] = (a - b) * k;
             }
-            for (int bnd = 0; bnd < 22; bnd++)
+            int groups = Groups(side[unit * SideInts + SBlockType]);
+            for (int bnd = 0; bnd < groups; bnd++)
             {
-                float m = XMath.Min(xmin[unit * 22 + bnd], xmin[(unit + 1) * 22 + bnd]);
-                xmin[unit * 22 + bnd] = m;
-                xmin[(unit + 1) * 22 + bnd] = m;
+                float m = XMath.Min(xmin[unit * XStride + bnd], xmin[(unit + 1) * XStride + bnd]);
+                xmin[unit * XStride + bnd] = m;
+                xmin[(unit + 1) * XStride + bnd] = m;
             }
         }
     }
@@ -480,15 +683,29 @@ public static class Mp3EncodeKernels
     }
 
     /// <summary>
-    /// Huffman bits of a granule with the region split (region0_count, region1_count) and best tables; returns the bits
-    /// and the chosen tables. <paramref name="exhaustive"/> tries every split, otherwise a fixed split.
+    /// The end of region 0 of a window-switched granule (implicit in the bitstream): the first 8 long bands (start /
+    /// stop) or the first 9 (short band, window) groups (short); region 1 is the rest of big_values.
     /// </summary>
-    private static int BigValueBits(ArrayView<int> ix, long at, ArrayView<int> tables, int bigValues, bool exhaustive,
+    private static int SwitchedRegion0End(ArrayView<int> tables, int bt) => bt == 2 ? tables[IGroup + 9] : tables[IBounds + 8];
+
+    /// <summary>
+    /// Huffman bits of a granule with the region split and best tables; returns the bits and the chosen tables. Long
+    /// granules (block type 0): <paramref name="exhaustive"/> tries every (region0_count, region1_count), otherwise a fixed
+    /// split. Window-switched granules (1, 2, 3): the implicit two regions.
+    /// </summary>
+    private static int BigValueBits(ArrayView<int> ix, long at, ArrayView<int> tables, int bigValues, int bt, bool exhaustive,
         out int region0, out int region1, out int t0, out int t1, out int t2)
     {
         int end = bigValues * 2;
         region0 = 0; region1 = 0; t0 = 0; t1 = 0; t2 = 0;
         if (end == 0) return 0;
+        if (bt != 0)
+        {
+            int e = XMath.Min(SwitchedRegion0End(tables, bt), end);
+            t0 = BestTable(ix, at, 0, e, MaxAbs(ix, at, 0, e), tables, out int y0);
+            t1 = BestTable(ix, at, e, end, MaxAbs(ix, at, e, end), tables, out int y1);
+            return y0 + y1;
+        }
         int best = int.MaxValue;
         int r0Max = exhaustive ? 15 : 0, r1Max = exhaustive ? 7 : 0;
         for (int r0 = exhaustive ? 0 : 7; r0 <= (exhaustive ? r0Max : 7); r0++)
@@ -514,37 +731,47 @@ public static class Mp3EncodeKernels
         return best;
     }
 
-    /// <summary>Bits of the scalefactors (part2) and scalefac_compress for the current maxima; -1 when they do not fit.</summary>
+    /// <summary>
+    /// Bits of the scalefactors (part2) and scalefac_compress for the current maxima; -1 when they do not fit. Long:
+    /// MPEG-1 slen1 for bands 0..10, slen2 for 11..20; MPEG-2 / 2.5 (no intensity stereo) partitions of 6, 5, 5, 5 bands.
+    /// Short (non-mixed): MPEG-1 slen1 for short bands 0..5, slen2 for 6..11 (18 values each); MPEG-2 / 2.5 partitions of
+    /// 9, 9, 9, 9 values (short bands 0-2, 3-5, 6-8, 9-11), the same scalefac_compress formula (ISO/IEC 13818-3
+    /// nr_of_sfb_block, scalefac_compress below 400).
+    /// </summary>
     private static int ScfBits(ArrayView<int> side, long s, int lsf, out int compress)
     {
+        int bt = side[s + SBlockType];
+        bool sh = bt == 2;
         int m1 = 0, m2 = 0, m3 = 0, m4 = 0;
-        for (int b = 0; b < 21; b++)
+        for (int b = 0; b < ScfCount(bt); b++)
         {
             int v = side[s + SScf + b];
-            if (b < 6) m1 = XMath.Max(m1, v);
-            else if (b < 11) m2 = XMath.Max(m2, v);
-            else if (b < 16) m3 = XMath.Max(m3, v);
+            int part = sh ? b / 9 : b < 6 ? 0 : b < 11 ? 1 : b < 16 ? 2 : 3;
+            if (part == 0) m1 = XMath.Max(m1, v);
+            else if (part == 1) m2 = XMath.Max(m2, v);
+            else if (part == 2) m3 = XMath.Max(m3, v);
             else m4 = XMath.Max(m4, v);
         }
         compress = 0;
         if (lsf == 0)
         {
-            // MPEG-1: slen1 for bands 0..10, slen2 for 11..20; the scalefac_compress with the fewest bits that holds them
+            // MPEG-1: the scalefac_compress with the fewest bits whose slen1 / slen2 hold the maxima
+            int n1 = sh ? 18 : 11, n2 = sh ? 18 : 10;
             int best = -1;
             for (int c = 0; c < 16; c++)
             {
                 int s1 = Slen1(c), s2 = Slen2(c);
                 if ((1 << s1) <= XMath.Max(m1, m2) || (1 << s2) <= XMath.Max(m3, m4)) continue;
-                int bits = 11 * s1 + 10 * s2;
+                int bits = n1 * s1 + n2 * s2;
                 if (best < 0 || bits < best) { best = bits; compress = c; }
             }
             return best;
         }
-        // MPEG-2 / 2.5 long blocks, no intensity stereo: partitions of 6, 5, 5, 5 bands, slen1 / slen2 0..4, slen3 / slen4 0..3
+        // MPEG-2 / 2.5, no intensity stereo: slen1 / slen2 0..4, slen3 / slen4 0..3
         int l1 = BitsFor(m1), l2 = BitsFor(m2), l3 = BitsFor(m3), l4 = BitsFor(m4);
         if (l1 > 4 || l2 > 4 || l3 > 3 || l4 > 3) return -1;
         compress = ((l1 * 5 + l2) << 4) + (l3 << 2) + l4;
-        return 6 * l1 + 5 * l2 + 5 * l3 + 5 * l4;
+        return sh ? 9 * (l1 + l2 + l3 + l4) : 6 * l1 + 5 * l2 + 5 * l3 + 5 * l4;
     }
 
     private static int BitsFor(int v)
@@ -557,18 +784,27 @@ public static class Mp3EncodeKernels
     private static int Slen1(int c) => c < 4 ? 0 : c == 4 ? 3 : c < 8 ? 1 : c < 11 ? 2 : c < 14 ? 3 : 4;
     private static int Slen2(int c) => c < 4 ? c : c == 4 ? 0 : c < 8 ? c - 4 : c < 11 ? c - 7 : c < 14 ? c - 10 : c - 12;
 
-    /// <summary>The factor the quantizer applies to band b: 2^(multiplier * scalefactor), multiplier 0.5 or 1.</summary>
-    private static float Amp(ArrayView<int> side, long s, int b) =>
-        b >= 21 ? 1f : XMath.Exp2((side[s + SScfScale] != 0 ? 1f : 0.5f) * side[s + SScf + b]);
+    /// <summary>
+    /// The factor the quantizer applies to group q: 2^(multiplier * scalefactor) with multiplier 0.5 or 1 (scalefac_scale),
+    /// times 2^(2 * subblock_gain) of the group's window in a short granule (the decoder's step is 2^((global_gain - 210
+    /// - 8 subblock_gain) / 4) 2^(-multiplier * scalefactor)).
+    /// </summary>
+    private static float Amp(ArrayView<int> side, long s, int bt, int q)
+    {
+        float e = q < ScfCount(bt) ? (side[s + SScfScale] != 0 ? 1f : 0.5f) * side[s + SScf + q] : 0f;
+        if (bt == 2) e += 2f * side[s + SSubGain + q % 3];
+        return XMath.Exp2(e);
+    }
 
     /// <summary>Quantize the granule at gain g with the current scalefactors into ix.</summary>
     private static void QuantizeAll(ArrayView<float> xr, ArrayView<int> ix, long at, ArrayView<int> side, long s, ArrayView<int> tables, int g)
     {
+        int bt = side[s + SBlockType];
         float stepInv = XMath.Exp2(-(g - 210) / 4f);
-        for (int b = 0; b < 22; b++)
+        for (int b = 0; b < Groups(bt); b++)
         {
-            float k = stepInv * Amp(side, s, b);
-            int lo = tables[IBounds + b], hi = tables[IBounds + b + 1];
+            float k = stepInv * Amp(side, s, bt, b);
+            int lo = GroupLo(tables, bt, b), hi = GroupLo(tables, bt, b + 1);
             for (int i = lo; i < hi; i++) ix[at + i] = Quant(xr[at + i], k) * (xr[at + i] < 0 ? -1 : 1);
         }
     }
@@ -577,25 +813,92 @@ public static class Mp3EncodeKernels
     private static int InnerLoop(ArrayView<float> xr, ArrayView<int> ix, long at, ArrayView<int> side, long s, ArrayView<int> tables,
         int lo, int huffBudget)
     {
+        int bt = side[s + SBlockType];
         int hi = 255, found = -1;
         while (lo <= hi)
         {
             int g = (lo + hi) >> 1;
             QuantizeAll(xr, ix, at, side, s, tables, g);
             Regions(ix, at, tables, out int bv, out _, out _, out int c1Bits);
-            int bits = BigValueBits(ix, at, tables, bv, false, out _, out _, out _, out _, out _) + c1Bits;
+            int bits = BigValueBits(ix, at, tables, bv, bt, false, out _, out _, out _, out _, out _) + c1Bits;
             if (bits <= huffBudget && MaxAbs(ix, at, 0, 576) <= 8206) { found = g; hi = g - 1; }
             else lo = g + 1;
         }
         return found;
     }
 
+    /// <summary>The smallest global gain that keeps every value within the escape range (8206) before amplification; -1 for
+    /// a silent granule.</summary>
+    private static int MinGain(ArrayView<float> xr, long at)
+    {
+        float maxAbs = 0;
+        for (int i = 0; i < 576; i++) maxAbs = XMath.Max(maxAbs, XMath.Abs(xr[at + i]));
+        if (maxAbs < 1e-20f) return -1;
+        // the smallest gain that keeps every value within the escape range (8206), before amplification
+        float need = 4f * XMath.Log2(maxAbs / PowP(8206.5f + 0.0946f, 4f / 3f));
+        return XMath.Clamp((int)XMath.Ceiling(210 + need), 0, 255);
+    }
+
+    /// <summary>
+    /// The subblock gains of a short granule (zero otherwise): the three windows of an attack differ by tens of dB, more
+    /// than scalefactors reach (22.5 dB in short bands 0..5, 10.5 dB in 6..11 at scalefac_scale 0). Each window needs a
+    /// step whose square is about its finest group's allowed noise per line (xmin / width), counting only groups whose
+    /// energy is over their allowed noise (a group under it is coded as zeros and needs no step at all: a silent band at
+    /// the threshold of hearing must not amplify the window); a window needing a finer step than the coarsest window by a
+    /// power ratio R gets subblock_gain floor(log2(R) / 4) (amplitude 2^(2 sbg) = R^(1/2)), 0..7, and the scalefactors
+    /// handle the rest. A window with no such group gets 0.
+    /// </summary>
+    private static void SetSubblockGains(ArrayView<float> xr, long at, ArrayView<int> side, long s, ArrayView<int> tables,
+        ArrayView<float> xmin, long xo)
+    {
+        int bt = side[s + SBlockType];
+        for (int w = 0; w < 3; w++) side[s + SSubGain + w] = 0;
+        if (bt != 2) return;
+        float n0 = float.MaxValue, n1 = float.MaxValue, n2 = float.MaxValue;
+        for (int q = 0; q < 39; q++)
+        {
+            int lo = GroupLo(tables, bt, q), hi = GroupLo(tables, bt, q + 1);
+            float e = 0;
+            for (int i = lo; i < hi; i++) e += xr[at + i] * xr[at + i];
+            if (e <= xmin[xo + q]) continue;
+            float perLine = xmin[xo + q] / (hi - lo);
+            int w = q % 3;
+            if (w == 0) n0 = XMath.Min(n0, perLine);
+            else if (w == 1) n1 = XMath.Min(n1, perLine);
+            else n2 = XMath.Min(n2, perLine);
+        }
+        // the coarsest need among the windows that have one
+        float top = 0;
+        if (n0 < float.MaxValue) top = XMath.Max(top, n0);
+        if (n1 < float.MaxValue) top = XMath.Max(top, n1);
+        if (n2 < float.MaxValue) top = XMath.Max(top, n2);
+        if (!(top > 0)) return;
+        side[s + SSubGain + 0] = SubblockGain(top, n0);
+        side[s + SSubGain + 1] = SubblockGain(top, n1);
+        side[s + SSubGain + 2] = SubblockGain(top, n2);
+    }
+
+    /// <summary>floor(log2(top / need) / 4) in 0..7; 0 for a window with no group to code.</summary>
+    private static int SubblockGain(float top, float need) =>
+        need >= float.MaxValue ? 0 : need > 0 ? XMath.Clamp((int)XMath.Floor(XMath.Log2(top / need) / 4f), 0, 7) : 7;
+
+    /// <summary>A silent (or budget-less) granule: no values, no scalefactors.</summary>
+    private static void ZeroGranule(ArrayView<int> ix, long at, ArrayView<int> side, long s)
+    {
+        for (int i = 0; i < 576; i++) ix[at + i] = 0;
+        side[s + SPart23] = 0; side[s + SBigValues] = 0; side[s + SGlobalGain] = 0; side[s + SScfCompress] = 0;
+        side[s + STable0] = 0; side[s + STable1] = 0; side[s + STable2] = 0; side[s + SRegion0] = 0; side[s + SRegion1] = 0;
+        side[s + SCount1Table] = 0;
+        for (int w = 0; w < 3; w++) side[s + SSubGain + w] = 0;
+    }
+
     /// <summary>
     /// One thread per (granule, channel): ISO 11172-3 Annex C's two loops. The inner loop finds the smallest global gain
-    /// whose bits (scalefactors + Huffman) fit side[SBudget]; the outer loop measures the noise in each long band against
-    /// its allowed noise xmin and amplifies (scalefactor + 1) every band over it, switching to scalefac_scale 1 when a
-    /// scalefactor would overflow, until no band is over or nothing can be amplified. The iteration with the fewest bands
-    /// over (then the least noise above the masks) is kept; ix and the side info written.
+    /// whose bits (scalefactors + Huffman) fit side[SBudget]; the outer loop measures the noise in each group (long band,
+    /// or short band of one window) against its allowed noise xmin and amplifies (scalefactor + 1) every group over it,
+    /// switching to scalefac_scale 1 when a scalefactor would overflow, until no group is over or nothing can be
+    /// amplified. The iteration with the fewest groups over (then the least noise above the masks) is kept; ix and the
+    /// side info written.
     /// </summary>
     public static void QuantizeKernel(Index1D i0, ArrayView<float> xr, ArrayView<int> ix, ArrayView<int> side, ArrayView<int> tables,
         ArrayView<float> xmin, ArrayView<int> work, int lsf, int requantOnly, int first)
@@ -604,29 +907,25 @@ public static class Mp3EncodeKernels
         long at = (long)index * 576;
         long s = (long)index * SideInts;
         if (requantOnly != 0 && side[s + SRequant] == 0) return;
-        long xo = (long)index * 22;
-        long wo = (long)index * WorkInts;   // [0..22) band over its mask, [22..43) the best iteration's scalefactors
+        long xo = (long)index * XStride;
+        long wo = (long)index * WorkInts;   // [0..39) group over its mask, [39..75) the best iteration's scalefactors
+        int bt = side[s + SBlockType];
+        int groups = Groups(bt), nScf = ScfCount(bt);
         int budget = XMath.Min(side[s + SBudget], 4095);
         side[s + SScfScale] = 0;
-        for (int b = 0; b < 21; b++) side[s + SScf + b] = 0;
-        float maxAbs = 0;
-        for (int i = 0; i < 576; i++) maxAbs = XMath.Max(maxAbs, XMath.Abs(xr[at + i]));
-        if (maxAbs < 1e-20f || budget <= 0)
+        for (int b = 0; b < 39; b++) side[s + SScf + b] = 0;
+        SetSubblockGains(xr, at, side, s, tables, xmin, xo);
+        int gMin = MinGain(xr, at);
+        if (gMin < 0 || budget <= 0)
         {
-            for (int i = 0; i < 576; i++) ix[at + i] = 0;
-            side[s + SPart23] = 0; side[s + SBigValues] = 0; side[s + SGlobalGain] = 0; side[s + SScfCompress] = 0;
-            side[s + STable0] = 0; side[s + STable1] = 0; side[s + STable2] = 0; side[s + SRegion0] = 0; side[s + SRegion1] = 0;
-            side[s + SCount1Table] = 0;
+            ZeroGranule(ix, at, side, s);
             return;
         }
-        // the smallest gain that keeps every value within the escape range (8206), before amplification
-        float need = 4f * XMath.Log2(maxAbs / PowP(8206.5f + 0.0946f, 4f / 3f));
-        int gMin = XMath.Clamp((int)XMath.Ceiling(210 + need), 0, 255);
 
-        // best iteration so far: (bands over, noise above the masks in dB), its gain, scalefac_scale and scalefactors
+        // best iteration so far: (groups over, noise above the masks in dB), its gain, scalefac_scale and scalefactors
         int bestOver = int.MaxValue, bestGain = 255, bestScale = 0;
         float bestOverDb = float.MaxValue;
-        for (int b = 0; b < 21; b++) work[wo + 22 + b] = 0;
+        for (int b = 0; b < nScf; b++) work[wo + 39 + b] = 0;
         for (int iter = 0; iter < 64; iter++)
         {
             int part2 = ScfBits(side, s, lsf, out _);
@@ -634,14 +933,14 @@ public static class Mp3EncodeKernels
             int g = InnerLoop(xr, ix, at, side, s, tables, gMin, budget - part2);
             if (g < 0) break;
             QuantizeAll(xr, ix, at, side, s, tables, g);
-            // noise per band against its mask
+            // noise per group against its mask
             float step = XMath.Exp2((g - 210) / 4f);
             int over = 0;
             float overDb = 0;
-            for (int b = 0; b < 22; b++)
+            for (int b = 0; b < groups; b++)
             {
-                float inv = step / Amp(side, s, b);
-                int lo = tables[IBounds + b], hi = tables[IBounds + b + 1];
+                float inv = step / Amp(side, s, bt, b);
+                int lo = GroupLo(tables, bt, b), hi = GroupLo(tables, bt, b + 1);
                 float noise = 0;
                 for (int i = lo; i < hi; i++)
                 {
@@ -661,17 +960,17 @@ public static class Mp3EncodeKernels
             if (over < bestOver || (over == bestOver && overDb < bestOverDb))
             {
                 bestOver = over; bestOverDb = overDb; bestGain = g; bestScale = side[s + SScfScale];
-                for (int b = 0; b < 21; b++) work[wo + 22 + b] = side[s + SScf + b];
+                for (int b = 0; b < nScf; b++) work[wo + 39 + b] = side[s + SScf + b];
             }
             if (over == 0) break;
-            // amplify every band over its mask
+            // amplify every group over its mask
             bool overflow = false, amplified = false;
-            for (int b = 0; b < 21; b++)
+            for (int b = 0; b < nScf; b++)
             {
                 if (work[wo + b] == 0) continue;
                 side[s + SScf + b]++;
                 amplified = true;
-                if (side[s + SScf + b] > ScfMax(b)) overflow = true;
+                if (side[s + SScf + b] > ScfMax(bt, b)) overflow = true;
             }
             if (!amplified) break;
             if (overflow)
@@ -679,28 +978,53 @@ public static class Mp3EncodeKernels
                 if (side[s + SScfScale] != 0) break;
                 // scalefac_scale 1 doubles the step of every scalefactor: halve them (rounding up keeps the amplification)
                 side[s + SScfScale] = 1;
-                for (int b = 0; b < 21; b++) side[s + SScf + b] = (side[s + SScf + b] + 1) >> 1;
+                for (int b = 0; b < nScf; b++) side[s + SScf + b] = (side[s + SScf + b] + 1) >> 1;
             }
         }
         // the best iteration, then the best region split and tables
         side[s + SScfScale] = bestScale;
-        for (int b = 0; b < 21; b++) side[s + SScf + b] = work[wo + 22 + b];
+        for (int b = 0; b < nScf; b++) side[s + SScf + b] = work[wo + 39 + b];
         int p2 = ScfBits(side, s, lsf, out int compress);
         if (p2 < 0)
         {
             // cannot happen for a kept iteration; fall back to no scalefactors
             side[s + SScfScale] = 0;
-            for (int b = 0; b < 21; b++) side[s + SScf + b] = 0;
+            for (int b = 0; b < nScf; b++) side[s + SScf + b] = 0;
             p2 = 0; compress = 0;
             bestGain = XMath.Max(InnerLoop(xr, ix, at, side, s, tables, gMin, budget), 0);
         }
         int gain = bestGain;
+        bool plainTried = false;
         while (true)
         {
             QuantizeAll(xr, ix, at, side, s, tables, gain);
             Regions(ix, at, tables, out int bv, out _, out int c1t, out int c1Bits);
-            int bits = BigValueBits(ix, at, tables, bv, true, out int r0, out int r1, out int t0, out int t1, out int t2) + c1Bits;
-            if (bits + p2 <= budget || gain == 255)
+            int bits = BigValueBits(ix, at, tables, bv, bt, true, out int r0, out int r1, out int t0, out int t1, out int t2) + c1Bits;
+            if (bits + p2 > budget && gain == 255)
+            {
+                // the budget is a hard bound (the frame layout and the reservoir rely on it): still over at the coarsest
+                // gain (amplified groups), so drop the amplification; when even that does not fit, an empty granule
+                if (plainTried)
+                {
+                    ZeroGranule(ix, at, side, s);
+                    return;
+                }
+                plainTried = true;
+                side[s + SScfScale] = 0;
+                for (int b = 0; b < 39; b++) side[s + SScf + b] = 0;
+                for (int w = 0; w < 3; w++) side[s + SSubGain + w] = 0;
+                p2 = 0;
+                compress = 0;
+                int plain = InnerLoop(xr, ix, at, side, s, tables, gMin, budget);
+                if (plain < 0)
+                {
+                    ZeroGranule(ix, at, side, s);
+                    return;
+                }
+                gain = plain;
+                continue;
+            }
+            if (bits + p2 <= budget)
             {
                 side[s + SPart23] = bits + p2;
                 side[s + SBigValues] = bv;
@@ -717,7 +1041,7 @@ public static class Mp3EncodeKernels
 
     // ------------------------------------------------------------------ variable bit rate
 
-    /// <summary>Noise of band b at gain g with amplification amp; float.MaxValue when a value leaves the escape range.</summary>
+    /// <summary>Noise of a group at gain g with amplification amp; float.MaxValue when a value leaves the escape range.</summary>
     private static float BandNoise(ArrayView<float> xr, long at, int lo, int hi, float stepInv, float amp)
     {
         float k = stepInv * amp;
@@ -734,31 +1058,33 @@ public static class Mp3EncodeKernels
     }
 
     /// <summary>
-    /// At gain g: the smallest scalefactor of each band whose noise is within its mask (written to side), and whether every
-    /// band found one.
+    /// At gain g: the smallest scalefactor of each group whose noise is within its mask (written to side), and whether
+    /// every group found one.
     /// </summary>
     private static bool FitScalefactors(ArrayView<float> xr, long at, ArrayView<int> side, long s, ArrayView<int> tables,
         ArrayView<float> xmin, long xo, int g, bool commitBest)
     {
+        int bt = side[s + SBlockType];
         float stepInv = XMath.Exp2(-(g - 210) / 4f);
         bool all = true;
-        for (int b = 0; b < 22; b++)
+        for (int b = 0; b < Groups(bt); b++)
         {
-            int lo = tables[IBounds + b], hi = tables[IBounds + b + 1];
-            int max = ScfMax(b);
+            int lo = GroupLo(tables, bt, b), hi = GroupLo(tables, bt, b + 1);
+            int max = ScfMax(bt, b);
+            float sub = bt == 2 ? 2f * side[s + SSubGain + b % 3] : 0f;   // the window's subblock gain (log2 amplitude)
             int chosen = -1;
             for (int sf = 0; sf <= max; sf++)
             {
-                if (BandNoise(xr, at, lo, hi, stepInv, XMath.Exp2(0.5f * sf)) <= xmin[xo + b]) { chosen = sf; break; }
+                if (BandNoise(xr, at, lo, hi, stepInv, XMath.Exp2(0.5f * sf + sub)) <= xmin[xo + b]) { chosen = sf; break; }
             }
             if (chosen < 0) { all = false; chosen = max; }
-            if (b < 21 && commitBest) side[s + SScf + b] = chosen;
+            if (b < ScfCount(bt) && commitBest) side[s + SScf + b] = chosen;
         }
         return all;
     }
 
     /// <summary>
-    /// One thread per (granule, channel), variable bit rate: the coarsest global gain at which every band's noise can be
+    /// One thread per (granule, channel), variable bit rate: the coarsest global gain at which every group's noise can be
     /// kept within its mask by a scalefactor (binary search; scalefac_scale 0), those scalefactors, then the best region
     /// split and tables. side[SRequant] = 1 when the granule needs more than 4095 bits (the layout re-quantizes it to a
     /// budget).
@@ -769,22 +1095,18 @@ public static class Mp3EncodeKernels
         int index = first + i0;
         long at = (long)index * 576;
         long s = (long)index * SideInts;
-        long xo = (long)index * 22;
+        long xo = (long)index * XStride;
+        int bt = side[s + SBlockType];
         side[s + SScfScale] = 0;
         side[s + SRequant] = 0;
-        for (int b = 0; b < 21; b++) side[s + SScf + b] = 0;
-        float maxAbs = 0;
-        for (int i = 0; i < 576; i++) maxAbs = XMath.Max(maxAbs, XMath.Abs(xr[at + i]));
-        if (maxAbs < 1e-20f)
+        for (int b = 0; b < 39; b++) side[s + SScf + b] = 0;
+        SetSubblockGains(xr, at, side, s, tables, xmin, xo);
+        int gMin = MinGain(xr, at);
+        if (gMin < 0)
         {
-            for (int i = 0; i < 576; i++) ix[at + i] = 0;
-            side[s + SPart23] = 0; side[s + SBigValues] = 0; side[s + SGlobalGain] = 0; side[s + SScfCompress] = 0;
-            side[s + STable0] = 0; side[s + STable1] = 0; side[s + STable2] = 0; side[s + SRegion0] = 0; side[s + SRegion1] = 0;
-            side[s + SCount1Table] = 0;
+            ZeroGranule(ix, at, side, s);
             return;
         }
-        float need = 4f * XMath.Log2(maxAbs / PowP(8206.5f + 0.0946f, 4f / 3f));
-        int gMin = XMath.Clamp((int)XMath.Ceiling(210 + need), 0, 255);
         // the largest gain that still satisfies every mask (coarser gains need fewer bits)
         int lo = gMin, hi = 255, best = gMin;
         while (lo <= hi)
@@ -797,7 +1119,7 @@ public static class Mp3EncodeKernels
         QuantizeAll(xr, ix, at, side, s, tables, best);
         int p2 = ScfBits(side, s, lsf, out int compress);
         Regions(ix, at, tables, out int bv, out _, out int c1t, out int c1Bits);
-        int bits = BigValueBits(ix, at, tables, bv, true, out int r0, out int r1, out int t0, out int t1, out int t2) + c1Bits;
+        int bits = BigValueBits(ix, at, tables, bv, bt, true, out int r0, out int r1, out int t0, out int t1, out int t2) + c1Bits;
         side[s + SPart23] = bits + p2;
         side[s + SBigValues] = bv;
         side[s + SGlobalGain] = best;
@@ -885,23 +1207,35 @@ public static class Mp3EncodeKernels
         long slot = (long)index * SlotBytes;
         for (int i = 0; i < SlotBytes; i++) slots[slot + i] = 0;
         int bitPos = 0;
-        // part2: the scalefactors of long bands 0..20 (scfsi 0)
+        // part2 (scfsi 0): the scalefactors of long bands 0..20, or of short groups 0..35 (short band * 3 + window)
+        int bt = side[s + SBlockType];
+        bool sh = bt == 2;
         int compress = side[s + SScfCompress];
-        for (int b = 0; b < 21; b++)
+        for (int b = 0; b < ScfCount(bt); b++)
         {
             int n;
-            if (lsf == 0) n = b < 11 ? Slen1(compress) : Slen2(compress);
+            if (lsf == 0) n = b < (sh ? 18 : 11) ? Slen1(compress) : Slen2(compress);
             else
             {
                 int sl1 = (compress >> 4) / 5, sl2 = (compress >> 4) % 5, sl3 = (compress >> 2) & 3, sl4 = compress & 3;
-                n = b < 6 ? sl1 : b < 11 ? sl2 : b < 16 ? sl3 : sl4;
+                int part = sh ? b / 9 : b < 6 ? 0 : b < 11 ? 1 : b < 16 ? 2 : 3;
+                n = part == 0 ? sl1 : part == 1 ? sl2 : part == 2 ? sl3 : sl4;
             }
             PutBits(slots, slot, ref bitPos, (uint)side[s + SScf + b], n);
         }
         int bv = side[s + SBigValues];
         int end = bv * 2;
-        int b0 = XMath.Min(tables[IBounds + XMath.Min(side[s + SRegion0] + 1, 22)], end);
-        int b1 = XMath.Min(tables[IBounds + XMath.Min(side[s + SRegion0] + side[s + SRegion1] + 2, 22)], end);
+        int b0, b1;
+        if (bt != 0)
+        {
+            b0 = XMath.Min(SwitchedRegion0End(tables, bt), end);
+            b1 = end;
+        }
+        else
+        {
+            b0 = XMath.Min(tables[IBounds + XMath.Min(side[s + SRegion0] + 1, 22)], end);
+            b1 = XMath.Min(tables[IBounds + XMath.Min(side[s + SRegion0] + side[s + SRegion1] + 2, 22)], end);
+        }
         for (int i = 0; i < end; i += 2)
         {
             int t = i < b0 ? side[s + STable0] : i < b1 ? side[s + STable1] : side[s + STable2];
@@ -934,16 +1268,18 @@ public static class Mp3EncodeKernels
     }
 
     /// <summary>
-    /// One thread per frame: header, side info and the granules' bits (main_data_begin 0: each frame holds its own main
-    /// data), at out[frameOffsets[f]]; frameInfo[f] = (bitrate index, padding). <paramref name="lsf"/> = MPEG-2/2.5.
+    /// One thread per frame: header and side info at out[frameOffsets[f]], the granules' bits from mainDataBegin[f] bytes
+    /// before the frame's own main-data area (MainDataKernel); frameInfo[f] = (bitrate index, padding).
+    /// <paramref name="lsf"/> = MPEG-2/2.5. The output is zeroed before (unused bytes are the stuffing); frames' main data
+    /// never share a byte, so the threads write disjoint bytes.
     /// </summary>
     public static void WriteFrameKernel(Index1D i0, ArrayView<int> side, ArrayView<byte> slots, ArrayView<long> frameOffsets,
-        ArrayView<int> frameInfo, ArrayView<byte> output, ArrayView<int> ms, int channels, int lsf, int version, int rateIndex, int first)
+        ArrayView<int> frameInfo, ArrayView<int> mainDataBegin, ArrayView<byte> output, ArrayView<int> ms, int channels, int lsf,
+        int version, int rateIndex, int sideBytes, int first)
     {
         int f = first + i0;
         long baseByte = frameOffsets[f];
-        long frameBytes = frameOffsets[f + 1] - baseByte;
-        for (long i = 0; i < frameBytes; i++) output[baseByte + i] = 0;
+        int mdb = mainDataBegin[f];
         int bitPos = 0;
         int granules = lsf != 0 ? 1 : 2;
         // header
@@ -963,13 +1299,13 @@ public static class Mp3EncodeKernels
         // side info
         if (lsf == 0)
         {
-            PutBits(output, baseByte, ref bitPos, 0, 9);            // main_data_begin
+            PutBits(output, baseByte, ref bitPos, (uint)mdb, 9);    // main_data_begin
             PutBits(output, baseByte, ref bitPos, 0, channels == 1 ? 5 : 3);
             PutBits(output, baseByte, ref bitPos, 0, 4 * channels); // scfsi
         }
         else
         {
-            PutBits(output, baseByte, ref bitPos, 0, 8);
+            PutBits(output, baseByte, ref bitPos, (uint)mdb, 8);
             PutBits(output, baseByte, ref bitPos, 0, channels == 1 ? 1 : 2);
         }
         for (int g = 0; g < granules; g++)
@@ -981,18 +1317,37 @@ public static class Mp3EncodeKernels
                 PutBits(output, baseByte, ref bitPos, (uint)side[s + SBigValues], 9);
                 PutBits(output, baseByte, ref bitPos, (uint)side[s + SGlobalGain], 8);
                 PutBits(output, baseByte, ref bitPos, (uint)side[s + SScfCompress], lsf != 0 ? 9 : 4);
-                PutBits(output, baseByte, ref bitPos, 0, 1);        // window_switching_flag
-                PutBits(output, baseByte, ref bitPos, (uint)side[s + STable0], 5);
-                PutBits(output, baseByte, ref bitPos, (uint)side[s + STable1], 5);
-                PutBits(output, baseByte, ref bitPos, (uint)side[s + STable2], 5);
-                PutBits(output, baseByte, ref bitPos, (uint)side[s + SRegion0], 4);
-                PutBits(output, baseByte, ref bitPos, (uint)side[s + SRegion1], 3);
+                int bt = side[s + SBlockType];
+                if (bt != 0)
+                {
+                    // window_switching_flag, block_type, mixed_block_flag 0, two table_selects, three subblock_gains
+                    PutBits(output, baseByte, ref bitPos, 1, 1);
+                    PutBits(output, baseByte, ref bitPos, (uint)bt, 2);
+                    PutBits(output, baseByte, ref bitPos, 0, 1);
+                    PutBits(output, baseByte, ref bitPos, (uint)side[s + STable0], 5);
+                    PutBits(output, baseByte, ref bitPos, (uint)side[s + STable1], 5);
+                    for (int w = 0; w < 3; w++) PutBits(output, baseByte, ref bitPos, (uint)side[s + SSubGain + w], 3);
+                }
+                else
+                {
+                    PutBits(output, baseByte, ref bitPos, 0, 1);    // window_switching_flag
+                    PutBits(output, baseByte, ref bitPos, (uint)side[s + STable0], 5);
+                    PutBits(output, baseByte, ref bitPos, (uint)side[s + STable1], 5);
+                    PutBits(output, baseByte, ref bitPos, (uint)side[s + STable2], 5);
+                    PutBits(output, baseByte, ref bitPos, (uint)side[s + SRegion0], 4);
+                    PutBits(output, baseByte, ref bitPos, (uint)side[s + SRegion1], 3);
+                }
                 if (lsf == 0) PutBits(output, baseByte, ref bitPos, 0, 1);   // preflag
                 PutBits(output, baseByte, ref bitPos, (uint)side[s + SScfScale], 1);   // scalefac_scale
                 PutBits(output, baseByte, ref bitPos, (uint)side[s + SCount1Table], 1);
             }
         }
-        // main data: the granules in order
+        // main data: the granules in order, from mdb bytes before the frame's own main-data area (in the unused tail of
+        // earlier frames' areas: the bit reservoir); the stream of main-data areas is addressed as one virtual byte run
+        long area = AreaStart(frameOffsets, f, sideBytes);
+        long vbit = (area - mdb) * 8;
+        int k = f;   // the frame whose area holds the current virtual byte
+        while (k > 0 && AreaStart(frameOffsets, k, sideBytes) > (vbit >> 3)) k--;
         for (int g = 0; g < granules; g++)
         {
             for (int c = 0; c < channels; c++)
@@ -1000,17 +1355,129 @@ public static class Mp3EncodeKernels
                 long gi = ((long)f * granules + g) * channels + c;
                 int bits = side[gi * SideInts + SPart23];
                 long slot = gi * SlotBytes;
-                for (int b = 0; b < bits; b++)
+                for (int b = 0; b < bits; b++, vbit++)
                 {
+                    long vbyte = vbit >> 3;
+                    while (AreaStart(frameOffsets, k + 1, sideBytes) <= vbyte) k++;
                     int bit = (slots[slot + (b >> 3)] >> (7 - (b & 7))) & 1;
                     if (bit != 0)
                     {
-                        long o = baseByte + (bitPos >> 3);
-                        output[o] = (byte)(output[o] | (0x80 >> (bitPos & 7)));
+                        long o = frameOffsets[k] + 4 + sideBytes + (vbyte - AreaStart(frameOffsets, k, sideBytes));
+                        output[o] = (byte)(output[o] | (0x80 >> (int)(vbit & 7)));
                     }
-                    bitPos++;
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Where frame f's main-data area (the bytes after its header and side info) starts in the run of all frames' areas:
+    /// the bytes of the frames before it minus their headers and side info. f = frames gives the run's length.
+    /// </summary>
+    private static long AreaStart(ArrayView<long> frameOffsets, int f, int sideBytes) =>
+        frameOffsets[f] - frameOffsets[0] - (long)f * (4 + sideBytes);
+
+    // ------------------------------------------------------------------ bit reservoir
+
+    /// <summary>
+    /// One thread, constant bit rate with the bit reservoir: the bit budget of every granule-channel, frame by frame.
+    /// A frame's demand is its perceptual entropy relative to the stream's mean frame PE, as a share of its own main-data
+    /// bits (a quiet frame at least half of them). It may spend its own area plus the reservoir R the frames before it
+    /// left (planned, at most <paramref name="maxBack"/> bytes: main_data_begin's reach, 511 MPEG-1 / 255 MPEG-2 / 2.5),
+    /// and must spend enough that no more than maxBack bytes stay unused (bytes past the reach are lost). The encoder sees
+    /// the whole stream, so a run of demanding frames shares the reservoir by excess demand (looking up to 8 frames
+    /// ahead) rather than its first frame draining it, and a frame that needs less saves only what the demanding frames
+    /// ahead will lack (a steady passage keeps an even split; the end of the stream leaves nothing unspent); at most 4095
+    /// bits per granule-channel. The frame's bits go to its granule-channels by PE (SplitBudget). The next frame's R is
+    /// what this frame's budgets leave, rounded to whole bytes. The quantizers use at most their budgets, so the real
+    /// reservoir (MainDataKernel) is never smaller than the plan.
+    /// </summary>
+    public static void ReservoirBudgetKernel(Index1D _, ArrayView<int> side, ArrayView<float> pe, ArrayView<long> frameOffsets, int frames,
+        int granulesPerFrame, int channels, int sideBytes, int maxBack)
+    {
+        int units = granulesPerFrame * channels;
+        float total = 0;
+        for (long u = 0; u < (long)frames * units; u++) total += pe[u];
+        float meanFrame = frames > 0 ? total / frames : 0;
+        long reservoir = 0;   // bytes
+        for (int f = 0; f < frames; f++)
+        {
+            long own = AreaStart(frameOffsets, f + 1, sideBytes) - AreaStart(frameOffsets, f, sideBytes);
+            long u0 = (long)f * units;
+            long excess = FrameWant(pe, frameOffsets, f, units, sideBytes, meanFrame) - own * 8;
+            // the frames ahead (up to 8): the excess demand of the run that continues from here, and of all of them
+            long runExcess = XMath.Max(excess, 0L), ahead = 0;
+            bool inRun = excess > 0;
+            for (int j = f + 1; j < frames && j < f + 8; j++)
+            {
+                long ownJ = AreaStart(frameOffsets, j + 1, sideBytes) - AreaStart(frameOffsets, j, sideBytes);
+                long e = FrameWant(pe, frameOffsets, j, units, sideBytes, meanFrame) - ownJ * 8;
+                if (e <= 0) inRun = false;
+                else
+                {
+                    ahead += e;
+                    if (inRun) runExcess += e;
+                }
+            }
+            long want;
+            if (excess > 0)
+            {
+                // a run of demanding frames starts or continues here: it cannot refill the reservoir, so the frames of the
+                // run share what is in it by their excess demand instead of the first taking it all
+                want = own * 8 + XMath.Min(excess, reservoir * 8 * excess / runExcess);
+            }
+            else
+            {
+                // a frame that needs less saves only what the demanding frames ahead will lack: with nothing ahead to
+                // spend it on (a steady passage, the end of the stream) it keeps its own bits
+                long lacking = XMath.Max(ahead - reservoir * 8, 0L);
+                want = own * 8 - XMath.Min(-excess, lacking);
+            }
+            long available = (reservoir + own) * 8;
+            long bits = XMath.Clamp(want, XMath.Max(available - (long)maxBack * 8, 0L), available);
+            bits = XMath.Min(bits, (long)units * 4095);
+            SplitBudget(side, pe, u0, units, (int)bits);
+            long used = 0;
+            for (int u = 0; u < units; u++) used += side[(u0 + u) * SideInts + SBudget];
+            reservoir = XMath.Min((long)maxBack, reservoir + own - (used + 7) / 8);
+        }
+    }
+
+    /// <summary>
+    /// A frame's wanted bits: its main-data bits scaled by its PE over the mean frame PE, at least half of them. Ratios
+    /// within a factor 2^(1/4) of 1 count as 1 and larger deviations shrink by that factor (continuous): a stationary
+    /// signal's PE wanders by a few dB from frame to frame, and moving bits on that noise only costs quality (an even
+    /// split is best for a steady signal).
+    /// </summary>
+    private static long FrameWant(ArrayView<float> pe, ArrayView<long> frameOffsets, int f, int units, int sideBytes, float meanFrame)
+    {
+        long own = AreaStart(frameOffsets, f + 1, sideBytes) - AreaStart(frameOffsets, f, sideBytes);
+        float framePe = 0;
+        for (int u = 0; u < units; u++) framePe += pe[(long)f * units + u];
+        float ratio = meanFrame > 0 ? framePe / meanFrame : 1f;
+        const float Zone = 1.18920712f;   // 2^(1/4)
+        ratio = ratio > Zone ? ratio / Zone : ratio < 1f / Zone ? ratio * Zone : 1f;
+        return (long)(own * 8 * XMath.Max(ratio, 0.5f));
+    }
+
+    /// <summary>
+    /// One thread, after quantization: each frame's main_data_begin from the bits the granules really used. Frame f's main
+    /// data starts where the previous frame's ended (rounded up to a byte), at most maxBack bytes before its own area
+    /// (0 = no reservoir: every frame holds its own main data).
+    /// </summary>
+    public static void MainDataKernel(Index1D _, ArrayView<int> side, ArrayView<long> frameOffsets, ArrayView<int> mainDataBegin, int frames,
+        int granulesPerFrame, int channels, int sideBytes, int maxBack)
+    {
+        int units = granulesPerFrame * channels;
+        long end = 0;   // virtual byte where the previous frame's main data ended
+        for (int f = 0; f < frames; f++)
+        {
+            long area = AreaStart(frameOffsets, f, sideBytes);
+            long start = XMath.Max(end, area - maxBack);
+            mainDataBegin[f] = (int)(area - start);
+            long bits = 0;
+            for (int u = 0; u < units; u++) bits += side[((long)f * units + u) * SideInts + SPart23];
+            end = start + (bits + 7) / 8;
         }
     }
 }

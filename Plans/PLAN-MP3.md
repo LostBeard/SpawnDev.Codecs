@@ -47,6 +47,12 @@ pass and the frame offsets are sequential, and both are cheap.
    tested against minimp3 itself (bit-exact float target) and against FFmpeg (report the difference).
 7. Warm-ups, browser lanes, quality report (SNR / bitrate vs LAME at the same settings, losses included).
 
+## Status (2026-11-08)
+- Encoder: CBR + VBR, MDCT-domain psychoacoustic model, joint stereo M/S, window switching (attack detection, start /
+  short / stop blocks, subblock gains, pre-echo control between short windows), CBR bit reservoir (PE-driven budgets with
+  look-ahead, main_data_begin up to 511 / 255 bytes), ID3v2 + Info / Xing with gapless delay / padding.
+- Not yet: mixed blocks, intensity stereo, scfsi (scalefactor reuse between MPEG-1 granules), preflag, a reservoir for VBR.
+
 ## Oracles
 - FFmpeg 8.1 decode (desktop tests): files must decode without errors; SNR vs the source.
 - minimp3 (C, built locally or via a Python binding) for the decoder's bit-exact target.

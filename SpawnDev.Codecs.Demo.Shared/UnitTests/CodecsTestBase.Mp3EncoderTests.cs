@@ -350,6 +350,316 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
+    /// <summary>One audio frame's side info as a decoder reads it: main_data_begin, each granule-channel's block type, the frame size and its main data bits (sum of part2_3_length).</summary>
+    private sealed record Mp3FrameSide(int MainDataBegin, int[] BlockTypes, int Size, int MainDataBits);
+
+    /// <summary>
+    /// Walk the audio frames of an MP3 (any version, any bit rate per frame; the ID3v2 tag and the Info / Xing frame
+    /// skipped) and read each frame's main_data_begin and block types from its side info.
+    /// </summary>
+    private static List<Mp3FrameSide> Mp3Sides(byte[] f)
+    {
+        var list = new List<Mp3FrameSide>();
+        int p = 0;
+        if (f.Length > 10 && f[0] == 'I' && f[1] == 'D' && f[2] == '3')
+            p = 10 + ((f[6] & 0x7F) << 21 | (f[7] & 0x7F) << 14 | (f[8] & 0x7F) << 7 | (f[9] & 0x7F));
+        int[] br1 = { 0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320 };
+        int[] br2 = { 0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160 };
+        bool first = true;
+        while (p + 4 <= f.Length && f[p] == 0xFF && (f[p + 1] & 0xE0) == 0xE0)
+        {
+            int ver = (f[p + 1] >> 3) & 3;   // 3 = MPEG-1, 2 = MPEG-2, 0 = MPEG-2.5
+            bool mpeg1 = ver == 3;
+            int brIdx = f[p + 2] >> 4, srIdx = (f[p + 2] >> 2) & 3, pad = (f[p + 2] >> 1) & 1;
+            int rate = new[] { 44100, 48000, 32000 }[srIdx] >> (ver == 3 ? 0 : ver == 2 ? 1 : 2);
+            bool mono = (f[p + 3] >> 6) == 3;
+            int size = (mpeg1 ? 144000 * br1[brIdx] : 72000 * br2[brIdx]) / rate + pad;
+            int sideBytes = mpeg1 ? (mono ? 17 : 32) : (mono ? 9 : 17);
+            int tagAt = p + 4 + sideBytes;
+            bool info = first && tagAt + 4 <= f.Length && ((f[tagAt] == 'I' && f[tagAt + 1] == 'n') || (f[tagAt] == 'X' && f[tagAt + 1] == 'i'));
+            first = false;
+            if (!info)
+            {
+                long bit = (p + 4) * 8L;
+                int Read(int n) { int v = 0; for (int k = 0; k < n; k++, bit++) v = (v << 1) | ((f[bit >> 3] >> (7 - (int)(bit & 7))) & 1); return v; }
+                int ch = mono ? 1 : 2;
+                int mdb;
+                if (mpeg1) { mdb = Read(9); Read(mono ? 5 : 3); Read(4 * ch); }
+                else { mdb = Read(8); Read(mono ? 1 : 2); }
+                var types = new List<int>();
+                int part23 = 0;
+                for (int g = 0; g < (mpeg1 ? 2 : 1); g++)
+                    for (int c = 0; c < ch; c++)
+                    {
+                        part23 += Read(12); Read(9); Read(8); Read(mpeg1 ? 4 : 9);
+                        int bt = 0;
+                        if (Read(1) != 0) { bt = Read(2); Read(1); Read(10); Read(9); } else { Read(15); Read(4); Read(3); }
+                        Read(mpeg1 ? 3 : 2);
+                        types.Add(bt);
+                    }
+                list.Add(new Mp3FrameSide(mdb, types.ToArray(), size, part23));
+            }
+            p += size;
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// A quiet tone (-46 dBFS) with four drum-like hits (a click, decaying noise and a decaying 90 Hz thump, about -3 dBFS)
+    /// at positions unrelated to the granule grid; returns the hit positions.
+    /// </summary>
+    private static (float[] Pcm, int[] Hits) Mp3Transients(int rate, int channels, int seed)
+    {
+        var r = new Random(seed);
+        int n = rate * 2;
+        var pcm = new float[n * channels];
+        var hits = new[] { (int)(rate * 0.31) + 17, (int)(rate * 0.77) + 301, (int)(rate * 1.21) + 95, (int)(rate * 1.63) + 433 };
+        for (int i = 0; i < n; i++)
+            for (int c = 0; c < channels; c++)
+                pcm[i * channels + c] = (float)(0.005 * Math.Sin(2 * Math.PI * (440 + 110 * c) * i / rate));
+        foreach (int h in hits)
+        {
+            for (int j = 0; j < rate / 5 && h + j < n; j++)
+            {
+                double env = Math.Exp(-j / (rate * 0.03));
+                double v = (j < 8 ? 0.4 : 0) + env * (0.35 * (r.NextDouble() * 2 - 1) + 0.3 * Math.Sin(2 * Math.PI * 90 * j / rate));
+                for (int c = 0; c < channels; c++) pcm[(h + j) * channels + c] += (float)(v * (c == 0 ? 1 : 0.9));
+            }
+        }
+        return (pcm, hits);
+    }
+
+    /// <summary>Error energy (decoded - source, all channels) in the <paramref name="span"/> samples before each hit.</summary>
+    private static double PreEcho(float[] src, float[] dec, int channels, int[] hits, int span)
+    {
+        double e = 0;
+        foreach (int h in hits)
+            for (int i = h - span; i < h; i++)
+                for (int c = 0; c < channels; c++)
+                {
+                    double d = dec[i * channels + c] - src[i * channels + c];
+                    e += d * d;
+                }
+        return e;
+    }
+
+    /// <summary>
+    /// Window switching: on a quiet tone with drum-like hits, short blocks (with start / stop blocks around them) must cut
+    /// the pre-echo (decoded error in the 1000 samples before each hit) clearly below long-only coding, at 128 kbps CBR,
+    /// V0 and an MPEG-2 rate (22.05 kHz, its own short-block scalefactor partitions); FFmpeg decodes every file gaplessly;
+    /// the side info carries block types 1, 2 and 3 (and only 0 when long blocks are forced); a steady tone gets no short
+    /// blocks.
+    /// </summary>
+    [TestMethod(Timeout = 900000, Category = "DesktopOnly,NotOnWebGL")]
+    public async Task Mp3EncoderGpu_ShortBlocks_CutPreEcho()
+    {
+        FfmpegOracle.RequireAvailable();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            using var enc = new Mp3EncoderGpu(acc);
+            var report = new List<string>();
+            var failures = new List<string>();
+            // measured 2026-11-08 (with the bit reservoir): 128k 10.0 dB, V0 12.0 dB, 22.05 kHz 64k 8.4 dB, 320k 6.5 dB (without the
+            // reservoir 128k was 4.9 dB and 22.05 kHz 4.0 dB: a short granule needs more bits than its frame's share)
+            foreach (var (rate, ch, kbps, vbr, minGainDb) in new (int, int, int, int?, double)[]
+                     {
+                         (44100, 2, 128, null, 7.0), (44100, 2, 0, 0, 9.0), (22050, 1, 64, null, 5.5), (44100, 2, 320, null, 4.0),
+                     })
+            {
+                string name = vbr is null ? $"{rate} Hz {ch} ch {kbps}k" : $"{rate} Hz {ch} ch V{vbr}";
+                var (src, hits) = Mp3Transients(rate, ch, rate + ch);
+                var energy = new Dictionary<bool, double>();
+                var snrs = new Dictionary<bool, double>();
+                foreach (bool forceLong in new[] { false, true })
+                {
+                    var opt = vbr is null
+                        ? new Mp3EncodeOptions { BitrateKbps = kbps, ForceLongBlocks = forceLong }
+                        : new Mp3EncodeOptions { VbrQuality = vbr, ForceLongBlocks = forceLong };
+                    var file = await enc.EncodeAsync(src, ch, rate, opt);
+                    float[] dec;
+                    try { dec = FfmpegOracle.DecodeFloat(file, ".mp3"); }
+                    catch (Exception e) { failures.Add($"{name} long-only {forceLong}: {e.Message}"); continue; }
+                    if (dec.Length != src.Length) failures.Add($"{name} long-only {forceLong}: decoded {dec.Length / ch} samples, want {src.Length / ch}");
+                    var types = Mp3Sides(file).SelectMany(s => s.BlockTypes).ToList();
+                    int[] count = new int[4];
+                    foreach (int t in types) count[t]++;
+                    energy[forceLong] = PreEcho(src, dec, ch, hits, 1000);
+                    var (snr, _) = AlignedSnr(src, dec, ch, 1);
+                    snrs[forceLong] = snr;
+                    double seconds = (double)src.Length / ch / rate;
+                    report.Add($"{name} long-only {forceLong}: block types 0/1/2/3 = {count[0]}/{count[1]}/{count[2]}/{count[3]}, "
+                        + $"pre-echo {10 * Math.Log10(energy[forceLong] + 1e-30):F1} dB, SNR {snr:F1} dB, {file.Length * 8 / seconds / 1000:F1} kbps");
+                    if (forceLong && count[0] != types.Count) failures.Add($"{name}: forced long blocks but the side info has other types");
+                    if (!forceLong && (count[1] == 0 || count[2] == 0 || count[3] == 0)) failures.Add($"{name}: block types 1 / 2 / 3 missing");
+                }
+                if (energy.Count == 2)
+                {
+                    double gain = 10 * Math.Log10(energy[true] / Math.Max(energy[false], 1e-30));
+                    report.Add($"{name}: short blocks cut the pre-echo by {gain:F1} dB");
+                    if (gain < minGainDb) failures.Add($"{name}: pre-echo only {gain:F1} dB lower with short blocks (want {minGainDb})");
+                }
+                // at 320k the quantization is fine, so the transforms show: short / start / stop granules must reconstruct
+                // as well as long ones (a window misplaced by a few samples breaks the alias cancellation)
+                if (kbps == 320 && snrs.Count == 2 && snrs[false] < snrs[true] - 2)
+                    failures.Add($"{name}: SNR with short blocks {snrs[false]:F1} dB, long-only {snrs[true]:F1} dB");
+            }
+            // a steady signal (tones and faint noise that start abruptly at sample 0) has no attack: long blocks only (the
+            // zeros before the input are padding, not a quiet passage)
+            foreach (var (rate, ch) in new[] { (44100, 2), (8000, 1) })
+            {
+                var tone = Mp3TestTone(rate * 2, ch, rate, 11);
+                var steady = await enc.EncodeAsync(tone, ch, rate, new Mp3EncodeOptions { VbrQuality = 0 });
+                int switched = Mp3Sides(steady).SelectMany(s => s.BlockTypes).Count(t => t != 0);
+                report.Add($"steady tone {rate} Hz {ch} ch V0: {switched} window-switched granule-channels");
+                if (switched != 0) failures.Add($"steady tone {rate} Hz: {switched} window-switched granule-channels, want 0");
+            }
+            // the lowest rate (MPEG-2.5 8 kHz, 8 kbps: 59 bytes of main data per frame): short granules whose amplified
+            // quiet windows do not fit the budget even at the coarsest gain must still keep it (a frame overflowing its
+            // main data breaks the stream); FFmpeg decodes with error detection on, gaplessly
+            {
+                var (low, _) = Mp3Transients(8000, 1, 8);
+                foreach (bool reservoir in new[] { true, false })
+                {
+                    var file = await enc.EncodeAsync(low, 1, 8000, new Mp3EncodeOptions { BitrateKbps = 8, BitReservoir = reservoir });
+                    try
+                    {
+                        var dec = FfmpegOracle.DecodeFloat(file, ".mp3");
+                        int shorts = Mp3Sides(file).SelectMany(s => s.BlockTypes).Count(t => t == 2);
+                        report.Add($"8000 Hz 1 ch 8k reservoir {reservoir}: {file.Length} bytes, {shorts} short granules, decoded {dec.Length} of {low.Length}");
+                        if (dec.Length != low.Length) failures.Add($"8000 Hz 8k reservoir {reservoir}: decoded {dec.Length} samples, want {low.Length}");
+                        if (shorts == 0) failures.Add($"8000 Hz 8k reservoir {reservoir}: no short granules");
+                    }
+                    catch (Exception e) { failures.Add($"8000 Hz 8k reservoir {reservoir}: {e.Message}"); }
+                }
+            }
+            Console.WriteLine(string.Join("\n", report));
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    /// <summary>
+    /// Quiet passages (a soft two-tone chord, -40 dBFS) alternating with short busy ones (dense noise and a loud chord,
+    /// about 3 frames long every 8 frames, fading in and out over 64 samples); returns the busy ranges [start, end).
+    /// </summary>
+    private static (float[] Pcm, List<(int Start, int End)> Busy) Mp3QuietBusy(int rate, int channels, int seed)
+    {
+        var r = new Random(seed);
+        int n = rate * 3;
+        int frame = rate >= 32000 ? 1152 : 576;
+        int period = frame * 8, busyLen = frame * 3;
+        var busy = new List<(int, int)>();
+        for (int s0 = frame * 2 + 37; s0 + busyLen < n; s0 += period) busy.Add((s0, s0 + busyLen));
+        var pcm = new float[n * channels];
+        for (int i = 0; i < n; i++)
+        {
+            double env = 0;
+            foreach (var (s0, s1) in busy)
+                if (i >= s0 && i < s1) env = Math.Min(1, Math.Min(i - s0, s1 - 1 - i) / 64.0);
+            for (int c = 0; c < channels; c++)
+            {
+                double t = (double)i / rate;
+                double quiet = 0.007 * Math.Sin(2 * Math.PI * 330 * t) + 0.005 * Math.Sin(2 * Math.PI * (495 + 20 * c) * t);
+                double loud = 0.25 * (r.NextDouble() * 2 - 1) + 0.2 * Math.Sin(2 * Math.PI * 180 * t) + 0.15 * Math.Sin(2 * Math.PI * (2700 + 100 * c) * t);
+                pcm[i * channels + c] = (float)(quiet + env * loud);
+            }
+        }
+        return (pcm, busy);
+    }
+
+    /// <summary>SNR (dB, no delay) over the given sample ranges, all channels.</summary>
+    private static double RangeSnr(float[] src, float[] dec, int channels, IEnumerable<(int Start, int End)> ranges)
+    {
+        double sig = 0, err = 0;
+        foreach (var (s0, s1) in ranges)
+            for (int i = s0; i < s1; i++)
+                for (int c = 0; c < channels; c++)
+                {
+                    double x = src[i * channels + c], d = dec[i * channels + c] - x;
+                    sig += x * x;
+                    err += d * d;
+                }
+        return 10 * Math.Log10(sig / Math.Max(err, 1e-30));
+    }
+
+    /// <summary>
+    /// The bit reservoir (CBR): on quiet passages alternating with short busy ones, the quiet frames save bits that the
+    /// busy frames spend, so the busy passages' SNR rises clearly over coding without the reservoir, at 128 kbps (MPEG-1,
+    /// main_data_begin up to 511 bytes) and 64 kbps at 22.05 kHz (MPEG-2, up to 255). The frames really reach back
+    /// (main_data_begin > 0; 0 everywhere without the reservoir, never above the limit), every frame keeps its CBR size, and
+    /// FFmpeg (error detection on) decodes both gaplessly. On steady tones the reservoir costs no quality.
+    /// </summary>
+    [TestMethod(Timeout = 900000, Category = "DesktopOnly,NotOnWebGL")]
+    public async Task Mp3EncoderGpu_BitReservoir_BusyPassagesGainSnr()
+    {
+        FfmpegOracle.RequireAvailable();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            using var enc = new Mp3EncoderGpu(acc);
+            var report = new List<string>();
+            var failures = new List<string>();
+            // measured 2026-11-08: busy SNR +3.24 dB at 128k, +1.18 dB at 22.05 kHz 64k
+            foreach (var (rate, ch, kbps, minGainDb) in new[] { (44100, 2, 128, 2.0), (22050, 2, 64, 0.8) })
+            {
+                string name = $"{rate} Hz {ch} ch {kbps}k";
+                var (src, busy) = Mp3QuietBusy(rate, ch, rate + 5);
+                // the quiet ranges between the busy ones (64 samples clear of each fade)
+                var quiet = new List<(int, int)>();
+                for (int b = 0; b + 1 < busy.Count; b++) quiet.Add((busy[b].End + 64, busy[b + 1].Start - 64));
+                var busySnr = new Dictionary<bool, double>();
+                foreach (bool reservoir in new[] { true, false })
+                {
+                    var file = await enc.EncodeAsync(src, ch, rate, new Mp3EncodeOptions { BitrateKbps = kbps, BitReservoir = reservoir });
+                    float[] dec;
+                    try { dec = FfmpegOracle.DecodeFloat(file, ".mp3"); }
+                    catch (Exception e) { failures.Add($"{name} reservoir {reservoir}: {e.Message}"); continue; }
+                    if (dec.Length != src.Length) failures.Add($"{name} reservoir {reservoir}: decoded {dec.Length / ch} samples, want {src.Length / ch}");
+                    var sides = Mp3Sides(file);
+                    int limit = rate >= 32000 ? 511 : 255;
+                    int reaching = sides.Count(s => s.MainDataBegin > 0), maxMdb = sides.Max(s => s.MainDataBegin);
+                    // CBR: every frame the size of the rate (plus its padding byte)
+                    int nominal = (rate >= 32000 ? 144000 : 72000) * kbps / rate;
+                    int badSize = sides.Count(s => s.Size != nominal && s.Size != nominal + 1);
+                    busySnr[reservoir] = RangeSnr(src, dec, ch, busy);
+                    double quietSnr = RangeSnr(src, dec, ch, quiet);
+                    report.Add($"{name} reservoir {reservoir}: busy SNR {busySnr[reservoir]:F2} dB, quiet SNR {quietSnr:F2} dB, "
+                        + $"main_data_begin > 0 in {reaching} of {sides.Count} frames (max {maxMdb}), {file.Length} bytes");
+                    if (badSize > 0) failures.Add($"{name} reservoir {reservoir}: {badSize} frames off the CBR size");
+                    if (maxMdb > limit) failures.Add($"{name}: main_data_begin {maxMdb} over {limit}");
+                    if (reservoir && reaching < sides.Count / 4) failures.Add($"{name}: only {reaching} of {sides.Count} frames use the reservoir");
+                    if (!reservoir && reaching > 0) failures.Add($"{name}: {reaching} frames reach back without the reservoir");
+                }
+                if (busySnr.Count == 2)
+                {
+                    double gain = busySnr[true] - busySnr[false];
+                    report.Add($"{name}: the reservoir raises the busy passages' SNR by {gain:F2} dB");
+                    if (gain < minGainDb) failures.Add($"{name}: busy SNR only {gain:F2} dB better with the reservoir (want {minGainDb})");
+                }
+            }
+            // a steady signal has nothing to move bits to: the reservoir must not cost quality (frames that are half encoder
+            // padding at the start and end look quiet, but the samples they carry are not)
+            foreach (var (rate, ch, kbps) in new[] { (8000, 2, 32), (11025, 1, 32), (44100, 2, 128) })
+            {
+                var src = Mp3TestTone(rate + 1234, ch, rate, rate + ch);
+                var snr = new Dictionary<bool, double>();
+                foreach (bool reservoir in new[] { true, false })
+                {
+                    var file = await enc.EncodeAsync(src, ch, rate, new Mp3EncodeOptions { BitrateKbps = kbps, BitReservoir = reservoir });
+                    snr[reservoir] = AlignedSnr(src, FfmpegOracle.DecodeFloat(file, ".mp3"), ch, 1).Snr;
+                }
+                report.Add($"steady tone {rate} Hz {ch} ch {kbps}k: SNR {snr[true]:F2} dB with the reservoir, {snr[false]:F2} dB without");
+                if (snr[true] < snr[false] - 0.5) failures.Add($"steady tone {rate} Hz {kbps}k: the reservoir costs {snr[false] - snr[true]:F2} dB");
+            }
+            Console.WriteLine(string.Join("\n", report));
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
     /// <summary>
     /// Mid / side stereo: on near-identical channels (a centred mix) at 96 kbps, coding mid / side gives a clearly better
     /// decode than left / right, and the frames carry joint stereo with the mid / side bit set.

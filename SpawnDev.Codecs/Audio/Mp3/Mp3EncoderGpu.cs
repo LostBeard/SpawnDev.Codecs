@@ -1,9 +1,10 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt). See NOTICE.md for upstream attributions.
 //
 // MP3 (MPEG-1 / 2 / 2.5 Layer III) encoder on the accelerator, written from ISO/IEC 11172-3 / 13818-3 (no LAME code;
-// see Plans/PLAN-MP3.md). This stage: constant bit rate, long blocks, left / right stereo or mono, every Layer III
-// sample rate (8000..48000 Hz), each frame holding its own main data (no bit reservoir yet), quantization noise flat
-// across the spectrum (no psychoacoustic model yet). The files are valid MP3 that every decoder plays.
+// see Plans/PLAN-MP3.md): constant or variable bit rate, every Layer III sample rate (8000..48000 Hz), mono or stereo
+// (joint stereo with mid / side per frame), an MDCT-domain psychoacoustic model shaping the quantization noise, window
+// switching (short blocks on attacks, with start / stop blocks around them), and for constant bit rate the bit reservoir
+// (main data reaching back into earlier frames' unused bytes). The files are valid MP3 that every decoder plays.
 //
 // Host work (pure coordinator): upload the PCM, compute the frame sizes of the bit rate (padding rule), dispatch
 // Mp3EncodeKernels, read back the file.
@@ -26,6 +27,16 @@ public sealed record Mp3EncodeOptions
     /// Each granule gets the fewest bits that keep its quantization noise within the psychoacoustic masks, scaled from
     /// 6 dB below them (0) to 6 dB above (9); each frame takes the lowest bit rate that holds it.</summary>
     public int? VbrQuality { get; init; }
+
+    /// <summary>Code every granule with long blocks (no window switching on attacks). Default false.</summary>
+    public bool ForceLongBlocks { get; init; }
+
+    /// <summary>
+    /// Constant bit rate: the bit reservoir. A frame's main data may start up to 511 bytes (MPEG-1; 255 MPEG-2 / 2.5)
+    /// before its header, in the bytes earlier frames left unused, so quiet frames save bits that busy frames and attacks
+    /// spend. Default true.
+    /// </summary>
+    public bool BitReservoir { get; init; } = true;
 
     /// <summary>Joint stereo with mid / side coding of the frames whose channels are alike. Default true.</summary>
     public bool MidSide { get; init; } = true;
@@ -54,20 +65,24 @@ public sealed class Mp3EncoderGpu : IDisposable
     private readonly Accelerator _accelerator;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, long, int, long> _polyphase;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, long> _matrix;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, long> _mdct;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, long> _alias;
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, int, int, int, long> _mdct;
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, long> _alias;
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, int, long, int> _attack;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int, int> _blockType;
     private readonly Action<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<float>, long, long, int, int, int, int, int, long> _layout;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<float>, int> _pe;
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int> _pe;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, long, int> _musicCrc;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>> _infoFrame;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _crcTable;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, int> _psy;
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, int> _psy;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int, int> _quantize;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int> _vbrQuantize;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int, int, long> _vbrLayout;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int> _writeGranule;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int, int, int, int, int> _writeFrame;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, int, int> _midSide;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int, int, int, int, int, int> _writeFrame;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<long>, int, int, int, int, int> _reservoir;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int> _mainData;
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, int, int, int> _midSide;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<float>, long> _toFloat;
     private readonly MemoryBuffer1D<float, Stride1D.Dense> _consts;
 
@@ -82,10 +97,12 @@ public sealed class Mp3EncoderGpu : IDisposable
         var a = accelerator;
         _polyphase = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, long, int, long>(K.PolyphaseKernel);
         _matrix = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, long>(K.MatrixKernel);
-        _mdct = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, long>(K.MdctKernel);
-        _alias = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, long>(K.AliasReduceKernel);
+        _mdct = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, int, int, int, long>(K.MdctKernel);
+        _alias = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, long>(K.AliasReduceKernel);
+        _attack = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, int, long, int>(K.AttackKernel);
+        _blockType = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int, int>(K.BlockTypeKernel);
         _layout = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<float>, long, long, int, int, int, int, int, long>(K.FrameLayoutKernel);
-        _pe = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<float>, int>(K.PerceptualEntropyKernel);
+        _pe = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int>(K.PerceptualEntropyKernel);
         _musicCrc = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, long, int>(K.MusicCrcKernel);
         _infoFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>>(K.InfoFrameKernel);
         var crc = new int[256];
@@ -97,13 +114,15 @@ public sealed class Mp3EncoderGpu : IDisposable
         }
         _crcTable = a.Allocate1D<int>(256);
         _crcTable.View.CopyFromCPU(crc);
-        _psy = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, int>(K.PsyKernel);
+        _psy = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, int>(K.PsyKernel);
         _quantize = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int, int>(K.QuantizeKernel);
         _vbrQuantize = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int>(K.VbrQuantizeKernel);
         _vbrLayout = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int, int, long>(K.VbrLayoutKernel);
         _writeGranule = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int>(K.WriteGranuleKernel);
-        _writeFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int, int, int, int, int>(K.WriteFrameKernel);
-        _midSide = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, int, int>(K.MidSideKernel);
+        _writeFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int, int, int, int, int, int>(K.WriteFrameKernel);
+        _reservoir = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<long>, int, int, int, int, int>(K.ReservoirBudgetKernel);
+        _mainData = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int>(K.MainDataKernel);
+        _midSide = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, int, int, int>(K.MidSideKernel);
         _toFloat = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, long>(Int32ToFloatKernel);
 
         // the constant tables (setup data, computed once per encoder)
@@ -115,6 +134,17 @@ public sealed class Mp3EncoderGpu : IDisposable
             // the MDCT / IMDCT pair of the standard (both unnormalised) gains n / 4 = 9 for the 36-point long block
             for (int i = 0; i < 36; i++) f[K.FCos + k * 36 + i] = (float)(Math.Cos(Math.PI / 72 * (2 * i + 19) * (2 * k + 1)) / 9.0);
         for (int i = 0; i < 36; i++) f[K.FSin + i] = (float)Math.Sin(Math.PI / 36 * (i + 0.5));
+        // start window: long rise, flat, short fall, zero; stop window: its mirror; the short window and 12 -> 6 MDCT
+        // (scaled by 12 / 4 = 3, like the long one by 36 / 4)
+        for (int i = 0; i < 36; i++)
+        {
+            double longSine = Math.Sin(Math.PI / 36 * (i + 0.5));
+            f[K.FStart + i] = (float)(i < 18 ? longSine : i < 24 ? 1 : i < 30 ? Math.Sin(Math.PI / 12 * (i - 18 + 0.5)) : 0);
+            f[K.FStop + i] = (float)(i < 6 ? 0 : i < 12 ? Math.Sin(Math.PI / 12 * (i - 6 + 0.5)) : i < 18 ? 1 : longSine);
+        }
+        for (int i = 0; i < 12; i++) f[K.FShortWin + i] = (float)Math.Sin(Math.PI / 12 * (i + 0.5));
+        for (int k = 0; k < 6; k++)
+            for (int i = 0; i < 12; i++) f[K.FShortCos + k * 12 + i] = (float)(Math.Cos(Math.PI / 24 * (2 * i + 7) * (2 * k + 1)) / 3.0);
         for (int i = 0; i < 8; i++)
         {
             double c = Mp3Tables.AliasC[i], n = Math.Sqrt(1 + c * c);
@@ -201,13 +231,17 @@ public sealed class Mp3EncoderGpu : IDisposable
         using var slotBuf = a.Allocate1D<byte>((long)units * K.SlotBytes);
         using var psy = a.Allocate1D<float>(K.PsyConsts);
         psy.View.CopyFromCPU(PsyTables(sampleRate));
-        using var psyScratch = a.Allocate1D<float>((long)units * 44);
-        using var xmin = a.Allocate1D<float>((long)units * 22);
+        using var psyScratch = a.Allocate1D<float>((long)units * K.ScratchFloats);
+        using var xmin = a.Allocate1D<float>((long)units * K.XStride);
+        using var attack = a.Allocate1D<int>(granules);
         using var work = a.Allocate1D<int>((long)units * K.WorkInts);
         using var frameOffsets = a.Allocate1D<long>(frames + 1);
         using var frameInfo = a.Allocate1D<int>(Math.Max(1, frames * 2));
         using var vmeta = a.Allocate1D<long>(K.VMeta);
         using var ms = a.Allocate1D<int>(Math.Max(1, frames));
+        using var mainDataBegin = a.Allocate1D<int>(Math.Max(1, frames));
+        // main_data_begin's reach in bytes (CBR with the reservoir; VBR frames each hold their own main data)
+        int maxBack = !vbr && o.BitReservoir ? (lsf ? 255 : 511) : 0;
         ms.MemSetToZero();
         side.MemSetToZero();
 
@@ -223,8 +257,14 @@ public sealed class Mp3EncoderGpu : IDisposable
         }
         await Launch((long)channels * slots * 64, (n, f) => _polyphase(n, pcm, _consts.View, y.View, channels, samples, slots, f));
         await Launch((long)channels * slots * 32, (n, f) => _matrix(n, y.View, _consts.View, sub.View, f));
-        await Launch((long)channels * granules * 32, (n, f) => _mdct(n, sub.View, _consts.View, xr.View, granules, slots, channels, f));
-        await Launch((long)units * 31 * 8, (n, f) => _alias(n, xr.View, _consts.View, f));
+        // window switching: attacks per granule, then the block types (side[SBlockType], zero = long when forced)
+        if (!o.ForceLongBlocks)
+        {
+            await Launch(granules, (n, f) => _attack(n, pcm, attack.View, channels, samples, (int)f));
+            await Launch(granules, (n, f) => _blockType(n, attack.View, side.View, granules, channels, (int)f));
+        }
+        await Launch((long)channels * granules * 32, (n, f) => _mdct(n, sub.View, _consts.View, xr.View, side.View, tables.View, granules, slots, channels, f));
+        await Launch((long)units * 31 * 8, (n, f) => _alias(n, xr.View, _consts.View, side.View, f));
 
         // masks: CBR at the model's threshold; VBR scaled by quality, 6 dB below (0) .. 6 dB above (9)
         float maskScale = vbr ? (float)Math.Pow(10, (-6 + 12.0 * o.VbrQuality!.Value / 9) / 10) : 1f;
@@ -232,7 +272,7 @@ public sealed class Mp3EncoderGpu : IDisposable
         for (int first = 0; first < units; first += UnitChunk)
         {
             int n = Math.Min(UnitChunk, units - first);
-            _psy(n, xr.View, tables.View, psy.View, psyScratch.View, xmin.View, maskScale, first);
+            _psy(n, xr.View, tables.View, side.View, psy.View, psyScratch.View, xmin.View, maskScale, first);
             await pacer.LaunchedAsync();
         }
         if (channels == 2)
@@ -240,7 +280,7 @@ public sealed class Mp3EncoderGpu : IDisposable
             for (int first = 0; first < frames; first += UnitChunk)
             {
                 int n = (int)Math.Min(UnitChunk, frames - first);
-                _midSide(n, xr.View, xmin.View, ms.View, granulesPerFrame, o.MidSide ? 1 : 0, first);
+                _midSide(n, xr.View, xmin.View, side.View, ms.View, granulesPerFrame, o.MidSide ? 1 : 0, first);
                 await pacer.LaunchedAsync();
             }
         }
@@ -250,11 +290,13 @@ public sealed class Mp3EncoderGpu : IDisposable
             using var pe = a.Allocate1D<float>(units);
             for (int first = 0; first < units; first += UnitChunk)
             {
-                _pe(Math.Min(UnitChunk, units - first), xr.View, xmin.View, tables.View, pe.View, first);
+                _pe(Math.Min(UnitChunk, units - first), xr.View, xmin.View, tables.View, side.View, pe.View, first);
                 await pacer.LaunchedAsync();
             }
             _layout((int)frames + 1, frameOffsets.View, frameInfo.View, side.View, pe.View, frames, num, sampleRate, bitrateIndex, sideBytes,
                 granulesPerFrame, channels, infoBytes);
+            // with the reservoir the budgets are planned across frames (one thread), replacing the per-frame split
+            if (maxBack > 0) _reservoir(1, side.View, pe.View, frameOffsets.View, (int)frames, granulesPerFrame, channels, sideBytes, maxBack);
             for (int first = 0; first < units; first += UnitChunk)
             {
                 _quantize(Math.Min(UnitChunk, units - first), xr.View, ix.View, side.View, tables.View, xmin.View, work.View, lsf ? 1 : 0, 0, first);
@@ -281,6 +323,8 @@ public sealed class Mp3EncoderGpu : IDisposable
             totalBytes = infoBytes + (await vmeta.View.SubView(K.VAudioBytes, 1).CopyToHostAsync())[0];
         }
         using var output = a.Allocate1D<byte>(Math.Max(1, totalBytes));
+        output.MemSetToZero();
+        _mainData(1, side.View, frameOffsets.View, mainDataBegin.View, (int)frames, granulesPerFrame, channels, sideBytes, maxBack);
         for (int first = 0; first < units; first += UnitChunk)
         {
             _writeGranule(Math.Min(UnitChunk, units - first), ix.View, side.View, tables.View, slotBuf.View, lsf ? 1 : 0, first);
@@ -288,8 +332,8 @@ public sealed class Mp3EncoderGpu : IDisposable
         }
         for (int first = 0; first < frames; first += UnitChunk)
         {
-            _writeFrame((int)Math.Min(UnitChunk, frames - first), side.View, slotBuf.View, frameOffsets.View, frameInfo.View, output.View,
-                ms.View, channels, lsf ? 1 : 0, version, rateIndex, first);
+            _writeFrame((int)Math.Min(UnitChunk, frames - first), side.View, slotBuf.View, frameOffsets.View, frameInfo.View, mainDataBegin.View,
+                output.View, ms.View, channels, lsf ? 1 : 0, version, rateIndex, sideBytes, first);
             await pacer.LaunchedAsync();
         }
         if (o.WriteInfoFrame)
@@ -380,28 +424,35 @@ public sealed class Mp3EncoderGpu : IDisposable
     /// The psychoacoustic model's per-band constants for a rate: the Bark of each long band's centre (Zwicker:
     /// 13 atan(0.00076 f) + 3.5 atan((f / 7500)^2)) and the threshold of hearing (Terhardt: 3.64 f^-0.8 - 6.5
     /// e^(-0.6 (f - 3.3)^2) + 0.001 f^4 dB SPL, f in kHz; the lowest over the band's lines) as an MDCT energy, with a
-    /// full-scale sine (MDCT energy about 1 per granule) at 96 dB SPL.
+    /// full-scale sine (MDCT energy about 1 per granule) at 96 dB SPL. The same per short band (lines of one 192-line
+    /// window): a sine's energy in one short window's MDCT (scaled by 1 / 3) equals its energy in a long granule's
+    /// (scaled by 1 / 9), and so does the energy of a given noise level, so the same scale applies.
     /// </summary>
     private static float[] PsyTables(int sampleRate)
     {
         var t = new float[K.PsyConsts];
         int r = Mp3Tables.BandRateIndex(sampleRate);
-        int lo = 0;
-        for (int b = 0; b < 22; b++)
+        void Bands(int count, int[] widths, int lines, int barkAt, int athAt)
         {
-            int hi = lo + Mp3Tables.LongBandWidths[r * 22 + b];
-            double fc = (lo + hi) / 2.0 * sampleRate / 1152.0;
-            t[K.PBark + b] = (float)(13 * Math.Atan(0.00076 * fc) + 3.5 * Math.Atan(Math.Pow(fc / 7500, 2)));
-            double athMin = double.MaxValue;
-            for (int i = lo; i < hi; i++)
+            int lo = 0;
+            for (int b = 0; b < count; b++)
             {
-                double f = Math.Max((i + 0.5) * sampleRate / 1152.0, 20) / 1000.0;
-                double ath = 3.64 * Math.Pow(f, -0.8) - 6.5 * Math.Exp(-0.6 * (f - 3.3) * (f - 3.3)) + 0.001 * Math.Pow(f, 4);
-                athMin = Math.Min(athMin, ath);
+                int hi = lo + widths[r * count + b];
+                double fc = (lo + hi) / 2.0 * sampleRate / (2.0 * lines);
+                t[barkAt + b] = (float)(13 * Math.Atan(0.00076 * fc) + 3.5 * Math.Atan(Math.Pow(fc / 7500, 2)));
+                double athMin = double.MaxValue;
+                for (int i = lo; i < hi; i++)
+                {
+                    double f = Math.Max((i + 0.5) * sampleRate / (2.0 * lines), 20) / 1000.0;
+                    double ath = 3.64 * Math.Pow(f, -0.8) - 6.5 * Math.Exp(-0.6 * (f - 3.3) * (f - 3.3)) + 0.001 * Math.Pow(f, 4);
+                    athMin = Math.Min(athMin, ath);
+                }
+                t[athAt + b] = (float)Math.Pow(10, (athMin - 96) / 10);
+                lo = hi;
             }
-            t[K.PAth + b] = (float)Math.Pow(10, (athMin - 96) / 10);
-            lo = hi;
         }
+        Bands(22, Mp3Tables.LongBandWidths, 576, K.PBark, K.PAth);
+        Bands(13, Mp3Tables.ShortBandWidths, 192, K.PSBark, K.PSAth);
         return t;
     }
 
@@ -428,6 +479,21 @@ public sealed class Mp3EncoderGpu : IDisposable
             b += Mp3Tables.LongBandWidths[r * 22 + i];
             t[K.IBounds + i + 1] = b;
         }
+        // short bands within a window, and the 39 groups (short band, window) of a short granule in the decoder's order
+        int sl = 0, gl = 0;
+        for (int sfb = 0; sfb < 13; sfb++)
+        {
+            int w = Mp3Tables.ShortBandWidths[r * 13 + sfb];
+            t[K.IShort + sfb] = sl;
+            sl += w;
+            for (int win = 0; win < 3; win++)
+            {
+                t[K.IGroup + sfb * 3 + win] = gl;
+                gl += w;
+            }
+        }
+        t[K.IShort + 13] = sl;
+        t[K.IGroup + 39] = gl;
         return t;
     }
 
