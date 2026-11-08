@@ -48,6 +48,15 @@ public static class Mp3EncodeKernels
     public const int IHCode = 0, IHLen = 8192, ILinbits = 16384, IMax = 16416, IC1Code = 16448, IC1Len = 16480, IBounds = 16512,
         IntConsts = 16535;
 
+    // ------------------------------------------------------------------ math through Exp2 / Log2 only
+    // Every backend maps Exp2 / Log2 to a native instruction; Log, Log10, Exp and Pow need ILGPU.Algorithms on CUDA.
+
+    private static float PowP(float a, float b) => a <= 0 ? 0 : XMath.Exp2(b * XMath.Log2(a));
+    private static float Ln(float x) => XMath.Log2(x) * 0.6931472f;
+    private static float Lg10(float x) => XMath.Log2(x) * 0.30103f;
+    private static float Exp(float x) => XMath.Exp2(x * 1.442695f);
+    private static float Exp10(float x) => XMath.Exp2(x * 3.321928f);
+
     // ------------------------------------------------------------------ analysis filterbank
 
     /// <summary>
@@ -176,10 +185,10 @@ public static class Mp3EncodeKernels
             {
                 float v = xr[at + i] * xr[at + i];
                 e += v;
-                logSum += XMath.Log(v + 1e-30f);
+                logSum += Ln(v + 1e-30f);
             }
             int n = hi - lo;
-            float sfmDb = 10f * XMath.Log10(XMath.Exp(logSum / n) / (e / n + 1e-30f) + 1e-30f);
+            float sfmDb = 10f * Lg10(Exp(logSum / n) / (e / n + 1e-30f) + 1e-30f);
             scratch[so + b] = e;
             scratch[so + 22 + b] = XMath.Clamp((sfmDb + 5.5f) / -25f, 0f, 1f);
         }
@@ -194,13 +203,13 @@ public static class Mp3EncodeKernels
                 float dz = zb - psy[PBark + j] + 0.474f;
                 float sfDb = 15.81f + 7.5f * dz - 17.5f * XMath.Sqrt(1f + dz * dz);
                 if (sfDb < -60f) continue;
-                float w = ej * XMath.Pow(10f, sfDb / 10f);
+                float w = ej * Exp10(sfDb / 10f);
                 spread += w;
                 toneWeighted += w * scratch[so + 22 + j];
             }
             float t = spread > 0 ? toneWeighted / spread : 0;
             float offsetDb = 18f * t + 6f * (1 - t);
-            float thr = spread * XMath.Pow(10f, -offsetDb / 10f);
+            float thr = spread * Exp10(-offsetDb / 10f);
             xmin[(long)index * 22 + b] = XMath.Max(thr, psy[PAth + b]) * quality;
         }
     }
@@ -288,7 +297,7 @@ public static class Mp3EncodeKernels
     private static int Quant(float x, float stepInv)
     {
         float a = XMath.Abs(x) * stepInv;
-        float v = XMath.Pow(a, 0.75f) - 0.0946f;
+        float v = PowP(a, 0.75f) - 0.0946f;
         return v <= 0 ? 0 : (int)(v + 0.5f);
     }
 
@@ -464,12 +473,12 @@ public static class Mp3EncodeKernels
 
     /// <summary>The factor the quantizer applies to band b: 2^(multiplier * scalefactor), multiplier 0.5 or 1.</summary>
     private static float Amp(ArrayView<int> side, long s, int b) =>
-        b >= 21 ? 1f : XMath.Pow(2f, (side[s + SScfScale] != 0 ? 1f : 0.5f) * side[s + SScf + b]);
+        b >= 21 ? 1f : XMath.Exp2((side[s + SScfScale] != 0 ? 1f : 0.5f) * side[s + SScf + b]);
 
     /// <summary>Quantize the granule at gain g with the current scalefactors into ix.</summary>
     private static void QuantizeAll(ArrayView<float> xr, ArrayView<int> ix, long at, ArrayView<int> side, long s, ArrayView<int> tables, int g)
     {
-        float stepInv = XMath.Pow(2f, -(g - 210) / 4f);
+        float stepInv = XMath.Exp2(-(g - 210) / 4f);
         for (int b = 0; b < 22; b++)
         {
             float k = stepInv * Amp(side, s, b);
@@ -525,7 +534,7 @@ public static class Mp3EncodeKernels
             return;
         }
         // the smallest gain that keeps every value within the escape range (8206), before amplification
-        float need = 4f * XMath.Log2(maxAbs / XMath.Pow(8206.5f + 0.0946f, 4f / 3f));
+        float need = 4f * XMath.Log2(maxAbs / PowP(8206.5f + 0.0946f, 4f / 3f));
         int gMin = XMath.Clamp((int)XMath.Ceiling(210 + need), 0, 255);
 
         // best iteration so far: (bands over, noise above the masks in dB), its gain, scalefac_scale and scalefactors
@@ -540,7 +549,7 @@ public static class Mp3EncodeKernels
             if (g < 0) break;
             QuantizeAll(xr, ix, at, side, s, tables, g);
             // noise per band against its mask
-            float step = XMath.Pow(2f, (g - 210) / 4f);
+            float step = XMath.Exp2((g - 210) / 4f);
             int over = 0;
             float overDb = 0;
             for (int b = 0; b < 22; b++)
@@ -550,7 +559,7 @@ public static class Mp3EncodeKernels
                 float noise = 0;
                 for (int i = lo; i < hi; i++)
                 {
-                    float q = XMath.Pow(XMath.Abs(ix[at + i]), 4f / 3f) * inv;
+                    float q = PowP(XMath.Abs(ix[at + i]), 4f / 3f) * inv;
                     float d = XMath.Abs(xr[at + i]) - q;
                     noise += d * d;
                 }
@@ -559,7 +568,7 @@ public static class Mp3EncodeKernels
                 if (isOver)
                 {
                     over++;
-                    overDb += 10f * XMath.Log10(noise / allowed);
+                    overDb += 10f * Lg10(noise / allowed);
                 }
                 work[wo + b] = isOver ? 1 : 0;
             }
@@ -632,7 +641,7 @@ public static class Mp3EncodeKernels
         {
             int q = Quant(xr[at + i], k);
             if (q > 8206) return float.MaxValue;
-            float d = XMath.Abs(xr[at + i]) - XMath.Pow(q, 4f / 3f) * back;
+            float d = XMath.Abs(xr[at + i]) - PowP(q, 4f / 3f) * back;
             noise += d * d;
         }
         return noise;
@@ -645,7 +654,7 @@ public static class Mp3EncodeKernels
     private static bool FitScalefactors(ArrayView<float> xr, long at, ArrayView<int> side, long s, ArrayView<int> tables,
         ArrayView<float> xmin, long xo, int g, bool commitBest)
     {
-        float stepInv = XMath.Pow(2f, -(g - 210) / 4f);
+        float stepInv = XMath.Exp2(-(g - 210) / 4f);
         bool all = true;
         for (int b = 0; b < 22; b++)
         {
@@ -654,7 +663,7 @@ public static class Mp3EncodeKernels
             int chosen = -1;
             for (int sf = 0; sf <= max; sf++)
             {
-                if (BandNoise(xr, at, lo, hi, stepInv, XMath.Pow(2f, 0.5f * sf)) <= xmin[xo + b]) { chosen = sf; break; }
+                if (BandNoise(xr, at, lo, hi, stepInv, XMath.Exp2(0.5f * sf)) <= xmin[xo + b]) { chosen = sf; break; }
             }
             if (chosen < 0) { all = false; chosen = max; }
             if (b < 21 && commitBest) side[s + SScf + b] = chosen;
@@ -688,7 +697,7 @@ public static class Mp3EncodeKernels
             side[s + SCount1Table] = 0;
             return;
         }
-        float need = 4f * XMath.Log2(maxAbs / XMath.Pow(8206.5f + 0.0946f, 4f / 3f));
+        float need = 4f * XMath.Log2(maxAbs / PowP(8206.5f + 0.0946f, 4f / 3f));
         int gMin = XMath.Clamp((int)XMath.Ceiling(210 + need), 0, 255);
         // the largest gain that still satisfies every mask (coarser gains need fewer bits)
         int lo = gMin, hi = 255, best = gMin;
