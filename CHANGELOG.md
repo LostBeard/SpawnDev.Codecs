@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### 1.0.2-local.9: MP3 decoder, MP3 encoder short blocks + bit reservoir (2026-11-08)
+- New `Audio.Mp3.Mp3DecoderGpu` (`DecodeAsync` interleaved float32, `DecodeFloatAsync` planar, `WarmUpAsync`): a port
+  of minimp3 (CC0) as ILGPU kernels. MPEG-1 / 2 / 2.5 Layer III, mono / stereo, M/S and intensity stereo, short and
+  mixed blocks, free format, CRC frames, ID3v2 tags. Gapless with the Info frame's delay / padding (FFmpeg's
+  convention). Damaged frames come out as silence and keep their time. Bit-exact with minimp3 on 21 fixtures (CPU
+  accelerator), 114..125 dB SNR vs FFmpeg 8.1.
+  **Known issue: wrong output on CUDA** (OpenCL and CPU are right). Cause: an ILGPU PTX miscompile of a nested loop
+  (repro `IlgpuNestedLoopRepro_InnerDoWhileShortCircuit_MatchesHost`), fix pending in SpawnDev.ILGPU.
+- `Mp3EncoderGpu`: window switching (short blocks with start / stop blocks, subblock gains, pre-echo control;
+  `Mp3EncodeOptions.ForceLongBlocks`) and the CBR bit reservoir (`Mp3EncodeOptions.BitReservoir`, default on;
+  look-ahead perceptual-entropy budgets). Pre-echo before transients 10.0 dB lower at 128k, 12.0 dB at V0; busy
+  passages +3.2 dB SNR at 128k.
+- Fix: a CBR stream whose frames cannot hold the Info tag (8 kbps at 8 kHz, 16 kHz 32k, ...) writes its Info frame at
+  the lowest rate that holds it (the tag used to run into the first audio frame).
+- SpawnDev.ILGPU 5.4.13 -> 5.4.18.
+- Verified: CPU accelerator, MP3 encoder + decoder tests 13/13. Not yet run on OpenCL / CUDA / WebGPU / Wasm since the
+  short-block and reservoir merge.
+
 ### MP3 encoder: `Mp3EncoderGpu` (clean-room, ISO 11172-3 / 13818-3) (2026-11-08)
 - New `Audio.Mp3.Mp3EncoderGpu.EncodeAsync` (float or int32 PCM, mono / stereo, every Layer III rate 8..48 kHz:
   MPEG-1, 2, 2.5) and `Mp3EncodeOptions` (`BitrateKbps` CBR, `VbrQuality` 0..9 VBR, `MidSide`, `Tags`, `Id3Encoder`,
