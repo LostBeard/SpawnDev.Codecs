@@ -1,4 +1,4 @@
-"""Fixtures for the WebM MUXER (Container/Matroska/WebMWriter.cs, a port of FFmpeg's matroskaenc in WebM mode).
+"""Fixtures for the WebM MUXER (Container/Matroska/WebMWriter.cs, a clean-room WebM muxer).
 
 For each case ffmpeg (8.1) encodes a short synthetic clip and muxes it with `-fflags +bitexact` (deterministic: no
 random UIDs, "Lavf" app strings). That file is the truth. A small EBML reader below lists what the muxer was given:
@@ -7,7 +7,7 @@ payload, BlockAdditional, duration, DiscardPadding), payloads as offsets into th
 those to WebMWriter and requires the same bytes.
 
 Writes SpawnDev.Codecs.Demo.Shared/TestData/WebMMux/<case>.webm + <case>.json and manifest.txt.
-Usage: python -I make_webm_mux_fixtures.py   (ffmpeg on PATH)
+Usage: python -I make_webm_mux_fixtures.py [case ...]   (ffmpeg on PATH; no case names = every case)
 """
 import json
 import os
@@ -246,42 +246,66 @@ def manifest(name, path, live=False):
     return name
 
 
-def main():
-    cases = []
+def main(only=None):
+    """Make every case (only=None) or the named ones; manifest.txt always lists every case, in this order."""
     vp9 = ["-c:v", "libvpx-vp9", "-crf", "40", "-b:v", "0", "-deadline", "realtime", "-cpu-used", "8", "-g", "12", "-threads", "1"]
     opus = ["-c:a", "libopus", "-b:a", "48k"]
     tsrc = lambda s, r, d: ["-f", "lavfi", "-i", f"testsrc2=size={s}:rate={r}:duration={d}"]
     sine = lambda d, rate=48000: ["-f", "lavfi", "-i", f"sine=frequency=440:sample_rate={rate}:duration={d}"]
+    vp9g = lambda g, crf=40: ["-c:v", "libvpx-vp9", "-crf", str(crf), "-b:v", "0", "-deadline", "realtime", "-cpu-used", "8",
+                              "-threads", "1", "-g", str(g)]
 
-    p = os.path.join(OUT, "vp9_only.webm"); ff(tsrc("64x48", 24, 2) + vp9, p); cases.append(manifest("vp9_only", p))
-    p = os.path.join(OUT, "vp9_opus.webm"); ff(tsrc("64x48", 24, 2) + sine(2) + vp9 + opus, p); cases.append(manifest("vp9_opus", p))
-    p = os.path.join(OUT, "vp9_alpha.webm")
-    ff(tsrc("64x48", 12, 1) + ["-vf", "format=yuva420p,geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='if(gt(X,32),255,64)'"]
-       + vp9 + ["-pix_fmt", "yuva420p"], p)
-    cases.append(manifest("vp9_alpha", p))
-    p = os.path.join(OUT, "long_opus.webm"); ff(tsrc("32x24", 10, 12) + sine(12) + vp9 + opus, p); cases.append(manifest("long_opus", p))
-    p = os.path.join(OUT, "opus_only.webm"); ff(sine(3) + opus, p); cases.append(manifest("opus_only", p))
-    p = os.path.join(OUT, "opus_441.webm"); ff(sine(1.3, 44100) + opus, p); cases.append(manifest("opus_441", p))
-    p = os.path.join(OUT, "vp8_only.webm"); ff(tsrc("48x32", 15, 1) + ["-c:v", "libvpx", "-crf", "30", "-b:v", "200k", "-g", "5", "-threads", "1"], p)
-    cases.append(manifest("vp8_only", p))
-    p = os.path.join(OUT, "av1_only.webm")
-    ff(tsrc("64x64", 8, 1) + ["-c:v", "libaom-av1", "-crf", "50", "-cpu-used", "8", "-g", "4", "-threads", "1", "-row-mt", "0"], p)
-    cases.append(manifest("av1_only", p))
-    p = os.path.join(OUT, "tags_title.webm")
-    ff(tsrc("32x32", 6, 1) + sine(1) + vp9 + opus + ["-metadata", "title=SpawnGen test", "-metadata",
-       'comment={"prompt": {"3": {"class_type": "KSampler"}}}', "-metadata:s:v:0", "language=eng",
-       "-metadata:s:a:0", "handler_name=ComfyUI audio"], p)
-    cases.append(manifest("tags_title", p))
-    # two video tracks at the same rate: every frame time is a tie, broken by track order in the interleaver
-    p = os.path.join(OUT, "two_video.webm")
-    ff(tsrc("32x24", 8, 1) + ["-f", "lavfi", "-i", "testsrc=size=32x24:rate=8:duration=1", "-map", "0:v", "-map", "1:v"] + vp9, p)
-    cases.append(manifest("two_video", p))
-    p = os.path.join(OUT, "live_vp9_opus.webm"); ff(tsrc("32x24", 10, 3) + sine(3) + vp9 + opus, p, pipe=True)
-    cases.append(manifest("live_vp9_opus", p, live=True))
+    cases = [  # (name, ffmpeg args, live)
+        ("vp9_only", tsrc("64x48", 24, 2) + vp9, False),
+        ("vp9_opus", tsrc("64x48", 24, 2) + sine(2) + vp9 + opus, False),
+        ("vp9_alpha", tsrc("64x48", 12, 1) + ["-vf", "format=yuva420p,geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='if(gt(X,32),255,64)'"]
+         + vp9 + ["-pix_fmt", "yuva420p"], False),
+        ("long_opus", tsrc("32x24", 10, 12) + sine(12) + vp9 + opus, False),
+        ("opus_only", sine(3) + opus, False),
+        ("opus_441", sine(1.3, 44100) + opus, False),
+        ("vp8_only", tsrc("48x32", 15, 1) + ["-c:v", "libvpx", "-crf", "30", "-b:v", "200k", "-g", "5", "-threads", "1"], False),
+        ("av1_only", tsrc("64x64", 8, 1) + ["-c:v", "libaom-av1", "-crf", "50", "-cpu-used", "8", "-g", "4", "-threads", "1", "-row-mt", "0"], False),
+        ("tags_title", tsrc("32x32", 6, 1) + sine(1) + vp9 + opus + ["-metadata", "title=SpawnGen test", "-metadata",
+         'comment={"prompt": {"3": {"class_type": "KSampler"}}}', "-metadata:s:v:0", "language=eng",
+         "-metadata:s:a:0", "handler_name=ComfyUI audio"], False),
+        # two video tracks at the same rate: every frame time is a tie, broken by track order in the interleaver
+        ("two_video", tsrc("32x24", 8, 1) + ["-f", "lavfi", "-i", "testsrc=size=32x24:rate=8:duration=1", "-map", "0:v", "-map", "1:v"] + vp9, False),
+        ("live_vp9_opus", tsrc("32x24", 10, 3) + sine(3) + vp9 + opus, True),
+        # audio only, 6 s: the 5 s cluster time limit and one cue per cluster
+        ("opus_6s", sine(6) + opus, False),
+        # audio only, pipe: 1 s clusters
+        ("opus_live", sine(3) + opus, True),
+        # video without key frames after the first: clusters split by time alone (5 s seekable, 1 s pipe)
+        ("vp9_longgop", tsrc("64x48", 10, 6) + vp9g(1000), False),
+        ("vp9_longgop_live", tsrc("64x48", 10, 3) + vp9g(1000), True),
+        # key frames every 3 frames around the 4 KiB key-frame cluster threshold (kept at 4088 bytes, split at 4112)
+        ("vp9_keyframe_4k", tsrc("80x64", 10, 6) + vp9g(3, 44), False),
+        ("vp9_keyframe_live", tsrc("64x48", 10, 4) + vp9g(3), True),
+        # pipe output past the 32 KiB cluster size limit
+        ("vp9_size_live", tsrc("192x144", 25, 1) + vp9g(1000, 4), True),
+        # track Name, Language, FlagDefault / FlagForced, DisplayWidth / DisplayHeight, chroma siting
+        ("meta_tracks", tsrc("64x48", 10, 1) + sine(1) + vp9 + opus + ["-metadata:s:v:0", "title=MyVideo", "-metadata:s:a:0",
+         "title=MyAudio", "-metadata:s:a:0", "language=fre", "-disposition:v:0", "default+forced", "-disposition:a:0", "forced",
+         "-aspect", "16:9", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv",
+         "-chroma_sample_location", "left"], False),
+        # every Colour field
+        ("meta_colour", tsrc("64x48", 10, 1) + vp9 + ["-vf", "setparams=color_primaries=bt709:color_trc=smpte2084:colorspace=bt709:range=tv",
+         "-color_primaries", "bt709", "-color_trc", "smpte2084", "-chroma_sample_location", "left", "-aspect", "4:3"], False),
+        # AlphaMode next to DisplayWidth / DisplayHeight
+        ("meta_alpha_display", tsrc("64x48", 10, 1) + ["-vf", "format=yuva420p"] + vp9 + ["-pix_fmt", "yuva420p", "-aspect", "2:1"], False),
+    ]
+    names = [c[0] for c in cases]
+    for name, args, live in cases:
+        if only and name not in only:
+            continue
+        p = os.path.join(OUT, name + ".webm")
+        ff(args, p, pipe=live)
+        manifest(name, p, live=live)
 
     with open(os.path.join(OUT, "manifest.txt"), "w", newline="\n") as fh:
-        fh.write("\n".join(cases) + "\n")
+        fh.write("\n".join(names) + "\n")
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(set(sys.argv[1:]) or None)

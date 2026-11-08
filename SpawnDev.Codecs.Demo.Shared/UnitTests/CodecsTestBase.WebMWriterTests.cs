@@ -1,11 +1,15 @@
-// Tests for WebMWriter (Container/Matroska), the port of FFmpeg 8.1's matroskaenc in WebM mode.
+// Tests for WebMWriter (Container/Matroska), the clean-room WebM muxer (RFC 8794 / RFC 9559 / WebM guidelines).
 //
-// Fixtures (scripts/video/make_webm_mux_fixtures.py): ffmpeg encodes short synthetic clips and muxes them with
-// -fflags +bitexact; each <case>.webm is the truth and <case>.json lists what the muxer was given (tracks, packets as
-// offsets into the truth file). Cases: VP9 alone; VP9 + Opus (codec delay, interleaving, the held-back audio packet,
+// Fixtures (scripts/video/make_webm_mux_fixtures.py): the ffmpeg command line tool (a black box) encodes short synthetic
+// clips and muxes them with -fflags +bitexact; each <case>.webm is the truth and <case>.json lists what the muxer was given
+// (tracks, packets as offsets into the truth file). Cases: VP9 alone; VP9 + Opus (codec delay, interleaving, the held-back audio packet,
 // DiscardPadding at the end); VP9 with alpha (BlockGroup + BlockAdditions, AlphaMode); 12 s VP9 + Opus (5 s clusters,
 // Cues); Opus alone at 48 and 44.1 kHz (cues per cluster without video); VP8; AV1 (CodecPrivate av1C); title + global and
 // track tags; and a non-seekable (pipe) output (SeekHead in the reserved room, no Duration / Cues, 1 s clusters).
+// Cluster rules, one case each: audio-only 5 s and 1 s clusters (opus_6s, opus_live); video split by time alone
+// (vp9_longgop, vp9_longgop_live); the 4 KiB key-frame threshold (vp9_keyframe_4k keeps a key frame at 4088 bytes and
+// splits at 4112; vp9_keyframe_live); the 32 KiB pipe size limit (vp9_size_live). Track header fields: Name, Language,
+// FlagForced, display size, every Colour field, AlphaMode with display size (meta_*).
 //
 // What must hold: the same bytes as ffmpeg, whether the packets arrive in file order or track by track (the writer
 // interleaves them as libavformat does).
@@ -151,7 +155,7 @@ public abstract partial class CodecsTestBase
                 }
             }
         }
-        True(cases.Count >= 10, $"only {cases.Count} fixtures");
+        True(cases.Count >= 21, $"only {cases.Count} fixtures");
         True(failures.Count == 0, $"{failures.Count} of {checkedOrders} differ:\n" + string.Join("\n", failures));
     }
 }

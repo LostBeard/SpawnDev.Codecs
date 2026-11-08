@@ -62,6 +62,8 @@ Observable behaviour: given the packets and timestamps in each fixture (TestData
 byte. Work out the element layout by inspecting the fixtures (EBML structure, element order, sizes, void elements,
 cluster / cue rules) and from the Matroska / WebM specs.
 Acceptance tests: the parked WebMWriter test.
+Status (2026-11-08): done. `Container/Matroska/WebMWriter.cs` + `EbmlBuffer.cs`; the test is back in `UnitTests/` and
+passes on every fixture (21 cases, 10 of them added to pin the cluster rules and track header fields).
 
 ## Component C: FLAC stream encoder
 Specs: RFC 9639 (FLAC); the literature on linear prediction (autocorrelation + Levinson-Durbin, windowing) and Rice
