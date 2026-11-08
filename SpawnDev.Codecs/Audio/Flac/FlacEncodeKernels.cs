@@ -225,8 +225,8 @@ public static class FlacEncodeKernels
         double half = 0.25 * (n - 1);     // alpha (N - 1) / 2 with alpha = 0.5
         if (half > 0)
         {
-            if (i < half) w = 0.5 * (1.0 - XMath.Cos(Math.PI * i / half));
-            else if (i > (n - 1) - half) w = 0.5 * (1.0 - XMath.Cos(Math.PI * ((n - 1) - i) / half));
+            if (i < half) w = 0.5 * (1.0 - XMath.Cos((float)(Math.PI * i / half)));
+            else if (i > (n - 1) - half) w = 0.5 * (1.0 - XMath.Cos((float)(Math.PI * ((n - 1) - i) / half)));
         }
         win[index] = (float)w;
     }
