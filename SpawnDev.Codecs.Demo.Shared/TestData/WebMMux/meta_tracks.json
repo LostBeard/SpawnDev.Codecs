@@ -1,0 +1,795 @@
+{
+"info": {
+"title": null,
+"muxing": "Lavf",
+"writing": "Lavf"
+},
+"globalTags": [],
+"tracks": [
+{
+"default": true,
+"forced": true,
+"number": 1,
+"uid": 1,
+"name": "MyVideo",
+"language": "und",
+"codec": "V_VP9",
+"type": 1,
+"defaultDurationNs": 100000000,
+"width": 64,
+"height": 48,
+"interlaced": false,
+"displayWidth": 85,
+"displayHeight": 48,
+"colour": {
+"matrix": 1,
+"range": 1,
+"sitingH": 1,
+"sitingV": 2
+},
+"tags": [
+[
+"ENCODER",
+"Lavc libvpx-vp9"
+]
+]
+},
+{
+"default": false,
+"forced": true,
+"number": 2,
+"uid": 2,
+"name": "MyAudio",
+"language": "fre",
+"codec": "A_OPUS",
+"codecDelayNs": 6500000,
+"type": 2,
+"channels": 1,
+"sampleRate": 48000.0,
+"bitDepth": 16,
+"codecPrivate": "4f707573486561640101380180bb0000000000",
+"tags": [
+[
+"ENCODER",
+"Lavc libopus"
+]
+],
+"initialPaddingSamples": 312
+}
+],
+"packets": [
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": -7,
+"key": true,
+"data": [
+657,
+229
+]
+},
+{
+"duration": 100,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 0,
+"key": true,
+"data": [
+893,
+1195
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 14,
+"key": true,
+"data": [
+2095,
+144
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 34,
+"key": true,
+"data": [
+2246,
+150
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 54,
+"key": true,
+"data": [
+2403,
+153
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 74,
+"key": true,
+"data": [
+2563,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 94,
+"key": true,
+"data": [
+2718,
+152
+]
+},
+{
+"duration": 100,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 100,
+"key": false,
+"data": [
+2876,
+35
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 114,
+"key": true,
+"data": [
+2918,
+152
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 134,
+"key": true,
+"data": [
+3077,
+150
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 154,
+"key": true,
+"data": [
+3234,
+154
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 174,
+"key": true,
+"data": [
+3395,
+154
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 194,
+"key": true,
+"data": [
+3556,
+149
+]
+},
+{
+"duration": 100,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 200,
+"key": false,
+"data": [
+3711,
+39
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 214,
+"key": true,
+"data": [
+3757,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 234,
+"key": true,
+"data": [
+3913,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 254,
+"key": true,
+"data": [
+4068,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 274,
+"key": true,
+"data": [
+4224,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 294,
+"key": true,
+"data": [
+4379,
+150
+]
+},
+{
+"duration": 100,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 300,
+"key": false,
+"data": [
+4535,
+23
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 314,
+"key": true,
+"data": [
+4565,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 334,
+"key": true,
+"data": [
+4721,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 354,
+"key": true,
+"data": [
+4876,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 374,
+"key": true,
+"data": [
+5032,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 394,
+"key": true,
+"data": [
+5187,
+150
+]
+},
+{
+"duration": 100,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 400,
+"key": false,
+"data": [
+5343,
+31
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 414,
+"key": true,
+"data": [
+5381,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 434,
+"key": true,
+"data": [
+5537,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 454,
+"key": true,
+"data": [
+5692,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 474,
+"key": true,
+"data": [
+5848,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 494,
+"key": true,
+"data": [
+6003,
+150
+]
+},
+{
+"duration": 100,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 500,
+"key": false,
+"data": [
+6159,
+19
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 514,
+"key": true,
+"data": [
+6185,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 534,
+"key": true,
+"data": [
+6341,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 554,
+"key": true,
+"data": [
+6496,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 574,
+"key": true,
+"data": [
+6652,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 594,
+"key": true,
+"data": [
+6807,
+150
+]
+},
+{
+"duration": 100,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 600,
+"key": false,
+"data": [
+6963,
+53
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 614,
+"key": true,
+"data": [
+7023,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 634,
+"key": true,
+"data": [
+7179,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 654,
+"key": true,
+"data": [
+7334,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 674,
+"key": true,
+"data": [
+7490,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 694,
+"key": true,
+"data": [
+7645,
+150
+]
+},
+{
+"duration": 100,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 700,
+"key": false,
+"data": [
+7801,
+20
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 714,
+"key": true,
+"data": [
+7828,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 734,
+"key": true,
+"data": [
+7984,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 754,
+"key": true,
+"data": [
+8139,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 774,
+"key": true,
+"data": [
+8295,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 794,
+"key": true,
+"data": [
+8450,
+150
+]
+},
+{
+"duration": 100,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 800,
+"key": false,
+"data": [
+8606,
+74
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 814,
+"key": true,
+"data": [
+8687,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 834,
+"key": true,
+"data": [
+8843,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 854,
+"key": true,
+"data": [
+8998,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 874,
+"key": true,
+"data": [
+9154,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 894,
+"key": true,
+"data": [
+9309,
+150
+]
+},
+{
+"duration": 100,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 900,
+"key": false,
+"data": [
+9465,
+33
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 914,
+"key": true,
+"data": [
+9505,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 934,
+"key": true,
+"data": [
+9661,
+148
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 954,
+"key": true,
+"data": [
+9816,
+149
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 2,
+"ts": 974,
+"key": true,
+"data": [
+9972,
+148
+]
+},
+{
+"duration": 7,
+"add": null,
+"discardNs": 13500000,
+"track": 2,
+"ts": 994,
+"key": true,
+"data": [
+10130,
+238
+]
+}
+],
+"live": false
+}

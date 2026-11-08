@@ -11,6 +11,21 @@
   through local.7 contain the ported code and must not be redistributed.
 - The FLAC decoder's MD5 kernels (own code, RFC 1321) moved to `FlacMd5Kernels`.
 
+### WebM writer rewritten clean-room (2026-11-08)
+- **`SpawnDev.Codecs.Container.Matroska.WebMWriter`** (MIT, written from RFC 8794 / RFC 9559 / the WebM guidelines and
+  black-box observation of ffmpeg's output): `AddVideoTrack(WebMVideoTrack)`, `AddAudioTrack(WebMAudioTrack)`,
+  `WriteFrame(track, packet, timestampMs, keyFrame, durationMs, blockAdditional, discardPaddingNs)`, `Finish()`;
+  `WebMWriterOptions` (apps, Title, global Tags, cluster limits), `WebMColour`. Interleaves packets by timestamp, holds one
+  audio packet back so a new cluster can start with it, splits clusters at 5 s / 5 MiB (pipe output: 1 s / 32 KiB) and at
+  video key frames once a cluster holds 4 KiB, writes SimpleBlocks or BlockGroups (alpha BlockAdditional, DiscardPadding,
+  non-default durations), Opus CodecDelay / SeekPreRoll, reserved CodecPrivate room, Cues, SeekHead, Duration and
+  per-track DURATION tags; non-seekable streams get the live layout.
+- Tests: `CodecsTestBase.WebMWriterTests.cs` is back (CpuOnly): 21 fixtures byte-identical with ffmpeg 8.1, in file order
+  and track by track (41 orderings). New fixtures pin the cluster rules and track header fields: `opus_6s`, `opus_live`,
+  `vp9_longgop`, `vp9_longgop_live`, `vp9_keyframe_4k`, `vp9_keyframe_live`, `vp9_size_live`, `meta_tracks`,
+  `meta_colour`, `meta_alpha_display` (`scripts/video/make_webm_mux_fixtures.py [case ...]`). `scripts/video/ebml_dump.py`
+  dumps an EBML tree.
+
 ### Warm-ups for the audio coders (2026-11-08)
 - `FlacDecoderGpu.WarmUpAsync`, `FlacEncoderGpu.WarmUpAsync`, `OggOpusEncoder.WarmUpAsync`: compile and load every kernel
   ahead of the first real call. Lore measured the first Ogg Opus save in Chrome on an RX 590 (WebGPU, D3D's FXC compiling

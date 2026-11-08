@@ -1,0 +1,197 @@
+{
+"info": {
+"title": null,
+"muxing": "Lavf",
+"writing": "Lavf"
+},
+"globalTags": [],
+"tracks": [
+{
+"default": false,
+"forced": false,
+"number": 1,
+"uid": 1,
+"language": "und",
+"codec": "V_VP9",
+"type": 1,
+"defaultDurationNs": 100000000,
+"width": 64,
+"height": 48,
+"interlaced": false,
+"alphaMode": true,
+"displayWidth": 96,
+"displayHeight": 48,
+"colour": {
+"range": 1
+},
+"tags": [
+[
+"ENCODER",
+"Lavc libvpx-vp9"
+]
+]
+}
+],
+"packets": [
+{
+"duration": 100,
+"add": [
+1677,
+94
+],
+"discardNs": 0,
+"track": 1,
+"ts": 0,
+"key": true,
+"data": [
+443,
+1224
+]
+},
+{
+"duration": 100,
+"add": [
+1826,
+15
+],
+"discardNs": 0,
+"ref": -100,
+"track": 1,
+"ts": 100,
+"key": false,
+"data": [
+1779,
+37
+]
+},
+{
+"duration": 100,
+"add": [
+1903,
+15
+],
+"discardNs": 0,
+"ref": -100,
+"track": 1,
+"ts": 200,
+"key": false,
+"data": [
+1852,
+41
+]
+},
+{
+"duration": 100,
+"add": [
+1963,
+15
+],
+"discardNs": 0,
+"ref": -100,
+"track": 1,
+"ts": 300,
+"key": false,
+"data": [
+1929,
+24
+]
+},
+{
+"duration": 100,
+"add": [
+2033,
+15
+],
+"discardNs": 0,
+"ref": -100,
+"track": 1,
+"ts": 400,
+"key": false,
+"data": [
+1989,
+34
+]
+},
+{
+"duration": 100,
+"add": [
+2090,
+15
+],
+"discardNs": 0,
+"ref": -100,
+"track": 1,
+"ts": 500,
+"key": false,
+"data": [
+2059,
+21
+]
+},
+{
+"duration": 100,
+"add": [
+2172,
+15
+],
+"discardNs": 0,
+"ref": -100,
+"track": 1,
+"ts": 600,
+"key": false,
+"data": [
+2116,
+46
+]
+},
+{
+"duration": 100,
+"add": [
+2227,
+15
+],
+"discardNs": 0,
+"ref": -100,
+"track": 1,
+"ts": 700,
+"key": false,
+"data": [
+2198,
+19
+]
+},
+{
+"duration": 100,
+"add": [
+2327,
+15
+],
+"discardNs": 0,
+"ref": -100,
+"track": 1,
+"ts": 800,
+"key": false,
+"data": [
+2253,
+64
+]
+},
+{
+"duration": 100,
+"add": [
+2385,
+15
+],
+"discardNs": 0,
+"ref": -100,
+"track": 1,
+"ts": 900,
+"key": false,
+"data": [
+2353,
+22
+]
+}
+],
+"live": false
+}

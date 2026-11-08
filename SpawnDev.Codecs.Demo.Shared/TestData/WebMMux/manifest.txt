@@ -9,3 +9,13 @@ av1_only
 tags_title
 two_video
 live_vp9_opus
+opus_6s
+opus_live
+vp9_longgop
+vp9_longgop_live
+vp9_keyframe_4k
+vp9_keyframe_live
+vp9_size_live
+meta_tracks
+meta_colour
+meta_alpha_display
