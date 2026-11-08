@@ -1,0 +1,826 @@
+{
+"info": {
+"title": null,
+"muxing": "Lavf",
+"writing": "Lavf"
+},
+"globalTags": [],
+"tracks": [
+{
+"default": false,
+"forced": false,
+"number": 1,
+"uid": 1,
+"language": "und",
+"codec": "A_OPUS",
+"codecDelayNs": 6500000,
+"type": 2,
+"channels": 1,
+"sampleRate": 48000.0,
+"bitDepth": 16,
+"codecPrivate": "4f707573486561640101380180bb0000000000",
+"tags": [
+[
+"ENCODER",
+"Lavc libopus"
+]
+],
+"initialPaddingSamples": 312
+}
+],
+"packets": [
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": -7,
+"key": true,
+"data": [
+454,
+229
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 14,
+"key": true,
+"data": [
+690,
+136
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 34,
+"key": true,
+"data": [
+833,
+143
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 54,
+"key": true,
+"data": [
+983,
+138
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 74,
+"key": true,
+"data": [
+1128,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 94,
+"key": true,
+"data": [
+1274,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 114,
+"key": true,
+"data": [
+1421,
+137
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 134,
+"key": true,
+"data": [
+1565,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 154,
+"key": true,
+"data": [
+1711,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 174,
+"key": true,
+"data": [
+1857,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 194,
+"key": true,
+"data": [
+2003,
+141
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 214,
+"key": true,
+"data": [
+2151,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 234,
+"key": true,
+"data": [
+2298,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 254,
+"key": true,
+"data": [
+2445,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 274,
+"key": true,
+"data": [
+2591,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 294,
+"key": true,
+"data": [
+2738,
+141
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 314,
+"key": true,
+"data": [
+2886,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 334,
+"key": true,
+"data": [
+3033,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 354,
+"key": true,
+"data": [
+3180,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 374,
+"key": true,
+"data": [
+3326,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 394,
+"key": true,
+"data": [
+3473,
+141
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 414,
+"key": true,
+"data": [
+3621,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 434,
+"key": true,
+"data": [
+3768,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 454,
+"key": true,
+"data": [
+3915,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 474,
+"key": true,
+"data": [
+4061,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 494,
+"key": true,
+"data": [
+4208,
+141
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 514,
+"key": true,
+"data": [
+4356,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 534,
+"key": true,
+"data": [
+4503,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 554,
+"key": true,
+"data": [
+4650,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 574,
+"key": true,
+"data": [
+4796,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 594,
+"key": true,
+"data": [
+4943,
+141
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 614,
+"key": true,
+"data": [
+5091,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 634,
+"key": true,
+"data": [
+5238,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 654,
+"key": true,
+"data": [
+5385,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 674,
+"key": true,
+"data": [
+5531,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 694,
+"key": true,
+"data": [
+5678,
+141
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 714,
+"key": true,
+"data": [
+5826,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 734,
+"key": true,
+"data": [
+5973,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 754,
+"key": true,
+"data": [
+6120,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 774,
+"key": true,
+"data": [
+6266,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 794,
+"key": true,
+"data": [
+6413,
+141
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 814,
+"key": true,
+"data": [
+6561,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 834,
+"key": true,
+"data": [
+6708,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 854,
+"key": true,
+"data": [
+6855,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 874,
+"key": true,
+"data": [
+7001,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 894,
+"key": true,
+"data": [
+7148,
+141
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 914,
+"key": true,
+"data": [
+7296,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 934,
+"key": true,
+"data": [
+7443,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 954,
+"key": true,
+"data": [
+7590,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 974,
+"key": true,
+"data": [
+7736,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 994,
+"key": true,
+"data": [
+7883,
+141
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 1014,
+"key": true,
+"data": [
+8031,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 1034,
+"key": true,
+"data": [
+8178,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 1054,
+"key": true,
+"data": [
+8325,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 1074,
+"key": true,
+"data": [
+8471,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 1094,
+"key": true,
+"data": [
+8618,
+141
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 1114,
+"key": true,
+"data": [
+8766,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 1134,
+"key": true,
+"data": [
+8913,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 1154,
+"key": true,
+"data": [
+9060,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 1174,
+"key": true,
+"data": [
+9206,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 1194,
+"key": true,
+"data": [
+9353,
+141
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 1214,
+"key": true,
+"data": [
+9501,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 1234,
+"key": true,
+"data": [
+9648,
+140
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 1254,
+"key": true,
+"data": [
+9795,
+139
+]
+},
+{
+"duration": 20,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 1274,
+"key": true,
+"data": [
+9941,
+140
+]
+},
+{
+"duration": 7,
+"add": null,
+"discardNs": 13500000,
+"track": 1,
+"ts": 1294,
+"key": true,
+"data": [
+10091,
+238
+]
+}
+],
+"live": false
+}

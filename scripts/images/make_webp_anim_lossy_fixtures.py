@@ -284,3 +284,38 @@ for sname, rgb in srcs:
 with open(os.path.join(FILT, "manifest.tsv"), "w", newline="\n") as fh:
     fh.write("\n".join(fman) + "\n")
 print(len(fman), "filter fixtures")
+
+# ---- still lossy files with ICCP / EXIF / XMP (Pillow's still save muxes them with libwebp's WebPMux)
+META = os.path.join(ROOT, "WebPLossyMeta")
+os.makedirs(META, exist_ok=True)
+icc = bytes(range(256)) * 2 + b"spawn-icc"          # opaque payload: the muxer copies it, nobody parses it here
+xmp = b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF/></x:xmpmeta>'
+exif_full = comfy_exif()                              # "Exif\0\0" + TIFF, what ComfyUI hands Pillow
+exif_stripped = exif_full[6:]                         # what Pillow's still save passes to libwebp
+mman = []
+srcs = {"meta_photo": opaque(photo(61, 43, 80))}
+a = opaque(photo(50, 34, 81))
+a[..., 3] = np.tile(np.linspace(0, 255, 50).astype(np.uint8), (34, 1))
+srcs["meta_alpha"] = a
+for name, kw, src in [
+    ("still_exif", dict(exif=exif_full), "meta_photo"),
+    ("still_icc_exif_xmp", dict(icc_profile=icc, exif=exif_full, xmp=xmp), "meta_photo"),
+    ("still_alpha_exif_xmp", dict(exif=exif_full, xmp=xmp), "meta_alpha"),
+]:
+    rgba = srcs[src]
+    img = Image.fromarray(rgba, "RGBA") if (rgba[..., 3] != 255).any() else Image.fromarray(np.ascontiguousarray(rgba[..., :3]), "RGB")
+    buf = io.BytesIO()
+    img.save(buf, "WEBP", quality=80, method=4, **kw)
+    with open(os.path.join(META, name + ".webp"), "wb") as fh:
+        fh.write(buf.getvalue())
+    if not os.path.exists(os.path.join(META, src + ".rgba.gz")):
+        with open(os.path.join(META, src + ".rgba.gz"), "wb") as fh:
+            fh.write(gzip.compress(np.ascontiguousarray(rgba).tobytes(), mtime=0))
+    h, w = rgba.shape[:2]
+    mman.append(f"{name}\t{src}\t{w}\t{h}\t{1 if 'icc_profile' in kw else 0}\t{1 if 'exif' in kw else 0}\t{1 if 'xmp' in kw else 0}")
+    print(name, len(buf.getvalue()))
+for nm, data in (("icc", icc), ("exif", exif_stripped), ("xmp", xmp)):
+    with open(os.path.join(META, nm + ".bin"), "wb") as fh:
+        fh.write(data)
+with open(os.path.join(META, "manifest.tsv"), "w", newline="\n") as fh:
+    fh.write("\n".join(mman) + "\n")

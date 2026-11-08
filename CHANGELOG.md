@@ -23,7 +23,32 @@
   for ALPH closes it.
 - Tests: `CodecsTestBase.WebPLossyAnimationEncoderTests.cs`; red-checked (flattening off, profile 0, key-frame tie rule,
   lossy tolerance 0, single-frame comparison, disposal tie rule, alpha scaling of the pixel test).
-- Status: CPU accelerator green (11 / 11 WebP lossy tests). CUDA, OpenCL and browser lanes not run yet.
+- Status: green on CPU (11 / 11 WebP lossy tests), CUDA and OpenCL (10 / 10 each), WebGPU and Wasm (8 / 8 each; the
+  Pillow checks are desktop-only). Lore checked SpawnGen's Save Animated WEBP against ComfyUI's own save (3 frames,
+  q80 m4, ComfyUI's EXIF): byte-identical on the CPU accelerator and on OpenCL (RX 590).
+
+### ICCP / EXIF / XMP on lossy stills (2026-11-08)
+- `WebPLossyEncodeOptions.IccProfile`, `Exif`, `Xmp`: written verbatim in libwebp WebPMux's still layout (RIFF, VP8X,
+  ICCP, [ALPH], VP8, EXIF, XMP), the file Pillow's still save writes (Pillow strips an `Exif\0\0` prefix before
+  libwebp: pass the stripped bytes). Opaque pictures byte-identical with Pillow; with transparency identical except the
+  ALPH coding. All three overloads; the ArrayView one names the needed size when the output is short.
+
+### WebM writer: `WebMWriter`, a port of FFmpeg 8.1's matroskaenc in WebM mode (2026-11-08)
+- **New `SpawnDev.Codecs.Container.Matroska.WebMWriter`**: `AddVideoTrack` (V_VP8 / V_VP9 / V_AV1: size, interlacing,
+  AlphaMode, display size, Colour, DefaultDuration, CodecPrivate + reserve), `AddAudioTrack` (A_OPUS / A_VORBIS: rate,
+  channels, bit depth, initial padding -> CodecDelay + timestamp offset, SeekPreRoll for Opus), `WriteFrame` (ms
+  timestamps, key frame, duration, VP8/VP9 alpha as BlockAdditional 1, DiscardPadding), `Finish`. Global and per-track
+  tags, title, muxing / writing app.
+- The same bytes as `ffmpeg -fflags +bitexact -c copy` for the same packets (11 fixtures from ffmpeg 8.1: VP9, VP9 +
+  Opus, VP9 alpha, 12 s VP9 + Opus, Opus at 48 / 44.1 kHz, VP8, AV1 (libaom: reserved CodecPrivate), title + tags, two
+  video tracks, a non-seekable pipe), whether packets arrive interleaved or track by track: libavformat's interleaver
+  (raw timestamps, ties by track), matroskaenc's held-back audio packet, cluster rules (5 s / 5 MB, 4 KB before a video
+  key frame, 16-bit timestamp overflow; 1 s / 32 KB non-seekable), SimpleBlock vs BlockGroup, BlockDuration rules
+  (default duration, coded Opus duration), Cues, the reserved SeekHead, Duration and per-track DURATION tags patched at
+  the end, AV1 temporal delimiter / padding OBUs removed.
+- A container writer on the host: payloads come already encoded and go to the caller's stream (like `IvfWriter`).
+- Tests: `CodecsTestBase.WebMWriterTests.cs` (CpuOnly); red-checked (audio not held back, no 4 KB key-frame cluster
+  rule, DURATION without its NUL, Opus duration rule off, interleave ties reversed).
 
 ## 1.0.1 (2026-10-30)
 

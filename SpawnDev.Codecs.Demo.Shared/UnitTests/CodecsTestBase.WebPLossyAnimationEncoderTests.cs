@@ -291,4 +291,65 @@ public abstract partial class CodecsTestBase
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
+
+    private const string WebPLossyMetaPrefix = "SpawnDev.Codecs.Demo.Shared.TestData.WebPLossyMeta.";
+
+    /// <summary>
+    /// Still lossy files with ICCP / EXIF / XMP against Pillow's still save (libwebp WebPMux): opaque pictures
+    /// byte-identical; a transparent one identical except the ALPH coding. The ArrayView overload writes the same file
+    /// and refuses an output one byte short, naming the size.
+    /// </summary>
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task WebPLossyEncoderGpu_StillMetadata_MatchesPillow()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            using var enc = new WebPLossyEncoderGpu(acc);
+            using var dec = new WebPDecoderGpu(acc);
+            byte[] icc = ReadEmbedded(WebPLossyMetaPrefix + "icc.bin"), exif = ReadEmbedded(WebPLossyMetaPrefix + "exif.bin"), xmp = ReadEmbedded(WebPLossyMetaPrefix + "xmp.bin");
+            var failures = new List<string>();
+            int count = 0;
+            foreach (var line in System.Text.Encoding.UTF8.GetString(ReadEmbedded(WebPLossyMetaPrefix + "manifest.tsv")).Split('\n'))
+            {
+                var row = line.TrimEnd('\r');
+                if (row.Length == 0) continue;
+                var c = row.Split('\t');
+                count++;
+                string name = c[0];
+                int w = int.Parse(c[2]), h = int.Parse(c[3]);
+                var rgba = Gunzip(ReadEmbedded(WebPLossyMetaPrefix + c[1] + ".rgba.gz"));
+                var o = new WebPLossyEncodeOptions
+                {
+                    Quality = 80, Method = 4,
+                    IccProfile = c[4] == "1" ? icc : null, Exif = c[5] == "1" ? exif : null, Xmp = c[6] == "1" ? xmp : null,
+                };
+                var pillow = ReadEmbedded(WebPLossyMetaPrefix + name + ".webp");
+                var ours = await enc.EncodeAsync(rgba, w, h, o);
+                if (!ours.AsSpan().SequenceEqual(pillow))
+                {
+                    bool alpha = WebPHasAlph(pillow);
+                    string? diff = alpha ? await CompareWebPAnimExceptAlphCoding(dec, ours, pillow) : $"{ours.Length} bytes vs Pillow {pillow.Length}";
+                    if (diff != null) { failures.Add($"{name}: {diff}"); continue; }
+                }
+                // the ArrayView overload: the same file, nothing past it, too small refused with the size
+                using var dIn = DeviceVerify.Upload(acc, rgba, slack: 3);
+                using var dOut = DeviceVerify.Poisoned(acc, ours.Length + 64);
+                int length = await enc.EncodeAsync(dIn.View, w, h, dOut.View.SubView(0, ours.Length), o);
+                if (length != ours.Length) failures.Add($"{name}: ArrayView length {length} vs {ours.Length}");
+                var tail = await DeviceVerify.AllEqualAsync(acc, dOut.View.SubView(length, 64), 64, 0xAB);
+                if (tail != null) failures.Add($"{name}: bytes past the end: {tail}");
+                if (!(await DeviceTransfer.DownloadAsync(dOut.View, length)).AsSpan().SequenceEqual(ours)) failures.Add($"{name}: ArrayView file differs");
+                using var small = DeviceVerify.Poisoned(acc, ours.Length - 1);
+                string? message = null;
+                try { await enc.EncodeAsync(dIn.View, w, h, small.View, o); }
+                catch (ArgumentException ex) { message = ex.Message; }
+                if (message == null || !message.Contains(ours.Length.ToString())) failures.Add($"{name}: too-small output: {message ?? "no exception"}");
+            }
+            True(count >= 3, $"only {count} fixtures");
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
 }

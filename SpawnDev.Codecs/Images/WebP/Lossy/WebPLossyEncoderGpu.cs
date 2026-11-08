@@ -58,6 +58,18 @@ public sealed record WebPLossyEncodeOptions
     /// alpha is always kept exactly (libwebp's alpha_quality 100). Null = <see cref="WebPAlphaEncodeOptions"/> defaults.
     /// </summary>
     public WebPAlphaEncodeOptions? Alpha { get; init; }
+
+    /// <summary>ICC profile written as an ICCP chunk (null = none). Still images only.</summary>
+    public byte[]? IccProfile { get; init; }
+
+    /// <summary>
+    /// EXIF chunk payload, written verbatim (null = none). Still images only. Pillow's still save strips an "Exif\0\0"
+    /// prefix before libwebp sees the bytes: pass the stripped bytes for Pillow's file.
+    /// </summary>
+    public byte[]? Exif { get; init; }
+
+    /// <summary>XMP packet written as an XMP chunk (null = none). Still images only.</summary>
+    public byte[]? Xmp { get; init; }
 }
 
 /// <summary>Lossy (VP8) WebP encoder running on an ILGPU accelerator, byte-identical with libwebp.</summary>
@@ -220,6 +232,12 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
         ArrayView1D<byte, Stride1D.Dense> output, WebPLossyEncodeOptions? options = null)
     {
         var o = options ?? new WebPLossyEncodeOptions();
+        if (HasMetadata(o))
+        {
+            return await EncodeStillWithMetadataAsync(rgba, width, height, o, need =>
+                need <= output.Length ? new ValueTask<ArrayView1D<byte, Stride1D.Dense>>(output)
+                    : throw new ArgumentException($"output must hold {need} bytes.", nameof(output)));
+        }
         var (simpleLength, alphaLength) = await EncodeToScratchAsync(rgba, width, height, o);
         int length = FileLength(simpleLength, alphaLength);
         if (output.Length < length) throw new ArgumentException($"output must hold {length} bytes.", nameof(output));
@@ -372,7 +390,13 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
     {
         _stageIn.Ensure(rgba.Length);
         DeviceTransfer.Upload(_stageIn.View, rgba.Span);
-        var (simpleLength, alphaLength) = await EncodeToScratchAsync(_stageIn.View, width, height, options ?? new WebPLossyEncodeOptions());
+        var o = options ?? new WebPLossyEncodeOptions();
+        if (HasMetadata(o))
+        {
+            int mlength = await EncodeStillWithMetadataAsync(_stageIn.View, width, height, o, need => _stageOut.EnsureDrainedAsync(need));
+            return await DeviceTransfer.DownloadAsync(_stageOut.View, mlength);
+        }
+        var (simpleLength, alphaLength) = await EncodeToScratchAsync(_stageIn.View, width, height, o);
         int length = FileLength(simpleLength, alphaLength);
         Assemble(_stageOut.Ensure(length), length, alphaLength);
         await _accelerator.SynchronizeAsync();
@@ -386,7 +410,13 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
         ArgumentNullException.ThrowIfNull(rgba);
         _stageIn.Ensure(rgba.ByteLength);
         DeviceTransfer.Upload(_stageIn.View, rgba);
-        var (simpleLength, alphaLength) = await EncodeToScratchAsync(_stageIn.View, width, height, options ?? new WebPLossyEncodeOptions());
+        var o = options ?? new WebPLossyEncodeOptions();
+        if (HasMetadata(o))
+        {
+            int mlength = await EncodeStillWithMetadataAsync(_stageIn.View, width, height, o, need => _stageOut.EnsureDrainedAsync(need));
+            return await DeviceTransfer.DownloadUint8ArrayAsync(_stageOut.View, mlength);
+        }
+        var (simpleLength, alphaLength) = await EncodeToScratchAsync(_stageIn.View, width, height, o);
         int length = FileLength(simpleLength, alphaLength);
         Assemble(_stageOut.Ensure(length), length, alphaLength);
         await _accelerator.SynchronizeAsync();

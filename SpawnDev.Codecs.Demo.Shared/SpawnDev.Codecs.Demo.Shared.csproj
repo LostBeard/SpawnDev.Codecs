@@ -58,6 +58,8 @@
 		<EmbeddedResource Include="TestData\WebPLossyAlpha\*" />
 		<EmbeddedResource Include="TestData\WebPAnimLossy\*" />
 		<EmbeddedResource Include="TestData\WebPLossyEncFilter\*" />
+		<EmbeddedResource Include="TestData\WebMMux\*" />
+		<EmbeddedResource Include="TestData\WebPLossyMeta\*" />
 		<EmbeddedResource Include="TestData\Filters\*" />
 		<EmbeddedResource Include="TestData\Lz4\*" />
 		<EmbeddedResource Include="TestData\Lz4Dec\*" />

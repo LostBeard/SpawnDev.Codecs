@@ -1,0 +1,133 @@
+{
+"info": {
+"title": null,
+"muxing": "Lavf",
+"writing": "Lavf"
+},
+"globalTags": [],
+"tracks": [
+{
+"default": false,
+"forced": false,
+"codecPrivateReserve": 493,
+"number": 1,
+"uid": 1,
+"language": "und",
+"codec": "V_AV1",
+"type": 1,
+"defaultDurationNs": 125000000,
+"width": 64,
+"height": 64,
+"interlaced": false,
+"colour": {
+"range": 1
+},
+"codecPrivate": "81000c000a0a00000002afff9b5f3008",
+"tags": [
+[
+"ENCODER",
+"Lavc libaom-av1"
+]
+]
+}
+],
+"packets": [
+{
+"duration": 125,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 0,
+"key": true,
+"data": [
+926,
+449
+]
+},
+{
+"duration": 125,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 125,
+"key": false,
+"data": [
+1382,
+182
+]
+},
+{
+"duration": 125,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 250,
+"key": false,
+"data": [
+1570,
+48
+]
+},
+{
+"duration": 125,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 375,
+"key": false,
+"data": [
+1624,
+20
+]
+},
+{
+"duration": 125,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 500,
+"key": true,
+"data": [
+1651,
+454
+]
+},
+{
+"duration": 125,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 625,
+"key": false,
+"data": [
+2112,
+231
+]
+},
+{
+"duration": 125,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 750,
+"key": false,
+"data": [
+2349,
+54
+]
+},
+{
+"duration": 125,
+"add": null,
+"discardNs": 0,
+"track": 1,
+"ts": 875,
+"key": false,
+"data": [
+2409,
+20
+]
+}
+],
+"live": false
+}

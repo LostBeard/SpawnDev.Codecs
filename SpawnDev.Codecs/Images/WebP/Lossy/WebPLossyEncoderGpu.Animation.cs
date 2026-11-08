@@ -281,6 +281,8 @@ public sealed partial class WebPLossyEncoderGpu
     {
         if (frameCount < 1) throw new ArgumentException("An animation needs at least one frame.");
         ArgumentNullException.ThrowIfNull(durationsMs);
+        if (o.IccProfile != null || o.Exif != null || o.Xmp != null)
+            throw new ArgumentException("An animation takes its ICC / EXIF / XMP from WebPLossyAnimationOptions, not the per-frame options.");
         if (durationsMs.Count != frameCount)
             throw new ArgumentException($"{durationsMs.Count} durations for {frameCount} frames.", nameof(durationsMs));
         for (int k = 0; k < frameCount; k++)
@@ -793,63 +795,22 @@ public sealed partial class WebPLossyEncoderGpu
                 blob += run.Icc.Length;
             }
             a.AnimChunk(14, o, p, unchecked((int)run.Background), run.LoopCount);
-            WriteTail(run, o, (int)run.Cursor, blob);
+            WriteMetadataTail(o, (int)run.Cursor, blob, run.Exif, run.Xmp);
             await _accelerator.SynchronizeAsync();
         }
         return (int)animatedLength;
     }
 
-    /// <summary>EXIF then XMP chunks at <paramref name="at"/> (blob offsets follow the ICC payload).</summary>
-    private void WriteTail(AnimRun run, ArrayView1D<byte, Stride1D.Dense> o, int at, int blob)
-    {
-        var a = _anim!;
-        if (run.Exif != null)
-        {
-            a.BlobChunk(ChunkLength(run.Exif), o, a.Blobs.View, at, 0x46495845, blob, run.Exif.Length);   // "EXIF"
-            at += ChunkLength(run.Exif);
-            blob += run.Exif.Length;
-        }
-        if (run.Xmp != null)
-            a.BlobChunk(ChunkLength(run.Xmp), o, a.Blobs.View, at, 0x20504D58, blob, run.Xmp.Length);     // "XMP "
-    }
+    private static long StillLength(AnimRun run, AnimVariant v) => StillFileLength(v.Length, v.HasAlpha, run.Icc, run.Exif, run.Xmp);
 
-    private static int StillFlags(AnimRun run, AnimVariant v) =>
-        (v.HasAlpha ? 0x10 : 0) | (run.Icc != null ? 0x20 : 0) | (run.Exif != null ? 0x08 : 0) | (run.Xmp != null ? 0x04 : 0);
-
-    /// <summary>Length of the non-animated file WebPMuxAssemble writes for one image: the simple format when no VP8X flag is needed.</summary>
-    private static long StillLength(AnimRun run, AnimVariant v)
-    {
-        if (StillFlags(run, v) == 0) return v.Length;
-        return 30 + ChunkLength(run.Icc) + (v.Length - ImageChunksStart(v)) + ChunkLength(run.Exif) + ChunkLength(run.Xmp);
-    }
-
-    /// <summary>The non-animated file of one canvas-sized image: RIFF [+ VP8X + ICCP] + its chunks [+ EXIF + XMP].</summary>
+    /// <summary>The non-animated file of one canvas-sized image (MuxCleanup / OptimizeSingleFrame).</summary>
     private async Task<int> WriteStillAsync(AnimRun run, AnimVariant v)
     {
-        var a = _anim!;
         long length = StillLength(run, v);
         var output = await run.Sink.ReserveAsync(length);
         if (output is { } o)
         {
-            int flags = StillFlags(run, v);
-            if (flags == 0)
-            {
-                a.Copy(v.Length, o, FileView(v), 0, 0);   // the still file as the encoder wrote it (RIFF + VP8)
-            }
-            else
-            {
-                a.FileHeader(30, o, (int)length - 8, flags, run.Width, run.Height);
-                int p = 30, blob = 0;
-                if (run.Icc != null)
-                {
-                    a.BlobChunk(ChunkLength(run.Icc), o, a.Blobs.View, p, 0x50434349, blob, run.Icc.Length);
-                    p += ChunkLength(run.Icc);
-                    blob += run.Icc.Length;
-                }
-                int skip = ImageChunksStart(v);
-                a.Copy(v.Length - skip, o, FileView(v), p, skip);
-                WriteTail(run, o, p + v.Length - skip, blob);
-            }
+            WriteStillFile(o, FileView(v), v.Length, v.HasAlpha, run.Width, run.Height, run.Icc, run.Exif, run.Xmp);
             await _accelerator.SynchronizeAsync();
         }
         return (int)length;

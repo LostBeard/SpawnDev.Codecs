@@ -23,3 +23,8 @@ WebPAnimLossy/* binary
 WebPAnimLossy/manifest.tsv text eol=lf
 WebPLossyEncFilter/* binary
 WebPLossyEncFilter/manifest.tsv text eol=lf
+WebMMux/*.webm binary
+WebMMux/*.json text eol=lf
+WebMMux/manifest.txt text eol=lf
+WebPLossyMeta/* binary
+WebPLossyMeta/manifest.tsv text eol=lf

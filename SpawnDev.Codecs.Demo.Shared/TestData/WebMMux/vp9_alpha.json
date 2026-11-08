@@ -1,0 +1,227 @@
+{
+"info": {
+"title": null,
+"muxing": "Lavf",
+"writing": "Lavf"
+},
+"globalTags": [],
+"tracks": [
+{
+"default": false,
+"forced": false,
+"number": 1,
+"uid": 1,
+"language": "und",
+"codec": "V_VP9",
+"type": 1,
+"defaultDurationNs": 83333333,
+"width": 64,
+"height": 48,
+"interlaced": false,
+"alphaMode": true,
+"colour": {
+"range": 1
+},
+"tags": [
+[
+"ENCODER",
+"Lavc libvpx-vp9"
+]
+]
+}
+],
+"packets": [
+{
+"duration": 83,
+"add": [
+1672,
+129
+],
+"discardNs": 0,
+"track": 1,
+"ts": 0,
+"key": true,
+"data": [
+435,
+1224
+]
+},
+{
+"duration": 83,
+"add": [
+1834,
+15
+],
+"discardNs": 0,
+"ref": -83,
+"track": 1,
+"ts": 83,
+"key": false,
+"data": [
+1809,
+15
+]
+},
+{
+"duration": 83,
+"add": [
+1915,
+15
+],
+"discardNs": 0,
+"ref": -84,
+"track": 1,
+"ts": 167,
+"key": false,
+"data": [
+1860,
+45
+]
+},
+{
+"duration": 83,
+"add": [
+1976,
+15
+],
+"discardNs": 0,
+"ref": -83,
+"track": 1,
+"ts": 250,
+"key": false,
+"data": [
+1941,
+25
+]
+},
+{
+"duration": 83,
+"add": [
+2043,
+15
+],
+"discardNs": 0,
+"ref": -83,
+"track": 1,
+"ts": 333,
+"key": false,
+"data": [
+2002,
+31
+]
+},
+{
+"duration": 83,
+"add": [
+2105,
+15
+],
+"discardNs": 0,
+"ref": -84,
+"track": 1,
+"ts": 417,
+"key": false,
+"data": [
+2069,
+26
+]
+},
+{
+"duration": 83,
+"add": [
+2179,
+15
+],
+"discardNs": 0,
+"ref": -83,
+"track": 1,
+"ts": 500,
+"key": false,
+"data": [
+2131,
+38
+]
+},
+{
+"duration": 83,
+"add": [
+2237,
+15
+],
+"discardNs": 0,
+"ref": -83,
+"track": 1,
+"ts": 583,
+"key": false,
+"data": [
+2205,
+22
+]
+},
+{
+"duration": 83,
+"add": [
+2330,
+15
+],
+"discardNs": 0,
+"ref": -84,
+"track": 1,
+"ts": 667,
+"key": false,
+"data": [
+2263,
+57
+]
+},
+{
+"duration": 83,
+"add": [
+2381,
+15
+],
+"discardNs": 0,
+"ref": -83,
+"track": 1,
+"ts": 750,
+"key": false,
+"data": [
+2356,
+15
+]
+},
+{
+"duration": 83,
+"add": [
+2438,
+15
+],
+"discardNs": 0,
+"ref": -83,
+"track": 1,
+"ts": 833,
+"key": false,
+"data": [
+2407,
+21
+]
+},
+{
+"duration": 83,
+"add": [
+2510,
+15
+],
+"discardNs": 0,
+"ref": -84,
+"track": 1,
+"ts": 917,
+"key": false,
+"data": [
+2464,
+36
+]
+}
+],
+"live": false
+}
