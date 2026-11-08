@@ -378,4 +378,33 @@ public abstract partial class CodecsTestBase
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
+    /// <summary>Diagnostics (skipped unless MP3DEC_DUMP names a folder): the first batch's intermediate buffers of cbr128_st44
+    /// on this backend, written as raw float32 files named after the backend, for comparing backends.</summary>
+    [TestMethod(Timeout = 600000, Category = "DesktopOnly,NotOnWebGL")]
+    public async Task Mp3DecoderGpu_DumpStages_ForBackendCompare()
+    {
+        string? dir = OperatingSystem.IsBrowser() ? null : Environment.GetEnvironmentVariable("MP3DEC_DUMP");
+        if (string.IsNullOrEmpty(dir)) throw new UnsupportedTestException("Set MP3DEC_DUMP to a folder.");
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        try
+        {
+            string tag = acc.AcceleratorType.ToString();
+            Mp3DecoderGpu.DebugDump = (name, values) =>
+            {
+                var bytes = new byte[values.Length * 4];
+                Buffer.BlockCopy(values, 0, bytes, 0, bytes.Length);
+                File.WriteAllBytes(Path.Combine(dir, tag + "_" + name + ".f32"), bytes);
+            };
+            using var dec = new Mp3DecoderGpu(acc);
+            var r = await dec.DecodeAsync(ReadEmbedded("SpawnDev.Codecs.Demo.Shared.TestData.Mp3Dec.cbr128_st44.mp3"));
+            var pcm = new byte[r.Interleaved!.Length * 4];
+            Buffer.BlockCopy(r.Interleaved, 0, pcm, 0, pcm.Length);
+            File.WriteAllBytes(Path.Combine(dir, tag + "_pcm.f32"), pcm);
+        }
+        finally
+        {
+            Mp3DecoderGpu.DebugDump = null;
+            ReleaseAccelerator(ctx, acc);
+        }
+    }
 }

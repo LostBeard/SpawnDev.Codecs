@@ -51,6 +51,9 @@ public sealed record Mp3DecodeResult
 /// <summary>MP3 decoder on the accelerator (port of minimp3, CC0; see the file header).</summary>
 public sealed class Mp3DecoderGpu : IDisposable
 {
+    /// <summary>Diagnostics only: receives the first batch's intermediate buffers (name, values) when set.</summary>
+    internal static Action<string, float[]>? DebugDump { get; set; }
+
     private readonly Accelerator _accelerator;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _ints;
     private readonly MemoryBuffer1D<float, Stride1D.Dense> _floats;
@@ -331,6 +334,16 @@ public sealed class Mp3DecoderGpu : IDisposable
                 await pacer.LaunchedAsync();
                 await Launch(gB * 18 * nch, (n, first) => _dct(n, tbuf.View, dct.View, _floats.View, meta.View, (int)first), pacer);
                 await Launch((long)gB * 18 * nch * 32, (n, first) => _synth(n, dct.View, output.View, _floats.View, meta.View, firstSample, skip, total, planar ? 1 : 0, first), pacer);
+                if (DebugDump is { } dump && f0 == 0)
+                {
+                    // diagnostics: the first batch's intermediate buffers (before the history carry)
+                    await a.SynchronizeAsync();
+                    dump("spec", await spec.View.SubView(0, (long)gB * nch * 576).CopyToHostAsync());
+                    dump("xbuf", await xbuf.View.SubView(0, (long)gB * nch * 576).CopyToHostAsync());
+                    dump("tbuf", await tbuf.View.SubView(0, (long)gB * nch * 576).CopyToHostAsync());
+                    dump("dct", await dct.View.SubView(0, (K.HistorySlots + (long)gB * 18) * nch * 32).CopyToHostAsync());
+                    dump("ovl", await ovl.View.SubView(0, ((long)gB + 1) * nch * 288).CopyToHostAsync());
+                }
                 _carry(K.HistorySlots * nch * 32, dct.View, (long)gB * 18 * nch * 32, 0L);
                 await pacer.LaunchedAsync();
             }
