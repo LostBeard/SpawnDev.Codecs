@@ -79,3 +79,5 @@ Observable behaviour (TestData/FlacEnc, `scripts/audio/make_flac_encoder_fixture
   the frames with FFmpeg is NOT required.
 Acceptance tests: the parked FLAC encoder test, adapted (byte identity of frames -> lossless + size ratio; metadata
 bytes still exact). Lore (SpawnGen) checks ComfyUI parity afterwards.
+Status (2026-11-08): implemented clean-room (FlacEncoderGpu.Encode.cs, FlacEncodeKernels.cs); the adapted tests are back in
+UnitTests/ and green on the CPU accelerator (65 fixtures lossless, metadata exact, frames 0.80 .. 1.00 x FFmpeg's).

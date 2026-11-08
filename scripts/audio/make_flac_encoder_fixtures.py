@@ -1,9 +1,10 @@
-"""Fixtures for the FLAC ENCODER (FlacEncoderGpu.EncodeAsync, a port of FFmpeg 8.1's flacenc + FLAC muxer).
+"""Fixtures for the FLAC ENCODER (FlacEncoderGpu.EncodeAsync, a clean-room encoder written from RFC 9639).
 
 For each source signal: <src>.s32.gz (the interleaved samples as int32 little-endian, the value range of the bit depth)
-and FFmpeg's .flac of it at several compression levels (`-fflags +bitexact -flags +bitexact`, deterministic), the
-expected file, made with `-cpuflags 0` (FFmpeg's C code, the same on every CPU; its x86 SIMD autocorrelation rounds
-differently). Our port of that C code must write the same bytes.
+and the ffmpeg binary's .flac of it at several compression levels (`-fflags +bitexact -flags +bitexact`, deterministic,
+`-cpuflags 0` so the file is the same on every CPU), the reference file. Our encoder must be lossless, write the same
+metadata blocks (STREAMINFO apart from the min / max frame size, VORBIS_COMMENT, PADDING) and, per file, frames at most
+2 % larger than the reference's (CodecsTestBase.FlacStreamEncoderTests.cs); its frames need not equal ffmpeg's.
 
 Writes SpawnDev.Codecs.Demo.Shared/TestData/FlacEnc/: <src>.s32.gz, <src>_l<level>.flac, manifest.tsv
 (name, source, channels, rate, bits, samples per channel, level).
