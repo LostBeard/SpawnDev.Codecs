@@ -19,3 +19,7 @@ Opus/*.pcm16 binary
 Opus/*.rng binary
 OpusEnc/* binary
 OpusEnc/manifest.tsv text eol=lf
+WebPAnimLossy/* binary
+WebPAnimLossy/manifest.tsv text eol=lf
+WebPLossyEncFilter/* binary
+WebPLossyEncFilter/manifest.tsv text eol=lf

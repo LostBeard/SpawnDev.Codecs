@@ -1,5 +1,30 @@
 # SpawnDev.Codecs CHANGELOG
 
+## Unreleased
+
+### Animated lossy WebP: `WebPLossyEncoderGpu.EncodeAnimationAsync`, a port of libwebp 1.6.0's WebPAnimEncoder (2026-11-08)
+- **New `WebPLossyEncoderGpu.EncodeAnimationAsync`** (managed, `TypedArray` and `ArrayView1D` overloads): full-canvas RGBA8
+  frames + per-frame durations in, the file Pillow's `save(save_all=True, lossless=False, quality, method, exif)` writes
+  out (ComfyUI's Save Animated WEBP). `WebPLossyAnimationOptions`: loop count, background colour, kmin / kmax (Pillow's
+  lossy defaults 3 / 5, sanitized as libwebp does), ICCP / EXIF / XMP chunks. EXIF is written exactly as given: Pillow's
+  animated save keeps the `Exif\0\0` prefix that its still save strips.
+- libwebp's decisions, frame for frame: change rectangles (lossless, then the lossy tolerance of the quality), snapped to
+  even offsets; previous-frame disposal (none / background) by the smaller rectangle; blending when possible, with
+  fully-similar 8x8 blocks made transparent and the loop filter off; dropped frames whose durations merge into the
+  previous one (and libwebp's 1x1 split frame past 24-bit durations); key frames by size penalty between kmin and kmax;
+  a lone frame written as a still (MuxCleanup / OptimizeSingleFrame). Rectangles, block flattening, canvases and every
+  byte of the file are kernels (`WebPAnimKernels`); the host reads back rectangles, two flags and encoded sizes.
+- **New `WebPLossyEncodeOptions.FilterStrength`** (libwebp `filter_strength`, default 60; 0 writes VP8 profile 2):
+  byte-identical with libwebp at 0 / 25 / 60 / 100.
+- Output vs libwebp (26 fixtures, `scripts/images/make_webp_anim_lossy_fixtures.py`, Pillow 13.0.0 / libwebp 1.6.0):
+  19 byte-identical; the 7 whose frames carry transparent pixels (flattened blocks, transparent sources) are identical
+  except the ALPH chunks, which our VP8L coder writes (same decoded alpha planes, other bytes). Because libwebp picks key
+  frames by encoded size, an ALPH size difference can change that choice on other content; a libwebp-exact VP8L coder
+  for ALPH closes it.
+- Tests: `CodecsTestBase.WebPLossyAnimationEncoderTests.cs`; red-checked (flattening off, profile 0, key-frame tie rule,
+  lossy tolerance 0, single-frame comparison, disposal tie rule, alpha scaling of the pixel test).
+- Status: CPU accelerator green (11 / 11 WebP lossy tests). CUDA, OpenCL and browser lanes not run yet.
+
 ## 1.0.1 (2026-10-30)
 
 Dependency update; no API or codec changes.

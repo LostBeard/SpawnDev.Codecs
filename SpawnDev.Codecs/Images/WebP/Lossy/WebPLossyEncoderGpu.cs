@@ -44,6 +44,12 @@ public sealed record WebPLossyEncodeOptions
     /// <summary>libwebp method; 3 and 4 (the default) are supported.</summary>
     public int Method { get; init; } = 4;
 
+    /// <summary>
+    /// libwebp `filter_strength` 0..100 (default 60): strength of the in-loop deblocking filter the decoder applies. 0 turns
+    /// the filter off and writes VP8 profile 2, as libwebp does (WebPAnimEncoder uses 0 for frames it blends onto the canvas).
+    /// </summary>
+    public int FilterStrength { get; init; } = 60;
+
     /// <summary>Keep the RGB under fully transparent pixels (libwebp `exact`); false runs libwebp's transparent-area cleanup.</summary>
     public bool Exact { get; init; }
 
@@ -56,7 +62,7 @@ public sealed record WebPLossyEncodeOptions
 
 /// <summary>Lossy (VP8) WebP encoder running on an ILGPU accelerator, byte-identical with libwebp.</summary>
 /// <remarks>Not thread-safe: one in-flight encode per instance.</remarks>
-public sealed class WebPLossyEncoderGpu : IDisposable
+public sealed partial class WebPLossyEncoderGpu : IDisposable
 {
     private readonly Accelerator _accelerator;
     private readonly WebPRgbaToYuvGpu _toYuv;
@@ -174,7 +180,7 @@ public sealed class WebPLossyEncoderGpu : IDisposable
         m[M.Width] = l.Width; m[M.Height] = l.Height; m[M.MbW] = l.MbW; m[M.MbH] = l.MbH;
         m[M.Method] = o.Method;
         m[M.QualityX100] = (int)(o.Quality * 100f);
-        m[M.SnsStrength] = 50; m[M.FilterStrength] = 60; m[M.FilterSharpnessCfg] = 0; m[M.FilterType] = 1; m[M.SegmentsCfg] = 4;
+        m[M.SnsStrength] = 50; m[M.FilterStrength] = o.FilterStrength; m[M.FilterSharpnessCfg] = 0; m[M.FilterType] = 1; m[M.SegmentsCfg] = 4;
         m[M.ErrorDiffusion] = o.Quality <= 98f ? 1 : 0;
         m[M.MaxI4HeaderBits] = 256 * 16 * 16;
         m[M.PassMaxI4HeaderBits] = maxI4HeaderBits;
@@ -183,7 +189,8 @@ public sealed class WebPLossyEncoderGpu : IDisposable
         m[M.TokenCapacity] = (int)tokenCapacity;
         m[M.Partition0Capacity] = l.P0Cap;
         m[M.Token1Capacity] = l.T1Cap;
-        m[M.Profile] = 0;   // filter_strength 60 > 0 and filter_type 1 -> profile 0
+        // InitVP8Encoder: use_filter = filter_strength > 0 || autofilter (always 0 here); filter_type 1 -> profile 0, no filter -> 2
+        m[M.Profile] = o.FilterStrength > 0 ? 0 : 2;
         int maxCount = l.MbCount >> 3;
         if (maxCount < 96) maxCount = 96;
         m[M.MaxCount] = maxCount;
@@ -200,6 +207,7 @@ public sealed class WebPLossyEncoderGpu : IDisposable
         if (width <= 0 || width > 16383) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0 || height > 16383) throw new ArgumentOutOfRangeException(nameof(height));
         if (o.Quality < 0 || o.Quality > 100) throw new ArgumentOutOfRangeException(nameof(o), "Quality must be 0..100.");
+        if (o.FilterStrength < 0 || o.FilterStrength > 100) throw new ArgumentOutOfRangeException(nameof(o), "FilterStrength must be 0..100.");
         if (o.Method is not (3 or 4))
             throw new NotSupportedException($"Method {o.Method}: only methods 3 and 4 are ported to the accelerator so far.");
     }
@@ -393,5 +401,6 @@ public sealed class WebPLossyEncoderGpu : IDisposable
         _yuv.Dispose(); _work.Dispose(); _scratch.Dispose(); _stageIn.Dispose(); _stageOut.Dispose();
         _mbRecs.Dispose(); _state.Dispose(); _tokens.Dispose();
         _alphaEncoder?.Dispose(); _alphaPayload.Dispose();
+        _anim?.Dispose();
     }
 }
