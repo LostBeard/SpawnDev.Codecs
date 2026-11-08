@@ -12,6 +12,9 @@
   STREAMINFO, CRC-8), put in file order, each frame's end found by CRC-16 at the next sync code, the chain walked on one
   thread, one thread per frame decodes, one thread per sample decorrelates and interleaves. A damaged frame comes out as
   silence of its length and the samples after it keep their time (from the coded frame / sample number), as libFLAC does.
+- **`DecodeFloatAsync`**: float32 planar [channel][sample], as ComfyUI's Load Audio gets it through PyAV (FFmpeg's FLAC
+  decoder shifts samples into int16 for <= 16 bits, int32 above; ComfyUI casts to float32 and divides by 2^15 / 2^31),
+  converted on the accelerator. Bit-identical with that rule on every fixture (red-checked: the shift into int16).
 - `DecodeStreamAsync(byte[])` keeps its signature and now runs this decoder (it was limited to the v1 encoder's
   verbatim streams and threw on a damaged frame).
 - 30 fixtures (`scripts/audio/make_flac_decoder_fixtures.py`): FFmpeg 8.1 (levels 0 / 5 / 8 / 12, fixed-only, every

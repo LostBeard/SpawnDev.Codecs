@@ -81,6 +81,52 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
+    /// <summary>
+    /// DecodeFloatAsync gives what ComfyUI's Load Audio gets through PyAV: FFmpeg's FLAC decoder shifts samples into
+    /// int16 (bits &lt;= 16) or int32 (more), ComfyUI casts that to float32 and divides by 2^15 or 2^31; planar
+    /// [channel][sample]. Every fixture (8 / 16 / 24 / 32 bits, 1 / 2 / 6 channels), bit for bit.
+    /// </summary>
+    [TestMethod(Timeout = 900000, Category = "NotOnWebGL")]
+    public async Task FlacDecoderGpu_DecodeFloat_AsComfyUiLoadAudio()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            using var dec = new FlacDecoderGpu(acc);
+            var failures = new List<string>();
+            var sources = new Dictionary<string, int[]>();
+            foreach (var c in FlacDecCases())
+            {
+                if (!sources.TryGetValue(c.Source, out var src)) sources[c.Source] = src = FlacDecSource(c.Source);
+                var r = await dec.DecodeFloatAsync(ReadEmbedded(FlacDecPrefix + c.Name + ".flac"));
+                var f = r.PlanarFloat!;
+                long n = c.Samples;
+                if (f.Length != n * c.Channels || r.InterleavedSamples.Length != 0) { failures.Add($"{c.Name}: {f.Length} floats"); continue; }
+                for (long s = 0; s < n; s++)
+                {
+                    bool bad = false;
+                    for (int k = 0; k < c.Channels; k++)
+                    {
+                        int v = src[s * c.Channels + k];
+                        // PyAV's sample (FFmpeg flacdec: s16 for <= 16 bits, s32 above), then torch's int -> float32 / 2^15 or 2^31
+                        float want = c.Bits <= 16 ? (float)(v << (16 - c.Bits)) / 32768f : (float)(v << (32 - c.Bits)) / 2147483648f;
+                        float got = f[k * n + s];
+                        if (BitConverter.SingleToInt32Bits(got) != BitConverter.SingleToInt32Bits(want))
+                        {
+                            failures.Add($"{c.Name}: channel {k} sample {s} = {got:R}, want {want:R}");
+                            bad = true;
+                            break;
+                        }
+                    }
+                    if (bad) break;
+                }
+            }
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
     /// <summary>The first index where two sample arrays differ (or the shorter length), -1 when equal.</summary>
     private static int FirstDifference(int[] a, int[] b)
     {

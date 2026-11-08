@@ -29,8 +29,11 @@ public sealed record FlacDecodeResult
     public required int BitsPerSample { get; init; }
     /// <summary>Samples per channel.</summary>
     public required long TotalSamplesPerChannel { get; init; }
-    /// <summary>Interleaved samples (channel 0[0], channel 1[0], ...), in the stream's integer range.</summary>
-    public required int[] InterleavedSamples { get; init; }
+    /// <summary>Interleaved samples (channel 0[0], channel 1[0], ...), in the stream's integer range
+    /// (<see cref="FlacDecoderGpu.DecodeAsync"/>; empty from <see cref="FlacDecoderGpu.DecodeFloatAsync"/>).</summary>
+    public int[] InterleavedSamples { get; init; } = Array.Empty<int>();
+    /// <summary>Float32 samples, planar [channel][sample] (<see cref="FlacDecoderGpu.DecodeFloatAsync"/>; else null).</summary>
+    public float[]? PlanarFloat { get; init; }
     /// <summary>True when STREAMINFO holds an MD5 of the samples (not all zero) and it was checked.</summary>
     public required bool Md5Checked { get; init; }
     /// <summary>True when the decoded samples' MD5 equals STREAMINFO's (false when not checked).</summary>
@@ -63,6 +66,7 @@ public sealed class FlacDecoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long> _md5Final;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _crcTable;
     private readonly MemoryBuffer1D<uint, Stride1D.Dense> _md5Tables;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<float>, int, long, int, long> _toFloat;
 
     private const int ByteChunk = 1 << 22, FrameChunk = 4096, SampleChunk = 1 << 22;
 
@@ -91,6 +95,7 @@ public sealed class FlacDecoderGpu : IDisposable
             t[i] = c;
         }
         _crcTable.View.CopyFromCPU(t);
+        _toFloat = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, int, long, int, long>(ToFloatKernel);
         _md5Tables = a.Allocate1D<uint>(128);
         var m = new uint[128];
         for (int i = 0; i < 64; i++) m[i] = (uint)(long)Math.Floor(Math.Abs(Math.Sin(i + 1)) * 4294967296.0);
@@ -167,8 +172,30 @@ public sealed class FlacDecoderGpu : IDisposable
         return si with { AudioStart = pos, Vendor = vendor };
     }
 
-    /// <summary>Decode a FLAC file (see the file header).</summary>
-    public async Task<FlacDecodeResult> DecodeAsync(ReadOnlyMemory<byte> file)
+    /// <summary>Decode a FLAC file to interleaved integer samples (see the file header).</summary>
+    public Task<FlacDecodeResult> DecodeAsync(ReadOnlyMemory<byte> file) => DecodeCoreAsync(file, toFloat: false);
+
+    /// <summary>
+    /// Decode a FLAC file to float32, planar [channel][sample] (<see cref="FlacDecodeResult.PlanarFloat"/>), as ComfyUI's
+    /// Load Audio gets it through PyAV / FFmpeg: FFmpeg's FLAC decoder shifts each sample into int16 (8..16 bits) or
+    /// int32 (17..32 bits), and ComfyUI converts that int to float32 (round to nearest even) and divides by 2^15 or 2^31.
+    /// Done on the accelerator; only the floats come back.
+    /// </summary>
+    public Task<FlacDecodeResult> DecodeFloatAsync(ReadOnlyMemory<byte> file) => DecodeCoreAsync(file, toFloat: true);
+
+    /// <summary>One thread per sample: interleaved int -> planar float32 (see <see cref="DecodeFloatAsync"/>).</summary>
+    private static void ToFloatKernel(Index1D index, ArrayView<int> interleaved, ArrayView<float> planar, int channels, long n, int bps, long first)
+    {
+        long i = first + index;
+        long s = i / channels;
+        int c = (int)(i - s * channels);
+        float v = bps <= 16
+            ? (float)(interleaved[i] << (16 - bps)) / 32768f
+            : (float)(interleaved[i] << (32 - bps)) / 2147483648f;
+        planar[(long)c * n + s] = v;
+    }
+
+    private async Task<FlacDecodeResult> DecodeCoreAsync(ReadOnlyMemory<byte> file, bool toFloat)
     {
         var si = ParseMetadata(file.Span);
         int channels = si.Channels, bps = si.Bps;
@@ -272,7 +299,20 @@ public sealed class FlacDecoderGpu : IDisposable
 
         await a.SynchronizeAsync();
         mHost = await meta.CopyToHostAsync();
-        var samples = total > 0 ? await output.View.SubView(0, total * channels).CopyToHostAsync() : Array.Empty<int>();
+        int[] samples = Array.Empty<int>();
+        float[]? planar = null;
+        if (toFloat)
+        {
+            using var floats = a.Allocate1D<float>(Math.Max(1, total * channels));
+            for (long first = 0; first < total * channels; first += SampleChunk)
+            {
+                _toFloat((int)Math.Min(SampleChunk, total * channels - first), output.View, floats.View, channels, total, bps, first);
+                await pacer.LaunchedAsync();
+            }
+            await a.SynchronizeAsync();
+            planar = total > 0 ? await floats.View.SubView(0, total * channels).CopyToHostAsync() : Array.Empty<float>();
+        }
+        else if (total > 0) samples = await output.View.SubView(0, total * channels).CopyToHostAsync();
         return new FlacDecodeResult
         {
             SampleRateHz = si.Rate,
@@ -280,6 +320,7 @@ public sealed class FlacDecoderGpu : IDisposable
             BitsPerSample = bps,
             TotalSamplesPerChannel = total,
             InterleavedSamples = samples,
+            PlanarFloat = planar,
             Md5Checked = md5Checked,
             Md5Matches = md5Matches,
             Frames = frames,
