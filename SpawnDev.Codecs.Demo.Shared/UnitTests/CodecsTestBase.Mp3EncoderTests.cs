@@ -349,4 +349,51 @@ public abstract partial class CodecsTestBase
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
+
+    /// <summary>
+    /// Mid / side stereo: on near-identical channels (a centred mix) at 96 kbps, coding mid / side gives a clearly better
+    /// decode than left / right, and the frames carry joint stereo with the mid / side bit set.
+    /// </summary>
+    [TestMethod(Timeout = 600000, Category = "DesktopOnly,NotOnWebGL")]
+    public async Task Mp3EncoderGpu_MidSide_BeatsLeftRightOnACentredMix()
+    {
+        FfmpegOracle.RequireAvailable();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            const int rate = 44100, ch = 2;
+            var mono = Mp3TestTone(rate * 2, 1, rate, 77);
+            var r = new Random(3);
+            var src = new float[mono.Length * 2];
+            for (int i = 0; i < mono.Length; i++)
+            {
+                src[2 * i] = mono[i] + 0.002f * (float)(r.NextDouble() - 0.5);
+                src[2 * i + 1] = mono[i] + 0.002f * (float)(r.NextDouble() - 0.5);
+            }
+            using var enc = new Mp3EncoderGpu(acc);
+            var withMs = await enc.EncodeAsync(src, ch, rate, new Mp3EncodeOptions { BitrateKbps = 96 });
+            var withoutMs = await enc.EncodeAsync(src, ch, rate, new Mp3EncodeOptions { BitrateKbps = 96, MidSide = false });
+            var decMs = FfmpegOracle.DecodeFloat(withMs, ".mp3");
+            var decLr = FfmpegOracle.DecodeFloat(withoutMs, ".mp3");
+            var (snrMs, _) = AlignedSnr(src, decMs, ch, 10);
+            var (snrLr, _) = AlignedSnr(src, decLr, ch, 10);
+            Console.WriteLine($"gain mid / side {FitGain(src, decMs, ch, 0):F4}, left / right {FitGain(src, decLr, ch, 0):F4}; sizes {withMs.Length} / {withoutMs.Length}");
+            // audio frames: joint stereo (mode 01) and the mid / side bit
+            int msFrames = 0, frames = 0;
+            int p = 10 + ((withMs[6] & 0x7F) << 21 | (withMs[7] & 0x7F) << 14 | (withMs[8] & 0x7F) << 7 | (withMs[9] & 0x7F));
+            bool first = true;
+            while (p + 4 <= withMs.Length && withMs[p] == 0xFF)
+            {
+                int size = 144000 * new[] { 0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320 }[withMs[p + 2] >> 4] / rate + ((withMs[p + 2] >> 1) & 1);
+                if (!first) { frames++; if ((withMs[p + 3] >> 6) == 1 && ((withMs[p + 3] >> 4) & 2) != 0) msFrames++; }
+                first = false;
+                p += size;
+            }
+            Console.WriteLine($"96 kbps centred mix: mid / side SNR {snrMs:F1} dB vs left / right {snrLr:F1} dB; {msFrames} of {frames} frames mid / side");
+            True(msFrames > frames / 2, $"only {msFrames} of {frames} frames used mid / side");
+            True(snrMs >= snrLr + 3, $"mid / side {snrMs:F1} dB is not 3 dB better than left / right {snrLr:F1} dB");
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
 }

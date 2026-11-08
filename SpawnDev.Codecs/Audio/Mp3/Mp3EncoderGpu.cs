@@ -27,6 +27,9 @@ public sealed record Mp3EncodeOptions
     /// 6 dB below them (0) to 6 dB above (9); each frame takes the lowest bit rate that holds it.</summary>
     public int? VbrQuality { get; init; }
 
+    /// <summary>Joint stereo with mid / side coding of the frames whose channels are alike. Default true.</summary>
+    public bool MidSide { get; init; } = true;
+
     /// <summary>Write an ID3v2.4 tag first (the tags below as TXXX frames, then TSSE). Default true.</summary>
     public bool WriteId3 { get; init; } = true;
 
@@ -53,7 +56,8 @@ public sealed class Mp3EncoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, long> _matrix;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, long> _mdct;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, long> _alias;
-    private readonly Action<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, long, long, int, int, int, int, int, long> _layout;
+    private readonly Action<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<float>, long, long, int, int, int, int, int, long> _layout;
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<float>, int> _pe;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, long, int> _musicCrc;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>> _infoFrame;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _crcTable;
@@ -62,7 +66,8 @@ public sealed class Mp3EncoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int> _vbrQuantize;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int, int, long> _vbrLayout;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int> _writeGranule;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, int, int, int, int, int> _writeFrame;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int, int, int, int, int> _writeFrame;
+    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, int, int> _midSide;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<float>, long> _toFloat;
     private readonly MemoryBuffer1D<float, Stride1D.Dense> _consts;
 
@@ -79,7 +84,8 @@ public sealed class Mp3EncoderGpu : IDisposable
         _matrix = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, long>(K.MatrixKernel);
         _mdct = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, long>(K.MdctKernel);
         _alias = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, long>(K.AliasReduceKernel);
-        _layout = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, long, long, int, int, int, int, int, long>(K.FrameLayoutKernel);
+        _layout = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<float>, long, long, int, int, int, int, int, long>(K.FrameLayoutKernel);
+        _pe = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<float>, int>(K.PerceptualEntropyKernel);
         _musicCrc = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, long, int>(K.MusicCrcKernel);
         _infoFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>>(K.InfoFrameKernel);
         var crc = new int[256];
@@ -96,7 +102,8 @@ public sealed class Mp3EncoderGpu : IDisposable
         _vbrQuantize = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int>(K.VbrQuantizeKernel);
         _vbrLayout = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int, int, long>(K.VbrLayoutKernel);
         _writeGranule = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int>(K.WriteGranuleKernel);
-        _writeFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, int, int, int, int, int>(K.WriteFrameKernel);
+        _writeFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int, int, int, int, int>(K.WriteFrameKernel);
+        _midSide = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, int, int>(K.MidSideKernel);
         _toFloat = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, long>(Int32ToFloatKernel);
 
         // the constant tables (setup data, computed once per encoder)
@@ -198,6 +205,8 @@ public sealed class Mp3EncoderGpu : IDisposable
         using var frameOffsets = a.Allocate1D<long>(frames + 1);
         using var frameInfo = a.Allocate1D<int>(Math.Max(1, frames * 2));
         using var vmeta = a.Allocate1D<long>(K.VMeta);
+        using var ms = a.Allocate1D<int>(Math.Max(1, frames));
+        ms.MemSetToZero();
         side.MemSetToZero();
 
         var pacer = new LaunchPacer(a);
@@ -224,10 +233,25 @@ public sealed class Mp3EncoderGpu : IDisposable
             _psy(n, xr.View, tables.View, psy.View, psyScratch.View, xmin.View, maskScale, first);
             await pacer.LaunchedAsync();
         }
+        if (channels == 2)
+        {
+            for (int first = 0; first < frames; first += UnitChunk)
+            {
+                int n = (int)Math.Min(UnitChunk, frames - first);
+                _midSide(n, xr.View, xmin.View, ms.View, granulesPerFrame, o.MidSide ? 1 : 0, first);
+                await pacer.LaunchedAsync();
+            }
+        }
         long totalBytes;
         if (!vbr)
         {
-            _layout((int)frames + 1, frameOffsets.View, frameInfo.View, side.View, frames, num, sampleRate, bitrateIndex, sideBytes,
+            using var pe = a.Allocate1D<float>(units);
+            for (int first = 0; first < units; first += UnitChunk)
+            {
+                _pe(Math.Min(UnitChunk, units - first), xr.View, xmin.View, tables.View, pe.View, first);
+                await pacer.LaunchedAsync();
+            }
+            _layout((int)frames + 1, frameOffsets.View, frameInfo.View, side.View, pe.View, frames, num, sampleRate, bitrateIndex, sideBytes,
                 granulesPerFrame, channels, infoBytes);
             for (int first = 0; first < units; first += UnitChunk)
             {
@@ -263,7 +287,7 @@ public sealed class Mp3EncoderGpu : IDisposable
         for (int first = 0; first < frames; first += UnitChunk)
         {
             _writeFrame((int)Math.Min(UnitChunk, frames - first), side.View, slotBuf.View, frameOffsets.View, frameInfo.View, output.View,
-                channels, lsf ? 1 : 0, version, rateIndex, first);
+                ms.View, channels, lsf ? 1 : 0, version, rateIndex, first);
             await pacer.LaunchedAsync();
         }
         if (o.WriteInfoFrame)

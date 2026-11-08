@@ -146,7 +146,8 @@ public static class Mp3EncodeKernels
     /// (the frame's main data split evenly, at most 4095 bits).
     /// </summary>
     public static void FrameLayoutKernel(Index1D index, ArrayView<long> frameOffsets, ArrayView<int> frameInfo, ArrayView<int> side,
-        long frames, long num, int sampleRate, int bitrateIndex, int sideBytes, int granulesPerFrame, int channels, long baseOffset)
+        ArrayView<float> pe, long frames, long num, int sampleRate, int bitrateIndex, int sideBytes, int granulesPerFrame, int channels,
+        long baseOffset)
     {
         long f = index;
         long t0 = f * num / sampleRate;
@@ -155,10 +156,24 @@ public static class Mp3EncodeKernels
         long size = (f + 1) * num / sampleRate - t0;
         frameInfo[f * 2] = bitrateIndex;
         frameInfo[f * 2 + 1] = (int)(size - num / sampleRate);
-        int perGranule = (int)XMath.Min(4095L, (size - 4 - sideBytes) * 8 / (granulesPerFrame * channels));
+        int perGranule = (int)((size - 4 - sideBytes) * 8 / granulesPerFrame);   // bits of one granule, all channels
         for (int g = 0; g < granulesPerFrame; g++)
-            for (int c = 0; c < channels; c++)
-                side[((f * granulesPerFrame + g) * channels + c) * SideInts + SBudget] = perGranule;
+        {
+            long u = (f * granulesPerFrame + g) * channels;
+            if (channels == 1)
+            {
+                side[u * SideInts + SBudget] = XMath.Min(4095, perGranule);
+                continue;
+            }
+            // two channels share the granule's bits by perceptual entropy, each keeping at least an eighth
+            float p0 = pe[u], p1 = pe[u + 1];
+            int floor = perGranule / 8;
+            int b0 = p0 + p1 > 0 ? (int)(perGranule * (p0 / (p0 + p1))) : perGranule / 2;
+            b0 = XMath.Clamp(b0, floor, perGranule - floor);
+            int b1 = perGranule - b0;
+            side[u * SideInts + SBudget] = XMath.Min(4095, b0);
+            side[(u + 1) * SideInts + SBudget] = XMath.Min(4095, b1);
+        }
     }
 
     // ------------------------------------------------------------------ psychoacoustic model (MDCT domain)
@@ -290,6 +305,77 @@ public static class Mp3EncodeKernels
     private static void PutBe32(ArrayView<byte> o, long at, uint v)
     {
         o[at] = (byte)(v >> 24); o[at + 1] = (byte)(v >> 16); o[at + 2] = (byte)(v >> 8); o[at + 3] = (byte)v;
+    }
+
+    // ------------------------------------------------------------------ perceptual entropy
+
+    /// <summary>
+    /// One thread per (granule, channel): the perceptual entropy of the granule, sum over long bands of
+    /// width * log2(1 + energy / allowed noise): an estimate of the bits it needs to keep its noise under the masks.
+    /// </summary>
+    public static void PerceptualEntropyKernel(Index1D i0, ArrayView<float> xr, ArrayView<float> xmin, ArrayView<int> tables,
+        ArrayView<float> pe, int first)
+    {
+        int index = first + i0;
+        long at = (long)index * 576;
+        float total = 0;
+        for (int b = 0; b < 22; b++)
+        {
+            int lo = tables[IBounds + b], hi = tables[IBounds + b + 1];
+            float e = 0;
+            for (int i = lo; i < hi; i++) e += xr[at + i] * xr[at + i];
+            float allowed = xmin[(long)index * 22 + b];
+            if (allowed > 0 && e > allowed) total += (hi - lo) * XMath.Log2(1f + e / allowed);
+        }
+        pe[index] = total;
+    }
+
+    // ------------------------------------------------------------------ mid / side stereo
+
+    /// <summary>
+    /// One thread per frame (stereo): mid / side when it concentrates the energy, i.e. when the smaller of the mid and side
+    /// energies is below 40 % of the smaller of left and right (identical or opposite channels give a near-empty mid or side;
+    /// independent channels of equal power do not). Then, for every granule of the frame, M = (L + R) / sqrt 2 and
+    /// S = (L - R) / sqrt 2 in place, and each band's allowed noise becomes the smaller of the left and right masks.
+    /// ms[f] = 1 when the frame is coded mid / side.
+    /// </summary>
+    public static void MidSideKernel(Index1D fIndex, ArrayView<float> xr, ArrayView<float> xmin, ArrayView<int> ms, int granulesPerFrame,
+        int enabled, int first)
+    {
+        int f = first + fIndex;
+        float el = 0, er = 0, em = 0, es = 0;
+        for (int g = 0; g < granulesPerFrame; g++)
+        {
+            long l = ((long)(f * granulesPerFrame + g) * 2) * 576, r = l + 576;
+            for (int i = 0; i < 576; i++)
+            {
+                float a = xr[l + i], b = xr[r + i];
+                el += a * a; er += b * b;
+                em += (a + b) * (a + b) * 0.5f;
+                es += (a - b) * (a - b) * 0.5f;
+            }
+        }
+        bool useMs = enabled != 0 && XMath.Min(em, es) < 0.4f * XMath.Min(el, er);
+        ms[f] = useMs ? 1 : 0;
+        if (!useMs) return;
+        const float k = 0.70710678f;
+        for (int g = 0; g < granulesPerFrame; g++)
+        {
+            long unit = (long)(f * granulesPerFrame + g) * 2;
+            long l = unit * 576, r = l + 576;
+            for (int i = 0; i < 576; i++)
+            {
+                float a = xr[l + i], b = xr[r + i];
+                xr[l + i] = (a + b) * k;
+                xr[r + i] = (a - b) * k;
+            }
+            for (int bnd = 0; bnd < 22; bnd++)
+            {
+                float m = XMath.Min(xmin[unit * 22 + bnd], xmin[(unit + 1) * 22 + bnd]);
+                xmin[unit * 22 + bnd] = m;
+                xmin[(unit + 1) * 22 + bnd] = m;
+            }
+        }
     }
 
     // ------------------------------------------------------------------ quantization + bit counting
@@ -852,7 +938,7 @@ public static class Mp3EncodeKernels
     /// data), at out[frameOffsets[f]]; frameInfo[f] = (bitrate index, padding). <paramref name="lsf"/> = MPEG-2/2.5.
     /// </summary>
     public static void WriteFrameKernel(Index1D i0, ArrayView<int> side, ArrayView<byte> slots, ArrayView<long> frameOffsets,
-        ArrayView<int> frameInfo, ArrayView<byte> output, int channels, int lsf, int version, int rateIndex, int first)
+        ArrayView<int> frameInfo, ArrayView<byte> output, ArrayView<int> ms, int channels, int lsf, int version, int rateIndex, int first)
     {
         int f = first + i0;
         long baseByte = frameOffsets[f];
@@ -869,8 +955,8 @@ public static class Mp3EncodeKernels
         PutBits(output, baseByte, ref bitPos, (uint)rateIndex, 2);
         PutBits(output, baseByte, ref bitPos, (uint)frameInfo[f * 2 + 1], 1);
         PutBits(output, baseByte, ref bitPos, 0, 1);                // private
-        PutBits(output, baseByte, ref bitPos, channels == 1 ? 3u : 0u, 2);   // mono / stereo
-        PutBits(output, baseByte, ref bitPos, 0, 2);                // mode extension
+        PutBits(output, baseByte, ref bitPos, channels == 1 ? 3u : 1u, 2);   // mono / joint stereo
+        PutBits(output, baseByte, ref bitPos, channels == 2 && ms[f] != 0 ? 2u : 0u, 2);   // mode extension: mid / side
         PutBits(output, baseByte, ref bitPos, 0, 1);                // copyright
         PutBits(output, baseByte, ref bitPos, 1, 1);                // original
         PutBits(output, baseByte, ref bitPos, 0, 2);                // emphasis
