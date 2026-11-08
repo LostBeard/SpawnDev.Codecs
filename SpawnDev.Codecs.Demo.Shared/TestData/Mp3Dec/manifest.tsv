@@ -1,0 +1,21 @@
+cbr128_st44	44100	2	24255	24255	24255	CBR 128k stereo 44.1 kHz, joint stereo; 24 frames, 6/96 short granule-channels, 1 M/S, 0 intensity, 0 free-format
+free_st44	44100	2	24255	24255	24255	free format (24 frames of cbr128_st44 with bitrate index 0); 24 frames, 6/96 short granule-channels, 1 M/S, 0 intensity, 24 free-format
+cbr320_st44	44100	2	22050	22050	22050	CBR 320k stereo 44.1 kHz; 22 frames, 4/88 short granule-channels, 1 M/S, 0 intensity, 0 free-format
+v0_st44	44100	2	22050	22050	22050	VBR V0 stereo 44.1 kHz; 22 frames, 4/88 short granule-channels, 1 M/S, 0 intensity, 0 free-format
+v4_mono48	48000	1	28800	28800	28800	VBR V4 mono 48 kHz; 27 frames, 2/54 short granule-channels, 0 M/S, 0 intensity, 0 free-format
+cbr96_st32	32000	2	19200	19200	19200	CBR 96k stereo 32 kHz; 19 frames, 4/76 short granule-channels, 0 M/S, 0 intensity, 0 free-format
+lr_st48	48000	2	21600	21600	21600	plain L/R stereo 48 kHz; 21 frames, 4/84 short granule-channels, 0 M/S, 0 intensity, 0 free-format
+lsf_st22	22050	2	17640	17640	17640	MPEG-2 22.05 kHz stereo 64k; 34 frames, 4/68 short granule-channels, 2 M/S, 0 intensity, 0 free-format
+lsf_v4_mono24	24000	1	19200	19200	19200	MPEG-2 24 kHz mono VBR V4; 37 frames, 1/37 short granule-channels, 0 M/S, 0 intensity, 0 free-format
+lsf_mono16	16000	1	14400	14400	14400	MPEG-2 16 kHz mono 32k; 28 frames, 2/28 short granule-channels, 0 M/S, 0 intensity, 0 free-format
+m25_mono8	8000	1	9600	9600	9600	MPEG-2.5 8 kHz mono 16k; 20 frames, 2/20 short granule-channels, 0 M/S, 0 intensity, 0 free-format
+m25_st11	11025	2	11025	11025	11025	MPEG-2.5 11.025 kHz stereo 24k; 23 frames, 6/46 short granule-channels, 3 M/S, 0 intensity, 0 free-format
+m25_v6_mono12	12000	1	12000	12000	12000	MPEG-2.5 12 kHz mono VBR V6; 24 frames, 2/24 short granule-channels, 0 M/S, 0 intensity, 0 free-format
+short_st44	44100	2	24255	24255	24255	transients: short blocks, 44.1 kHz stereo; 24 frames, 28/96 short granule-channels, 4 M/S, 0 intensity, 0 free-format
+short_lsf_mono22	22050	1	17640	17640	17640	transients: short blocks, MPEG-2 mono; 34 frames, 25/34 short granule-channels, 0 M/S, 0 intensity, 0 free-format
+short_m25_st12	12000	2	12000	12000	12000	transients: short blocks, MPEG-2.5 stereo; 24 frames, 42/48 short granule-channels, 3 M/S, 0 intensity, 0 free-format
+ms_st44	44100	2	22050	22050	22050	joint stereo at 96k (M/S frames); 22 frames, 4/88 short granule-channels, 21 M/S, 0 intensity, 0 free-format
+tags_st44	44100	2	17640	17640	17640	ID3v2 (TXXX) + Info frame + ID3v1; 18 frames, 4/72 short granule-channels, 0 M/S, 0 intensity, 0 free-format
+notag_mono44	44100	1	-1	19584	19584	no ID3v2, no Info frame (no gapless trim); 17 frames, 2/34 short granule-channels, 0 M/S, 0 intensity, 0 free-format
+is_st44	44100	2	-1	28271	8687	MediaFoundation 40k: intensity stereo frames; mp3dec_load_buf gives 8687 samples; 26 frames, 2/104 short granule-channels, 0 M/S, 5 intensity, 0 free-format
+is_st48	48000	2	-1	30575	9839	MediaFoundation 32k 48 kHz: intensity stereo frames; mp3dec_load_buf gives 9839 samples; 28 frames, 2/112 short granule-channels, 0 M/S, 9 intensity, 0 free-format
