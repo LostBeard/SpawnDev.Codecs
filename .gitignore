@@ -385,3 +385,6 @@ bbb_frame0.yuv
 
 # Opus encoder decision dumps from the instrumented libopus (regenerate with scripts/audio/make_opus_encoder_fixtures.py)
 *.celtdbg
+
+# Claude Code agent worktrees
+.claude/
