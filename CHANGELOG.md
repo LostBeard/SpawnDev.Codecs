@@ -27,6 +27,31 @@
   Pillow checks are desktop-only). Lore checked SpawnGen's Save Animated WEBP against ComfyUI's own save (3 frames,
   q80 m4, ComfyUI's EXIF): byte-identical on the CPU accelerator and on OpenCL (RX 590).
 
+### FLAC of any length: `FlacEncoderGpu.EncodeAsync`, a port of FFmpeg 8.1's FLAC encoder + muxer (2026-11-08)
+- **New `FlacEncoderGpu.EncodeAsync(samples, channels, sampleRate, bitsPerSample, options)`** (managed `ReadOnlyMemory<int>`,
+  browser `Int32Array`, `ArrayView1D<int>` into a caller view): a complete .flac of any length (the last block shorter),
+  any rate FLAC carries (standard and non-standard codes), 1..8 channels, 16 or 24 bits. `FlacEncodeOptions`: FFmpeg
+  compression level 0..8 (default 5, PyAV's), block size, stereo mode, padding, Vorbis vendor and tags, channel mask
+  (WAVEFORMATEXTENSIBLE_CHANNEL_MASK comment for non-native layouts, as FFmpeg's muxer). ComfyUI's Save Audio format.
+- FFmpeg's encoder on the accelerator: stereo mode estimate and decorrelation, wasted bits, constant / verbatim / fixed /
+  LPC subframes, FFmpeg's LPC analysis in double (window, autocorrelation, Levinson-Durbin, reflection-coefficient order
+  estimate, 15-bit coefficient quantization), the order methods of levels 6..8, the rice partition search, the verbatim
+  fallback, frame headers with CRC-8 / CRC-16, the MD5 of the samples, STREAMINFO / VORBIS_COMMENT / PADDING. One thread
+  per frame or subframe; MD5 in bounded launches; the host reads back the file size and the file.
+- **Byte-identical with FFmpeg** (`-fflags +bitexact`, 65 fixtures: stereo / mono / 5 channels, 16 / 24 bits, 22.05..96 kHz
+  and a non-standard rate, non-multiple lengths, a 3-sample clip, silence, constants, wasted bits, white noise (verbatim
+  fallback), at levels 0, 1, 2, 5, 8) on the CPU accelerator. The fixtures use FFmpeg's C code (`-cpuflags 0`): its x86
+  SIMD autocorrelation rounds differently and changed 4 of the 65 files. WebGPU / WebGL emulate doubles, so there the LPC
+  levels may pick other coefficients; the test then checks the stream header and the size (within 2 %). libFLAC decodes
+  every file of ours to exactly the source samples (desktop oracle, `scripts/audio/flac_decode.py`).
+- An integer Levinson-Durbin was tried first (for identical bytes on every backend): tonal signals need near-double
+  precision and it produced wrong coefficients (files up to 2x larger); it was replaced by FFmpeg's double analysis.
+- Red-checked: stereo estimate off, wasted bits off, MD5 final block skipped, verbatim fallback off (caught after adding
+  the white-noise fixtures). Not covered by any fixture (exact ties never occur in them): the partition-order tie rule
+  and lrintf's round-half-to-even in coefficient quantization; both follow FFmpeg's code as written.
+- The older `EncodeStreamAsync` (verbatim, 4096-multiples, 44.1 kHz / 16-bit) and `FlacDecoderGpu` (which reads only
+  that subset) are unchanged; a full FLAC decoder is separate work.
+
 ### Animated lossless WebP the WebPAnimEncoder way + one animation engine for both modes (2026-11-08)
 - **New `WebPLosslessEncoderGpu.EncodeAnimationAsync(frames, width, height, durationsMs, options, animation)`**
   (managed / TypedArray / ArrayView1D): full-canvas frames in, libwebp's lossless WebPAnimEncoder decisions out - exact

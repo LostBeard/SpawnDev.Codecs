@@ -30,3 +30,5 @@ WebPLossyMeta/* binary
 WebPLossyMeta/manifest.tsv text eol=lf
 WebPAnimLossless/* binary
 WebPAnimLossless/manifest.tsv text eol=lf
+FlacEnc/* binary
+FlacEnc/manifest.tsv text eol=lf

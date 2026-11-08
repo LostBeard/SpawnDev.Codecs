@@ -132,6 +132,25 @@ public static class DeviceTransfer
         return result;
     }
 
+    /// <summary>
+    /// Copy a JS typed array's bytes into an int view (e.g. an Int32Array of samples into an int device buffer). The
+    /// bytes go JS -> GPU; they never enter the .NET heap.
+    /// </summary>
+    /// <exception cref="NotSupportedException">The view is not on a browser accelerator.</exception>
+    [SupportedOSPlatform("browser")]
+    public static void Upload(ArrayView1D<int, Stride1D.Dense> dest, TypedArray src)
+    {
+        ArgumentNullException.ThrowIfNull(src);
+        var contiguous = (IContiguousArrayView)dest.BaseView;
+        if (contiguous.Buffer is not IBrowserMemoryBuffer browser)
+            throw new NotSupportedException(
+                $"A TypedArray overload needs a browser accelerator buffer; got {contiguous.Buffer.GetType().Name} " +
+                $"on {contiguous.Buffer.Accelerator.AcceleratorType}. On a desktop accelerator use the managed or ArrayView1D overload.");
+        if ((long)src.ByteLength > dest.Length * sizeof(int))
+            throw new ArgumentOutOfRangeException(nameof(src), "Source is larger than the destination view.");
+        browser.CopyFromJS(src, contiguous.IndexInBytes);
+    }
+
     private static IBrowserMemoryBuffer RequireBrowserBuffer(ArrayView1D<byte, Stride1D.Dense> view, out long byteOffset)
     {
         var contiguous = (IContiguousArrayView)view.BaseView;
