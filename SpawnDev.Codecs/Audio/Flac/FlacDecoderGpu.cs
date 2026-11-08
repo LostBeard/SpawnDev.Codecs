@@ -1,233 +1,320 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
-// FLAC v1 GPU decoder integration class. Symmetric to FlacEncoderGpu.
-// Wraps FlacFrameReaderGpuKernel into a callable DecodeStreamAsync
-// API that consumes a .flac byte stream produced by either the GPU
-// FlacEncoderGpu or any conforming FLAC encoder (within v1's
-// constraints: 4096-block, 44.1 kHz, 16-bit, all-VERBATIM
-// subframes, fixed blocking).
+// FLAC decoder (RFC 9639) on the accelerator: any conforming stream - fixed or variable block size, 4..32 bits per
+// sample, 1..8 channels, every subframe and residual coding, wasted bits, every stereo decorrelation - as written by
+// libFLAC, FFmpeg and others. ComfyUI's Load Audio reads FLAC through PyAV / FFmpeg; this decodes to the same samples.
 //
-// Stream parse (host - metadata only):
-//   1. "fLaC" marker (4 bytes)
-//   2. STREAMINFO metadata block (header 4 + payload 34 = 38 bytes)
-//      Extract: blockSize, sampleRateHz, channels, bps, totalSamples
-//   3. Skip any non-STREAMINFO metadata blocks (until isLast=1)
-// Frame decode (GPU - codec-data math):
-//   For each frame: FlacFrameReaderGpuKernel's bounded parallel launches
-//   (header parse, one thread per sample, CRC-16 pieces), then the interleave
-//
-// V1 simplifications match FlacEncoderGpu.
+// Host work (pure coordinator): parse the metadata blocks (an ID3v2 tag before "fLaC" is skipped; STREAMINFO,
+// VORBIS_COMMENT), upload the file once, dispatch FlacStreamDecodeKernels (frame search, frame chain, one thread per frame
+// decode, decorrelation + interleave, MD5 of the samples), read back the frame count and the samples. Frames are checked
+// by their CRC-8 and CRC-16 as libFLAC checks them; a damaged frame comes out as silence of its length and the samples
+// after it keep their time (DecodeResult reports how many).
 
 using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.ILGPU;
+using K = SpawnDev.Codecs.Audio.Flac.FlacStreamDecodeKernels;
+using W = SpawnDev.Codecs.Audio.Flac.FlacStreamWriteKernels;
 
 namespace SpawnDev.Codecs.Audio.Flac;
 
-/// <summary>
-/// V1 GPU FLAC decoder integration class. Per-frame decode runs on
-/// the accelerator via FlacFrameReaderGpuKernel; stream-level parse
-/// (fLaC marker + STREAMINFO + metadata block scan) runs on host.
-/// </summary>
+/// <summary>A decoded FLAC stream.</summary>
+public sealed record FlacDecodeResult
+{
+    /// <summary>Sample rate in Hz (STREAMINFO).</summary>
+    public required int SampleRateHz { get; init; }
+    /// <summary>Channel count.</summary>
+    public required int Channels { get; init; }
+    /// <summary>Bits per sample (4..32): the samples are integers in that range.</summary>
+    public required int BitsPerSample { get; init; }
+    /// <summary>Samples per channel.</summary>
+    public required long TotalSamplesPerChannel { get; init; }
+    /// <summary>Interleaved samples (channel 0[0], channel 1[0], ...), in the stream's integer range.</summary>
+    public required int[] InterleavedSamples { get; init; }
+    /// <summary>True when STREAMINFO holds an MD5 of the samples (not all zero) and it was checked.</summary>
+    public required bool Md5Checked { get; init; }
+    /// <summary>True when the decoded samples' MD5 equals STREAMINFO's (false when not checked).</summary>
+    public required bool Md5Matches { get; init; }
+    /// <summary>Frames decoded.</summary>
+    public required int Frames { get; init; }
+    /// <summary>Frames whose CRCs passed but whose subframes could not be decoded (each comes out as silence).</summary>
+    public required int BadFrames { get; init; }
+    /// <summary>Samples per channel of silence where frames were lost (damaged headers or CRC-16 failures).</summary>
+    public required long LostSamples { get; init; }
+    /// <summary>The VORBIS_COMMENT vendor string, or null.</summary>
+    public string? Vendor { get; init; }
+    /// <summary>The VORBIS_COMMENT fields, in order ("KEY", "value"), or empty.</summary>
+    public IReadOnlyList<KeyValuePair<string, string>> Tags { get; init; } = Array.Empty<KeyValuePair<string, string>>();
+}
+
+/// <summary>FLAC decoder on the accelerator (see the file header).</summary>
 public sealed class FlacDecoderGpu : IDisposable
 {
     private readonly Accelerator _accelerator;
-    private readonly FlacFrameReaderGpuKernel _frameKernel;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int, long, long>
-        _interleaveKernel;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, long> _findSync;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _countSync;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _syncOffsets;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _compactSync;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _frameEnd;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>> _walk;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int> _decodeFrame;
+    private readonly Action<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, long> _interleave;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long, long, int> _md5Blocks;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long> _md5Final;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _crcTable;
+    private readonly MemoryBuffer1D<uint, Stride1D.Dense> _md5Tables;
 
-    /// <summary>Construct a decoder bound to <paramref name="accelerator"/>.</summary>
+    private const int ByteChunk = 1 << 22, FrameChunk = 4096, SampleChunk = 1 << 22;
+
+    /// <summary>A decoder bound to <paramref name="accelerator"/>.</summary>
     public FlacDecoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
-        _frameKernel = new FlacFrameReaderGpuKernel(accelerator);
-        _interleaveKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, int, int, long, long>(FlacDecodeInterleaveKernel);
+        var a = accelerator;
+        _findSync = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, long>(K.FindSyncKernel);
+        _countSync = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(K.CountSyncKernel);
+        _syncOffsets = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(K.SyncOffsetsKernel);
+        _compactSync = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(K.CompactSyncKernel);
+        _frameEnd = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(K.FrameEndKernel);
+        _walk = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>>(K.WalkKernel);
+        _decodeFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int>(K.DecodeFrameKernel);
+        _interleave = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, long>(K.InterleaveKernel);
+        _md5Blocks = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long, long, int>(W.Md5BlocksKernel);
+        _md5Final = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long>(W.Md5FinalKernel);
+        _crcTable = a.Allocate1D<int>(256);
+        var t = new int[256];
+        for (int i = 0; i < 256; i++)
+        {
+            int c = i << 8;
+            for (int k = 0; k < 8; k++) c = (c & 0x8000) != 0 ? ((c << 1) ^ 0x8005) & 0xFFFF : (c << 1) & 0xFFFF;
+            t[i] = c;
+        }
+        _crcTable.View.CopyFromCPU(t);
+        _md5Tables = a.Allocate1D<uint>(128);
+        var m = new uint[128];
+        for (int i = 0; i < 64; i++) m[i] = (uint)(long)Math.Floor(Math.Abs(Math.Sin(i + 1)) * 4294967296.0);
+        int[] sh = { 7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21 };
+        for (int i = 0; i < 64; i++) m[64 + i] = (uint)sh[(i / 16) * 4 + (i & 3)];
+        _md5Tables.View.CopyFromCPU(m);
     }
 
-    /// <summary>
-    /// Per-element interleave kernel. One thread per (channel, sample).
-    /// Reads from channel-major dSamples, writes to interleaved dOutput at
-    /// the per-frame offset.
-    /// </summary>
-    private static void FlacDecodeInterleaveKernel(
-        Index1D index,
-        ArrayView<int> channelMajor, ArrayView<int> interleavedOut,
-        int channels, int numFrames, long cmBase, long outBase)
+    private sealed record StreamInfo(int MinBlock, int MaxBlock, int MaxFrame, int Rate, int Channels, int Bps, long Total,
+        byte[] Md5, int AudioStart, string? Vendor, List<KeyValuePair<string, string>> Tags);
+
+    /// <summary>The metadata blocks: STREAMINFO and VORBIS_COMMENT; where the frames start.</summary>
+    private static StreamInfo ParseMetadata(ReadOnlySpan<byte> f)
     {
-        FlacInterleaveOutputGpu.InterleaveAt(
-            channelMajor, cmBase, interleavedOut, outBase,
-            channels, numFrames, index.X);
-    }
-
-    /// <summary>
-    /// Decode a complete FLAC byte stream. Returns interleaved PCM
-    /// samples (channel 0[0], channel 1[0], channel 0[1], ...).
-    /// </summary>
-    public async Task<FlacGpuDecodeResult> DecodeStreamAsync(byte[] flacBytes)
-    {
-        if (flacBytes is null) throw new ArgumentNullException(nameof(flacBytes));
-        if (flacBytes.Length < 42) // 4 marker + 38 STREAMINFO
-            throw new ArgumentException("FLAC stream too short.", nameof(flacBytes));
-
-        // ---- Parse "fLaC" marker (host) ----
-        if (flacBytes[0] != 'f' || flacBytes[1] != 'L'
-            || flacBytes[2] != 'a' || flacBytes[3] != 'C')
-            throw new ArgumentException("Not a FLAC stream (missing fLaC marker).", nameof(flacBytes));
-
-        // ---- Parse metadata blocks (host) ----
-        int pos = 4;
-        int blockSize = 0;
-        int sampleRateHz = 0;
-        int channels = 0;
-        int bps = 0;
-        ulong totalSamples = 0;
+        int pos = 0;
+        // an ID3v2 tag before the stream (libFLAC skips it too)
+        if (f.Length >= 10 && f[0] == 'I' && f[1] == 'D' && f[2] == '3')
+        {
+            int size = (f[6] & 0x7F) << 21 | (f[7] & 0x7F) << 14 | (f[8] & 0x7F) << 7 | (f[9] & 0x7F);
+            pos = 10 + size + ((f[5] & 0x10) != 0 ? 10 : 0);
+        }
+        if (f.Length < pos + 4 + 38 || f[pos] != 'f' || f[pos + 1] != 'L' || f[pos + 2] != 'a' || f[pos + 3] != 'C')
+            throw new InvalidDataException("Not a FLAC stream (no fLaC marker).");
+        pos += 4;
+        StreamInfo? si = null;
+        string? vendor = null;
+        var tags = new List<KeyValuePair<string, string>>();
         while (true)
         {
-            byte hdr = flacBytes[pos];
-            bool isLast = (hdr & 0x80) != 0;
-            int blockType = hdr & 0x7F;
-            int blockLen = (flacBytes[pos + 1] << 16) | (flacBytes[pos + 2] << 8) | flacBytes[pos + 3];
+            if (pos + 4 > f.Length) throw new InvalidDataException("FLAC metadata runs past the end of the file.");
+            bool last = (f[pos] & 0x80) != 0;
+            int type = f[pos] & 0x7F;
+            int len = f[pos + 1] << 16 | f[pos + 2] << 8 | f[pos + 3];
             pos += 4;
-            if (blockType == FlacConstants.MetadataStreamInfo)
+            if (pos + len > f.Length) throw new InvalidDataException("FLAC metadata block runs past the end of the file.");
+            var b = f.Slice(pos, len);
+            if (type == 0 && len >= 34)
             {
-                // STREAMINFO payload (34 bytes): min/max block (32) +
-                // min/max frame (48) + sample_rate (20) + ch-1 (3) +
-                // bps-1 (5) + total_samples (36) + md5 (128).
-                var r = new SpawnDev.Codecs.Audio.Flac.FlacBitReader(
-                    new ReadOnlySpan<byte>(flacBytes, pos, blockLen));
-                int minBlock = (int)r.ReadBits(16);
-                int maxBlock = (int)r.ReadBits(16);
-                blockSize = maxBlock; // V1 fixed block size, min == max.
-                int minFrame = (int)r.ReadBits(24);
-                int maxFrame = (int)r.ReadBits(24);
-                sampleRateHz = (int)r.ReadBits(20);
-                channels = (int)r.ReadBits(3) + 1;
-                bps = (int)r.ReadBits(5) + 1;
-                ulong hi = r.ReadBits(4);
-                ulong lo = r.ReadBits(32);
-                totalSamples = (hi << 32) | lo;
-                // Skip MD5 (16 bytes already counted in blockLen).
+                int minBlock = b[0] << 8 | b[1], maxBlock = b[2] << 8 | b[3];
+                int maxFrame = b[7] << 16 | b[8] << 8 | b[9];
+                int rate = b[10] << 12 | b[11] << 4 | b[12] >> 4;
+                int channels = ((b[12] >> 1) & 7) + 1;
+                int bps = ((b[12] & 1) << 4 | b[13] >> 4) + 1;
+                long total = (long)(b[13] & 15) << 32 | (long)b[14] << 24 | (long)b[15] << 16 | (long)b[16] << 8 | b[17];
+                si = new StreamInfo(minBlock, maxBlock, maxFrame, rate, channels, bps, total, b.Slice(18, 16).ToArray(), 0, null, tags);
             }
-            pos += blockLen;
-            if (isLast) break;
+            else if (type == 4 && len >= 8)
+            {
+                // Vorbis comment: little-endian lengths
+                int p = 0;
+                int vl = BitConverter.ToInt32(b.Slice(p, 4)); p += 4;
+                if (vl >= 0 && p + vl <= len)
+                {
+                    vendor = System.Text.Encoding.UTF8.GetString(b.Slice(p, vl)); p += vl;
+                    if (p + 4 <= len)
+                    {
+                        int n = BitConverter.ToInt32(b.Slice(p, 4)); p += 4;
+                        for (int i = 0; i < n && p + 4 <= len; i++)
+                        {
+                            int l = BitConverter.ToInt32(b.Slice(p, 4)); p += 4;
+                            if (l < 0 || p + l > len) break;
+                            string field = System.Text.Encoding.UTF8.GetString(b.Slice(p, l)); p += l;
+                            int eq = field.IndexOf('=');
+                            tags.Add(eq < 0 ? new(field, "") : new(field[..eq], field[(eq + 1)..]));
+                        }
+                    }
+                }
+            }
+            pos += len;
+            if (last) break;
+        }
+        if (si is null) throw new InvalidDataException("FLAC stream without STREAMINFO.");
+        if (si.Bps < 4 || si.Bps > 32) throw new InvalidDataException($"FLAC bits per sample {si.Bps} is outside 4..32.");
+        return si with { AudioStart = pos, Vendor = vendor };
+    }
+
+    /// <summary>Decode a FLAC file (see the file header).</summary>
+    public async Task<FlacDecodeResult> DecodeAsync(ReadOnlyMemory<byte> file)
+    {
+        var si = ParseMetadata(file.Span);
+        int channels = si.Channels, bps = si.Bps;
+        var audio = file[si.AudioStart..];
+        long length = audio.Length;
+        var a = _accelerator;
+
+        using var data = a.Allocate1D<byte>(Math.Max(1, length));
+        if (length > 0) data.View.SubView(0, length).CopyFromCPU(audio.ToArray());
+        var dataView = data.View.SubView(0, Math.Max(1, length));
+        using var meta = a.Allocate1D<int>(K.MetaSize);
+        int syncBlocks = (int)Math.Max(1, (length + K.SyncBlock - 1) / K.SyncBlock);
+        var m0 = new int[K.MetaSize];
+        m0[K.MChannels] = channels; m0[K.MBps] = bps; m0[K.MRate] = si.Rate; m0[K.MMaxFrame] = si.MaxFrame;
+        m0[K.MSyncBlocks] = syncBlocks;
+        m0[K.MBlockSize] = si.MinBlock == si.MaxBlock ? si.MinBlock : 0;
+        meta.View.CopyFromCPU(m0);
+
+        // 1-2. frame header candidates, in file order
+        using var flags = a.Allocate1D<byte>(Math.Max(1, length));
+        var pacer = new LaunchPacer(a);
+        for (long first = 0; first < length; first += ByteChunk)
+        {
+            _findSync((int)Math.Min(ByteChunk, length - first), dataView, flags.View.SubView(0, Math.Max(1, length)), meta.View, first);
+            await pacer.LaunchedAsync();
+        }
+        var flagView = flags.View.SubView(0, Math.Max(1, length));
+        using var blockCounts = a.Allocate1D<int>(syncBlocks);
+        if (length > 0)
+        {
+            _countSync(syncBlocks, flagView, blockCounts.View);
+            _syncOffsets(1, blockCounts.View, meta.View);
+        }
+        await a.SynchronizeAsync();
+        var mHost = await meta.CopyToHostAsync();
+        int candidates = mHost[K.MCandidates];
+        using var cands = a.Allocate1D<int>(Math.Max(1, candidates));
+        using var ends = a.Allocate1D<int>(Math.Max(1, candidates));
+        using var frameOffsets = a.Allocate1D<int>(Math.Max(1, candidates));
+        using var frameEnds = a.Allocate1D<int>(Math.Max(1, candidates));
+        using var frameSamples = a.Allocate1D<long>(candidates + 1);
+        if (candidates > 0)
+        {
+            _compactSync(syncBlocks, flagView, blockCounts.View, cands.View);
+            // 3. where each candidate's frame ends (CRC-16)
+            for (int first = 0; first < candidates; first += FrameChunk)
+            {
+                _frameEnd(Math.Min(FrameChunk, candidates - first), dataView, cands.View, _crcTable.View, ends.View, meta.View, first);
+                await pacer.LaunchedAsync();
+            }
+        }
+        // 4. the frame chain
+        _walk(1, dataView, cands.View, ends.View, frameOffsets.View, frameEnds.View, frameSamples.View, meta.View);
+        await a.SynchronizeAsync();
+        mHost = await meta.CopyToHostAsync();
+        int frames = mHost[K.MFrames];
+        long walked = (await frameSamples.View.SubView(frames, 1).CopyToHostAsync())[0];
+        long total = Math.Max(walked, si.Total);
+
+        // 5. frames -> channel-major regions
+        using var buf = a.Allocate1D<int>(Math.Max(1, walked * channels));
+        using var wide = a.Allocate1D<long>(bps == 32 && channels == 2 ? Math.Max(1, walked) : 1);
+        using var frameInfo = a.Allocate1D<int>(Math.Max(1, frames * K.FrameInts));
+        for (int first = 0; first < frames; first += FrameChunk)
+        {
+            _decodeFrame(Math.Min(FrameChunk, frames - first), dataView, frameOffsets.View, frameEnds.View, frameSamples.View, frameInfo.View,
+                buf.View, wide.View, meta.View, first);
+            await pacer.LaunchedAsync();
+        }
+        // 6. decorrelation + interleave
+        using var output = a.Allocate1D<int>(Math.Max(1, total * channels));
+        for (long first = 0; first < total; first += SampleChunk)
+        {
+            _interleave((int)Math.Min(SampleChunk, total - first), frameSamples.View, frameInfo.View, buf.View, wide.View,
+                output.View, meta.View, first);
+            await pacer.LaunchedAsync();
         }
 
-        if (channels == 0 || blockSize == 0)
-            throw new InvalidDataException("STREAMINFO did not provide block size or channels.");
-        if (totalSamples == 0)
-            throw new InvalidDataException("V1 GPU decoder requires STREAMINFO totalSamples to be set.");
-
-        int totalPerChannel = (int)totalSamples;
-        int frameCount = (totalPerChannel + blockSize - 1) / blockSize;
-
-        // ---- Per-frame decode (GPU) ----
-        // Each frame's decode + interleave runs on the accelerator;
-        // host only does sync-code scanning (metadata) + per-frame
-        // status check + the final single readback of the interleaved
-        // output buffer.
-        using var dData = _accelerator.Allocate1D<byte>(flacBytes.Length);
-        using var dSamples = _accelerator.Allocate1D<int>(blockSize * channels);
-        using var dStatus = _accelerator.Allocate1D<int>(1);
-        using var dFrameLen = _accelerator.Allocate1D<long>(1);
-        using var dOutput = _accelerator.Allocate1D<int>((long)totalPerChannel * channels);
-        dData.View.CopyFromCPU(flacBytes);
-
-        long frameBase = pos;
-        for (int frameIdx = 0; frameIdx < frameCount; frameIdx++)
+        // MD5 of the samples (little-endian, ceil(bps / 8) bytes each), when STREAMINFO has one
+        bool md5Checked = si.Md5.Any(x => x != 0);
+        bool md5Matches = false;
+        if (md5Checked)
         {
-            int fLen = (int)EstimateFrameLength((ulong)frameIdx, blockSize, channels, bps);
-            long actualFLen = ScanFrameLength(flacBytes, (int)frameBase, fLen);
-
-            await _frameKernel.RunAsync(dData.View, dSamples.View, dStatus.View, dFrameLen.View,
-                frameBase, (int)actualFLen, blockSize, channels, bps);
-
-            int status = (await dStatus.CopyToHostAsync())[0];
-            long consumed = (await dFrameLen.CopyToHostAsync())[0];
-            if (status != 0)
-                throw new InvalidDataException(
-                    $"FLAC frame {frameIdx} decode failed at byte {frameBase} (status={status}).");
-
-            // GPU interleave: dispatch one thread per (channel, sample),
-            // writing this frame's samples into dOutput at the right offset.
-            // The last frame may have fewer than blockSize samples; clip to
-            // remaining samples so we don't write past totalPerChannel.
-            int framesThisCall = Math.Min(blockSize, totalPerChannel - frameIdx * blockSize);
-            long outBase = (long)frameIdx * blockSize * channels;
-            _interleaveKernel(
-                new Index1D(framesThisCall * channels),
-                dSamples.View, dOutput.View,
-                channels, blockSize, /*cmBase*/ 0, outBase);
-
-            frameBase += consumed;
+            using var md5 = a.Allocate1D<uint>(W.Md5Size);
+            md5.View.SubView(0, 4).CopyFromCPU(new uint[] { 0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476 });
+            int bytesPerSample = (bps + 7) / 8;
+            long totalBytes = total * channels * bytesPerSample;
+            long blocks = totalBytes / 64;
+            var outView = output.View.SubView(0, Math.Max(1, total * channels));
+            for (long b = 0; b < blocks; b += W.Md5BlocksPerLaunch)
+            {
+                _md5Blocks(1, outView, md5.View, _md5Tables.View, bytesPerSample, totalBytes, b, (int)Math.Min(W.Md5BlocksPerLaunch, blocks - b));
+                await pacer.LaunchedAsync();
+            }
+            _md5Final(1, outView, md5.View, _md5Tables.View, bytesPerSample, totalBytes);
+            await a.SynchronizeAsync();
+            var digest = await md5.View.SubView(W.Md5Digest, 16).CopyToHostAsync();
+            md5Matches = true;
+            for (int i = 0; i < 16; i++) md5Matches &= digest[i] == si.Md5[i];
         }
 
-        await _accelerator.SynchronizeAsync();
-        var output = await dOutput.CopyToHostAsync();
-
-        return new FlacGpuDecodeResult
+        await a.SynchronizeAsync();
+        mHost = await meta.CopyToHostAsync();
+        var samples = total > 0 ? await output.View.SubView(0, total * channels).CopyToHostAsync() : Array.Empty<int>();
+        return new FlacDecodeResult
         {
-            SampleRateHz = sampleRateHz,
+            SampleRateHz = si.Rate,
             Channels = channels,
             BitsPerSample = bps,
-            BlockSize = blockSize,
-            TotalSamplesPerChannel = totalPerChannel,
-            InterleavedSamples = output,
+            TotalSamplesPerChannel = total,
+            InterleavedSamples = samples,
+            Md5Checked = md5Checked,
+            Md5Matches = md5Matches,
+            Frames = frames,
+            BadFrames = mHost[K.MBadFrames],
+            LostSamples = mHost[K.MGapSamples] + (total - walked),
+            Vendor = si.Vendor,
+            Tags = si.Tags,
         };
     }
 
-    /// <summary>
-    /// Estimate worst-case frame length in bytes for a v1 frame with
-    /// the given parameters. Used to size the GPU read range; the
-    /// actual length is recovered from the kernel's frameLen output.
-    /// </summary>
-    private static long EstimateFrameLength(ulong frameIndex, int blockSize, int channels, int bps)
+    /// <summary>Decode a complete FLAC byte stream (compatibility form of <see cref="DecodeAsync"/>).</summary>
+    public async Task<FlacGpuDecodeResult> DecodeStreamAsync(byte[] flacBytes)
     {
-        // Header: 32 bits fixed = 4 bytes + UTF-8 frame number length.
-        int utf8Bytes = frameIndex < 0x80 ? 1
-            : frameIndex < 0x800 ? 2
-            : frameIndex < 0x10000 ? 3
-            : frameIndex < 0x200000 ? 4
-            : frameIndex < 0x4000000 ? 5
-            : frameIndex < 0x80000000 ? 6
-            : 7;
-        int headerBytes = 4 + utf8Bytes;
-        int crc8Bytes = 1;
-        // Each VERBATIM subframe: 8-bit header + blockSize * bps bits.
-        long subframeBits = (long)channels * (8 + (long)blockSize * bps);
-        long subframeBytes = (subframeBits + 7) / 8;
-        int crc16Bytes = 2;
-        return headerBytes + crc8Bytes + subframeBytes + crc16Bytes;
-    }
-
-    /// <summary>
-    /// Scan forward from <paramref name="start"/> for the next FLAC
-    /// frame sync code (0xFFF8 / 0xFFFA). Used to bound the current
-    /// frame's length when the estimate may overshoot. Returns the
-    /// distance to the next sync, or remaining bytes if none found.
-    /// </summary>
-    private static long ScanFrameLength(byte[] data, int start, int hint)
-    {
-        int searchStart = Math.Min(start + hint - 4, data.Length - 2);
-        if (searchStart <= start) return data.Length - start;
-        for (int i = searchStart; i + 1 < data.Length; i++)
+        ArgumentNullException.ThrowIfNull(flacBytes);
+        var r = await DecodeAsync(flacBytes);
+        return new FlacGpuDecodeResult
         {
-            // Sync code 0x3FFE in the top 14 bits of the first 2 bytes.
-            // Byte 0 = 0xFF, byte 1 = 0xF8 (with bit 1 = blocking strategy).
-            if (data[i] == 0xFF && (data[i + 1] & 0xFE) == 0xF8) return i - start;
-        }
-        return data.Length - start;
+            SampleRateHz = r.SampleRateHz,
+            Channels = r.Channels,
+            BitsPerSample = r.BitsPerSample,
+            BlockSize = ParseMetadata(flacBytes).MaxBlock,
+            TotalSamplesPerChannel = (int)r.TotalSamplesPerChannel,
+            InterleavedSamples = r.InterleavedSamples,
+        };
     }
 
     /// <summary>Release accelerator-bound resources.</summary>
     public void Dispose()
     {
-        _frameKernel.Dispose();
+        _crcTable.Dispose();
+        _md5Tables.Dispose();
     }
 }
 
-/// <summary>Result of a GPU FLAC decode.</summary>
+/// <summary>Result of <see cref="FlacDecoderGpu.DecodeStreamAsync"/>.</summary>
 public sealed record FlacGpuDecodeResult
 {
     /// <summary>Sample rate in Hz.</summary>
@@ -236,7 +323,7 @@ public sealed record FlacGpuDecodeResult
     public required int Channels { get; init; }
     /// <summary>Bits per sample.</summary>
     public required int BitsPerSample { get; init; }
-    /// <summary>Block size (samples per frame per channel).</summary>
+    /// <summary>STREAMINFO's largest block size.</summary>
     public required int BlockSize { get; init; }
     /// <summary>Total samples per channel across the stream.</summary>
     public required int TotalSamplesPerChannel { get; init; }

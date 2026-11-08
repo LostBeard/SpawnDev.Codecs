@@ -35,3 +35,5 @@ FlacEnc/manifest.tsv text eol=lf
 OggOpus/* binary
 OggOpus/*.json text eol=lf
 OggOpus/manifest.txt text eol=lf
+FlacDec/* binary
+FlacDec/manifest.tsv text eol=lf

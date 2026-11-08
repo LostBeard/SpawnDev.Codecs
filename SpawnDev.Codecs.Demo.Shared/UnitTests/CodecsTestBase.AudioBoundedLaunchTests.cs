@@ -170,55 +170,6 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>
-    /// The parallel frame reader keeps the serial reader's verdicts: a damaged subframe header is status 4, a damaged
-    /// sample (CRC-16) is status 3, a damaged header byte (CRC-8) is status 2.
-    /// </summary>
-    [TestMethod(Category = "NotOnWebGL")]
-    public async Task FlacDecoderGpu_DamagedFrames_ReportSerialStatusCodes()
-    {
-        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
-        RequireFeatures(acc, SerialStreamKernels);
-        try
-        {
-            const int channels = 2;
-            var rng = new Random(0xBAD);
-            var samples = new int[3 * FlacEncoderGpu.BlockSize * channels];
-            for (int i = 0; i < samples.Length; i++) samples[i] = rng.Next(-32768, 32768);
-            using var enc = new FlacEncoderGpu(acc);
-            var good = await enc.EncodeStreamAsync(samples, channels);
-            using var dec = new FlacDecoderGpu(acc);
-            var ok = await dec.DecodeStreamAsync(good);
-            for (int i = 0; i < samples.Length; i++)
-                if (samples[i] != ok.InterleavedSamples[i]) throw new Exception($"sample[{i}] mismatch on the intact stream");
-
-            // Frame 0 starts at byte 42: 5 header bytes (1-byte frame number), CRC-8, then the subframes.
-            const int frame0 = 42;
-            await ExpectStatusAsync(dec, good, frame0 + 2, 0x10, 2);                // sample-rate bits: CRC-8 mismatch
-            await ExpectStatusAsync(dec, good, frame0 + 6, 0x40, 4);                // channel 0 subframe header
-            await ExpectStatusAsync(dec, good, frame0 + 6 + 1 + 1000, 0x01, 3);     // a channel 0 sample: CRC-16
-            await ExpectStatusAsync(dec, good, frame0 + 6 + 1 + 2 * FlacEncoderGpu.BlockSize, 0x80, 4); // channel 1 header
-        }
-        finally { ReleaseAccelerator(ctx, acc); }
-    }
-
-    private static async Task ExpectStatusAsync(FlacDecoderGpu dec, byte[] good, int at, byte xor, int status)
-    {
-        var bad = (byte[])good.Clone();
-        bad[at] ^= xor;
-        try
-        {
-            await dec.DecodeStreamAsync(bad);
-        }
-        catch (InvalidDataException e)
-        {
-            if (!e.Message.Contains($"status={status})"))
-                throw new Exception($"byte {at} ^ 0x{xor:X2}: expected status {status}, got: {e.Message}");
-            return;
-        }
-        throw new Exception($"byte {at} ^ 0x{xor:X2}: expected status {status}, decode succeeded");
-    }
-
-    /// <summary>
     /// An 8192-sample block: 4096 residue codewords of 10 bits each are about 50k work units, so the resumable
     /// packet decode spans several launches; the PCM must still match the CPU decoder.
     /// </summary>

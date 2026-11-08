@@ -1,0 +1,30 @@
+ff_st16_l0	st16_44k	2	44100	16	53976	ffmpeg level 0
+ff_st16_l5	st16_44k	2	44100	16	53976	ffmpeg level 5
+ff_st16_l8	st16_44k	2	44100	16	53976	ffmpeg level 8
+ff_st16_l12	st16_44k	2	44100	16	53976	ffmpeg level 12
+ff_st16_indep	st16_44k	2	44100	16	53976	ffmpeg stereo mode indep
+ff_st16_left_side	st16_44k	2	44100	16	53976	ffmpeg stereo mode left_side
+ff_st16_right_side	st16_44k	2	44100	16	53976	ffmpeg stereo mode right_side
+ff_st16_mid_side	st16_44k	2	44100	16	53976	ffmpeg stereo mode mid_side
+ff_st16_fixed	st16_44k	2	44100	16	53976	fixed predictors only
+ff_st16_exact_rice	st16_44k	2	44100	16	53976	exact rice parameters
+ff_st16_frame192	st16_44k	2	44100	16	53976	frame size 192
+ff_st16_frame1000	st16_44k	2	44100	16	53976	frame size 1000
+ff_st16_frame16384	st16_44k	2	44100	16	53976	frame size 16384
+ff_mono16_22k	mono16_22k	1	22050	16	33333	mono, odd length, 22.05 kHz
+ff_st24_96k_l8	st24_96k	2	96000	24	48077	24-bit 96 kHz
+ff_ch6_48k	ch6_48k	6	48000	16	24003	6 channels
+ff_noise16	noise16	2	44100	16	20000	white noise (verbatim subframes)
+ff_noise24	noise24	2	48000	24	12000	24-bit noise (Rice2)
+ff_wasted16	wasted16	2	44100	16	15000	wasted bits
+ff_silence_dc	silence_dc	2	44100	16	16000	constant subframes
+ff_st32_48k	st32_48k	2	48000	32	12000	32-bit
+libflac_st16_44k	st16_44k	2	44100	16	53976	libFLAC PCM_16
+libflac_st24_96k	st24_96k	2	96000	24	48077	libFLAC PCM_24
+libflac_mono8_8k	mono8_8k	1	8000	8	8005	libFLAC PCM_S8
+libflac_ch6_48k	ch6_48k	6	48000	16	24003	libFLAC PCM_16
+libflac_wasted16	wasted16	2	44100	16	15000	libFLAC PCM_16
+libflac_noise24	noise24	2	48000	24	12000	libFLAC PCM_24
+var_blocksize	st16_44k	2	44100	16	53976	variable block size (4096 then 1152), MD5 set
+hand_escapes_rice2_lpc32_md5	hand16	2	32000	16	4096	escaped partitions, Rice2, LPC order 32, constant, verbatim, wasted bits; MD5 set
+hand_escapes_rice2_lpc32	hand16	2	32000	16	4096	the same frames, STREAMINFO total samples 0 and no MD5
