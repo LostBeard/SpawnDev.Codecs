@@ -9,9 +9,11 @@
 // What must hold:
 //   * levels 0..2 (FFmpeg's integer fixed predictors): our file is BYTE-IDENTICAL with FFmpeg's, on every backend;
 //   * levels 5 and 8 (LPC, FFmpeg's double-precision analysis; fixtures made with -cpuflags 0, FFmpeg's C code):
-//     BYTE-IDENTICAL on the backends with IEEE doubles (CPU, CUDA, OpenCL, Wasm). WebGPU / WebGL emulate doubles, so
-//     there the coefficients may differ: the same stream header as FFmpeg's (STREAMINFO with the same MD5 of the samples,
-//     Vorbis comment, padding) apart from the min / max frame sizes, and a file no more than 2 % larger;
+//     BYTE-IDENTICAL on the backends that round every double operation as .NET does (CPU, Velocity, Wasm). CUDA and
+//     OpenCL let the device compiler fuse multiply-adds (ILGPU emits PTX mul.f64 / add.f64 without .rn, and OpenCL C
+//     contracts by default); WebGPU / WebGL emulate doubles. There the LPC coefficients can differ in a few frames: the
+//     same stream header as FFmpeg's (STREAMINFO with the same MD5 of the samples, Vorbis comment, padding) apart from
+//     the min / max frame sizes, and a file no more than 2 % larger;
 //   * (desktop) libFLAC decodes every file of ours, every level, to exactly the source samples.
 
 using ILGPU;
@@ -66,13 +68,6 @@ public abstract partial class CodecsTestBase
         return i;
     }
 
-    /// <summary>WebGPU and WebGL emulate double (no IEEE f64 in their shading languages).</summary>
-    private static bool IsEmulatedDoubleBackend(Accelerator acc)
-    {
-        string type = acc.AcceleratorType.ToString();
-        return type.Contains("WebGPU", StringComparison.OrdinalIgnoreCase) || type.Contains("WebGL", StringComparison.OrdinalIgnoreCase);
-    }
-
     /// <summary>The bytes before the first audio frame: "fLaC" + every metadata block (until the last-block flag).</summary>
     private static int FlacHeaderLength(byte[] f)
     {
@@ -118,7 +113,7 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
-    public async Task FlacEncoderGpu_LpcLevels_ByteIdenticalWithFfmpeg_WhereDoublesAreIeee()
+    public async Task FlacEncoderGpu_LpcLevels_ByteIdenticalWithFfmpeg_WhereDoublesRoundEachOperation()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         RequireFeatures(acc, SerialStreamKernels);
@@ -130,7 +125,8 @@ public abstract partial class CodecsTestBase
             var report = new List<string>();
             int identical = 0;
             var cases = FlacEncCases().Where(c => c.Level > 2).ToList();
-            bool ieeeDoubles = !IsEmulatedDoubleBackend(acc);
+            // every double operation rounded on its own, as .NET (and FFmpeg's C code) does: no fused multiply-adds
+            bool ieeeDoubles = acc.AcceleratorType is AcceleratorType.CPU or AcceleratorType.Velocity or AcceleratorType.Wasm;
             foreach (var c in cases)
             {
                 try

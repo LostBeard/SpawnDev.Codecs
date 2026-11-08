@@ -41,8 +41,11 @@
 - **Byte-identical with FFmpeg** (`-fflags +bitexact`, 65 fixtures: stereo / mono / 5 channels, 16 / 24 bits, 22.05..96 kHz
   and a non-standard rate, non-multiple lengths, a 3-sample clip, silence, constants, wasted bits, white noise (verbatim
   fallback), at levels 0, 1, 2, 5, 8) on the CPU accelerator. The fixtures use FFmpeg's C code (`-cpuflags 0`): its x86
-  SIMD autocorrelation rounds differently and changed 4 of the 65 files. WebGPU / WebGL emulate doubles, so there the LPC
-  levels may pick other coefficients; the test then checks the stream header and the size (within 2 %). libFLAC decodes
+  SIMD autocorrelation rounds differently and changed 4 of the 65 files. The same on Wasm. CUDA and OpenCL fuse
+  multiply-adds in the double analysis (ILGPU emits PTX mul.f64 / add.f64 without .rn; OpenCL C contracts by default)
+  and WebGPU / WebGL emulate doubles: there the LPC levels can pick other coefficients in a few frames (CUDA / OpenCL:
+  the 96 kHz 24-bit fixture, 2 of 26 LPC files; the others identical); the test then checks the stream header and the
+  size (within 2 %), and the files still decode exactly. libFLAC decodes
   every file of ours to exactly the source samples (desktop oracle, `scripts/audio/flac_decode.py`).
 - An integer Levinson-Durbin was tried first (for identical bytes on every backend): tonal signals need near-double
   precision and it produced wrong coefficients (files up to 2x larger); it was replaced by FFmpeg's double analysis.
