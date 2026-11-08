@@ -10,6 +10,7 @@
 // straight to the GPU through IBrowserMemoryBuffer.CopyFromJS and come back as a Uint8Array, never
 // through ReadBytes()/byte[]. The managed overloads stay for desktop and for tiny test inputs.
 
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using ILGPU;
@@ -147,6 +148,25 @@ public static class DeviceTransfer
                 $"A TypedArray overload needs a browser accelerator buffer; got {contiguous.Buffer.GetType().Name} " +
                 $"on {contiguous.Buffer.Accelerator.AcceleratorType}. On a desktop accelerator use the managed or ArrayView1D overload.");
         if ((long)src.ByteLength > dest.Length * sizeof(int))
+            throw new ArgumentOutOfRangeException(nameof(src), "Source is larger than the destination view.");
+        browser.CopyFromJS(src, contiguous.IndexInBytes);
+    }
+
+    /// <summary>
+    /// Copy a JS typed array's bytes into a view of any element type (e.g. an Int16Array or Float32Array of samples into
+    /// a short or float device buffer). The bytes go JS -> GPU; they never enter the .NET heap.
+    /// </summary>
+    /// <exception cref="NotSupportedException">The view is not on a browser accelerator.</exception>
+    [SupportedOSPlatform("browser")]
+    public static void Upload<T>(ArrayView1D<T, Stride1D.Dense> dest, TypedArray src) where T : unmanaged
+    {
+        ArgumentNullException.ThrowIfNull(src);
+        var contiguous = (IContiguousArrayView)dest.BaseView;
+        if (contiguous.Buffer is not IBrowserMemoryBuffer browser)
+            throw new NotSupportedException(
+                $"A TypedArray overload needs a browser accelerator buffer; got {contiguous.Buffer.GetType().Name} " +
+                $"on {contiguous.Buffer.Accelerator.AcceleratorType}. On a desktop accelerator use the managed or ArrayView1D overload.");
+        if ((long)src.ByteLength > dest.Length * Unsafe.SizeOf<T>())
             throw new ArgumentOutOfRangeException(nameof(src), "Source is larger than the destination view.");
         browser.CopyFromJS(src, contiguous.IndexInBytes);
     }

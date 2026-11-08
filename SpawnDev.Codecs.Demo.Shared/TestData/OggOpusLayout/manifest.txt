@@ -1,0 +1,13 @@
+spill_then_duration 1500000
+zero_lacing_and_huge 0
+byte_limit_flush 0
+byte_limit_split 0
+first_page_start_in 1104167
+first_page_start_out 1104168
+first_page_half_in 1000063
+first_page_half_out 1000064
+full_last_page 1000000
+zero_lacing_last 1000000
+tags_span_pages 1000000
+short_pages 30000
+no_audio 1000000

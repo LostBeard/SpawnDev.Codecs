@@ -1,5 +1,6 @@
-// Tests for the Ogg Opus writer (Container/Ogg/OggOpusWriter.cs, a port of FFmpeg 8.1's ogg muxer) and for Ogg Opus
-// encoding with OpusEncoderGpu at the settings FFmpeg's libopus wrapper uses.
+// Tests for the Ogg Opus writer (Container/Ogg/OggOpusWriter.cs, written clean-room from RFC 3533 / RFC 7845 and the
+// observed output of the ffmpeg binary) and for Ogg Opus encoding with OpusEncoderGpu at the settings FFmpeg's libopus
+// encoding is observed to use.
 //
 // Fixtures (scripts/audio/make_ogg_opus_fixtures.py, TestData/OggOpus): FFmpeg + libopus files of stereo / mono 48 kHz
 // and stereo 24 kHz sources at 64..320 kbps (bit-exact mode), with the packets each contains.
@@ -32,6 +33,15 @@ public abstract partial class CodecsTestBase
     private static List<string> OggOpusCases() =>
         System.Text.Encoding.UTF8.GetString(ReadEmbedded(OggOpusPrefix + "manifest.txt")).Split('\n')
             .Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+
+    /// <summary>The index of the first byte where <paramref name="a"/> and <paramref name="b"/> differ (the shorter
+    /// length when one is a prefix of the other).</summary>
+    private static int FirstDifference(byte[] a, byte[] b)
+    {
+        int i = 0, n = Math.Min(a.Length, b.Length);
+        while (i < n && a[i] == b[i]) i++;
+        return i;
+    }
 
     /// <summary>Vendor and fields of an OpusTags packet.</summary>
     private static (string Vendor, List<KeyValuePair<string, string>> Tags) ParseOpusTags(byte[] t)
@@ -122,6 +132,58 @@ public abstract partial class CodecsTestBase
         return packets;
     }
 
+    private const string OggOpusLayoutPrefix = "SpawnDev.Codecs.Demo.Shared.TestData.OggOpusLayout.";
+
+    /// <summary>
+    /// The page layout edge cases the encode fixtures never reach (scripts/audio/make_ogg_opus_layout_fixtures.py: crafted
+    /// streams the ffmpeg binary remuxed): a packet larger than a page, the 65025-byte flush, a packet split across pages
+    /// and the continued page's start time, zero lacing values, the first page's start time and microsecond rounding, a
+    /// full last page, OpusTags across pages, no duration limit, no audio packets. Given FFmpeg's packets and the page
+    /// duration, the writer writes FFmpeg's file byte for byte.
+    /// </summary>
+    [TestMethod(Category = "CpuOnly")]
+    public async Task OggOpusWriter_PageLayoutEdgeCases_ByteIdenticalWithFfmpeg()
+    {
+        await Task.Yield();
+        var failures = new List<string>();
+        var cases = System.Text.Encoding.UTF8.GetString(ReadEmbedded(OggOpusLayoutPrefix + "manifest.txt")).Split('\n')
+            .Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        True(cases.Count == 13, $"{cases.Count} layout cases");
+        foreach (var line in cases)
+        {
+            var parts = line.Split(' ');
+            string name = parts[0];
+            long pageDurationUs = long.Parse(parts[1]);
+            var truth = Gunzip(ReadEmbedded(OggOpusLayoutPrefix + name + ".opus.gz"));
+            var packets = OggPackets(truth);
+            var head = packets[0];
+            int preSkip = BitConverter.ToUInt16(head, 10);
+            var (vendor, tags) = ParseOpusTags(packets[1]);
+            long finalGranule = OggPages(truth)[^1].Granule;
+            var ms = new MemoryStream();
+            using (var w = new OggOpusWriter(ms, new OggOpusWriterOptions
+            {
+                Channels = head[9], PreSkip = preSkip, InputSampleRate = BitConverter.ToInt32(head, 12),
+                OutputGain = BitConverter.ToInt16(head, 16), Vendor = vendor, Tags = tags, PageDurationUs = pageDurationUs,
+            }, leaveOpen: true))
+            {
+                int count = packets.Count - 2;
+                for (int k = 0; k < count; k++)
+                {
+                    long pts = -preSkip + 960L * k;
+                    int duration = k < count - 1 ? 960 : (int)(finalGranule - preSkip - pts);
+                    w.WritePacket(packets[k + 2], pts, duration);
+                }
+            }
+            var ours = ms.ToArray();
+            if (!ours.AsSpan().SequenceEqual(truth))
+                failures.Add($"{name}: {ours.Length} bytes vs FFmpeg {truth.Length}, first difference at byte {FirstDifference(ours, truth)}; pages "
+                    + string.Join(" ", OggPages(ours).Select(x => x.Granule + "/" + x.Flags)) + " vs FFmpeg "
+                    + string.Join(" ", OggPages(truth).Select(x => x.Granule + "/" + x.Flags)));
+        }
+        True(failures.Count == 0, string.Join("\n", failures));
+    }
+
     [TestMethod(Timeout = 900000, Category = "NotOnWebGL")]
     public async Task OggOpusEncoder_FfmpegLayout_DecodesCloseToSource()
     {
@@ -188,6 +250,75 @@ public abstract partial class CodecsTestBase
                 double snr = 10 * Math.Log10(sig / Math.Max(err, 1e-30));
                 report.Add($"{name} {ours.Length}B vs {truth.Length}B, {same}/{ok.Count - 2} packets equal, SNR {snr:F1} dB");
                 if (snr < 12) failures.Add($"{name}: decoded audio SNR {snr:F1} dB vs the source");
+            }
+            Console.WriteLine(string.Join("\n", report));
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    /// <summary>
+    /// Packet count and final granule at input lengths around the frame boundaries, as the ffmpeg binary (8.1, libopus,
+    /// -fflags +bitexact) writes them for the first n samples of the mono48 / stereo24 sources (measured 2026-11-08):
+    /// ceil((n + lookahead) / frame) packets, final granule = n at 48 kHz + pre-skip, header pages only for n = 0.
+    /// </summary>
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task OggOpusEncoder_TailPacketsAndFinalGranule_MatchFfmpeg()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            // (source, rate, channels, samples per channel, FFmpeg's audio packet count, FFmpeg's final granule)
+            var cases = new (string Src, int Rate, int Ch, int N, int Packets, long Final)[]
+            {
+                ("mono48", 48000, 1, 0, 0, 0), ("mono48", 48000, 1, 1, 1, 313), ("mono48", 48000, 1, 647, 1, 959),
+                ("mono48", 48000, 1, 648, 1, 960), ("mono48", 48000, 1, 649, 2, 961), ("mono48", 48000, 1, 960, 2, 1272),
+                ("mono48", 48000, 1, 9287, 10, 9599), ("mono48", 48000, 1, 9288, 10, 9600), ("mono48", 48000, 1, 9289, 11, 9601),
+                ("mono48", 48000, 1, 9600, 11, 9912), ("stereo24", 24000, 2, 1, 1, 314), ("stereo24", 24000, 2, 100, 1, 512),
+                ("stereo24", 24000, 2, 4643, 10, 9598), ("stereo24", 24000, 2, 4644, 10, 9600), ("stereo24", 24000, 2, 4645, 11, 9602),
+                ("stereo24", 24000, 2, 4799, 11, 9910),
+            };
+            var failures = new List<string>();
+            var report = new List<string>();
+            var sources = new Dictionary<string, short[]>();
+            foreach (var c in cases)
+            {
+                if (!sources.TryGetValue(c.Src, out var all))
+                {
+                    var raw = Gunzip(ReadEmbedded(OggOpusPrefix + c.Src + ".s16.gz"));
+                    all = new short[raw.Length / 2];
+                    Buffer.BlockCopy(raw, 0, all, 0, raw.Length);
+                    sources[c.Src] = all;
+                }
+                var file = await OggOpusEncoder.EncodeAsync(acc, all.AsMemory(0, c.N * c.Ch), c.Rate, c.Ch, new OggOpusEncodeOptions { Bitrate = 64000 });
+                var pages = OggPages(file);
+                int packets = OggPackets(file).Count - 2;
+                long final = pages[^1].Granule;
+                int lastFlags = pages[^1].Flags;
+                bool ok = packets == c.Packets && final == c.Final && (c.Packets == 0 ? pages.Count == 2 && lastFlags == 0 : lastFlags == 4);
+                if (!ok)
+                {
+                    failures.Add($"{c.Src} n={c.N}: {packets} packets, final granule {final}, last flags {lastFlags}; FFmpeg {c.Packets}, {c.Final}");
+                    continue;
+                }
+                if (c.N < 600) continue;
+
+                // The input's last 400 samples (part of the zero-padded tail packets) decode close to the source.
+                using var dec = new OpusDecoderGpu(acc, c.Rate, c.Ch);
+                var outPcm = new List<float>();
+                foreach (var p in OggPackets(file).Skip(2)) outPcm.AddRange(await dec.DecodePacketAsync(p));
+                int skip = 312 / (48000 / c.Rate) * c.Ch;
+                double sig = 0, err = 0;
+                for (int i = (c.N - 400) * c.Ch; i < c.N * c.Ch; i++)
+                {
+                    double x = all[i] / 32768.0, y = outPcm[skip + i];
+                    sig += x * x;
+                    err += (x - y) * (x - y);
+                }
+                double snr = 10 * Math.Log10(sig / Math.Max(err, 1e-30));
+                report.Add($"{c.Src} n={c.N}: last 400 samples SNR {snr:F1} dB");
+                if (snr < 12) failures.Add($"{c.Src} n={c.N}: the input's last 400 samples decode at SNR {snr:F1} dB");
             }
             Console.WriteLine(string.Join("\n", report));
             True(failures.Count == 0, string.Join("\n", failures));

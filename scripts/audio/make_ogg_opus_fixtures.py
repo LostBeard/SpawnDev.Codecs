@@ -1,5 +1,5 @@
-"""Fixtures for the Ogg Opus writer (Container/Ogg/OggOpusWriter.cs, a port of FFmpeg's ogg muxer) and the Ogg Opus
-encode (OpusEncoderGpu + OggOpusWriter, as FFmpeg's libopus wrapper drives libopus).
+"""Fixtures for the Ogg Opus writer (Container/Ogg/OggOpusWriter.cs, clean-room from RFC 3533 / RFC 7845, matching the
+ffmpeg binary's output) and the Ogg Opus encode (OpusEncoderGpu + OggOpusWriter, at the settings ffmpeg + libopus use).
 
 For each case FFmpeg 8.1 encodes source PCM (s16) with libopus at a bitrate (`-fflags +bitexact -flags +bitexact`):
   <name>.opus      FFmpeg's file (the truth)
