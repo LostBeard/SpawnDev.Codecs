@@ -178,11 +178,13 @@ public sealed class Mp3EncoderGpu : IDisposable
         int granules = (int)(frames * granulesPerFrame);
         int slots = granules * 18;
         int units = granules * channels;
-        // the Info frame: CBR one unpadded frame of the stream's rate; VBR the lowest rate whose frame holds the tag
+        // the Info frame: CBR one unpadded frame of the stream's rate when that holds the tag (header, side info, 156
+        // bytes of Xing + LAME-format data), else, and always for VBR, the lowest rate whose frame does
         int infoIndex = bitrateIndex;
-        if (vbr)
+        int infoNeed = 4 + sideBytes + 156;
+        if (vbr || (long)coeff * Mp3Tables.BitratesKbps[brBase + bitrateIndex] / sampleRate < infoNeed)
             for (infoIndex = 1; infoIndex < 14; infoIndex++)
-                if ((long)coeff * Mp3Tables.BitratesKbps[brBase + infoIndex] / sampleRate >= 4 + sideBytes + 156) break;
+                if ((long)coeff * Mp3Tables.BitratesKbps[brBase + infoIndex] / sampleRate >= infoNeed) break;
         int infoBytes = o.WriteInfoFrame ? (int)((long)coeff * Mp3Tables.BitratesKbps[brBase + infoIndex] / sampleRate) : 0;
         long num = (long)coeff * (vbr ? 0 : o.BitrateKbps);   // CBR bytes per frame = num / rate
         var a = _accelerator;

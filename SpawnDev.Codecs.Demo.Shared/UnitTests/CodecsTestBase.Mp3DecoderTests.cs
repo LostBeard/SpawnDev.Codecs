@@ -196,14 +196,12 @@ public abstract partial class CodecsTestBase
             using var dec = new Mp3DecoderGpu(acc);
             var failures = new List<string>();
             var report = new List<string>();
-            // Not here: CBR rates whose frames are under 169 bytes (16 kHz 32k, 8 kHz 16k: 144 bytes). Mp3EncoderGpu writes its
-            // Info frame at the stream's rate, and a 144-byte frame cannot hold the Xing + LAME tag: the tag runs into the
-            // first audio frame, minimp3 (and this decoder) bound-check the tag and decode the Info frame as audio.
-            // Reported for the encoder (it should pick a larger rate for the Info frame, as its VBR path does).
+            // 16 kHz 32k and 8 kHz 16k have 144-byte frames, too small for the Info frame's tag: the encoder writes its Info
+            // frame at a larger rate there (found by this test, fixed in Mp3EncoderGpu).
             foreach (var (rate, ch, kbps, vbr) in new (int, int, int, int?)[]
                      {
                          (44100, 2, 128, null), (48000, 1, 192, null), (32000, 2, 96, null), (22050, 2, 64, null),
-                         (16000, 1, 48, null), (8000, 1, 24, null), (11025, 2, 32, null), (44100, 2, 0, 0), (24000, 1, 0, 4),
+                         (16000, 1, 48, null), (8000, 1, 24, null), (11025, 2, 32, null), (44100, 2, 0, 0), (24000, 1, 0, 4), (16000, 1, 32, null), (8000, 1, 16, null),
                      })
             {
                 int samples = rate / 3 + 1234;
