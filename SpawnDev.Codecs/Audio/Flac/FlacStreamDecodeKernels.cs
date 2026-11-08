@@ -31,6 +31,9 @@ public static class FlacStreamDecodeKernels
     public const int MChannels = 0, MBps = 1, MRate = 2, MMaxFrame = 3, MCandidates = 4, MFrames = 5, MSkippedBytes = 6,
         MBadFrames = 7, MSyncBlocks = 8, MBlockSize = 9, MGapSamples = 10, MetaSize = 11;
 
+    /// <summary>FLAC's largest channel count and LPC order (the per-frame coefficient scratch: frames x 8 x 32 ints).</summary>
+    public const int MaxChannels = 8, MaxLpcOrder = 32;
+
     /// <summary>Per-frame ints: block size, channel assignment, status (0 = decoded).</summary>
     public const int FBlockSize = 0, FAssign = 1, FStatus = 2, FrameInts = 3;
 
@@ -379,7 +382,7 @@ public static class FlacStreamDecodeKernels
     /// A frame that fails (reserved subframe type, invalid residual) comes out as silence with a non-zero status.
     /// </summary>
     public static void DecodeFrameKernel(Index1D index, ArrayView<byte> data, ArrayView<int> frameOffsets, ArrayView<int> frameEnds, ArrayView<long> frameSamples,
-        ArrayView<int> frameInfo, ArrayView<int> buf, ArrayView<long> wide, ArrayView<int> meta, int firstFrame)
+        ArrayView<int> frameInfo, ArrayView<int> buf, ArrayView<long> wide, ArrayView<int> coefs, ArrayView<int> meta, int firstFrame)
     {
         int f = firstFrame + index;
         if (f >= meta[MFrames]) return;
@@ -449,18 +452,30 @@ public static class FlacStreamDecodeKernels
                 if (precision == 16) { status = 6; break; }
                 int shift = ReadSigned(data, ref pos, 5);
                 if (shift < 0) { status = 7; break; }
-                // the coefficients: kept in the frame's region of the int view is not possible (it holds samples), so
-                // they are read again from the bitstream for each sample - their bit position is known
-                long coefPos = pos;
-                pos += (long)order * precision;
+                long coefAt = ((long)f * MaxChannels + c) * MaxLpcOrder;
+                for (int j = 0; j < order; j++) coefs[coefAt + j] = ReadSigned(data, ref pos, precision);
                 if (!Residual(data, ref pos, endBit, n, order, buf, wide, chBase, wideBase, isWide)) { status = 5; break; }
-                for (int i = order; i < n; i++)
+                // libFLAC's rule: a 32-bit sum cannot overflow when bits + precision + floor(log2(order)) <= 32
+                int log2Order = 0;
+                while ((2 << log2Order) <= order) log2Order++;
+                if (!isWide && ebps + precision + log2Order <= 32)
                 {
-                    long cp = coefPos;
-                    long sum = 0;
-                    for (int j = 0; j < order; j++)
-                        sum += (long)ReadSigned(data, ref cp, precision) * Load(buf, wide, chBase, wideBase, isWide, i - 1 - j);
-                    Store(buf, wide, chBase, wideBase, isWide, i, Load(buf, wide, chBase, wideBase, isWide, i) + (sum >> shift));
+                    for (int i = order; i < n; i++)
+                    {
+                        int sum = 0;
+                        for (int j = 0; j < order; j++) sum += coefs[coefAt + j] * buf[chBase + i - 1 - j];
+                        buf[chBase + i] += sum >> shift;
+                    }
+                }
+                else
+                {
+                    for (int i = order; i < n; i++)
+                    {
+                        long sum = 0;
+                        for (int j = 0; j < order; j++)
+                            sum += (long)coefs[coefAt + j] * Load(buf, wide, chBase, wideBase, isWide, i - 1 - j);
+                        Store(buf, wide, chBase, wideBase, isWide, i, Load(buf, wide, chBase, wideBase, isWide, i) + (sum >> shift));
+                    }
                 }
             }
             else { status = 8; break; }

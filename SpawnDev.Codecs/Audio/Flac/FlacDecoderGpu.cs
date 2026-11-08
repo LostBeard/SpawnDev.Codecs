@@ -60,7 +60,7 @@ public sealed class FlacDecoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _compactSync;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _frameEnd;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>> _walk;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int> _decodeFrame;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, int> _decodeFrame;
     private readonly Action<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, long> _interleave;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long, long, int> _md5Blocks;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long> _md5Final;
@@ -82,7 +82,7 @@ public sealed class FlacDecoderGpu : IDisposable
         _compactSync = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(K.CompactSyncKernel);
         _frameEnd = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(K.FrameEndKernel);
         _walk = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>>(K.WalkKernel);
-        _decodeFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int>(K.DecodeFrameKernel);
+        _decodeFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, int>(K.DecodeFrameKernel);
         _interleave = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, long>(K.InterleaveKernel);
         _md5Blocks = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long, long, int>(W.Md5BlocksKernel);
         _md5Final = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long>(W.Md5FinalKernel);
@@ -259,10 +259,11 @@ public sealed class FlacDecoderGpu : IDisposable
         using var buf = a.Allocate1D<int>(Math.Max(1, walked * channels));
         using var wide = a.Allocate1D<long>(bps == 32 && channels == 2 ? Math.Max(1, walked) : 1);
         using var frameInfo = a.Allocate1D<int>(Math.Max(1, frames * K.FrameInts));
+        using var coefs = a.Allocate1D<int>(Math.Max(1, (long)frames * K.MaxChannels * K.MaxLpcOrder));
         for (int first = 0; first < frames; first += FrameChunk)
         {
             _decodeFrame(Math.Min(FrameChunk, frames - first), dataView, frameOffsets.View, frameEnds.View, frameSamples.View, frameInfo.View,
-                buf.View, wide.View, meta.View, first);
+                buf.View, wide.View, coefs.View, meta.View, first);
             await pacer.LaunchedAsync();
         }
         // 6. decorrelation + interleave
