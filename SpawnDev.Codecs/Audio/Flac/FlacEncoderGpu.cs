@@ -34,7 +34,7 @@ namespace SpawnDev.Codecs.Audio.Flac;
 /// (fLaC marker + STREAMINFO metadata block) runs on the host since
 /// it is one-shot metadata serialization with no codec-data math.
 /// </summary>
-public sealed partial class FlacEncoderGpu : IDisposable
+public sealed class FlacEncoderGpu : IDisposable
 {
     /// <summary>V1 constants - block size enforced.</summary>
     public const int BlockSize = 4096;
@@ -205,6 +205,5 @@ public sealed partial class FlacEncoderGpu : IDisposable
     public void Dispose()
     {
         _frameKernel.Dispose();
-        _stream?.Dispose();
     }
 }

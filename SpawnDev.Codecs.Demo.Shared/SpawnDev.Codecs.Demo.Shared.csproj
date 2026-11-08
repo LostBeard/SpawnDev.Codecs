@@ -11,6 +11,13 @@
 		<PackageReference Include="SpawnDev.UnitTesting.Browser" Version="2.7.2-local.3" />
 	</ItemGroup>
 
+	<!-- Acceptance tests of the components being rewritten clean-room (Plans/PLAN-CleanRoom-Rewrite.md): compiled again as
+	     each rewrite lands. -->
+	<ItemGroup>
+		<Compile Remove="UnitTests\CleanRoomPending\**" />
+		<None Include="UnitTests\CleanRoomPending\**" />
+	</ItemGroup>
+
 	<ItemGroup>
 		<ProjectReference Include="..\SpawnDev.Codecs\SpawnDev.Codecs.csproj" />
 		<!-- Tests use the CPU reference encoders/decoders (e.g. Concentus-based

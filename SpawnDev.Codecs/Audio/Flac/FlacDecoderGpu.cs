@@ -14,7 +14,7 @@ using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.ILGPU;
 using K = SpawnDev.Codecs.Audio.Flac.FlacStreamDecodeKernels;
-using W = SpawnDev.Codecs.Audio.Flac.FlacStreamWriteKernels;
+using W = SpawnDev.Codecs.Audio.Flac.FlacMd5Kernels;
 
 namespace SpawnDev.Codecs.Audio.Flac;
 
@@ -97,11 +97,7 @@ public sealed class FlacDecoderGpu : IDisposable
         _crcTable.View.CopyFromCPU(t);
         _toFloat = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, int, long, int, long>(ToFloatKernel);
         _md5Tables = a.Allocate1D<uint>(128);
-        var m = new uint[128];
-        for (int i = 0; i < 64; i++) m[i] = (uint)(long)Math.Floor(Math.Abs(Math.Sin(i + 1)) * 4294967296.0);
-        int[] sh = { 7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21 };
-        for (int i = 0; i < 64; i++) m[64 + i] = (uint)sh[(i / 16) * 4 + (i & 3)];
-        _md5Tables.View.CopyFromCPU(m);
+        _md5Tables.View.CopyFromCPU(W.BuildTables());
     }
 
     private sealed record StreamInfo(int MinBlock, int MaxBlock, int MaxFrame, int Rate, int Channels, int Bps, long Total,

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### REMOVED: code ported from FFmpeg (LGPL), to be rewritten clean-room (2026-11-08)
+- `WebMWriter`, `OggOpusWriter`, `OggOpusEncoder`, `PcmConvertKernels` and the FLAC stream encoder
+  (`FlacEncoderGpu.EncodeAsync`, `FlacEncodeOptions`, `FlacEncoderGpu.WarmUpAsync`, `FlacStreamKernels`,
+  `FlacStreamWriteKernels`) were ports of FFmpeg 8.1 source, which is LGPL-2.1-or-later; SpawnDev.Codecs is MIT. They are
+  removed and will be rewritten clean-room (MIT) from the public specifications and black-box fixtures:
+  `Plans/PLAN-CleanRoom-Rewrite.md`. Their tests wait in `UnitTests/CleanRoomPending/`. Local packages 1.0.2-local.1
+  through local.7 contain the ported code and must not be redistributed.
+- The FLAC decoder's MD5 kernels (own code, RFC 1321) moved to `FlacMd5Kernels`.
+
 ### Warm-ups for the audio coders (2026-11-08)
 - `FlacDecoderGpu.WarmUpAsync`, `FlacEncoderGpu.WarmUpAsync`, `OggOpusEncoder.WarmUpAsync`: compile and load every kernel
   ahead of the first real call. Lore measured the first Ogg Opus save in Chrome on an RX 590 (WebGPU, D3D's FXC compiling
@@ -38,7 +47,7 @@
   ILGPU's Ozaki mode (strict IEEE-754) through the new internal `StrictFloat64` helper, which restores the
   accelerator's mode after the load: no other kernel changes mode.
 
-### Ogg Opus files: `OggOpusWriter` (a port of FFmpeg 8.1's ogg muxer) + `OggOpusEncoder` (2026-11-08)
+### Ogg Opus files: `OggOpusWriter` (a port of FFmpeg 8.1's ogg muxer) + `OggOpusEncoder` (2026-11-08) [REMOVED, see above]
 - **New `Container.Ogg.OggOpusWriter`**: OpusHead on the beginning-of-stream page, OpusTags (vendor + `KEY=value`
   fields, in order) on the next, then the audio packets packed as FFmpeg packs them: a page closed at 255 segments,
   before a packet that would overflow 65025 bytes, or once it spans 1 s of granule time; granule = pts + duration +
@@ -86,7 +95,7 @@
   Pillow checks are desktop-only). Lore checked SpawnGen's Save Animated WEBP against ComfyUI's own save (3 frames,
   q80 m4, ComfyUI's EXIF): byte-identical on the CPU accelerator and on OpenCL (RX 590).
 
-### FLAC of any length: `FlacEncoderGpu.EncodeAsync`, a port of FFmpeg 8.1's FLAC encoder + muxer (2026-11-08)
+### FLAC of any length: `FlacEncoderGpu.EncodeAsync`, a port of FFmpeg 8.1's FLAC encoder + muxer (2026-11-08) [REMOVED, see above]
 - **New `FlacEncoderGpu.EncodeAsync(samples, channels, sampleRate, bitsPerSample, options)`** (managed `ReadOnlyMemory<int>`,
   browser `Int32Array`, `ArrayView1D<int>` into a caller view): a complete .flac of any length (the last block shorter),
   any rate FLAC carries (standard and non-standard codes), 1..8 channels, 16 or 24 bits. `FlacEncodeOptions`: FFmpeg
@@ -140,7 +149,7 @@
   libwebp: pass the stripped bytes). Opaque pictures byte-identical with Pillow; with transparency identical except the
   ALPH coding. All three overloads; the ArrayView one names the needed size when the output is short.
 
-### WebM writer: `WebMWriter`, a port of FFmpeg 8.1's matroskaenc in WebM mode (2026-11-08)
+### WebM writer: `WebMWriter`, a port of FFmpeg 8.1's matroskaenc in WebM mode (2026-11-08) [REMOVED, see above]
 - **New `SpawnDev.Codecs.Container.Matroska.WebMWriter`**: `AddVideoTrack` (V_VP8 / V_VP9 / V_AV1: size, interlacing,
   AlphaMode, display size, Colour, DefaultDuration, CodecPrivate + reserve), `AddAudioTrack` (A_OPUS / A_VORBIS: rate,
   channels, bit depth, initial padding -> CodecDelay + timestamp offset, SeekPreRoll for Opus), `WriteFrame` (ms

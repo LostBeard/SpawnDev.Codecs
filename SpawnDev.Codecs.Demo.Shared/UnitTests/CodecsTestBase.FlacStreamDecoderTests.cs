@@ -128,7 +128,7 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>
-    /// The warm-ups (FlacDecoderGpu, FlacEncoderGpu, OggOpusEncoder) run on every backend (the decoder checks its built-in
+    /// The decoder's warm-up runs on every backend (it checks its built-in
     /// file by CRC), and a real decode afterwards still matches its source.
     /// </summary>
     [TestMethod(Timeout = 900000, Category = "NotOnWebGL")]
@@ -140,8 +140,6 @@ public abstract partial class CodecsTestBase
         {
             using var dec = new FlacDecoderGpu(acc);
             await dec.WarmUpAsync();
-            using (var enc = new FlacEncoderGpu(acc)) await enc.WarmUpAsync();
-            await SpawnDev.Codecs.Audio.Opus.OggOpusEncoder.WarmUpAsync(acc);
             var c = FlacDecCases().First(x => x.Name == "ff_st16_l5");
             var r = await dec.DecodeAsync(ReadEmbedded(FlacDecPrefix + c.Name + ".flac"));
             int diff = FirstDifference(r.InterleavedSamples, FlacDecSource(c.Source));
