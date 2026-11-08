@@ -3,8 +3,8 @@
 // MP3 (MPEG-1 / 2 / 2.5 Layer III) encoder on the accelerator, written from ISO/IEC 11172-3 / 13818-3 (no LAME code;
 // see Plans/PLAN-MP3.md): constant or variable bit rate, every Layer III sample rate (8000..48000 Hz), mono or stereo
 // (joint stereo with mid / side per frame), an MDCT-domain psychoacoustic model shaping the quantization noise, window
-// switching (short blocks on attacks, with start / stop blocks around them), each frame holding its own main data
-// (no bit reservoir yet). The files are valid MP3 that every decoder plays.
+// switching (short blocks on attacks, with start / stop blocks around them), and for constant bit rate the bit reservoir
+// (main data reaching back into earlier frames' unused bytes). The files are valid MP3 that every decoder plays.
 //
 // Host work (pure coordinator): upload the PCM, compute the frame sizes of the bit rate (padding rule), dispatch
 // Mp3EncodeKernels, read back the file.
@@ -30,6 +30,13 @@ public sealed record Mp3EncodeOptions
 
     /// <summary>Code every granule with long blocks (no window switching on attacks). Default false.</summary>
     public bool ForceLongBlocks { get; init; }
+
+    /// <summary>
+    /// Constant bit rate: the bit reservoir. A frame's main data may start up to 511 bytes (MPEG-1; 255 MPEG-2 / 2.5)
+    /// before its header, in the bytes earlier frames left unused, so quiet frames save bits that busy frames and attacks
+    /// spend. Default true.
+    /// </summary>
+    public bool BitReservoir { get; init; } = true;
 
     /// <summary>Joint stereo with mid / side coding of the frames whose channels are alike. Default true.</summary>
     public bool MidSide { get; init; } = true;
@@ -72,7 +79,9 @@ public sealed class Mp3EncoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int> _vbrQuantize;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int, int, long> _vbrLayout;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int> _writeGranule;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int, int, int, int, int> _writeFrame;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int, int, int, int, int, int> _writeFrame;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<long>, int, int, int, int, int> _reservoir;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int> _mainData;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, int, int, int> _midSide;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<float>, long> _toFloat;
     private readonly MemoryBuffer1D<float, Stride1D.Dense> _consts;
@@ -110,7 +119,9 @@ public sealed class Mp3EncoderGpu : IDisposable
         _vbrQuantize = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int>(K.VbrQuantizeKernel);
         _vbrLayout = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int, int, long>(K.VbrLayoutKernel);
         _writeGranule = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int>(K.WriteGranuleKernel);
-        _writeFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int, int, int, int, int>(K.WriteFrameKernel);
+        _writeFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int, int, int, int, int, int>(K.WriteFrameKernel);
+        _reservoir = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<long>, int, int, int, int, int>(K.ReservoirBudgetKernel);
+        _mainData = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int>(K.MainDataKernel);
         _midSide = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, int, int, int>(K.MidSideKernel);
         _toFloat = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, long>(Int32ToFloatKernel);
 
@@ -197,9 +208,10 @@ public sealed class Mp3EncoderGpu : IDisposable
         int granules = (int)(frames * granulesPerFrame);
         int slots = granules * 18;
         int units = granules * channels;
-        // the Info frame: CBR one unpadded frame of the stream's rate; VBR the lowest rate whose frame holds the tag
+        // the Info frame: CBR one unpadded frame of the stream's rate when that holds the tag (header, side info, 156 bytes);
+        // VBR, and CBR rates whose frames are smaller (e.g. 8 kbps: 72 bytes at 8 kHz), the lowest rate whose frame does
         int infoIndex = bitrateIndex;
-        if (vbr)
+        if (vbr || (long)coeff * Mp3Tables.BitratesKbps[brBase + bitrateIndex] / sampleRate < 4 + sideBytes + 156)
             for (infoIndex = 1; infoIndex < 14; infoIndex++)
                 if ((long)coeff * Mp3Tables.BitratesKbps[brBase + infoIndex] / sampleRate >= 4 + sideBytes + 156) break;
         int infoBytes = o.WriteInfoFrame ? (int)((long)coeff * Mp3Tables.BitratesKbps[brBase + infoIndex] / sampleRate) : 0;
@@ -226,6 +238,9 @@ public sealed class Mp3EncoderGpu : IDisposable
         using var frameInfo = a.Allocate1D<int>(Math.Max(1, frames * 2));
         using var vmeta = a.Allocate1D<long>(K.VMeta);
         using var ms = a.Allocate1D<int>(Math.Max(1, frames));
+        using var mainDataBegin = a.Allocate1D<int>(Math.Max(1, frames));
+        // main_data_begin's reach in bytes (CBR with the reservoir; VBR frames each hold their own main data)
+        int maxBack = !vbr && o.BitReservoir ? (lsf ? 255 : 511) : 0;
         ms.MemSetToZero();
         side.MemSetToZero();
 
@@ -279,6 +294,8 @@ public sealed class Mp3EncoderGpu : IDisposable
             }
             _layout((int)frames + 1, frameOffsets.View, frameInfo.View, side.View, pe.View, frames, num, sampleRate, bitrateIndex, sideBytes,
                 granulesPerFrame, channels, infoBytes);
+            // with the reservoir the budgets are planned across frames (one thread), replacing the per-frame split
+            if (maxBack > 0) _reservoir(1, side.View, pe.View, frameOffsets.View, (int)frames, granulesPerFrame, channels, sideBytes, maxBack);
             for (int first = 0; first < units; first += UnitChunk)
             {
                 _quantize(Math.Min(UnitChunk, units - first), xr.View, ix.View, side.View, tables.View, xmin.View, work.View, lsf ? 1 : 0, 0, first);
@@ -305,6 +322,8 @@ public sealed class Mp3EncoderGpu : IDisposable
             totalBytes = infoBytes + (await vmeta.View.SubView(K.VAudioBytes, 1).CopyToHostAsync())[0];
         }
         using var output = a.Allocate1D<byte>(Math.Max(1, totalBytes));
+        output.MemSetToZero();
+        _mainData(1, side.View, frameOffsets.View, mainDataBegin.View, (int)frames, granulesPerFrame, channels, sideBytes, maxBack);
         for (int first = 0; first < units; first += UnitChunk)
         {
             _writeGranule(Math.Min(UnitChunk, units - first), ix.View, side.View, tables.View, slotBuf.View, lsf ? 1 : 0, first);
@@ -312,8 +331,8 @@ public sealed class Mp3EncoderGpu : IDisposable
         }
         for (int first = 0; first < frames; first += UnitChunk)
         {
-            _writeFrame((int)Math.Min(UnitChunk, frames - first), side.View, slotBuf.View, frameOffsets.View, frameInfo.View, output.View,
-                ms.View, channels, lsf ? 1 : 0, version, rateIndex, first);
+            _writeFrame((int)Math.Min(UnitChunk, frames - first), side.View, slotBuf.View, frameOffsets.View, frameInfo.View, mainDataBegin.View,
+                output.View, ms.View, channels, lsf ? 1 : 0, version, rateIndex, sideBytes, first);
             await pacer.LaunchedAsync();
         }
         if (o.WriteInfoFrame)

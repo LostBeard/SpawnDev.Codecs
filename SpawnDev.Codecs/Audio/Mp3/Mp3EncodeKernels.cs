@@ -12,7 +12,10 @@
 //   * Quantize: one thread per (granule, channel): the global gain that fits the granule's bit budget (binary search),
 //     big_values / count1 regions, region split and Huffman tables by least bits;
 //   * WriteGranule: one thread per (granule, channel): the granule's Huffman bits into its slot;
-//   * WriteFrame: one thread per frame: header, side info, the granules' bits, stuffing.
+//   * ReservoirBudget (CBR): one thread: every granule's bit budget from its frame's perceptual entropy and the bit
+//     reservoir; MainData: one thread: each frame's main_data_begin from the bits really used;
+//   * WriteFrame: one thread per frame: header, side info, the granules' bits (into earlier frames' unused bytes when
+//     main_data_begin reaches back).
 //
 // A granule's "groups" are its scalefactor bands: 22 long bands, or for a short granule the 39 (short band, window)
 // pairs in the decoder's order (group q = short band * 3 + window), 36 of them with scalefactors (short band 12 has
@@ -839,11 +842,14 @@ public static class Mp3EncodeKernels
     /// <summary>
     /// The subblock gains of a short granule (zero otherwise): the three windows of an attack differ by tens of dB, more
     /// than scalefactors reach (22.5 dB in short bands 0..5, 10.5 dB in 6..11 at scalefac_scale 0). Each window needs a
-    /// step whose square is about its finest group's allowed noise per line (xmin / width); a window needing a finer step
-    /// than the coarsest window by a power ratio R gets subblock_gain floor(log2(R) / 4) (amplitude 2^(2 sbg) = R^(1/2)),
-    /// 0..7, and the scalefactors handle the rest.
+    /// step whose square is about its finest group's allowed noise per line (xmin / width), counting only groups whose
+    /// energy is over their allowed noise (a group under it is coded as zeros and needs no step at all: a silent band at
+    /// the threshold of hearing must not amplify the window); a window needing a finer step than the coarsest window by a
+    /// power ratio R gets subblock_gain floor(log2(R) / 4) (amplitude 2^(2 sbg) = R^(1/2)), 0..7, and the scalefactors
+    /// handle the rest. A window with no such group gets 0.
     /// </summary>
-    private static void SetSubblockGains(ArrayView<int> side, long s, ArrayView<int> tables, ArrayView<float> xmin, long xo)
+    private static void SetSubblockGains(ArrayView<float> xr, long at, ArrayView<int> side, long s, ArrayView<int> tables,
+        ArrayView<float> xmin, long xo)
     {
         int bt = side[s + SBlockType];
         for (int w = 0; w < 3; w++) side[s + SSubGain + w] = 0;
@@ -851,18 +857,30 @@ public static class Mp3EncodeKernels
         float n0 = float.MaxValue, n1 = float.MaxValue, n2 = float.MaxValue;
         for (int q = 0; q < 39; q++)
         {
-            float perLine = xmin[xo + q] / (GroupLo(tables, bt, q + 1) - GroupLo(tables, bt, q));
+            int lo = GroupLo(tables, bt, q), hi = GroupLo(tables, bt, q + 1);
+            float e = 0;
+            for (int i = lo; i < hi; i++) e += xr[at + i] * xr[at + i];
+            if (e <= xmin[xo + q]) continue;
+            float perLine = xmin[xo + q] / (hi - lo);
             int w = q % 3;
             if (w == 0) n0 = XMath.Min(n0, perLine);
             else if (w == 1) n1 = XMath.Min(n1, perLine);
             else n2 = XMath.Min(n2, perLine);
         }
-        float top = XMath.Max(n0, XMath.Max(n1, n2));
+        // the coarsest need among the windows that have one
+        float top = 0;
+        if (n0 < float.MaxValue) top = XMath.Max(top, n0);
+        if (n1 < float.MaxValue) top = XMath.Max(top, n1);
+        if (n2 < float.MaxValue) top = XMath.Max(top, n2);
         if (!(top > 0)) return;
-        side[s + SSubGain + 0] = n0 > 0 ? XMath.Clamp((int)XMath.Floor(XMath.Log2(top / n0) / 4f), 0, 7) : 7;
-        side[s + SSubGain + 1] = n1 > 0 ? XMath.Clamp((int)XMath.Floor(XMath.Log2(top / n1) / 4f), 0, 7) : 7;
-        side[s + SSubGain + 2] = n2 > 0 ? XMath.Clamp((int)XMath.Floor(XMath.Log2(top / n2) / 4f), 0, 7) : 7;
+        side[s + SSubGain + 0] = SubblockGain(top, n0);
+        side[s + SSubGain + 1] = SubblockGain(top, n1);
+        side[s + SSubGain + 2] = SubblockGain(top, n2);
     }
+
+    /// <summary>floor(log2(top / need) / 4) in 0..7; 0 for a window with no group to code.</summary>
+    private static int SubblockGain(float top, float need) =>
+        need >= float.MaxValue ? 0 : need > 0 ? XMath.Clamp((int)XMath.Floor(XMath.Log2(top / need) / 4f), 0, 7) : 7;
 
     /// <summary>A silent (or budget-less) granule: no values, no scalefactors.</summary>
     private static void ZeroGranule(ArrayView<int> ix, long at, ArrayView<int> side, long s)
@@ -896,7 +914,7 @@ public static class Mp3EncodeKernels
         int budget = XMath.Min(side[s + SBudget], 4095);
         side[s + SScfScale] = 0;
         for (int b = 0; b < 39; b++) side[s + SScf + b] = 0;
-        SetSubblockGains(side, s, tables, xmin, xo);
+        SetSubblockGains(xr, at, side, s, tables, xmin, xo);
         int gMin = MinGain(xr, at);
         if (gMin < 0 || budget <= 0)
         {
@@ -976,12 +994,37 @@ public static class Mp3EncodeKernels
             bestGain = XMath.Max(InnerLoop(xr, ix, at, side, s, tables, gMin, budget), 0);
         }
         int gain = bestGain;
+        bool plainTried = false;
         while (true)
         {
             QuantizeAll(xr, ix, at, side, s, tables, gain);
             Regions(ix, at, tables, out int bv, out _, out int c1t, out int c1Bits);
             int bits = BigValueBits(ix, at, tables, bv, bt, true, out int r0, out int r1, out int t0, out int t1, out int t2) + c1Bits;
-            if (bits + p2 <= budget || gain == 255)
+            if (bits + p2 > budget && gain == 255)
+            {
+                // the budget is a hard bound (the frame layout and the reservoir rely on it): still over at the coarsest
+                // gain (amplified groups), so drop the amplification; when even that does not fit, an empty granule
+                if (plainTried)
+                {
+                    ZeroGranule(ix, at, side, s);
+                    return;
+                }
+                plainTried = true;
+                side[s + SScfScale] = 0;
+                for (int b = 0; b < 39; b++) side[s + SScf + b] = 0;
+                for (int w = 0; w < 3; w++) side[s + SSubGain + w] = 0;
+                p2 = 0;
+                compress = 0;
+                int plain = InnerLoop(xr, ix, at, side, s, tables, gMin, budget);
+                if (plain < 0)
+                {
+                    ZeroGranule(ix, at, side, s);
+                    return;
+                }
+                gain = plain;
+                continue;
+            }
+            if (bits + p2 <= budget)
             {
                 side[s + SPart23] = bits + p2;
                 side[s + SBigValues] = bv;
@@ -1057,7 +1100,7 @@ public static class Mp3EncodeKernels
         side[s + SScfScale] = 0;
         side[s + SRequant] = 0;
         for (int b = 0; b < 39; b++) side[s + SScf + b] = 0;
-        SetSubblockGains(side, s, tables, xmin, xo);
+        SetSubblockGains(xr, at, side, s, tables, xmin, xo);
         int gMin = MinGain(xr, at);
         if (gMin < 0)
         {
@@ -1225,16 +1268,18 @@ public static class Mp3EncodeKernels
     }
 
     /// <summary>
-    /// One thread per frame: header, side info and the granules' bits (main_data_begin 0: each frame holds its own main
-    /// data), at out[frameOffsets[f]]; frameInfo[f] = (bitrate index, padding). <paramref name="lsf"/> = MPEG-2/2.5.
+    /// One thread per frame: header and side info at out[frameOffsets[f]], the granules' bits from mainDataBegin[f] bytes
+    /// before the frame's own main-data area (MainDataKernel); frameInfo[f] = (bitrate index, padding).
+    /// <paramref name="lsf"/> = MPEG-2/2.5. The output is zeroed before (unused bytes are the stuffing); frames' main data
+    /// never share a byte, so the threads write disjoint bytes.
     /// </summary>
     public static void WriteFrameKernel(Index1D i0, ArrayView<int> side, ArrayView<byte> slots, ArrayView<long> frameOffsets,
-        ArrayView<int> frameInfo, ArrayView<byte> output, ArrayView<int> ms, int channels, int lsf, int version, int rateIndex, int first)
+        ArrayView<int> frameInfo, ArrayView<int> mainDataBegin, ArrayView<byte> output, ArrayView<int> ms, int channels, int lsf,
+        int version, int rateIndex, int sideBytes, int first)
     {
         int f = first + i0;
         long baseByte = frameOffsets[f];
-        long frameBytes = frameOffsets[f + 1] - baseByte;
-        for (long i = 0; i < frameBytes; i++) output[baseByte + i] = 0;
+        int mdb = mainDataBegin[f];
         int bitPos = 0;
         int granules = lsf != 0 ? 1 : 2;
         // header
@@ -1254,13 +1299,13 @@ public static class Mp3EncodeKernels
         // side info
         if (lsf == 0)
         {
-            PutBits(output, baseByte, ref bitPos, 0, 9);            // main_data_begin
+            PutBits(output, baseByte, ref bitPos, (uint)mdb, 9);    // main_data_begin
             PutBits(output, baseByte, ref bitPos, 0, channels == 1 ? 5 : 3);
             PutBits(output, baseByte, ref bitPos, 0, 4 * channels); // scfsi
         }
         else
         {
-            PutBits(output, baseByte, ref bitPos, 0, 8);
+            PutBits(output, baseByte, ref bitPos, (uint)mdb, 8);
             PutBits(output, baseByte, ref bitPos, 0, channels == 1 ? 1 : 2);
         }
         for (int g = 0; g < granules; g++)
@@ -1297,7 +1342,12 @@ public static class Mp3EncodeKernels
                 PutBits(output, baseByte, ref bitPos, (uint)side[s + SCount1Table], 1);
             }
         }
-        // main data: the granules in order
+        // main data: the granules in order, from mdb bytes before the frame's own main-data area (in the unused tail of
+        // earlier frames' areas: the bit reservoir); the stream of main-data areas is addressed as one virtual byte run
+        long area = AreaStart(frameOffsets, f, sideBytes);
+        long vbit = (area - mdb) * 8;
+        int k = f;   // the frame whose area holds the current virtual byte
+        while (k > 0 && AreaStart(frameOffsets, k, sideBytes) > (vbit >> 3)) k--;
         for (int g = 0; g < granules; g++)
         {
             for (int c = 0; c < channels; c++)
@@ -1305,17 +1355,129 @@ public static class Mp3EncodeKernels
                 long gi = ((long)f * granules + g) * channels + c;
                 int bits = side[gi * SideInts + SPart23];
                 long slot = gi * SlotBytes;
-                for (int b = 0; b < bits; b++)
+                for (int b = 0; b < bits; b++, vbit++)
                 {
+                    long vbyte = vbit >> 3;
+                    while (AreaStart(frameOffsets, k + 1, sideBytes) <= vbyte) k++;
                     int bit = (slots[slot + (b >> 3)] >> (7 - (b & 7))) & 1;
                     if (bit != 0)
                     {
-                        long o = baseByte + (bitPos >> 3);
-                        output[o] = (byte)(output[o] | (0x80 >> (bitPos & 7)));
+                        long o = frameOffsets[k] + 4 + sideBytes + (vbyte - AreaStart(frameOffsets, k, sideBytes));
+                        output[o] = (byte)(output[o] | (0x80 >> (int)(vbit & 7)));
                     }
-                    bitPos++;
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Where frame f's main-data area (the bytes after its header and side info) starts in the run of all frames' areas:
+    /// the bytes of the frames before it minus their headers and side info. f = frames gives the run's length.
+    /// </summary>
+    private static long AreaStart(ArrayView<long> frameOffsets, int f, int sideBytes) =>
+        frameOffsets[f] - frameOffsets[0] - (long)f * (4 + sideBytes);
+
+    // ------------------------------------------------------------------ bit reservoir
+
+    /// <summary>
+    /// One thread, constant bit rate with the bit reservoir: the bit budget of every granule-channel, frame by frame.
+    /// A frame's demand is its perceptual entropy relative to the stream's mean frame PE, as a share of its own main-data
+    /// bits (a quiet frame at least half of them). It may spend its own area plus the reservoir R the frames before it
+    /// left (planned, at most <paramref name="maxBack"/> bytes: main_data_begin's reach, 511 MPEG-1 / 255 MPEG-2 / 2.5),
+    /// and must spend enough that no more than maxBack bytes stay unused (bytes past the reach are lost). The encoder sees
+    /// the whole stream, so a run of demanding frames shares the reservoir by excess demand (looking up to 8 frames
+    /// ahead) rather than its first frame draining it, and a frame that needs less saves only what the demanding frames
+    /// ahead will lack (a steady passage keeps an even split; the end of the stream leaves nothing unspent); at most 4095
+    /// bits per granule-channel. The frame's bits go to its granule-channels by PE (SplitBudget). The next frame's R is
+    /// what this frame's budgets leave, rounded to whole bytes. The quantizers use at most their budgets, so the real
+    /// reservoir (MainDataKernel) is never smaller than the plan.
+    /// </summary>
+    public static void ReservoirBudgetKernel(Index1D _, ArrayView<int> side, ArrayView<float> pe, ArrayView<long> frameOffsets, int frames,
+        int granulesPerFrame, int channels, int sideBytes, int maxBack)
+    {
+        int units = granulesPerFrame * channels;
+        float total = 0;
+        for (long u = 0; u < (long)frames * units; u++) total += pe[u];
+        float meanFrame = frames > 0 ? total / frames : 0;
+        long reservoir = 0;   // bytes
+        for (int f = 0; f < frames; f++)
+        {
+            long own = AreaStart(frameOffsets, f + 1, sideBytes) - AreaStart(frameOffsets, f, sideBytes);
+            long u0 = (long)f * units;
+            long excess = FrameWant(pe, frameOffsets, f, units, sideBytes, meanFrame) - own * 8;
+            // the frames ahead (up to 8): the excess demand of the run that continues from here, and of all of them
+            long runExcess = XMath.Max(excess, 0L), ahead = 0;
+            bool inRun = excess > 0;
+            for (int j = f + 1; j < frames && j < f + 8; j++)
+            {
+                long ownJ = AreaStart(frameOffsets, j + 1, sideBytes) - AreaStart(frameOffsets, j, sideBytes);
+                long e = FrameWant(pe, frameOffsets, j, units, sideBytes, meanFrame) - ownJ * 8;
+                if (e <= 0) inRun = false;
+                else
+                {
+                    ahead += e;
+                    if (inRun) runExcess += e;
+                }
+            }
+            long want;
+            if (excess > 0)
+            {
+                // a run of demanding frames starts or continues here: it cannot refill the reservoir, so the frames of the
+                // run share what is in it by their excess demand instead of the first taking it all
+                want = own * 8 + XMath.Min(excess, reservoir * 8 * excess / runExcess);
+            }
+            else
+            {
+                // a frame that needs less saves only what the demanding frames ahead will lack: with nothing ahead to
+                // spend it on (a steady passage, the end of the stream) it keeps its own bits
+                long lacking = XMath.Max(ahead - reservoir * 8, 0L);
+                want = own * 8 - XMath.Min(-excess, lacking);
+            }
+            long available = (reservoir + own) * 8;
+            long bits = XMath.Clamp(want, XMath.Max(available - (long)maxBack * 8, 0L), available);
+            bits = XMath.Min(bits, (long)units * 4095);
+            SplitBudget(side, pe, u0, units, (int)bits);
+            long used = 0;
+            for (int u = 0; u < units; u++) used += side[(u0 + u) * SideInts + SBudget];
+            reservoir = XMath.Min((long)maxBack, reservoir + own - (used + 7) / 8);
+        }
+    }
+
+    /// <summary>
+    /// A frame's wanted bits: its main-data bits scaled by its PE over the mean frame PE, at least half of them. Ratios
+    /// within a factor 2^(1/4) of 1 count as 1 and larger deviations shrink by that factor (continuous): a stationary
+    /// signal's PE wanders by a few dB from frame to frame, and moving bits on that noise only costs quality (an even
+    /// split is best for a steady signal).
+    /// </summary>
+    private static long FrameWant(ArrayView<float> pe, ArrayView<long> frameOffsets, int f, int units, int sideBytes, float meanFrame)
+    {
+        long own = AreaStart(frameOffsets, f + 1, sideBytes) - AreaStart(frameOffsets, f, sideBytes);
+        float framePe = 0;
+        for (int u = 0; u < units; u++) framePe += pe[(long)f * units + u];
+        float ratio = meanFrame > 0 ? framePe / meanFrame : 1f;
+        const float Zone = 1.18920712f;   // 2^(1/4)
+        ratio = ratio > Zone ? ratio / Zone : ratio < 1f / Zone ? ratio * Zone : 1f;
+        return (long)(own * 8 * XMath.Max(ratio, 0.5f));
+    }
+
+    /// <summary>
+    /// One thread, after quantization: each frame's main_data_begin from the bits the granules really used. Frame f's main
+    /// data starts where the previous frame's ended (rounded up to a byte), at most maxBack bytes before its own area
+    /// (0 = no reservoir: every frame holds its own main data).
+    /// </summary>
+    public static void MainDataKernel(Index1D _, ArrayView<int> side, ArrayView<long> frameOffsets, ArrayView<int> mainDataBegin, int frames,
+        int granulesPerFrame, int channels, int sideBytes, int maxBack)
+    {
+        int units = granulesPerFrame * channels;
+        long end = 0;   // virtual byte where the previous frame's main data ended
+        for (int f = 0; f < frames; f++)
+        {
+            long area = AreaStart(frameOffsets, f, sideBytes);
+            long start = XMath.Max(end, area - maxBack);
+            mainDataBegin[f] = (int)(area - start);
+            long bits = 0;
+            for (int u = 0; u < units; u++) bits += side[((long)f * units + u) * SideInts + SPart23];
+            end = start + (bits + 7) / 8;
         }
     }
 }
