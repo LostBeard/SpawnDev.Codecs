@@ -70,6 +70,8 @@
 		<EmbeddedResource Include="TestData\WebPAnimLossless\*" />
 		<EmbeddedResource Include="TestData\FlacEnc\*" />
 		<EmbeddedResource Include="TestData\OggOpus\*" />
+		<!-- Ogg Opus page layout edge cases (crafted streams remuxed by the ffmpeg binary): scripts/audio/make_ogg_opus_layout_fixtures.py -->
+		<EmbeddedResource Include="TestData\OggOpusLayout\*" />
 		<EmbeddedResource Include="TestData\FlacDec\*" />
 		<EmbeddedResource Include="TestData\Filters\*" />
 		<EmbeddedResource Include="TestData\Lz4\*" />
