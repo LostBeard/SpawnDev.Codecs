@@ -95,7 +95,8 @@ public sealed partial class FlacEncoderGpu
             StereoMode = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(K.StereoModeKernel);
             Decorrelate = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(K.DecorrelateKernel);
             Wasted = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(K.WastedBitsKernel);
-            LpcAnalysis = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<double>, ArrayView<int>>(K.LpcAnalysisKernel);
+            // FFmpeg's double analysis: IEEE-754 rounding on WebGPU / WebGL too (Ozaki f64 emulation), else other coefficients
+            LpcAnalysis = StrictFloat64.Load(a, () => a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<double>, ArrayView<int>>(K.LpcAnalysisKernel));
             Choose = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, int>(K.ChooseKernel);
             FrameBits = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(W.FrameBitsKernel);
             Offsets = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(W.OffsetsKernel);

@@ -206,6 +206,10 @@ public sealed class OpusEncoderGpu : IDisposable
     }
     private int _userBitrate = BitrateAuto;
 
+    /// <summary>The encoder's lookahead in samples per channel at <see cref="SampleRateHz"/> (OPUS_GET_LOOKAHEAD: 2.5 ms,
+    /// plus the 4 ms delay compensation unless restricted low delay); an Ogg Opus pre-skip is this at 48 kHz.</summary>
+    public int Lookahead => SampleRateHz / 400 + (Application == OpusEncoderApplication.RestrictedLowDelay ? 0 : _delayCompensation);
+
     /// <summary>Variable bitrate (OPUS_SET_VBR); libopus' default is on.</summary>
     public bool Vbr { get; set; } = true;
 
@@ -370,6 +374,13 @@ public sealed class OpusEncoderGpu : IDisposable
         var dPcm = _dInput.Ensure((long)frameSize * ChannelCount);
         dPcm.SubView(0, (long)frameSize * ChannelCount).CopyFromCPU(pcm.Span[..(frameSize * ChannelCount)].ToArray());
         int length = await EncodeDeviceAsync(dPcm, frameSize, maxPacketBytes);
+        return await DeviceTransfer.DownloadAsync(_packet.View, length);
+    }
+
+    /// <summary>Encode one packet from int16 PCM already on the accelerator and read back only the packet.</summary>
+    internal async Task<byte[]> EncodePacketToHostAsync(ArrayView<short> pcm, int frameSize, int maxPacketBytes)
+    {
+        int length = await EncodeDeviceAsync(pcm, frameSize, maxPacketBytes);
         return await DeviceTransfer.DownloadAsync(_packet.View, length);
     }
 

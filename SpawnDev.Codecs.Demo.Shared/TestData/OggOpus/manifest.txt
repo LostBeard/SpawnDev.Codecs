@@ -1,0 +1,11 @@
+stereo48_64k
+stereo48_96k
+stereo48_128k
+stereo48_192k
+stereo48_320k
+mono48_64k
+mono48_128k
+stereo24_96k
+stereo48_128k_c9
+mono48_64k_c9
+stereo24_96k_c9

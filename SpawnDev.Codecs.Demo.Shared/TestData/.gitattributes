@@ -32,3 +32,6 @@ WebPAnimLossless/* binary
 WebPAnimLossless/manifest.tsv text eol=lf
 FlacEnc/* binary
 FlacEnc/manifest.tsv text eol=lf
+OggOpus/* binary
+OggOpus/*.json text eol=lf
+OggOpus/manifest.txt text eol=lf

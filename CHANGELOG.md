@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### FLAC LPC analysis in strict IEEE f64 on WebGPU / WebGL (2026-11-08)
+- Lore saw SpawnGen's browser (WebGPU) FLAC files differ from the server's (OpenCL) and ComfyUI's for the same samples
+  (still lossless). Cause: WGSL has no f64 and SpawnDev.ILGPU emulates it with Dekker double-float by default (~48
+  bits, not IEEE), so FFmpeg's double LPC analysis chose other coefficients. The LPC analysis kernel now loads in
+  ILGPU's Ozaki mode (strict IEEE-754) through the new internal `StrictFloat64` helper, which restores the
+  accelerator's mode after the load: no other kernel changes mode.
+
+### Ogg Opus files: `OggOpusWriter` (a port of FFmpeg 8.1's ogg muxer) + `OggOpusEncoder` (2026-11-08)
+- **New `Container.Ogg.OggOpusWriter`**: OpusHead on the beginning-of-stream page, OpusTags (vendor + `KEY=value`
+  fields, in order) on the next, then the audio packets packed as FFmpeg packs them: a page closed at 255 segments,
+  before a packet that would overflow 65025 bytes, or once it spans 1 s of granule time; granule = pts + duration +
+  pre-skip; pages written one behind so the last one carries end-of-stream; Ogg CRC-32. Serial number, vendor, tags,
+  input rate and output gain are options (FFmpeg: serial 0 and vendor "ffmpeg" in bit-exact mode; ComfyUI's PyAV:
+  random serial, vendor "Lavf62.12.102", tags prompt / workflow / encoder). Given FFmpeg's packets, the file is
+  FFmpeg's file byte for byte (11 fixtures: stereo / mono 48 kHz and stereo 24 kHz, 64..320 kbps,
+  `scripts/audio/make_ogg_opus_fixtures.py`).
+- **New `Audio.Opus.OggOpusEncoder.EncodeAsync`** (int16 and float interleaved PCM, to a byte array or a stream):
+  OpusEncoderGpu driven as FFmpeg's libopus wrapper drives libopus (application audio, unconstrained VBR, 20 ms frames,
+  FFmpeg's default bitrate when none is given, the last frame zero-padded, silent frames until the lookahead is out,
+  pre-skip = lookahead at 48 kHz, final granule = input length + pre-skip). Float input becomes int16 on the
+  accelerator as libswresample converts it (lrintf(x * 32768), clipped): PyAV hands libopus int16. Same pages,
+  granules, flags, OpusHead and OpusTags as FFmpeg's file for every fixture.
+- **New `OpusEncoderGpu.Lookahead`** (OPUS_GET_LOOKAHEAD).
+- Packets are not libopus' bytes: FFmpeg / PyAV builds use libopus' FLOAT build, which runs the tonality analysis from
+  complexity 7 (FFmpeg's default is 10; its output changes between complexity 6 and 7 and is the same at 8, 9, 10);
+  OpusEncoderGpu is libopus 1.5.2's fixed-point CELT (complexity up to 9). Decoded quality on the fixtures: 23..33 dB
+  SNR vs the source; our files are 2..16 % smaller (libopus' analysis raises the VBR rate on tonal content).
+- Tests: `CodecsTestBase.OggOpusTests.cs`; red-checked (end-of-stream flag, CRC polynomial, page duration rule, final
+  granule, round half to even).
+
 ### Animated lossy WebP: `WebPLossyEncoderGpu.EncodeAnimationAsync`, a port of libwebp 1.6.0's WebPAnimEncoder (2026-11-08)
 - **New `WebPLossyEncoderGpu.EncodeAnimationAsync`** (managed, `TypedArray` and `ArrayView1D` overloads): full-canvas RGBA8
   frames + per-frame durations in, the file Pillow's `save(save_all=True, lossless=False, quality, method, exif)` writes

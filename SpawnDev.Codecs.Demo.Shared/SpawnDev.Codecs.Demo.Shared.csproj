@@ -62,6 +62,7 @@
 		<EmbeddedResource Include="TestData\WebPLossyMeta\*" />
 		<EmbeddedResource Include="TestData\WebPAnimLossless\*" />
 		<EmbeddedResource Include="TestData\FlacEnc\*" />
+		<EmbeddedResource Include="TestData\OggOpus\*" />
 		<EmbeddedResource Include="TestData\Filters\*" />
 		<EmbeddedResource Include="TestData\Lz4\*" />
 		<EmbeddedResource Include="TestData\Lz4Dec\*" />
