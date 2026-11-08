@@ -20,6 +20,23 @@ public sealed record Mp3EncodeOptions
 {
     /// <summary>Constant bit rate in kbps: MPEG-1 (32 / 44.1 / 48 kHz) 32..320, MPEG-2 / 2.5 (8..24 kHz) 8..160.</summary>
     public int BitrateKbps { get; init; } = 128;
+
+    /// <summary>Write an ID3v2.4 tag first (the tags below as TXXX frames, then TSSE). Default true.</summary>
+    public bool WriteId3 { get; init; } = true;
+
+    /// <summary>User text fields written as ID3v2.4 TXXX frames, in order (ComfyUI: prompt, workflow).</summary>
+    public IReadOnlyList<KeyValuePair<string, string>>? Tags { get; init; }
+
+    /// <summary>The ID3v2.4 TSSE (encoder settings) text. Default "Lavf62.12.102", the value ComfyUI's PyAV writes.</summary>
+    public string Id3Encoder { get; init; } = "Lavf62.12.102";
+
+    /// <summary>Write the Info / Xing frame (frame count, seek table, encoder delay and padding for gapless decoding).
+    /// Default true.</summary>
+    public bool WriteInfoFrame { get; init; } = true;
+
+    /// <summary>The 9-byte encoder string of the Info frame's LAME-format extension. Default "Lavc62.28", the value
+    /// ComfyUI's PyAV files carry.</summary>
+    public string InfoEncoder { get; init; } = "Lavc62.28";
 }
 
 /// <summary>MP3 encoder on the accelerator (see the file header).</summary>
@@ -30,7 +47,10 @@ public sealed class Mp3EncoderGpu : IDisposable
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, long> _matrix;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, long> _mdct;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, long> _alias;
-    private readonly Action<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, long, long, int, int, int, int, int> _layout;
+    private readonly Action<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, long, long, int, int, int, int, int, long> _layout;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, long, int> _musicCrc;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>> _infoFrame;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _crcTable;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, int> _psy;
     private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int> _quantize;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int> _writeGranule;
@@ -51,7 +71,18 @@ public sealed class Mp3EncoderGpu : IDisposable
         _matrix = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, long>(K.MatrixKernel);
         _mdct = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, long>(K.MdctKernel);
         _alias = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, long>(K.AliasReduceKernel);
-        _layout = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, long, long, int, int, int, int, int>(K.FrameLayoutKernel);
+        _layout = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, long, long, int, int, int, int, int, long>(K.FrameLayoutKernel);
+        _musicCrc = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, long, int>(K.MusicCrcKernel);
+        _infoFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>>(K.InfoFrameKernel);
+        var crc = new int[256];
+        for (int i = 0; i < 256; i++)
+        {
+            int c = i;
+            for (int k = 0; k < 8; k++) c = (c & 1) != 0 ? (c >> 1) ^ 0xA001 : c >> 1;
+            crc[i] = c;
+        }
+        _crcTable = a.Allocate1D<int>(256);
+        _crcTable.View.CopyFromCPU(crc);
         _psy = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, int>(K.PsyKernel);
         _quantize = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int>(K.QuantizeKernel);
         _writeGranule = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int>(K.WriteGranuleKernel);
@@ -126,7 +157,9 @@ public sealed class Mp3EncoderGpu : IDisposable
         int granules = (int)(frames * granulesPerFrame);
         int slots = granules * 18;
         long num = (lsf ? 72000L : 144000L) * o.BitrateKbps;   // bytes per frame = num / rate
-        long totalBytes = frames * num / sampleRate;
+        int infoBytes = o.WriteInfoFrame ? (int)(num / sampleRate) : 0;   // the Info frame: one unpadded frame of the rate
+        long audioBytes = frames * num / sampleRate;
+        long totalBytes = infoBytes + audioBytes;
         int units = granules * channels;
         var a = _accelerator;
 
@@ -158,7 +191,7 @@ public sealed class Mp3EncoderGpu : IDisposable
             }
         }
         _layout((int)frames + 1, frameOffsets.View, frameInfo.View, side.View, frames, num, sampleRate, bitrateIndex, sideBytes,
-            granulesPerFrame, channels);
+            granulesPerFrame, channels, infoBytes);
         await Launch((long)channels * slots * 64, (n, f) => _polyphase(n, pcm, _consts.View, y.View, channels, samples, slots, f));
         await Launch((long)channels * slots * 32, (n, f) => _matrix(n, y.View, _consts.View, sub.View, f));
         await Launch((long)channels * granules * 32, (n, f) => _mdct(n, sub.View, _consts.View, xr.View, granules, slots, channels, f));
@@ -179,9 +212,89 @@ public sealed class Mp3EncoderGpu : IDisposable
                 channels, lsf ? 1 : 0, version, rateIndex, first);
             await pacer.LaunchedAsync();
         }
+        if (o.WriteInfoFrame)
+        {
+            // CRC-16 of the audio frames in bounded launches, then the Info frame (seek table, delay / padding, CRCs)
+            using var crcState = a.Allocate1D<int>(1);
+            crcState.MemSetToZero();
+            const int CrcChunk = 1 << 20;
+            for (long from = infoBytes; from < totalBytes; from += CrcChunk)
+            {
+                _musicCrc(1, output.View, _crcTable.View, crcState.View, from, (int)Math.Min(CrcChunk, totalBytes - from));
+                await pacer.LaunchedAsync();
+            }
+            var name = new byte[9];
+            System.Text.Encoding.ASCII.GetBytes(o.InfoEncoder ?? "").AsSpan(0, Math.Min(9, (o.InfoEncoder ?? "").Length)).CopyTo(name);
+            using var nameView = a.Allocate1D<byte>(9);
+            nameView.View.CopyFromCPU(name);
+            // gapless: a decoder drops delay + 529 samples at the start (our latency is CodecDelay) and padding - 529 at the
+            // end, so delay + samples + padding covers every frame (the convention LAME's own files follow)
+            int delay = CodecDelay - 529;
+            int padding = (int)(frames * frameSamples - samples - delay);
+            var ip = new long[K.InfoParams];
+            ip[K.InfoVersion] = version; ip[K.InfoRate] = rateIndex; ip[K.InfoBitrate] = bitrateIndex; ip[K.InfoChannels] = channels;
+            ip[K.InfoSide] = sideBytes; ip[K.InfoBytes] = infoBytes; ip[K.InfoFrames] = frames; ip[K.InfoTotal] = totalBytes;
+            ip[K.InfoVbr] = 0; ip[K.InfoDelay] = delay; ip[K.InfoPadding] = padding;
+            using var ipView = a.Allocate1D<long>(K.InfoParams);
+            ipView.View.CopyFromCPU(ip);
+            _infoFrame(1, output.View, frameOffsets.View, nameView.View, _crcTable.View, crcState.View, ipView.View);
+        }
         await a.SynchronizeAsync();
-        return await output.View.SubView(0, totalBytes).CopyToHostAsync();
+        var audio = await output.View.SubView(0, totalBytes).CopyToHostAsync();
+        if (!o.WriteId3) return audio;
+        var id3 = Id3Tag(o);
+        var file = new byte[id3.Length + audio.Length];
+        id3.CopyTo(file, 0);
+        audio.CopyTo(file, id3.Length);
+        return file;
     }
+
+    /// <summary>
+    /// The ID3v2.4 tag (metadata, not codec data): header (version 4.0, flags 0, syncsafe size), a TXXX frame per tag
+    /// (UTF-8, description NUL value NUL), TSSE (UTF-8, text NUL), 10 bytes of padding.
+    /// </summary>
+    private static byte[] Id3Tag(Mp3EncodeOptions o)
+    {
+        var body = new MemoryStream();
+        void Frame(string id, byte[] content)
+        {
+            body.Write(System.Text.Encoding.ASCII.GetBytes(id));
+            body.Write(Syncsafe(content.Length));
+            body.WriteByte(0);
+            body.WriteByte(0);
+            body.Write(content);
+        }
+        var utf8 = System.Text.Encoding.UTF8;
+        foreach (var kv in o.Tags ?? Array.Empty<KeyValuePair<string, string>>())
+        {
+            var c = new MemoryStream();
+            c.WriteByte(3);
+            c.Write(utf8.GetBytes(kv.Key));
+            c.WriteByte(0);
+            c.Write(utf8.GetBytes(kv.Value));
+            c.WriteByte(0);
+            Frame("TXXX", c.ToArray());
+        }
+        {
+            var c = new MemoryStream();
+            c.WriteByte(3);
+            c.Write(utf8.GetBytes(o.Id3Encoder ?? ""));
+            c.WriteByte(0);
+            Frame("TSSE", c.ToArray());
+        }
+        body.Write(new byte[10]);
+        var tag = new MemoryStream();
+        tag.Write("ID3"u8);
+        tag.WriteByte(4);
+        tag.WriteByte(0);
+        tag.WriteByte(0);
+        tag.Write(Syncsafe((int)body.Length));
+        body.Position = 0;
+        body.CopyTo(tag);
+        return tag.ToArray();
+    }
+
+    private static byte[] Syncsafe(int v) => new[] { (byte)((v >> 21) & 0x7F), (byte)((v >> 14) & 0x7F), (byte)((v >> 7) & 0x7F), (byte)(v & 0x7F) };
 
     /// <summary>
     /// The psychoacoustic model's per-band constants for a rate: the Bark of each long band's centre (Zwicker:
@@ -239,5 +352,9 @@ public sealed class Mp3EncoderGpu : IDisposable
     }
 
     /// <summary>Release accelerator-bound resources.</summary>
-    public void Dispose() => _consts.Dispose();
+    public void Dispose()
+    {
+        _consts.Dispose();
+        _crcTable.Dispose();
+    }
 }

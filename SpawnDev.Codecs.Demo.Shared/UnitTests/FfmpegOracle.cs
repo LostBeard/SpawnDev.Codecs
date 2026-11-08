@@ -62,4 +62,36 @@ internal static class FfmpegOracle
             try { Directory.Delete(work, true); } catch { /* best effort */ }
         }
     }
+
+    /// <summary>Run an FFmpeg tool (ffprobe, ffmpeg) on a file and return its stdout; stderr output fails.</summary>
+    [UnsupportedOSPlatform("browser")]
+    public static string Probe(byte[] file, string ext, params string[] args)
+    {
+        RequireAvailable();
+        string work = Path.Combine(Path.GetTempPath(), "spawndev-ffp-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(work);
+        try
+        {
+            string input = Path.Combine(work, "in" + ext);
+            File.WriteAllBytes(input, file);
+            var psi = new ProcessStartInfo("ffprobe")
+            {
+                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("-v");
+            psi.ArgumentList.Add("error");
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            psi.ArgumentList.Add(input);
+            using var proc = Process.Start(psi) ?? throw new InvalidOperationException("could not start ffprobe");
+            string stdout = proc.StandardOutput.ReadToEnd();
+            string stderr = proc.StandardError.ReadToEnd();
+            if (!proc.WaitForExit(60_000)) { proc.Kill(true); throw new Exception("ffprobe timed out"); }
+            if (proc.ExitCode != 0 || stderr.Trim().Length > 0) throw new Exception($"ffprobe reported: {stderr.Trim()}");
+            return stdout;
+        }
+        finally
+        {
+            try { Directory.Delete(work, true); } catch { /* best effort */ }
+        }
+    }
 }

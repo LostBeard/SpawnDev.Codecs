@@ -134,11 +134,11 @@ public static class Mp3EncodeKernels
     /// (the frame's main data split evenly, at most 4095 bits).
     /// </summary>
     public static void FrameLayoutKernel(Index1D index, ArrayView<long> frameOffsets, ArrayView<int> frameInfo, ArrayView<int> side,
-        long frames, long num, int sampleRate, int bitrateIndex, int sideBytes, int granulesPerFrame, int channels)
+        long frames, long num, int sampleRate, int bitrateIndex, int sideBytes, int granulesPerFrame, int channels, long baseOffset)
     {
         long f = index;
         long t0 = f * num / sampleRate;
-        frameOffsets[f] = t0;
+        frameOffsets[f] = baseOffset + t0;
         if (f >= frames) return;
         long size = (f + 1) * num / sampleRate - t0;
         frameInfo[f * 2] = bitrateIndex;
@@ -200,6 +200,84 @@ public static class Mp3EncodeKernels
             float thr = spread * XMath.Pow(10f, -offsetDb / 10f);
             xmin[(long)index * 22 + b] = XMath.Max(thr, psy[PAth + b]) * quality;
         }
+    }
+
+    // ------------------------------------------------------------------ Info / Xing frame (gapless + seek data)
+
+    /// <summary>InfoFrameKernel's parameter view (longs).</summary>
+    public const int InfoVersion = 0, InfoRate = 1, InfoBitrate = 2, InfoChannels = 3, InfoSide = 4, InfoBytes = 5, InfoFrames = 6,
+        InfoTotal = 7, InfoVbr = 8, InfoDelay = 9, InfoPadding = 10, InfoParams = 11;
+
+    /// <summary>The CRC-16 the Info frame's extension carries (polynomial 0x8005 bit-reversed, initial 0).</summary>
+    private static int Crc16Step(int crc, int b, ArrayView<int> table) => ((crc >> 8) ^ table[(crc ^ b) & 0xFF]) & 0xFFFF;
+
+    /// <summary>
+    /// One thread: continue the CRC-16 of the audio frames over output[from, from + count) (state in state[0]); bounded
+    /// work per launch.
+    /// </summary>
+    public static void MusicCrcKernel(Index1D _, ArrayView<byte> output, ArrayView<int> table, ArrayView<int> state, long from, int count)
+    {
+        int crc = state[0];
+        for (int i = 0; i < count; i++) crc = Crc16Step(crc, output[from + i], table);
+        state[0] = crc;
+    }
+
+    /// <summary>
+    /// One thread: the Info frame at output[0..infoBytes): an MPEG frame header (the stream's version, rate and channel
+    /// layout; stereo or mono mode, no CRC, original 0) and zeroed side info, then at +sideBytes + 4: "Info" (constant
+    /// bit rate) or "Xing" (variable), flags 0x0F, the audio frame count, the byte count (Info frame included), the
+    /// 100-entry seek table (entry i: 256 * end of audio frame floor(i * frames / 100) / bytes, entry 0 = 0), quality 0;
+    /// then the LAME-format extension: a 9-byte encoder string, encoder delay / padding (12 + 12 bits), the music length
+    /// (= the byte count), the CRC-16 of the audio frames (state[0]) and the CRC-16 of the frame's first 190 bytes.
+    /// </summary>
+    public static void InfoFrameKernel(Index1D _, ArrayView<byte> output, ArrayView<long> frameOffsets, ArrayView<byte> encoderName,
+        ArrayView<int> table, ArrayView<int> state, ArrayView<long> p)
+    {
+        int version = (int)p[InfoVersion], rateIndex = (int)p[InfoRate], bitrateIndex = (int)p[InfoBitrate];
+        int channels = (int)p[InfoChannels], sideBytes = (int)p[InfoSide], infoBytes = (int)p[InfoBytes];
+        long frames = p[InfoFrames], totalBytes = p[InfoTotal];
+        int vbr = (int)p[InfoVbr], delay = (int)p[InfoDelay], padding = (int)p[InfoPadding];
+        for (int i = 0; i < infoBytes; i++) output[i] = 0;
+        output[0] = 0xFF;
+        output[1] = (byte)(0xE0 | (version << 3) | (1 << 1) | 1);       // layer III, no CRC
+        output[2] = (byte)((bitrateIndex << 4) | (rateIndex << 2));
+        output[3] = (byte)(channels == 1 ? 0xC0 : 0x00);
+        int x = 4 + sideBytes;
+        if (vbr != 0) { output[x] = (byte)'X'; output[x + 1] = (byte)'i'; output[x + 2] = (byte)'n'; output[x + 3] = (byte)'g'; }
+        else { output[x] = (byte)'I'; output[x + 1] = (byte)'n'; output[x + 2] = (byte)'f'; output[x + 3] = (byte)'o'; }
+        PutBe32(output, x + 4, 0x0F);
+        PutBe32(output, x + 8, (uint)frames);
+        PutBe32(output, x + 12, (uint)totalBytes);
+        for (int i = 0; i < 100; i++)
+        {
+            long v = 0;
+            if (i > 0)
+            {
+                long j = (long)i * frames / 100;
+                v = frameOffsets[j + 1] * 256 / totalBytes;
+                if (v > 255) v = 255;
+            }
+            output[x + 16 + i] = (byte)v;
+        }
+        PutBe32(output, x + 116, 0);                                       // quality
+        int e = x + 120;
+        for (int i = 0; i < 9; i++) output[e + i] = encoderName[i];
+        output[e + 21] = (byte)(delay >> 4);
+        output[e + 22] = (byte)(((delay & 15) << 4) | ((padding >> 8) & 15));
+        output[e + 23] = (byte)padding;
+        PutBe32(output, e + 28, (uint)totalBytes);
+        int music = state[0];
+        output[e + 32] = (byte)(music >> 8);
+        output[e + 33] = (byte)music;
+        int crc = 0;
+        for (int i = 0; i < 190; i++) crc = Crc16Step(crc, output[i], table);
+        output[e + 34] = (byte)(crc >> 8);
+        output[e + 35] = (byte)crc;
+    }
+
+    private static void PutBe32(ArrayView<byte> o, long at, uint v)
+    {
+        o[at] = (byte)(v >> 24); o[at + 1] = (byte)(v >> 16); o[at + 2] = (byte)(v >> 8); o[at + 3] = (byte)v;
     }
 
     // ------------------------------------------------------------------ quantization + bit counting

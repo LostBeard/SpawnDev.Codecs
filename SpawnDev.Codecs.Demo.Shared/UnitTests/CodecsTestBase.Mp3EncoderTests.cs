@@ -100,6 +100,9 @@ public abstract partial class CodecsTestBase
                 double actualKbps = file.Length * 8.0 / ((double)src.Length / ch / rate) / 1000;
                 report.Add($"{rate} Hz {ch} ch {kbps}k: {file.Length} bytes ({actualKbps:F1} kbps), SNR {snr:F1} dB at delay {delay}, gain {FitGain(src, dec, ch, delay):F4}");
                 if (snr < minSnr) failures.Add($"{rate} Hz {ch} ch {kbps}k: SNR {snr:F1} dB < {minSnr}");
+                // the Info frame's delay / padding make the decode gapless: the source's length, no delay
+                if (delay != 0 || dec.Length != src.Length)
+                    failures.Add($"{rate} Hz {ch} ch {kbps}k: decoded {dec.Length / ch} samples at delay {delay}, want {src.Length / ch} at 0");
             }
             Console.WriteLine(string.Join("\n", report));
             True(failures.Count == 0, string.Join("\n", failures));
@@ -216,6 +219,78 @@ public abstract partial class CodecsTestBase
             Console.WriteLine($"scalefactors in {used} of {units} granule-channels; local SNR 9 kHz {quiet:F1} dB, 200 Hz {loud:F1} dB");
             True(used > 0, "no granule used scalefactors");
             True(quiet >= 12, $"quiet 9 kHz tone local SNR {quiet:F1} dB < 12");
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    /// <summary>
+    /// The container as ComfyUI's PyAV writes it (layout measured on its files): an ID3v2.4 tag (TXXX per tag, TSSE, 10 bytes
+    /// of padding) that ffprobe reads back; an Info frame whose frame count, byte count, music CRC and tag CRC
+    /// (CRC-16, polynomial 0x8005 bit-reversed, initial 0) all check out.
+    /// </summary>
+    [TestMethod(Timeout = 600000, Category = "DesktopOnly,NotOnWebGL")]
+    public async Task Mp3EncoderGpu_Container_Id3TagAndInfoFrame()
+    {
+        FfmpegOracle.RequireAvailable();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            using var enc = new Mp3EncoderGpu(acc);
+            var tags = new List<KeyValuePair<string, string>> { new("prompt", "{\"a\":1}"), new("workflow", "{\"w\":2}") };
+            var src = Mp3TestTone(44100 * 2, 2, 44100, 5);
+            var file = await enc.EncodeAsync(src, 2, 44100, new Mp3EncodeOptions { BitrateKbps = 128, Tags = tags });
+
+            // the tag, byte for byte as measured: header, TXXX prompt, TXXX workflow, TSSE, 10 zero bytes
+            var expectBody = new List<byte>();
+            void Frame(string id, byte[] content)
+            {
+                expectBody.AddRange(System.Text.Encoding.ASCII.GetBytes(id));
+                int n = content.Length;
+                expectBody.AddRange(new[] { (byte)((n >> 21) & 0x7F), (byte)((n >> 14) & 0x7F), (byte)((n >> 7) & 0x7F), (byte)(n & 0x7F), (byte)0, (byte)0 });
+                expectBody.AddRange(content);
+            }
+            Frame("TXXX", new byte[] { 3 }.Concat("prompt"u8.ToArray()).Concat(new byte[] { 0 }).Concat("{\"a\":1}"u8.ToArray()).Concat(new byte[] { 0 }).ToArray());
+            Frame("TXXX", new byte[] { 3 }.Concat("workflow"u8.ToArray()).Concat(new byte[] { 0 }).Concat("{\"w\":2}"u8.ToArray()).Concat(new byte[] { 0 }).ToArray());
+            Frame("TSSE", new byte[] { 3 }.Concat("Lavf62.12.102"u8.ToArray()).Concat(new byte[] { 0 }).ToArray());
+            expectBody.AddRange(new byte[10]);
+            int size = expectBody.Count;
+            var expect = new List<byte> { (byte)'I', (byte)'D', (byte)'3', 4, 0, 0, (byte)((size >> 21) & 0x7F), (byte)((size >> 14) & 0x7F), (byte)((size >> 7) & 0x7F), (byte)(size & 0x7F) };
+            expect.AddRange(expectBody);
+            True(file.AsSpan(0, expect.Count).SequenceEqual(expect.ToArray()), "the ID3v2.4 tag differs from the measured layout");
+
+            // ffprobe reads the tags back
+            string probe = FfmpegOracle.Probe(file, ".mp3", "-show_entries", "format_tags", "-of", "json");
+            True(probe.Contains("\"prompt\"") && probe.Contains("\"workflow\"") && probe.Contains("Lavf62.12.102"), "ffprobe did not read the tags: " + probe);
+
+            // the Info frame
+            int info = expect.Count;
+            int x = info + 36;   // MPEG-1 stereo: header + 32 bytes of side info
+            True(file[x] == 'I' && file[x + 1] == 'n' && file[x + 2] == 'f' && file[x + 3] == 'o', "no Info frame");
+            uint Be(int at) => (uint)(file[at] << 24 | file[at + 1] << 16 | file[at + 2] << 8 | file[at + 3]);
+            int infoBytes = 144000 * 128 / 44100;
+            int frames = 0;
+            for (int p = info + infoBytes; p + 4 <= file.Length;)
+            {
+                int pad = (file[p + 2] >> 1) & 1;
+                p += 144000 * 128 / 44100 + pad;
+                frames++;
+            }
+            True(Be(x + 8) == frames, $"frame count {Be(x + 8)} vs {frames}");
+            True(Be(x + 12) == file.Length - info, $"byte count {Be(x + 12)} vs {file.Length - info}");
+            int Crc(int from, int count)
+            {
+                int c = 0;
+                for (int i = 0; i < count; i++)
+                {
+                    c ^= file[from + i];
+                    for (int k = 0; k < 8; k++) c = (c & 1) != 0 ? (c >> 1) ^ 0xA001 : c >> 1;
+                }
+                return c;
+            }
+            int e = x + 120;
+            True((file[e + 32] << 8 | file[e + 33]) == Crc(info + infoBytes, file.Length - info - infoBytes), "music CRC");
+            True((file[e + 34] << 8 | file[e + 35]) == Crc(info, 190), "tag CRC");
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
