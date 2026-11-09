@@ -35,6 +35,7 @@
 #define CTX_BYTES ((int)offsetof(FRAME_CONTEXT, initialized))
 static FILE *ctx_out;
 static int mi_mode, hooked_frames;
+static const char *dump_dir; /* -d: raw mode info serialization per frame (mi_<n>.bin) */
 void (*vp9ref_hook)(struct VP9Decoder *pbi, int stage);
 
 static void md5_hex(MD5Context *md5, char out[33]) {
@@ -47,7 +48,8 @@ static void md5_hex(MD5Context *md5, char out[33]) {
 /* -m: per decoded frame "M <n> mi=<md5> counts=<md5|->" after the tiles and "A <n> <md5>" (context after backward
  * adaptation). The mode info MD5 runs over every mi position in raster order, as int32s: sb_type, segment_id, skip,
  * tx_size, is_inter, then for intra blocks mode, uv_mode (+ bmi[0..3].as_mode below 8x8), for inter blocks mode,
- * ref_frame[0], ref_frame[1], interp_filter, mv[0], mv[1] (+ bmi[0..3].as_mv[0], as_mv[1] below 8x8). Only fields the
+ * ref_frame[0], ref_frame[1], interp_filter, mv[0], mv[1] (+ bmi[0..3].as_mv[0], as_mv[1] below 8x8; the second MVs only
+ * for compound blocks: libvpx never writes or reads them otherwise). Only fields the
  * block type defines (libvpx leaves the others stale). counts = FRAME_COUNTS bytes, frames with backward adaptation. */
 static void mi_hook(struct VP9Decoder *pbi, int stage) {
   const VP9_COMMON *cm = &pbi->common;
@@ -55,6 +57,12 @@ static void mi_hook(struct VP9Decoder *pbi, int stage) {
   char hex[33];
   int r, c, k;
   if (stage == 2) {
+    FILE *dump_file = NULL;
+    if (dump_dir) {
+      char path[1024];
+      snprintf(path, sizeof(path), "%s/mi_%d.bin", dump_dir, hooked_frames);
+      dump_file = fopen(path, "wb");
+    }
     MD5Init(&md5);
     for (r = 0; r < cm->mi_rows; ++r)
       for (c = 0; c < cm->mi_cols; ++c) {
@@ -77,15 +85,17 @@ static void mi_hook(struct VP9Decoder *pbi, int stage) {
           v[n++] = mi->ref_frame[1];
           v[n++] = mi->interp_filter;
           v[n++] = (int)mi->mv[0].as_int;
-          v[n++] = (int)mi->mv[1].as_int;
+          if (mi->ref_frame[1] > INTRA_FRAME) v[n++] = (int)mi->mv[1].as_int;
           if (mi->sb_type < BLOCK_8X8)
             for (k = 0; k < 4; ++k) {
               v[n++] = (int)mi->bmi[k].as_mv[0].as_int;
-              v[n++] = (int)mi->bmi[k].as_mv[1].as_int;
+              if (mi->ref_frame[1] > INTRA_FRAME) v[n++] = (int)mi->bmi[k].as_mv[1].as_int;
             }
         }
         MD5Update(&md5, (const unsigned char *)v, n * 4);
+        if (dump_file) fwrite(v, 4, n, dump_file);
       }
+    if (dump_file) fclose(dump_file);
     md5_hex(&md5, hex);
     printf("M %d mi=%s counts=", hooked_frames, hex);
     if (!cm->error_resilient_mode && !cm->frame_parallel_decoding_mode) {
@@ -282,6 +292,12 @@ int main(int argc, char **argv) {
     } else if (argc > 1 && strcmp(argv[1], "-t") == 0) {
       print_tables();
       return 0;
+    } else if (argc > 2 && strcmp(argv[1], "-d") == 0) {
+      dump_dir = argv[2];
+      mi_mode = 1;
+      vp9ref_hook = hook;
+      argv += 2;
+      argc -= 2;
     } else if (argc > 1 && strcmp(argv[1], "-m") == 0) {
       mi_mode = 1;
       vp9ref_hook = hook;

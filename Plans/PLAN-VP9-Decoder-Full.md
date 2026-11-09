@@ -58,7 +58,8 @@ vector passes.
 - [x] S0 fixtures + harness: vectors into the repo (profile-0 core set embedded; full set as a Conformance category),
       per-frame MD5 test, WebM / IVF / superframe demux into frame packets.
 - [x] S1 uncompressed header (all fields, every vector parses) + compressed header kernel + frame contexts.
-- [ ] S2 parse kernel: keyframes / intra-only (vectors 00, 02, 03 first frames).
+- [x] S2 parse kernel: intra AND inter frames (mode info, MV prediction, tokens, counts) == libvpx on all 5112 frames
+      (2026-11-08, Vp9ParseKernels*.cs, Vp9TileParserGpu.cs; S4's parse half is in here).
 - [ ] S3 intra recon + inverse transforms + loop filter: keyframes MD5-exact (00 quantizer set frame 1, 02 / 03 sizes).
 - [ ] S4 inter parse (refs, modes, MV prediction + decode, interp filters, compound, sub-8x8) + inter recon + adaptation:
       all frames of 00 / 02 / 03 / 06 / 07.

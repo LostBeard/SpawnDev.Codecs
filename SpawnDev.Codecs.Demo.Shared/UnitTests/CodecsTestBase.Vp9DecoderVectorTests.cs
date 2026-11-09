@@ -207,6 +207,142 @@ public abstract partial class CodecsTestBase
         True(failures.Count == 0, $"{failures.Count} mismatches:\n" + string.Join("\n", failures.Take(40)));
     }
 
+    /// <summary>MD5 (hex) of <paramref name="bytes"/>, on every platform (FlacMd5: System.Security.Cryptography.MD5 is not in WASM).</summary>
+    private static string Md5Hex(byte[] bytes)
+    {
+        var samples = new int[bytes.Length];
+        for (int i = 0; i < bytes.Length; i++) samples[i] = (sbyte)bytes[i];
+        return Convert.ToHexString(SpawnDev.Codecs.Audio.Flac.FlacMd5.Compute(samples, 8)).ToLowerInvariant();
+    }
+
+    /// <summary>libvpx_modeinfo.tsv.gz: file name -> per decoded frame (mi md5, counts md5 or "-", adapted context md5).</summary>
+    private static Dictionary<string, List<(string Mi, string Counts, string Adapted)>> LibvpxModeInfo()
+    {
+        using var gz = new System.IO.Compression.GZipStream(new MemoryStream(ReadEmbedded(Vp9VectorPrefix + "libvpx_modeinfo.tsv.gz")),
+            System.IO.Compression.CompressionMode.Decompress);
+        using var reader = new StreamReader(gz);
+        var all = new Dictionary<string, List<(string, string, string)>>();
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            int tab = line.IndexOf('\t');
+            string file = line[..tab];
+            var parts = line[(tab + 1)..].Split(' ');
+            if (!all.TryGetValue(file, out var list)) all[file] = list = new();
+            if (parts[0] == "M") list.Add((parts[2]["mi=".Length..], parts[3]["counts=".Length..], ""));
+            else list[^1] = (list[^1].Item1, list[^1].Item2, parts[2]);
+        }
+        return all;
+    }
+
+    /// <summary>Our mode info grid serialized as libvpx_ref.c mi_hook does (see there), as bytes.</summary>
+    private static byte[] Vp9ModeInfoBytes(int[] mi, int miCols, int miRows, int gridOffset)
+    {
+        var v = new List<int>(miCols * miRows * 12);
+        for (int r = 0; r < miRows; r++)
+            for (int c = 0; c < miCols; c++)
+            {
+                int b = mi[gridOffset + r * miCols + c] * Vp9Mi.Stride;
+                bool inter = mi[b + Vp9Mi.Ref0] > 0;
+                v.Add(mi[b + Vp9Mi.SbType]); v.Add(mi[b + Vp9Mi.SegmentId]); v.Add(mi[b + Vp9Mi.Skip]); v.Add(mi[b + Vp9Mi.TxSize]);
+                v.Add(inter ? 1 : 0);
+                if (!inter)
+                {
+                    v.Add(mi[b + Vp9Mi.Mode]); v.Add(mi[b + Vp9Mi.UvMode]);
+                    if (mi[b + Vp9Mi.SbType] < 3) for (int k = 0; k < 4; k++) v.Add(mi[b + Vp9Mi.BmiMode + k]);
+                }
+                else
+                {
+                    v.Add(mi[b + Vp9Mi.Mode]); v.Add(mi[b + Vp9Mi.Ref0]); v.Add(mi[b + Vp9Mi.Ref1]); v.Add(mi[b + Vp9Mi.Interp]);
+                    bool compound = mi[b + Vp9Mi.Ref1] > 0;   // second MVs only for compound blocks (undefined otherwise)
+                    v.Add(mi[b + Vp9Mi.Mv0]);
+                    if (compound) v.Add(mi[b + Vp9Mi.Mv1]);
+                    if (mi[b + Vp9Mi.SbType] < 3)
+                        for (int k = 0; k < 4; k++) { v.Add(mi[b + Vp9Mi.BmiMv0 + k]); if (compound) v.Add(mi[b + Vp9Mi.BmiMv1 + k]); }
+                }
+            }
+        var bytes = new byte[v.Count * 4];
+        Buffer.BlockCopy(v.ToArray(), 0, bytes, 0, bytes.Length);
+        return bytes;
+    }
+
+    /// <summary>
+    /// S2: the tile parse kernel (partitions, mode info, MVs, tokens, counts) gives libvpx's mode info grid (MD5 over the
+    /// fields each block type defines) on every frame of every VP9 test file, and libvpx's FRAME_COUNTS on frames with
+    /// backward adaptation. Each frame starts from libvpx's loaded context (backward adaptation is S4); everything else
+    /// (header state, compressed header, segmentation maps, previous-frame MVs) is ours.
+    /// </summary>
+    [TestMethod(Timeout = 3600000, Category = "NotOnWebGL")]
+    public async Task Vp9Parse_EveryFrame_MatchesLibvpxModeInfo()
+    {
+        var contextsRef = LibvpxContexts();
+        var modeInfoRef = LibvpxModeInfo();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            using var contexts = new Vp9FrameContextsGpu(acc);
+            using var parser = new Vp9TileParserGpu(acc);
+            var failures = new List<string>();
+            int frames = 0, countsChecked = 0;
+            foreach (var v in Vp9Vectors())
+            {
+                if (!contextsRef.TryGetValue(v.Name, out var recs) || !modeInfoRef.TryGetValue(v.Name, out var want))
+                { failures.Add($"{v.Name}: no libvpx reference"); continue; }
+                var reader = new Vp9HeaderReader();
+                int rec = 0, decoded = 0, prevBuffer = -1;
+                foreach (byte[] packet in Vp9Packets.ReadFile(v.File))
+                {
+                    using var buf = acc.Allocate1D(packet);
+                    foreach (var (offset, length) in Vp9Packets.Split(packet))
+                    {
+                        var h = reader.ReadFrame(packet.AsSpan(offset, length));
+                        if (h.ShowExistingFrame) { reader.FinishFrame(); continue; }
+                        contexts.BeginFrame(h);
+                        var cur = contexts.Contexts.SubView(Vp9Ctx.Current * Vp9Ctx.Bytes, Vp9Ctx.Bytes);
+                        cur.CopyFromCPU(recs[rec].Context.Take(Vp9Ctx.Bytes).Select(b => (int)b).ToArray());   // test: libvpx's loaded context
+                        rec += 2;
+                        contexts.ReadCompressedHeader(buf.View, offset, h);
+                        parser.Parse(buf.View, offset, packet.AsSpan(offset, length), h, contexts, prevBuffer);
+                        var status = await parser.ReadStatusAsync();
+                        var mi = await parser.ModeInfo.CopyToHostAsync();
+                        var miBytes = Vp9ModeInfoBytes(mi, parser.MiCols, parser.MiRows, parser.GridOffset);
+                        string miMd5 = Md5Hex(miBytes);
+                        // diagnostics: VP9_MI_DUMP=dir and VP9_MI_FILE=name write ours_<n>.bin (compare with libvpx_ref -d)
+                        string? dumpDir = OperatingSystem.IsBrowser() ? null : Environment.GetEnvironmentVariable("VP9_MI_DUMP");
+                        if (dumpDir != null && v.Name == Environment.GetEnvironmentVariable("VP9_MI_FILE"))
+                            File.WriteAllBytes(Path.Combine(dumpDir, $"ours_{decoded + 1}.bin"), miBytes);
+                        var w = want[decoded];
+                        if (status.Any(s => s != 0)) failures.Add($"{v.Name} frame {decoded + 1}: parse status {string.Join(",", status)}");
+                        else if (miMd5 != w.Mi) failures.Add($"{v.Name} frame {decoded + 1}: mode info differs ({h.Width}x{h.Height}, type {h.FrameType}, intra-only {h.IntraOnly})");
+                        if (w.Counts != "-")
+                        {
+                            var counts = await parser.Counts.SubView(0, (long)parser.TileCols * Vp9Cnt.Size).CopyToHostAsync();
+                            var sum = new int[Vp9Cnt.Size];
+                            for (int tc = 0; tc < parser.TileCols; tc++)
+                                for (int k = 0; k < Vp9Cnt.Size; k++) sum[k] += counts[tc * Vp9Cnt.Size + k];
+                            var bytes = new byte[sum.Length * 4];
+                            Buffer.BlockCopy(sum, 0, bytes, 0, bytes.Length);
+                            if (Md5Hex(bytes) != w.Counts) failures.Add($"{v.Name} frame {decoded + 1}: counts differ");
+                            countsChecked++;
+                        }
+                        contexts.EndFrame(h);
+                        parser.EndFrame(h);
+                        reader.FinishFrame();
+                        prevBuffer = h.NewBuffer;
+                        decoded++;
+                        frames++;
+                        if (failures.Count > 40) goto done;
+                    }
+                }
+            }
+        done:
+            Console.WriteLine($"{acc.AcceleratorType}: {frames} frames parsed, {countsChecked} counts checked");
+            True(failures.Count == 0, $"{failures.Count} mismatches:\n" + string.Join("\n", failures.Take(40)));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
     /// <summary>One libvpx_ref -c record: stage 0 = the context a frame loads, stage 1 = after its compressed header
     /// (+ tx_mode, reference_mode, comp_fixed_ref, comp_var_ref[0..1]).</summary>
     private sealed record Vp9CtxRecord(int Stage, byte[] Context, byte[] Extra);
