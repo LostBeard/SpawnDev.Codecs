@@ -49,3 +49,4 @@ Vp9ComfyUI/*.webm binary
 Vp9ComfyUI/*.md5 text eol=lf
 Vp9Synthetic/*.ivf binary
 Vp9Synthetic/*.md5 text eol=lf
+Vp9Dsp/*.gz binary

@@ -80,6 +80,7 @@
 		<EmbeddedResource Include="TestData\Vp9Conformance\*" Exclude="TestData\Vp9Conformance\SOURCES.md" />
 		<EmbeddedResource Include="TestData\Vp9ComfyUI\*" />
 		<EmbeddedResource Include="TestData\Vp9Synthetic\*" />
+		<EmbeddedResource Include="TestData\Vp9Dsp\*" Exclude="TestData\Vp9Dsp\README.md" />
 		<None Include="TestData\Vp9ConformanceLarge\*" CopyToOutputDirectory="PreserveNewest" LinkBase="TestData\Vp9ConformanceLarge" />
 		<EmbeddedResource Include="TestData\Filters\*" />
 		<EmbeddedResource Include="TestData\Lz4\*" />
