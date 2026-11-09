@@ -57,17 +57,17 @@ public sealed class Mp3DecoderGpu : IDisposable
     private readonly Accelerator _accelerator;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _ints;
     private readonly MemoryBuffer1D<float, Stride1D.Dense> _floats;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _walk;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _sideInfo;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _reservoir;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int> _gather;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int> _granule;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int> _stereo;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int> _imdctPrep;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, int> _imdctOut;
-    private readonly Action<Index1D, ArrayView<float>, long, long> _carry;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, int> _dct;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, long, long, long, int, long> _synth;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _walk = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _sideInfo = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _reservoir = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int> _gather = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int> _granule = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int> _stereo = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int> _imdctPrep = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, int> _imdctOut = null!;
+    private Action<Index1D, ArrayView<float>, long, long> _carry = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, int> _dct = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, long, long, long, int, long> _synth = null!;
 
     /// <summary>Walker steps per launch, launches between meta reads.</summary>
     private const int WalkBudget = 1 << 14, WalkLaunchesPerRead = 8;
@@ -76,27 +76,42 @@ public sealed class Mp3DecoderGpu : IDisposable
     /// <summary>Threads per launch of the per-line stages.</summary>
     private const int ThreadChunk = 1 << 20;
 
-    /// <summary>A decoder bound to <paramref name="accelerator"/>.</summary>
+    // Kernels load lazily (EnsureKernelsAsync, awaited by every entry point): the constructor compiles nothing.
+    private Task? _kernelsLoad;
+
+    /// <summary>A decoder bound to <paramref name="accelerator"/>. Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public Mp3DecoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         var a = accelerator;
-        _walk = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(K.WalkKernel);
-        _sideInfo = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(K.SideInfoKernel);
-        _reservoir = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(K.ReservoirKernel);
-        _gather = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int>(K.GatherKernel);
-        _granule = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int>(K.GranuleKernel);
-        _stereo = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int>(K.StereoKernel);
-        _imdctPrep = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int>(K.ImdctPrepKernel);
-        _imdctOut = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, int>(K.ImdctOutKernel);
-        _carry = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, long, long>(K.CarryKernel);
-        _dct = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, int>(K.DctKernel);
-        _synth = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, long, long, long, int, long>(K.SynthKernel);
         _ints = a.Allocate1D<int>(Mp3DecodeTables.IntCount);
         _ints.View.CopyFromCPU(Mp3DecodeTables.Ints);
         _floats = a.Allocate1D<float>(Mp3DecodeTables.FloatCount);
         _floats.View.CopyFromCPU(Mp3DecodeTables.Floats);
+    }
+
+    /// <summary>Load every kernel once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _walk = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(K.WalkKernel);
+        _sideInfo = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(K.SideInfoKernel);
+        _reservoir = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(K.ReservoirKernel);
+        _gather = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int>(K.GatherKernel);
+        _granule = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int>(K.GranuleKernel);
+        _stereo = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int>(K.StereoKernel);
+        _imdctPrep = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int>(K.ImdctPrepKernel);
+        _imdctOut = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, int>(K.ImdctOutKernel);
+        _carry = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, long, long>(K.CarryKernel);
+        _dct = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, int>(K.DctKernel);
+        _synth = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, long, long, long, int, long>(K.SynthKernel);
     }
 
     /// <summary>A 3-frame stereo 44.1 kHz MP3 (Info frame + 2 audio frames, FFmpeg / libmp3lame 32k) for <see cref="WarmUpAsync"/>.</summary>
@@ -104,12 +119,15 @@ public sealed class Mp3DecoderGpu : IDisposable
         "//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAADAAACCQCZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZnMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMz///////////////////////////////////////////8AAAAATGF2YzYyLjI4AAAAAAAAAAAAAAAAJAKjAAAAAAAAAgmjxhB/AAAAAAAAAAAAAAAAAAAAAP/7EGQAAAB5BtOFMAAKAAANIKAAAQQIM0oZoQAAAAA0gwAAABLEszjOBABAGhMfu2+Hh5eYQ8JQFaVgCjDWAYaDxF0bYXXGhq//fCgPgINcKgr9inAG4ABjjGZjRj+jjFYdlVNTZBw///sSZAoD8I8G1adgAAgAAA0g4AABAiAbTLWgACAAADSCgAAEdPMOgaaKZ0Cut14nG43nAAvDDDDAAAAAyFCUw55oJjcV30TS6TGd7v383lk/gYV/HixfAx34VUcDAIlrkSJGyJFFhsXp//sQZBsAAUMQ1c5goAAAAA0gwAAAAawbPhxgACgAADSDgAAETEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU=";
 
     /// <summary>
-    /// Compile and load every kernel <see cref="DecodeAsync"/> and <see cref="DecodeFloatAsync"/> use (decodes a tiny
-    /// built-in file both ways), so the first real decode does not wait for them. On browser backends the first compile
+    /// Compile and load every kernel <see cref="DecodeAsync"/> and <see cref="DecodeFloatAsync"/> use, then decode a tiny
+    /// built-in file both ways, so the first real decode does not wait for them. On browser backends the first compile
     /// of the shaders can take tens of seconds; call this early, for example when a page shows a node that loads audio.
+    /// The loads are awaited one kernel at a time and yield to the browser's event loop before each compile (WebGPU builds
+    /// the pipelines asynchronously), so the page keeps painting and answering input meanwhile.
     /// </summary>
     public async Task WarmUpAsync()
     {
+        await EnsureKernelsAsync();
         var file = Convert.FromBase64String(WarmUpFile);
         await DecodeAsync(file);
         await DecodeFloatAsync(file);
@@ -230,6 +248,7 @@ public sealed class Mp3DecoderGpu : IDisposable
         int length = end - start;
         if (length < 4) throw new InvalidDataException("No MPEG audio frames found.");
         if (length > int.MaxValue - (1 << 20)) throw new NotSupportedException("MP3 files of 2 GB or more are not supported.");
+        await EnsureKernelsAsync();
         var a = _accelerator;
         var pacer = new LaunchPacer(a);
 

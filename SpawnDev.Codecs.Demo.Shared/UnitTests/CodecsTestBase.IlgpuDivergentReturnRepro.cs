@@ -4,8 +4,13 @@
 // Found 2026-11-08 in Vp9OutputKernels.PackPlanesKernel (VP9 decoder readback): on CUDA, for a 66x66 picture the
 // output bytes 4356..4383 (the U-plane threads of the warp 4352..4383, whose first 4 threads are Y threads taking the
 // early return) came back 0. CPU and OpenCL are right; sizes whose plane boundaries fall on warp boundaries pass.
-// The variants below keep the kernel shape and change one thing each, so the failing set names the trigger. The
-// expected bytes come from running the same method on the host (.NET semantics).
+// The variants below keep the kernel shape and change one thing each. The expected bytes come from running the same
+// method on the host (.NET semantics).
+//
+// Root cause (Data, ILGPU): the O2 uniformity analysis started every kernel parameter as warp-uniform, including an
+// implicitly grouped kernel's thread index, so the branch on `at < ySize` (directly on the index) was emitted as
+// `bra.uni` and ptxas ran the warp straddling the plane boundary down one path. The 64-bit/32-bit split between the
+// variants was incidental to how each branch got emitted, not the trigger.
 
 using ILGPU;
 using ILGPU.Runtime;

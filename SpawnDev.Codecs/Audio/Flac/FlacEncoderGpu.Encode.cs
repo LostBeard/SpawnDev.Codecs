@@ -75,43 +75,49 @@ public sealed partial class FlacEncoderGpu
     /// <summary>The stream encoder's kernels and tables, loaded on first use.</summary>
     private sealed class StreamKernels : IDisposable
     {
-        public readonly Action<Index1D, ArrayView<float>, ArrayView<int>> Window;
-        public readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int> Prep;
-        public readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<double>, int> Autocorr;
-        public readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<double>, ArrayView<double>, ArrayView<int>> Lpc;
-        public readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int> PartSum;
-        public readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<long>, ArrayView<int>, int> PredCost;
-        public readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, int> Subframe;
-        public readonly Action<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, int> FrameSize;
-        public readonly Action<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<long>, int> Offsets;
-        public readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, int> WriteFrame;
-        public readonly Action<Index1D, ArrayView<long>, ArrayView<uint>, ArrayView<byte>, int> Patch;
-        public readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, long> Copy;
-        public readonly Action<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long, long, int> Md5Blocks;
-        public readonly Action<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long> Md5Final;
+        public Action<Index1D, ArrayView<float>, ArrayView<int>> Window = null!;
+        public Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int> Prep = null!;
+        public Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<double>, int> Autocorr = null!;
+        public Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<double>, ArrayView<double>, ArrayView<int>> Lpc = null!;
+        public Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int> PartSum = null!;
+        public Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<long>, ArrayView<int>, int> PredCost = null!;
+        public Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, int> Subframe = null!;
+        public Action<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, int> FrameSize = null!;
+        public Action<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<long>, int> Offsets = null!;
+        public Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, int> WriteFrame = null!;
+        public Action<Index1D, ArrayView<long>, ArrayView<uint>, ArrayView<byte>, int> Patch = null!;
+        public Action<Index1D, ArrayView<byte>, ArrayView<byte>, long> Copy = null!;
+        public Action<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long, long, int> Md5Blocks = null!;
+        public Action<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long> Md5Final = null!;
         public readonly MemoryBuffer1D<int, Stride1D.Dense> Crc;
         public readonly MemoryBuffer1D<uint, Stride1D.Dense> Md5Tables;
 
+        /// <summary>Tables only; <see cref="LoadAsync"/> loads the kernels.</summary>
         public StreamKernels(Accelerator a)
         {
-            Window = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>>(K.WindowKernel);
-            Prep = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int>(K.PrepKernel);
-            Autocorr = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<double>, int>(K.AutocorrKernel);
-            Lpc = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<double>, ArrayView<double>, ArrayView<int>>(K.LpcKernel);
-            PartSum = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int>(K.PartSumKernel);
-            PredCost = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<long>, ArrayView<int>, int>(K.PredCostKernel);
-            Subframe = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, int>(K.SubframeKernel);
-            FrameSize = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, int>(K.FrameSizeKernel);
-            Offsets = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<long>, int>(K.OffsetsKernel);
-            WriteFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, int>(K.WriteFrameKernel);
-            Patch = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<long>, ArrayView<uint>, ArrayView<byte>, int>(K.PatchStreamInfoKernel);
-            Copy = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, long>(K.CopyBytesKernel);
-            Md5Blocks = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long, long, int>(W.Md5BlocksKernel);
-            Md5Final = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long>(W.Md5FinalKernel);
             Crc = a.Allocate1D<int>(512);
             Crc.View.CopyFromCPU(K.BuildCrcTables());
             Md5Tables = a.Allocate1D<uint>(128);
             Md5Tables.View.CopyFromCPU(W.BuildTables());
+        }
+
+        /// <summary>Load every kernel (awaited loads: each compile yields to the browser's event loop first).</summary>
+        public async Task LoadAsync(Accelerator a)
+        {
+            Window = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<int>>(K.WindowKernel);
+            Prep = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int>(K.PrepKernel);
+            Autocorr = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<double>, int>(K.AutocorrKernel);
+            Lpc = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<double>, ArrayView<double>, ArrayView<int>>(K.LpcKernel);
+            PartSum = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int>(K.PartSumKernel);
+            PredCost = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<long>, ArrayView<int>, int>(K.PredCostKernel);
+            Subframe = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, int>(K.SubframeKernel);
+            FrameSize = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, int>(K.FrameSizeKernel);
+            Offsets = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<long>, int>(K.OffsetsKernel);
+            WriteFrame = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<byte>, int>(K.WriteFrameKernel);
+            Patch = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<long>, ArrayView<uint>, ArrayView<byte>, int>(K.PatchStreamInfoKernel);
+            Copy = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, long>(K.CopyBytesKernel);
+            Md5Blocks = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long, long, int>(W.Md5BlocksKernel);
+            Md5Final = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long>(W.Md5FinalKernel);
         }
 
         public void Dispose()
@@ -121,7 +127,22 @@ public sealed partial class FlacEncoderGpu
         }
     }
 
-    private StreamKernels Kernels => _stream ??= new StreamKernels(_accelerator);
+    private Task<StreamKernels>? _streamLoad;
+
+    /// <summary>The stream encoder's kernels, loaded once on first use (awaited, so a browser page keeps running).</summary>
+    private Task<StreamKernels> KernelsAsync()
+    {
+        if (_streamLoad == null || _streamLoad.IsFaulted || _streamLoad.IsCanceled) _streamLoad = LoadStreamKernelsAsync();
+        return _streamLoad;
+    }
+
+    private async Task<StreamKernels> LoadStreamKernelsAsync()
+    {
+        var k = new StreamKernels(_accelerator);
+        try { await k.LoadAsync(_accelerator); }
+        catch { k.Dispose(); throw; }
+        return _stream = k;
+    }
 
     /// <summary>Per level: block duration (ms), highest fixed order, highest LPC order (0: none), highest Rice partition order.</summary>
     private static readonly (int Ms, int Fixed, int Lpc, int Po)[] Levels =
@@ -308,7 +329,7 @@ public sealed partial class FlacEncoderGpu
         long length = await EncodeCoreAsync(interleaved, plan, o, work.View);
         if (length > output.Length)
             throw new ArgumentException($"The FLAC file is {length} bytes; the output view holds {output.Length}.", nameof(output));
-        var k = Kernels;
+        var k = await KernelsAsync();
         var pacer = new LaunchPacer(_accelerator);
         const int CopyChunk = 1 << 22;
         for (long first = 0; first < length; first += CopyChunk)
@@ -325,7 +346,7 @@ public sealed partial class FlacEncoderGpu
         ArrayView1D<byte, Stride1D.Dense> target)
     {
         var a = _accelerator;
-        var k = Kernels;
+        var k = await KernelsAsync();
         var lv = Levels[plan.Level];
         int maxLpc = lv.Lpc;
         int preds = 5 + maxLpc;

@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Kernel loads no longer freeze a browser page (ILGPU 5.4.19 awaited loads) (2026-11-08)
+- `FlacDecoderGpu`, `FlacEncoderGpu` (and its `FlacFrameWriterGpuKernel`), `Mp3DecoderGpu`, `OpusEncoderGpu` /
+  `OggOpusEncoder`, `Vp9DecoderGpu` and the WebP animation encoder (`WebPAnimEncoder`, behind both WebP encoders'
+  `EncodeAnimationAsync`) compile nothing in their constructors. Each loads its kernels once, lazily,
+  from its async entry points through `LoadAutoGroupedStreamKernelAsync`: every compile yields to the browser's event
+  loop first, and on WebGPU the pipelines are built with `createComputePipelineAsync` during the load. Lore measured
+  SpawnGen frozen 30-104 s while these compiled synchronously (RX590, WebGPU, non-AOT).
+- `WarmUpAsync` loads the codec's kernels (then decodes / encodes a tiny built-in input as before). New:
+  `Vp9DecoderGpu.WarmUpAsync`.
+- `OpusEncoderGpu.Reset` now marks the CELT state for a reset that runs before the next frame (the reset kernel may
+  not be loaded yet); the coded packets are unchanged.
+- FIXED: `OggOpusEncoder` recompiled its 12 kernels after any garbage collection. It makes an `OpusEncoderGpu` per
+  call, and the accelerator's kernel cache holds compiled kernels only weakly, so once the per-call encoders were
+  collected every later encode (and the effect of `WarmUpAsync`) was gone. The Opus encoder's kernels are now loaded
+  once per accelerator and kept with it (`ConditionalWeakTable<Accelerator, ...>`).
+- Guard: `Codecs_ConstructorsCompileNothing_WarmUpCompilesWhatTheyUse` (fresh accelerator; counts compiled kernels;
+  forces a GC between the warm-ups and the work). Red-checked: a constructor compiling one kernel again (1 compiled),
+  the Opus kernels not kept per accelerator (12 compiled after the GC), and `Vp9DecoderGpu.WarmUpAsync` skipping the
+  output kernel (9 of 10) each fail it; the restored source passes.
+- NEXT: the still-image codecs (PNG, JPEG, GIF, BMP, WebP stills) still compile in their constructors.
+
 ### Full VP9 decoder: `Video.Vp9.Decoder.Vp9DecoderGpu` (libvpx v1.17.0 port, BSD-3-Clause) (2026-11-08)
 - Profile 0 (8-bit 4:2:0) with every feature libvpx's profile-0 conformance vectors use: inter frames, compound and
   scaled references (resizing streams), all interpolation filters, tiles, segmentation, lossless, hidden /

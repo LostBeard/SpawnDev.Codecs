@@ -19,12 +19,14 @@ internal sealed class Vp9DecodePipeline : IDisposable
     private readonly Vp9TileParserGpu _parser;
     private readonly Vp9FrameBuffersGpu _frames;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables, _reconArgs, _lfHdr, _lfTable, _lfArgs;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _lfInit;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _lfWave;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>> _lfInit = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _lfWave = null!;
     private MemoryBuffer1D<int, Stride1D.Dense>? _scratch;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _reconInter;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _reconIntra;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _reconInter = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _reconIntra = null!;
     private int _prevBuffer = -1;
+    private Task? _kernelsLoad;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long>? _packDiag;
 
     public Vp9DecodePipeline(Accelerator accelerator)
     {
@@ -34,15 +36,28 @@ internal sealed class Vp9DecodePipeline : IDisposable
         _frames = new Vp9FrameBuffersGpu(_acc);
         _tables = _acc.Allocate1D(Vp9T.Packed);
         _reconArgs = _acc.Allocate1D<int>(Vp9RArg.Count);
-        _reconInter = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
-            ArrayView<int>, ArrayView<int>>(Vp9ReconKernels.InterPassKernel);
-        _reconIntra = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
-            ArrayView<int>, ArrayView<int>, int>(Vp9ReconKernels.IntraWaveKernel);
         _lfHdr = _acc.Allocate1D<int>(Vp9LfHdr.Ints);
         _lfTable = _acc.Allocate1D<int>(Vp9LfTable.Ints);
         _lfArgs = _acc.Allocate1D<int>(Vp9LArg.Count);
-        _lfInit = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(Vp9LoopFilterKernels.FrameInitKernel);
-        _lfWave = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(
+    }
+
+    /// <summary>Load every kernel once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    internal Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        await _contexts.LoadKernelsAsync();
+        await _parser.LoadKernelsAsync();
+        _reconInter = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
+            ArrayView<int>, ArrayView<int>>(Vp9ReconKernels.InterPassKernel);
+        _reconIntra = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
+            ArrayView<int>, ArrayView<int>, int>(Vp9ReconKernels.IntraWaveKernel);
+        _lfInit = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(Vp9LoopFilterKernels.FrameInitKernel);
+        _lfWave = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(
             Vp9LoopFilterKernels.WavefrontKernel);
     }
 
@@ -92,6 +107,7 @@ internal sealed class Vp9DecodePipeline : IDisposable
     public async Task<Vp9FrameInfo> DecodeFrameAsync(ReadOnlyMemory<byte> frame, ArrayView<byte> frameView, int frameOffset,
         Func<Vp9FrameInfo, Task>? afterRecon = null)
     {
+        await EnsureKernelsAsync();
         var h = _reader.ReadFrame(frame.Span);
         if (h.ShowExistingFrame)
         {
@@ -182,7 +198,7 @@ internal sealed class Vp9DecodePipeline : IDisposable
         int uvW = l.UvCropWidth, uvH = l.UvCropHeight;
         long total = (long)l.Width * l.Height + 2L * uvW * uvH;
         using var dst = _acc.Allocate1D<byte>(total);
-        var pack = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long>(
+        var pack = _packDiag ??= await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long>(
             Vp9OutputKernels.PackPlanesKernel);
         pack((int)total, _frames.Pool, dst.View, l.Width, l.Height, uvW, uvH, l.YStride, l.UvStride, b, b + l.UOffset, b + l.VOffset);
         return await dst.View.CopyToHostAsync();

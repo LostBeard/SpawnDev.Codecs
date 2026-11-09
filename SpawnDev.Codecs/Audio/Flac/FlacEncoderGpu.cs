@@ -45,20 +45,21 @@ public sealed partial class FlacEncoderGpu : IDisposable
 
     private readonly Accelerator _accelerator;
     private readonly FlacFrameWriterGpuKernel _frameKernel;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int>
-        _deinterleaveKernel;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int, int>?
+        _deinterleaveKernel;   // loaded by the first EncodeStreamAsync (awaited)
 
     /// <summary>Samples per de-interleave launch (one thread each, a copy).</summary>
     private const int DeinterleaveLaunchSamples = 1 << 24;
 
-    /// <summary>Construct an encoder bound to <paramref name="accelerator"/>.</summary>
+    /// <summary>
+    /// Construct an encoder bound to <paramref name="accelerator"/>. Compiles no kernels: they load (awaited) on first
+    /// use or in <see cref="WarmUpAsync"/>.
+    /// </summary>
     public FlacEncoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _frameKernel = new FlacFrameWriterGpuKernel(accelerator);
-        _deinterleaveKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<int>, ArrayView<int>, int, int>(FlacEncodeDeinterleaveKernel);
     }
 
     /// <summary>
@@ -139,10 +140,12 @@ public sealed partial class FlacEncoderGpu : IDisposable
 
         // De-interleave every frame into its channel-major slot of dAllSamples
         // (a frame's slot covers the same sample range as its interleaved slice).
+        var deinterleave = _deinterleaveKernel ??= await _accelerator.LoadAutoGroupedStreamKernelAsync<
+            Index1D, ArrayView<int>, ArrayView<int>, int, int>(FlacEncodeDeinterleaveKernel);
         var pacer = new LaunchPacer(_accelerator);
         for (int first = 0; first < totalSamples; first += DeinterleaveLaunchSamples)
         {
-            _deinterleaveKernel(new Index1D(Math.Min(DeinterleaveLaunchSamples, totalSamples - first)),
+            deinterleave(new Index1D(Math.Min(DeinterleaveLaunchSamples, totalSamples - first)),
                 dAllInterleaved.View, dAllSamples.View, channels, first);
             await pacer.LaunchedAsync();
         }

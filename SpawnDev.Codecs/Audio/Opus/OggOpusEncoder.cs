@@ -191,7 +191,7 @@ public static class OggOpusEncoder
         using var s16 = accelerator.Allocate1D<short>(Math.Max(1, n));
         if (n > 0)
         {
-            var convert = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<short>>(PcmConvertKernels.FloatToS16Kernel);
+            var convert = await OpusEncoderGpu.GetFloatToS16Async(accelerator);   // the accelerator's shared set (kept alive)
             var pacer = new LaunchPacer(accelerator);
             for (long at = 0; at < n; at += ConvertChunk)
             {

@@ -44,16 +44,30 @@ public sealed class Vp9DecoderGpu : IDisposable
     private readonly Vp9DecodePipeline _pipe;
     private Vp9DecodePipeline? _alphaPipe;   // the WebM alpha stream (a second VP9 stream)
     private MemoryBuffer1D<byte, Stride1D.Dense>? _packet;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long> _pack;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long>? _pack;   // loaded by the first decode
 
-    /// <summary>A decoder on <paramref name="accelerator"/>.</summary>
+    /// <summary>A decoder on <paramref name="accelerator"/>. Compiles no kernels: they load (awaited) with the first packet.</summary>
     public Vp9DecoderGpu(Accelerator accelerator)
     {
         _acc = accelerator ?? throw new ArgumentNullException(nameof(accelerator));
         _pipe = new Vp9DecodePipeline(_acc);
-        _pack = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long>(
-            Vp9OutputKernels.PackPlanesKernel);
     }
+
+    /// <summary>
+    /// Compile and load every kernel a decode uses, so the first packet does not wait for them. On browser backends the
+    /// first compile of the shaders can take tens of seconds; call this early. The loads are awaited one kernel at a time
+    /// and yield to the browser's event loop before each compile (WebGPU builds the pipelines asynchronously), so the
+    /// page keeps painting and answering input meanwhile.
+    /// </summary>
+    public async Task WarmUpAsync()
+    {
+        await _pipe.EnsureKernelsAsync();
+        await EnsurePackAsync();
+    }
+
+    private async Task EnsurePackAsync()
+        => _pack ??= await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long>(
+            Vp9OutputKernels.PackPlanesKernel);
 
     /// <summary>Decode the packets of a WebM / Matroska (first V_VP9 track) or IVF file; one picture per shown packet.</summary>
     /// <remarks>WebM alpha (BlockAdditional, AlphaMode 1) is decoded too: <see cref="Vp9VideoFrame.Alpha"/>.</remarks>
@@ -110,6 +124,7 @@ public sealed class Vp9DecoderGpu : IDisposable
     private async Task<int> DecodePacketCoreAsync(Vp9DecodePipeline pipe, ReadOnlyMemory<byte> packet)
     {
         if (packet.IsEmpty) return -1;
+        await EnsurePackAsync();
         if (_packet == null || _packet.Length < packet.Length)
         {
             _packet?.Dispose();
@@ -137,7 +152,7 @@ public sealed class Vp9DecoderGpu : IDisposable
         var l = pipe.Frames.Layout(buffer);
         long b = pipe.Frames.Offset(buffer);
         var f = Format(pipe, buffer);
-        _pack(checked((int)f.PlanarBytes), pipe.Frames.Pool, dst, l.Width, l.Height, f.ChromaWidth, f.ChromaHeight, l.YStride, l.UvStride,
+        _pack!(checked((int)f.PlanarBytes), pipe.Frames.Pool, dst, l.Width, l.Height, f.ChromaWidth, f.ChromaHeight, l.YStride, l.UvStride,
             b, b + l.UOffset, b + l.VOffset);
     }
 

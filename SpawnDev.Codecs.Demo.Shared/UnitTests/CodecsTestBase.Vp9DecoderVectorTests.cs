@@ -305,6 +305,8 @@ public abstract partial class CodecsTestBase
         {
             using var contexts = new Vp9FrameContextsGpu(acc);
             using var parser = new Vp9TileParserGpu(acc);
+            await contexts.LoadKernelsAsync();
+            await parser.LoadKernelsAsync();
             var failures = new List<string>();
             int frames = 0, countsChecked = 0;
             foreach (var v in Vp9Vectors())
@@ -578,6 +580,7 @@ public abstract partial class CodecsTestBase
         try
         {
             using var contexts = new Vp9FrameContextsGpu(acc);
+            await contexts.LoadKernelsAsync();
             var failures = new List<string>();
             int frames = 0, managedChecked = 0;
             foreach (var v in Vp9Vectors())

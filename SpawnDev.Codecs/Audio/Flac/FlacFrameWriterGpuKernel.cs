@@ -31,25 +31,39 @@ public sealed class FlacFrameWriterGpuKernel : IDisposable
 
     private readonly Accelerator _accelerator;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables;
-    private readonly Action<Index1D, ArrayView<byte>, int, ulong, int, int> _headerKernel;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, FlacFrameShape, int, long> _packKernel;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, FlacFrameShape, int, int> _pieceKernel;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<int>, FlacFrameShape, int, int, int> _combineKernel;
+    // Loaded lazily by the first RunBatchAsync (awaited loads; the constructor compiles nothing).
+    private Action<Index1D, ArrayView<byte>, int, ulong, int, int> _headerKernel = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<byte>, FlacFrameShape, int, long> _packKernel = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, FlacFrameShape, int, int> _pieceKernel = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<int>, FlacFrameShape, int, int, int> _combineKernel = null!;
+    private Task? _kernelsLoad;
 
-    /// <summary>Compile.</summary>
+    /// <summary>Bind to <paramref name="accelerator"/> (the kernels compile on first use).</summary>
     public FlacFrameWriterGpuKernel(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _tables = accelerator.Allocate1D<int>(FlacCrcGpu.TableInts);
         _tables.View.CopyFromCPU(FlacCrcGpu.BuildTables());
-        _headerKernel = accelerator.LoadAutoGroupedStreamKernel<
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _headerKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, int, ulong, int, int>(FlacFrameHeaderKernel);
-        _packKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _packKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<int>, ArrayView<byte>, FlacFrameShape, int, long>(FlacFramePackKernel);
-        _pieceKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _pieceKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, FlacFrameShape, int, int>(FlacFrameCrcPieceKernel);
-        _combineKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _combineKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<int>, FlacFrameShape, int, int, int>(FlacFrameCrcCombineKernel);
     }
 
@@ -82,6 +96,7 @@ public sealed class FlacFrameWriterGpuKernel : IDisposable
         int outBufStride)
     {
         if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        await EnsureKernelsAsync();
         var shape = new FlacFrameShape
         {
             BlockSize = blockSize, Channels = channels, Bps = bps, StartFrameNumber = startFrameNumber,

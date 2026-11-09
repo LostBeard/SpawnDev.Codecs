@@ -54,38 +54,31 @@ public sealed record FlacDecodeResult
 public sealed class FlacDecoderGpu : IDisposable
 {
     private readonly Accelerator _accelerator;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, long> _findSync;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _countSync;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _syncOffsets;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _compactSync;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _frameEnd;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>> _walk;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, int> _decodeFrame;
-    private readonly Action<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, long> _interleave;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long, long, int> _md5Blocks;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long> _md5Final;
+    // Kernels load lazily (EnsureKernelsAsync, awaited by every entry point): the constructor compiles nothing, so
+    // creating a decoder never holds a browser page's thread, and each compile yields to the event loop first.
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, long> _findSync = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>> _countSync = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>> _syncOffsets = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _compactSync = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _frameEnd = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>> _walk = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, int> _decodeFrame = null!;
+    private Action<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, long> _interleave = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long, long, int> _md5Blocks = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long> _md5Final = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<float>, int, long, int, long> _toFloat = null!;
+    private Task? _kernelsLoad;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _crcTable;
     private readonly MemoryBuffer1D<uint, Stride1D.Dense> _md5Tables;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<float>, int, long, int, long> _toFloat;
 
     private const int ByteChunk = 1 << 22, FrameChunk = 4096, SampleChunk = 1 << 22;
 
-    /// <summary>A decoder bound to <paramref name="accelerator"/>.</summary>
+    /// <summary>A decoder bound to <paramref name="accelerator"/>. Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public FlacDecoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         var a = accelerator;
-        _findSync = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, long>(K.FindSyncKernel);
-        _countSync = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(K.CountSyncKernel);
-        _syncOffsets = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(K.SyncOffsetsKernel);
-        _compactSync = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(K.CompactSyncKernel);
-        _frameEnd = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(K.FrameEndKernel);
-        _walk = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>>(K.WalkKernel);
-        _decodeFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, int>(K.DecodeFrameKernel);
-        _interleave = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, long>(K.InterleaveKernel);
-        _md5Blocks = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long, long, int>(W.Md5BlocksKernel);
-        _md5Final = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long>(W.Md5FinalKernel);
         _crcTable = a.Allocate1D<int>(256);
         var t = new int[256];
         for (int i = 0; i < 256; i++)
@@ -95,9 +88,31 @@ public sealed class FlacDecoderGpu : IDisposable
             t[i] = c;
         }
         _crcTable.View.CopyFromCPU(t);
-        _toFloat = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, int, long, int, long>(ToFloatKernel);
         _md5Tables = a.Allocate1D<uint>(128);
         _md5Tables.View.CopyFromCPU(W.BuildTables());
+    }
+
+    /// <summary>Load every kernel once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _findSync = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, long>(K.FindSyncKernel);
+        _countSync = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>>(K.CountSyncKernel);
+        _syncOffsets = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(K.SyncOffsetsKernel);
+        _compactSync = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(K.CompactSyncKernel);
+        _frameEnd = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(K.FrameEndKernel);
+        _walk = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>>(K.WalkKernel);
+        _decodeFrame = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, int>(K.DecodeFrameKernel);
+        _interleave = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<int>, long>(K.InterleaveKernel);
+        _md5Blocks = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long, long, int>(W.Md5BlocksKernel);
+        _md5Final = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int, long>(W.Md5FinalKernel);
+        _toFloat = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<float>, int, long, int, long>(ToFloatKernel);
     }
 
     private sealed record StreamInfo(int MinBlock, int MaxBlock, int MaxFrame, int Rate, int Channels, int Bps, long Total,
@@ -173,12 +188,15 @@ public sealed class FlacDecoderGpu : IDisposable
         "ZkxhQ4AAACISABIAAACbAACbCsRC8AAAAECODGdxc8e8G0RiBWZwZIMt//hpmAA/CUoAAACJAIBgVdAwGBdLmMiaDjqWnU+izf5dhKvekL92xU/xxos8YGBgSCBwSYMS5GuzS2F5UdGJ08WPB6p17NGlx1suRMGRQ+JnycAAACpAU0B6AJ0gu8DVAOgcxeZRZ1f+2jo4/7QsTV/ZoAyGK6MXbVtNJJPaf58tm6RzCDHDiBhAgogpDqqLStJbzySzSSWgics=";
 
     /// <summary>
-    /// Compile and load every kernel <see cref="DecodeAsync"/> and <see cref="DecodeFloatAsync"/> use (decodes a tiny
-    /// built-in file both ways), so the first real decode does not wait for them. On browser backends the first compile
+    /// Compile and load every kernel <see cref="DecodeAsync"/> and <see cref="DecodeFloatAsync"/> use, then decode a tiny
+    /// built-in file both ways, so the first real decode does not wait for them. On browser backends the first compile
     /// of the shaders can take tens of seconds; call this early, for example when a page shows a node that loads audio.
+    /// The loads are awaited one kernel at a time and yield to the browser's event loop before each compile (WebGPU builds
+    /// the pipelines asynchronously), so the page keeps painting and answering input meanwhile.
     /// </summary>
     public async Task WarmUpAsync()
     {
+        await EnsureKernelsAsync();
         var file = Convert.FromBase64String(WarmUpFile);
         await DecodeAsync(file);
         await DecodeFloatAsync(file);
@@ -210,6 +228,7 @@ public sealed class FlacDecoderGpu : IDisposable
     private async Task<FlacDecodeResult> DecodeCoreAsync(ReadOnlyMemory<byte> file, bool toFloat)
     {
         var si = ParseMetadata(file.Span);
+        await EnsureKernelsAsync();
         int channels = si.Channels, bps = si.Bps;
         var audio = file[si.AudioStart..];
         long length = audio.Length;

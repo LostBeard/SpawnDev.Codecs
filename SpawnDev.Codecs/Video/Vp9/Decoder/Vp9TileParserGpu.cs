@@ -16,8 +16,8 @@ public sealed class Vp9TileParserGpu : IDisposable
     private readonly Accelerator _acc;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables, _args;
     private MemoryBuffer1D<int, Stride1D.Dense>? _mi, _sb, _dq, _work, _maps, _counts;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
-        ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _parse;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
+        ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _parse = null!;
     private int _miCols, _miRows, _miCount, _maxMiCount, _sbCount, _tileColsAlloc, _dqStride, _dqU, _dqV;
     private int _lastSeg, _curSeg;   // which of the two seg map regions is last / current
     private int _alignedCols;
@@ -28,10 +28,15 @@ public sealed class Vp9TileParserGpu : IDisposable
         _acc = accelerator ?? throw new ArgumentNullException(nameof(accelerator));
         _tables = _acc.Allocate1D(Vp9T.Packed);
         _args = _acc.Allocate1D<int>(Vp9PArg.Count);
-        _parse = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
-            ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(Vp9ParseKernels.ParseKernel);
         _lastSeg = 0;
         _curSeg = 1;
+    }
+
+    /// <summary>Load the parse kernel (awaited: the compile yields to the browser's event loop first).</summary>
+    internal async Task LoadKernelsAsync()
+    {
+        _parse = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
+            ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(Vp9ParseKernels.ParseKernel);
     }
 
     /// <summary>Mode info records + grid (see <see cref="Vp9Mi"/>; the grid follows the records).</summary>

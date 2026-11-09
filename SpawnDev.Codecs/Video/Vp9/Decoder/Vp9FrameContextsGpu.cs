@@ -229,12 +229,12 @@ public sealed class Vp9FrameContextsGpu : IDisposable
 {
     private readonly Accelerator _acc;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _ctx, _defaults, _invMap, _args, _results, _tables, _sum, _totals, _adaptArgs;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _sumCounts;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _adapt;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _copy;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _compressed;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int> _sumCounts = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _adapt = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _copy = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _compressed = null!;
 
-    /// <summary>Contexts on <paramref name="accelerator"/>, all slots at libvpx's defaults.</summary>
+    /// <summary>Contexts on <paramref name="accelerator"/>; <see cref="LoadKernelsAsync"/> loads the kernels and sets the slots to libvpx's defaults.</summary>
     public Vp9FrameContextsGpu(Accelerator accelerator)
     {
         _acc = accelerator ?? throw new ArgumentNullException(nameof(accelerator));
@@ -243,17 +243,25 @@ public sealed class Vp9FrameContextsGpu : IDisposable
         _invMap = _acc.Allocate1D(Vp9DecoderTables.InvMapTable.Select(b => (int)b).ToArray());
         _args = _acc.Allocate1D<int>(Vp9CompArgs.Count);
         _results = _acc.Allocate1D<int>(Vp9CompArgs.ResultCount);
-        _copy = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int>(Vp9CompressedHeaderKernels.CopyContextKernel);
-        _compressed = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(
-            Vp9CompressedHeaderKernels.CompressedHeaderKernel);
-        for (int s = 0; s < Vp9Ctx.Slots; s++) _copy(Vp9Ctx.Bytes, _ctx.View, _defaults.View, s, -1);
         _tables = _acc.Allocate1D(Vp9T.Packed);
         _sum = _acc.Allocate1D<int>(Vp9Cnt.Size);
         _totals = _acc.Allocate1D<int>(16);
         _adaptArgs = _acc.Allocate1D<int>(Vp9AArg.Count);
-        _sumCounts = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(Vp9AdaptKernels.SumCountsKernel);
-        _adapt = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(
+    }
+
+    /// <summary>
+    /// Load the kernels (awaited: each compile yields to the browser's event loop first), then set every context slot to
+    /// libvpx's defaults. The pipeline calls this once before the first frame.
+    /// </summary>
+    internal async Task LoadKernelsAsync()
+    {
+        _copy = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int, int>(Vp9CompressedHeaderKernels.CopyContextKernel);
+        _compressed = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(
+            Vp9CompressedHeaderKernels.CompressedHeaderKernel);
+        _sumCounts = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(Vp9AdaptKernels.SumCountsKernel);
+        _adapt = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(
             Vp9AdaptKernels.AdaptKernel);
+        for (int s = 0; s < Vp9Ctx.Slots; s++) _copy(Vp9Ctx.Bytes, _ctx.View, _defaults.View, s, -1);
     }
 
     /// <summary>

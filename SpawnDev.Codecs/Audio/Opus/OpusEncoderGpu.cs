@@ -19,6 +19,7 @@ using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.Codecs.Audio.Opus.Celt;
 using SpawnDev.Codecs.Audio.Opus.Silk;
+using System.Runtime.CompilerServices;
 using SpawnDev.ILGPU;
 
 namespace SpawnDev.Codecs.Audio.Opus;
@@ -89,12 +90,12 @@ public sealed class OpusEncoderGpu : IDisposable
     private readonly StageBuffer<byte> _frames;                                // one slot of curr_max bytes per frame
     private readonly StageBuffer<byte> _packet;
 
-    private readonly Action<Index1D, ArrayView<short>, ArrayView<short>, int> _delayHeadKernel;
-    private readonly Action<Index1D, ArrayView<short>, int, ArrayView<short>, int, ArrayView<int>, int, int, int> _dcRejectKernel;
-    private readonly Action<Index1D, ArrayView<short>, int, ArrayView<short>, int, ArrayView<int>, int, int, HpBiquad> _hpCutoffKernel;
-    private readonly Action<Index1D, ArrayView<short>, ArrayView<short>, int, int, int, int> _delayUpdateKernel;
-    private readonly Action<Index1D, ArrayView<short>, ArrayView<short>, int, int, int, int> _stereoFadeKernel;
-    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>, int, int, int, int, ArrayView<byte>, ArrayView<int>> _assembleKernel;
+    private Action<Index1D, ArrayView<short>, ArrayView<short>, int> _delayHeadKernel = null!;
+    private Action<Index1D, ArrayView<short>, int, ArrayView<short>, int, ArrayView<int>, int, int, int> _dcRejectKernel = null!;
+    private Action<Index1D, ArrayView<short>, int, ArrayView<short>, int, ArrayView<int>, int, int, HpBiquad> _hpCutoffKernel = null!;
+    private Action<Index1D, ArrayView<short>, ArrayView<short>, int, int, int, int> _delayUpdateKernel = null!;
+    private Action<Index1D, ArrayView<short>, ArrayView<short>, int, int, int, int> _stereoFadeKernel = null!;
+    private Action<Index1D, ArrayView<byte>, int, ArrayView<int>, int, int, int, int, ArrayView<byte>, ArrayView<int>> _assembleKernel = null!;
 
     // The CELT encoder (CeltEncoderGpu: celt_encode_with_ec, one thread per call) and its persistent state.
     private readonly CeltModeGpu _celtMode;
@@ -106,8 +107,12 @@ public sealed class OpusEncoderGpu : IDisposable
     private readonly int[] _celtCtlHost = new int[(int)CeltEncoderGpu.Ctl.Count];
     // celt_encode_with_ec as four stage kernels (analysis, coding decisions + energies, bands, finish): each stays small
     // enough for the browser backends' shader compilers, and every backend runs the same path.
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>[] _celtStageKernels;
-    private readonly Action<Index1D, ArrayView<int>> _celtResetKernel;
+    private Action<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>[] _celtStageKernels = null!;
+    private Action<Index1D, ArrayView<int>> _celtResetKernel = null!;
+    // Kernels load lazily (EnsureKernelsAsync, awaited by the encode path): the constructor compiles nothing. The CELT
+    // state reset (constructor, Reset) runs before the next frame is coded, once the reset kernel is loaded.
+    private Task? _kernelsLoad;
+    private bool _celtResetPending = true;
 
     // libopus OpusEncoder state the dispatch keeps (st->...).
     private int _streamChannels;
@@ -161,27 +166,89 @@ public sealed class OpusEncoderGpu : IDisposable
         _frames = new StageBuffer<byte>(accelerator);
         _packet = new StageBuffer<byte>(accelerator);
 
-        _delayHeadKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<short>, int>(DelayHeadKernel);
-        _dcRejectKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, int, ArrayView<short>, int, ArrayView<int>, int, int, int>(DcRejectKernel);
-        _hpCutoffKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, int, ArrayView<short>, int, ArrayView<int>, int, int, HpBiquad>(HpCutoffKernel);
-        _delayUpdateKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<short>, int, int, int, int>(DelayUpdateKernel);
-        _stereoFadeKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<short>, int, int, int, int>(StereoFadeKernel);
-        _assembleKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, ArrayView<int>, int, int, int, int, ArrayView<byte>, ArrayView<int>>(AssembleKernel);
-
         (_celtMode, _celtModeBuffer) = CeltModeGpu.Upload(accelerator);
         _pvqU = accelerator.Allocate1D(CeltPvqTables.Data);
         _celtState = accelerator.Allocate1D<int>(CeltEncoderGpu.StateInts);
         _celtWork = accelerator.Allocate1D<int>(CeltEncoderGpu.WorkInts);
         _celtCtl = accelerator.Allocate1D<int>((int)CeltEncoderGpu.Ctl.Count);
-        _celtStageKernels = new[]
+    }
+
+    /// <summary>
+    /// The encoder's kernels, loaded once per accelerator and shared by every encoder on it. <see cref="OggOpusEncoder"/>
+    /// makes an encoder per call, and the accelerator's kernel cache holds compiled kernels only weakly: launchers owned by
+    /// short-lived encoders would be collected and every later encode would compile them again. Held here they live as
+    /// long as the accelerator.
+    /// </summary>
+    private sealed class SharedKernels
+    {
+        public Action<Index1D, ArrayView<short>, ArrayView<short>, int> DelayHead = null!;
+        public Action<Index1D, ArrayView<short>, int, ArrayView<short>, int, ArrayView<int>, int, int, int> DcReject = null!;
+        public Action<Index1D, ArrayView<short>, int, ArrayView<short>, int, ArrayView<int>, int, int, HpBiquad> HpCutoff = null!;
+        public Action<Index1D, ArrayView<short>, ArrayView<short>, int, int, int, int> DelayUpdate = null!;
+        public Action<Index1D, ArrayView<short>, ArrayView<short>, int, int, int, int> StereoFade = null!;
+        public Action<Index1D, ArrayView<byte>, int, ArrayView<int>, int, int, int, int, ArrayView<byte>, ArrayView<int>> Assemble = null!;
+        public Action<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>[] CeltStages = null!;
+        public Action<Index1D, ArrayView<int>> CeltReset = null!;
+        public Action<Index1D, ArrayView<float>, ArrayView<short>> FloatToS16 = null!;
+
+        /// <summary>Load every kernel (awaited loads: each compile yields to the browser's event loop first).</summary>
+        public static async Task<SharedKernels> LoadAsync(Accelerator a)
         {
-            accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>(CeltEncoderGpu.AnalysisKernel),
-            accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>(CeltEncoderGpu.CodingKernel),
-            accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>(CeltEncoderGpu.BandsKernel),
-            accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>(CeltEncoderGpu.FinishKernel),
-        };
-        _celtResetKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(CeltEncoderGpu.ResetKernel);
-        _celtResetKernel(1, _celtState.View);
+            var k = new SharedKernels();
+            k.DelayHead = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<short>, ArrayView<short>, int>(DelayHeadKernel);
+            k.DcReject = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<short>, int, ArrayView<short>, int, ArrayView<int>, int, int, int>(DcRejectKernel);
+            k.HpCutoff = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<short>, int, ArrayView<short>, int, ArrayView<int>, int, int, HpBiquad>(HpCutoffKernel);
+            k.DelayUpdate = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<short>, ArrayView<short>, int, int, int, int>(DelayUpdateKernel);
+            k.StereoFade = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<short>, ArrayView<short>, int, int, int, int>(StereoFadeKernel);
+            k.Assemble = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, int, ArrayView<int>, int, int, int, int, ArrayView<byte>, ArrayView<int>>(AssembleKernel);
+            k.CeltStages = new[]
+            {
+                await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>(CeltEncoderGpu.AnalysisKernel),
+                await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>(CeltEncoderGpu.CodingKernel),
+                await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>(CeltEncoderGpu.BandsKernel),
+                await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, CeltModeGpu, ArrayView<uint>>(CeltEncoderGpu.FinishKernel),
+            };
+            k.CeltReset = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(CeltEncoderGpu.ResetKernel);
+            k.FloatToS16 = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<short>>(PcmConvertKernels.FloatToS16Kernel);
+            return k;
+        }
+    }
+
+    private static readonly ConditionalWeakTable<Accelerator, Task<SharedKernels>> s_sharedKernels = new();
+
+    private static Task<SharedKernels> GetSharedKernelsAsync(Accelerator accelerator)
+    {
+        lock (s_sharedKernels)
+        {
+            if (s_sharedKernels.TryGetValue(accelerator, out var load) && !load.IsFaulted && !load.IsCanceled) return load;
+            load = SharedKernels.LoadAsync(accelerator);
+            s_sharedKernels.AddOrUpdate(accelerator, load);
+            return load;
+        }
+    }
+
+    /// <summary>The float -> int16 conversion kernel (<see cref="PcmConvertKernels.FloatToS16Kernel"/>) of <paramref name="accelerator"/>'s shared set.</summary>
+    internal static async Task<Action<Index1D, ArrayView<float>, ArrayView<short>>> GetFloatToS16Async(Accelerator accelerator)
+        => (await GetSharedKernelsAsync(accelerator)).FloatToS16;
+
+    /// <summary>Load every kernel once (the accelerator's shared set; see <see cref="SharedKernels"/>).</summary>
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var k = await GetSharedKernelsAsync(_accelerator);
+        _delayHeadKernel = k.DelayHead;
+        _dcRejectKernel = k.DcReject;
+        _hpCutoffKernel = k.HpCutoff;
+        _delayUpdateKernel = k.DelayUpdate;
+        _stereoFadeKernel = k.StereoFade;
+        _assembleKernel = k.Assemble;
+        _celtStageKernels = k.CeltStages;
+        _celtResetKernel = k.CeltReset;
     }
 
     /// <summary>Input sample rate in Hz.</summary>
@@ -273,7 +340,7 @@ public sealed class OpusEncoderGpu : IDisposable
         _rangeValid = false;
         _delay.MemSetToZero();
         _hpMem.MemSetToZero();
-        _celtResetKernel(1, _celtState.View);
+        _celtResetPending = true;   // the CELT state resets before the next frame
     }
 
     /// <summary>The input's significant bits (OPUS_SET_LSB_DEPTH), 8..24; int16 input caps it at 16 as libopus does.</summary>
@@ -392,6 +459,12 @@ public sealed class OpusEncoderGpu : IDisposable
         if (outDataBytes <= 0) throw new ArgumentOutOfRangeException(nameof(outDataBytes));
         int maxDataBytes = Math.Min(MaxPacketBytes, outDataBytes);
         if (maxDataBytes == 1 && fs == frameSize * 10) throw new ArgumentException("100 ms cannot be encoded in 1 byte.");
+        await EnsureKernelsAsync();
+        if (_celtResetPending)
+        {
+            _celtResetKernel(1, _celtState.View);
+            _celtResetPending = false;
+        }
         int lsbDepth = Math.Min(16, _lsbDepth);                                   // opus_encode: int16 input = 16 bits
 
         int bitrate = UserBitrateToBitrate(frameSize, maxDataBytes);

@@ -102,23 +102,23 @@ internal sealed class WebPAnimEncoder : IDisposable
     private const int FourccIccp = 0x50434349, FourccExif = 0x46495845, FourccXmp = 0x20504D58;
 
     private readonly Accelerator _acc;
-    private readonly Action<Index1D, ArrayView<int>, int, int, int, int, int> _setRect;
-    private readonly Action<Index1D, ArrayView<int>, int, int> _copyRect;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int> _columns, _rows, _blendRows;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _columnsReduce;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _rowsReduce;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int, int> _any;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int> _extract, _place;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, int, int> _flatten;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int> _increaseTransparency;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>> _copyCanvas;
-    private readonly Action<Index1D, ArrayView<byte>> _clearCanvas;
-    private readonly Action<Index1D, ArrayView<byte>, int, int, int, int> _clearRect;
-    private readonly Action<Index1D, ArrayView<byte>, int, int, int, int> _fileHeader;
-    private readonly Action<Index1D, ArrayView<byte>, int, int, int> _animChunk;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int> _blobChunk;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, int, int, int> _frame;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int> _copy;
+    private Action<Index1D, ArrayView<int>, int, int, int, int, int> _setRect = null!;
+    private Action<Index1D, ArrayView<int>, int, int> _copyRect = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int> _columns = null!, _rows = null!, _blendRows = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int> _columnsReduce = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _rowsReduce = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int, int, int> _any = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int> _extract = null!, _place = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, int, int> _flatten = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int> _increaseTransparency = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>> _copyCanvas = null!;
+    private Action<Index1D, ArrayView<byte>> _clearCanvas = null!;
+    private Action<Index1D, ArrayView<byte>, int, int, int, int> _clearRect = null!;
+    private Action<Index1D, ArrayView<byte>, int, int, int, int> _fileHeader = null!;
+    private Action<Index1D, ArrayView<byte>, int, int, int> _animChunk = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int> _blobChunk = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, int, int, int> _frame = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int> _copy = null!;
 
     private readonly StageBuffer<byte> _prev, _prevDisposed, _canvas, _picture, _blobs;
     private readonly StageBuffer<int> _colFlags, _rowFlags;
@@ -135,29 +135,44 @@ internal sealed class WebPAnimEncoder : IDisposable
     /// <summary>The growing output of a managed / TypedArray encode (valid after one).</summary>
     public ArrayView1D<byte, Stride1D.Dense> Output => _out!.View;
 
+    // Kernels load lazily (EnsureKernelsAsync, awaited by EncodeAsync): the constructor compiles nothing.
+    private Task? _kernelsLoad;
+
+    /// <summary>Load every kernel once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _acc;
+        _setRect = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, int, int, int, int, int>(K.SetRectKernel);
+        _copyRect = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, int, int>(K.CopyRectKernel);
+        _columns = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int>(K.ColumnsKernel);
+        _rows = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int>(K.RowsKernel);
+        _blendRows = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int>(K.BlendRowsKernel);
+        _columnsReduce = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(K.ColumnsReduceKernel);
+        _rowsReduce = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int, int>(K.RowsReduceKernel);
+        _any = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int, int, int>(K.AnyKernel);
+        _extract = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(K.ExtractKernel);
+        _place = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(K.PlaceKernel);
+        _flatten = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, int, int>(K.FlattenKernel);
+        _increaseTransparency = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(K.IncreaseTransparencyKernel);
+        _copyCanvas = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>>(K.CopyCanvasKernel);
+        _clearCanvas = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>>(K.ClearCanvasKernel);
+        _clearRect = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, int, int, int, int>(K.ClearRectKernel);
+        _fileHeader = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, int, int, int, int>(K.FileHeaderKernel);
+        _animChunk = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, int, int, int>(K.AnimChunkKernel);
+        _blobChunk = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(K.BlobChunkKernel);
+        _frame = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, int, int, int>(K.FrameKernel);
+        _copy = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int>(K.CopyKernel);
+    }
+
     public WebPAnimEncoder(Accelerator a)
     {
         _acc = a;
-        _setRect = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, int, int, int, int, int>(K.SetRectKernel);
-        _copyRect = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, int, int>(K.CopyRectKernel);
-        _columns = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int>(K.ColumnsKernel);
-        _rows = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int>(K.RowsKernel);
-        _blendRows = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int>(K.BlendRowsKernel);
-        _columnsReduce = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(K.ColumnsReduceKernel);
-        _rowsReduce = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int>(K.RowsReduceKernel);
-        _any = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int, int>(K.AnyKernel);
-        _extract = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(K.ExtractKernel);
-        _place = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(K.PlaceKernel);
-        _flatten = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, int, int>(K.FlattenKernel);
-        _increaseTransparency = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(K.IncreaseTransparencyKernel);
-        _copyCanvas = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>>(K.CopyCanvasKernel);
-        _clearCanvas = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>>(K.ClearCanvasKernel);
-        _clearRect = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, int, int, int>(K.ClearRectKernel);
-        _fileHeader = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, int, int, int>(K.FileHeaderKernel);
-        _animChunk = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, int, int>(K.AnimChunkKernel);
-        _blobChunk = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(K.BlobChunkKernel);
-        _frame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, int, int, int>(K.FrameKernel);
-        _copy = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, int, int>(K.CopyKernel);
         _prev = new StageBuffer<byte>(a); _prevDisposed = new StageBuffer<byte>(a); _canvas = new StageBuffer<byte>(a);
         _picture = new StageBuffer<byte>(a); FrameIn = new StageBuffer<byte>(a); _blobs = new StageBuffer<byte>(a);
         _colFlags = new StageBuffer<int>(a); _rowFlags = new StageBuffer<int>(a);
@@ -325,6 +340,7 @@ internal sealed class WebPAnimEncoder : IDisposable
         WebPAnimEncoderOptions anim, Sink sink)
     {
         if (anim.LoopCount < 0 || anim.LoopCount > 65535) throw new ArgumentOutOfRangeException(nameof(anim), "LoopCount must be 0..65535.");
+        await EnsureKernelsAsync();
         ResetPool();
         var (kmin, kmax) = SanitizeKeyframes(anim.KeyframeMin ?? (lossless ? 9 : 3), anim.KeyframeMax ?? (lossless ? 17 : 5));
         var run = new Run
