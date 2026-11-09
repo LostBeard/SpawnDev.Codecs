@@ -2,10 +2,16 @@
 
 ## Unreleased
 
-### SpawnDev.ILGPU 5.4.20-local.1; FLAC analysis in IEEE f64 on WebGPU / WebGL (2026-11-08)
-- ILGPU 5.4.20-local.1: Data's fix for the CUDA divergent-warp bug (a branch on the thread index was emitted as
-  `bra.uni`), which broke VP9 readback on odd sizes; `IlgpuDivergentReturnRepro_PackPlanes_MatchesHost` stays as the
-  guard (CUDA re-run pending the next GPU window).
+### SpawnDev.ILGPU 5.4.20; the FLAC encoder writes the same file on every backend (2026-11-09)
+- SpawnDev.ILGPU 5.4.20 (stable): Data's fix for the CUDA divergent-warp bug (a branch on the thread index was emitted
+  as `bra.uni`), which broke VP9 readback on odd sizes. CUDA (RTX 4070): every VP9 test passes now, including
+  `Vp9Decode_EveryFrame_MatchesLibvpx` (311 files == libvpx, 476 s) and the public API / alpha tests;
+  `IlgpuDivergentReturnRepro_PackPlanes_MatchesHost` passes and stays as the guard.
+- FIXED: the FLAC encoder's Tukey window used the backend's float cos (`XMath.Cos`: CUDA's approximation, .NET
+  `MathF.Cos`, the browser's libm), which differ in the last ulps, so CUDA picked different LPC coefficients for some
+  blocks (a different, still lossless, file). The window now uses `CosZeroToPi`, a Taylor series in IEEE double
+  + - * only (error < 3.4e-16; the float window equals libm's double cos at 200,001 points), so every backend
+  computes the same bits. Red-checked on CUDA (the float cos back -> different files).
 - The FLAC encoder's window, autocorrelation and LPC kernels compile under `F64EmulationScope.Use(Ieee)`: WebGPU and
   WebGL emulate their doubles bit-exactly like desktop .NET, so they pick the same coefficients and write the same
   file. The scope applies to these loads only (an AsyncLocal; interleaved loads keep the default mode). Removed the

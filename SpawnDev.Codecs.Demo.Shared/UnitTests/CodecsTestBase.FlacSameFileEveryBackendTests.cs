@@ -20,10 +20,10 @@ public abstract partial class CodecsTestBase
     {
         ("stereo16_l0", 2, 16, 0, null, "e9d512d3e1fbb39da80c8ddc741f0a5a"),
         ("stereo16_l5", 2, 16, 5, null, "567d547c0f7279f9ea1a3bdcfec021ac"),
-        ("stereo16_l8", 2, 16, 8, null, "621b1c8ed62547a2708ee01721ff61d0"),
+        ("stereo16_l8", 2, 16, 8, null, "035269097459002ec57e73e03a70d2fb"),
         ("mono24_l8", 1, 24, 8, null, "5d934f0bbe59fa968f22cdba9fd09b39"),
-        ("stereo16_l8_b1152", 2, 16, 8, 1152, "61db69772f65d2cc7c2e0a5bd52f36fb"),
-        ("stereo20_l7_b2048", 2, 20, 7, 2048, "fbc32c3f24a1b134eb8e9bbe8ffb3225"),
+        ("stereo16_l8_b1152", 2, 16, 8, 1152, "8d2b86093387ad493a84be8f378bf1e0"),
+        ("stereo20_l7_b2048", 2, 20, 7, 2048, "789679f7bac48bda9f8ab30ccc75c3a2"),
     };
 
     [TestMethod(Timeout = 1200000)]

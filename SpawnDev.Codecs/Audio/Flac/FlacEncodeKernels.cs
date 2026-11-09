@@ -225,10 +225,36 @@ public static class FlacEncodeKernels
         double half = 0.25 * (n - 1);     // alpha (N - 1) / 2 with alpha = 0.5
         if (half > 0)
         {
-            if (i < half) w = 0.5 * (1.0 - XMath.Cos((float)(Math.PI * i / half)));
-            else if (i > (n - 1) - half) w = 0.5 * (1.0 - XMath.Cos((float)(Math.PI * ((n - 1) - i) / half)));
+            if (i < half) w = 0.5 * (1.0 - CosZeroToPi(Math.PI * i / half));
+            else if (i > (n - 1) - half) w = 0.5 * (1.0 - CosZeroToPi(Math.PI * ((n - 1) - i) / half));
         }
         win[index] = (float)w;
+    }
+
+    /// <summary>
+    /// cos(x) for x in [0, pi] from IEEE-754 double + - * only, so every backend computes the same bits: hardware and
+    /// library cos differ in the last ulps between backends (CUDA cos.approx, .NET MathF.Cos, browser libm) and between
+    /// platforms, and a window ulp can change the LPC coefficients the encoder picks (a different, still lossless, file).
+    /// Folds x to [0, pi/2] (cos(x) = -cos(pi - x)), then the Taylor series to x^20 by Horner: truncation below 2e-17,
+    /// far under the float the window is stored as.
+    /// </summary>
+    private static double CosZeroToPi(double x)
+    {
+        double sign = 1.0;
+        if (x > Math.PI / 2) { x = Math.PI - x; sign = -1.0; }
+        double y = x * x;
+        double r = 1.0 / 2432902008176640000.0;          // +1/20!
+        r = r * y - 1.0 / 6402373705728000.0;            // -1/18!
+        r = r * y + 1.0 / 20922789888000.0;              // +1/16!
+        r = r * y - 1.0 / 87178291200.0;                 // -1/14!
+        r = r * y + 1.0 / 479001600.0;                   // +1/12!
+        r = r * y - 1.0 / 3628800.0;                     // -1/10!
+        r = r * y + 1.0 / 40320.0;                       // +1/8!
+        r = r * y - 1.0 / 720.0;                         // -1/6!
+        r = r * y + 1.0 / 24.0;                          // +1/4!
+        r = r * y - 0.5;                                 // -1/2!
+        r = r * y + 1.0;
+        return sign * r;
     }
 
     /// <summary>One thread per (frame, candidate): constant flag, wasted bits, range check of the input channels.</summary>
