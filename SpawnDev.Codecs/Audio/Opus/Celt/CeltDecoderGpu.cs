@@ -79,14 +79,59 @@ public sealed class CeltDecoderGpu : IDisposable
     private readonly MemoryBuffer1D<uint, Stride1D.Dense> _pvqU;
     private readonly MemoryBuffer1D<OpusRangeDecoderGpuState, Stride1D.Dense> _ownEc;
     private readonly CeltModeGpu _mode;
-    private readonly Action<Index1D, ArrayView<int>> _resetKernel;
-    private readonly Action<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<byte>, CeltFrameGeometry> _headerKernel;
-    private readonly Action<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<byte>, ArrayView<uint>, CeltFrameGeometry> _bandsKernel;
-    private readonly Action<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>, CeltFrameGeometry> _synthesisKernel;
-    private readonly Action<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<short>, CeltFrameGeometry> _postKernel;
-    private readonly Action<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>, ArrayView<short>, CeltFrameGeometry> _lostKernel;
+    // Kernels load on first use: awaited by WarmUpAsync (each compile yields to the browser's event loop first); the
+    // synchronous Decode / DecodeLost / ResetState load synchronously when nothing has loaded them yet. The state reset of
+    // a new decoder (and of ResetState before the kernels exist) is queued before the next kernel that reads the state.
+    private Kernels? _kernels;
+    private Task? _kernelsLoad;
+    private bool _resetPending = true;
 
-    /// <summary>A decoder for <paramref name="channelCount"/> output channels at <paramref name="sampleRateHz"/> (8, 12, 16, 24 or 48 kHz).</summary>
+    /// <summary>The decoder's kernels, loaded together (the async load assigns them at once, so a synchronous call meanwhile
+    /// never sees a partial set).</summary>
+    private sealed class Kernels
+    {
+        public Action<Index1D, ArrayView<int>> Reset = null!;
+        public Action<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<byte>, CeltFrameGeometry> Header = null!;
+        public Action<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<byte>, ArrayView<uint>, CeltFrameGeometry> Bands = null!;
+        public Action<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>, CeltFrameGeometry> Synthesis = null!;
+        public Action<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<short>, CeltFrameGeometry> Post = null!;
+        public Action<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>, ArrayView<short>, CeltFrameGeometry> Lost = null!;
+
+        /// <summary>Awaited loads: each compile yields to the browser's event loop first.</summary>
+        public static async Task<Kernels> LoadAsync(Accelerator a) => new()
+        {
+            Reset = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(ResetKernel),
+            Header = await a.LoadAutoGroupedStreamKernelAsync<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>,
+                ArrayView<OpusRangeDecoderGpuState>, ArrayView<byte>, CeltFrameGeometry>(HeaderKernel),
+            Bands = await a.LoadAutoGroupedStreamKernelAsync<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>,
+                ArrayView<OpusRangeDecoderGpuState>, ArrayView<byte>, ArrayView<uint>, CeltFrameGeometry>(BandsKernel),
+            Synthesis = await a.LoadAutoGroupedStreamKernelAsync<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>,
+                CeltFrameGeometry>(SynthesisKernel),
+            Post = await a.LoadAutoGroupedStreamKernelAsync<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>,
+                ArrayView<OpusRangeDecoderGpuState>, ArrayView<short>, CeltFrameGeometry>(PostKernel),
+            Lost = await a.LoadAutoGroupedStreamKernelAsync<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>, ArrayView<short>,
+                CeltFrameGeometry>(LostKernel),
+        };
+
+        /// <summary>Synchronous loads (the synchronous entry points, when nothing has loaded the kernels yet).</summary>
+        public static Kernels Load(Accelerator a) => new()
+        {
+            Reset = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(ResetKernel),
+            Header = a.LoadAutoGroupedStreamKernel<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>,
+                ArrayView<OpusRangeDecoderGpuState>, ArrayView<byte>, CeltFrameGeometry>(HeaderKernel),
+            Bands = a.LoadAutoGroupedStreamKernel<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>,
+                ArrayView<OpusRangeDecoderGpuState>, ArrayView<byte>, ArrayView<uint>, CeltFrameGeometry>(BandsKernel),
+            Synthesis = a.LoadAutoGroupedStreamKernel<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>,
+                CeltFrameGeometry>(SynthesisKernel),
+            Post = a.LoadAutoGroupedStreamKernel<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>,
+                ArrayView<OpusRangeDecoderGpuState>, ArrayView<short>, CeltFrameGeometry>(PostKernel),
+            Lost = a.LoadAutoGroupedStreamKernel<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>, ArrayView<short>,
+                CeltFrameGeometry>(LostKernel),
+        };
+    }
+
+    /// <summary>A decoder for <paramref name="channelCount"/> output channels at <paramref name="sampleRateHz"/> (8, 12, 16, 24 or 48 kHz).
+    /// Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public CeltDecoderGpu(Accelerator accelerator, int sampleRateHz, int channelCount)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
@@ -101,18 +146,50 @@ public sealed class CeltDecoderGpu : IDisposable
         _state = accelerator.Allocate1D<int>(StateInts);
         _work = accelerator.Allocate1D<int>(WorkInts);
         _ownEc = accelerator.Allocate1D<OpusRangeDecoderGpuState>(1);
-        _resetKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(ResetKernel);
-        _headerKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>,
-            ArrayView<OpusRangeDecoderGpuState>, ArrayView<byte>, CeltFrameGeometry>(HeaderKernel);
-        _bandsKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>,
-            ArrayView<OpusRangeDecoderGpuState>, ArrayView<byte>, ArrayView<uint>, CeltFrameGeometry>(BandsKernel);
-        _synthesisKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>,
-            CeltFrameGeometry>(SynthesisKernel);
-        _postKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>,
-            ArrayView<OpusRangeDecoderGpuState>, ArrayView<short>, CeltFrameGeometry>(PostKernel);
-        _lostKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, CeltModeGpu, ArrayView<int>, ArrayView<int>, ArrayView<short>,
-            CeltFrameGeometry>(LostKernel);
-        ResetState();
+        // the state reset (libopus opus_decoder_init) runs before the first kernel that reads the state: _resetPending
+    }
+
+    /// <summary>
+    /// Compile and load the decoder's kernels, awaited (on browser backends each compile yields to the event loop first and
+    /// WebGPU builds its pipelines asynchronously), then queue the pending state reset. Call it early in a browser, before
+    /// the synchronous <see cref="Decode"/> / <see cref="DecodeLost"/> / <see cref="ResetState"/>, which would otherwise
+    /// compile on the page's thread. It decodes nothing.
+    /// </summary>
+    public Task WarmUpAsync()
+    {
+        if (_kernels != null)
+        {
+            FlushReset(_kernels);
+            return Task.CompletedTask;
+        }
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var k = await Kernels.LoadAsync(_accelerator);
+        // a synchronous call may have loaded them meanwhile: keep that set
+        FlushReset(_kernels ??= k);
+    }
+
+    /// <summary>The kernels, after the pending state reset; loads them synchronously when nothing has (the synchronous
+    /// entry points).</summary>
+    private Kernels Launchers
+    {
+        get
+        {
+            var k = _kernels ??= Kernels.Load(_accelerator);
+            FlushReset(k);
+            return k;
+        }
+    }
+
+    private void FlushReset(Kernels k)
+    {
+        if (!_resetPending) return;
+        _resetPending = false;
+        k.Reset(StateInts, _state.View);
     }
 
     /// <summary>Output sample rate in Hz.</summary>
@@ -121,11 +198,17 @@ public sealed class CeltDecoderGpu : IDisposable
     public int ChannelCount { get; }
     /// <summary>48 kHz / <see cref="SampleRateHz"/>.</summary>
     public int Downsample { get; }
-    /// <summary>The decoder state view (layout: the <c>*At</c> and <c>S*</c> constants); for tests and the Opus layer.</summary>
+    /// <summary>The decoder state view (layout: the <c>*At</c> and <c>S*</c> constants); for tests and the Opus layer. A new
+    /// decoder's state is reset by <see cref="WarmUpAsync"/> or before the first frame.</summary>
     public ArrayView<int> State => _state.View;
 
-    /// <summary>libopus OPUS_RESET_STATE: clear the state, the previous energies to -28 dB, skip the pitch PLC once.</summary>
-    public void ResetState() => _resetKernel(StateInts, _state.View);
+    /// <summary>libopus OPUS_RESET_STATE: clear the state, the previous energies to -28 dB, skip the pitch PLC once. Queued
+    /// now when the kernels are loaded, else before the next kernel that reads the state.</summary>
+    public void ResetState()
+    {
+        _resetPending = true;
+        if (_kernels != null) FlushReset(_kernels);
+    }
 
     /// <summary>
     /// Decode one CELT frame of <paramref name="samplesPerChannel"/> output samples (2.5, 5, 10 or 20 ms) into
@@ -153,10 +236,11 @@ public sealed class CeltDecoderGpu : IDisposable
             C = streamChannels, CC = ChannelCount, LM = lm, Downsample = Downsample, Accum = accum ? 1 : 0, PcmAt = pcmAt,
         };
         var ecView = ec ?? _ownEc.View;
-        _headerKernel(1, _mode, _state.View, _work.View, ecView, packet, g);
-        _bandsKernel(1, _mode, _state.View, _work.View, ecView, packet, _pvqU.View, g);
-        _synthesisKernel(1, _mode, _state.View, _work.View, g);
-        _postKernel(1, _mode, _state.View, _work.View, ecView, pcm, g);
+        var k = Launchers;
+        k.Header(1, _mode, _state.View, _work.View, ecView, packet, g);
+        k.Bands(1, _mode, _state.View, _work.View, ecView, packet, _pvqU.View, g);
+        k.Synthesis(1, _mode, _state.View, _work.View, g);
+        k.Post(1, _mode, _state.View, _work.View, ecView, pcm, g);
     }
 
     /// <summary>
@@ -172,7 +256,7 @@ public sealed class CeltDecoderGpu : IDisposable
             Start = startBand, End = endBand, C = ChannelCount, CC = ChannelCount, LM = FrameLm(samplesPerChannel),
             Downsample = Downsample, Accum = accum ? 1 : 0, PcmAt = pcmAt,
         };
-        _lostKernel(1, _mode, _state.View, _work.View, pcm, g);
+        Launchers.Lost(1, _mode, _state.View, _work.View, pcm, g);
     }
 
     private static void CheckBands(int startBand, int endBand)
@@ -201,7 +285,8 @@ public sealed class CeltDecoderGpu : IDisposable
     /// <summary>The range coder's final state after the last frame (libopus OPUS_GET_FINAL_RANGE for the CELT layer).</summary>
     public async Task<uint> GetFinalRangeAsync()
     {
-        var s = await _state.View.SubView(ScalarsAt + SRng, 1).CopyToHostAsync();
+        await WarmUpAsync();   // a pending state reset first (a new decoder reports 0, as libopus does)
+        var s =await _state.View.SubView(ScalarsAt + SRng, 1).CopyToHostAsync();
         return (uint)s[0];
     }
 

@@ -61,6 +61,9 @@ internal static class Vp9Itx
     /// <param name="eob">End of block: 1 + the scan position of the last coefficient (libvpx eobs[]).</param>
     /// <param name="dst">Byte plane; the block's top-left pixel at <paramref name="dstAt"/>, rows <paramref name="stride"/> apart.</param>
     /// <param name="scratch">At least <see cref="ScratchInts"/> ints at <paramref name="scratchAt"/>, this thread's own.</param>
+    // A real function on Wasm (and on the WebGPU / WebGL backends once ILGPU emits view-taking helpers as functions),
+    // not inlined at every call site: keeps the kernels small enough for the browsers' shader and Wasm compilers.
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static void InverseTransformAdd(ArrayView<int> coef, long coefAt, int txSize, int txType, bool lossless, int eob,
         ArrayView<byte> dst, long dstAt, int stride, ArrayView<int> scratch, long scratchAt)
     {

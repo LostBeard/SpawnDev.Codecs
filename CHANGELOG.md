@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### VP9 decoder: WebGPU-valid parse kernel, offline WGSL screen, [NoInlining] DSP helpers; ILGPU 5.4.21 (2026-11-09)
+- SpawnDev.ILGPU 5.4.21 (stable).
+- FIXED (WebGPU / WebGL): the tile parse kernel chose at run time between views of two different buffers. WGSL
+  cannot express that, so the kernel did not compile, and on WebGL the code generator overflowed the stack.
+  read_partition now indexes the keyframe table and the frame context each in its own branch. Data found it with his
+  offline WGSL screen.
+- NEW `Vp9DecoderKernels_GenerateWgsl_WithinSizeBudget` (CpuOnly): generates WGSL for all ten VP9 decoder kernels
+  on the desktop (`ShaderCompiler`, no browser) and fails on unsupported constructs or growth past a per-kernel
+  budget (today's size + 10%). Today: ParseKernel 87.1 MB, InterPass / IntraWave 33.7 MB each, loop filter 10.8 MB.
+  On WebGPU every helper that takes a view is inlined at every call site, which ILGPU will change; until then the
+  `GiantShader` fence stays.
+- `[NoInlining]` on the four VP9 DSP helpers (inverse transform, intra prediction, inter prediction, superblock loop
+  filter). They become real functions on Wasm today (smaller modules), and on CUDA the decode got faster, bit-exact:
+  - tile parse 24.5 -> 19.1 ms per frame;
+  - reconstruction 21.2 -> 16.2 ms;
+  - loop filter 20.5 -> 16.5 ms.
+  Measured on an RTX 4070 over the 6 ComfyUI files, `VP9_STAGE_TIMES=1`. CPU: every VP9 vector still matches libvpx.
+
+### Audio codecs: constructors compile nothing (2026-11-09)
+- `Mp3EncoderGpu`, `OpusDecoderGpu`, `VorbisAudioEncoderGpu` and `VorbisAudioDecoderGpu` load their kernels once, lazily,
+  from their async entry points (awaited loads: browser compiles yield to the event loop). New `WarmUpAsync` on each.
+  - `Mp3EncoderGpu.WarmUpAsync` and `VorbisAudioEncoderGpu.WarmUpAsync` also encode a short built-in signal.
+  - `OpusDecoderGpu.WarmUpAsync` and `VorbisAudioDecoderGpu.WarmUpAsync` decode nothing (the decoders keep stream
+    state); the Opus one loads the SILK and CELT layers too and creates the CELT layer early.
+- `SilkPacketDecoderGpu`, `CeltDecoderGpu` and `SilkDecodeFrameGpuOrchestrator` compile nothing in their constructors
+  either; new `WarmUpAsync` on each. Their synchronous methods (`Decode`, `DecodeLost`, `ResetState`, the orchestrator's
+  `Decode*`) load synchronously only when nothing loaded the kernels yet: call `WarmUpAsync` first in a browser.
+  `CeltDecoderGpu`'s initial state reset now runs before the first kernel that reads the state (or in `WarmUpAsync`);
+  `GetFinalRangeAsync` on a new decoder still reports 0.
+- Guard extended: the constructors above compile nothing, each `WarmUpAsync` compiles, and after a GC an MP3 encode
+  (CBR, VBR) decoded again, the libopus mode-switch stream (checked sample for sample and by final range against
+  libopus) and a Vorbis encode (single, batch, stream) decoded again compile nothing. Red-checked: a synchronous load
+  back in the `Mp3EncoderGpu`, `CeltDecoderGpu` or `VorbisAudioDecoderGpu` constructor fails it.
+
 ### Browser lanes: GiantShader fence for the VP9 decoder; SpawnDev.ILGPU 5.4.21-local.1 (2026-11-09)
 - SpawnDev.ILGPU 5.4.21-local.1 (Data):
   - Wasm local reuse: the VP9 loop-filter kernel went from 68,382 to 8,300 locals, so V8 now compiles it;

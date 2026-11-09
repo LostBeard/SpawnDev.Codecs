@@ -168,19 +168,62 @@ public sealed class SilkPacketDecoderGpu : IDisposable
     private bool _pendingResetStereo;
     private int _lostKHz;              // DecControl.internalSampleRate kept for concealment across a reset
 
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkIndicesInputs, SilkPulsesInputs, ArrayView<short>, SilkFrameGeometry, SilkLbrrTableOffsets> _headerKernel;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, ArrayView<byte>, ArrayView<short>, SilkResetTargets, SilkFrameGeometry, SilkStereoTableOffsets> _stereoKernel;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkIndicesInputs, SilkFrameGeometry> _indicesKernel;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkPulsesInputs, ArrayView<short>, SilkFrameGeometry> _pulsesKernel;
-    private readonly Action<Index1D, ArrayView<int>, SilkParametersInputs, SilkParametersState, ArrayView<int>, ArrayView<short>, SilkFrameGeometry> _paramsKernel;
-    private readonly Action<Index1D, SilkDecodeCoreInputs, ArrayView<int>, SilkFrameGeometry> _coreKernel;
-    private readonly Action<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry> _finalizeKernel;
-    private readonly Action<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry> _concealKernel;
-    private readonly Action<Index1D, SilkResetTargets, ArrayView<int>, SilkFrameGeometry> _lostPrepKernel;
-    private readonly Action<Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<short>, ArrayView<short>, ArrayView<short>, SilkFrameGeometry, SilkOutputParams> _outputKernel;
-    private readonly Action<Index1D, SilkResetTargets, ArrayView<short>, ArrayView<int>, ArrayView<short>, ArrayView<int>, SilkFrameGeometry, SilkOutputParams> _transitionKernel;
+    // Kernels load on first use: awaited by WarmUpAsync (each compile yields to the browser's event loop first); the
+    // synchronous Decode / DecodeLost load synchronously when nothing has loaded them yet.
+    private Kernels? _kernels;
+    private Task? _kernelsLoad;
 
-    /// <summary>A SILK decoder producing <paramref name="apiChannels"/> channels at <paramref name="apiRateHz"/>.</summary>
+    /// <summary>The decoder's kernels, loaded together (the async load assigns them at once, so a synchronous call meanwhile
+    /// never sees a partial set).</summary>
+    private sealed class Kernels
+    {
+        public Action<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkIndicesInputs, SilkPulsesInputs, ArrayView<short>, SilkFrameGeometry, SilkLbrrTableOffsets> Header = null!;
+        public Action<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, ArrayView<byte>, ArrayView<short>, SilkResetTargets, SilkFrameGeometry, SilkStereoTableOffsets> Stereo = null!;
+        public Action<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkIndicesInputs, SilkFrameGeometry> Indices = null!;
+        public Action<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkPulsesInputs, ArrayView<short>, SilkFrameGeometry> Pulses = null!;
+        public Action<Index1D, ArrayView<int>, SilkParametersInputs, SilkParametersState, ArrayView<int>, ArrayView<short>, SilkFrameGeometry> Params = null!;
+        public Action<Index1D, SilkDecodeCoreInputs, ArrayView<int>, SilkFrameGeometry> Core = null!;
+        public Action<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry> FinalizeFrame = null!;
+        public Action<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry> Conceal = null!;
+        public Action<Index1D, SilkResetTargets, ArrayView<int>, SilkFrameGeometry> LostPrep = null!;
+        public Action<Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<short>, ArrayView<short>, ArrayView<short>, SilkFrameGeometry, SilkOutputParams> Output = null!;
+        public Action<Index1D, SilkResetTargets, ArrayView<short>, ArrayView<int>, ArrayView<short>, ArrayView<int>, SilkFrameGeometry, SilkOutputParams> Transition = null!;
+
+        /// <summary>Awaited loads: each compile yields to the browser's event loop first.</summary>
+        public static async Task<Kernels> LoadAsync(Accelerator a) => new()
+        {
+            Header = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkIndicesInputs, SilkPulsesInputs, ArrayView<short>, SilkFrameGeometry, SilkLbrrTableOffsets>(HeaderKernel),
+            Stereo = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, ArrayView<byte>, ArrayView<short>, SilkResetTargets, SilkFrameGeometry, SilkStereoTableOffsets>(StereoKernel),
+            Indices = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkIndicesInputs, SilkFrameGeometry>(IndicesKernel),
+            Pulses = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkPulsesInputs, ArrayView<short>, SilkFrameGeometry>(PulsesKernel),
+            Params = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, SilkParametersInputs, SilkParametersState, ArrayView<int>, ArrayView<short>, SilkFrameGeometry>(ParamsKernel),
+            Core = await a.LoadAutoGroupedStreamKernelAsync<Index1D, SilkDecodeCoreInputs, ArrayView<int>, SilkFrameGeometry>(CoreKernel),
+            FinalizeFrame = await a.LoadAutoGroupedStreamKernelAsync<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry>(FinalizeKernel),
+            Conceal = await a.LoadAutoGroupedStreamKernelAsync<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry>(ConcealKernel),
+            LostPrep = await a.LoadAutoGroupedStreamKernelAsync<Index1D, SilkResetTargets, ArrayView<int>, SilkFrameGeometry>(LostPrepKernel),
+            Output = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<short>, ArrayView<short>, ArrayView<short>, SilkFrameGeometry, SilkOutputParams>(OutputKernel),
+            Transition = await a.LoadAutoGroupedStreamKernelAsync<Index1D, SilkResetTargets, ArrayView<short>, ArrayView<int>, ArrayView<short>, ArrayView<int>, SilkFrameGeometry, SilkOutputParams>(TransitionKernel),
+        };
+
+        /// <summary>Synchronous loads (the synchronous entry points, when nothing has loaded the kernels yet).</summary>
+        public static Kernels Load(Accelerator a) => new()
+        {
+            Header = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkIndicesInputs, SilkPulsesInputs, ArrayView<short>, SilkFrameGeometry, SilkLbrrTableOffsets>(HeaderKernel),
+            Stereo = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, ArrayView<byte>, ArrayView<short>, SilkResetTargets, SilkFrameGeometry, SilkStereoTableOffsets>(StereoKernel),
+            Indices = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkIndicesInputs, SilkFrameGeometry>(IndicesKernel),
+            Pulses = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkPulsesInputs, ArrayView<short>, SilkFrameGeometry>(PulsesKernel),
+            Params = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, SilkParametersInputs, SilkParametersState, ArrayView<int>, ArrayView<short>, SilkFrameGeometry>(ParamsKernel),
+            Core = a.LoadAutoGroupedStreamKernel<Index1D, SilkDecodeCoreInputs, ArrayView<int>, SilkFrameGeometry>(CoreKernel),
+            FinalizeFrame = a.LoadAutoGroupedStreamKernel<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry>(FinalizeKernel),
+            Conceal = a.LoadAutoGroupedStreamKernel<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry>(ConcealKernel),
+            LostPrep = a.LoadAutoGroupedStreamKernel<Index1D, SilkResetTargets, ArrayView<int>, SilkFrameGeometry>(LostPrepKernel),
+            Output = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<short>, ArrayView<short>, ArrayView<short>, SilkFrameGeometry, SilkOutputParams>(OutputKernel),
+            Transition = a.LoadAutoGroupedStreamKernel<Index1D, SilkResetTargets, ArrayView<short>, ArrayView<int>, ArrayView<short>, ArrayView<int>, SilkFrameGeometry, SilkOutputParams>(TransitionKernel),
+        };
+    }
+
+    /// <summary>A SILK decoder producing <paramref name="apiChannels"/> channels at <paramref name="apiRateHz"/>. Compiles no
+    /// kernels (see <see cref="WarmUpAsync"/>).</summary>
     public SilkPacketDecoderGpu(Accelerator accelerator, int apiRateHz, int apiChannels)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
@@ -362,19 +405,28 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         _mix.MemSetToZero();
         _resInts.MemSetToZero();
         _resShorts.MemSetToZero();
-
-        _headerKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkIndicesInputs, SilkPulsesInputs, ArrayView<short>, SilkFrameGeometry, SilkLbrrTableOffsets>(HeaderKernel);
-        _stereoKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, ArrayView<byte>, ArrayView<short>, SilkResetTargets, SilkFrameGeometry, SilkStereoTableOffsets>(StereoKernel);
-        _indicesKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkIndicesInputs, SilkFrameGeometry>(IndicesKernel);
-        _pulsesKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, SilkPulsesInputs, ArrayView<short>, SilkFrameGeometry>(PulsesKernel);
-        _paramsKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, SilkParametersInputs, SilkParametersState, ArrayView<int>, ArrayView<short>, SilkFrameGeometry>(ParamsKernel);
-        _coreKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkDecodeCoreInputs, ArrayView<int>, SilkFrameGeometry>(CoreKernel);
-        _finalizeKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry>(FinalizeKernel);
-        _concealKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkFrameViews, ArrayView<int>, ArrayView<short>, SilkPlcChannel, SilkFrameGeometry>(ConcealKernel);
-        _lostPrepKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkResetTargets, ArrayView<int>, SilkFrameGeometry>(LostPrepKernel);
-        _outputKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<short>, ArrayView<short>, ArrayView<short>, SilkFrameGeometry, SilkOutputParams>(OutputKernel);
-        _transitionKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SilkResetTargets, ArrayView<short>, ArrayView<int>, ArrayView<short>, ArrayView<int>, SilkFrameGeometry, SilkOutputParams>(TransitionKernel);
     }
+
+    /// <summary>
+    /// Compile and load the decoder's kernels, awaited (on browser backends each compile yields to the event loop first and
+    /// WebGPU builds its pipelines asynchronously). Call it early in a browser, before the synchronous <see cref="Decode"/> /
+    /// <see cref="DecodeLost"/>, which would otherwise compile on the page's thread. It decodes nothing.
+    /// </summary>
+    public Task WarmUpAsync()
+    {
+        if (_kernels != null) return Task.CompletedTask;
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var k = await Kernels.LoadAsync(_acc);
+        _kernels ??= k;   // a synchronous call may have loaded them meanwhile: keep that set
+    }
+
+    /// <summary>The kernels; loads them synchronously when nothing has (the synchronous entry points).</summary>
+    private Kernels Launchers => _kernels ??= Kernels.Load(_acc);
 
     private SilkResetTargets ResetTargets => new SilkResetTargets
     {
@@ -400,6 +452,7 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         if (frameLengthMs != 10 && frameLengthMs != 20) throw new ArgumentOutOfRangeException(nameof(frameLengthMs));
         if (frameCount < 1 || frameCount > 3) throw new ArgumentOutOfRangeException(nameof(frameCount));
         if (streamChannels != 1 && streamChannels != 2) throw new ArgumentOutOfRangeException(nameof(streamChannels));
+        var k = Launchers;
         int nbSubfr = frameLengthMs == 20 ? SilkConstants.MAX_NB_SUBFR : SilkConstants.MAX_NB_SUBFR / 2;
         var (indicesInputs, paramsInputs, contourCbSize) = _variants[(internalKHz, nbSubfr)];
         int order = internalKHz == 16 ? 16 : 10;
@@ -443,10 +496,10 @@ public sealed class SilkPacketDecoderGpu : IDisposable
             PcmOutBase = pcmOutBase,
         };
         if (flags != 0)
-            _transitionKernel(1, ResetTargets, _mix.View, _work.View, _resShorts.View, _resInts.View, g, outParams);
+            k.Transition(1, ResetTargets, _mix.View, _work.View, _resShorts.View, _resInts.View, g, outParams);
 
         var lbrr = new SilkLbrrTableOffsets { Lbrr2At = _lbrr2At, Lbrr3At = _lbrr3At, JointAt = _jointAt, Uniform3At = _uniform3At, Uniform5At = _uniform5At, MidOnlyAt = _midOnlyAt };
-        _headerKernel(1, packet, _ec.View, _work.View, indicesInputs, _pulsesInputs, _pulses.View, g, lbrr);
+        k.Header(1, packet, _ec.View, _work.View, indicesInputs, _pulsesInputs, _pulses.View, g, lbrr);
 
         var stereoOffsets = new SilkStereoTableOffsets { JointAt = _jointAt, Uniform3At = _uniform3At, Uniform5At = _uniform5At, MidOnlyAt = _midOnlyAt, QuantAt = _stereoQuantAt };
         for (int f = 0; f < frameCount; f++)
@@ -454,17 +507,17 @@ public sealed class SilkPacketDecoderGpu : IDisposable
             g.Frame = f;
             g.StereoToMonoFirst = stereoToMono && f == 0 ? 1 : 0;
             if (streamChannels == 2)
-                _stereoKernel(1, packet, _ec.View, _work.View, _indicesBytes.View, _shortTables.View, ResetTargets, g, stereoOffsets);
+                k.Stereo(1, packet, _ec.View, _work.View, _indicesBytes.View, _shortTables.View, ResetTargets, g, stereoOffsets);
             for (int c = 0; c < streamChannels; c++)
             {
                 g.Channel = c;
-                _indicesKernel(1, packet, _ec.View, _work.View, indicesInputs, g);
-                _pulsesKernel(1, packet, _ec.View, _work.View, _pulsesInputs, _pulses.View, g);
-                _paramsKernel(1, _work.View, paramsInputs, _chanParams[c].Params, _paramsIntOut.View, _paramsShortOut.View, g);
-                _coreKernel(1, _chanCore[c], _work.View, g);
-                _finalizeKernel(1, FrameViews, _work.View, _mix.View, _chanPlc[c], g);
+                k.Indices(1, packet, _ec.View, _work.View, indicesInputs, g);
+                k.Pulses(1, packet, _ec.View, _work.View, _pulsesInputs, _pulses.View, g);
+                k.Params(1, _work.View, paramsInputs, _chanParams[c].Params, _paramsIntOut.View, _paramsShortOut.View, g);
+                k.Core(1, _chanCore[c], _work.View, g);
+                k.FinalizeFrame(1, FrameViews, _work.View, _mix.View, _chanPlc[c], g);
             }
-            _outputKernel(1, _mix.View, _work.View, _resInts.View, _resShorts.View, _shortTables.View, pcmOut, g, outParams);
+            k.Output(1, _mix.View, _work.View, _resInts.View, _resShorts.View, _shortTables.View, pcmOut, g, outParams);
         }
     }
 
@@ -484,6 +537,7 @@ public sealed class SilkPacketDecoderGpu : IDisposable
     {
         if (frameLengthMs != 10 && frameLengthMs != 20) throw new ArgumentOutOfRangeException(nameof(frameLengthMs));
         if (_lostKHz == 0) throw new InvalidOperationException("Nothing to conceal before the first decoded SILK frame.");
+        var k = Launchers;
         int internalKHz = _lostKHz, streamChannels = _prevStreamChannels;
         int flags = _pendingResetStereo ? TransitionResetStereo : 0;
         _pendingResetStereo = false;
@@ -511,15 +565,15 @@ public sealed class SilkPacketDecoderGpu : IDisposable
         if (flags != 0)
         {
             g.TransitionFlags = flags;
-            _transitionKernel(1, ResetTargets, _mix.View, _work.View, _resShorts.View, _resInts.View, g, outParams);
+            k.Transition(1, ResetTargets, _mix.View, _work.View, _resShorts.View, _resInts.View, g, outParams);
         }
-        _lostPrepKernel(1, ResetTargets, _work.View, g);
+        k.LostPrep(1, ResetTargets, _work.View, g);
         for (int c = 0; c < streamChannels; c++)
         {
             g.Channel = c;
-            _concealKernel(1, FrameViews, _work.View, _mix.View, _chanPlc[c], g);
+            k.Conceal(1, FrameViews, _work.View, _mix.View, _chanPlc[c], g);
         }
-        _outputKernel(1, _mix.View, _work.View, _resInts.View, _resShorts.View, _shortTables.View, pcmOut, g, outParams);
+        k.Output(1, _mix.View, _work.View, _resInts.View, _resShorts.View, _shortTables.View, pcmOut, g, outParams);
     }
 
     /// <summary>

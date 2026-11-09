@@ -32,6 +32,7 @@
 // Frame table (Vp9LfTable, ints): lf_info.lvl[seg][ref][mode], lf_info.lfthr[lvl] mblim / lim / hev_thr and the frame
 // filter level; FrameInit builds it from the frame header (Vp9LfHdr) on the accelerator.
 
+using System.Runtime.CompilerServices;
 using ILGPU;
 
 namespace SpawnDev.Codecs.Video.Vp9.Decoder;
@@ -1016,6 +1017,9 @@ public static class Vp9Lpf
     /// column (miCol * 8) &gt;&gt; ssX of the plane). Does nothing when the frame's filter level is 0 (libvpx skips
     /// the whole frame). Superblocks run in raster order (see the file header).
     /// </summary>
+    // A real function on Wasm (and on the WebGPU / WebGL backends once ILGPU emits view-taking helpers as functions),
+    // not inlined at every call site: keeps the kernels small enough for the browsers' shader and Wasm compilers.
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static void FilterSuperblock(ArrayView<byte> y, long yAt, int yStride, ArrayView<byte> u, long uAt,
         ArrayView<byte> v, long vAt, int uvStride, int ssX, int ssY, ArrayView<int> mi, int gridOffset, int miRows,
         int miCols, int miRow, int miCol, ArrayView<int> lf, int lfOffset)

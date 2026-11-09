@@ -367,12 +367,17 @@ internal static partial class Vp9ParseKernels
                         int aboveP = (work[a[Vp9PArg.AbovePartOffset] + cc] >> n8l2) & 1;
                         int leftP = (work[scratch + Vp9PLayout.ScLeftPart + (rr & 7)] >> n8l2) & 1;
                         int pctx = leftP * 2 + aboveP + n8l2 * 4;
-                        ArrayView<int> probView = intraOnly ? t : ctx;
+                        // The probabilities come from the keyframe table (intra-only frames) or the frame context. Each buffer
+                        // is indexed in its own branch: WGSL cannot choose at run time between views of different buffers.
                         int probAt = intraOnly ? Vp9T.KfPartitionProbs + pctx * 3 : fc + Vp9Ctx.Partition + pctx * 3;
                         int partition;
-                        if (hasRows && hasCols) partition = ReadTree(ref r, d, t, Vp9T.PartitionTree, probView, probAt);
-                        else if (!hasRows && hasCols) partition = Read(ref r, d, probView[probAt + 1]) != 0 ? PartitionSplit : PartitionHorz;
-                        else if (hasRows) partition = Read(ref r, d, probView[probAt + 2]) != 0 ? PartitionSplit : PartitionVert;
+                        if (hasRows && hasCols)
+                            partition = intraOnly ? ReadTree(ref r, d, t, Vp9T.PartitionTree, t, probAt)
+                                                  : ReadTree(ref r, d, t, Vp9T.PartitionTree, ctx, probAt);
+                        else if (!hasRows && hasCols)
+                            partition = Read(ref r, d, intraOnly ? t[probAt + 1] : ctx[probAt + 1]) != 0 ? PartitionSplit : PartitionHorz;
+                        else if (hasRows)
+                            partition = Read(ref r, d, intraOnly ? t[probAt + 2] : ctx[probAt + 2]) != 0 ? PartitionSplit : PartitionVert;
                         else partition = PartitionSplit;
                         if (cnt >= 0) counts[cnt + Vp9Cnt.Partition + pctx * 4 + partition]++;
                         sbBuf[sb * Vp9PLayout.SbStride + Vp9PLayout.SbPartitions + parts] = partition;

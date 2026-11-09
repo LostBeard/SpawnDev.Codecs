@@ -1,6 +1,7 @@
-// Kernel loading of the codecs (FLAC, MP3, Opus, VP9 decode, and the still-image encoders and decoders: BMP, GIF, JPEG,
-// PNG, WebP lossless / lossy): constructors compile nothing, WarmUpAsync compiles every kernel the codec uses (awaited
-// loads, so a browser page keeps running), and work after the warm-up compiles nothing more.
+// Kernel loading of the codecs (FLAC, MP3 decode / encode, Opus encode / decode with its SILK and CELT layers, Vorbis
+// encode / decode, VP9 decode, and the still-image encoders and decoders: BMP, GIF, JPEG, PNG, WebP lossless / lossy,
+// BCn): constructors compile nothing, WarmUpAsync compiles every kernel the codec uses (awaited loads, so a browser page
+// keeps running), and work after the warm-up compiles nothing more.
 //
 // Lore (SpawnGen) measured the page frozen 30-104 s while Codecs compiled its kernels synchronously in constructors and
 // on first use. ILGPU 5.4.19's LoadAutoGroupedStreamKernelAsync yields to the event loop before each compile; the
@@ -12,6 +13,9 @@ using ILGPU.Runtime;
 using SpawnDev.Codecs.Audio.Flac;
 using SpawnDev.Codecs.Audio.Mp3;
 using SpawnDev.Codecs.Audio.Opus;
+using SpawnDev.Codecs.Audio.Opus.Celt;
+using SpawnDev.Codecs.Audio.Opus.Silk;
+using SpawnDev.Codecs.Audio.Vorbis;
 using SpawnDev.Codecs.Images.Bmp;
 using SpawnDev.Codecs.Images.Gif;
 using SpawnDev.Codecs.Images.Jpeg;
@@ -45,6 +49,20 @@ public abstract partial class CodecsTestBase
             using var opus = new OpusEncoderGpu(acc, 48000, 2, OpusEncoderApplication.Audio);
             using var vp9 = new Vp9DecoderGpu(acc);
             Equal(c0, Count(), "kernels compiled by the constructors (FlacDecoderGpu, FlacEncoderGpu, Mp3DecoderGpu, OpusEncoderGpu, Vp9DecoderGpu)");
+
+            // the other audio codecs: the MP3 encoder, the Opus decoder and its SILK / CELT layers (also on their own), the
+            // SILK frame orchestrator, the Vorbis encoder and decoder
+            long ca = Count();
+            using var mp3Enc = new Mp3EncoderGpu(acc);
+            using var opusDec = new OpusDecoderGpu(acc, 48000, 2);
+            using var silk = new SilkPacketDecoderGpu(acc, 48000, 2);
+            using var celt = new CeltDecoderGpu(acc, 48000, 2);
+            using var silkFrames = new SilkDecodeFrameGpuOrchestrator(acc);
+            var vorbisOptions = new VorbisAudioEncoderOptions { SampleRateHz = 44100, Channels = 1, BlockSize = 1024 };
+            using var vorbisEnc = new VorbisAudioEncoderGpu(acc, vorbisOptions);
+            using var vorbisDec = new VorbisAudioDecoderGpu(acc, vorbisEnc.Identification, vorbisEnc.Setup);
+            Equal(ca, Count(), "kernels compiled by the constructors (Mp3EncoderGpu, OpusDecoderGpu, SilkPacketDecoderGpu, " +
+                "CeltDecoderGpu, SilkDecodeFrameGpuOrchestrator, VorbisAudioEncoderGpu, VorbisAudioDecoderGpu)");
 
             // the still-image codecs, also before anything of theirs is loaded
             long ci = Count();
@@ -92,9 +110,23 @@ public abstract partial class CodecsTestBase
                 long vp9Warm = await Compiled(vp9.WarmUpAsync);
                 True(vp9Warm >= 10, $"Vp9DecoderGpu.WarmUpAsync compiled {vp9Warm} kernels; the decode uses 10");
             }
+            // the SILK and CELT layers on their own first: the Opus decoder's warm-up loads theirs too (cache hits then,
+            // not counted), and its own kernels on top
+            var audioWarmUps = new (string Name, Func<Task> WarmUp)[]
+            {
+                ("Mp3EncoderGpu", mp3Enc.WarmUpAsync), ("SilkPacketDecoderGpu", silk.WarmUpAsync),
+                ("CeltDecoderGpu", celt.WarmUpAsync), ("SilkDecodeFrameGpuOrchestrator", silkFrames.WarmUpAsync),
+                ("OpusDecoderGpu", opusDec.WarmUpAsync), ("VorbisAudioEncoderGpu", vorbisEnc.WarmUpAsync),
+                ("VorbisAudioDecoderGpu", vorbisDec.WarmUpAsync),
+            };
+            foreach (var (name, warmUp) in audioWarmUps)
+                True(await Compiled(warmUp) > 0, $"{name}.WarmUpAsync compiled no kernel");
+            var opusFixture = LoadOpusFixture("switch_modes_48k_stereo_loss");
 
             // real work after the warm-ups: a FLAC encode at another level + decode both ways, an Opus encode from int16
-            // and float with the already constructed encoder; all kernels were loaded by the warm-ups
+            // and float with the already constructed encoder, an MP3 encode (CBR from float, VBR from int32) decoded again,
+            // a libopus stream through every Opus mode switch and loss (checked against libopus), a Vorbis encode (single,
+            // batch, stream) decoded again; all kernels were loaded by the warm-ups
             const int n = 9000;
             var pcm = new int[n * 2];
             var s16 = new short[960 * 2];
@@ -117,6 +149,36 @@ public abstract partial class CodecsTestBase
                 await flacDec.DecodeFloatAsync(file);
                 await opus.EncodePacketAsync(s16, 960);
                 await OggOpusEncoder.EncodeAsync(acc, new float[4800 * 2], 48000, 2);
+
+                var pcmF = new float[pcm.Length];
+                for (int i = 0; i < pcm.Length; i++) pcmF[i] = pcm[i] / 32768f;
+                await mp3.DecodeAsync(await mp3Enc.EncodeAsync(pcmF, 2, 48000));
+                var pcm32 = new int[pcm.Length];
+                for (int i = 0; i < pcm.Length; i++) pcm32[i] = pcm[i] << 16;
+                await mp3.DecodeAsync(await mp3Enc.EncodeAsync(pcm32, 2, 22050, new Mp3EncodeOptions { VbrQuality = 4 }));
+
+                int at = 0;
+                for (int p = 0; p < opusFixture.Packets.Count; p++)
+                {
+                    var pkt = opusFixture.Packets[p];
+                    var got = pkt is null
+                        ? await opusDec.DecodeLostAsync((int)((long)opusFixture.ApiRate * opusFixture.PacketUs / 1_000_000))
+                        : await opusDec.DecodePacketAsync(pkt);
+                    for (int i = 0; i < got.Length; i++)
+                        if (got[i] != opusFixture.Pcm[at + i] / 32768.0f)
+                            throw new Exception($"Opus packet {p} after the warm-ups: sample {i} differs from libopus");
+                    at += got.Length;
+                    Equal(opusFixture.Ranges[p], await opusDec.GetFinalRangeAsync(), $"Opus packet {p} final range");
+                }
+                Equal(opusFixture.Pcm.Length, at, "Opus samples after the warm-ups");
+
+                var mono = new float[n];
+                for (int i = 0; i < n; i++) mono[i] = pcmF[2 * i];
+                ReadOnlyMemory<float> block = mono.AsMemory(0, vorbisOptions.BlockSize);
+                var vorbisPackets = await vorbisEnc.EncodeAudioPacketsBatchAsync(new[] { block, block, block });
+                await vorbisEnc.EncodeAudioPacketAsync(block);
+                await vorbisEnc.EncodeStreamAsync(mono);
+                foreach (var packet in vorbisPackets) await vorbisDec.DecodePacketAsync(packet);
             });
             Equal(0L, after, "kernels compiled by work after the warm-ups");
 

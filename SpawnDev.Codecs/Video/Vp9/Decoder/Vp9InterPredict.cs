@@ -26,6 +26,7 @@
 // moving on gives the same bytes with a 135-entry scratch instead of 64 x 135. The _avg variants (convolve then
 // ROUND_POWER_OF_TWO(dst + result, 1)) are fused per pixel, which is the same arithmetic as libvpx's temp + average.
 
+using System.Runtime.CompilerServices;
 using ILGPU;
 
 namespace SpawnDev.Codecs.Video.Vp9.Decoder;
@@ -474,6 +475,9 @@ internal static class Vp9InterPred
     /// <param name="scratch">Per-call scratch of <see cref="ScratchInts"/> ints (the 2-D convolve's intermediate column).</param>
     /// <param name="scratchAt">Start of this call's scratch.</param>
     /// <remarks>The scale factors must be valid (libvpx stops the frame with VPX_CODEC_UNSUP_BITSTREAM otherwise).</remarks>
+    // A real function on Wasm (and on the WebGPU / WebGL backends once ILGPU emits view-taking helpers as functions),
+    // not inlined at every call site: keeps the kernels small enough for the browsers' shader and Wasm compilers.
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static void PredictBlockPlane(int ssX, int ssY, int miRow, int miCol, int miRows, int miCols,
         ArrayView<int> mi, long miAt,
         ArrayView<byte> ref0, Vp9InterRefPlane ref0Plane, ArrayView<byte> ref1, Vp9InterRefPlane ref1Plane,

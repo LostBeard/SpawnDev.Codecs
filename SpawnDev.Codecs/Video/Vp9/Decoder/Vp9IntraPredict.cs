@@ -9,6 +9,7 @@
 // Bit-exact with libvpx's own C on every mode x transform size x plane, at frame edges and every neighbour
 // availability (CodecsTestBase.Vp9DspIntraTests.cs, fixture from scripts/video/libvpx_ref/intra_ref.c).
 
+using System.Runtime.CompilerServices;
 using ILGPU;
 
 namespace SpawnDev.Codecs.Video.Vp9.Decoder;
@@ -78,6 +79,9 @@ internal static class Vp9IntraPred
     /// row uninitialised (and reads above_row[-1] before setting it when x0 == frameWidth); this port leaves the
     /// scratch as it was there too, so such input has no defined result in either.
     /// </remarks>
+    // A real function on Wasm (and on the WebGPU / WebGL backends once ILGPU emits view-taking helpers as functions),
+    // not inlined at every call site: keeps the kernels small enough for the browsers' shader and Wasm compilers.
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static void Predict(int bwlIn, int txSize, int mode, int aoff, int loff, bool haveAboveMi, bool haveLeftMi,
         int mbToLeftEdge, int mbToTopEdge, int mbToRightEdge, int mbToBottomEdge, int subsamplingX, int subsamplingY,
         int frameWidth, int frameHeight, ArrayView<byte> dst, long dstAt, int stride, ArrayView<int> scratch, long scratchAt)
