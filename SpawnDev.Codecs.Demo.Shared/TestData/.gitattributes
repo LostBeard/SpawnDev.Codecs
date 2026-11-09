@@ -39,3 +39,11 @@ FlacDec/* binary
 FlacDec/manifest.tsv text eol=lf
 Mp3Dec/*.mp3 binary
 Mp3Dec/*.gz binary
+Vp9Conformance/*.webm binary
+Vp9Conformance/*.ivf binary
+Vp9Conformance/*.md5 text eol=lf
+Vp9ConformanceLarge/*.webm binary
+Vp9ConformanceLarge/*.ivf binary
+Vp9ConformanceLarge/*.md5 text eol=lf
+Vp9ComfyUI/*.webm binary
+Vp9ComfyUI/*.md5 text eol=lf

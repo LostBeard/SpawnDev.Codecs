@@ -74,6 +74,12 @@
 		<EmbeddedResource Include="TestData\OggOpusLayout\*" />
 		<EmbeddedResource Include="TestData\FlacDec\*" />
 		<EmbeddedResource Include="TestData\Mp3Dec\*" />
+		<!-- VP9 decoder: libvpx's profile-0 conformance vectors + per-frame MD5s (TestData/Vp9Conformance/SOURCES.md), and
+		     ComfyUI SaveWEBM files with libvpx's MD5s. The four largest vectors (13.6 MB) are not embedded: they are copied
+		     next to the desktop runner and read from disk, so every vector runs on the desktop backends. -->
+		<EmbeddedResource Include="TestData\Vp9Conformance\*" Exclude="TestData\Vp9Conformance\SOURCES.md" />
+		<EmbeddedResource Include="TestData\Vp9ComfyUI\*" />
+		<None Include="TestData\Vp9ConformanceLarge\*" CopyToOutputDirectory="PreserveNewest" LinkBase="TestData\Vp9ConformanceLarge" />
 		<EmbeddedResource Include="TestData\Filters\*" />
 		<EmbeddedResource Include="TestData\Lz4\*" />
 		<EmbeddedResource Include="TestData\Lz4Dec\*" />

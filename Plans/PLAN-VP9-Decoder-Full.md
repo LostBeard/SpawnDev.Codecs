@@ -55,7 +55,7 @@ already in the first version, finer parallelism (per transform block, per edge) 
 vector passes.
 
 ## Steps
-- [ ] S0 fixtures + harness: vectors into the repo (profile-0 core set embedded; full set as a Conformance category),
+- [x] S0 fixtures + harness: vectors into the repo (profile-0 core set embedded; full set as a Conformance category),
       per-frame MD5 test, WebM / IVF / superframe demux into frame packets.
 - [ ] S1 uncompressed header (all fields, every vector parses) + compressed header kernel + frame contexts.
 - [ ] S2 parse kernel: keyframes / intra-only (vectors 00, 02, 03 first frames).
