@@ -19,7 +19,11 @@ internal static class Vp9Mi
 {
     public const int SbType = 0, Mode = 1, UvMode = 2, TxSize = 3, Skip = 4, SegmentId = 5, SegIdPredicted = 6,
         Ref0 = 7, Ref1 = 8, Interp = 9, Mv0 = 10, Mv1 = 11, BmiMode = 12, BmiMv0 = 16, BmiMv1 = 20;
-    public const int Stride = 24;
+    /// <summary>Not libvpx: the block's slot in its superblock's block table (<see cref="Vp9PLayout"/> SbBlocks), written by
+    /// the parse kernel, so a reconstruction thread that finds the block through the grid also finds where its
+    /// coefficients and eobs start.</summary>
+    public const int TableSlot = 24;
+    public const int Stride = 25;
 
     // libvpx enums
     public const int IntraFrame = 0, LastFrame = 1, GoldenFrame = 2, AltrefFrame = 3, NoRefFrame = -1;

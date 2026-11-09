@@ -440,10 +440,10 @@ internal static class Vp9InterPred
     // ---------------------------------------------------------------- vp9_decodeframe.c
 
     /// <summary>num_8x8_blocks_wide_lookup[bsize].</summary>
-    private static int Num8x8Wide(int bsize) => bsize < 5 ? 1 : bsize < 8 ? 2 : bsize < 11 ? 4 : 8;
+    public static int Num8x8Wide(int bsize) => bsize < 5 ? 1 : bsize < 8 ? 2 : bsize < 11 ? 4 : 8;
 
     /// <summary>num_8x8_blocks_high_lookup[bsize]: BLOCK_4X4 .. BLOCK_64X64 = 1,1,1,1,2,1,2,4,2,4,8,4,8.</summary>
-    private static int Num8x8High(int bsize) =>
+    public static int Num8x8High(int bsize) =>
         bsize < 4 ? 1 : bsize == 4 ? 2 : bsize == 5 ? 1 : bsize == 6 ? 2 : bsize == 7 ? 4 : bsize == 8 ? 2 : bsize == 9 ? 4 : bsize == 10 ? 8 : bsize == 11 ? 4 : 8;
 
     /// <summary>
@@ -483,6 +483,32 @@ internal static class Vp9InterPred
         ArrayView<byte> ref0, Vp9InterRefPlane ref0Plane, ArrayView<byte> ref1, Vp9InterRefPlane ref1Plane,
         ArrayView<byte> dst, long dstAt, int dstStride, ArrayView<int> scratch, long scratchAt)
     {
+        // the whole block: every block lies inside its 64 x 64 superblock
+        PredictBlockPlaneRegion(ssX, ssY, miRow, miCol, miRows, miCols, mi, miAt, ref0, ref0Plane, ref1, ref1Plane,
+            dst, dstAt, dstStride, 0, 0, 64, 64, scratch, scratchAt);
+    }
+
+    /// <summary>Scratch ints one <see cref="PredictBlockPlaneRegion"/> call needs for a region at most 4 pixels high: the
+    /// 2-D convolve's intermediate_height for h = 4 is at most ((3 * 32 + 15) &gt;&gt; 4) + 8 = 14 (y_step_q4 &lt;= 32).</summary>
+    public const int RegionScratchInts = 16;
+
+    /// <summary>
+    /// <see cref="PredictBlockPlane"/> restricted to the pixels of the region (<paramref name="rx"/>, <paramref name="ry"/>,
+    /// <paramref name="rw"/>, <paramref name="rh"/>) of the block's plane (pixels, from the block's top-left; clipped to the
+    /// block): every reference, the same arithmetic per pixel. libvpx predicts the whole block (or each 4x4 below
+    /// BLOCK_8X8) in one convolve call; each output pixel of a call depends only on the call's setup (origin, sub-pel
+    /// phase, steps, filter, which convolve) and its own position in the call, so a thread can produce any part of a call
+    /// by doing the call's setup and running the same convolve over that part only (see PredictOne). The second
+    /// (compound) reference is averaged in by the same thread after the first, as libvpx orders it.
+    /// </summary>
+    /// <param name="scratch">At least <see cref="ScratchInts"/> ints at <paramref name="scratchAt"/>, or
+    /// <see cref="RegionScratchInts"/> when <paramref name="rh"/> &lt;= 4.</param>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static void PredictBlockPlaneRegion(int ssX, int ssY, int miRow, int miCol, int miRows, int miCols,
+        ArrayView<int> mi, long miAt,
+        ArrayView<byte> ref0, Vp9InterRefPlane ref0Plane, ArrayView<byte> ref1, Vp9InterRefPlane ref1Plane,
+        ArrayView<byte> dst, long dstAt, int dstStride, int rx, int ry, int rw, int rh, ArrayView<int> scratch, long scratchAt)
+    {
         int bsize = mi[miAt + Vp9Mi.SbType];
         int filter = mi[miAt + Vp9Mi.Interp];
         bool compound = mi[miAt + Vp9Mi.Ref1] > Vp9Mi.IntraFrame;
@@ -491,46 +517,57 @@ internal static class Vp9InterPred
         int toTop = -((miRow * 8) * 8), toBottom = ((miRows - bh - miRow) * 8) * 8;
         int toLeft = -((miCol * 8) * 8), toRight = ((miCols - bw - miCol) * 8) * 8;
         PredictRef(ssX, ssY, miRow, miCol, bsize, bw, bh, toLeft, toRight, toTop, toBottom, filter, mi, miAt, 0,
-            ref0, ref0Plane, dst, dstAt, dstStride, scratch, scratchAt);
+            ref0, ref0Plane, dst, dstAt, dstStride, rx, ry, rw, rh, scratch, scratchAt);
         if (compound)
             PredictRef(ssX, ssY, miRow, miCol, bsize, bw, bh, toLeft, toRight, toTop, toBottom, filter, mi, miAt, 1,
-                ref1, ref1Plane, dst, dstAt, dstStride, scratch, scratchAt);
+                ref1, ref1Plane, dst, dstAt, dstStride, rx, ry, rw, rh, scratch, scratchAt);
     }
 
-    /// <summary>The body of dec_build_inter_predictors_sb's loop for one reference and one plane.</summary>
+    /// <summary>The body of dec_build_inter_predictors_sb's loop for one reference and one plane, producing only the
+    /// pixels of the region (rx, ry, rw, rh) of the plane block.</summary>
     private static void PredictRef(int ssX, int ssY, int miRow, int miCol, int bsize, int bw, int bh,
         int toLeft, int toRight, int toTop, int toBottom, int filter, ArrayView<int> mi, long miAt, int refIdx,
-        ArrayView<byte> src, Vp9InterRefPlane p, ArrayView<byte> dst, long dstAt, int dstStride, ArrayView<int> scratch, long scratchAt)
+        ArrayView<byte> src, Vp9InterRefPlane p, ArrayView<byte> dst, long dstAt, int dstStride,
+        int rx, int ry, int rw, int rh, ArrayView<int> scratch, long scratchAt)
     {
         int n4w = (bw << 1) >> ssX, n4h = (bh << 1) >> ssY;   // set_plane_n4
         int n4wX4 = 4 * n4w, n4hX4 = 4 * n4h;
         int miX = miCol * 8, miY = miRow * 8;
         bool avg = refIdx == 1;
+        int rx1 = rx + rw, ry1 = ry + rh;
         if (bsize < Block8x8)
         {
             long bmiAt = miAt + Vp9Mi.BmiMv0 + 4 * refIdx;
-            int i = 0;
             for (int y = 0; y < n4h; y++)
                 for (int x = 0; x < n4w; x++)
                 {
-                    int mv = AverageSplitMv(mi, bmiAt, ssX, ssY, i++);
-                    PredictOne(src, p, ssX, ssY, n4wX4, n4hX4, 4 * x, 4 * y, 4, 4, miX, miY, toLeft, toRight, toTop, toBottom,
-                        filter, MvRow(mv), MvCol(mv), avg, dst, dstAt, dstStride, scratch, scratchAt);
+                    // the part of this 4x4 call inside the region
+                    int cx0 = 4 * x > rx ? 4 * x : rx, cx1 = 4 * x + 4 < rx1 ? 4 * x + 4 : rx1;
+                    int cy0 = 4 * y > ry ? 4 * y : ry, cy1 = 4 * y + 4 < ry1 ? 4 * y + 4 : ry1;
+                    if (cx0 >= cx1 || cy0 >= cy1) continue;
+                    int mv = AverageSplitMv(mi, bmiAt, ssX, ssY, y * n4w + x);   // libvpx's i++ over the 4x4s in raster order
+                    PredictOne(src, p, ssX, ssY, n4wX4, n4hX4, 4 * x, 4 * y, 4, 4, cx0 - 4 * x, cy0 - 4 * y, cx1 - cx0, cy1 - cy0,
+                        miX, miY, toLeft, toRight, toTop, toBottom, filter, MvRow(mv), MvCol(mv), avg, dst, dstAt, dstStride,
+                        scratch, scratchAt);
                 }
         }
         else
         {
+            int cx1 = n4wX4 < rx1 ? n4wX4 : rx1, cy1 = n4hX4 < ry1 ? n4hX4 : ry1;
+            if (rx >= cx1 || ry >= cy1) return;
             int mv = mi[miAt + Vp9Mi.Mv0 + refIdx];
-            PredictOne(src, p, ssX, ssY, n4wX4, n4hX4, 0, 0, n4wX4, n4hX4, miX, miY, toLeft, toRight, toTop, toBottom,
-                filter, MvRow(mv), MvCol(mv), avg, dst, dstAt, dstStride, scratch, scratchAt);
+            PredictOne(src, p, ssX, ssY, n4wX4, n4hX4, 0, 0, n4wX4, n4hX4, rx, ry, cx1 - rx, cy1 - ry,
+                miX, miY, toLeft, toRight, toTop, toBottom, filter, MvRow(mv), MvCol(mv), avg, dst, dstAt, dstStride,
+                scratch, scratchAt);
         }
     }
 
     /// <summary>dec_build_inter_predictors(plane, bw, bh, x, y, w, h, mi_x, mi_y, kernel, sf, mv, is_scaled, ref): the
-    /// w x h block at (x, y) inside the bw x bh plane block, MV (mvRow, mvCol) in 1/8 luma pel.</summary>
+    /// w x h block at (x, y) inside the bw x bh plane block, MV (mvRow, mvCol) in 1/8 luma pel. Only the part
+    /// (rx, ry, rw, rh) of the call's w x h output (relative to (x, y), non-empty, inside it) is produced.</summary>
     private static void PredictOne(ArrayView<byte> src, in Vp9InterRefPlane p, int ssX, int ssY, int bw, int bh,
-        int x, int y, int w, int h, int miX, int miY, int toLeft, int toRight, int toTop, int toBottom, int filter,
-        int mvRow, int mvCol, bool avg, ArrayView<byte> dst, long dstAt, int dstStride, ArrayView<int> scratch, long scratchAt)
+        int x, int y, int w, int h, int rx, int ry, int rw, int rh, int miX, int miY, int toLeft, int toRight, int toTop, int toBottom,
+        int filter, int mvRow, int mvCol, bool avg, ArrayView<byte> dst, long dstAt, int dstStride, ArrayView<int> scratch, long scratchAt)
     {
         int x0, y0, x0_16, y0_16, smvRow, smvCol, xs, ys;
         if (IsScaled(p.XScaleFp, p.YScaleFp))
@@ -582,22 +619,33 @@ internal static class Vp9InterPred
         bool edge = wx0 < 0 || wx0 > p.CropWidth - 1 || x1 < 0 || x1 > p.CropWidth - 1 ||
                     wy0 < 0 || wy0 > p.CropHeight - 1 || y1 < 0 || y1 > p.CropHeight - 1;
 
-        long at = dstAt + (long)y * dstStride + x;
+        // The part (rx, ry, rw, rh) of the call. Every convolve filters output column i of the call at the 1/16-pel
+        // position q = subpel_x + i * xs from x0: taps Kernel(q & 15), source columns from x0 - 3 + (q >> 4) (copy: q is
+        // a multiple of 16). Starting at column rx instead, with origin ox = x0 + (qx >> 4) and phase qx & 15 where
+        // qx = subpel_x + rx * xs, gives every column of the part the same q & 15 and the same x0 + (q >> 4), so the
+        // same taps over the same source pixels (and in the 2-D convolve the same intermediate rows, each
+        // RoundClip(DotRow(column, row)) of the same column and row). Likewise for rows. The convolve variant, the
+        // window test (edge) and the scaled setup above stay those of the whole call, as libvpx computes them.
+        int qx = subpelX + rx * xs, qy = subpelY + ry * ys;
+        int ox = x0 + (qx >> SubpelBits), oy = y0 + (qy >> SubpelBits);
+        qx &= SubpelMask;
+        qy &= SubpelMask;
+        long at = dstAt + (long)(y + ry) * dstStride + x + rx;
         // sf->predict[subpel_x != 0][subpel_y != 0][ref] as vp9_setup_scale_factors_for_frame fills it
         bool scaleX = p.XStepQ4 != SubpelShifts, scaleY = p.YStepQ4 != SubpelShifts;
         bool fx = subpelX != 0, fy = subpelY != 0;
         if (!scaleX && !scaleY)
         {
-            if (!fx && !fy) ConvolveCopy(src, p, x0, y0, edge, dst, at, dstStride, w, h, avg);
-            else if (!fy) ConvolveHoriz(src, p, x0, y0, edge, filter, subpelX, xs, dst, at, dstStride, w, h, avg);
-            else if (!fx) ConvolveVert(src, p, x0, y0, edge, filter, subpelY, ys, dst, at, dstStride, w, h, avg);
-            else Convolve2D(src, p, x0, y0, edge, filter, subpelX, xs, subpelY, ys, dst, at, dstStride, w, h, avg, scratch, scratchAt);
+            if (!fx && !fy) ConvolveCopy(src, p, ox, oy, edge, dst, at, dstStride, rw, rh, avg);
+            else if (!fy) ConvolveHoriz(src, p, ox, oy, edge, filter, qx, xs, dst, at, dstStride, rw, rh, avg);
+            else if (!fx) ConvolveVert(src, p, ox, oy, edge, filter, qy, ys, dst, at, dstStride, rw, rh, avg);
+            else Convolve2D(src, p, ox, oy, edge, filter, qx, xs, qy, ys, dst, at, dstStride, rw, rh, avg, scratch, scratchAt);
         }
         else if (!scaleX && !fx)   // x unscaled, y scaled: [0][*] = vpx_scaled_vert
-            ConvolveVert(src, p, x0, y0, edge, filter, subpelY, ys, dst, at, dstStride, w, h, avg);
+            ConvolveVert(src, p, ox, oy, edge, filter, qy, ys, dst, at, dstStride, rw, rh, avg);
         else if (!scaleY && !fy)   // y unscaled, x scaled: [*][0] = vpx_scaled_horiz
-            ConvolveHoriz(src, p, x0, y0, edge, filter, subpelX, xs, dst, at, dstStride, w, h, avg);
+            ConvolveHoriz(src, p, ox, oy, edge, filter, qx, xs, dst, at, dstStride, rw, rh, avg);
         else                       // vpx_scaled_2d
-            Convolve2D(src, p, x0, y0, edge, filter, subpelX, xs, subpelY, ys, dst, at, dstStride, w, h, avg, scratch, scratchAt);
+            Convolve2D(src, p, ox, oy, edge, filter, qx, xs, qy, ys, dst, at, dstStride, rw, rh, avg, scratch, scratchAt);
     }
 }

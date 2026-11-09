@@ -22,7 +22,8 @@ internal sealed class Vp9DecodePipeline : IDisposable
     private Action<Index1D, ArrayView<int>, ArrayView<int>> _lfInit = null!;
     private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _lfWave = null!;
     private MemoryBuffer1D<int, Stride1D.Dense>? _scratch;
-    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _reconInter = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _interPredict = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _interResidual = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _reconIntra = null!;
     private int _prevBuffer = -1;
     private Task? _kernelsLoad;
@@ -52,8 +53,10 @@ internal sealed class Vp9DecodePipeline : IDisposable
     {
         await _contexts.LoadKernelsAsync();
         await _parser.LoadKernelsAsync();
-        _reconInter = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
-            ArrayView<int>, ArrayView<int>>(Vp9ReconKernels.InterPassKernel);
+        _interPredict = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(
+            Vp9ReconKernels.InterPredictKernel);
+        _interResidual = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
+            ArrayView<int>, ArrayView<int>>(Vp9ReconKernels.InterResidualKernel);
         _reconIntra = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, ArrayView<int>, int>(Vp9ReconKernels.IntraWaveKernel);
         _lfInit = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(Vp9LoopFilterKernels.FrameInitKernel);
@@ -157,7 +160,14 @@ internal sealed class Vp9DecodePipeline : IDisposable
     private void Reconstruct(Vp9FrameInfo h)
     {
         int sbRows = (h.MiRows + 7) >> 3, sbCols = (h.MiCols + 7) >> 3;
-        long scratchInts = (long)sbRows * sbCols * Vp9RArg.Scratch;
+        // launch sizes in 4x4 units (Y, then U and V): inter prediction over the superblock grid, inter residual over
+        // the mi grid
+        int predUnits = sbCols * 16 * (sbRows * 16) + 2 * ((sbCols * 16) >> h.SubsamplingX) * ((sbRows * 16) >> h.SubsamplingY);
+        int residUnits = h.MiCols * 2 * (h.MiRows * 2) + 2 * ((h.MiCols * 2) >> h.SubsamplingX) * ((h.MiRows * 2) >> h.SubsamplingY);
+        // one scratch buffer for the launches, which run one after another: per prediction unit, per inter transform
+        // block (Vp9RArg.ResidualScratchAt over the frame's coefficients), per intra superblock thread
+        long scratchInts = Math.Max((long)sbRows * sbCols * Vp9RArg.Scratch,
+            Math.Max((long)predUnits * Vp9InterPred.RegionScratchInts, Vp9RArg.ResidualScratchAt(sbRows * sbCols * _parser.DqStride)));
         if (_scratch == null || _scratch.Length < scratchInts)
         {
             _scratch?.Dispose();
@@ -207,9 +217,14 @@ internal sealed class Vp9DecodePipeline : IDisposable
                 a[Vp9RArg.Scale + r * 4 + 3] = sf.YStepQ4;
             }
         _reconArgs.View.CopyFromCPU(a);   // frame metadata scalars
-        // pass A: inter blocks of every superblock; pass B: intra blocks on the wavefront row + col
+        // inter prediction of every inter pixel, then the inter residual per transform block (after all prediction),
+        // then the intra blocks on the superblock wavefront row + col
         if (!h.IsIntraOnlyFrame)
-            _reconInter(sbRows * sbCols, _frames.Pool, _reconArgs.View, _tables.View, _parser.ModeInfo, _parser.Superblocks, _parser.Coefficients, _scratch.View);
+        {
+            _interPredict(predUnits, _frames.Pool, _reconArgs.View, _parser.ModeInfo, _scratch.View);
+            _interResidual(residUnits, _frames.Pool, _reconArgs.View, _tables.View, _parser.ModeInfo, _parser.Superblocks,
+                _parser.Coefficients, _scratch.View);
+        }
         for (int k = 0; k < sbRows + sbCols - 1; k++)
             _reconIntra(Math.Min(sbRows - 1, k) + 1, _frames.Pool, _reconArgs.View, _tables.View, _parser.ModeInfo, _parser.Superblocks,
                 _parser.Coefficients, _scratch.View, k);

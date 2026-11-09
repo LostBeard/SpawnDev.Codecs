@@ -198,6 +198,7 @@ internal static partial class Vp9ParseKernels
             sbBuf[e + Vp9PLayout.BlkEobY] = eobY;
             sbBuf[e + Vp9PLayout.BlkEobU] = eobU;
             sbBuf[e + Vp9PLayout.BlkEobV] = eobV;
+            mi[b + Vp9Mi.TableSlot] = slot;
         }
 
         var p = new BlockPos

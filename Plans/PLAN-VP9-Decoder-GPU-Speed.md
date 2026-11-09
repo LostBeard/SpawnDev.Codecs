@@ -49,6 +49,19 @@ Bit-exact on CPU, CUDA and OpenCL.
   - One thread per (plane, 4x4 unit) of every inter block, using the mode-info grid. The sub-pel filter is per
     pixel, so this goes from 40 threads to about 15k for 512x320.
   - Then the residual: one thread per transform block (later per row / column of the 1-D transforms).
+  - Built 2026-11-09 (inter half):
+    - `InterPredictKernel`: one thread per (plane, 4x4 unit) over the superblock grid. `PredictBlockPlaneRegion`
+      does the libvpx call's setup, then runs the same convolve over only its 4x4 part (origin moved by
+      `(subpel + offset * step) >> 4`), so the arithmetic per pixel is the same.
+    - `InterResidualKernel`: one thread per (plane, 4x4 unit) of the mi grid; the transform block's top-left unit does
+      the transform.
+    - Offsets: the block-table slot is stored in the mode info (`Vp9Mi.TableSlot`). The j-th transform block of a
+      plane is at block start + j * (16 << 2 tx) coefficients and j eobs.
+    - Bit-exact on the CPU accelerator: EveryFrame (311 files), PublicApi, and the inter DSP test, now also per unit.
+      Red-checked (wrong U offset, residual before prediction).
+    - CPU accelerator reconstruction (ComfyUI files): 9.1 -> 4.4 ms/frame.
+    - CUDA / OpenCL: not measured yet.
+    - Next: one 32x32 transform is still one thread (a row / column split is the follow-up).
 - **Intra:** an anti-diagonal wavefront over 4x4 transform blocks (each depends on left, above and above-right):
   - step k covers the blocks with 2 * row + col == k;
   - each step can run hundreds of threads, against at most 5 now;
