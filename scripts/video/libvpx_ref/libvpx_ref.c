@@ -115,6 +115,14 @@ static void mi_hook(struct VP9Decoder *pbi, int stage) {
     for (i_ = 0; i_ < n_; ++i_) printf(" %d", (int)p_[i_]);       \
     printf("\n");                                                 \
   } while (0)
+/* arrays declared without a size (extern T name[]): the count must be given */
+#define PTN(name, arr, T, count)                                               \
+  do {                                                                         \
+    int i_;                                                                    \
+    printf("T %s %d", name, (int)(count));                                     \
+    for (i_ = 0; i_ < (int)(count); ++i_) printf(" %d", (int)((const T *)(arr))[i_]); \
+    printf("\n");                                                              \
+  } while (0)
 
 static void print_tables(void) {
   int tx, type, i;
@@ -140,6 +148,11 @@ static void print_tables(void) {
   PT("vp9_partition_tree", vp9_partition_tree, vpx_tree_index);
   PT("vp9_switchable_interp_tree", vp9_switchable_interp_tree, vpx_tree_index);
   PT("vp9_segment_tree", vp9_segment_tree, vpx_tree_index);
+  PTN("vp9_mv_joint_tree", vp9_mv_joint_tree, vpx_tree_index, TREE_SIZE(MV_JOINTS));
+  PTN("vp9_mv_class_tree", vp9_mv_class_tree, vpx_tree_index, TREE_SIZE(MV_CLASSES));
+  PTN("vp9_mv_class0_tree", vp9_mv_class0_tree, vpx_tree_index, TREE_SIZE(CLASS0_SIZE));
+  PTN("vp9_mv_fp_tree", vp9_mv_fp_tree, vpx_tree_index, TREE_SIZE(MV_FP_SIZE));
+  PT("partition_context_lookup", partition_context_lookup, PARTITION_CONTEXT); /* {above, left} per block size */
   PT("vp9_pt_energy_class", vp9_pt_energy_class, uint8_t);
   PT("vp9_cat1_prob", vp9_cat1_prob, uint8_t);
   PT("vp9_cat2_prob", vp9_cat2_prob, uint8_t);

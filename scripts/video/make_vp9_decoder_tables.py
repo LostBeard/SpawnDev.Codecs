@@ -48,7 +48,7 @@ def packed_tables(path):
         if not parts or parts[0] != "T":
             continue
         name, n, vals = parts[1], int(parts[2]), [int(v) for v in parts[3:]]
-        assert len(vals) == n, name
+        assert len(vals) == n and n > 0, f"{name}: {n} entries (an array of unknown size prints 0)"
         consts.append(f"    public const int {pascal(name)} = {len(values)};   // {name}[{n}]")
         values += vals
     return consts, values
