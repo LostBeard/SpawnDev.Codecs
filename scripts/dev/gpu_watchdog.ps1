@@ -2,7 +2,7 @@
 # its working set passes -LimitGB, so a giant shader compile (Tint) cannot starve the PC. Logs the peak it saw.
 # Playwright's browser process is the chrome.exe whose command line has --remote-debugging-pipe; its GPU process is the
 # child with --type=gpu-process (the child's own command line carries none of Playwright's flags).
-param([double]$LimitGB = 3, [int]$IntervalMs = 1000, [string]$Log = "$PSScriptRoot\gpu_watchdog.log")
+param([double]$LimitGB = 3, [int]$IntervalMs = 1000, [string]$Log = (Join-Path $env:TEMP 'gpu_watchdog.log'))
 
 $limit = [int64]($LimitGB * 1GB)
 $peak = 0
