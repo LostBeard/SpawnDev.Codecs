@@ -4,7 +4,7 @@
  * Reference VP9 decoder for the VP9 decoder's tests: libvpx (BSD-3-Clause, github.com/webmproject/libvpx) built as
  * plain C (generic target, single thread, 8-bit) by build_libvpx_ref.py. libvpx is NOT in this repository.
  *
- * Usage: libvpx_ref [-h] [-c ctx.bin] [-m] in.ivf [out.i420]
+ * Usage: libvpx_ref [-h] [-c ctx.bin] [-m] in.ivf [out.i420]   |   libvpx_ref -t   (constant tables)
  *   decodes every frame and prints one line per output frame, "<n> <width>x<height> <md5>", where the MD5 is computed
  *   exactly as libvpx's test/md5_helper.h does (each plane row by row over the displayed width; chroma sizes rounded
  *   up), so the lines compare with the conformance vectors' .md5 files. With out.i420 the cropped planes of every
@@ -22,6 +22,13 @@
 #include "md5_utils.h"
 #include "vp9/vp9_dx_iface.h"
 #include "vp9/decoder/vp9_decoder.h"
+#include "vp9/common/vp9_common_data.h"
+#include "vp9/common/vp9_entropy.h"
+#include "vp9/common/vp9_entropymode.h"
+#include "vp9/common/vp9_mvref_common.h"
+#include "vp9/common/vp9_scan.h"
+#include "vp9/common/vp9_seg_common.h"
+#include "vpx_dsp/prob.h"
 
 /* -c: frame context dumps. Stage 0 = the context the frame loads; stage 1 = after its compressed header, followed by
  * tx_mode, reference_mode, comp_fixed_ref, comp_var_ref[0], comp_var_ref[1] (one byte each). */
@@ -95,6 +102,69 @@ static void mi_hook(struct VP9Decoder *pbi, int stage) {
     md5_hex(&md5, hex);
     printf("A %d %s\n", hooked_frames, hex);
   }
+}
+
+/* -t: libvpx's constant tables as "T <name> <count> v..." lines (make_vp9_decoder_tables.py turns them into C#). The
+ * compiler resolves every enum and size, so nothing is transcribed by hand. */
+#define PT(name, arr, T)                                          \
+  do {                                                            \
+    const T *p_ = (const T *)(arr);                               \
+    const int n_ = (int)(sizeof(arr) / sizeof(T));                \
+    int i_;                                                       \
+    printf("T %s %d", name, n_);                                  \
+    for (i_ = 0; i_ < n_; ++i_) printf(" %d", (int)p_[i_]);       \
+    printf("\n");                                                 \
+  } while (0)
+
+static void print_tables(void) {
+  int tx, type, i;
+  PT("b_width_log2_lookup", b_width_log2_lookup, uint8_t);
+  PT("b_height_log2_lookup", b_height_log2_lookup, uint8_t);
+  PT("mi_width_log2_lookup", mi_width_log2_lookup, uint8_t);
+  PT("num_8x8_blocks_wide_lookup", num_8x8_blocks_wide_lookup, uint8_t);
+  PT("num_8x8_blocks_high_lookup", num_8x8_blocks_high_lookup, uint8_t);
+  PT("num_4x4_blocks_wide_lookup", num_4x4_blocks_wide_lookup, uint8_t);
+  PT("num_4x4_blocks_high_lookup", num_4x4_blocks_high_lookup, uint8_t);
+  PT("size_group_lookup", size_group_lookup, uint8_t);
+  PT("subsize_lookup", subsize_lookup, BLOCK_SIZE);
+  PT("max_txsize_lookup", max_txsize_lookup, TX_SIZE);
+  PT("tx_mode_to_biggest_tx_size", tx_mode_to_biggest_tx_size, TX_SIZE);
+  PT("ss_size_lookup", ss_size_lookup, BLOCK_SIZE);
+  PT("uv_txsize_lookup", uv_txsize_lookup, TX_SIZE);
+  PT("intra_mode_to_tx_type_lookup", intra_mode_to_tx_type_lookup, TX_TYPE);
+  PT("vp9_kf_y_mode_prob", vp9_kf_y_mode_prob, vpx_prob);
+  PT("vp9_kf_uv_mode_prob", vp9_kf_uv_mode_prob, vpx_prob);
+  PT("vp9_kf_partition_probs", vp9_kf_partition_probs, vpx_prob);
+  PT("vp9_intra_mode_tree", vp9_intra_mode_tree, vpx_tree_index);
+  PT("vp9_inter_mode_tree", vp9_inter_mode_tree, vpx_tree_index);
+  PT("vp9_partition_tree", vp9_partition_tree, vpx_tree_index);
+  PT("vp9_switchable_interp_tree", vp9_switchable_interp_tree, vpx_tree_index);
+  PT("vp9_segment_tree", vp9_segment_tree, vpx_tree_index);
+  PT("vp9_pt_energy_class", vp9_pt_energy_class, uint8_t);
+  PT("vp9_cat1_prob", vp9_cat1_prob, uint8_t);
+  PT("vp9_cat2_prob", vp9_cat2_prob, uint8_t);
+  PT("vp9_cat3_prob", vp9_cat3_prob, uint8_t);
+  PT("vp9_cat4_prob", vp9_cat4_prob, uint8_t);
+  PT("vp9_cat5_prob", vp9_cat5_prob, uint8_t);
+  PT("vp9_cat6_prob", vp9_cat6_prob, uint8_t);
+  PT("vp9_coefband_trans_8x8plus", vp9_coefband_trans_8x8plus, uint8_t);
+  PT("vp9_coefband_trans_4x4", vp9_coefband_trans_4x4, uint8_t);
+  PT("vp9_pareto8_full", vp9_pareto8_full, vpx_prob);
+  PT("mode_2_counter", mode_2_counter, int);
+  PT("counter_to_context", counter_to_context, int);
+  PT("mv_ref_blocks", mv_ref_blocks, int); /* POSITION {int row, col} */
+  PT("vpx_norm", vpx_norm, uint8_t);
+  /* vp9_scan_orders[tx_size][tx_type]: scan and neighbors (MAX_NEIGHBORS * (n + 1)) */
+  for (tx = 0; tx < TX_SIZES; ++tx)
+    for (type = 0; type < TX_TYPES; ++type) {
+      const ScanOrder *so = &vp9_scan_orders[tx][type];
+      const int n = 16 << (2 * tx);
+      printf("T scan_%d_%d %d", tx, type, n);
+      for (i = 0; i < n; ++i) printf(" %d", so->scan[i]);
+      printf("\nT neighbors_%d_%d %d", tx, type, MAX_NEIGHBORS * (n + 1));
+      for (i = 0; i < MAX_NEIGHBORS * (n + 1); ++i) printf(" %d", so->neighbors[i]);
+      printf("\n");
+    }
 }
 
 static void ctx_hook(struct VP9Decoder *pbi, int stage);
@@ -196,6 +266,9 @@ int main(int argc, char **argv) {
               (int)offsetof(FRAME_CONTEXT, skip_probs), (int)offsetof(FRAME_CONTEXT, nmvc));
       argv += 2;
       argc -= 2;
+    } else if (argc > 1 && strcmp(argv[1], "-t") == 0) {
+      print_tables();
+      return 0;
     } else if (argc > 1 && strcmp(argv[1], "-m") == 0) {
       mi_mode = 1;
       vp9ref_hook = hook;
