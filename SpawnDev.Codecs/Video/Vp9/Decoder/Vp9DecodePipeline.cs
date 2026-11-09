@@ -18,7 +18,9 @@ internal sealed class Vp9DecodePipeline : IDisposable
     private readonly Vp9FrameContextsGpu _contexts;
     private readonly Vp9TileParserGpu _parser;
     private readonly Vp9FrameBuffersGpu _frames;
-    private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables, _reconArgs;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables, _reconArgs, _lfHdr, _lfTable, _lfArgs;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _lfInit;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _lfWave;
     private MemoryBuffer1D<int, Stride1D.Dense>? _scratch;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _recon;
     private int _prevBuffer = -1;
@@ -33,6 +35,42 @@ internal sealed class Vp9DecodePipeline : IDisposable
         _reconArgs = _acc.Allocate1D<int>(Vp9RArg.Count);
         _recon = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, ArrayView<int>>(Vp9ReconKernels.ReconKernel);
+        _lfHdr = _acc.Allocate1D<int>(Vp9LfHdr.Ints);
+        _lfTable = _acc.Allocate1D<int>(Vp9LfTable.Ints);
+        _lfArgs = _acc.Allocate1D<int>(Vp9LArg.Count);
+        _lfInit = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(Vp9LoopFilterKernels.FrameInitKernel);
+        _lfWave = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(
+            Vp9LoopFilterKernels.WavefrontKernel);
+    }
+
+    /// <summary>libvpx vp9_loop_filter_frame (after the tiles): filter level table, then the superblock wavefront.</summary>
+    private void LoopFilter(Vp9FrameInfo h)
+    {
+        if (h.LoopFilter.Level == 0) return;   // libvpx: cm->lf.filter_level == 0 -> no filtering
+        var hdr = new int[Vp9LfHdr.Ints];
+        Vp9LfHdr.Pack(hdr, h.LoopFilter, h.Segmentation);
+        _lfHdr.View.CopyFromCPU(hdr);   // frame metadata scalars
+        _lfInit(1, _lfHdr.View, _lfTable.View);
+        var l = _frames.Layout(h.NewBuffer);
+        long b = _frames.Offset(h.NewBuffer);
+        var a = new int[Vp9LArg.Count];
+        a[Vp9LArg.MiRows] = h.MiRows;
+        a[Vp9LArg.MiCols] = h.MiCols;
+        a[Vp9LArg.SsX] = h.SubsamplingX;
+        a[Vp9LArg.SsY] = h.SubsamplingY;
+        a[Vp9LArg.GridOffset] = _parser.GridOffset;
+        a[Vp9LArg.Y] = checked((int)b);
+        a[Vp9LArg.U] = checked((int)(b + l.UOffset));
+        a[Vp9LArg.V] = checked((int)(b + l.VOffset));
+        a[Vp9LArg.YStride] = l.YStride;
+        a[Vp9LArg.UvStride] = l.UvStride;
+        _lfArgs.View.CopyFromCPU(a);
+        int sbRows = (h.MiRows + 7) >> 3, sbCols = (h.MiCols + 7) >> 3;
+        for (int k = 0; k < 2 * (sbRows - 1) + sbCols; k++)
+        {
+            int rMax = Math.Min(sbRows - 1, k / 2);
+            _lfWave(rMax + 1, _frames.Pool, _lfArgs.View, _parser.ModeInfo, _lfTable.View, k);
+        }
     }
 
     internal Vp9FrameContextsGpu Contexts => _contexts;
@@ -60,7 +98,7 @@ internal sealed class Vp9DecodePipeline : IDisposable
         _parser.Parse(frameView, frameOffset, frame.Span, h, _contexts, _prevBuffer);
         Reconstruct(h);
         if (afterRecon != null) await afterRecon(h);
-        // loop filter: next (Vp9Lpf)
+        LoopFilter(h);
         _contexts.Adapt(h, _parser.Counts, _parser.TileCols);
         _contexts.EndFrame(h);
         _parser.EndFrame(h);
@@ -146,5 +184,8 @@ internal sealed class Vp9DecodePipeline : IDisposable
         _tables.Dispose();
         _reconArgs.Dispose();
         _scratch?.Dispose();
+        _lfHdr.Dispose();
+        _lfTable.Dispose();
+        _lfArgs.Dispose();
     }
 }

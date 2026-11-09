@@ -373,7 +373,7 @@ public abstract partial class CodecsTestBase
     /// orchestration; the loop filter extends this to every frame.
     /// </summary>
     [TestMethod(Timeout = 3600000, Category = "NotOnWebGL")]
-    public async Task Vp9Recon_PreLoopFilter_MatchesLibvpx()
+    public async Task Vp9Decode_EveryFrame_MatchesLibvpx()
     {
         var modeInfoRef = LibvpxModeInfo();
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -381,39 +381,46 @@ public abstract partial class CodecsTestBase
         try
         {
             var failures = new List<string>();
-            int compared = 0, intra = 0, interFrames = 0;
+            int frames = 0, outputs = 0, files = 0;
             foreach (var v in Vp9Vectors())
             {
                 if (!modeInfoRef.TryGetValue(v.Name, out var want)) { failures.Add($"{v.Name}: no libvpx reference"); continue; }
+                files++;
                 using var pipe = new Vp9DecodePipeline(acc);
-                int decoded = 0;
-                bool refsUnfiltered = true;
+                int decoded = 0, shown = 0;
                 foreach (byte[] packet in Vp9Packets.ReadFile(v.File))
                 {
                     using var buf = acc.Allocate1D(packet);
+                    int show = -1;   // libvpx outputs the packet's last shown frame
                     foreach (var (offset, length) in Vp9Packets.Split(packet))
                     {
-                        bool comparable = refsUnfiltered;
                         int n = decoded;
                         var h = await pipe.DecodeFrameAsync(packet.AsMemory(offset, length), buf.View, offset, async fh =>
                         {
-                            if (!comparable) return;
-                            string md5 = Md5Hex(await pipe.ReadPlanesAsync(fh.NewBuffer));
-                            compared++;
-                            if (fh.IsIntraOnlyFrame) intra++; else interFrames++;
-                            if (md5 != want[n].Pre)
+                            if (Md5Hex(await pipe.ReadPlanesAsync(fh.NewBuffer)) != want[n].Pre)
                                 failures.Add($"{v.Name} frame {n + 1}: reconstruction differs ({fh.Width}x{fh.Height}, type {fh.FrameType}, intra-only {fh.IntraOnly}, lossless {fh.Lossless})");
                         });
-                        if (h.ShowExistingFrame) continue;
-                        if (h.LoopFilter.Level != 0) refsUnfiltered = false;
+                        if (h.ShowExistingFrame) { show = h.FrameToShowBuffer; continue; }
+                        if (Md5Hex(await pipe.ReadPlanesAsync(h.NewBuffer)) != want[n].Post)
+                            failures.Add($"{v.Name} frame {n + 1}: loop-filtered frame differs (filter level {h.LoopFilter.Level}, sharpness {h.LoopFilter.Sharpness})");
+                        if (h.ShowFrame) show = h.NewBuffer;
                         decoded++;
+                        frames++;
                         if (failures.Count > 40) goto done;
                     }
+                    if (show >= 0)
+                    {
+                        if (shown >= v.FrameMd5.Length) failures.Add($"{v.Name}: more output frames than libvpx's {v.FrameMd5.Length}");
+                        else if (Md5Hex(await pipe.ReadPlanesAsync(show)) != v.FrameMd5[shown])
+                            failures.Add($"{v.Name} output frame {shown + 1}: MD5 differs from the vector's .md5");
+                        shown++;
+                        outputs++;
+                    }
                 }
+                if (shown != v.FrameMd5.Length) failures.Add($"{v.Name}: {shown} output frames, libvpx {v.FrameMd5.Length}");
             }
         done:
-            Console.WriteLine($"{acc.AcceleratorType}: {compared} frames compared ({intra} intra, {interFrames} inter)");
-            True(compared > 300, $"only {compared} frames compared");
+            Console.WriteLine($"{acc.AcceleratorType}: {files} files, {frames} frames decoded, {outputs} output frames == libvpx .md5");
             True(failures.Count == 0, $"{failures.Count} mismatches:\n" + string.Join("\n", failures.Take(40)));
         }
         finally { ReleaseAccelerator(ctx, acc); }
