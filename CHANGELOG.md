@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### VP9 decoder: inter reconstruction per 4x4 unit and per transform block (2026-11-09)
+- Inter reconstruction no longer runs one thread per superblock (`Plans/PLAN-VP9-Decoder-GPU-Speed.md` step S2, inter
+  half). `Vp9ReconKernels.InterPassKernel` is replaced by two launches, before the intra wavefront:
+  - `InterPredictKernel`: one thread per 4x4 unit of each plane over the superblock grid (15,360 threads at 512x320,
+    40 before). Each thread finds its block through the mode info grid. Units past the last mi row / column predict
+    only when their block reaches over the frame edge, as libvpx does.
+  - `InterResidualKernel`: one thread per 4x4 unit inside the mi grid. The thread at a transform block's top-left adds
+    that transform block's residual; the others exit.
+- Prediction: the new `Vp9InterPred.PredictBlockPlaneRegion` does the whole libvpx call's setup (MV clamp, scaled
+  position, sub-pel phase, edge test, choice of convolve). It then runs the same convolve over only the thread's 4x4
+  part, with the origin moved by `(subpel + offset * step) >> 4`. Every output pixel gets the same taps over the same
+  source pixels, scaled references, compound averaging and sub-8x8 per-4x4 MVs included. `PredictBlockPlane` is that
+  call over the whole block.
+- Residual offsets, derived on the accelerator:
+  - The parse kernel stores each block's block-table slot in its mode info record (`Vp9Mi.TableSlot`;
+    `Vp9Mi.Stride` 24 -> 25).
+  - The j-th transform block of a plane of a block starts `j * (16 << 2 tx_size)` coefficients and j eobs after the
+    block's first. j is its raster index over max_blocks_high x max_blocks_wide.
+  - Each transform block's inverse transform uses its own scratch at `dqAt / 4 * 5` (`Vp9RArg.ResidualScratchAt`).
+- The intra pass is unchanged apart from dropping the inter code it no longer runs. WGSL sizes: InterPass 33.7 MB is
+  replaced by InterPredict 5.7 MB and InterResidual 4.5 MB; IntraWave 33.7 -> 6.6 MB.
+- `Vp9InterPred_AllCases_MatchLibvpx` also checks the per-unit path against libvpx: 1820 blocks, 1000 with a scaled
+  reference, 750 below 8x8, 763 compound.
+- Verified on the CPU accelerator: `Vp9Decode_EveryFrame_MatchesLibvpx` (311 files, 5000 output frames equal to
+  libvpx's .md5), `Vp9DecoderGpu_PublicApi_MatchesLibvpx`, `Vp9InterPred_AllCases_MatchLibvpx` and
+  `Vp9DecoderKernels_GenerateWgsl_WithinSizeBudget` pass. CPU accelerator reconstruction (ComfyUI files) went from 9.1
+  to 4.4 ms per frame.
+- Red-checks:
+  - On the ComfyUI files: a U-plane residual offset one transform block off fails (41 mismatches), and so does
+    launching the residual before the prediction (41 mismatches).
+  - Moving the region origin by whole pixels, which ignores the scaled step, fails `Vp9InterPred_AllCases_MatchLibvpx`.
+  - Restored, all pass.
+- Measured (6 ComfyUI files, 252 frames, `VP9_STAGE_TIMES=1`), reconstruction in ms per frame:
+  - CUDA RTX 4070: 16.1 -> 2.10.
+  - OpenCL: 1.46.
+  Bit-exact on both (252 frames equal libvpx).
+
 ### VP9 decoder: loop filter runs one thread group per superblock (2026-11-09)
 - The loop filter kernel filters each superblock with a thread group of 64 lanes instead of one thread
   (`Plans/PLAN-VP9-Decoder-GPU-Speed.md` step S1). The k = 2r + c wavefront between superblocks is unchanged.
@@ -18,8 +55,8 @@
 - Verified on the CPU accelerator: `Vp9Decode_EveryFrame_MatchesLibvpx` (311 files, 5000 output frames equal to
   libvpx's .md5), `Vp9DecoderGpu_PublicApi_MatchesLibvpx`, `Vp9Lpf_Superblocks_MatchLibvpx` (2400 superblocks, all
   subsamplings) and `Vp9Lpf_EdgeFilters_MatchLibvpx` pass. Red-check: running the horizontal pass before the vertical
-  one fails `Vp9Decode_EveryFrame_MatchesLibvpx` (43 mismatches on the ComfyUI files); restored, it passes. CUDA /
-  OpenCL not measured yet.
+  one fails `Vp9Decode_EveryFrame_MatchesLibvpx` (43 mismatches on the ComfyUI files); restored, it passes.
+- Measured (ComfyUI files), loop filter in ms per frame: CUDA 16.5 -> 1.35, OpenCL 1.0. Bit-exact on both.
 - KNOWN SLOWDOWN on ILGPU's CPU accelerator (the debugging backend, not a GPU): the loop filter went from 3.5 to 351 ms
   per frame (ComfyUI files, `VP9_STAGE_TIMES=1`), and `Vp9Decode_EveryFrame_MatchesLibvpx` from 247 to 2383 s
   (timeout 3600 s); `Vp9DecoderGpu_PublicApi_MatchesLibvpx` from about 40 to 221 s. Cause: the CPU accelerator runs

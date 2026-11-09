@@ -20,14 +20,16 @@ public abstract partial class CodecsTestBase
 {
     // (class, kernel method, WGSL character budget). Measured 2026-11-09 on SpawnDev.ILGPU 5.4.21: ParseKernel 87.1 MB
     // (821,758 lines), InterPass / IntraWave 33.7 MB each, loop-filter Wavefront 10.8 MB, CompressedHeader 6.4 MB; the
-    // browser GPU lanes keep these fenced (GiantShader) until they shrink.
+    // browser GPU lanes keep these fenced (GiantShader) until they shrink. Plan S2 inter (2026-11-09): InterPass split
+    // into InterPredict 5.7 MB + InterResidual 4.5 MB, and IntraWave 6.6 MB without the inter code.
     private static readonly (Type Owner, string Kernel, long Budget)[] Vp9WgslKernels =
     {
         (typeof(Vp9CompressedHeaderKernels), "CopyContextKernel", 3734),
         (typeof(Vp9CompressedHeaderKernels), "CompressedHeaderKernel", 7089732),
         (typeof(Vp9ParseKernels), "ParseKernel", 95805552),
-        (typeof(Vp9ReconKernels), "InterPassKernel", 37019010),
-        (typeof(Vp9ReconKernels), "IntraWaveKernel", 37024471),
+        (typeof(Vp9ReconKernels), "InterPredictKernel", 6290819),
+        (typeof(Vp9ReconKernels), "InterResidualKernel", 4928588),
+        (typeof(Vp9ReconKernels), "IntraWaveKernel", 7213330),
         (typeof(Vp9LoopFilterKernels), "FrameInitKernel", 24780),
         (typeof(Vp9LoopFilterKernels), "WavefrontKernel", 11848236),
         (typeof(Vp9AdaptKernels), "SumCountsKernel", 3579),

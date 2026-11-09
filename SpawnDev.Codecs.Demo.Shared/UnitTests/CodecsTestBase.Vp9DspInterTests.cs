@@ -14,7 +14,8 @@
 //
 // What must hold: every predicted pixel of every plane of every block equals libvpx's (integer arithmetic: exact on every
 // backend), the bytes of the destination outside the block are untouched, and SetupScaleFactors equals
-// vp9_setup_scale_factors_for_frame.
+// vp9_setup_scale_factors_for_frame. Both paths are checked: the whole block in one call (PredictBlockPlane) and every
+// 4x4 unit on its own (PredictBlockPlaneRegion, the decoder's InterPredictKernel path).
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -121,6 +122,30 @@ public abstract partial class CodecsTestBase
         }
     }
 
+    /// <summary>The decoder's per-unit path: thread (case, plane, unit row) predicts each 4x4 unit of its row of the plane
+    /// block on its own with <see cref="Vp9InterPred.PredictBlockPlaneRegion"/>, as Vp9ReconKernels.InterPredictKernel does.</summary>
+    private static void Vp9InterPredUnitTestKernel(Index1D i, ArrayView<int> cases, ArrayView<int> mi, ArrayView<byte> refs,
+        ArrayView<byte> dst, ArrayView<int> scratch)
+    {
+        int t = i, caseIdx = t / 48, plane = (t % 48) / 16, uy = t % 16;
+        long c = (long)caseIdx * InterCaseInts;
+        int ssX = plane == 0 ? 0 : cases[c], ssY = plane == 0 ? 0 : cases[c + 1];
+        long miAt = (long)caseIdx * Vp9Mi.Stride;
+        int bsize = mi[miAt + Vp9Mi.SbType];
+        int n4w = (Vp9InterPred.Num8x8Wide(bsize) << 1) >> ssX, n4h = (Vp9InterPred.Num8x8High(bsize) << 1) >> ssY;
+        if (uy >= n4h) return;
+        long a0 = c + InterCaseRefs + plane * 8, a1 = c + InterCaseRefs + (3 + plane) * 8;
+        Vp9InterRefPlane r0, r1;
+        r0.Offset = cases[a0]; r0.Stride = cases[a0 + 1]; r0.CropWidth = cases[a0 + 2]; r0.CropHeight = cases[a0 + 3];
+        r0.XScaleFp = cases[a0 + 4]; r0.YScaleFp = cases[a0 + 5]; r0.XStepQ4 = cases[a0 + 6]; r0.YStepQ4 = cases[a0 + 7];
+        r1.Offset = cases[a1]; r1.Stride = cases[a1 + 1]; r1.CropWidth = cases[a1 + 2]; r1.CropHeight = cases[a1 + 3];
+        r1.XScaleFp = cases[a1 + 4]; r1.YScaleFp = cases[a1 + 5]; r1.XStepQ4 = cases[a1 + 6]; r1.YStepQ4 = cases[a1 + 7];
+        for (int ux = 0; ux < n4w; ux++)
+            Vp9InterPred.PredictBlockPlaneRegion(ssX, ssY, cases[c + 2], cases[c + 3], cases[c + 4], cases[c + 5],
+                mi, miAt, refs, r0, refs, r1, dst, cases[c + InterCaseDst + plane], InterDstStride, ux * 4, uy * 4, 4, 4,
+                scratch, (long)t * Vp9InterPred.RegionScratchInts);
+    }
+
     [TestMethod(Timeout = 900000, Category = "NotOnWebGL")]
     public async Task Vp9InterPred_AllCases_MatchLibvpx()
     {
@@ -221,49 +246,60 @@ public abstract partial class CodecsTestBase
                 ArrayView<int>>(Vp9InterPredTestKernel);
             kernel(new Index1D(n), dCases.View, dMi.View, dRefs.View, dDst.View, dScratch.View);
             await acc.SynchronizeAsync();
-            var got = await dDst.CopyToHostAsync();
+            var gotBlock = await dDst.CopyToHostAsync();
+            // the same blocks again, each 4x4 unit predicted on its own (the decoder's InterPredictKernel path)
+            using var dDstUnits = acc.Allocate1D(dstInit);
+            using var dScratchUnits = acc.Allocate1D<int>((long)n * 48 * Vp9InterPred.RegionScratchInts);
+            var unitKernel = acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<byte>,
+                ArrayView<int>>(Vp9InterPredUnitTestKernel);
+            unitKernel(new Index1D(n * 48), dCases.View, dMi.View, dRefs.View, dDstUnits.View, dScratchUnits.View);
+            await acc.SynchronizeAsync();
+            var gotUnits = await dDstUnits.CopyToHostAsync();
 
-            int badCases = 0, pixels = 0, scaled = 0, sub8 = 0, compound = 0;
-            var perFilter = new int[4];
-            for (int i = 0; i < n; i++)
+            foreach (var (path, got) in new[] { ("whole block", gotBlock), ("per 4x4 unit", gotUnits) })
             {
-                var c = cases[i];
-                var s = scen[c.Scenario];
-                bool isScaled = Vp9InterPred.IsScaled(s.Sf[0].XScaleFp, s.Sf[0].YScaleFp) ||
-                                (c.Compound && Vp9InterPred.IsScaled(s.Sf[1].XScaleFp, s.Sf[1].YScaleFp));
-                if (isScaled) scaled++;
-                if (c.BSize < Vp9InterPred.Block8x8) sub8++;
-                if (c.Compound) compound++;
-                perFilter[c.Filter]++;
-                string? first = null;
-                int bad = 0;
-                for (int plane = 0; plane < 3; plane++)
+                int badCases = 0, pixels = 0, scaled = 0, sub8 = 0, compound = 0;
+                var perFilter = new int[4];
+                for (int i = 0; i < n; i++)
                 {
-                    int ssx = plane == 0 ? 0 : s.SsX, ssy = plane == 0 ? 0 : s.SsY;
-                    int w = ((Vp9InterN8W(c.BSize) << 1) >> ssx) * 4, h = ((Vp9InterN8H(c.BSize) << 1) >> ssy) * 4;
-                    int at = (i * 3 + plane) * InterDstPlane;
-                    for (int y = 0; y < InterDstStride; y++)
-                        for (int x = 0; x < InterDstStride; x++)
-                        {
-                            int k = at + y * InterDstStride + x;
-                            bool inBlock = x < w && y < h;
-                            byte want = inBlock ? c.Want[plane][y * w + x] : dstInit[k];
-                            if (inBlock) pixels++;
-                            if (got[k] == want) continue;
-                            bad++;
-                            first ??= $"plane {plane} ({x},{y}) got {got[k]} want {want}" + (inBlock ? "" : " (outside the block: must be untouched)");
-                        }
+                    var c = cases[i];
+                    var s = scen[c.Scenario];
+                    bool isScaled = Vp9InterPred.IsScaled(s.Sf[0].XScaleFp, s.Sf[0].YScaleFp) ||
+                                    (c.Compound && Vp9InterPred.IsScaled(s.Sf[1].XScaleFp, s.Sf[1].YScaleFp));
+                    if (isScaled) scaled++;
+                    if (c.BSize < Vp9InterPred.Block8x8) sub8++;
+                    if (c.Compound) compound++;
+                    perFilter[c.Filter]++;
+                    string? first = null;
+                    int bad = 0;
+                    for (int plane = 0; plane < 3; plane++)
+                    {
+                        int ssx = plane == 0 ? 0 : s.SsX, ssy = plane == 0 ? 0 : s.SsY;
+                        int w = ((Vp9InterN8W(c.BSize) << 1) >> ssx) * 4, h = ((Vp9InterN8H(c.BSize) << 1) >> ssy) * 4;
+                        int at = (i * 3 + plane) * InterDstPlane;
+                        for (int y = 0; y < InterDstStride; y++)
+                            for (int x = 0; x < InterDstStride; x++)
+                            {
+                                int k = at + y * InterDstStride + x;
+                                bool inBlock = x < w && y < h;
+                                byte want = inBlock ? c.Want[plane][y * w + x] : dstInit[k];
+                                if (inBlock) pixels++;
+                                if (got[k] == want) continue;
+                                bad++;
+                                first ??= $"plane {plane} ({x},{y}) got {got[k]} want {want}" + (inBlock ? "" : " (outside the block: must be untouched)");
+                            }
+                    }
+                    if (bad == 0) continue;
+                    badCases++;
+                    if (failures.Count < 12)
+                        failures.Add($"{path}: case {i}: scenario {c.Scenario} (ss {s.SsX},{s.SsY} cur {s.CurW}x{s.CurH} ref0 {s.W[0]}x{s.H[0]} " +
+                            $"ref1 {s.W[1]}x{s.H[1]}) bsize {c.BSize} mi ({c.MiRow},{c.MiCol}) filter {c.Filter} compound {c.Compound} " +
+                            $"mv {Vp9InterMvText(c.Mv[0])} {Vp9InterMvText(c.Mv[1])} bmi0 {string.Join(" ", c.Bmi0.Select(Vp9InterMvText))} " +
+                            $"bmi1 {string.Join(" ", c.Bmi1.Select(Vp9InterMvText))}: {bad} bytes differ, first {first}");
                 }
-                if (bad == 0) continue;
-                badCases++;
-                if (failures.Count < 12)
-                    failures.Add($"case {i}: scenario {c.Scenario} (ss {s.SsX},{s.SsY} cur {s.CurW}x{s.CurH} ref0 {s.W[0]}x{s.H[0]} " +
-                        $"ref1 {s.W[1]}x{s.H[1]}) bsize {c.BSize} mi ({c.MiRow},{c.MiCol}) filter {c.Filter} compound {c.Compound} " +
-                        $"mv {Vp9InterMvText(c.Mv[0])} {Vp9InterMvText(c.Mv[1])} bmi0 {string.Join(" ", c.Bmi0.Select(Vp9InterMvText))} " +
-                        $"bmi1 {string.Join(" ", c.Bmi1.Select(Vp9InterMvText))}: {bad} bytes differ, first {first}");
+                Console.WriteLine($"{path}: {n} blocks ({scen.Count} frame setups, {pixels} predicted pixels): {scaled} with a scaled reference, " +
+                    $"{sub8} below 8x8, {compound} compound; filters {string.Join("/", perFilter)}; {badCases} blocks differ from libvpx");
             }
-            Console.WriteLine($"{n} blocks ({scen.Count} frame setups, {pixels} predicted pixels): {scaled} with a scaled reference, " +
-                $"{sub8} below 8x8, {compound} compound; filters {string.Join("/", perFilter)}; {badCases} blocks differ from libvpx");
             True(failures.Count == 0, string.Join("\n", failures));
         }
         finally { ReleaseAccelerator(ctx, acc); }
