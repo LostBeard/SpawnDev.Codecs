@@ -525,6 +525,62 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
+    /// <summary>
+    /// The TypedArray (browser) overloads: a ComfyUI RGBA WebM decoded packet by packet from JS Uint8Arrays (colour and
+    /// alpha streams) gives libvpx's pictures, returned as JS Uint8Arrays.
+    /// </summary>
+    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL")]
+    public async Task Vp9DecoderGpu_TypedArrayOverloads_MatchLibvpx()
+    {
+        if (!OperatingSystem.IsBrowser())
+            throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            using var dec = new Vp9DecoderGpu(acc);
+            await RunVp9TypedArrayAsync(acc, dec);
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("browser")]
+    private static async Task RunVp9TypedArrayAsync(Accelerator acc, Vp9DecoderGpu dec)
+    {
+        const string name = "comfyui_vp9_rgba_512x320_crf32.webm";
+        byte[] file = ReadEmbedded(Vp9ComfyPrefix + name);
+        string[] colour = Md5Lines(ReadEmbedded(Vp9ComfyPrefix + name + ".md5"));
+        string[] alpha = Md5Lines(ReadEmbedded(Vp9ComfyPrefix + name + ".alpha.md5"));
+        var failures = new List<string>();
+        int n = 0;
+        foreach (var (packet, alphaPacket) in Vp9Packets.ReadFileWithAlpha(file))
+        {
+            using var jPacket = new SpawnDev.SpawnJS.JSObjects.Uint8Array(packet.Length);
+            jPacket.Set(packet);
+            using var frame = await dec.DecodePacketAsync(jPacket);
+            SpawnDev.SpawnJS.JSObjects.Uint8Array? jAlphaPlane = null;
+            if (alphaPacket != null)
+            {
+                using var jAlpha = new SpawnDev.SpawnJS.JSObjects.Uint8Array(alphaPacket.Length);
+                jAlpha.Set(alphaPacket);
+                jAlphaPlane = await dec.DecodeAlphaPacketAsync(jAlpha);
+            }
+            using (jAlphaPlane)
+            {
+                if (frame == null) continue;
+                if (n >= colour.Length) { failures.Add("more pictures than libvpx"); break; }
+                // the TEST's terminal compares
+                if (Md5Hex(frame.Planes.ReadBytes()) != colour[n]) failures.Add($"picture {n + 1}: colour differs");
+                if (jAlphaPlane == null) failures.Add($"picture {n + 1}: no alpha");
+                else if (Md5Hex(jAlphaPlane.ReadBytes()) != alpha[n]) failures.Add($"picture {n + 1}: alpha differs");
+                n++;
+            }
+        }
+        if (n != colour.Length) failures.Add($"{n} pictures, libvpx {colour.Length}");
+        Console.WriteLine($"{acc.AcceleratorType}: {n} pictures through the TypedArray overloads");
+        True(failures.Count == 0, string.Join("\n", failures));
+    }
+
     /// <summary>One libvpx_ref -c record: stage 0 = the context a frame loads, stage 1 = after its compressed header
     /// (+ tx_mode, reference_mode, comp_fixed_ref, comp_var_ref[0..1]).</summary>
     private sealed record Vp9CtxRecord(int Stage, byte[] Context, byte[] Extra);

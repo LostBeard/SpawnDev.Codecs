@@ -10,11 +10,41 @@
 // accelerator until the caller takes them (one readback per output frame for the managed overload, none for ArrayView).
 // One output frame per packet, as libvpx: the packet's last shown frame (a show_existing_frame shows a reference).
 
+using System.Runtime.Versioning;
 using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.ILGPU;
+using SpawnDev.SpawnJS.JSObjects;
 
 namespace SpawnDev.Codecs.Video.Vp9.Decoder;
+
+/// <summary>
+/// A decoded VP9 picture as JS <see cref="Uint8Array"/>s (browser): tight planar Y, U, V in <see cref="Planes"/>, and the
+/// WebM alpha plane (Width x Height) in <see cref="Alpha"/> when there is one. The caller disposes it; the pictures never
+/// entered the .NET heap.
+/// </summary>
+[SupportedOSPlatform("browser")]
+public sealed class Vp9VideoFrameJS : IDisposable
+{
+    /// <summary>Size and chroma layout.</summary>
+    public Vp9PictureFormat Format { get; }
+    /// <summary>Y, then U, then V (<see cref="Vp9PictureFormat.PlanarBytes"/> bytes).</summary>
+    public Uint8Array Planes { get; }
+    /// <summary>The alpha plane, or null.</summary>
+    public Uint8Array? Alpha { get; }
+
+    internal Vp9VideoFrameJS(Vp9PictureFormat format, Uint8Array planes, Uint8Array? alpha = null)
+    {
+        Format = format; Planes = planes; Alpha = alpha;
+    }
+
+    /// <summary>Dispose the arrays.</summary>
+    public void Dispose()
+    {
+        Planes.Dispose();
+        Alpha?.Dispose();
+    }
+}
 
 /// <summary>Size and chroma layout of a decoded VP9 picture.</summary>
 /// <param name="Width">Luma width (crop size).</param>
@@ -119,6 +149,42 @@ public sealed class Vp9DecoderGpu : IDisposable
         if (dst.Length < format.PlanarBytes) throw new ArgumentException($"dst holds {dst.Length} bytes, the picture needs {format.PlanarBytes}.", nameof(dst));
         Pack(_pipe, show, dst);
         return format;
+    }
+
+    /// <summary>
+    /// Decode one packet held in a JS typed array (browser accelerators only). The compressed packet is read into .NET
+    /// for the host's metadata parse (frame headers, superframe index, tile sizes); the decoded picture comes back as a
+    /// JS <see cref="Uint8Array"/> and never enters the .NET heap. The caller disposes the result. Returns null when the
+    /// packet shows nothing.
+    /// </summary>
+    /// <exception cref="NotSupportedException">The accelerator is not a browser accelerator.</exception>
+    [SupportedOSPlatform("browser")]
+    public async Task<Vp9VideoFrameJS?> DecodePacketAsync(TypedArray packet)
+    {
+        ArgumentNullException.ThrowIfNull(packet);
+        int show = await DecodePacketCoreAsync(_pipe, packet.ReadBytes());
+        if (show < 0) return null;
+        var format = Format(_pipe, show);
+        using var dst = _acc.Allocate1D<byte>(format.PlanarBytes);
+        Pack(_pipe, show, dst.View);
+        return new Vp9VideoFrameJS(format, await DeviceTransfer.DownloadUint8ArrayAsync(dst.View, format.PlanarBytes));
+    }
+
+    /// <summary>
+    /// Decode one packet of the WebM alpha stream held in a JS typed array (browser accelerators only); returns its
+    /// picture's luma (the alpha plane, Width x Height) as a JS <see cref="Uint8Array"/>, or null. The caller disposes it.
+    /// </summary>
+    [SupportedOSPlatform("browser")]
+    public async Task<Uint8Array?> DecodeAlphaPacketAsync(TypedArray alphaPacket)
+    {
+        ArgumentNullException.ThrowIfNull(alphaPacket);
+        _alphaPipe ??= new Vp9DecodePipeline(_acc);
+        int show = await DecodePacketCoreAsync(_alphaPipe, alphaPacket.ReadBytes());
+        if (show < 0) return null;
+        var l = _alphaPipe.Frames.Layout(show);
+        using var dst = _acc.Allocate1D<byte>(Format(_alphaPipe, show).PlanarBytes);
+        Pack(_alphaPipe, show, dst.View);
+        return await DeviceTransfer.DownloadUint8ArrayAsync(dst.View, (long)l.Width * l.Height);   // the luma plane comes first
     }
 
     private async Task<int> DecodePacketCoreAsync(Vp9DecodePipeline pipe, ReadOnlyMemory<byte> packet)

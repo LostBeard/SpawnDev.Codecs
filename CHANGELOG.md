@@ -39,9 +39,16 @@
   6 ComfyUI SaveWEBM files and 2 synthetic header fixtures (5112 frames before and after the loop filter, 5000
   output frames == the vectors' .md5), at every stage (headers, contexts, mode info, counts, adaptation). Test oracle:
   scripts/video/libvpx_ref (libvpx built from source with stage hooks).
-- NOT yet: CUDA / OpenCL / WebGPU / Wasm runs, the TypedArray (browser) overload, profiles 1..3 (4:4:4, 10/12-bit),
-  and speed: parse and reconstruction run one thread per tile column today, slow on a GPU; the parallel
-  reconstruction pass is next. `Vp9KeyframeDecoderGpu` (keyframes only, sizes multiple of 64) is unchanged.
+- Reconstruction runs in two passes: inter blocks of every superblock at once, then intra blocks on the superblock
+  wavefront (row + col); the loop filter runs on its own wavefront.
+- OpenCL: every VP9 test passes (332 public-API pictures). CUDA: sizes whose plane boundaries split a warp read back
+  wrong (66x66, 226x198): an ILGPU PTX bug (the thread index was treated as warp-uniform, `bra.uni`), not the decoder;
+  repro `IlgpuDivergentReturnRepro_PackPlanes_MatchesHost`, fix pending in SpawnDev.ILGPU.
+- Browser: `DecodePacketAsync(TypedArray)` -> `Vp9VideoFrameJS` (planes as a JS Uint8Array) and
+  `DecodeAlphaPacketAsync(TypedArray)`; the compressed packet is read into .NET for the host's metadata parse, the
+  pictures never enter the .NET heap. Test `Vp9DecoderGpu_TypedArrayOverloads_MatchLibvpx` (browser lanes; not run yet).
+- NOT yet: WebGPU / Wasm runs, profiles 1..3 (4:4:4, 10/12-bit), GPU speed numbers. `Vp9KeyframeDecoderGpu`
+  (keyframes only, sizes multiple of 64) is unchanged.
 
 ### 1.0.2-local.9: MP3 decoder, MP3 encoder short blocks + bit reservoir (2026-11-08)
 - New `Audio.Mp3.Mp3DecoderGpu` (`DecodeAsync` interleaved float32, `DecodeFloatAsync` planar, `WarmUpAsync`): a port
