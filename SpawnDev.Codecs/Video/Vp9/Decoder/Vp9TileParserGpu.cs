@@ -26,7 +26,7 @@ public sealed class Vp9TileParserGpu : IDisposable
     public Vp9TileParserGpu(Accelerator accelerator)
     {
         _acc = accelerator ?? throw new ArgumentNullException(nameof(accelerator));
-        _tables = _acc.Allocate1D(Vp9T.Packed);
+        _tables = _acc.Allocate1D(Vp9PScan.Tables);
         _args = _acc.Allocate1D<int>(Vp9PArg.Count);
         _lastSeg = 0;
         _curSeg = 1;
@@ -80,7 +80,7 @@ public sealed class Vp9TileParserGpu : IDisposable
             _mi = _acc.Allocate1D<int>((long)_maxMiCount * (Vp9Mi.Stride + 1));
             _sb = _acc.Allocate1D<int>((long)_sbCount * Vp9PLayout.SbStride);
             _dq = _acc.Allocate1D<int>((long)_sbCount * _dqStride);
-            _work = _acc.Allocate1D<int>(WorkSize(_maxMiCount, _tileColsAlloc));
+            _work = _acc.Allocate1D<int>(WorkSize(_tileColsAlloc));
             _maps = _acc.Allocate1D<int>(2L * _maxMiCount + (long)Vp9HeaderReader.FrameBuffers * _maxMiCount * Vp9PLayout.MvStride);
             _counts = _acc.Allocate1D<int>((long)_tileColsAlloc * Vp9Cnt.Size);
             _mi.MemSetToZero();
@@ -94,9 +94,11 @@ public sealed class Vp9TileParserGpu : IDisposable
     /// <summary>VP9's widest frame (65536) in aligned mi columns.</summary>
     private const int MaxAlignedCols = 65536 / 8;
 
-    /// <summary>Above entropy contexts (3 planes x 2 per mi column) + above partition contexts + per-thread scratch + status words.</summary>
-    private static long WorkSize(int maxMiCount, int tileCols) =>
-        3L * 2 * MaxAlignedCols + MaxAlignedCols + (long)tileCols * Vp9PLayout.ScratchStride + 64;
+    /// <summary>
+    /// Above entropy contexts (3 planes x 2 per mi column) + status words. The rest of the parse thread's context state is
+    /// in its local memory (<see cref="Vp9PLocal"/>).
+    /// </summary>
+    private static long WorkSize(int tileCols) => 3L * 2 * MaxAlignedCols + tileCols;
 
     /// <summary>
     /// libvpx vp9_setup_past_independence clears both segmentation maps (call after <see cref="Vp9HeaderReader.ReadFrame"/>).
@@ -146,11 +148,8 @@ public sealed class Vp9TileParserGpu : IDisposable
         a[Vp9PArg.CurSegOffset] = SegOffset(_curSeg);
         a[Vp9PArg.CurMvOffset] = MvOffset(h.NewBuffer);
         a[Vp9PArg.PrevMvOffset] = prevBuffer >= 0 ? MvOffset(prevBuffer) : 0;
-        int aboveCtx = 0, abovePart = 3 * 2 * _alignedCols, scratch = abovePart + _alignedCols, status = scratch + tileCols * Vp9PLayout.ScratchStride;
-        a[Vp9PArg.AboveCtxOffset] = aboveCtx;
-        a[Vp9PArg.AbovePartOffset] = abovePart;
-        a[Vp9PArg.ScratchOffset] = scratch;
-        a[Vp9PArg.StatusOffset] = status;
+        int aboveCtx = 3 * 2 * _alignedCols;   // above entropy contexts from 0, then the status words
+        a[Vp9PArg.StatusOffset] = aboveCtx;
         a[Vp9PArg.DqStride] = _dqStride;
         a[Vp9PArg.DqU] = _dqU;
         a[Vp9PArg.DqV] = _dqV;
@@ -178,8 +177,10 @@ public sealed class Vp9TileParserGpu : IDisposable
         _args.View.CopyFromCPU(a);   // frame metadata scalars
         _dq!.View.SubView(0, (long)((h.MiCols + 7) >> 3) * ((h.MiRows + 7) >> 3) * _dqStride).MemSetToZero();
         _counts!.View.SubView(0, (long)tileCols * Vp9Cnt.Size).MemSetToZero();
-        _work!.View.SubView(0, scratch).MemSetToZero();   // above entropy + partition contexts (decode_tiles' memsets)
-        _parse(tileCols, frame, _args.View, contexts.Contexts, _tables.View, _mi!.View, _sb!.View, _dq.View, _work.View, _maps!.View,
+        // decode_tiles' memset of the above entropy contexts (the above partition contexts are cleared in the kernel,
+        // in each thread's local memory)
+        _work!.View.SubView(0, aboveCtx).MemSetToZero();
+        _parse(tileCols, frame, _args.View, contexts.Contexts, _tables.View, _mi!.View, _sb!.View, _dq.View, _work!.View, _maps!.View,
             _counts.View, contexts.Results);
     }
 
@@ -190,11 +191,7 @@ public sealed class Vp9TileParserGpu : IDisposable
     }
 
     /// <summary>The per tile column status words of the last parse (0 = ok; a tiny readback).</summary>
-    internal async Task<int[]> ReadStatusAsync()
-    {
-        int status = 3 * 2 * _alignedCols + _alignedCols + TileCols * Vp9PLayout.ScratchStride;
-        return await _work!.View.SubView(status, TileCols).CopyToHostAsync();
-    }
+    internal async Task<int[]> ReadStatusAsync() => await _work!.View.SubView(3 * 2 * _alignedCols, TileCols).CopyToHostAsync();
 
     /// <inheritdoc/>
     public void Dispose()

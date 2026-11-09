@@ -26,8 +26,7 @@ internal static class Vp9PArg
         AllowHp = 7, UsePrevMvs = 8, Lossless = 9, SegEnabled = 10, SegUpdateMap = 11, SegTemporal = 12,
         SegTree = 13, SegPred = 20, SegMask = 23, SegData = 31, SignBias = 63, Dequant = 67, SbCols = 99,
         GridOffset = 101, LastSegOffset = 102, CurSegOffset = 103, CurMvOffset = 104, PrevMvOffset = 105,
-        AboveCtxOffset = 106, AbovePartOffset = 107, ScratchOffset = 108, DqStride = 109, DqU = 110, DqV = 111,
-        StatusOffset = 112, SsX = 113, SsY = 114,
+        DqStride = 109, DqU = 110, DqV = 111, StatusOffset = 112, SsX = 113, SsY = 114,
         TileBuf = 128;
     public const int Count = TileBuf + 2 * 4 * 64;
 }
@@ -43,10 +42,59 @@ internal static class Vp9PLayout
     public const int SbPartitions = 0, SbEobY = 85, SbEobU = 85 + 256, SbEobV = 85 + 512, SbBlockCount = 85 + 768, SbBlocks = SbBlockCount + 1;
     public const int BlkRec = 0, BlkBwl = 1, BlkBhl = 2, BlkDqY = 3, BlkDqU = 4, BlkDqV = 5, BlkEobY = 6, BlkEobU = 7, BlkEobV = 8, BlkStride = 9;
     public const int SbStride = SbBlocks + 64 * BlkStride;
-    /// <summary>Per tile column thread (scratch): left entropy ctx 3 x 16, left partition ctx 8, token cache 1024, stack.</summary>
-    public const int ScLeftCtx = 0, ScLeftPart = 48, ScTokenCache = 56, ScStack = 56 + 1024, StackEntries = 16, ScratchStride = ScStack + 4 * StackEntries;
+    /// <summary>Partition stack entries (row, col, bsize, n4 log2) of the per thread local stack.</summary>
+    public const int StackEntries = 16;
     /// <summary>Per mi position (maps buffer, MV regions): ref_frame[0], ref_frame[1], mv[0], mv[1].</summary>
     public const int MvStride = 4;
+}
+
+/// <summary>
+/// The parse thread's local memory (one int array per tile column thread), so the hot loop's read-after-write state
+/// does not go through device memory: the above partition contexts (mi columns relative to the tile start; a tile column
+/// is at most 64 superblocks = 512 mi wide), the left entropy and partition contexts of the superblock row, and the
+/// token cache (libvpx token_cache, by coefficient position). 1592 ints + the 64-int partition stack = 6.5 KB, inside
+/// WGSL's 8192-byte limit on a function's variables (the above entropy contexts, 3 x 1024 more, stay in the work buffer).
+/// </summary>
+internal static class Vp9PLocal
+{
+    public const int AbovePart = 0, LeftCtx = 512, LeftPart = LeftCtx + 48, TokenCache = LeftPart + 8, Ints = TokenCache + 1024;
+}
+
+/// <summary>
+/// Coefficient scan tables packed for the token loop: per (tx_size, tx_type) and scan index c in [0, 16 << 2 tx], one int
+/// <c>scan[c] | neighbors[2c] &lt;&lt; 10 | neighbors[2c + 1] &lt;&lt; 20</c> (libvpx vp9_scan_orders; the entry at the end
+/// carries the neighbours' padding), so one load per coefficient gives its position and the next context's neighbours.
+/// Appended to the parse kernel's table buffer after <see cref="Vp9T.Packed"/>.
+/// </summary>
+internal static class Vp9PScan
+{
+    /// <summary>Offset of the packed table of (<paramref name="tx"/>, <paramref name="type"/>) in <see cref="Tables"/>.</summary>
+    public static int Offset(int tx, int type) =>
+        Vp9T.Count + (tx == 0 ? 0 : tx == 1 ? 4 * 17 : tx == 2 ? 4 * (17 + 65) : 4 * (17 + 65 + 257)) + type * ((16 << (2 * tx)) + 1);
+
+    public const int Ints = 4 * (17 + 65 + 257 + 1025);
+
+    /// <summary><see cref="Vp9T.Packed"/> followed by the packed scans (built once from libvpx's constant tables).</summary>
+    public static readonly int[] Tables = Build();
+
+    private static int[] Build()
+    {
+        var t = Vp9T.Packed;
+        var all = new int[Vp9T.Count + Ints];
+        Array.Copy(t, all, Vp9T.Count);
+        for (int tx = 0; tx < 4; tx++)
+            for (int type = 0; type < 4; type++)
+            {
+                int n = 16 << (2 * tx), scan = Vp9ParseKernels.ScanOffset(tx, type), nb = Vp9ParseKernels.NeighborsOffset(tx, type);
+                for (int c = 0; c <= n; c++)
+                    all[Offset(tx, type) + c] = (c < n ? t[scan + c] : 0) | (t[nb + 2 * c] << 10) | (t[nb + 2 * c + 1] << 20);
+                // the token loop computes the band (Vp9ParseKernels.CoefBand) instead of loading it
+                int bands = tx == 0 ? Vp9T.CoefbandTrans4x4 : Vp9T.CoefbandTrans8x8plus;
+                for (int c = 0; c < n; c++)
+                    if (Vp9ParseKernels.CoefBand(tx, c) != t[bands + c]) throw new InvalidOperationException($"VP9 coefficient band {tx}/{c}");
+            }
+        return all;
+    }
 }
 
 /// <summary>libvpx FRAME_COUNTS layout (unsigned int arrays in struct order), one block per tile column.</summary>
@@ -72,7 +120,35 @@ internal static partial class Vp9ParseKernels
 
     // ---------------------------------------------------------------- bool reading
 
-    private static int Read(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, int prob) => Vp8BoolDecoderGpu.DecodeBool(ref r, d, prob);
+    /// <summary>
+    /// vpx_read (libvpx vpx_dsp/bitreader.h), the same arithmetic as <see cref="Vp8BoolDecoderGpu.DecodeBool"/> with the
+    /// renormalising shift (vpx_norm[range]) from a leading zero count: range is in [1, 255] here, so the shift is
+    /// lzcnt32(range) - 24, one instruction instead of a chain of compares on the parse thread's every bool.
+    /// </summary>
+    private static int Read(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, int prob)
+    {
+        uint split = 1u + (((r.Range - 1u) * (uint)prob) >> 8);
+        if (r.Count < 0) Vp8BoolDecoderGpu.Fill(ref r, d);
+        ulong bigsplit = (ulong)split << (Vp8BoolDecoderGpu.BdValueSize - 8);
+        uint range;
+        int bit;
+        if (r.Value >= bigsplit)
+        {
+            range = r.Range - split;
+            r.Value -= bigsplit;
+            bit = 1;
+        }
+        else
+        {
+            range = split;
+            bit = 0;
+        }
+        int shift = System.Numerics.BitOperations.LeadingZeroCount(range) - 24;
+        r.Range = range << shift;
+        r.Value <<= shift;
+        r.Count -= shift;
+        return bit;
+    }
 
     /// <summary>vpx_read_tree: tree and probabilities are int views (packed tables / context).</summary>
     private static int ReadTree(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, ArrayView<int> tree, int treeAt, ArrayView<int> probs, int probAt)

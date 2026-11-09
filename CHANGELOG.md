@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### VP9 decoder: tile parse coefficient loop on local memory (2026-11-09)
+- The serial tile parse thread spends 89% of its bool decodes on coefficient tokens (ComfyUI files: 87k of 98k bools per
+  frame, `Plans/PLAN-VP9-Decoder-GPU-Speed.md` step S3). Its coefficient loop (`Vp9ParseKernels.DecodeCoefs`) now
+  waits on far fewer device loads per coefficient:
+  - one packed scan entry per coefficient (`Vp9PScan`: position and the next context's two neighbours), fetched one
+    coefficient ahead, instead of separate scan, neighbour and band loads;
+  - the band computed (`CoefBand`, checked against libvpx's band tables when the table is built);
+  - the three node probabilities of a context loaded together;
+  - the token cache in the thread's local memory.
+- The left entropy contexts, the above / left partition contexts and the partition stack also moved to the thread's
+  local memory (`Vp9PLocal`, 6.5 KB; above partition contexts tile-relative, a tile column is at most 64 superblocks).
+  The above entropy contexts stay in the work buffer, so the locals fit WGSL's 8192-byte limit on a function's
+  variables.
+- The bool read's renormalising shift comes from a leading zero count instead of a compare chain. Dequant factors are
+  read once per plane of a block.
+- Bit-exact with libvpx on the CPU accelerator (EveryFrame 311 files / 5112 frames, Parse_ModeInfo with counts,
+  PublicApi); red-checked. CPU accelerator tile parse on the ComfyUI files: 3.57 -> 2.59 ms/frame. ParseKernel WGSL
+  87.1 -> 72.9 MB.
+
 ### VP9 decoder: inter reconstruction per 4x4 unit and per transform block (2026-11-09)
 - Inter reconstruction no longer runs one thread per superblock (`Plans/PLAN-VP9-Decoder-GPU-Speed.md` step S2, inter
   half). `Vp9ReconKernels.InterPassKernel` is replaced by two launches, before the intra wavefront:
