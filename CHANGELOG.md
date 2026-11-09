@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 1.0.2-local.10 (2026-11-09)
+Everything below down to local.9:
+- the full VP9 decoder (bit-exact with libvpx on CPU, CUDA and OpenCL; WebGPU / Wasm pending);
+- codec constructors that compile nothing (no browser freeze), WarmUpAsync on every codec;
+- the FLAC encoder writing the same file on every backend;
+- the VP9 encoder superframe-marker fix;
+- SpawnDev.ILGPU 5.4.20.
+
 ### SpawnDev.ILGPU 5.4.20; the FLAC encoder writes the same file on every backend (2026-11-09)
 - SpawnDev.ILGPU 5.4.20 (stable): Data's fix for the CUDA divergent-warp bug (a branch on the thread index was emitted
   as `bra.uni`), which broke VP9 readback on odd sizes. CUDA (RTX 4070): every VP9 test passes now, including
