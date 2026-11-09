@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Full VP9 decoder: `Video.Vp9.Decoder.Vp9DecoderGpu` (libvpx v1.17.0 port, BSD-3-Clause) (2026-11-08)
+- Profile 0 (8-bit 4:2:0) with every feature libvpx's profile-0 conformance vectors use: inter frames, compound and
+  scaled references (resizing streams), all interpolation filters, tiles, segmentation, lossless, hidden /
+  show-existing / intra-only frames, superframes, backward adaptation. Plus WebM alpha (BlockAdditional, AlphaMode 1),
+  as ComfyUI's SaveWEBM writes for RGBA input.
+- API: `DecodeFileAsync(byte[])` (WebM / Matroska first V_VP9 track, or IVF) yields `Vp9VideoFrame` (tight planar
+  Y, U, V + optional alpha); `DecodePacketAsync(packet)` (one readback per picture) and
+  `DecodePacketAsync(packet, ArrayView1D<byte>)` (picture written on the accelerator). One picture per packet, as
+  libvpx. Supporting types: `Vp9PictureFormat`, `Vp9Packets` (superframe split, `ReadFile` / `ReadFileWithAlpha`),
+  `MatroskaFrame.BlockAdditional`.
+- Everything that touches coded data is a kernel: compressed header, tile parse (one thread per tile column),
+  reconstruction (one thread per tile column), loop filter (superblock wavefront), adaptation.
+- Verified on the CPU accelerator, bit for bit against libvpx: every frame of 303 libvpx vp90-2 conformance vectors,
+  6 ComfyUI SaveWEBM files and 2 synthetic header fixtures (5112 frames before and after the loop filter, 5000
+  output frames == the vectors' .md5), at every stage (headers, contexts, mode info, counts, adaptation). Test oracle:
+  scripts/video/libvpx_ref (libvpx built from source with stage hooks).
+- NOT yet: CUDA / OpenCL / WebGPU / Wasm runs, the TypedArray (browser) overload, profiles 1..3 (4:4:4, 10/12-bit),
+  and speed: parse and reconstruction run one thread per tile column today, slow on a GPU; the parallel
+  reconstruction pass is next. `Vp9KeyframeDecoderGpu` (keyframes only, sizes multiple of 64) is unchanged.
+
 ### 1.0.2-local.9: MP3 decoder, MP3 encoder short blocks + bit reservoir (2026-11-08)
 - New `Audio.Mp3.Mp3DecoderGpu` (`DecodeAsync` interleaved float32, `DecodeFloatAsync` planar, `WarmUpAsync`): a port
   of minimp3 (CC0) as ILGPU kernels. MPEG-1 / 2 / 2.5 Layer III, mono / stereo, M/S and intensity stereo, short and

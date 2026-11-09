@@ -61,11 +61,12 @@ vector passes.
 - [x] S2 parse kernel: intra AND inter frames (mode info, MV prediction, tokens, counts) == libvpx on all 5112 frames
       (2026-11-08, Vp9ParseKernels*.cs, Vp9TileParserGpu.cs; S4's parse half is in here).
 - [x] S4 (bitstream half) backward adaptation: own chain == libvpx on every frame (c300131).
-- [ ] S3 intra recon + inverse transforms + loop filter: keyframes MD5-exact (00 quantizer set frame 1, 02 / 03 sizes).
-- [ ] S4 inter parse (refs, modes, MV prediction + decode, interp filters, compound, sub-8x8) + inter recon + adaptation:
+- [x] S3 intra recon + inverse transforms + loop filter: keyframes MD5-exact (00 quantizer set frame 1, 02 / 03 sizes).
+- [x] S4 inter parse (refs, modes, MV prediction + decode, interp filters, compound, sub-8x8) + inter recon + adaptation:
       all frames of 00 / 02 / 03 / 06 / 07.
-- [ ] S5 tiles (08), segmentation (15, deltaq), lf deltas, skip (19), superframes (20), show-existing (17), intra-only (16).
-- [ ] S6 scaled references: resize vectors (05, 14, 18, 21), SVC (22).
+- [x] S5 tiles (08), segmentation (15, deltaq), lf deltas, skip (19), superframes (20), show-existing (17), intra-only (16).
+- [x] S6 scaled references: resize vectors (05, 14, 18, 21), SVC (22).
+- [x] (2026-11-08, 390bd5d) S3..S6: every frame of all 303 profile-0 vectors + 6 ComfyUI files == libvpx on CPU; WebM alpha fb61b7b.
 - [ ] S7 every backend (CPU, Velocity, CUDA, OpenCL, WebGPU, Wasm; WebGL where its limits allow), ComfyUI files, BBB.
 - [ ] S8 performance pass (frames / s vs libvpx single-thread and FFmpeg, logged in _TestStats).
 - [ ] S9 public API + README + CHANGELOG; replace `Vp9KeyframeDecoderGpu`'s internals (it rejects sizes that are not
