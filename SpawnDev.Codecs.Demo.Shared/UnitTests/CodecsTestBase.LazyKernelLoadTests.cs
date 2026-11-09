@@ -78,12 +78,20 @@ public abstract partial class CodecsTestBase
             long flacEncWarm = await Compiled(flacEnc.WarmUpAsync);
             long mp3Warm = await Compiled(mp3.WarmUpAsync);
             long opusWarm = await Compiled(() => OggOpusEncoder.WarmUpAsync(acc));
-            True(flacDecWarm > 0, "FlacDecoderGpu.WarmUpAsync compiled no kernel");
-            True(flacEncWarm > 0, "FlacEncoderGpu.WarmUpAsync compiled no kernel");
-            True(mp3Warm > 0, "Mp3DecoderGpu.WarmUpAsync compiled no kernel");
-            True(opusWarm > 0, "OggOpusEncoder.WarmUpAsync compiled no kernel");
-            long vp9Warm = await Compiled(vp9.WarmUpAsync);
-            True(vp9Warm >= 10, $"Vp9DecoderGpu.WarmUpAsync compiled {vp9Warm} kernels; the decode uses 10");
+            string warmCounts = $"{acc.AcceleratorType}: compiled by warm-ups: FLAC decoder {flacDecWarm}, FLAC encoder {flacEncWarm}, " +
+                $"MP3 decoder {mp3Warm}, Ogg Opus {opusWarm}; constructors {Count() - c0 - flacDecWarm - flacEncWarm - mp3Warm - opusWarm}";
+            Console.WriteLine(warmCounts);
+            True(flacDecWarm > 0, "FlacDecoderGpu.WarmUpAsync compiled no kernel. " + warmCounts);
+            True(flacEncWarm > 0, "FlacEncoderGpu.WarmUpAsync compiled no kernel. " + warmCounts);
+            True(mp3Warm > 0, "Mp3DecoderGpu.WarmUpAsync compiled no kernel. " + warmCounts);
+            True(opusWarm > 0, "OggOpusEncoder.WarmUpAsync compiled no kernel. " + warmCounts);
+            // The VP9 decoder's kernels are GiantShader on the browser GPU backends (Tint can take Chrome's GPU process to
+            // many GB): its warm-up is checked on the desktop and Wasm lanes only. Its constructor check above runs everywhere.
+            if (acc.AcceleratorType is not (AcceleratorType.WebGPU or AcceleratorType.WebGL))
+            {
+                long vp9Warm = await Compiled(vp9.WarmUpAsync);
+                True(vp9Warm >= 10, $"Vp9DecoderGpu.WarmUpAsync compiled {vp9Warm} kernels; the decode uses 10");
+            }
 
             // real work after the warm-ups: a FLAC encode at another level + decode both ways, an Opus encode from int16
             // and float with the already constructed encoder; all kernels were loaded by the warm-ups
@@ -141,24 +149,36 @@ public abstract partial class CodecsTestBase
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
-            long imageAfter = await Compiled(async () =>
+            // per step, so a failure names the codec whose warm-up missed a kernel
+            var imageSteps = new List<string>();
+            async Task Step(string name, Func<Task> work)
             {
-                var bmp = await bmpEnc.EncodeAsync(rgba, w, h);
-                True((await bmpDec.DecodeAsync(bmp)).Pixels.AsSpan().SequenceEqual(rgba), "BMP round trip after the warm-ups is not lossless");
-                var gif = await gifEnc.EncodeAsync(rgba, w, h);
-                await gifDec.DecodeAsync(gif);
-                var jpeg = await jpegEnc.EncodeAsync(rgba, w, h);
-                await jpegDec.DecodeAsync(jpeg);
-                var png = await pngEnc.EncodeAsync(rgba, w, h);
-                True((await pngDec.DecodeAsync(png)).Pixels.AsSpan().SequenceEqual(rgba), "PNG round trip after the warm-ups is not lossless");
-                var lossless = await webpLossless.EncodeAsync(rgba, w, h);
-                True((await webpDec.DecodeAsync(lossless)).Pixels.AsSpan().SequenceEqual(rgba), "WebP lossless round trip after the warm-ups is not lossless");
-                var lossy = await webpLossy.EncodeAsync(rgba, w, h);
-                await webpDec.DecodeAsync(lossy);
-                foreach (var format in new[] { BcnFormat.Bc1, BcnFormat.Bc7 })
-                    await bcnDec.DecodeAsync(await bcnEnc.EncodeAsync(rgba, w, h, format), format, w, h);
-            });
-            Equal(0L, imageAfter, "kernels compiled by image work after the warm-ups");
+                long n = await Compiled(work);
+                if (n != 0) imageSteps.Add($"{name}: {n}");
+            }
+            byte[] bmp = null!, gif = null!, jpeg = null!, png = null!, lossless = null!, lossy = null!;
+            await Step("BmpEncoderGpu.EncodeAsync", async () => bmp = await bmpEnc.EncodeAsync(rgba, w, h));
+            await Step("BmpDecoderGpu.DecodeAsync", async () =>
+                True((await bmpDec.DecodeAsync(bmp)).Pixels.AsSpan().SequenceEqual(rgba), "BMP round trip after the warm-ups is not lossless"));
+            await Step("GifEncoderGpu.EncodeAsync", async () => gif = await gifEnc.EncodeAsync(rgba, w, h));
+            await Step("GifDecoderGpu.DecodeAsync", async () => await gifDec.DecodeAsync(gif));
+            await Step("JpegEncoderGpu.EncodeAsync", async () => jpeg = await jpegEnc.EncodeAsync(rgba, w, h));
+            await Step("JpegDecoderGpu.DecodeAsync", async () => await jpegDec.DecodeAsync(jpeg));
+            await Step("PngEncoderGpu.EncodeAsync", async () => png = await pngEnc.EncodeAsync(rgba, w, h));
+            await Step("PngDecoderGpu.DecodeAsync", async () =>
+                True((await pngDec.DecodeAsync(png)).Pixels.AsSpan().SequenceEqual(rgba), "PNG round trip after the warm-ups is not lossless"));
+            await Step("WebPLosslessEncoderGpu.EncodeAsync", async () => lossless = await webpLossless.EncodeAsync(rgba, w, h));
+            await Step("WebPDecoderGpu.DecodeAsync (lossless)", async () =>
+                True((await webpDec.DecodeAsync(lossless)).Pixels.AsSpan().SequenceEqual(rgba), "WebP lossless round trip after the warm-ups is not lossless"));
+            await Step("WebPLossyEncoderGpu.EncodeAsync", async () => lossy = await webpLossy.EncodeAsync(rgba, w, h));
+            await Step("WebPDecoderGpu.DecodeAsync (lossy)", async () => await webpDec.DecodeAsync(lossy));
+            foreach (var format in new[] { BcnFormat.Bc1, BcnFormat.Bc7 })
+            {
+                byte[] blocks = null!;
+                await Step($"BcnEncoderGpu.EncodeAsync ({format})", async () => blocks = await bcnEnc.EncodeAsync(rgba, w, h, format));
+                await Step($"BcnDecoderGpu.DecodeAsync ({format})", async () => await bcnDec.DecodeAsync(blocks, format, w, h));
+            }
+            True(imageSteps.Count == 0, $"{acc.AcceleratorType}: kernels compiled by image work after the warm-ups: " + string.Join(", ", imageSteps));
         }
         finally
         {

@@ -294,7 +294,7 @@ public abstract partial class CodecsTestBase
     /// backward adaptation. Each frame starts from libvpx's loaded context (backward adaptation is S4); everything else
     /// (header state, compressed header, segmentation maps, previous-frame MVs) is ours.
     /// </summary>
-    [TestMethod(Timeout = 3600000, Category = "NotOnWebGL")]
+    [TestMethod(Timeout = 3600000, Category = "NotOnWebGL,GiantShader")]
     public async Task Vp9Parse_EveryFrame_MatchesLibvpxModeInfo()
     {
         var contextsRef = LibvpxContexts();
@@ -381,7 +381,7 @@ public abstract partial class CodecsTestBase
     /// first frame of every stream qualifies). Covers intra prediction, inverse transforms, inter prediction and their
     /// orchestration; the loop filter extends this to every frame.
     /// </summary>
-    [TestMethod(Timeout = 3600000, Category = "NotOnWebGL")]
+    [TestMethod(Timeout = 3600000, Category = "NotOnWebGL,GiantShader")]
     public async Task Vp9Decode_EveryFrame_MatchesLibvpx()
     {
         var modeInfoRef = LibvpxModeInfo();
@@ -452,7 +452,7 @@ public abstract partial class CodecsTestBase
     /// the ComfyUI SaveWEBM files and the vectors with the trickiest output rules (show-existing, intra-only, resizing,
     /// big superframes, odd sizes).
     /// </summary>
-    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL")]
+    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL,GiantShader")]
     public async Task Vp9DecoderGpu_PublicApi_MatchesLibvpx()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -502,7 +502,7 @@ public abstract partial class CodecsTestBase
     /// <see cref="Vp9DecoderGpu.DecodeFileAsync"/> returns equal libvpx's (FFmpeg's libvpx-vp9 decoder, yuva420p A plane,
     /// comfyui_vp9_rgba_512x320_crf32.webm.alpha.md5), and the colour pictures still equal the .md5.
     /// </summary>
-    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL")]
+    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL,GiantShader")]
     public async Task Vp9DecoderGpu_WebMAlpha_MatchesLibvpx()
     {
         const string name = "comfyui_vp9_rgba_512x320_crf32.webm";
@@ -536,7 +536,7 @@ public abstract partial class CodecsTestBase
     /// The TypedArray (browser) overloads: a ComfyUI RGBA WebM decoded packet by packet from JS Uint8Arrays (colour and
     /// alpha streams) gives libvpx's pictures, returned as JS Uint8Arrays.
     /// </summary>
-    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL")]
+    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL,GiantShader")]
     public async Task Vp9DecoderGpu_TypedArrayOverloads_MatchLibvpx()
     {
         if (!OperatingSystem.IsBrowser())
@@ -634,7 +634,7 @@ public abstract partial class CodecsTestBase
     /// and compound references; and while no earlier frame of the stream used backward adaptation (S4), our own context
     /// handling (past-independence resets, load, store) loads exactly the context libvpx loads.
     /// </summary>
-    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL")]
+    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL,GiantShader")]
     public async Task Vp9CompressedHeader_EveryFrame_MatchesLibvpx()
     {
         var reference = LibvpxContexts();

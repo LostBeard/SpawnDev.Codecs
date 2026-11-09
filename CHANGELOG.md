@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Browser lanes: GiantShader fence for the VP9 decoder; SpawnDev.ILGPU 5.4.21-local.1 (2026-11-09)
+- SpawnDev.ILGPU 5.4.21-local.1 (Data):
+  - Wasm local reuse: the VP9 loop-filter kernel went from 68,382 to 8,300 locals, so V8 now compiles it;
+  - -0 constants keep their sign on WebGPU / WebGL / OpenCL;
+  - culture-independent code generation;
+  - accurate CUDA float exp.
+- NEW test category `GiantShader`, excluded by the WebGPU and WebGL lanes (`ExcludeCategories`). It covers the
+  tests that compile the full VP9 decode pipeline:
+  - `Vp9Parse_EveryFrame`, `Vp9Decode_EveryFrame`, `Vp9CompressedHeader_EveryFrame`;
+  - the `Vp9DecoderGpu` public API / alpha / TypedArray / own-keyframe tests;
+  - the VP9 GPU-transcode demo test.
+- Why the fence: on WebGPU, compiling these kernels lost the device (Chrome's shader compiler; earlier Codecs giant
+  kernels drove its GPU process to many GB). They still run on the desktop and Wasm lanes. The lazy-load guard skips
+  the VP9 warm-up on WebGPU / WebGL (its constructor check still runs there).
+- Guard diagnostics:
+  - the failure message lists every warm-up's compile count;
+  - the image "after the warm-ups" check names the codec step that compiled.
+- On WebGPU the guard currently reports `WebPLossyEncoderGpu.EncodeAsync: 1`. That is SpawnDev.ILGPU's internal
+  byte-fill kernel (`WebGPUMemoryBuffer.FillBytes`, the unaligned head / tail of a MemSet), which ILGPU compiles
+  synchronously on first use; reported to Data. The guard passes on CPU, CUDA, OpenCL, WebGL and Wasm.
+- Wasm: `Vp9DecoderGpu_TypedArrayOverloads_MatchLibvpx` gets past the old codegen limit but runs past PMT's 300 s
+  wait (slow decode on Wasm); to investigate.
+
 ### BCn texture codecs: constructors compile nothing (2026-11-09)
 - `BcnEncoderGpu`, `BcnDecoderGpu` and `Bc7EncoderGpu` load their kernels on first use.
   - New `WarmUpAsync` loads them awaited: browser compiles yield to the event loop.

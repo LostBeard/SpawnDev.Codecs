@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL,GiantShader")]
     public async Task GpuTranscodeDemo_Vp9_GradientFrame_RoundTripsViaGpuPair()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

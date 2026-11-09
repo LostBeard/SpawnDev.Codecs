@@ -219,7 +219,7 @@ public abstract partial class CodecsTestBase
     /// the conformance vectors) equal the encoder's reconstruction and the keyframe-only decoder's planes: the evidence
     /// that <see cref="Vp9KeyframeDecoderGpu"/> can retire in favour of the full decoder.
     /// </summary>
-    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL,GiantShader")]
     public async Task Vp9DecoderGpu_DecodesOwnKeyframeEncoder_LikeKeyframeDecoder()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();

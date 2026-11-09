@@ -18,7 +18,10 @@ namespace SpawnDev.Codecs.Demo.UnitTests;
 /// run on WebGL.)
 /// </remarks>
 // Discovery leaves out tests this lane can only skip: CpuOnly (CPU-only tests run once, in CpuCodecsTests); DesktopOnly (the Pillow / libwebp oracles need a desktop process); NotOnWebGL (WebGL has no scatter stores or atomics).
-[ExcludeCategories("CpuOnly", "DesktopOnly", "NotOnWebGL")]
+// GiantShader: tests compiling kernels whose WGSL / GLSL can drive Chrome's GPU process (Tint) to many GB and starve
+// the PC (the full VP9 decoder pipeline); they run on the desktop and Wasm lanes until screened, one at a time
+// under a GPU-process memory watchdog.
+[ExcludeCategories("CpuOnly", "DesktopOnly", "NotOnWebGL", "GiantShader")]
 public class WebGLCodecsTests : CodecsTestBase
 {
     protected override async ValueTask<(Context, Accelerator)> CreateKernelAcceleratorAsync()
