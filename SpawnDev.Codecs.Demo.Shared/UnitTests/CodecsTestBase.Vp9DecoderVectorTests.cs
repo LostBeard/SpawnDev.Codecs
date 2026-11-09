@@ -394,6 +394,7 @@ public abstract partial class CodecsTestBase
                 if (!modeInfoRef.TryGetValue(v.Name, out var want)) { failures.Add($"{v.Name}: no libvpx reference"); continue; }
                 files++;
                 using var pipe = new Vp9DecodePipeline(acc);
+                if (!OperatingSystem.IsBrowser() && int.TryParse(Environment.GetEnvironmentVariable("VP9_DEBUG_FLAGS"), out int dbg)) pipe.DebugFlags = dbg;
                 int decoded = 0, shown = 0;
                 foreach (byte[] packet in Vp9Packets.ReadFile(v.File))
                 {

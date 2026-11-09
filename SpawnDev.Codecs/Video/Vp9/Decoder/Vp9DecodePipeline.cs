@@ -76,6 +76,9 @@ internal sealed class Vp9DecodePipeline : IDisposable
         }
     }
 
+    /// <summary>Diagnostics only: see <see cref="Vp9RArg.DebugFlags"/> (tests set it from VP9_DEBUG_FLAGS).</summary>
+    internal int DebugFlags { get; set; }
+
     internal Vp9FrameContextsGpu Contexts => _contexts;
     internal Vp9TileParserGpu Parser => _parser;
     internal Vp9FrameBuffersGpu Frames => _frames;
@@ -132,6 +135,7 @@ internal sealed class Vp9DecodePipeline : IDisposable
         a[Vp9RArg.DqStride] = _parser.DqStride;
         a[Vp9RArg.DqU] = _parser.DqU;
         a[Vp9RArg.DqV] = _parser.DqV;
+        a[Vp9RArg.DebugFlags] = DebugFlags;
         var cur = _frames.Layout(h.NewBuffer);
         long curBase = _frames.Offset(h.NewBuffer);
         for (int p = 0; p < 3; p++)

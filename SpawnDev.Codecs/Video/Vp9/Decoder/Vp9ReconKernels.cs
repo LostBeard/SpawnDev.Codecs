@@ -16,7 +16,9 @@ namespace SpawnDev.Codecs.Video.Vp9.Decoder;
 internal static class Vp9RArg
 {
     public const int MiCols = 0, MiRows = 1, Log2TileCols = 2, Log2TileRows = 3, Lossless = 4, SsX = 5, SsY = 6, SbCols = 7,
-        GridOffset = 8, DqStride = 9, DqU = 10, DqV = 11;
+        GridOffset = 8, DqStride = 9, DqU = 10, DqV = 11,
+        /// <summary>Diagnostics only (0 in normal decoding): bit 0 skips inverse transforms, bit 1 skips intra prediction.</summary>
+        DebugFlags = 12;
     /// <summary>Current frame, per plane: absolute offset in the pool, stride, libvpx y_width/uv_width, y_height/uv_height.</summary>
     public const int Cur = 16;           // + plane * 4
     /// <summary>References LAST, GOLDEN, ALTREF, per plane: offset, stride, crop width, crop height.</summary>
@@ -102,6 +104,7 @@ internal static class Vp9ReconKernels
                     {
                         int mode = plane == 0 ? mi[b + Vp9Mi.Mode] : mi[b + Vp9Mi.UvMode];
                         if (bsize < Block8x8 && plane == 0) mode = mi[b + Vp9Mi.BmiMode + (row << 1) + col];
+                        if ((a[Vp9RArg.DebugFlags] & 2) == 0)
                         Vp9IntraPred.Predict(bwl - sx, txSize, mode, col, row, miRow != 0, miCol > colStart,
                             toLeft, toTop, toRight, toBottom, sx, sy, a[Vp9RArg.Cur + plane * 4 + 2], a[Vp9RArg.Cur + plane * 4 + 3],
                             pool, dstAt, stride, scratch, scr);
@@ -112,7 +115,7 @@ internal static class Vp9ReconKernels
                     if (plane == 0) { eob = sbBuf[sbEob + Vp9PLayout.SbEobY + eobY]; eobY++; dqAt = dqY; dqY += 16 << (txSize << 1); }
                     else if (plane == 1) { eob = sbBuf[sbEob + Vp9PLayout.SbEobU + eobU]; eobU++; dqAt = dqU; dqU += 16 << (txSize << 1); }
                     else { eob = sbBuf[sbEob + Vp9PLayout.SbEobV + eobV]; eobV++; dqAt = dqV; dqV += 16 << (txSize << 1); }
-                    if (eob > 0) Vp9Itx.InverseTransformAdd(dq, dqAt, txSize, txType, lossless, eob, pool, dstAt, stride, scratch, scr);
+                    if (eob > 0 && (a[Vp9RArg.DebugFlags] & 1) == 0) Vp9Itx.InverseTransformAdd(dq, dqAt, txSize, txType, lossless, eob, pool, dstAt, stride, scratch, scr);
                 }
         }
     }
