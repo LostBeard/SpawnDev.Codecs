@@ -10,6 +10,14 @@ cropped; MD5 as libvpx `test/md5_helper.h`). From the WebM Project's test data,
 
 Verified with `scripts/video/libvpx_ref` (libvpx built as plain C): all 303 vectors match their `.md5` on every frame.
 
+## Vp9Synthetic
+Header paths no vector reaches (absolute segment data; also delta data with every feature): the first frame of
+vp90-2-00-quantizer-20 with only its uncompressed header re-packed by `scripts/video/make_vp9_header_fixtures.py`
+(segmentation enabled, update_map 0 so the tile syntax is unchanged). `.md5` and header lines from libvpx_ref.
+
+## libvpx_headers.tsv.gz
+`libvpx_ref -h` of every frame of every file above (file name, tab, the H line), the reference for the header reader.
+
 ## Vp9ComfyUI
 Files written by ComfyUI 0.42.0's SaveWEBM node (codec vp9, fps 24; crf 32 at 512x512 / 832x480 / 1024x576, crf 10
 and 50 at 512x512, and an RGBA 512x320 batch with alpha), run as a black box through a local server (LoadVideo ->

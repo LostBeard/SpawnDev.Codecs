@@ -47,3 +47,5 @@ Vp9ConformanceLarge/*.ivf binary
 Vp9ConformanceLarge/*.md5 text eol=lf
 Vp9ComfyUI/*.webm binary
 Vp9ComfyUI/*.md5 text eol=lf
+Vp9Synthetic/*.ivf binary
+Vp9Synthetic/*.md5 text eol=lf

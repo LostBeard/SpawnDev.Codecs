@@ -79,6 +79,7 @@
 		     next to the desktop runner and read from disk, so every vector runs on the desktop backends. -->
 		<EmbeddedResource Include="TestData\Vp9Conformance\*" Exclude="TestData\Vp9Conformance\SOURCES.md" />
 		<EmbeddedResource Include="TestData\Vp9ComfyUI\*" />
+		<EmbeddedResource Include="TestData\Vp9Synthetic\*" />
 		<None Include="TestData\Vp9ConformanceLarge\*" CopyToOutputDirectory="PreserveNewest" LinkBase="TestData\Vp9ConformanceLarge" />
 		<EmbeddedResource Include="TestData\Filters\*" />
 		<EmbeddedResource Include="TestData\Lz4\*" />

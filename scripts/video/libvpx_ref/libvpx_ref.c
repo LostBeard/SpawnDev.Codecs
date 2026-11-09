@@ -48,6 +48,16 @@ static void print_header(vpx_codec_ctx_t *codec, int packet, int sub) {
          cm->uv_ac_delta_q, seg->enabled, seg->update_map, seg->temporal_update, seg->abs_delta, cm->log2_tile_cols,
          cm->log2_tile_rows, cm->tx_mode, cm->reference_mode, cm->comp_fixed_ref, cm->comp_var_ref[0],
          cm->comp_var_ref[1], cm->mi_cols, cm->mi_rows);
+  printf(" use_prev_mvs=%d lossless=%d", cm->use_prev_frame_mvs, pbi->mb.lossless);
+  if (!frame_is_intra_only(cm)) {
+    printf(" ref_sizes=");
+    for (i = 0; i < REFS_PER_FRAME; ++i)
+      printf(i ? ",%dx%d" : "%dx%d", cm->frame_refs[i].buf->y_crop_width, cm->frame_refs[i].buf->y_crop_height);
+  }
+  printf(" dequant=");
+  for (i = 0; i < (seg->enabled ? MAX_SEGMENTS : 1); ++i)
+    printf(i ? ";%d,%d,%d,%d" : "%d,%d,%d,%d", cm->y_dequant[i][0], cm->y_dequant[i][1], cm->uv_dequant[i][0],
+           cm->uv_dequant[i][1]);
   if (seg->enabled) {
     printf(" seg_tree=");
     for (i = 0; i < SEG_TREE_PROBS; ++i) printf(i ? ",%d" : "%d", seg->tree_probs[i]);
