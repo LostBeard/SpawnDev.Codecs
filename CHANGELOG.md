@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### BCn texture codecs: constructors compile nothing (2026-11-09)
+- `BcnEncoderGpu`, `BcnDecoderGpu` and `Bc7EncoderGpu` load their kernels on first use.
+  - New `WarmUpAsync` loads them awaited: browser compiles yield to the event loop.
+  - `BcnEncoderGpu.WarmUpAsync(params BcnFormat[])` loads only the formats you name; no formats means all.
+  - The async overloads await the load.
+  - The synchronous `Encode` / `Decode` (ArrayView) load synchronously only when nothing loaded the kernels yet: call
+    `WarmUpAsync` first in a browser.
+- Guard extended to the BCn codecs, with a BC1 and a BC7 round trip after the warm-ups. Red-checked: a constructor
+  compiling again fails it. CPU: all BCn tests pass.
+
 ### 1.0.2-local.10 (2026-11-09)
 Everything below down to local.9:
 - the full VP9 decoder (bit-exact with libvpx on CPU, CUDA and OpenCL; WebGPU / Wasm pending);

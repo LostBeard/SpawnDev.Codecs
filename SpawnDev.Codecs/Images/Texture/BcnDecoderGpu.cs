@@ -45,21 +45,42 @@ public sealed class BcnDecoderGpu : IDisposable
 
     private readonly Accelerator _accelerator;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int> _decode;
+    // Loaded on first use: awaited by WarmUpAsync and the async overloads (each compile yields to the browser's event
+    // loop first); the synchronous Decode loads synchronously when nothing has loaded it yet.
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>? _decode;
+    private Task? _kernelsLoad;
     private readonly StageBuffer<byte> _stageIn;
     private readonly StageBuffer<byte> _stageOut;
 
-    /// <summary>Compile the kernel and upload the BC7 tables.</summary>
+    /// <summary>Upload the BC7 tables (the kernel compiles on first use, or in <see cref="WarmUpAsync"/>).</summary>
     public BcnDecoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _tables = accelerator.Allocate1D<int>(TableInts);
         _tables.View.CopyFromCPU(BuildTables());
-        _decode = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>(DecodeKernel);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
     }
+
+    /// <summary>
+    /// Compile and load the decode kernel, awaited (on browser backends the compile yields to the event loop first and
+    /// WebGPU builds its pipeline asynchronously). Call it early in a browser, before the synchronous
+    /// <see cref="Decode"/>, which would otherwise compile on the page's thread.
+    /// </summary>
+    public Task WarmUpAsync()
+    {
+        if (_decode != null) return Task.CompletedTask;
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+        => _decode = await _accelerator.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>(DecodeKernel);
+
+    /// <summary>The decode kernel; loads it synchronously when nothing has (the synchronous <see cref="Decode"/> path).</summary>
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int> DecodeLauncher
+        => _decode ??= _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>(DecodeKernel);
 
     private static int[] BuildTables()
     {
@@ -94,7 +115,7 @@ public sealed class BcnDecoderGpu : IDisposable
         Validate(format, width, height);
         if (blocks.Length < BlocksSize(format, width, height)) throw new ArgumentException("blocks too short.", nameof(blocks));
         if (rgba.Length < 4L * width * height) throw new ArgumentException("rgba too short.", nameof(rgba));
-        _decode(width * height, blocks, rgba, _tables.View, (int)format, width, height);
+        DecodeLauncher(width * height, blocks, rgba, _tables.View, (int)format, width, height);
     }
 
     /// <summary>Decode blocks held by the host; returns width x height RGBA8 pixels.</summary>
@@ -103,10 +124,11 @@ public sealed class BcnDecoderGpu : IDisposable
         Validate(format, width, height);
         long need = BlocksSize(format, width, height);
         if (blocks.Length < need) throw new ArgumentException("blocks too short.", nameof(blocks));
+        await WarmUpAsync();
         _stageIn.Ensure(need);
         _stageOut.Ensure(4L * width * height);
         DeviceTransfer.Upload(_stageIn.View, blocks.Span.Slice(0, (int)need));
-        _decode(width * height, _stageIn.View, _stageOut.View, _tables.View, (int)format, width, height);
+        DecodeLauncher(width * height, _stageIn.View, _stageOut.View, _tables.View, (int)format, width, height);
         return await DeviceTransfer.DownloadAsync(_stageOut.View, 4L * width * height);
     }
 
@@ -117,10 +139,11 @@ public sealed class BcnDecoderGpu : IDisposable
         Validate(format, width, height);
         long need = BlocksSize(format, width, height);
         if (blocks.ByteLength < need) throw new ArgumentException("blocks too short.", nameof(blocks));
+        await WarmUpAsync();
         _stageIn.Ensure(blocks.ByteLength);
         _stageOut.Ensure(4L * width * height);
         DeviceTransfer.Upload(_stageIn.View, blocks);
-        _decode(width * height, _stageIn.View, _stageOut.View, _tables.View, (int)format, width, height);
+        DecodeLauncher(width * height, _stageIn.View, _stageOut.View, _tables.View, (int)format, width, height);
         return await DeviceTransfer.DownloadUint8ArrayAsync(_stageOut.View, 4L * width * height);
     }
 

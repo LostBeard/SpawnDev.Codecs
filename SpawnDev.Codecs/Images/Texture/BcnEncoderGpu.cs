@@ -28,7 +28,10 @@ public sealed class BcnEncoderGpu : IDisposable
     private const int DivBase = 0, TableInts = DivBase + 766;
 
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int> _encode;
+    // Loaded on first use: awaited by WarmUpAsync and the async overloads; the synchronous Encode loads synchronously
+    // when nothing has loaded it yet.
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>? _encode;
+    private Task? _kernelsLoad;
     private readonly StageBuffer<byte> _stageIn;
     private readonly StageBuffer<byte> _stageOut;
     private readonly StageBuffer<int> _bc7ScratchA;
@@ -36,7 +39,7 @@ public sealed class BcnEncoderGpu : IDisposable
     private readonly Accelerator _accelerator;
     private Bc7EncoderGpu? _bc7;
 
-    /// <summary>Compile the kernel and upload etcpak's division table (the BC7 kernels compile on first BC7 use).</summary>
+    /// <summary>Upload etcpak's division table (the kernels compile on first use, or in <see cref="WarmUpAsync"/>).</summary>
     public BcnEncoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
@@ -45,12 +48,33 @@ public sealed class BcnEncoderGpu : IDisposable
         var t = new int[TableInts];
         for (int i = 0; i < 766; i++) t[DivBase + i] = EtcpakDxtcTables.DivTable[i];
         _tables.View.CopyFromCPU(t);
-        _encode = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>(EncodeKernel);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
         _bc7ScratchA = new StageBuffer<int>(accelerator);
         _bc7ScratchB = new StageBuffer<int>(accelerator);
     }
+
+    /// <summary>
+    /// Compile and load the kernels of <paramref name="formats"/> (all when empty), awaited: on browser backends each compile
+    /// yields to the event loop first and WebGPU builds its pipelines asynchronously. Call it early in a browser, before
+    /// the synchronous <see cref="Encode"/>, which would otherwise compile on the page's thread.
+    /// </summary>
+    public async Task WarmUpAsync(params BcnFormat[] formats)
+    {
+        bool all = formats.Length == 0;
+        if (all || formats.Any(f => f != BcnFormat.Bc7)) await EnsureBcnKernelAsync();
+        if (all || formats.Contains(BcnFormat.Bc7)) await (_bc7 ??= new Bc7EncoderGpu(_accelerator)).WarmUpAsync();
+    }
+
+    private Task EnsureBcnKernelAsync()
+    {
+        if (_encode != null) return Task.CompletedTask;
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadBcnKernelAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadBcnKernelAsync()
+        => _encode = await _accelerator.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>(EncodeKernel);
 
     /// <summary>
     /// Queue the encode of <paramref name="rgba"/> (width x height pixels of 4 bytes, tightly packed) into
@@ -72,6 +96,7 @@ public sealed class BcnEncoderGpu : IDisposable
         long n = 4L * width * height;
         if (rgba.Length < n) throw new ArgumentException("rgba too short.", nameof(rgba));
         long size = BcnDecoderGpu.BlocksSize(format, width, height);
+        await WarmUpAsync(format);
         _stageIn.Ensure(n);
         _stageOut.Ensure(size);
         DeviceTransfer.Upload(_stageIn.View, rgba.Span.Slice(0, (int)n));
@@ -86,6 +111,7 @@ public sealed class BcnEncoderGpu : IDisposable
         Validate(format, width, height);
         if (rgba.ByteLength < 4L * width * height) throw new ArgumentException("rgba too short.", nameof(rgba));
         long size = BcnDecoderGpu.BlocksSize(format, width, height);
+        await WarmUpAsync(format);
         _stageIn.Ensure(rgba.ByteLength);
         _stageOut.Ensure(size);
         DeviceTransfer.Upload(_stageIn.View, rgba);
@@ -101,7 +127,7 @@ public sealed class BcnEncoderGpu : IDisposable
             long ints = Bc7EncoderGpu.ScratchInts(width, height);
             _bc7.Encode(rgba, width, height, _bc7ScratchA.Ensure(ints), _bc7ScratchB.Ensure(ints), blocks);
         }
-        else _encode((int)(size / 4), rgba, blocks, _tables.View, (int)format, width, height);
+        else (_encode ??= _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>(EncodeKernel))((int)(size / 4), rgba, blocks, _tables.View, (int)format, width, height);
     }
 
     private static void Validate(BcnFormat format, int width, int height)

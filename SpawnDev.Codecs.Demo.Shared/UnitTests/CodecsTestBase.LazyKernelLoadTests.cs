@@ -18,6 +18,7 @@ using SpawnDev.Codecs.Images.Jpeg;
 using SpawnDev.Codecs.Images.Png;
 using SpawnDev.Codecs.Images.WebP;
 using SpawnDev.Codecs.Images.WebP.Lossy;
+using SpawnDev.Codecs.Images.Texture;
 using SpawnDev.Codecs.Video.Vp9.Decoder;
 using SpawnDev.ILGPU;
 using SpawnDev.UnitTesting;
@@ -58,8 +59,10 @@ public abstract partial class CodecsTestBase
             using var webpDec = new WebPDecoderGpu(acc);
             using var webpLossless = new WebPLosslessEncoderGpu(acc);
             using var webpLossy = new WebPLossyEncoderGpu(acc);
+            using var bcnEnc = new BcnEncoderGpu(acc);
+            using var bcnDec = new BcnDecoderGpu(acc);
             Equal(ci, Count(), "kernels compiled by the image codec constructors (BMP, GIF, JPEG, PNG decoders and encoders, " +
-                "WebPDecoderGpu, WebPLosslessEncoderGpu, WebPLossyEncoderGpu)");
+                "WebPDecoderGpu, WebPLosslessEncoderGpu, WebPLossyEncoderGpu, BcnEncoderGpu, BcnDecoderGpu)");
 
             // The codecs need scatter stores (their tests are NotOnWebGL): the constructor checks above run on every
             // backend, the warm-ups and the work below where the codecs run.
@@ -117,6 +120,7 @@ public abstract partial class CodecsTestBase
                 ("PngDecoderGpu", pngDec.WarmUpAsync), ("PngEncoderGpu", pngEnc.WarmUpAsync),
                 ("WebPDecoderGpu", webpDec.WarmUpAsync), ("WebPLosslessEncoderGpu", webpLossless.WarmUpAsync),
                 ("WebPLossyEncoderGpu", webpLossy.WarmUpAsync),
+                ("BcnEncoderGpu", () => bcnEnc.WarmUpAsync()), ("BcnDecoderGpu", bcnDec.WarmUpAsync),
             };
             // Each warm-up loads at least one kernel no earlier one shares (the shared ones are cache hits, not counted).
             foreach (var (name, warmUp) in imageWarmUps)
@@ -151,6 +155,8 @@ public abstract partial class CodecsTestBase
                 True((await webpDec.DecodeAsync(lossless)).Pixels.AsSpan().SequenceEqual(rgba), "WebP lossless round trip after the warm-ups is not lossless");
                 var lossy = await webpLossy.EncodeAsync(rgba, w, h);
                 await webpDec.DecodeAsync(lossy);
+                foreach (var format in new[] { BcnFormat.Bc1, BcnFormat.Bc7 })
+                    await bcnDec.DecodeAsync(await bcnEnc.EncodeAsync(rgba, w, h, format), format, w, h);
             });
             Equal(0L, imageAfter, "kernels compiled by image work after the warm-ups");
         }

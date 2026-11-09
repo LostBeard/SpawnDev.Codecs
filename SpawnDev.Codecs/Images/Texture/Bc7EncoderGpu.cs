@@ -49,22 +49,39 @@ internal sealed class Bc7EncoderGpu : IDisposable
 
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _ti;
     private readonly MemoryBuffer1D<float, Stride1D.Dense> _tf;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int, int, int> _mode;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>> _pack;
+    // Loaded on first use: awaited by WarmUpAsync (each compile yields to the browser's event loop first); the synchronous
+    // Encode loads synchronously when nothing has loaded them yet.
+    private readonly Accelerator _accelerator;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int, int, int>? _mode;
+    private Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>>? _pack;
+    private Task? _kernelsLoad;
     // Threads per block in a mode launch: 1 (it stores the whole best), or BlockInts where a thread may store only its
     // own element (WebGL): thread j of a block computes the same candidate and stores int j.
     private readonly int _lanes;
 
     public Bc7EncoderGpu(Accelerator accelerator)
     {
+        _accelerator = accelerator;
         _lanes = accelerator.Device.Satisfies(new AcceleratorRequirements { RequiresScatterStores = true }) ? 1 : BlockInts;
         _ti = accelerator.Allocate1D<int>(TableInts);
         _tf = accelerator.Allocate1D<float>(TableFloats);
         BuildTables(out int[] ti, out float[] tf);
         _ti.View.CopyFromCPU(ti);
         _tf.View.CopyFromCPU(tf);
-        _mode = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int, int, int>(ModeKernel);
-        _pack = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>>(PackKernel);
+    }
+
+    /// <summary>Compile and load the kernels, awaited (call before the synchronous <see cref="Encode"/> in a browser).</summary>
+    public Task WarmUpAsync()
+    {
+        if (_mode != null && _pack != null) return Task.CompletedTask;
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        _mode = await _accelerator.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int, int, int>(ModeKernel);
+        _pack = await _accelerator.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>>(PackKernel);
     }
 
     /// <summary>The tables bc7enc_compress_block_init builds, the static ones, and the default perceptual weights.</summary>
@@ -180,13 +197,15 @@ internal sealed class Bc7EncoderGpu : IDisposable
     /// </summary>
     public void Encode(ArrayView<byte> rgba, int width, int height, ArrayView<int> scratchA, ArrayView<int> scratchB, ArrayView<byte> blocks)
     {
+        var mode = _mode ??= _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int, int, int>(ModeKernel);
+        var pack = _pack ??= _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>>(PackKernel);
         int count = ((width + 3) / 4) * ((height + 3) / 4);
         for (int which = 0; which < 4; which++)
         {
             bool even = (which & 1) == 0;
-            _mode(count * _lanes, rgba, even ? scratchB : scratchA, even ? scratchA : scratchB, _ti.View, _tf.View, which, width, height, _lanes);
+            mode(count * _lanes, rgba, even ? scratchB : scratchA, even ? scratchA : scratchB, _ti.View, _tf.View, which, width, height, _lanes);
         }
-        _pack(count * 4, scratchB, blocks, _ti.View);
+        pack(count * 4, scratchB, blocks, _ti.View);
     }
 
     public void Dispose()
