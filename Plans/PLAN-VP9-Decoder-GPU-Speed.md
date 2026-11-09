@@ -123,8 +123,11 @@ Results:
   - PublicApi: 332 pictures.
 - Red-checked (prefetch of the wrong entry, wrong energy class, stale probability: all fail).
 - ParseKernel WGSL: 87.1 -> 72.9 MB.
-- CPU accelerator tile parse (ComfyUI): 3.57 -> 2.59 ms/frame (3.57 = the counter build; the plan's earlier 3.4 had
-  no counters). CUDA / OpenCL: to be measured.
+- CPU accelerator tile parse (ComfyUI), quiet A/B (base, S3, base, S3):
+  - 3.32 / 3.23 -> 2.67 / 2.68 ms/frame (-18%);
+  - without the first frame (kernel compile): 2.34 / 2.31 -> 2.00 / 1.97 (-15%);
+  - the whole test is not slower (base 104.8 / 103.2 s, S3 102.2 / 102.3 s).
+- CUDA / OpenCL: to be measured.
 
 Next for S3:
 - Mode info (9% of the bools, but many neighbour loads per block): the arguments and neighbour records in locals.

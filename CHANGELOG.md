@@ -18,8 +18,8 @@
 - The bool read's renormalising shift comes from a leading zero count instead of a compare chain. Dequant factors are
   read once per plane of a block.
 - Bit-exact with libvpx on the CPU accelerator (EveryFrame 311 files / 5112 frames, Parse_ModeInfo with counts,
-  PublicApi); red-checked. CPU accelerator tile parse on the ComfyUI files: 3.57 -> 2.59 ms/frame. ParseKernel WGSL
-  87.1 -> 72.9 MB.
+  PublicApi); red-checked. CPU accelerator tile parse on the ComfyUI files (quiet A/B): 3.28 -> 2.68 ms/frame mean,
+  2.33 -> 1.98 without the first frame's kernel compile. ParseKernel WGSL 87.1 -> 72.9 MB.
 
 ### VP9 decoder: inter reconstruction per 4x4 unit and per transform block (2026-11-09)
 - Inter reconstruction no longer runs one thread per superblock (`Plans/PLAN-VP9-Decoder-GPU-Speed.md` step S2, inter
