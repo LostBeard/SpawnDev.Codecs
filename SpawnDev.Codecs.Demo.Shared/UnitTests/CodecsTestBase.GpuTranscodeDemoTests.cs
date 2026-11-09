@@ -9,6 +9,7 @@ using ILGPU.Runtime;
 using SpawnDev.Codecs.Video.Av1;
 using SpawnDev.Codecs.Video.Vp8;
 using SpawnDev.Codecs.Video.Vp9;
+using SpawnDev.Codecs.Video.Vp9.Decoder;
 using SpawnDev.UnitTesting;
 using static SpawnDev.Codecs.Demo.Shared.UnitTests.TestHelpers;
 
@@ -61,12 +62,13 @@ public abstract partial class CodecsTestBase
                 ySrc, uSrc, vSrc, width, height, baseQIndex: q);
             True(encoded.Length > 0, "VP9-GPU encoder must produce non-empty output");
 
-            using var dec = new Vp9KeyframeDecoderGpu(acc);
-            var frame = await dec.DecodeKeyFrameAsync(encoded);
-            True(frame.YPlane.Length == width * height,
-                $"VP9-GPU decoder Y plane must be width*height bytes; got {frame.YPlane.Length}");
+            using var dec = new Vp9DecoderGpu(acc);
+            var frame = await dec.DecodePacketAsync(encoded);
+            True(frame != null && frame.Format.Width == width && frame.Format.Height == height,
+                "VP9-GPU decoder must return a width x height picture");
+            byte[] yPlane = frame!.Planes[..(width * height)];
 
-            double psnr = ComputeYPsnrForTest(ySrc, frame.YPlane, width, height, width);
+            double psnr = ComputeYPsnrForTest(ySrc, yPlane, width, height, width);
             True(psnr > 10.0,
                 $"VP9-GPU demo round-trip Y PSNR floor 10 dB; got {psnr:F1} dB");
         }

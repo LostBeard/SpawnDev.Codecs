@@ -3,9 +3,11 @@
 // SAME recon planes that Vp9KeyframeWalker (CPU oracle) produces
 // when fed the same encoded bytes.
 
+#pragma warning disable CS0618 // Vp9KeyframeDecoderGpu is obsolete; these tests keep covering it until it is removed
 using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.Codecs.Video.Vp9;
+using SpawnDev.Codecs.Video.Vp9.Decoder;
 using SpawnDev.ILGPU;
 using SpawnDev.UnitTesting;
 using static SpawnDev.Codecs.Demo.Shared.UnitTests.TestHelpers;
@@ -210,6 +212,48 @@ public abstract partial class CodecsTestBase
         for (int i = 0; i < encVRecon.Length; i++)
             if (encVRecon[i] != decFrame.VPlane[i])
                 throw new Exception($"V self-consistency mismatch at {i}: encoder={encVRecon[i]} decoder={decFrame.VPlane[i]}");
+    }
+
+    /// <summary>
+    /// Our keyframe encoder's frames decoded by the full decoder (<see cref="Vp9DecoderGpu"/>, bit-exact with libvpx on
+    /// the conformance vectors) equal the encoder's reconstruction and the keyframe-only decoder's planes: the evidence
+    /// that <see cref="Vp9KeyframeDecoderGpu"/> can retire in favour of the full decoder.
+    /// </summary>
+    [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
+    public async Task Vp9DecoderGpu_DecodesOwnKeyframeEncoder_LikeKeyframeDecoder()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            var rng = new Random(0x5EED);
+            foreach (var (w, h, q, flat) in new[] { (64, 64, 30, false), (64, 64, 120, false), (128, 128, 30, false), (64, 64, 60, true), (192, 128, 80, false) })
+            {
+                var y = new byte[w * h];
+                var u = new byte[w * h / 4];
+                var v = new byte[w * h / 4];
+                if (flat) { Array.Fill(y, (byte)128); Array.Fill(u, (byte)128); Array.Fill(v, (byte)128); }
+                else { rng.NextBytes(y); rng.NextBytes(u); rng.NextBytes(v); }
+                using var enc = new Vp9KeyframeEncoderGpu(acc);
+                var (bytes, ry, ru, rv) = await enc.EncodeKeyFrameWithReconAsync(y, u, v, w, h, q);
+                using var old = new Vp9KeyframeDecoderGpu(acc);
+                var oldFrame = await old.DecodeKeyFrameAsync(bytes);
+                using var full = new Vp9DecoderGpu(acc);
+                var frame = await full.DecodePacketAsync(bytes);
+                string tag = $"{w}x{h} q{q}{(flat ? " flat" : "")}";
+                True(frame != null, $"{tag}: the full decoder shows no picture");
+                Equal(new Vp9PictureFormat(w, h, 1, 1), frame!.Format, $"{tag}: format");
+                byte[] planes = frame.Planes;
+                int ySize = w * h, cSize = w * h / 4;
+                EqualBytes(ry, planes[..ySize], $"{tag}: Y vs the encoder's reconstruction");
+                EqualBytes(ru, planes[ySize..(ySize + cSize)], $"{tag}: U vs the encoder's reconstruction");
+                EqualBytes(rv, planes[(ySize + cSize)..], $"{tag}: V vs the encoder's reconstruction");
+                EqualBytes(oldFrame.YPlane, planes[..ySize], $"{tag}: Y vs Vp9KeyframeDecoderGpu");
+                EqualBytes(oldFrame.UPlane, planes[ySize..(ySize + cSize)], $"{tag}: U vs Vp9KeyframeDecoderGpu");
+                EqualBytes(oldFrame.VPlane, planes[(ySize + cSize)..], $"{tag}: V vs Vp9KeyframeDecoderGpu");
+            }
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 
     [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]

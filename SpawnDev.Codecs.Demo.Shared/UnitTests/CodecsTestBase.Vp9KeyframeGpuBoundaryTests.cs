@@ -12,6 +12,7 @@
 // The unaligned VP9 pad itself shares PlanePadKernel with VP8, whose odd-size tests have an
 // independent oracle (Vp8KeyframeEncoderGpu_OddDimensions_*).
 
+#pragma warning disable CS0618 // Vp9KeyframeDecoderGpu is obsolete; these tests keep covering it until it is removed
 using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.Codecs.Video.Vp9;

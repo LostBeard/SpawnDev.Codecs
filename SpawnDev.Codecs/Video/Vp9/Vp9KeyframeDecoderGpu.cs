@@ -88,6 +88,7 @@ public sealed class Vp9DecodedFrameJS : IDisposable
 /// <remarks>
 /// Not thread-safe: one in-flight decode per instance (the staging buffer is shared across calls).
 /// </remarks>
+[Obsolete("Use SpawnDev.Codecs.Video.Vp9.Decoder.Vp9DecoderGpu: the full VP9 decoder (every frame type and size, bit-exact with libvpx; it also decodes Vp9KeyframeEncoderGpu output). This keyframe-only decoder (sizes multiple of 64) will be removed in a later release.")]
 public sealed class Vp9KeyframeDecoderGpu : IDisposable
 {
     // The uncompressed header of a keyframe is a few tens of bytes; this is a generous upper bound

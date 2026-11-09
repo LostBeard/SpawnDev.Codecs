@@ -158,6 +158,23 @@ public static class Vp8BoolEncoderGpu
         for (int i = 0; i < 32; i++) EncodeBool(ref state, outBuf, 0, 128);
     }
 
+    /// <summary>
+    /// VP9's finalize, libvpx <c>vpx_stop_encode</c>: <see cref="Stop"/>, then a 0 byte when the last byte would read
+    /// as a superframe index marker (0b110xxxxx). libvpx's decoder rejects a packet ending in such a byte without a
+    /// matching index as corrupt. VP8 (<c>vp8_stop_encode</c>) has no superframes and does not pad.
+    /// </summary>
+    public static void StopVp9(
+        ref Vp8BoolEncoderGpuState state,
+        ArrayView<byte> outBuf)
+    {
+        Stop(ref state, outBuf);
+        if (state.OutLen > 0 && (outBuf[state.OutLen - 1] & 0xE0) == 0xC0)
+        {
+            outBuf[state.OutLen] = 0;
+            state.OutLen++;
+        }
+    }
+
     /// <summary>Ints <see cref="Save"/> writes (LowValue, Range, Count, OutLen).</summary>
     public const int StateInts = 4;
 

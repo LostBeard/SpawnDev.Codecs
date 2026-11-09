@@ -7,6 +7,7 @@
 @using SpawnDev.Codecs.Video.Av1
 @using SpawnDev.Codecs.Video.Vp8
 @using SpawnDev.Codecs.Video.Vp9
+@using SpawnDev.Codecs.Video.Vp9.Decoder
 @using SpawnDev.ILGPU.WebGPU
 @using SpawnDev.ILGPU.Wasm
 @inject SpawnJSRuntime JS
@@ -18,7 +19,7 @@
 <p>
     Encode + decode through the <strong>100% ILGPU</strong> integration classes
     (<code>Vp8KeyframeEncoderGpu</code> / <code>Vp8KeyframeDecoderGpu</code>,
-    <code>Vp9KeyframeEncoderGpu</code> / <code>Vp9KeyframeDecoderGpu</code>,
+    <code>Vp9KeyframeEncoderGpu</code> / <code>Vp9DecoderGpu</code>,
     <code>Av1KeyframeEncoderGpu</code> / <code>Av1KeyframeDecoderGpu</code>).
     Every byte of the encoded bitstream is written by an ILGPU kernel; every
     pixel of the decoded recon plane comes back from a kernel readback. The
@@ -98,7 +99,7 @@
         <canvas id="gpu-vp8-canvas" width="@CanvasW" height="@CanvasH" style="border:1px solid #888;"></canvas>
     </div>
     <div>
-        <h3>VP9 (Vp9KeyframeEncoderGpu &rarr; Vp9KeyframeDecoderGpu)</h3>
+        <h3>VP9 (Vp9KeyframeEncoderGpu &rarr; Vp9DecoderGpu)</h3>
         <canvas id="gpu-vp9-canvas" width="@CanvasW" height="@CanvasH" style="border:1px solid #888;"></canvas>
     </div>
     <div>
@@ -276,8 +277,12 @@
         Vp9DecodedFrame decoded;
         try
         {
-            using var dec = new Vp9KeyframeDecoderGpu(acc);
-            decoded = await dec.DecodeKeyFrameAsync(encoded);
+            using var dec = new Vp9DecoderGpu(acc);
+            var picture = await dec.DecodePacketAsync(encoded) ?? throw new InvalidDataException("The packet shows no picture.");
+            int ySize = picture.Format.Width * picture.Format.Height;
+            int cSize = picture.Format.ChromaWidth * picture.Format.ChromaHeight;
+            decoded = new Vp9DecodedFrame(picture.Planes[..ySize], picture.Planes[ySize..(ySize + cSize)],
+                picture.Planes[(ySize + cSize)..], picture.Format.Width, picture.Format.Height);
         }
         catch (Exception ex)
         {

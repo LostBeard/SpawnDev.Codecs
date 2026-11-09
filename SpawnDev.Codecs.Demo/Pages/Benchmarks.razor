@@ -14,6 +14,7 @@
 @using SpawnDev.Codecs.Video.Av1
 @using SpawnDev.Codecs.Video.Vp8
 @using SpawnDev.Codecs.Video.Vp9
+@using SpawnDev.Codecs.Video.Vp9.Decoder
 @using SpawnDev.ILGPU.WebGPU
 @using SpawnDev.ILGPU.Wasm
 @inject HttpClient Http
@@ -742,9 +743,9 @@
         try
         {
             using var enc = new Vp9KeyframeEncoderGpu(_acc);
-            using var dec = new Vp9KeyframeDecoderGpu(_acc);
+            using var dec = new Vp9DecoderGpu(_acc);
             var warm = await enc.EncodeKeyFrameAsync(ySrc, uSrc, vSrc, width, height, q);
-            _ = await dec.DecodeKeyFrameAsync(warm);
+            _ = await dec.DecodePacketAsync(warm);
 
             long encBytes = 0;
             var swEnc = Stopwatch.StartNew();
@@ -757,7 +758,7 @@
             swEnc.Stop();
 
             var swDec = Stopwatch.StartNew();
-            for (int i = 0; i < iterations; i++) _ = await dec.DecodeKeyFrameAsync(encoded);
+            for (int i = 0; i < iterations; i++) _ = await dec.DecodePacketAsync(encoded);
             swDec.Stop();
 
             double encFps = iterations * 1000.0 / swEnc.Elapsed.TotalMilliseconds;

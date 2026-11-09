@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### VP9 encoder: superframe-marker padding; `Vp9KeyframeDecoderGpu` obsolete (2026-11-08)
+- FIXED: the VP9 bool-coded segments (compressed header, tiles) ended without libvpx `vpx_stop_encode`'s padding:
+  when the last byte reads as a superframe index marker (0b110xxxxx) libvpx appends a 0 byte. Without it libvpx's
+  decoder (and `Vp9DecoderGpu`) rejects the packet as corrupt. GPU (`Vp8BoolEncoderGpu.StopVp9`, used by the three
+  VP9 kernels) and CPU reference (`Vp9BoolEncoder.Stop`) both pad now. Found by decoding our keyframe encoder's
+  output with the full decoder; red-checked (no padding -> "superframe index markers differ").
+- `Vp9DecoderGpu_DecodesOwnKeyframeEncoder_LikeKeyframeDecoder`: five sizes / quantizers / content; the full decoder
+  equals the encoder's reconstruction and `Vp9KeyframeDecoderGpu`'s planes.
+- `Vp9KeyframeDecoderGpu` is `[Obsolete]` (use `Vp9DecoderGpu`); the GPU transcode and benchmark demo pages use the
+  full decoder now.
+
 ### Kernel loads no longer freeze a browser page (ILGPU 5.4.19 awaited loads) (2026-11-08)
 - `FlacDecoderGpu`, `FlacEncoderGpu` (and its `FlacFrameWriterGpuKernel`), `Mp3DecoderGpu`, `OpusEncoderGpu` /
   `OggOpusEncoder`, `Vp9DecoderGpu` and the WebP animation encoder (`WebPAnimEncoder`, behind both WebP encoders'

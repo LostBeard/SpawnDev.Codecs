@@ -124,7 +124,7 @@ public sealed class Vp9BlockCoefEncoderTestKernel : IDisposable
             ref state, outBuf, coefs, scan, neighbors, coefProbs, consts, tokenCache,
             maxCoefs, planeType, refType, initialCtx, isHighBitDepth, isTx4x4);
 
-        Vp8BoolEncoderGpu.Stop(ref state, outBuf);
+        Vp8BoolEncoderGpu.StopVp9(ref state, outBuf);
 
         outLen[0] = state.OutLen;
         eobOut[0] = eob;

@@ -367,7 +367,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
 
         if (slot >= slotCount)
         {
-            Vp8BoolEncoderGpu.Stop(ref state, outBuf);
+            Vp8BoolEncoderGpu.StopVp9(ref state, outBuf);
             outLen[0] = state.OutLen;
             st[StDone] = 1;
         }

@@ -124,7 +124,7 @@ public sealed class Vp9FrameCompressedHeaderKernel : IDisposable
         Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 0, 252);
 
         // 5. Stop: 32 trailing zero-prob-128 bits to flush.
-        Vp8BoolEncoderGpu.Stop(ref state, outBuf);
+        Vp8BoolEncoderGpu.StopVp9(ref state, outBuf);
 
         outLenOut[0] = state.OutLen;
     }

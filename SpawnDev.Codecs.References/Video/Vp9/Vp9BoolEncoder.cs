@@ -104,12 +104,14 @@ public sealed class Vp9BoolEncoder
     }
 
     /// <summary>
-    /// Finalize and return encoded bytes. Mirrors libvpx <c>vpx_stop_encode</c>
-    /// which emits 32 trailing zero bits at probability 128 to flush.
+    /// Finalize and return encoded bytes. Mirrors libvpx <c>vpx_stop_encode</c>: 32 trailing zero bits at probability
+    /// 128, then a 0 byte when the last byte would read as a superframe index marker (0b110xxxxx), so the data cannot be
+    /// mistaken for a superframe index (libvpx's decoder rejects such a packet as corrupt).
     /// </summary>
     public byte[] Stop()
     {
         for (int i = 0; i < 32; i++) Write(0, 128);
+        if (_buf.Count > 0 && (_buf[^1] & 0xE0) == 0xC0) _buf.Add(0);
         return _buf.ToArray();
     }
 
