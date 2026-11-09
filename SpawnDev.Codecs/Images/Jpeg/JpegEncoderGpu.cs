@@ -97,7 +97,7 @@ public sealed class JpegEncoderGpu : IDisposable
     private readonly StageBuffer<byte> _stageIn;
     private readonly StageBuffer<byte> _stageOut;
 
-    /// <summary>Compile the kernels.</summary>
+    /// <summary>An encoder bound to <paramref name="accelerator"/>. Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public JpegEncoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
@@ -117,6 +117,19 @@ public sealed class JpegEncoderGpu : IDisposable
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
     }
+
+    // Kernels load lazily (awaited by EncodeAsync, where every overload ends up): the constructor compiles nothing.
+    private async Task EnsureKernelsAsync()
+    {
+        await _kernels.EnsureKernelsAsync();
+        await _scanKernels.EnsureKernelsAsync();
+    }
+
+    /// <summary>
+    /// Compile and load every kernel the encoder uses, so the first encode does not wait for them. The loads are awaited
+    /// one kernel at a time and yield to the browser's event loop before each compile.
+    /// </summary>
+    public Task WarmUpAsync() => EnsureKernelsAsync();
 
     // ------------------------------------------------------------------
     // Geometry
@@ -597,6 +610,7 @@ public sealed class JpegEncoderGpu : IDisposable
         long needed = GetMaxEncodedSize(width, height, options);
         if (output.Length < needed)
             throw new ArgumentException($"output must hold {needed} bytes (GetMaxEncodedSize) for {width}x{height}.", nameof(output));
+        await EnsureKernelsAsync();
 
         _planes.Ensure(g.TotalSamples);
         _coefs.Ensure(g.TotalCoefs);

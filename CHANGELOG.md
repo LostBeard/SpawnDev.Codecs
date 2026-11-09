@@ -21,7 +21,28 @@
   forces a GC between the warm-ups and the work). Red-checked: a constructor compiling one kernel again (1 compiled),
   the Opus kernels not kept per accelerator (12 compiled after the GC), and `Vp9DecoderGpu.WarmUpAsync` skipping the
   output kernel (9 of 10) each fail it; the restored source passes.
-- NEXT: the still-image codecs (PNG, JPEG, GIF, BMP, WebP stills) still compile in their constructors.
+- The still-image codecs now do the same: `BmpDecoderGpu` / `BmpEncoderGpu`, `GifDecoderGpu` / `GifEncoderGpu`,
+  `JpegDecoderGpu` / `JpegEncoderGpu`, `PngDecoderGpu` / `PngEncoderGpu`, `WebPDecoderGpu`, `WebPLosslessEncoderGpu`
+  and `WebPLossyEncoderGpu` compile nothing in their constructors, and so do the kernel holders behind them
+  (`BmpKernels`, `GifKernels`, `JpegKernels`, `JpegEncoderKernels`, `JpegScanEncoderKernels`, `PngKernels`,
+  `WebPKernels`, `WebPEncodeKernels`, `WebPRgbaToYuvGpu`, `WebPYuvToRgbaGpu` and the internal palette, pixel, PNG
+  encode and GIF encode kernels). Each holder has a public `EnsureKernelsAsync()`; its codec awaits it before the
+  first launch of every async entry point. The DEFLATE kernels (PNG encoder, `ZlibCompressorGpu`), `InflateKernel`
+  (PNG decoder) and the VP8 keyframe decoder of lossy WebP (`Vp8FullKeyframeDecoderGpu`, `Vp8StridedPlanePackKernel`)
+  load the same way: they compiled synchronously on the first encode / decode before. New: `WarmUpAsync` on each of
+  the eleven image codecs (it only loads the kernels the codec uses). Direct users of `JpegScanEncoderKernels`,
+  `WebPRgbaToYuvGpu.Convert`, `WebPYuvToRgbaGpu.Convert` and the other holders' synchronous launchers must await
+  `EnsureKernelsAsync()` first.
+- FIXED: a lossy WebP still with ICC / EXIF / XMP on a fresh encoder launched the container kernels of
+  `WebPAnimEncoder` before they were loaded (only its `EncodeAsync` loaded them). The metadata path now loads them.
+- Guard extended: constructing every image encoder and decoder compiles 0 kernels, each `WarmUpAsync` compiles more
+  than 0, and an encode + decode with every image codec after the warm-ups (and a GC) compiles nothing. Red-checked: a
+  sync load put back into the `BmpKernels` constructor, the same in the `WebPRgbaToYuvGpu` constructor (inside
+  `WebPLossyEncoderGpu`), and `PngEncoderGpu.WarmUpAsync` skipping the DEFLATE kernels (16 compiled by the work) each
+  fail it; the restored source passes.
+- Still compiling in their constructors: `Bc7EncoderGpu`, `BcnDecoderGpu`, `BcnEncoderGpu` (`Images/Texture`; their
+  ArrayView entry points `Encode` / `Decode` are synchronous launchers), and the other compressors (`GDeflate*`,
+  `Lz4Frame*`, `ShuffleFilterGpu`, `WeightPackGpu`).
 
 ### Full VP9 decoder: `Video.Vp9.Decoder.Vp9DecoderGpu` (libvpx v1.17.0 port, BSD-3-Clause) (2026-11-08)
 - Profile 0 (8-bit 4:2:0) with every feature libvpx's profile-0 conformance vectors use: inter frames, compound and

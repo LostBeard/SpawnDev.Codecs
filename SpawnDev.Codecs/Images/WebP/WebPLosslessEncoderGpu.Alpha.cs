@@ -57,6 +57,7 @@ public sealed partial class WebPLosslessEncoderGpu
         int maxSize = GetMaxAlphaEncodedSize(width, height);
         if (output.Length < maxSize)
             throw new ArgumentException($"output must hold {maxSize} bytes (GetMaxAlphaEncodedSize) for {width}x{height}.", nameof(output));
+        await _kernels.EnsureKernelsAsync();
 
         var hostMeta = new int[WebPEncMeta.Size];
         // the coded stream may use at most the raw size (1 header byte + the plane): longer, and the plane is stored raw instead

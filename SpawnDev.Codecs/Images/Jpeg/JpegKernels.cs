@@ -32,44 +32,61 @@ namespace SpawnDev.Codecs.Images.Jpeg;
 /// <summary>Loads and launches the JPEG decode kernels.</summary>
 public sealed class JpegKernels : IDisposable
 {
-    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, ArrayView<int>> _scan;
-    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _ecsSummary;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _rstCount;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _rstPrefix;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int> _rstFill;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int> _rstFinish;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _buildHuff;
-    private readonly Action<Index1D, ArrayView<short>> _clearCoef;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
-        ArrayView<int>, ArrayView<int>, int, int, int> _decodeScan;
-    private readonly Action<Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<int>> _idct;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, int> _color;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int> _orient;
+    private Action<Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, ArrayView<int>> _scan = null!;
+    private Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _ecsSummary = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _rstCount = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int> _rstPrefix = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int> _rstFill = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int> _rstFinish = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _buildHuff = null!;
+    private Action<Index1D, ArrayView<short>> _clearCoef = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
+        ArrayView<int>, ArrayView<int>, int, int, int> _decodeScan = null!;
+    private Action<Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<int>> _idct = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, int> _color = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int> _orient = null!;
 
-    /// <summary>Compile the kernels.</summary>
+    private readonly Accelerator _accelerator;
+    // The kernels above load lazily (EnsureKernelsAsync, awaited loads): the constructor compiles nothing.
+    private Task? _kernelsLoad;
+
+    /// <summary>Bind to <paramref name="accelerator"/>. Compiles nothing: await <see cref="EnsureKernelsAsync"/> before the first launch.</summary>
     public JpegKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
-        _scan = accelerator.LoadAutoGroupedStreamKernel<
+        _accelerator = accelerator;
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _scan = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, ArrayView<int>>(ScanMarkersKernel);
-        _ecsSummary = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, ArrayView<int>>(EcsSummaryKernel);
-        _rstCount = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(RstCountKernel);
-        _rstPrefix = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(RstPrefixKernel);
-        _rstFill = accelerator.LoadAutoGroupedStreamKernel<
+        _ecsSummary = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, int, ArrayView<int>>(EcsSummaryKernel);
+        _rstCount = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(RstCountKernel);
+        _rstPrefix = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(RstPrefixKernel);
+        _rstFill = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int>(RstFillKernel);
-        _rstFinish = accelerator.LoadAutoGroupedStreamKernel<
+        _rstFinish = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int>(RstFinishKernel);
-        _buildHuff = accelerator.LoadAutoGroupedStreamKernel<
+        _buildHuff = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(BuildHuffKernel);
-        _clearCoef = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>>(ClearCoefKernel);
-        _decodeScan = accelerator.LoadAutoGroupedStreamKernel<
+        _clearCoef = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<short>>(ClearCoefKernel);
+        _decodeScan = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, ArrayView<int>, int, int, int>(DecodeScanKernel);
-        _idct = accelerator.LoadAutoGroupedStreamKernel<
+        _idct = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<int>>(IdctKernel);
-        _color = accelerator.LoadAutoGroupedStreamKernel<
+        _color = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, int>(ColorKernel);
-        _orient = accelerator.LoadAutoGroupedStreamKernel<
+        _orient = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(OrientKernel);
     }
 

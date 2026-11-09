@@ -321,6 +321,7 @@ public abstract partial class CodecsTestBase
         try
         {
             using var kernels = new JpegScanEncoderKernels(acc);
+            await kernels.EnsureKernelsAsync();
             using var hist = acc.Allocate1D<int>(4L * JpegEncMeta.HistStride);
             using var tabs = acc.Allocate1D<int>(4L * JpegEncMeta.TabStride);
             // Four histograms: counts 1, 2, 4, ... 2^29 over 30 symbols (the Huffman tree is a chain 30 deep, so the

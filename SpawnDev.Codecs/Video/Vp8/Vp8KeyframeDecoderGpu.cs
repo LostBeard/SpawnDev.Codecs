@@ -281,6 +281,7 @@ public sealed class Vp8KeyframeDecoderGpu : IDisposable
             // Step 3: crop the macroblock grid to the signalled picture size.
             if (!aligned)
             {
+                await _crop.EnsureKernelsAsync();
                 _crop.Run(wY!.View, 0, workWidth, yOut, 0, width, height);
                 _crop.Run(wU!.View, 0, uvWorkWidth, uOut, 0, uvWidth, uvHeight);
                 _crop.Run(wV!.View, 0, uvWorkWidth, vOut, 0, uvWidth, uvHeight);

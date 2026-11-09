@@ -101,7 +101,7 @@ public sealed class GifEncoderGpu : IDisposable
     private readonly StageBuffer<byte> _stageIn;
     private readonly StageBuffer<byte> _stageOut;
 
-    /// <summary>Compile the kernels.</summary>
+    /// <summary>An encoder bound to <paramref name="accelerator"/>. Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public GifEncoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
@@ -128,6 +128,20 @@ public sealed class GifEncoderGpu : IDisposable
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
     }
+
+    // Kernels load lazily (awaited by EncodeCoreAsync, where every overload ends up): the constructor compiles nothing.
+    private async Task EnsureKernelsAsync()
+    {
+        await _kernels.EnsureKernelsAsync();
+        await _globalBuilder.EnsureKernelsAsync();
+        await _frameBuilder.EnsureKernelsAsync();
+    }
+
+    /// <summary>
+    /// Compile and load every kernel the encoder uses, so the first encode does not wait for them. The loads are awaited
+    /// one kernel at a time and yield to the browser's event loop before each compile.
+    /// </summary>
+    public Task WarmUpAsync() => EnsureKernelsAsync();
 
     // ------------------------------------------------------------------
     // sizes
@@ -233,6 +247,7 @@ public sealed class GifEncoderGpu : IDisposable
         ArrayView1D<byte, Stride1D.Dense> rgba, int width, int height, int frames, Geometry geo,
         ArrayView1D<byte, Stride1D.Dense> output, GifEncodeOptions o)
     {
+        await EnsureKernelsAsync();
         int pixels = geo.Pixels;
         long frameBytes = (long)pixels * 4;
 

@@ -90,7 +90,7 @@ public sealed class GifDecoderGpu : IDisposable
     /// </summary>
     public GifCompositing Compositing { get; set; } = GifCompositing.Pillow;
 
-    /// <summary>Compile the kernels.</summary>
+    /// <summary>A decoder bound to <paramref name="accelerator"/>. Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public GifDecoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
@@ -150,9 +150,23 @@ public sealed class GifDecoderGpu : IDisposable
         var e => e.ToString(),
     };
 
+    // Kernels load lazily (awaited by ScanAsync, where every entry point starts): the constructor compiles nothing.
+    private async Task EnsureKernelsAsync()
+    {
+        await _kernels.EnsureKernelsAsync();
+        await _pixel.EnsureKernelsAsync();
+    }
+
+    /// <summary>
+    /// Compile and load every kernel the decoder uses, so the first decode does not wait for them. The loads are awaited
+    /// one kernel at a time and yield to the browser's event loop before each compile.
+    /// </summary>
+    public Task WarmUpAsync() => EnsureKernelsAsync();
+
     private async Task<Layout> ScanAsync(ArrayView1D<byte, Stride1D.Dense> file, int fileLength)
     {
         if (fileLength <= 0 || fileLength > file.Length) throw new ArgumentOutOfRangeException(nameof(fileLength));
+        await EnsureKernelsAsync();
         // The walk is a chain of bounded launches (ScanStepBound always finishes it); the done flag is checked
         // after every ScanBatch launches, so a file that needs fewer costs no readback beyond the header's.
         _kernels.ScanInit(file, fileLength, _meta.View);

@@ -52,7 +52,20 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
     /// <summary>Diagnostics: stage names of EncodeStreamAsync as they complete (tests time a browser lane with it). Null = off.</summary>
     internal static Action<string>? Trace;
 
-    /// <summary>Compile the kernels and upload the constant tables.</summary>
+    /// <summary>
+    /// Compile and load every kernel the encoder uses (still, alpha, both animation paths), so the first encode does not
+    /// wait for them. The loads are awaited one kernel at a time and yield to the browser's event loop before each compile.
+    /// </summary>
+    public async Task WarmUpAsync()
+    {
+        await EnsureStreamKernelsAsync();
+        await AnimEncoder.EnsureKernelsAsync();
+    }
+
+    /// <summary>The VP8L coder's kernels only (still, alpha and frame-list animation; not the WebPAnimEncoder's).</summary>
+    internal Task EnsureStreamKernelsAsync() => _kernels.EnsureKernelsAsync();
+
+    /// <summary>Upload the constant tables. Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public WebPLosslessEncoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
@@ -503,6 +516,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
         int maxSize = GetMaxEncodedSize(width, height, options);
         if (output.Length < maxSize)
             throw new ArgumentException($"output must hold {maxSize} bytes (GetMaxEncodedSize) for {width}x{height}.", nameof(output));
+        await _kernels.EnsureKernelsAsync();
 
         byte[]? icc = options.IccProfile is { Length: > 0 } ? options.IccProfile : null;
         byte[]? exif = ExifPayload(options.Exif);

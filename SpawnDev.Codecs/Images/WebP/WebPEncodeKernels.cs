@@ -35,39 +35,39 @@ namespace SpawnDev.Codecs.Images.WebP;
 /// <summary>Loads and launches the WebP lossless encode kernels.</summary>
 public sealed class WebPEncodeKernels : IDisposable
 {
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<uint>, int> _toArgb;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _analyzeInit, _analyzeFinish;
-    private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _analyze;
-    private readonly Action<Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _paletteIndex;
-    private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>> _subtractGreen;
-    private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _predictorMode;
-    private readonly Action<Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _predictorResidual;
-    private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _crossMode;
-    private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _crossForward;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _tokenizeInit;
-    private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _tokenize;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _buildCodes;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _emitHeader, _emitTail;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _emitBits;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _subImageBegin, _subImageBuild;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _subImageHist;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _subImageSymbols;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int> _emitCode;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _emitTokens;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _finalize;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int> _copyBlob;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _tileHistInit;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _tileHist;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _clusterSeedFirst, _clusterTileMin, _clusterSeedNext,
-        _clusterLengths, _clusterAssign, _clusterAccumulate, _clusterFinish;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _buildGroupCodes;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _alphaCost;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _alphaPick;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<uint>, ArrayView<int>> _alphaToArgb;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _alphaRaw;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, int> _finalizeAlpha;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _finalizeFrame;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _finalizeAnim;
+    private Action<Index1D, ArrayView<byte>, ArrayView<uint>, int> _toArgb = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>> _analyzeInit = null!, _analyzeFinish = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _analyze = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _paletteIndex = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<int>> _subtractGreen = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _predictorMode = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _predictorResidual = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _crossMode = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _crossForward = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int> _tokenizeInit = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _tokenize = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>> _buildCodes = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _emitHeader = null!, _emitTail = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _emitBits = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int> _subImageBegin = null!, _subImageBuild = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _subImageHist = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _subImageSymbols = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int> _emitCode = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _emitTokens = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>> _finalize = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int> _copyBlob = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>> _tileHistInit = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _tileHist = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>> _clusterSeedFirst = null!, _clusterTileMin = null!, _clusterSeedNext = null!,
+        _clusterLengths = null!, _clusterAssign = null!, _clusterAccumulate = null!, _clusterFinish = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>> _buildGroupCodes = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _alphaCost = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>> _alphaPick = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<uint>, ArrayView<int>> _alphaToArgb = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _alphaRaw = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, int> _finalizeAlpha = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>> _finalizeFrame = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>> _finalizeAnim = null!;
 
     private readonly LaunchPacer _pacer;
     private readonly Accelerator _accelerator;
@@ -86,69 +86,84 @@ public sealed class WebPEncodeKernels : IDisposable
         Trace?.Invoke(name);
     }
 
-    /// <summary>Compile the kernels.</summary>
+    // The kernels above load lazily (EnsureKernelsAsync, awaited loads): the constructor compiles nothing.
+    private Task? _kernelsLoad;
+
+    /// <summary>Bind to <paramref name="accelerator"/>. Compiles nothing: await <see cref="EnsureKernelsAsync"/> before the first launch.</summary>
     public WebPEncodeKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _pacer = new LaunchPacer(accelerator);
-        _toArgb = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<uint>, int>(ToArgbKernel);
-        _analyzeInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(AnalyzeInitKernel);
-        _analyze = accelerator.LoadAutoGroupedStreamKernel<
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _toArgb = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<uint>, int>(ToArgbKernel);
+        _analyzeInit = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(AnalyzeInitKernel);
+        _analyze = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>>(AnalyzeKernel);
-        _analyzeFinish = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(AnalyzeFinishKernel);
-        _paletteIndex = accelerator.LoadAutoGroupedStreamKernel<
+        _analyzeFinish = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(AnalyzeFinishKernel);
+        _paletteIndex = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, ArrayView<int>>(PaletteIndexKernel);
-        _subtractGreen = accelerator.LoadAutoGroupedStreamKernel<
+        _subtractGreen = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<int>>(SubtractGreenKernel);
-        _predictorMode = accelerator.LoadAutoGroupedStreamKernel<
+        _predictorMode = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>>(PredictorModeKernel);
-        _predictorResidual = accelerator.LoadAutoGroupedStreamKernel<
+        _predictorResidual = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, ArrayView<int>>(PredictorResidualKernel);
-        _crossMode = accelerator.LoadAutoGroupedStreamKernel<
+        _crossMode = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>>(CrossColorModeKernel);
-        _crossForward = accelerator.LoadAutoGroupedStreamKernel<
+        _crossForward = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>>(CrossColorKernel);
-        _tokenizeInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(TokenizeInitKernel);
-        _tokenize = accelerator.LoadAutoGroupedStreamKernel<
+        _tokenizeInit = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(TokenizeInitKernel);
+        _tokenize = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(TokenizeKernel);
-        _buildCodes = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(BuildCodesKernel);
-        _emitHeader = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(EmitHeaderKernel);
-        _emitBits = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(EmitBitsKernel);
-        _subImageBegin = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(SubImageBeginKernel);
-        _subImageHist = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int>(SubImageHistKernel);
-        _subImageBuild = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(SubImageBuildKernel);
-        _subImageSymbols = accelerator.LoadAutoGroupedStreamKernel<
+        _buildCodes = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(BuildCodesKernel);
+        _emitHeader = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(EmitHeaderKernel);
+        _emitBits = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(EmitBitsKernel);
+        _subImageBegin = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(SubImageBeginKernel);
+        _subImageHist = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int, int>(SubImageHistKernel);
+        _subImageBuild = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(SubImageBuildKernel);
+        _subImageSymbols = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(SubImageSymbolsKernel);
-        _emitCode = accelerator.LoadAutoGroupedStreamKernel<
+        _emitCode = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int>(EmitCodeKernel);
-        _emitTokens = accelerator.LoadAutoGroupedStreamKernel<
+        _emitTokens = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(EmitTokensKernel);
-        _emitTail = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(EmitTailKernel);
-        _finalize = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(FinalizeKernel);
-        _copyBlob = accelerator.LoadAutoGroupedStreamKernel<
+        _emitTail = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(EmitTailKernel);
+        _finalize = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>>(FinalizeKernel);
+        _copyBlob = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int>(CopyBlobKernel);
-        _tileHistInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(TileHistInitKernel);
-        _tileHist = accelerator.LoadAutoGroupedStreamKernel<
+        _tileHistInit = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(TileHistInitKernel);
+        _tileHist = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(TileHistKernel);
-        _clusterSeedFirst = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClusterSeedFirstKernel);
-        _clusterTileMin = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClusterTileMinKernel);
-        _clusterSeedNext = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClusterSeedNextKernel);
-        _clusterLengths = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClusterLengthsKernel);
-        _clusterAssign = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClusterAssignKernel);
-        _clusterAccumulate = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClusterAccumulateKernel);
-        _clusterFinish = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClusterFinishKernel);
-        _buildGroupCodes = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(BuildGroupCodesKernel);
-        _alphaCost = accelerator.LoadAutoGroupedStreamKernel<
+        _clusterSeedFirst = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(ClusterSeedFirstKernel);
+        _clusterTileMin = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(ClusterTileMinKernel);
+        _clusterSeedNext = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(ClusterSeedNextKernel);
+        _clusterLengths = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(ClusterLengthsKernel);
+        _clusterAssign = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(ClusterAssignKernel);
+        _clusterAccumulate = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(ClusterAccumulateKernel);
+        _clusterFinish = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(ClusterFinishKernel);
+        _buildGroupCodes = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(BuildGroupCodesKernel);
+        _alphaCost = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(AlphaCostKernel);
-        _alphaPick = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(AlphaPickKernel);
-        _alphaToArgb = accelerator.LoadAutoGroupedStreamKernel<
+        _alphaPick = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(AlphaPickKernel);
+        _alphaToArgb = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<uint>, ArrayView<int>>(AlphaToArgbKernel);
-        _alphaRaw = accelerator.LoadAutoGroupedStreamKernel<
+        _alphaRaw = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(AlphaRawKernel);
-        _finalizeAlpha = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, int>(FinalizeAlphaKernel);
-        _finalizeFrame = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(FinalizeFrameKernel);
-        _finalizeAnim = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(FinalizeAnimKernel);
+        _finalizeAlpha = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, int>(FinalizeAlphaKernel);
+        _finalizeFrame = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>>(FinalizeFrameKernel);
+        _finalizeAnim = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>>(FinalizeAnimKernel);
     }
 
     // ------------------------------------------------------------------

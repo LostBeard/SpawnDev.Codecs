@@ -35,15 +35,17 @@ public sealed class Vp8FullKeyframeDecoderGpu : IDisposable
 {
     private readonly Accelerator _accelerator;
 
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
-        ArrayView<int>, ArrayView<int>> _header;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, int> _modes;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<short>,
-        ArrayView<byte>, ArrayView<byte>, int, int, int> _tokens;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<short>, ArrayView<int>,
-        int, int> _recon;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>,
-        int, int> _loopFilter;
+    // Loaded lazily (EnsureKernelsAsync, awaited by the decode): the constructor compiles nothing.
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+        ArrayView<int>, ArrayView<int>> _header = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, int> _modes = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<short>,
+        ArrayView<byte>, ArrayView<byte>, int, int, int> _tokens = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<short>, ArrayView<int>,
+        int, int> _recon = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>,
+        int, int> _loopFilter = null!;
+    private Task? _kernelsLoad;
     private readonly Vp8StridedPlanePackKernel _crop;
 
     // Constants uploaded once per accelerator.
@@ -56,21 +58,11 @@ public sealed class Vp8FullKeyframeDecoderGpu : IDisposable
     // Grow-only staging for the encoded bytes of the managed and TypedArray overloads.
     private readonly StageBuffer<byte> _stageIn;
 
-    /// <summary>Compile the kernels and upload the constant tables onto <paramref name="accelerator"/>.</summary>
+    /// <summary>Upload the constant tables onto <paramref name="accelerator"/>. Compiles no kernels (see <see cref="EnsureKernelsAsync"/>).</summary>
     public Vp8FullKeyframeDecoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
-        _header = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>,
-            ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(Vp8FullHeaderKernel.HeaderKernel);
-        _modes = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>,
-            ArrayView<byte>, int>(Vp8FullModeKernel.ModeKernel);
-        _tokens = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>,
-            ArrayView<byte>, ArrayView<short>, ArrayView<byte>, ArrayView<byte>, int, int, int>(Vp8FullTokenKernel.TokenKernel);
-        _recon = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
-            ArrayView<short>, ArrayView<int>, int, int>(Vp8FullReconKernel.ReconKernel);
-        _loopFilter = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
-            ArrayView<int>, int, int>(Vp8FullLoopFilterKernel.LoopFilterKernel);
         _crop = new Vp8StridedPlanePackKernel(accelerator);
         _stageIn = new StageBuffer<byte>(accelerator);
 
@@ -84,6 +76,32 @@ public sealed class Vp8FullKeyframeDecoderGpu : IDisposable
         _defaultProbs.View.CopyFromCPU(Vp8FrameSetupKernel.BuildDefaultCoefProbs());
         _updateProbs.View.CopyFromCPU(Vp8FrameSetupKernel.BuildUpdateCoefProbs());
         _tables.View.CopyFromCPU(Vp8FullTables.Build());
+    }
+
+    /// <summary>
+    /// Load every kernel the decode uses, once (awaited loads: each compile yields to the browser's event loop first).
+    /// The decode calls it itself; call it early to keep the first decode from waiting for the compiles.
+    /// </summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _header = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>,
+            ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(Vp8FullHeaderKernel.HeaderKernel);
+        _modes = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>,
+            ArrayView<byte>, int>(Vp8FullModeKernel.ModeKernel);
+        _tokens = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>,
+            ArrayView<byte>, ArrayView<short>, ArrayView<byte>, ArrayView<byte>, int, int, int>(Vp8FullTokenKernel.TokenKernel);
+        _recon = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+            ArrayView<short>, ArrayView<int>, int, int>(Vp8FullReconKernel.ReconKernel);
+        _loopFilter = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+            ArrayView<int>, int, int>(Vp8FullLoopFilterKernel.LoopFilterKernel);
+        await _crop.EnsureKernelsAsync();
     }
 
     /// <summary>Luma plane size in bytes for a <paramref name="width"/> x <paramref name="height"/> picture.</summary>
@@ -154,6 +172,7 @@ public sealed class Vp8FullKeyframeDecoderGpu : IDisposable
         ArrayView1D<byte, Stride1D.Dense> uOut,
         ArrayView1D<byte, Stride1D.Dense> vOut)
     {
+        await EnsureKernelsAsync();
         int width = tag.Width!.Value;
         int height = tag.Height!.Value;
         int mbCols = (width + 15) / 16;

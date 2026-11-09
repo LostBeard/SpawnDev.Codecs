@@ -104,6 +104,7 @@ public sealed partial class WebPLosslessEncoderGpu
         int maxSize = GetMaxAnimationEncodedSize(frames, options);
         if (output.Length < maxSize)
             throw new ArgumentException($"output must hold {maxSize} bytes (GetMaxAnimationEncodedSize).", nameof(output));
+        await _kernels.EnsureKernelsAsync();
 
         byte[]? icc = options.IccProfile is { Length: > 0 } ? options.IccProfile : null;
         byte[]? exif = ExifPayload(options.Exif);

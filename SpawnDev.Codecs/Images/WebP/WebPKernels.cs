@@ -36,54 +36,70 @@ public sealed class WebPKernels : IDisposable
     private const uint FccExif = 'E' | ('X' << 8) | ('I' << 16) | ('F' << 24);
     private const uint FccXmp = 'X' | ('M' << 8) | ('P' << 16) | (' ' << 24);
 
-    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, int> _scan;
-    private readonly Action<Index1D, ArrayView<byte>, int, int, int, int, int,
-        ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<uint>, ArrayView<int>> _decode;
-    private readonly Action<Index1D, ArrayView<uint>> _subtractGreen;
-    private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, int, int, int> _crossColor;
-    private readonly Action<Index1D, ArrayView<uint>, ArrayView<int>, int, int, int, int, int, int> _predictor;
-    private readonly Action<Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, int, int, int, int, int> _colorIndex;
-    private readonly Action<Index1D, ArrayView<uint>, ArrayView<byte>> _toRgba;
-    private readonly Action<Index1D, ArrayView<uint>> _alphaGreen;
-    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<uint>> _alphaCopy;
-    private readonly Action<Index1D, ArrayView<uint>, int, int, int, int, int> _alphaUnfilter;
-    private readonly Action<Index1D, ArrayView<uint>, ArrayView<byte>> _alphaPack;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>> _applyAlpha;
-    private readonly Action<Index1D, ArrayView<byte>, int, int, int, int, int> _clearRect;
-    private readonly Action<Index1D, ArrayView<byte>> _clearAll;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, int, int, int, int, int> _composite;
+    private Action<Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, int> _scan = null!;
+    private Action<Index1D, ArrayView<byte>, int, int, int, int, int,
+        ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<uint>, ArrayView<int>> _decode = null!;
+    private Action<Index1D, ArrayView<uint>> _subtractGreen = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<int>, int, int, int> _crossColor = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<int>, int, int, int, int, int, int> _predictor = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, int, int, int, int, int> _colorIndex = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<byte>> _toRgba = null!;
+    private Action<Index1D, ArrayView<uint>> _alphaGreen = null!;
+    private Action<Index1D, ArrayView<byte>, int, ArrayView<uint>> _alphaCopy = null!;
+    private Action<Index1D, ArrayView<uint>, int, int, int, int, int> _alphaUnfilter = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<byte>> _alphaPack = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>> _applyAlpha = null!;
+    private Action<Index1D, ArrayView<byte>, int, int, int, int, int> _clearRect = null!;
+    private Action<Index1D, ArrayView<byte>> _clearAll = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, int, int, int, int, int> _composite = null!;
 
     private readonly LaunchPacer _pacer;
+    private readonly Accelerator _accelerator;
+    // The kernels above load lazily (EnsureKernelsAsync, awaited loads): the constructor compiles nothing.
+    private Task? _kernelsLoad;
 
-    /// <summary>Compile the kernels.</summary>
+    /// <summary>Bind to <paramref name="accelerator"/>. Compiles nothing: await <see cref="EnsureKernelsAsync"/> before the first launch.</summary>
     public WebPKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        _accelerator = accelerator;
         _pacer = new LaunchPacer(accelerator);
-        _scan = accelerator.LoadAutoGroupedStreamKernel<
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _scan = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, int>(ScanKernel);
-        _decode = accelerator.LoadAutoGroupedStreamKernel<
+        _decode = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, int, int, int, int, int,
             ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<uint>, ArrayView<int>>(DecodeKernel);
-        _subtractGreen = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<uint>>(SubtractGreenKernel);
-        _crossColor = accelerator.LoadAutoGroupedStreamKernel<
+        _subtractGreen = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<uint>>(SubtractGreenKernel);
+        _crossColor = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<int>, int, int, int>(CrossColorKernel);
-        _predictor = accelerator.LoadAutoGroupedStreamKernel<
+        _predictor = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<int>, int, int, int, int, int, int>(PredictorKernel);
-        _colorIndex = accelerator.LoadAutoGroupedStreamKernel<
+        _colorIndex = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, int, int, int, int, int>(ColorIndexKernel);
-        _toRgba = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<uint>, ArrayView<byte>>(ToRgbaKernel);
-        _alphaGreen = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<uint>>(AlphaGreenKernel);
-        _alphaCopy = accelerator.LoadAutoGroupedStreamKernel<
+        _toRgba = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<uint>, ArrayView<byte>>(ToRgbaKernel);
+        _alphaGreen = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<uint>>(AlphaGreenKernel);
+        _alphaCopy = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, int, ArrayView<uint>>(AlphaCopyKernel);
-        _alphaUnfilter = accelerator.LoadAutoGroupedStreamKernel<
+        _alphaUnfilter = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, int, int, int, int, int>(AlphaUnfilterKernel);
-        _alphaPack = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<uint>, ArrayView<byte>>(AlphaPackKernel);
-        _applyAlpha = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>>(ApplyAlphaKernel);
-        _clearRect = accelerator.LoadAutoGroupedStreamKernel<
+        _alphaPack = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<uint>, ArrayView<byte>>(AlphaPackKernel);
+        _applyAlpha = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>>(ApplyAlphaKernel);
+        _clearRect = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, int, int, int, int, int>(ClearRectKernel);
-        _clearAll = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>>(ClearAllKernel);
-        _composite = accelerator.LoadAutoGroupedStreamKernel<
+        _clearAll = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>>(ClearAllKernel);
+        _composite = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, int, int, int, int, int>(CompositeKernel);
     }
 

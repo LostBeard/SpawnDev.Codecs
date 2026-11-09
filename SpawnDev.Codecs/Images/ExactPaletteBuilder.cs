@@ -43,12 +43,15 @@ internal sealed class ExactPaletteBuilder : IDisposable
     public const int TableSlots = 1024;
     public const int MaxPalette = 256;
 
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, int> _scanAlpha;
-    private readonly Action<Index1D, ArrayView<int>, int> _setLimit;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _setLimitFrom;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _insert;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _finishCount;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>> _finishRank;
+    private readonly Accelerator _accelerator;
+    // Loaded lazily by EnsureKernelsAsync (awaited loads; the constructor compiles nothing).
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, int> _scanAlpha = null!;
+    private Action<Index1D, ArrayView<int>, int> _setLimit = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _setLimitFrom = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _insert = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>> _finishCount = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>> _finishRank = null!;
+    private Task? _kernelsLoad;
 
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _table;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _palette;
@@ -57,15 +60,28 @@ internal sealed class ExactPaletteBuilder : IDisposable
     public ExactPaletteBuilder(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
-        _scanAlpha = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, int>(ScanAlphaKernel);
-        _setLimit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, int>(SetLimitKernel);
-        _setLimitFrom = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int>(SetLimitFromKernel);
-        _insert = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(InsertKernel);
-        _finishCount = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(FinishCountKernel);
-        _finishRank = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(FinishRankKernel);
+        _accelerator = accelerator;
         _table = accelerator.Allocate1D<int>(TableSlots);
         _palette = accelerator.Allocate1D<int>(MaxPalette);
         _state = accelerator.Allocate1D<int>(ExactPaletteState.Size);
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _scanAlpha = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, int>(ScanAlphaKernel);
+        _setLimit = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, int>(SetLimitKernel);
+        _setLimitFrom = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int, int>(SetLimitFromKernel);
+        _insert = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(InsertKernel);
+        _finishCount = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(FinishCountKernel);
+        _finishRank = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(FinishRankKernel);
     }
 
     /// <summary>Sorted palette (0xRRGGBB per entry); valid when <c>State[Exact] == 1</c>.</summary>

@@ -11,12 +11,27 @@ namespace SpawnDev.Codecs.Images;
 /// <summary>Launches the shared 8-bit image pixel kernels.</summary>
 internal sealed class ImagePixelKernels : IDisposable
 {
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>> _widen;
+    private readonly Accelerator _accelerator;
+    // Loaded lazily by EnsureKernelsAsync (awaited load; the constructor compiles nothing).
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>> _widen = null!;
+    private Task? _kernelsLoad;
 
     public ImagePixelKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
-        _widen = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>>(WidenKernel);
+        _accelerator = accelerator;
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        _widen = await _accelerator.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>>(WidenKernel);
     }
 
     /// <summary>

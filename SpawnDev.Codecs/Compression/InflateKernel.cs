@@ -18,18 +18,34 @@ namespace SpawnDev.Codecs.Compression;
 /// <summary>Launches the resumable zlib decode (<see cref="InflateGpu.InitZlib"/> + <see cref="InflateGpu.Step"/>) on the accelerator.</summary>
 public sealed class InflateKernel : IDisposable
 {
-    private readonly Action<Index1D, ArrayView<byte>, int, int, ArrayView<int>, ArrayView<int>, int> _init;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _step;
+    private Action<Index1D, ArrayView<byte>, int, int, ArrayView<int>, ArrayView<int>, int> _init = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _step = null!;
     private readonly LaunchPacer _pacer;
+    private readonly Accelerator _accelerator;
+    // The kernels above load lazily (EnsureKernelsAsync, awaited by RunAsync): the constructor compiles nothing.
+    private Task? _kernelsLoad;
 
-    /// <summary>Compile.</summary>
+    /// <summary>Bind to <paramref name="accelerator"/> (the kernels compile on first use, or in <see cref="EnsureKernelsAsync"/>).</summary>
     public InflateKernel(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        _accelerator = accelerator;
         _pacer = new LaunchPacer(accelerator);
-        _init = accelerator.LoadAutoGroupedStreamKernel<
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _init = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, int, int, ArrayView<int>, ArrayView<int>, int>(InflateInitKernel);
-        _step = accelerator.LoadAutoGroupedStreamKernel<
+        _step = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(InflateStepKernel);
     }
 
@@ -57,6 +73,7 @@ public sealed class InflateKernel : IDisposable
         if (scratch.Length < InflateGpu.ScratchInts)
             throw new ArgumentException($"scratch must hold {InflateGpu.ScratchInts} ints.", nameof(scratch));
         if (result.Length < 1) throw new ArgumentException("result must hold 1 int.", nameof(result));
+        await EnsureKernelsAsync();
         _init(1, zlib, zlibLength, outputCapacity, scratch, result, verifyAdler ? 1 : 0);
         int steps = InflateGpu.MaxSteps(zlibLength, outputCapacity);
         for (int i = 0; i < steps; i++)

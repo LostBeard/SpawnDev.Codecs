@@ -47,35 +47,51 @@ public sealed class PngKernels : IDisposable
     /// </summary>
     public const int UnfilterLaneBytes = 32768;
 
-    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _scanInit;
-    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _scan;
-    private readonly Action<Index1D, ArrayView<int>> _scanFinish;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, ArrayView<int>> _crcPiece;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, int> _crcCombine;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>> _gather;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, int, int> _unfilter;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _toRgba;
+    private Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _scanInit = null!;
+    private Action<Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _scan = null!;
+    private Action<Index1D, ArrayView<int>> _scanFinish = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, ArrayView<int>> _crcPiece = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, int> _crcCombine = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>> _gather = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, int, int> _unfilter = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _toRgba = null!;
 
-    /// <summary>Compile the kernels.</summary>
     private readonly LaunchPacer _pacer;
+    private readonly Accelerator _accelerator;
+    // The kernels above load lazily (EnsureKernelsAsync, awaited loads): the constructor compiles nothing.
+    private Task? _kernelsLoad;
 
+    /// <summary>Bind to <paramref name="accelerator"/>. Compiles nothing: await <see cref="EnsureKernelsAsync"/> before the first launch.</summary>
     public PngKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        _accelerator = accelerator;
         _pacer = new LaunchPacer(accelerator);
-        _scanInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, ArrayView<int>>(ScanInitKernel);
-        _scan = accelerator.LoadAutoGroupedStreamKernel<
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _scanInit = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, int, ArrayView<int>>(ScanInitKernel);
+        _scan = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(ScanKernel);
-        _scanFinish = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(ScanFinishKernel);
-        _crcPiece = accelerator.LoadAutoGroupedStreamKernel<
+        _scanFinish = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(ScanFinishKernel);
+        _crcPiece = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, ArrayView<int>>(CrcPieceKernel);
-        _crcCombine = accelerator.LoadAutoGroupedStreamKernel<
+        _crcCombine = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, int>(CrcCombineKernel);
-        _gather = accelerator.LoadAutoGroupedStreamKernel<
+        _gather = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>>(GatherKernel);
-        _unfilter = accelerator.LoadAutoGroupedStreamKernel<
+        _unfilter = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, int, int>(UnfilterKernel);
-        _toRgba = accelerator.LoadAutoGroupedStreamKernel<
+        _toRgba = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(ToRgbaKernel);
     }
 

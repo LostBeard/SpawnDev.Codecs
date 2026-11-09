@@ -164,69 +164,85 @@ internal sealed class GifEncoderKernels : IDisposable
         CHi = 9, CCnt = 10, CAxis = 11, CAxisMin = 12, CAxisMax = 13, CSplit = 14, CMid = 15, CPrevLo = 16, CPrevHi = 17,
         CPrevMid = 18, CPrevBest = 19, CPrevNew = 20;
 
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _prepGlobal;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _framePalette;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _hist;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _medLaneCount;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _medSetup;
-    private readonly Action<Index1D, ArrayView<int>> _medCompact;
-    private readonly Action<Index1D, ArrayView<int>> _medSelect;
-    private readonly Action<Index1D, ArrayView<int>> _medAxisHist;
-    private readonly Action<Index1D, ArrayView<int>> _medPartCount;
-    private readonly Action<Index1D, ArrayView<int>> _medPrefix;
-    private readonly Action<Index1D, ArrayView<int>> _medScatter;
-    private readonly Action<Index1D, ArrayView<int>> _medFinalCopy;
-    private readonly Action<Index1D, ArrayView<int>> _medAccumulate;
-    private readonly Action<Index1D, ArrayView<int>> _medMeans;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _medSort;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _layout;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _quantFlags;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _map;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _fsWave;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int> _lzwInit;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int> _lzwStep;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _segOffsets;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _frameOffsets;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int> _gather;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _writePrefix;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int> _copyFramed;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _header;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _trailer;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _prepGlobal = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _framePalette = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _hist = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _medLaneCount = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _medSetup = null!;
+    private Action<Index1D, ArrayView<int>> _medCompact = null!;
+    private Action<Index1D, ArrayView<int>> _medSelect = null!;
+    private Action<Index1D, ArrayView<int>> _medAxisHist = null!;
+    private Action<Index1D, ArrayView<int>> _medPartCount = null!;
+    private Action<Index1D, ArrayView<int>> _medPrefix = null!;
+    private Action<Index1D, ArrayView<int>> _medScatter = null!;
+    private Action<Index1D, ArrayView<int>> _medFinalCopy = null!;
+    private Action<Index1D, ArrayView<int>> _medAccumulate = null!;
+    private Action<Index1D, ArrayView<int>> _medMeans = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _medSort = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _layout = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int> _quantFlags = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _map = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _fsWave = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int> _lzwInit = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int> _lzwStep = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _segOffsets = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _frameOffsets = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int> _gather = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _writePrefix = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int> _copyFramed = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _header = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>> _trailer = null!;
 
     private readonly LaunchPacer _pacer;
+    private readonly Accelerator _accelerator;
+    // The kernels above load lazily (EnsureKernelsAsync, awaited loads): the constructor compiles nothing.
+    private Task? _kernelsLoad;
 
     public GifEncoderKernels(Accelerator a)
     {
         ArgumentNullException.ThrowIfNull(a);
+        _accelerator = a;
         _pacer = new LaunchPacer(a);
-        _prepGlobal = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(PrepGlobalKernel);
-        _framePalette = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(FramePaletteKernel);
-        _hist = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(HistKernel);
-        _medLaneCount = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(MedLaneCountKernel);
-        _medSetup = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(MedSetupKernel);
-        _medCompact = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(MedCompactKernel);
-        _medSelect = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(MedSelectKernel);
-        _medAxisHist = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(MedAxisHistKernel);
-        _medPartCount = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(MedPartCountKernel);
-        _medPrefix = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(MedPrefixKernel);
-        _medScatter = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(MedScatterKernel);
-        _medFinalCopy = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(MedFinalCopyKernel);
-        _medAccumulate = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(MedAccumulateKernel);
-        _medMeans = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(MedMeansKernel);
-        _medSort = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(MedSortKernel);
-        _layout = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(LayoutKernel);
-        _quantFlags = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(QuantFlagsKernel);
-        _map = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(MapKernel);
-        _fsWave = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(FsWaveKernel);
-        _lzwInit = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int>(LzwInitKernel);
-        _lzwStep = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int>(LzwStepKernel);
-        _segOffsets = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(SegOffsetsKernel);
-        _frameOffsets = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int>(FrameOffsetsKernel);
-        _gather = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int>(GatherKernel);
-        _writePrefix = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(WritePrefixKernel);
-        _copyFramed = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int>(CopyFramedKernel);
-        _header = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(HeaderKernel);
-        _trailer = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(TrailerKernel);
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _prepGlobal = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(PrepGlobalKernel);
+        _framePalette = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(FramePaletteKernel);
+        _hist = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(HistKernel);
+        _medLaneCount = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(MedLaneCountKernel);
+        _medSetup = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(MedSetupKernel);
+        _medCompact = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(MedCompactKernel);
+        _medSelect = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(MedSelectKernel);
+        _medAxisHist = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(MedAxisHistKernel);
+        _medPartCount = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(MedPartCountKernel);
+        _medPrefix = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(MedPrefixKernel);
+        _medScatter = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(MedScatterKernel);
+        _medFinalCopy = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(MedFinalCopyKernel);
+        _medAccumulate = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(MedAccumulateKernel);
+        _medMeans = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(MedMeansKernel);
+        _medSort = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(MedSortKernel);
+        _layout = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(LayoutKernel);
+        _quantFlags = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(QuantFlagsKernel);
+        _map = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(MapKernel);
+        _fsWave = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(FsWaveKernel);
+        _lzwInit = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int>(LzwInitKernel);
+        _lzwStep = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int>(LzwStepKernel);
+        _segOffsets = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(SegOffsetsKernel);
+        _frameOffsets = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int, int>(FrameOffsetsKernel);
+        _gather = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int, int>(GatherKernel);
+        _writePrefix = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(WritePrefixKernel);
+        _copyFramed = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int, int>(CopyFramedKernel);
+        _header = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(HeaderKernel);
+        _trailer = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>>(TrailerKernel);
     }
 
     // ------------------------------------------------------------------

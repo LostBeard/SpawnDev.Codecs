@@ -808,7 +808,8 @@ internal sealed class WebPAnimEncoder : IDisposable
 
     /// <summary>
     /// The still file of one encoded image (<paramref name="file"/>: a complete RIFF of <paramref name="fileLength"/> bytes)
-    /// with the metadata chunks, into <paramref name="o"/>. The blobs must already be uploaded.
+    /// with the metadata chunks, into <paramref name="o"/>. The blobs must already be uploaded and the kernels loaded
+    /// (<see cref="EnsureKernelsAsync"/>).
     /// </summary>
     public void WriteStillFile(ArrayView1D<byte, Stride1D.Dense> o, ArrayView1D<byte, Stride1D.Dense> file, int fileLength, bool hasAlpha,
         int imageChunksStart, int width, int height, byte[]? icc, byte[]? exif, byte[]? xmp)
