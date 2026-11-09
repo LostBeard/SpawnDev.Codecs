@@ -68,6 +68,21 @@ PATCHES = {
          "  if (!xd->corrupted) {\n    if (!cm->error_resilient_mode && !cm->frame_parallel_decoding_mode) {\n"),
         ("  // Non frame parallel update frame context here.\n",
          "  if (vp9ref_hook) vp9ref_hook(pbi, 3);\n  // Non frame parallel update frame context here.\n"),
+        # the loop filter runs once over the whole frame after all tiles (instead of row by row inside
+        # decode_tiles), so stage 4 sees the reconstructed frame before it and stage 5 after it. libvpx's own MT path
+        # filters after the tiles too; check_vectors.py proves the output unchanged.
+        ("      if (cm->lf.filter_level && !cm->skip_loop_filter) {\n        const int lf_start = mi_row - MI_BLOCK_SIZE;\n",
+         "      if (0) {\n        const int lf_start = mi_row - MI_BLOCK_SIZE;\n"),
+        ("  if (cm->lf.filter_level && !cm->skip_loop_filter) {\n    LFWorkerData *const lf_data = (LFWorkerData *)pbi->lf_worker.data1;\n"
+         "    winterface->sync(&pbi->lf_worker);\n    lf_data->start = lf_data->stop;\n",
+         "  if (0) {\n    LFWorkerData *const lf_data = (LFWorkerData *)pbi->lf_worker.data1;\n"
+         "    winterface->sync(&pbi->lf_worker);\n    lf_data->start = lf_data->stop;\n"),
+        ("    *p_data_end = decode_tiles(pbi, data + first_partition_size, data_end);\n",
+         "    *p_data_end = decode_tiles(pbi, data + first_partition_size, data_end);\n"
+         "    if (vp9ref_hook) vp9ref_hook(pbi, 4);\n"
+         "    if (cm->lf.filter_level && !cm->skip_loop_filter)\n"
+         "      vp9_loop_filter_frame(new_fb, cm, &pbi->mb, cm->lf.filter_level, 0, 0);\n"
+         "    if (vp9ref_hook) vp9ref_hook(pbi, 5);\n"),
     ],
 }
 patched = []

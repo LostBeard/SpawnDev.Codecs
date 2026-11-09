@@ -106,6 +106,20 @@ static void mi_hook(struct VP9Decoder *pbi, int stage) {
     } else {
       printf("-\n");
     }
+  } else if (stage == 4 || stage == 5) {
+    /* P = reconstructed frame before the loop filter, L = after (cropped planes, as the .md5 files hash them) */
+    const YV12_BUFFER_CONFIG *f = get_frame_new_buffer((VP9_COMMON *)cm);
+    int plane, y;
+    MD5Init(&md5);
+    for (plane = 0; plane < 3; ++plane) {
+      const unsigned char *p = plane == 0 ? f->y_buffer : plane == 1 ? f->u_buffer : f->v_buffer;
+      const int stride = plane == 0 ? f->y_stride : f->uv_stride;
+      const int w = plane == 0 ? f->y_crop_width : f->uv_crop_width;
+      const int h = plane == 0 ? f->y_crop_height : f->uv_crop_height;
+      for (y = 0; y < h; ++y) MD5Update(&md5, p + y * stride, w);
+    }
+    md5_hex(&md5, hex);
+    printf("%c %d %s\n", stage == 4 ? 'P' : 'L', hooked_frames, hex);
   } else if (stage == 3) {
     MD5Init(&md5);
     MD5Update(&md5, (const unsigned char *)cm->fc, CTX_BYTES - 1);

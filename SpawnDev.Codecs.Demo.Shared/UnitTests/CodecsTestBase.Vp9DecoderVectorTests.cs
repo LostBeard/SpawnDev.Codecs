@@ -215,13 +215,20 @@ public abstract partial class CodecsTestBase
         return Convert.ToHexString(SpawnDev.Codecs.Audio.Flac.FlacMd5.Compute(samples, 8)).ToLowerInvariant();
     }
 
-    /// <summary>libvpx_modeinfo.tsv.gz: file name -> per decoded frame (mi md5, counts md5 or "-", adapted context md5).</summary>
-    private static Dictionary<string, List<(string Mi, string Counts, string Adapted)>> LibvpxModeInfo()
+    /// <summary>One decoded frame in libvpx_modeinfo.tsv.gz: mode info MD5, counts MD5 (or "-"), context after adaptation,
+    /// reconstructed frame before (Pre) and after (Post) the loop filter.</summary>
+    private sealed class Vp9FrameRef
+    {
+        public string Mi = "", Counts = "", Adapted = "", Pre = "", Post = "";
+    }
+
+    /// <summary>libvpx_modeinfo.tsv.gz: file name -> per decoded frame (M / A / P / L lines of libvpx_ref -m).</summary>
+    private static Dictionary<string, List<Vp9FrameRef>> LibvpxModeInfo()
     {
         using var gz = new System.IO.Compression.GZipStream(new MemoryStream(ReadEmbedded(Vp9VectorPrefix + "libvpx_modeinfo.tsv.gz")),
             System.IO.Compression.CompressionMode.Decompress);
         using var reader = new StreamReader(gz);
-        var all = new Dictionary<string, List<(string, string, string)>>();
+        var all = new Dictionary<string, List<Vp9FrameRef>>();
         string? line;
         while ((line = reader.ReadLine()) != null)
         {
@@ -229,8 +236,16 @@ public abstract partial class CodecsTestBase
             string file = line[..tab];
             var parts = line[(tab + 1)..].Split(' ');
             if (!all.TryGetValue(file, out var list)) all[file] = list = new();
-            if (parts[0] == "M") list.Add((parts[2]["mi=".Length..], parts[3]["counts=".Length..], ""));
-            else list[^1] = (list[^1].Item1, list[^1].Item2, parts[2]);
+            int n = int.Parse(parts[1]);   // 1-based decoded frame number
+            while (list.Count < n) list.Add(new Vp9FrameRef());
+            var f = list[n - 1];
+            switch (parts[0])
+            {
+                case "M": f.Mi = parts[2]["mi=".Length..]; f.Counts = parts[3]["counts=".Length..]; break;
+                case "A": f.Adapted = parts[2]; break;
+                case "P": f.Pre = parts[2]; break;
+                case "L": f.Post = parts[2]; break;
+            }
         }
         return all;
     }
