@@ -1,17 +1,18 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt). See NOTICE.md for upstream attributions.
 //
-// VP9 frame buffers on the accelerator (libvpx BufferPool frame_bufs, indices from Vp9HeaderReader): one byte buffer
-// per frame buffer holding Y, U, V. Planes are padded to whole 64x64 superblocks, so a prediction or reconstruction of
-// a block that crosses the right / bottom frame edge stays inside the allocation (libvpx writes those pixels into its
-// frame borders; nothing reads them back as picture data). Sizes: the frame's crop size (libvpx y_crop_width), the
-// 8-aligned decoded size (y_width, what intra prediction treats as the frame edge) and the padded allocation.
+// VP9 frame buffers on the accelerator (libvpx BufferPool frame_bufs, indices from Vp9HeaderReader), all in ONE byte
+// buffer so a kernel reaches any reference by offset (a block picks LAST / GOLDEN / ALTREF at run time). Each frame
+// buffer owns a fixed-size region holding Y, U, V. Planes are padded to whole 64x64 superblocks, so a prediction or
+// reconstruction of a block that crosses the right / bottom frame edge stays inside the region (libvpx writes those
+// pixels into its frame borders; nothing reads them back as picture data). When a larger frame arrives the pool grows
+// and every region is copied over with its layout (references of another size stay valid: scaled prediction).
 
 using ILGPU;
 using ILGPU.Runtime;
 
 namespace SpawnDev.Codecs.Video.Vp9.Decoder;
 
-/// <summary>Geometry of one frame buffer's planes.</summary>
+/// <summary>Geometry of one frame buffer's planes (offsets relative to the frame buffer's region).</summary>
 internal readonly record struct Vp9PlaneLayout(int Width, int Height, int SsX, int SsY, int YStride, int YRows, int UvStride, int UvRows)
 {
     public long UOffset => (long)YStride * YRows;
@@ -27,6 +28,11 @@ internal readonly record struct Vp9PlaneLayout(int Width, int Height, int SsX, i
     public int UvAlignedWidth => AlignedWidth >> SsX;
     public int UvAlignedHeight => AlignedHeight >> SsY;
 
+    public long PlaneOffset(int plane) => plane == 0 ? 0 : plane == 1 ? UOffset : VOffset;
+    public int Stride(int plane) => plane == 0 ? YStride : UvStride;
+    public int CropWidth(int plane) => plane == 0 ? Width : UvCropWidth;
+    public int CropHeight(int plane) => plane == 0 ? Height : UvCropHeight;
+
     public static Vp9PlaneLayout For(int width, int height, int ssX, int ssY)
     {
         int w64 = (width + 63) & ~63, h64 = (height + 63) & ~63;
@@ -34,49 +40,56 @@ internal readonly record struct Vp9PlaneLayout(int Width, int Height, int SsX, i
     }
 }
 
-/// <summary>The decoder's frame buffers on the accelerator.</summary>
+/// <summary>The decoder's frame buffers on the accelerator, one region per libvpx frame buffer index.</summary>
 internal sealed class Vp9FrameBuffersGpu : IDisposable
 {
     private readonly Accelerator _acc;
-    private readonly MemoryBuffer1D<byte, Stride1D.Dense>?[] _buffers = new MemoryBuffer1D<byte, Stride1D.Dense>?[Vp9HeaderReader.FrameBuffers];
+    private MemoryBuffer1D<byte, Stride1D.Dense>? _pool;
+    private long _slotBytes;
     private readonly Vp9PlaneLayout[] _layouts = new Vp9PlaneLayout[Vp9HeaderReader.FrameBuffers];
 
     public Vp9FrameBuffersGpu(Accelerator accelerator) => _acc = accelerator ?? throw new ArgumentNullException(nameof(accelerator));
 
-    /// <summary>Make frame buffer <paramref name="index"/> hold a frame of the given size (reallocates only when it grows).</summary>
+    /// <summary>Make frame buffer <paramref name="index"/> hold a frame of the given size (the pool grows when needed).</summary>
     public void Ensure(int index, int width, int height, int ssX, int ssY)
     {
         var layout = Vp9PlaneLayout.For(width, height, ssX, ssY);
-        var buf = _buffers[index];
-        if (buf == null || buf.Length < layout.Bytes)
+        if (_pool == null || layout.Bytes > _slotBytes)
         {
-            buf?.Dispose();
-            _buffers[index] = _acc.Allocate1D<byte>(layout.Bytes);
+            long slot = Math.Max(layout.Bytes, _slotBytes);
+            var pool = _acc.Allocate1D<byte>(slot * Vp9HeaderReader.FrameBuffers);
+            if (_pool != null)
+                for (int i = 0; i < Vp9HeaderReader.FrameBuffers; i++)
+                    if (_layouts[i].Bytes > 0)
+                        _pool.View.SubView(i * _slotBytes, _layouts[i].Bytes).CopyTo(pool.View.SubView(i * slot, _layouts[i].Bytes));
+            _pool?.Dispose();
+            _pool = pool;
+            _slotBytes = slot;
         }
         _layouts[index] = layout;
     }
 
-    public ArrayView<byte> View(int index) => _buffers[index]!.View;
+    /// <summary>All frame buffers.</summary>
+    public ArrayView<byte> Pool => _pool!.View;
+    /// <summary>Where frame buffer <paramref name="index"/> starts in <see cref="Pool"/>.</summary>
+    public long Offset(int index) => index * _slotBytes;
     public Vp9PlaneLayout Layout(int index) => _layouts[index];
 
-    public void Dispose()
-    {
-        foreach (var b in _buffers) b?.Dispose();
-    }
+    public void Dispose() => _pool?.Dispose();
 }
 
 /// <summary>Output packing: the cropped planes of a frame buffer into one tight I420-style buffer (Y, then U, then V).</summary>
 internal static class Vp9OutputKernels
 {
-    /// <summary>One thread per output byte.</summary>
+    /// <summary>One thread per output byte; <paramref name="src"/> offsets are absolute in the pool.</summary>
     public static void PackPlanesKernel(Index1D i, ArrayView<byte> src, ArrayView<byte> dst, int w, int h, int uvW, int uvH,
-        int yStride, int uvStride, long uOffset, long vOffset)
+        int yStride, int uvStride, long yOffset, long uOffset, long vOffset)
     {
         long ySize = (long)w * h, uvSize = (long)uvW * uvH;
         long at = i;
         if (at < ySize)
         {
-            dst[at] = src[(at / w) * yStride + at % w];
+            dst[at] = src[yOffset + (at / w) * yStride + at % w];
             return;
         }
         at -= ySize;

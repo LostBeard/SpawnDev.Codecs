@@ -366,6 +366,59 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
+    /// <summary>
+    /// S3/S4 reconstruction: the decode pipeline's frame before the loop filter equals libvpx's (P line, cropped planes) on
+    /// every frame whose references are not loop-filtered yet (all earlier frames of the stream had filter level 0; the
+    /// first frame of every stream qualifies). Covers intra prediction, inverse transforms, inter prediction and their
+    /// orchestration; the loop filter extends this to every frame.
+    /// </summary>
+    [TestMethod(Timeout = 3600000, Category = "NotOnWebGL")]
+    public async Task Vp9Recon_PreLoopFilter_MatchesLibvpx()
+    {
+        var modeInfoRef = LibvpxModeInfo();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            var failures = new List<string>();
+            int compared = 0, intra = 0, interFrames = 0;
+            foreach (var v in Vp9Vectors())
+            {
+                if (!modeInfoRef.TryGetValue(v.Name, out var want)) { failures.Add($"{v.Name}: no libvpx reference"); continue; }
+                using var pipe = new Vp9DecodePipeline(acc);
+                int decoded = 0;
+                bool refsUnfiltered = true;
+                foreach (byte[] packet in Vp9Packets.ReadFile(v.File))
+                {
+                    using var buf = acc.Allocate1D(packet);
+                    foreach (var (offset, length) in Vp9Packets.Split(packet))
+                    {
+                        bool comparable = refsUnfiltered;
+                        int n = decoded;
+                        var h = await pipe.DecodeFrameAsync(packet.AsMemory(offset, length), buf.View, offset, async fh =>
+                        {
+                            if (!comparable) return;
+                            string md5 = Md5Hex(await pipe.ReadPlanesAsync(fh.NewBuffer));
+                            compared++;
+                            if (fh.IsIntraOnlyFrame) intra++; else interFrames++;
+                            if (md5 != want[n].Pre)
+                                failures.Add($"{v.Name} frame {n + 1}: reconstruction differs ({fh.Width}x{fh.Height}, type {fh.FrameType}, intra-only {fh.IntraOnly}, lossless {fh.Lossless})");
+                        });
+                        if (h.ShowExistingFrame) continue;
+                        if (h.LoopFilter.Level != 0) refsUnfiltered = false;
+                        decoded++;
+                        if (failures.Count > 40) goto done;
+                    }
+                }
+            }
+        done:
+            Console.WriteLine($"{acc.AcceleratorType}: {compared} frames compared ({intra} intra, {interFrames} inter)");
+            True(compared > 300, $"only {compared} frames compared");
+            True(failures.Count == 0, $"{failures.Count} mismatches:\n" + string.Join("\n", failures.Take(40)));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
     /// <summary>One libvpx_ref -c record: stage 0 = the context a frame loads, stage 1 = after its compressed header
     /// (+ tx_mode, reference_mode, comp_fixed_ref, comp_var_ref[0..1]).</summary>
     private sealed record Vp9CtxRecord(int Stage, byte[] Context, byte[] Extra);
