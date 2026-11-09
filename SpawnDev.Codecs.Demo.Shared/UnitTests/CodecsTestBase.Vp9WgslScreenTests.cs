@@ -18,20 +18,20 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    // (class, kernel method, WGSL character budget). Measured 2026-11-09 on SpawnDev.ILGPU 5.4.21: ParseKernel 87.1 MB
-    // (821,758 lines), InterPass / IntraWave 33.7 MB each, loop-filter Wavefront 10.8 MB, CompressedHeader 6.4 MB; the
-    // browser GPU lanes keep these fenced (GiantShader) until they shrink. Plan S2 inter (2026-11-09): InterPass split
-    // into InterPredict 5.7 MB + InterResidual 4.5 MB, and IntraWave 6.6 MB without the inter code.
+    // (class, kernel method, WGSL character budget), each today's size + 10%. Measured 2026-11-09 on SpawnDev.ILGPU
+    // 5.4.23-local.3, which emits view-taking helpers, ref state and LocalMemory views as WGSL functions instead of
+    // inlining them: ParseKernel 9.0 MB (113,564 lines; 87.1 MB on 5.4.21), loop-filter Wavefront 9.2 MB,
+    // CompressedHeader 6.4 MB, InterPredict 5.6 MB, IntraWave 2.7 MB, InterResidual 2.4 MB.
     private static readonly (Type Owner, string Kernel, long Budget)[] Vp9WgslKernels =
     {
         (typeof(Vp9CompressedHeaderKernels), "CopyContextKernel", 3734),
         (typeof(Vp9CompressedHeaderKernels), "CompressedHeaderKernel", 7089732),
-        (typeof(Vp9ParseKernels), "ParseKernel", 95805552),
-        (typeof(Vp9ReconKernels), "InterPredictKernel", 6290819),
-        (typeof(Vp9ReconKernels), "InterResidualKernel", 4928588),
-        (typeof(Vp9ReconKernels), "IntraWaveKernel", 7213330),
+        (typeof(Vp9ParseKernels), "ParseKernel", 9884585),
+        (typeof(Vp9ReconKernels), "InterPredictKernel", 6148984),
+        (typeof(Vp9ReconKernels), "InterResidualKernel", 2691056),
+        (typeof(Vp9ReconKernels), "IntraWaveKernel", 2971359),
         (typeof(Vp9LoopFilterKernels), "FrameInitKernel", 24780),
-        (typeof(Vp9LoopFilterKernels), "WavefrontKernel", 11848236),
+        (typeof(Vp9LoopFilterKernels), "WavefrontKernel", 10143101),
         (typeof(Vp9AdaptKernels), "SumCountsKernel", 3579),
         (typeof(Vp9AdaptKernels), "AdaptKernel", 404973),
         (typeof(Vp9OutputKernels), "PackPlanesKernel", 19703),
