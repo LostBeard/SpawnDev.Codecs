@@ -426,6 +426,56 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
+    /// <summary>
+    /// The public decoder (<see cref="Vp9DecoderGpu.DecodeFileAsync"/> and the ArrayView overload) gives libvpx's pictures:
+    /// the ComfyUI SaveWEBM files and the vectors with the trickiest output rules (show-existing, intra-only, resizing,
+    /// big superframes, odd sizes).
+    /// </summary>
+    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL")]
+    public async Task Vp9DecoderGpu_PublicApi_MatchesLibvpx()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            string[] picks = { "vp90-2-17-show-existing-frame.webm", "vp90-2-16-intra-only.webm", "vp90-2-05-resize.ivf",
+                "vp90-2-20-big_superframe-01.webm", "vp90-2-02-size-66x66.webm", "vp90-2-03-size-226x198.webm" };
+            var failures = new List<string>();
+            int pictures = 0;
+            foreach (var v in Vp9Vectors().Where(x => x.Name.StartsWith("comfyui_") || picks.Contains(x.Name)))
+            {
+                using var dec = new Vp9DecoderGpu(acc);
+                int n = 0;
+                await foreach (var frame in dec.DecodeFileAsync(v.File))
+                {
+                    if (n >= v.FrameMd5.Length) { failures.Add($"{v.Name}: more pictures than libvpx"); break; }
+                    if (frame.Planes.LongLength != frame.Format.PlanarBytes) failures.Add($"{v.Name} picture {n + 1}: {frame.Planes.Length} bytes");
+                    else if (Md5Hex(frame.Planes) != v.FrameMd5[n]) failures.Add($"{v.Name} picture {n + 1}: MD5 differs ({frame.Format})");
+                    n++;
+                    pictures++;
+                }
+                if (n != v.FrameMd5.Length) failures.Add($"{v.Name}: {n} pictures, libvpx {v.FrameMd5.Length}");
+                // the ArrayView overload on the same stream: pictures stay on the accelerator
+                using var dec2 = new Vp9DecoderGpu(acc);
+                using var dst = acc.Allocate1D<byte>(64L * 1024 * 1024 / 16);
+                int k = 0;
+                foreach (byte[] packet in Vp9Packets.ReadFile(v.File))
+                {
+                    var format = await dec2.DecodePacketAsync(packet, dst.View);
+                    if (format is not { } f) continue;
+                    if (k < v.FrameMd5.Length && Md5Hex(await dst.View.SubView(0, f.PlanarBytes).CopyToHostAsync()) != v.FrameMd5[k])
+                        failures.Add($"{v.Name} picture {k + 1}: ArrayView overload differs");
+                    k++;
+                }
+                if (k != v.FrameMd5.Length) failures.Add($"{v.Name}: ArrayView overload gave {k} pictures, libvpx {v.FrameMd5.Length}");
+            }
+            Console.WriteLine($"{acc.AcceleratorType}: {pictures} pictures == libvpx");
+            True(pictures > 300, $"only {pictures} pictures");
+            True(failures.Count == 0, $"{failures.Count} mismatches:\n" + string.Join("\n", failures.Take(40)));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
     /// <summary>One libvpx_ref -c record: stage 0 = the context a frame loads, stage 1 = after its compressed header
     /// (+ tx_mode, reference_mode, comp_fixed_ref, comp_var_ref[0..1]).</summary>
     private sealed record Vp9CtxRecord(int Stage, byte[] Context, byte[] Extra);
