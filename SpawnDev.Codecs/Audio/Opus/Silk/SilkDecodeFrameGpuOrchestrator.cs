@@ -36,54 +36,125 @@ namespace SpawnDev.Codecs.Audio.Opus.Silk;
 
 /// <summary>
 /// Host orchestrator for SILK per-frame decode (Phase A: indices +
-/// pulses; Phase B pending). Owns 3 compiled kernel handles and
+/// pulses; Phase B pending). Owns 5 kernel handles and
 /// dispatches them in sequence over GPU-resident buffers.
 /// </summary>
 public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
 {
-    private readonly Action<
+    private readonly Accelerator _accelerator;
+
+    // Kernels load on first use: awaited by WarmUpAsync (each compile yields to the browser's event loop first); the
+    // synchronous Decode* methods load the ones they launch synchronously when nothing has loaded them yet.
+    private Action<
         Index1D,
         ArrayView<byte>, int, int,
         SilkIndicesInputs,
         SilkIndicesScalars,
         ArrayView<OpusRangeDecoderGpuState>,
-        ArrayView<int>> _indicesKernel;
+        ArrayView<int>>? _indicesKernel;
 
-    private readonly Action<
+    private Action<
         Index1D,
         ArrayView<byte>, int, int,
         SilkPulsesInputs,
         ArrayView<int>,
         int,
         ArrayView<OpusRangeDecoderGpuState>,
-        ArrayView<short>> _pulsesKernel;
+        ArrayView<short>>? _pulsesKernel;
 
-    private readonly Action<
+    private Action<
         Index1D,
         ArrayView<int>,
         SilkParametersInputs,
         SilkParametersState,
         SilkParametersScalars,
         ArrayView<int>,
-        ArrayView<short>> _parametersKernel;
+        ArrayView<short>>? _parametersKernel;
 
-    private readonly Action<
+    private Action<
         Index1D,
         SilkDecodeCoreInputs,
-        SilkDecodeCoreScalars> _decodeCoreKernel;
+        SilkDecodeCoreScalars>? _decodeCoreKernel;
 
-    private readonly Action<
+    private Action<
         Index1D,
         ArrayView<short>,
         int, int,
-        int, int> _finalizeKernel;
+        int, int>? _finalizeKernel;
 
-    /// <summary>Compile all 3 phase kernels for the supplied accelerator.</summary>
+    private Task? _kernelsLoad;
+
+    /// <summary>An orchestrator bound to <paramref name="accelerator"/>. Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public SilkDecodeFrameGpuOrchestrator(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        _accelerator = accelerator;
+    }
 
-        _indicesKernel = accelerator.LoadAutoGroupedStreamKernel<
+    /// <summary>
+    /// Compile and load the 5 phase kernels, awaited (on browser backends each compile yields to the event loop first and
+    /// WebGPU builds its pipelines asynchronously). Call it early in a browser, before the synchronous Decode* methods,
+    /// which would otherwise compile on the page's thread.
+    /// </summary>
+    public Task WarmUpAsync()
+    {
+        if (_indicesKernel != null && _pulsesKernel != null && _parametersKernel != null && _decodeCoreKernel != null &&
+            _finalizeKernel != null)
+            return Task.CompletedTask;
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    // Each kernel a synchronous call has not loaded meanwhile.
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        var indices = await a.LoadAutoGroupedStreamKernelAsync<
+            Index1D,
+            ArrayView<byte>, int, int,
+            SilkIndicesInputs,
+            SilkIndicesScalars,
+            ArrayView<OpusRangeDecoderGpuState>,
+            ArrayView<int>>(SilkFrameIndicesKernel);
+        _indicesKernel ??= indices;
+
+        var pulses = await a.LoadAutoGroupedStreamKernelAsync<
+            Index1D,
+            ArrayView<byte>, int, int,
+            SilkPulsesInputs,
+            ArrayView<int>,
+            int,
+            ArrayView<OpusRangeDecoderGpuState>,
+            ArrayView<short>>(SilkFramePulsesKernel);
+        _pulsesKernel ??= pulses;
+
+        var parameters = await a.LoadAutoGroupedStreamKernelAsync<
+            Index1D,
+            ArrayView<int>,
+            SilkParametersInputs,
+            SilkParametersState,
+            SilkParametersScalars,
+            ArrayView<int>,
+            ArrayView<short>>(SilkFrameParametersKernel);
+        _parametersKernel ??= parameters;
+
+        var decodeCore = await a.LoadAutoGroupedStreamKernelAsync<
+            Index1D,
+            SilkDecodeCoreInputs,
+            SilkDecodeCoreScalars>(SilkFrameDecodeCoreKernel);
+        _decodeCoreKernel ??= decodeCore;
+
+        var finalize = await a.LoadAutoGroupedStreamKernelAsync<
+            Index1D,
+            ArrayView<short>,
+            int, int,
+            int, int>(SilkFrameFinalizeKernel);
+        _finalizeKernel ??= finalize;
+    }
+
+    // The launchers of the synchronous methods: each loads synchronously when nothing has loaded it.
+    private Action<Index1D, ArrayView<byte>, int, int, SilkIndicesInputs, SilkIndicesScalars, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>> IndicesLauncher
+        => _indicesKernel ??= _accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<byte>, int, int,
             SilkIndicesInputs,
@@ -91,7 +162,8 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             ArrayView<OpusRangeDecoderGpuState>,
             ArrayView<int>>(SilkFrameIndicesKernel);
 
-        _pulsesKernel = accelerator.LoadAutoGroupedStreamKernel<
+    private Action<Index1D, ArrayView<byte>, int, int, SilkPulsesInputs, ArrayView<int>, int, ArrayView<OpusRangeDecoderGpuState>, ArrayView<short>> PulsesLauncher
+        => _pulsesKernel ??= _accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<byte>, int, int,
             SilkPulsesInputs,
@@ -100,7 +172,8 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             ArrayView<OpusRangeDecoderGpuState>,
             ArrayView<short>>(SilkFramePulsesKernel);
 
-        _parametersKernel = accelerator.LoadAutoGroupedStreamKernel<
+    private Action<Index1D, ArrayView<int>, SilkParametersInputs, SilkParametersState, SilkParametersScalars, ArrayView<int>, ArrayView<short>> ParametersLauncher
+        => _parametersKernel ??= _accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<int>,
             SilkParametersInputs,
@@ -109,17 +182,18 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             ArrayView<int>,
             ArrayView<short>>(SilkFrameParametersKernel);
 
-        _decodeCoreKernel = accelerator.LoadAutoGroupedStreamKernel<
+    private Action<Index1D, SilkDecodeCoreInputs, SilkDecodeCoreScalars> DecodeCoreLauncher
+        => _decodeCoreKernel ??= _accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             SilkDecodeCoreInputs,
             SilkDecodeCoreScalars>(SilkFrameDecodeCoreKernel);
 
-        _finalizeKernel = accelerator.LoadAutoGroupedStreamKernel<
+    private Action<Index1D, ArrayView<short>, int, int, int, int> FinalizeLauncher
+        => _finalizeKernel ??= _accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<short>,
             int, int,
             int, int>(SilkFrameFinalizeKernel);
-    }
 
     /// <summary>
     /// Phase A: dispatch the indices + pulses decode. Range decoder state
@@ -140,9 +214,9 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
     {
         // IndicesAdapterKernel inits state from packet at the start of the
         // first dispatch, so a separate InitStateKernel is unnecessary.
-        _indicesKernel(1, packet, packetStart, packetStorage,
+        IndicesLauncher(1, packet, packetStart, packetStorage,
             indicesInputs, indicesScalars, stateBuf, indicesOut);
-        _pulsesKernel(1, packet, packetStart, packetStorage,
+        PulsesLauncher(1, packet, packetStart, packetStorage,
             pulsesInputs, indicesOut, frameLength, stateBuf, pulsesOut);
     }
 
@@ -171,7 +245,7 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             packet, packetStart, packetStorage,
             indicesInputs, indicesScalars, pulsesInputs,
             frameLength, stateBuf, indicesOut, pulsesOut);
-        _parametersKernel(1,
+        ParametersLauncher(1,
             indicesOut, parametersInputs, parametersState, parametersScalars,
             paramsIntOut, paramsShortOut);
     }
@@ -236,7 +310,7 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
         // rejects ("Storage buffer aliasing detected in kernel 'Kernel_SilkFrameDecodeCoreKernel'").
         decodeCoreInputs.ParamsShort = paramsShortOut;
         decodeCoreInputs.ParamsInt = paramsIntOut;
-        _decodeCoreKernel(1, decodeCoreInputs, decodeCoreScalars);
+        DecodeCoreLauncher(1, decodeCoreInputs, decodeCoreScalars);
     }
 
     /// <summary>
@@ -277,7 +351,7 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
             lpcOrder, nbSubfr, subfrLength, ltpMemLength,
             nlsfInterpEnabled,
             stateBuf, indicesOut, pulsesOut, paramsIntOut, paramsShortOut);
-        _finalizeKernel(1,
+        FinalizeLauncher(1,
             decodeCoreInputs.Shorts, decodeCoreInputs.OutBufInOutAt, decodeCoreInputs.XqOutAt,
             ltpMemLength, frameLength);
     }

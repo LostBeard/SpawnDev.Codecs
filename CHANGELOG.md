@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Audio codecs: constructors compile nothing (2026-11-09)
+- `Mp3EncoderGpu`, `OpusDecoderGpu`, `VorbisAudioEncoderGpu` and `VorbisAudioDecoderGpu` load their kernels once, lazily,
+  from their async entry points (awaited loads: browser compiles yield to the event loop). New `WarmUpAsync` on each.
+  - `Mp3EncoderGpu.WarmUpAsync` and `VorbisAudioEncoderGpu.WarmUpAsync` also encode a short built-in signal.
+  - `OpusDecoderGpu.WarmUpAsync` and `VorbisAudioDecoderGpu.WarmUpAsync` decode nothing (the decoders keep stream
+    state); the Opus one loads the SILK and CELT layers too and creates the CELT layer early.
+- `SilkPacketDecoderGpu`, `CeltDecoderGpu` and `SilkDecodeFrameGpuOrchestrator` compile nothing in their constructors
+  either; new `WarmUpAsync` on each. Their synchronous methods (`Decode`, `DecodeLost`, `ResetState`, the orchestrator's
+  `Decode*`) load synchronously only when nothing loaded the kernels yet: call `WarmUpAsync` first in a browser.
+  `CeltDecoderGpu`'s initial state reset now runs before the first kernel that reads the state (or in `WarmUpAsync`);
+  `GetFinalRangeAsync` on a new decoder still reports 0.
+- Guard extended: the constructors above compile nothing, each `WarmUpAsync` compiles, and after a GC an MP3 encode
+  (CBR, VBR) decoded again, the libopus mode-switch stream (checked sample for sample and by final range against
+  libopus) and a Vorbis encode (single, batch, stream) decoded again compile nothing. Red-checked: a synchronous load
+  back in the `Mp3EncoderGpu`, `CeltDecoderGpu` or `VorbisAudioDecoderGpu` constructor fails it.
+
 ### BCn texture codecs: constructors compile nothing (2026-11-09)
 - `BcnEncoderGpu`, `BcnDecoderGpu` and `Bc7EncoderGpu` load their kernels on first use.
   - New `WarmUpAsync` loads them awaited: browser compiles yield to the event loop.

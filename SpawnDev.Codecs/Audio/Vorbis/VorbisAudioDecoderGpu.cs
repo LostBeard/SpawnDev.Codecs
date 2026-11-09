@@ -93,8 +93,12 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     /// <summary>Step launches between two reads of the done flag (most packets finish in the first).</summary>
     private const int V2StepsPerCheck = 4;
 
+    // The kernels load lazily (EnsureKernelsAsync, awaited by every entry point): the constructor compiles nothing, so
+    // creating a decoder never holds a browser page's thread, and each compile yields to the event loop first.
+    private Task? _kernelsLoad;
+
     // The v2 packet-decode step kernel.
-    private readonly Action<
+    private Action<
         Index1D,
         ArrayView<byte>,
         ArrayView<int>,
@@ -105,18 +109,18 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         ArrayView<float>,
         ArrayView<int>,
         VorbisPacketDecodeScalars>
-        _v2DecodeKernel;
+        _v2DecodeKernel = null!;
 
     // Compiled kernels.
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<float>,
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<float>,
         ArrayView<float>, ArrayView<int>, ArrayView<byte>, int, int, int, int>
-        _floorRenderKernel;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>>
-        _multiplyKernel;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>> _inverseCouplingKernel;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, int> _imdctKernel;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>,
-        ArrayView<float>, ArrayView<float>, int, int, int, int> _overlapKernel;
+        _floorRenderKernel = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>>
+        _multiplyKernel = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>> _inverseCouplingKernel = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, int> _imdctKernel = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>,
+        ArrayView<float>, ArrayView<float>, int, int, int, int> _overlapKernel = null!;
 
     /// <summary>Identification header (sample rate, channels, etc.).</summary>
     public VorbisIdentificationHeader Identification => _ident;
@@ -124,7 +128,8 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     /// <summary>Setup header (codebooks, floors, residues, mappings, modes).</summary>
     public VorbisSetupHeader Setup => _setup;
 
-    /// <summary>Construct + bind to the accelerator.</summary>
+    /// <summary>Construct + bind to the accelerator. Uploads the stream's tables; compiles no kernels (see
+    /// <see cref="WarmUpAsync"/>).</summary>
     public VorbisAudioDecoderGpu(
         Accelerator accelerator,
         VorbisIdentificationHeader ident,
@@ -170,7 +175,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         _dRightHalf = new[] { accelerator.Allocate1D<float>(rightLen), accelerator.Allocate1D<float>(rightLen) };
 
         // Vorbis v2 infrastructure: flatten the setup + codebook tables into
-        // the two pools, upload once, compile the resumable step kernel.
+        // the two pools, upload once (the resumable step kernel loads with the others, see EnsureKernelsAsync).
         var v2Setup = VorbisPacketDecodeSetup.Build(setup);
         _v2CodebookCount = v2Setup.CodebookCount;
         _dV2SetupInts = AllocAndUpload(accelerator, v2Setup.Ints);
@@ -190,8 +195,19 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
         _dPcm = accelerator.Allocate1D<float>(halfMax);
         _dScratchInt = accelerator.Allocate1D<int>(Math.Max(1L, (long)channels * 2 * _maxXListLength));
         _dScratchByte = accelerator.Allocate1D<byte>(Math.Max(1L, (long)channels * _maxXListLength));
+    }
 
-        _v2DecodeKernel = accelerator.LoadAutoGroupedStreamKernel<
+    /// <summary>Load every kernel once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _v2DecodeKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D,
             ArrayView<byte>,
             ArrayView<int>,
@@ -203,19 +219,27 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
             ArrayView<int>,
             VorbisPacketDecodeScalars>(VorbisPacketDecodeKernel.Step);
 
-        _floorRenderKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _floorRenderKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<int>, ArrayView<int>, ArrayView<float>,
             ArrayView<float>, ArrayView<int>, ArrayView<byte>, int, int, int, int>(VorbisDecodeFloorRenderKernel);
-        _multiplyKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _multiplyKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>>(VorbisDecodeMultiplyKernel);
-        _inverseCouplingKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _inverseCouplingKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<float>, ArrayView<float>>(VorbisDecodeInverseCouplingKernel);
-        _imdctKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _imdctKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<float>, ArrayView<float>, int>(VorbisDecodeImdctKernel);
-        _overlapKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _overlapKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>,
             ArrayView<float>, ArrayView<float>, int, int, int, int>(VorbisDecodeOverlapKernel);
     }
+
+    /// <summary>
+    /// Compile and load every kernel the decoder uses, so the first packet does not wait for them. It decodes nothing:
+    /// the decoder keeps the stream's overlap state between packets. On browser backends the first compile of the shaders
+    /// can take tens of seconds; call this early. The loads are awaited one kernel at a time and yield to the browser's
+    /// event loop before each compile (WebGPU builds the pipelines asynchronously), so the page keeps painting meanwhile.
+    /// </summary>
+    public Task WarmUpAsync() => EnsureKernelsAsync();
 
     /// <summary>
     /// Most interleaved samples one packet returns (<c>channels * BlockSize1 / 2</c>): the size a caller's PCM view needs for
@@ -280,6 +304,7 @@ public sealed class VorbisAudioDecoderGpu : IDisposable
     /// </summary>
     private async Task<int> DecodeCoreAsync(ArrayView1D<byte, Stride1D.Dense> packet, ArrayView1D<float, Stride1D.Dense> pcmOut)
     {
+        await EnsureKernelsAsync();
         int channels = _ident.AudioChannels;
 
         // ---- bit-stream decode on the accelerator: the resumable step kernel ----

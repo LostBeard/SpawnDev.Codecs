@@ -47,17 +47,19 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
     private readonly MemoryBuffer1D<int, global::ILGPU.Stride1D.Dense> _dResidueBookLengths;
     private readonly MemoryBuffer1D<int, global::ILGPU.Stride1D.Dense> _dXList;
 
-    // Compiled kernels.
-    private readonly Action<Index1D, ArrayView<float>, int, int, ArrayView<float>>
-        _inputWindowKernel;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, int> _windowKernel;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, int> _mdctKernel;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, float> _floorFitKernel;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<byte>, int, int, int> _floorRenderKernel;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, float, int> _divQuantKernel;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, ArrayView<int>, EmitPacketParams> _emitKernel;
+    // Compiled kernels. They load lazily (EnsureKernelsAsync, awaited by every entry point): the constructor compiles
+    // nothing, so creating an encoder never holds a browser page's thread, and each compile yields to the event loop first.
+    private Action<Index1D, ArrayView<float>, int, int, ArrayView<float>>
+        _inputWindowKernel = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, int> _windowKernel = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, int> _mdctKernel = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, float> _floorFitKernel = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<byte>, int, int, int> _floorRenderKernel = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, float, int> _divQuantKernel = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, ArrayView<int>, EmitPacketParams> _emitKernel = null!;
+    private Task? _kernelsLoad;
 
-    /// <summary>Construct + bind to the accelerator. One-time setup uploads.</summary>
+    /// <summary>Construct + bind to the accelerator. One-time setup uploads; compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public VorbisAudioEncoderGpu(Accelerator accelerator, VorbisAudioEncoderOptions options)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
@@ -104,25 +106,49 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         _dResidueBookLengths.View.CopyFromCPU(residueLens);
         _dXList = accelerator.Allocate1D<int>(_floorCfg.XList.Length);
         _dXList.View.CopyFromCPU(_floorCfg.XList);
+    }
 
-        // Compile kernels.
-        _inputWindowKernel = accelerator.LoadAutoGroupedStreamKernel<
+    /// <summary>Load every kernel once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _inputWindowKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<float>, int, int, ArrayView<float>>(VorbisEncodeInputWindowKernel);
-        _windowKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _windowKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<float>, ArrayView<float>, int>(VorbisEncodeWindowKernel);
-        _mdctKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _mdctKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<float>, ArrayView<float>, int>(VorbisEncodeMdctKernel);
-        _floorFitKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _floorFitKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, float>(VorbisEncodeFloorFitKernel);
-        _floorRenderKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _floorRenderKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>,
             ArrayView<int>, ArrayView<byte>, int, int, int>(VorbisEncodeFloorRenderKernel);
-        _divQuantKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _divQuantKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, float, int>(VorbisEncodeDivQuantKernel);
-        _emitKernel = accelerator.LoadAutoGroupedStreamKernel<
+        _emitKernel = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<int>,
             ArrayView<uint>, ArrayView<int>, ArrayView<uint>, ArrayView<int>,
             ArrayView<int>, EmitPacketParams>(VorbisEncodeEmitKernel);
+    }
+
+    /// <summary>
+    /// Compile and load every kernel the encoder uses, then encode one built-in packet, so the first real encode does not
+    /// wait for them. On browser backends the first compile of the shaders can take tens of seconds; call this early. The
+    /// loads are awaited one kernel at a time and yield to the browser's event loop before each compile (WebGPU builds the
+    /// pipelines asynchronously), so the page keeps painting and answering input meanwhile.
+    /// </summary>
+    public async Task WarmUpAsync()
+    {
+        await EnsureKernelsAsync();
+        var block = new float[_opts.BlockSize];
+        for (int i = 0; i < block.Length; i++) block[i] = 0.25f * MathF.Sin(i * 0.0627f);
+        await EncodeAudioPacketAsync(block);
     }
 
     /// <summary>Identification header (resolved once at construction).</summary>
@@ -141,6 +167,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         int n = _opts.BlockSize;
         if (block.Length != n)
             throw new ArgumentException($"block must be {n} samples, got {block.Length}.");
+        await EnsureKernelsAsync();
 
         // Upload the input PCM block once (necessary I/O - source comes
         // from outside the accelerator) and delegate to the GPU-input
@@ -258,6 +285,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
                 throw new ArgumentException(
                     $"block[{i}] must be {n} samples, got {blocks[i].Length}.");
         }
+        await EnsureKernelsAsync();
 
         var floorCfg = _floorCfg;
         const float headroom = 1.25f;
@@ -380,6 +408,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
         ReadOnlyMemory<float> mono, string vendor = "SpawnDev.Codecs")
     {
         if (_opts.Channels != 1) throw new NotSupportedException();
+        await EnsureKernelsAsync();
         var packets = new List<Container.Ogg.OggOutgoingPacket>();
 
         // 3 header packets via static helpers - no CPU encoder instance

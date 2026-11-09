@@ -3,7 +3,7 @@
 // Opus decoder on the accelerator (RFC 6716; libopus 1.5.2 opus_decode, fixed point). The host parses the packet's TOC
 // byte and frame packing (codes 0-3: container framing, the same metadata a demuxer reads) and runs libopus'
 // opus_decode_frame as a dispatcher: the SILK decoder (SilkPacketDecoderGpu) and the CELT decoder (CeltDecoderGpu,
-// created on the first CELT or hybrid frame) decode every bit of the frames on the accelerator into an int16 PCM
+// created on the first CELT or hybrid frame, or by WarmUpAsync) decode every bit of the frames on the accelerator into an int16 PCM
 // buffer there, and small kernels here do the rest of the glue (the redundancy flags on the shared range decoder,
 // smooth_fade, the SILK + CELT sum) before one conversion to float. The only bitstream values that cross to the host
 // are the four redundancy ints after the SILK layer (whether a 5 ms CELT redundancy frame follows, its direction, its
@@ -52,12 +52,16 @@ public sealed class OpusDecoderGpu : IDisposable
     private readonly MemoryBuffer1D<byte, Stride1D.Dense> _silence;         // the {0xFF, 0xFF} CELT silence frame
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _info;             // redundancy decisions + the range state
 
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, int, int, int> _redundancyKernel;
-    private readonly Action<Index1D, ArrayView<short>, int, ArrayView<short>, int, int, int, int, ArrayView<short>, int> _fadeKernel;
-    private readonly Action<Index1D, ArrayView<short>, int, ArrayView<short>, int> _addKernel;
-    private readonly Action<Index1D, ArrayView<short>, int, ArrayView<short>, int> _copyKernel;
-    private readonly Action<Index1D, ArrayView<short>, ArrayView<float>> _toFloatKernel;
-    private readonly Action<Index1D, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>> _rangeKernel;
+    // Kernels load lazily (EnsureKernelsAsync, awaited by every entry point, with the SILK layer's; the CELT layer's load
+    // when it is created): the constructor compiles nothing, so creating a decoder never holds a browser page's thread,
+    // and each compile yields to the event loop first.
+    private Action<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, int, int, int> _redundancyKernel = null!;
+    private Action<Index1D, ArrayView<short>, int, ArrayView<short>, int, int, int, int, ArrayView<short>, int> _fadeKernel = null!;
+    private Action<Index1D, ArrayView<short>, int, ArrayView<short>, int> _addKernel = null!;
+    private Action<Index1D, ArrayView<short>, int, ArrayView<short>, int> _copyKernel = null!;
+    private Action<Index1D, ArrayView<short>, ArrayView<float>> _toFloatKernel = null!;
+    private Action<Index1D, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>> _rangeKernel = null!;
+    private Task? _kernelsLoad;
 
     // libopus decoder state the dispatch needs (st->...).
     private int _mode, _bandwidth, _frameSize, _streamChannels;   // the current packet's TOC (st->mode etc.)
@@ -91,12 +95,48 @@ public sealed class OpusDecoderGpu : IDisposable
         _window = accelerator.Allocate1D(CeltModeTables.Window.Select(w => (short)w).ToArray());
         _silence = accelerator.Allocate1D(new byte[] { 0xFF, 0xFF });
         _info = accelerator.Allocate1D<int>(8);
-        _redundancyKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, int, int, int>(RedundancyKernel);
-        _fadeKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, int, ArrayView<short>, int, int, int, int, ArrayView<short>, int>(FadeKernel);
-        _addKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, int, ArrayView<short>, int>(AddKernel);
-        _copyKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, int, ArrayView<short>, int>(CopyKernel);
-        _toFloatKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<float>>(ToFloatKernel);
-        _rangeKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>>(RangeKernel);
+    }
+
+    /// <summary>Load this layer's kernels and the SILK layer's once (awaited loads: each compile yields to the browser's
+    /// event loop first).</summary>
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _redundancyKernel = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>, int, int, int>(RedundancyKernel);
+        _fadeKernel = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<short>, int, ArrayView<short>, int, int, int, int, ArrayView<short>, int>(FadeKernel);
+        _addKernel = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<short>, int, ArrayView<short>, int>(AddKernel);
+        _copyKernel = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<short>, int, ArrayView<short>, int>(CopyKernel);
+        _toFloatKernel = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<short>, ArrayView<float>>(ToFloatKernel);
+        _rangeKernel = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>>(RangeKernel);
+        await _silk.WarmUpAsync();
+    }
+
+    /// <summary>
+    /// Compile and load every kernel the decoder uses (the SILK and CELT layers' too; the CELT layer is created here
+    /// instead of at the first CELT or hybrid frame), so the first packet does not wait for them. It decodes nothing: the
+    /// decoder keeps the stream's state between packets. On browser backends the first compile of the shaders can take
+    /// tens of seconds; call this early. The loads are awaited one kernel at a time and yield to the browser's event loop
+    /// before each compile (WebGPU builds the pipelines asynchronously), so the page keeps painting meanwhile.
+    /// </summary>
+    public async Task WarmUpAsync()
+    {
+        await EnsureKernelsAsync();
+        await GetCeltAsync();
+    }
+
+    /// <summary>The CELT layer, created on the first CELT or hybrid frame (or by <see cref="WarmUpAsync"/>), its kernels
+    /// loaded (awaited).</summary>
+    private async ValueTask<CeltDecoderGpu> GetCeltAsync()
+    {
+        var celt = _celt ??= new CeltDecoderGpu(_accelerator, SampleRateHz, ChannelCount);
+        await celt.WarmUpAsync();
+        return celt;
     }
 
     /// <summary>Output sample rate in Hz.</summary>
@@ -107,8 +147,6 @@ public sealed class OpusDecoderGpu : IDisposable
 
     /// <summary>Most floats one packet can produce (<see cref="MaxSamplesPerChannel"/> * channels).</summary>
     public int MaxSamplesPerPacket => MaxSamplesPerChannel * ChannelCount;
-
-    private CeltDecoderGpu Celt => _celt ??= new CeltDecoderGpu(_accelerator, SampleRateHz, ChannelCount);
 
     /// <summary>
     /// Decode one packet that is already on the accelerator into a caller-owned view (at least
@@ -181,6 +219,7 @@ public sealed class OpusDecoderGpu : IDisposable
             throw new ArgumentOutOfRangeException(nameof(samplesPerChannel), "A multiple of 2.5 ms, at most 120 ms.");
         if (pcmOut.Length < MaxSamplesPerPacket)
             throw new ArgumentException($"pcmOut must hold {MaxSamplesPerPacket} floats (MaxSamplesPerPacket).", nameof(pcmOut));
+        await EnsureKernelsAsync();
         // opus_decode_native with data == NULL.
         int count = 0;
         do
@@ -196,7 +235,8 @@ public sealed class OpusDecoderGpu : IDisposable
     public async Task<uint> GetFinalRangeAsync()
     {
         if (_rangeSource == 0) return 0;
-        if (_rangeSource == 2) return await Celt.GetFinalRangeAsync();
+        if (_rangeSource == 2) return await (await GetCeltAsync()).GetFinalRangeAsync();
+        await EnsureKernelsAsync();
         _rangeKernel(1, _silk.RangeDecoder, _info.View);
         var r = await _info.View.SubView(4, 1).CopyToHostAsync();
         return (uint)r[0] ^ _redundantRng;
@@ -212,6 +252,7 @@ public sealed class OpusDecoderGpu : IDisposable
     // opus_decode_native for a packet with data: the TOC sets the state, then every frame decodes.
     private async Task<int> DecodeParsedAsync(OpusPacket packet, byte[] layoutBytes, ArrayView1D<byte, Stride1D.Dense> dPacket)
     {
+        await EnsureKernelsAsync();
         var toc = packet.Toc;
         _mode = toc.Mode switch { OpusMode.Silk => ModeSilk, OpusMode.Hybrid => ModeHybrid, _ => ModeCelt };
         _bandwidth = toc.Bandwidth switch
@@ -333,20 +374,22 @@ public sealed class OpusDecoderGpu : IDisposable
         _redundantRng = 0;
         if (redundancy && celtToSilk)
         {
-            Celt.Decode(data, dataStart + len, redundancyBytes, null, 0, _celtEnd, celtChannels, f5, false, _redundantAudio.View, 0);
-            _redundantRng = await Celt.GetFinalRangeAsync();
+            var celt = await GetCeltAsync();
+            celt.Decode(data, dataStart + len, redundancyBytes, null, 0, _celtEnd, celtChannels, f5, false, _redundantAudio.View, 0);
+            _redundantRng = await celt.GetFinalRangeAsync();
         }
         _celtStart = startBand;
 
         if (mode != ModeSilk)
         {
+            var celt = await GetCeltAsync();
             int celtFrameSize = Math.Min(f20, frameSize);
-            if (mode != _prevMode && _prevMode > 0 && !_prevRedundancy) Celt.ResetState();
+            if (mode != _prevMode && _prevMode > 0 && !_prevRedundancy) celt.ResetState();
             if (hasData)
-                Celt.Decode(data, dataStart, len, mode == ModeHybrid ? _silk.RangeDecoder : null, startBand, _celtEnd,
+                celt.Decode(data, dataStart, len, mode == ModeHybrid ? _silk.RangeDecoder : null, startBand, _celtEnd,
                     celtChannels, celtFrameSize, celtAccum, pcm, pcmAt);
             else
-                Celt.DecodeLost(startBand, _celtEnd, celtFrameSize, celtAccum, pcm, pcmAt);
+                celt.DecodeLost(startBand, _celtEnd, celtFrameSize, celtAccum, pcm, pcmAt);
         }
         else
         {
@@ -355,7 +398,7 @@ public sealed class OpusDecoderGpu : IDisposable
             if (_prevMode == ModeHybrid && !(redundancy && celtToSilk && _prevRedundancy))
             {
                 _celtStart = 0;
-                Celt.Decode(_silence.View, 0, 2, null, 0, _celtEnd, celtChannels, f2_5, celtAccum, pcm, pcmAt);
+                (await GetCeltAsync()).Decode(_silence.View, 0, 2, null, 0, _celtEnd, celtChannels, f2_5, celtAccum, pcm, pcmAt);
             }
         }
 
@@ -366,9 +409,10 @@ public sealed class OpusDecoderGpu : IDisposable
         // SILK -> CELT: the redundant 5 ms CELT frame cross-fades into the end of the frame.
         if (redundancy && !celtToSilk)
         {
-            Celt.ResetState();
-            Celt.Decode(data, dataStart + len, redundancyBytes, null, 0, _celtEnd, celtChannels, f5, false, _redundantAudio.View, 0);
-            _redundantRng = await Celt.GetFinalRangeAsync();
+            var celt = await GetCeltAsync();
+            celt.ResetState();
+            celt.Decode(data, dataStart + len, redundancyBytes, null, 0, _celtEnd, celtChannels, f5, false, _redundantAudio.View, 0);
+            _redundantRng = await celt.GetFinalRangeAsync();
             _fadeKernel(f2_5 * ch, pcm, pcmAt + ch * (frameSize - f2_5), _redundantAudio.View, ch * f2_5, 1, f2_5, ch, _window.View, inc);
         }
         // CELT -> SILK: the redundant frame leads (ignored if the previous frame did not use CELT).

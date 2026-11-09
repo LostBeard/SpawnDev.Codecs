@@ -63,48 +63,41 @@ public sealed record Mp3EncodeOptions
 public sealed class Mp3EncoderGpu : IDisposable
 {
     private readonly Accelerator _accelerator;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, long, int, long> _polyphase;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, long> _matrix;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, int, int, int, long> _mdct;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, long> _alias;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, int, long, int> _attack;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int, int> _blockType;
-    private readonly Action<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<float>, long, long, int, int, int, int, int, long> _layout;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int> _pe;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, long, int> _musicCrc;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>> _infoFrame;
+    // Kernels load lazily (EnsureKernelsAsync, awaited by every entry point): the constructor compiles nothing, so
+    // creating an encoder never holds a browser page's thread, and each compile yields to the event loop first.
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, long, int, long> _polyphase = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, long> _matrix = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, int, int, int, long> _mdct = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, long> _alias = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<int>, int, long, int> _attack = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int, int, int> _blockType = null!;
+    private Action<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<float>, long, long, int, int, int, int, int, long> _layout = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int> _pe = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, long, int> _musicCrc = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>> _infoFrame = null!;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _crcTable;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, int> _psy;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int, int> _quantize;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int> _vbrQuantize;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int, int, long> _vbrLayout;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int> _writeGranule;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int, int, int, int, int, int> _writeFrame;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<long>, int, int, int, int, int> _reservoir;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int> _mainData;
-    private readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, int, int, int> _midSide;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<float>, long> _toFloat;
+    private Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, int> _psy = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int, int> _quantize = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int> _vbrQuantize = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int, int, long> _vbrLayout = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int> _writeGranule = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int, int, int, int, int, int> _writeFrame = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<long>, int, int, int, int, int> _reservoir = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int> _mainData = null!;
+    private Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, int, int, int> _midSide = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<float>, long> _toFloat = null!;
+    private Task? _kernelsLoad;
     private readonly MemoryBuffer1D<float, Stride1D.Dense> _consts;
 
     /// <summary>Samples between an input sample and the same sample in a decoder's output (481 + 576).</summary>
     public const int CodecDelay = 1057;
 
-    /// <summary>An encoder bound to <paramref name="accelerator"/>.</summary>
+    /// <summary>An encoder bound to <paramref name="accelerator"/>. Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public Mp3EncoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         var a = accelerator;
-        _polyphase = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, long, int, long>(K.PolyphaseKernel);
-        _matrix = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, long>(K.MatrixKernel);
-        _mdct = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, int, int, int, long>(K.MdctKernel);
-        _alias = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, long>(K.AliasReduceKernel);
-        _attack = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, int, long, int>(K.AttackKernel);
-        _blockType = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int, int>(K.BlockTypeKernel);
-        _layout = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<float>, long, long, int, int, int, int, int, long>(K.FrameLayoutKernel);
-        _pe = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int>(K.PerceptualEntropyKernel);
-        _musicCrc = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, long, int>(K.MusicCrcKernel);
-        _infoFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>>(K.InfoFrameKernel);
         var crc = new int[256];
         for (int i = 0; i < 256; i++)
         {
@@ -114,16 +107,6 @@ public sealed class Mp3EncoderGpu : IDisposable
         }
         _crcTable = a.Allocate1D<int>(256);
         _crcTable.View.CopyFromCPU(crc);
-        _psy = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, int>(K.PsyKernel);
-        _quantize = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int, int>(K.QuantizeKernel);
-        _vbrQuantize = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int>(K.VbrQuantizeKernel);
-        _vbrLayout = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int, int, long>(K.VbrLayoutKernel);
-        _writeGranule = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int>(K.WriteGranuleKernel);
-        _writeFrame = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int, int, int, int, int, int>(K.WriteFrameKernel);
-        _reservoir = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<long>, int, int, int, int, int>(K.ReservoirBudgetKernel);
-        _mainData = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int>(K.MainDataKernel);
-        _midSide = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, int, int, int>(K.MidSideKernel);
-        _toFloat = a.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<float>, long>(Int32ToFloatKernel);
 
         // the constant tables (setup data, computed once per encoder)
         var f = new float[K.FloatConsts];
@@ -155,6 +138,63 @@ public sealed class Mp3EncoderGpu : IDisposable
         _consts.View.CopyFromCPU(f);
     }
 
+    /// <summary>Load every kernel once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _polyphase = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, long, int, long>(K.PolyphaseKernel);
+        _matrix = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, long>(K.MatrixKernel);
+        _mdct = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, int, int, int, long>(K.MdctKernel);
+        _alias = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, long>(K.AliasReduceKernel);
+        _attack = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<int>, int, long, int>(K.AttackKernel);
+        _blockType = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int, int, int>(K.BlockTypeKernel);
+        _layout = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<float>, long, long, int, int, int, int, int, long>(K.FrameLayoutKernel);
+        _pe = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int>(K.PerceptualEntropyKernel);
+        _musicCrc = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, long, int>(K.MusicCrcKernel);
+        _infoFrame = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<long>>(K.InfoFrameKernel);
+        _psy = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<float>, ArrayView<float>, float, int>(K.PsyKernel);
+        _quantize = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<int>, int, int, int>(K.QuantizeKernel);
+        _vbrQuantize = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int>(K.VbrQuantizeKernel);
+        _vbrLayout = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int, int, long>(K.VbrLayoutKernel);
+        _writeGranule = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int>(K.WriteGranuleKernel);
+        _writeFrame = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<long>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int, int, int, int, int, int>(K.WriteFrameKernel);
+        _reservoir = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<float>, ArrayView<long>, int, int, int, int, int>(K.ReservoirBudgetKernel);
+        _mainData = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<long>, ArrayView<int>, int, int, int, int, int>(K.MainDataKernel);
+        _midSide = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<int>, int, int, int>(K.MidSideKernel);
+        _toFloat = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<float>, long>(Int32ToFloatKernel);
+    }
+
+    /// <summary>
+    /// Compile and load every kernel <see cref="EncodeAsync(ReadOnlyMemory{float}, int, int, Mp3EncodeOptions?)"/> uses,
+    /// then encode a short built-in stereo signal (constant bit rate from float, variable bit rate from int32), so the
+    /// first real encode does not wait for them. On browser backends the first compile of the shaders can take tens of
+    /// seconds; call this early. The loads are awaited one kernel at a time and yield to the browser's event loop before
+    /// each compile (WebGPU builds the pipelines asynchronously), so the page keeps painting and answering input meanwhile.
+    /// </summary>
+    public async Task WarmUpAsync()
+    {
+        await EnsureKernelsAsync();
+        // two tones, 2304 samples per channel (two MPEG-1 frames)
+        const int n = 2304;
+        var pcm = new float[n * 2];
+        var pcm32 = new int[n * 2];
+        for (int i = 0; i < n; i++)
+        {
+            pcm[2 * i] = 0.25f * MathF.Sin(i * 0.0627f);
+            pcm[2 * i + 1] = 0.2f * MathF.Sin(i * 0.0411f + 1);
+            pcm32[2 * i] = (int)(pcm[2 * i] * 2147483648f);
+            pcm32[2 * i + 1] = (int)(pcm[2 * i + 1] * 2147483648f);
+        }
+        await EncodeAsync(pcm, 2, 44100);
+        await EncodeAsync(pcm32, 2, 44100, new Mp3EncodeOptions { VbrQuality = 2 });
+    }
+
     /// <summary>int32 full scale (PyAV's s32 samples) to float in [-1, 1).</summary>
     private static void Int32ToFloatKernel(Index1D i, ArrayView<int> src, ArrayView<float> dst, long first)
     {
@@ -173,6 +213,7 @@ public sealed class Mp3EncoderGpu : IDisposable
     /// <summary>Encode interleaved float PCM (full scale +-1) to an MP3 file.</summary>
     public async Task<byte[]> EncodeAsync(ReadOnlyMemory<float> pcm, int channels, int sampleRate, Mp3EncodeOptions? options = null)
     {
+        await EnsureKernelsAsync();
         using var d = _accelerator.Allocate1D<float>(Math.Max(1, pcm.Length));
         if (pcm.Length > 0) d.View.SubView(0, pcm.Length).CopyFromCPU(pcm.ToArray());
         return await EncodeDeviceAsync(d.View.SubView(0, Math.Max(1, pcm.Length)), pcm.Length / Math.Max(1, channels), channels, sampleRate, options);
@@ -181,6 +222,7 @@ public sealed class Mp3EncoderGpu : IDisposable
     /// <summary>Encode interleaved int32 PCM (full scale, as PyAV hands libmp3lame s32 samples) to an MP3 file.</summary>
     public async Task<byte[]> EncodeAsync(ReadOnlyMemory<int> pcm, int channels, int sampleRate, Mp3EncodeOptions? options = null)
     {
+        await EnsureKernelsAsync();
         using var di = _accelerator.Allocate1D<int>(Math.Max(1, pcm.Length));
         if (pcm.Length > 0) di.View.SubView(0, pcm.Length).CopyFromCPU(pcm.ToArray());
         using var d = _accelerator.Allocate1D<float>(Math.Max(1, pcm.Length));
