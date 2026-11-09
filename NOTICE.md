@@ -124,13 +124,55 @@ SpawnDev.Codecs.Opus is an independent implementation of the Opus codec as defin
 
 ---
 
-## libvpx - reference VP8/VP9 implementation (planned for Phase 2+)
+## libvpx - reference VP8/VP9 implementation (VP9 decoder port)
 
-**Copyright:** © 2010-present, The WebM Project Authors, Google LLC
-**License:** BSD 3-Clause (VP8/VP9 license grant)
-**Source:** https://github.com/webmproject/libvpx
+**Source:** https://github.com/webmproject/libvpx, tag v1.17.0
+**License:** BSD 3-Clause, plus Google's Additional IP Rights Grant (Patents). Verbatim copies ship with this package:
+`ThirdPartyLicenses/libvpx-LICENSE.txt` and `ThirdPartyLicenses/libvpx-PATENTS.txt`.
 
-VP8 and VP9 are released under the Google WebM patent pledge - patent-clean for royalty-free implementation.
+**Ported into SpawnDev.Codecs** (C# / ILGPU kernels; each file's header names the libvpx files it follows):
+`Video/Vp9/Decoder/` Vp9HeaderReader, Vp9FrameContextsGpu, Vp9ParseContexts, Vp9ParseKernels (+ .Inter, .Tiles),
+Vp9AdaptKernels, Vp9ReconKernels, Vp9InverseTransforms, Vp9IntraPredict, Vp9InterPredict, Vp9LoopFilter,
+Vp9LoopFilterKernels, Vp9Packets, Vp9DecoderTables (constant tables generated from libvpx). From vp9/decoder,
+vp9/common, vpx_dsp and vpx_dsp/prob.
+
+libvpx's copyright notice and licence, as required by its clause 1 and 2:
+
+```
+Copyright (c) 2010, The WebM Project authors. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+  * Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+  * Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in
+    the documentation and/or other materials provided with the
+    distribution.
+
+  * Neither the name of Google, nor the WebM Project, nor the names
+    of its contributors may be used to endorse or promote products
+    derived from this software without specific prior written
+    permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+Test data: libvpx's VP9 conformance vectors (WebM Project test data) in
+`SpawnDev.Codecs.Demo.Shared/TestData/Vp9Conformance*` are test fixtures only, not part of the package.
 
 ---
 

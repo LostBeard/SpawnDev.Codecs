@@ -27,6 +27,9 @@
 
 	<ItemGroup>
 		<None Include="..\LICENSE.txt" Pack="true" PackagePath="\" />
+		<!-- Third-party notices travel with the package (BSD-3-Clause clause 2: binary redistributions reproduce the notice). -->
+		<None Include="..\NOTICE.md" Pack="true" PackagePath="\" />
+		<None Include="..\ThirdPartyLicenses\*.txt" Pack="true" PackagePath="ThirdPartyLicenses\" />
 		<None Include="..\README.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 

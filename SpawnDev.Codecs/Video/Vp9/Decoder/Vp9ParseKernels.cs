@@ -35,8 +35,14 @@ internal static class Vp9PArg
 /// <summary>Buffer layouts of the parse kernel.</summary>
 internal static class Vp9PLayout
 {
-    /// <summary>Per superblock (sb buffer): 85 partitions, then 256 eobs per plane.</summary>
-    public const int SbPartitions = 0, SbEobY = 85, SbEobU = 85 + 256, SbEobV = 85 + 512, SbStride = 85 + 768;
+    /// <summary>
+    /// Per superblock (sb buffer): 85 partitions, 256 eobs per plane, then the block table: a count and up to 64 entries
+    /// (one per decoded block, parse order) of <see cref="BlkStride"/> ints: mode info record, bwl, bhl, and the
+    /// coefficient (absolute) and eob (relative) positions where the block's data starts per plane.
+    /// </summary>
+    public const int SbPartitions = 0, SbEobY = 85, SbEobU = 85 + 256, SbEobV = 85 + 512, SbBlockCount = 85 + 768, SbBlocks = SbBlockCount + 1;
+    public const int BlkRec = 0, BlkBwl = 1, BlkBhl = 2, BlkDqY = 3, BlkDqU = 4, BlkDqV = 5, BlkEobY = 6, BlkEobU = 7, BlkEobV = 8, BlkStride = 9;
+    public const int SbStride = SbBlocks + 64 * BlkStride;
     /// <summary>Per tile column thread (scratch): left entropy ctx 3 x 16, left partition ctx 8, token cache 1024, stack.</summary>
     public const int ScLeftCtx = 0, ScLeftPart = 48, ScTokenCache = 56, ScStack = 56 + 1024, StackEntries = 16, ScratchStride = ScStack + 4 * StackEntries;
     /// <summary>Per mi position (maps buffer, MV regions): ref_frame[0], ref_frame[1], mv[0], mv[1].</summary>

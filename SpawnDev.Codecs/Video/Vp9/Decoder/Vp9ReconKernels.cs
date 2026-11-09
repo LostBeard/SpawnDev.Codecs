@@ -3,9 +3,9 @@
 // VP9 reconstruction on the accelerator: prediction + inverse transform of every block, from the parse kernel's
 // output. A port of libvpx v1.17.0 (BSD-3-Clause) vp9/decoder/vp9_decodeframe.c recon_tile_row / process_partition
 // (RECON) / recon_block / predict_and_reconstruct_intra_block_row_mt / reconstruct_inter_block_row_mt /
-// predict_recon_intra / predict_recon_inter. One thread per tile column: tiles are independent for reconstruction
-// (intra edges never cross a tile column, inter prediction reads only reference frames). The partitions are replayed
-// from the parse kernel's per-superblock list; coefficients and eobs are consumed in the order the parse wrote them.
+// predict_recon_intra / predict_recon_inter, scheduled in two passes: inter blocks (all superblocks at once), then intra
+// blocks on a superblock wavefront. Blocks are replayed from the parse kernel's per-superblock block table (record,
+// size, and where its coefficients and eobs start), so every block reads exactly the data the parse wrote for it.
 // The DSP is Vp9IntraPred (vp9_predict_intra_block), Vp9InterPred (dec_build_inter_predictors_sb, one plane) and Vp9Itx.
 
 using ILGPU;
@@ -117,73 +117,64 @@ internal static class Vp9ReconKernels
         }
     }
 
-    /// <summary>One thread per tile column: every superblock of the column, tile row after tile row, as libvpx RECON.</summary>
-    public static void ReconKernel(Index1D index, ArrayView<byte> pool, ArrayView<int> a, ArrayView<int> t, ArrayView<int> mi,
+    /// <summary>The first mi column of the tile column holding <paramref name="miCol"/> (libvpx tile->mi_col_start).</summary>
+    private static int TileColStart(int miCol, int miCols, int log2Cols)
+    {
+        int sbCols = (miCols + 7) >> 3, tiles = 1 << log2Cols;
+        for (int t = tiles - 1; t >= 0; t--)
+        {
+            int start = ((t * sbCols) >> log2Cols) << 3;
+            if (start > miCols) start = miCols;
+            if (miCol >= start) return start;
+        }
+        return 0;
+    }
+
+    /// <summary>Reconstruct the blocks of superblock <paramref name="sb"/> that are inter (pass A) or intra (pass B), in parse order.</summary>
+    private static void ReconSuperblock(ArrayView<byte> pool, ArrayView<int> a, ArrayView<int> t, ArrayView<int> mi, ArrayView<int> sbBuf,
+        ArrayView<int> dq, ArrayView<int> scratch, long scr, int sb, bool interPass)
+    {
+        int miCols = a[Vp9RArg.MiCols];
+        int tb = sb * Vp9PLayout.SbStride;
+        int count = sbBuf[tb + Vp9PLayout.SbBlockCount];
+        for (int slot = 0; slot < count; slot++)
+        {
+            int e = tb + Vp9PLayout.SbBlocks + slot * Vp9PLayout.BlkStride;
+            int rec = sbBuf[e + Vp9PLayout.BlkRec];
+            bool inter = mi[rec * Vp9Mi.Stride + Vp9Mi.Ref0] > Vp9Mi.IntraFrame;
+            if (inter != interPass) continue;
+            int miRow = rec / miCols, miCol = rec % miCols;
+            int dqY = sbBuf[e + Vp9PLayout.BlkDqY], dqU = sbBuf[e + Vp9PLayout.BlkDqU], dqV = sbBuf[e + Vp9PLayout.BlkDqV];
+            int eobY = sbBuf[e + Vp9PLayout.BlkEobY], eobU = sbBuf[e + Vp9PLayout.BlkEobU], eobV = sbBuf[e + Vp9PLayout.BlkEobV];
+            int colStart = interPass ? 0 : TileColStart(miCol, miCols, a[Vp9RArg.Log2TileCols]);
+            ReconBlock(pool, a, t, mi, sbBuf, dq, scratch, scr, sb, miRow, miCol, colStart,
+                sbBuf[e + Vp9PLayout.BlkBwl], sbBuf[e + Vp9PLayout.BlkBhl], ref dqY, ref dqU, ref dqV, ref eobY, ref eobU, ref eobV);
+        }
+    }
+
+    /// <summary>
+    /// Pass A, one thread per superblock: every inter block (prediction from reference frames + residual). Inter blocks
+    /// read only reference frames, so all superblocks run at once.
+    /// </summary>
+    public static void InterPassKernel(Index1D index, ArrayView<byte> pool, ArrayView<int> a, ArrayView<int> t, ArrayView<int> mi,
         ArrayView<int> sbBuf, ArrayView<int> dq, ArrayView<int> scratch)
     {
-        int tileCol = index;
-        int log2Cols = a[Vp9RArg.Log2TileCols], log2Rows = a[Vp9RArg.Log2TileRows];
-        int tileRows = 1 << log2Rows;
-        int miCols = a[Vp9RArg.MiCols], miRows = a[Vp9RArg.MiRows];
-        int sbCols = (miCols + 7) >> 3, sbRows = (miRows + 7) >> 3;
-        int colStart = ((tileCol * sbCols) >> log2Cols) << 3, colEnd = (((tileCol + 1) * sbCols) >> log2Cols) << 3;
-        if (colStart > miCols) colStart = miCols;
-        if (colEnd > miCols) colEnd = miCols;
-        long scr = (long)tileCol * (Vp9RArg.Scratch + 64);
-        long stack = scr + Vp9RArg.Scratch;   // 16 entries x 4 ints after the DSP scratch
-        int dqStride = a[Vp9RArg.DqStride];
-        for (int tileRow = 0; tileRow < tileRows; tileRow++)
-        {
-            int rowStart = ((tileRow * sbRows) >> log2Rows) << 3, rowEnd = (((tileRow + 1) * sbRows) >> log2Rows) << 3;
-            if (rowStart > miRows) rowStart = miRows;
-            if (rowEnd > miRows) rowEnd = miRows;
-            for (int miRow = rowStart; miRow < rowEnd; miRow += 8)
-                for (int miCol = colStart; miCol < colEnd; miCol += 8)
-                {
-                    int sb = (miRow >> 3) * sbCols + (miCol >> 3);
-                    int dqY = sb * dqStride, dqU = dqY + a[Vp9RArg.DqU], dqV = dqY + a[Vp9RArg.DqV];
-                    int eobY = 0, eobU = 0, eobV = 0, parts = 0;
-                    scratch[stack] = miRow; scratch[stack + 1] = miCol; scratch[stack + 2] = Block64x64; scratch[stack + 3] = 4;
-                    int sp = 1;
-                    while (sp > 0)
-                    {
-                        sp--;
-                        int rr = scratch[stack + sp * 4], cc = scratch[stack + sp * 4 + 1], bsize = scratch[stack + sp * 4 + 2], n4l2 = scratch[stack + sp * 4 + 3];
-                        int n8l2 = n4l2 - 1, hbs = (1 << n8l2) >> 1;
-                        if (rr >= miRows || cc >= miCols) continue;
-                        bool hasRows = rr + hbs < miRows, hasCols = cc + hbs < miCols;
-                        int partition = sbBuf[sb * Vp9PLayout.SbStride + Vp9PLayout.SbPartitions + parts];
-                        parts++;
-                        int subsize = t[Vp9T.SubsizeLookup + partition * 13 + bsize];
-                        if (hbs == 0)
-                            ReconBlock(pool, a, t, mi, sbBuf, dq, scratch, scr, sb, rr, cc, colStart, 1, 1, ref dqY, ref dqU, ref dqV, ref eobY, ref eobU, ref eobV);
-                        else if (partition == PartitionNone)
-                            ReconBlock(pool, a, t, mi, sbBuf, dq, scratch, scr, sb, rr, cc, colStart, n4l2, n4l2, ref dqY, ref dqU, ref dqV, ref eobY, ref eobU, ref eobV);
-                        else if (partition == PartitionHorz)
-                        {
-                            ReconBlock(pool, a, t, mi, sbBuf, dq, scratch, scr, sb, rr, cc, colStart, n4l2, n8l2, ref dqY, ref dqU, ref dqV, ref eobY, ref eobU, ref eobV);
-                            if (hasRows)
-                                ReconBlock(pool, a, t, mi, sbBuf, dq, scratch, scr, sb, rr + hbs, cc, colStart, n4l2, n8l2, ref dqY, ref dqU, ref dqV, ref eobY, ref eobU, ref eobV);
-                        }
-                        else if (partition == PartitionVert)
-                        {
-                            ReconBlock(pool, a, t, mi, sbBuf, dq, scratch, scr, sb, rr, cc, colStart, n8l2, n4l2, ref dqY, ref dqU, ref dqV, ref eobY, ref eobU, ref eobV);
-                            if (hasCols)
-                                ReconBlock(pool, a, t, mi, sbBuf, dq, scratch, scr, sb, rr, cc + hbs, colStart, n8l2, n4l2, ref dqY, ref dqU, ref dqV, ref eobY, ref eobU, ref eobV);
-                        }
-                        else
-                        {
-                            for (int k = 3; k >= 0; k--)
-                            {
-                                scratch[stack + sp * 4] = rr + ((k >> 1) != 0 ? hbs : 0);
-                                scratch[stack + sp * 4 + 1] = cc + ((k & 1) != 0 ? hbs : 0);
-                                scratch[stack + sp * 4 + 2] = subsize;
-                                scratch[stack + sp * 4 + 3] = n8l2;
-                                sp++;
-                            }
-                        }
-                    }
-                }
-        }
+        int sb = index;
+        ReconSuperblock(pool, a, t, mi, sbBuf, dq, scratch, (long)sb * Vp9RArg.Scratch, sb, true);
+    }
+
+    /// <summary>
+    /// Pass B, one thread per superblock on wavefront step <paramref name="k"/> = row + col: the superblock's intra blocks
+    /// in parse order. Intra prediction reads only pixels above and to the left (libvpx: above-right stays inside the
+    /// block), all reconstructed by pass A or by earlier steps / earlier blocks of the same superblock.
+    /// </summary>
+    public static void IntraWaveKernel(Index1D index, ArrayView<byte> pool, ArrayView<int> a, ArrayView<int> t, ArrayView<int> mi,
+        ArrayView<int> sbBuf, ArrayView<int> dq, ArrayView<int> scratch, int k)
+    {
+        int r = index, c = k - r;
+        int sbCols = (a[Vp9RArg.MiCols] + 7) >> 3;
+        if (c < 0 || c >= sbCols) return;
+        int sb = r * sbCols + c;
+        ReconSuperblock(pool, a, t, mi, sbBuf, dq, scratch, (long)sb * Vp9RArg.Scratch, sb, false);
     }
 }

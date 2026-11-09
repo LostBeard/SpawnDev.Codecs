@@ -183,6 +183,22 @@ internal static partial class Vp9ParseKernels
             for (int x = 0; x < xMis; x++) mi[grid + miOffset + y * miCols + x] = rec;
         int b = rec * Vp9Mi.Stride;
         mi[b + Vp9Mi.SbType] = bsize;
+        // block table entry (reconstruction replays blocks from it)
+        {
+            int tb = sb * Vp9PLayout.SbStride;
+            int slot = sbBuf[tb + Vp9PLayout.SbBlockCount];
+            sbBuf[tb + Vp9PLayout.SbBlockCount] = slot + 1;
+            int e = tb + Vp9PLayout.SbBlocks + slot * Vp9PLayout.BlkStride;
+            sbBuf[e + Vp9PLayout.BlkRec] = rec;
+            sbBuf[e + Vp9PLayout.BlkBwl] = bwl;
+            sbBuf[e + Vp9PLayout.BlkBhl] = bhl;
+            sbBuf[e + Vp9PLayout.BlkDqY] = dqY;
+            sbBuf[e + Vp9PLayout.BlkDqU] = dqU;
+            sbBuf[e + Vp9PLayout.BlkDqV] = dqV;
+            sbBuf[e + Vp9PLayout.BlkEobY] = eobY;
+            sbBuf[e + Vp9PLayout.BlkEobU] = eobU;
+            sbBuf[e + Vp9PLayout.BlkEobV] = eobV;
+        }
 
         var p = new BlockPos
         {
@@ -336,6 +352,7 @@ internal static partial class Vp9ParseKernels
                     int sb = (miRow >> 3) * sbCols + (miCol >> 3);
                     int dqY = sb * dqStride, dqU = dqY + a[Vp9PArg.DqU], dqV = dqY + a[Vp9PArg.DqV];
                     int eobY = 0, eobU = 0, eobV = 0, parts = 0;
+                    sbBuf[sb * Vp9PLayout.SbStride + Vp9PLayout.SbBlockCount] = 0;
                     int sp = 0;
                     work[stack] = miRow; work[stack + 1] = miCol; work[stack + 2] = Block64x64; work[stack + 3] = 4;
                     sp = 1;

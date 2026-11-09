@@ -22,7 +22,8 @@ internal sealed class Vp9DecodePipeline : IDisposable
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _lfInit;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _lfWave;
     private MemoryBuffer1D<int, Stride1D.Dense>? _scratch;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _recon;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _reconInter;
+    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _reconIntra;
     private int _prevBuffer = -1;
 
     public Vp9DecodePipeline(Accelerator accelerator)
@@ -33,8 +34,10 @@ internal sealed class Vp9DecodePipeline : IDisposable
         _frames = new Vp9FrameBuffersGpu(_acc);
         _tables = _acc.Allocate1D(Vp9T.Packed);
         _reconArgs = _acc.Allocate1D<int>(Vp9RArg.Count);
-        _recon = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
-            ArrayView<int>, ArrayView<int>>(Vp9ReconKernels.ReconKernel);
+        _reconInter = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
+            ArrayView<int>, ArrayView<int>>(Vp9ReconKernels.InterPassKernel);
+        _reconIntra = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
+            ArrayView<int>, ArrayView<int>, int>(Vp9ReconKernels.IntraWaveKernel);
         _lfHdr = _acc.Allocate1D<int>(Vp9LfHdr.Ints);
         _lfTable = _acc.Allocate1D<int>(Vp9LfTable.Ints);
         _lfArgs = _acc.Allocate1D<int>(Vp9LArg.Count);
@@ -109,8 +112,8 @@ internal sealed class Vp9DecodePipeline : IDisposable
 
     private void Reconstruct(Vp9FrameInfo h)
     {
-        int tileCols = 1 << h.Log2TileCols;
-        long scratchInts = (long)tileCols * (Vp9RArg.Scratch + 64);
+        int sbRows = (h.MiRows + 7) >> 3, sbCols = (h.MiCols + 7) >> 3;
+        long scratchInts = (long)sbRows * sbCols * Vp9RArg.Scratch;
         if (_scratch == null || _scratch.Length < scratchInts)
         {
             _scratch?.Dispose();
@@ -159,7 +162,12 @@ internal sealed class Vp9DecodePipeline : IDisposable
                 a[Vp9RArg.Scale + r * 4 + 3] = sf.YStepQ4;
             }
         _reconArgs.View.CopyFromCPU(a);   // frame metadata scalars
-        _recon(tileCols, _frames.Pool, _reconArgs.View, _tables.View, _parser.ModeInfo, _parser.Superblocks, _parser.Coefficients, _scratch.View);
+        // pass A: inter blocks of every superblock; pass B: intra blocks on the wavefront row + col
+        if (!h.IsIntraOnlyFrame)
+            _reconInter(sbRows * sbCols, _frames.Pool, _reconArgs.View, _tables.View, _parser.ModeInfo, _parser.Superblocks, _parser.Coefficients, _scratch.View);
+        for (int k = 0; k < sbRows + sbCols - 1; k++)
+            _reconIntra(Math.Min(sbRows - 1, k) + 1, _frames.Pool, _reconArgs.View, _tables.View, _parser.ModeInfo, _parser.Superblocks,
+                _parser.Coefficients, _scratch.View, k);
     }
 
     /// <summary>The cropped planes (Y, U, V, tight) of frame buffer <paramref name="buffer"/> (diagnostics / tests).</summary>
