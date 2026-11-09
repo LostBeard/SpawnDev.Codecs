@@ -8,7 +8,7 @@ that matches every .md5 also proves the remux).
 """
 import os, subprocess, sys
 
-exe, vec_dir, ivf_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+exe, vec_dir, ivf_dir = sys.argv[1].split("|"), sys.argv[2], sys.argv[3]  # "exe|arg|arg": extra decoder args
 prefix = sys.argv[4] if len(sys.argv) > 4 else "vp90-2-"
 os.makedirs(ivf_dir, exist_ok=True)
 names = sorted(n for n in os.listdir(vec_dir) if n.startswith(prefix) and n.endswith((".webm", ".ivf")))
@@ -19,8 +19,8 @@ for name in names:
     if not os.path.exists(ivf):
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-c", "copy", "-copyinkf", "-f", "ivf", ivf], check=True)
     want = [l.split()[0] for l in open(src + ".md5") if l.strip()]
-    r = subprocess.run([exe, ivf], capture_output=True, text=True, timeout=600)
-    got = [l.split()[2] for l in r.stdout.splitlines() if l.strip()]
+    r = subprocess.run(exe + [ivf], capture_output=True, text=True, timeout=600)
+    got = [l.split()[2] for l in r.stdout.splitlines() if l.strip() and not l.startswith("H ")]
     if r.returncode != 0:
         bad.append(f"{name}: exit {r.returncode}: {r.stderr.strip()[:200]}")
     elif got != want:
