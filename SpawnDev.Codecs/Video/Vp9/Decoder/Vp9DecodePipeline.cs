@@ -94,6 +94,23 @@ internal sealed class Vp9DecodePipeline : IDisposable
     /// <summary>Diagnostics only: see <see cref="Vp9RArg.DebugFlags"/> (tests set it from VP9_DEBUG_FLAGS).</summary>
     internal int DebugFlags { get; set; }
 
+    /// <summary>
+    /// Diagnostics: when set, every frame waits for the accelerator after each stage and adds the stage's time (ms) here
+    /// (total and worst frame), so a long single submission (a browser GPU watchdog) can be pinned to a stage. Null in
+    /// normal decoding: no waits are added.
+    /// </summary>
+    internal Dictionary<string, (double TotalMs, double MaxMs, int Frames)>? StageTimes { get; set; }
+
+    private async Task MarkStageAsync(System.Diagnostics.Stopwatch? timer, string stage)
+    {
+        if (timer == null || StageTimes == null) return;
+        await _acc.SynchronizeAsync();
+        double ms = timer.Elapsed.TotalMilliseconds;
+        StageTimes.TryGetValue(stage, out var t);
+        StageTimes[stage] = (t.TotalMs + ms, Math.Max(t.MaxMs, ms), t.Frames + 1);
+        timer.Restart();
+    }
+
     internal Vp9FrameContextsGpu Contexts => _contexts;
     internal Vp9TileParserGpu Parser => _parser;
     internal Vp9FrameBuffersGpu Frames => _frames;
@@ -115,13 +132,20 @@ internal sealed class Vp9DecodePipeline : IDisposable
             return h;
         }
         _frames.Ensure(h.NewBuffer, h.Width, h.Height, h.SubsamplingX, h.SubsamplingY);
+        var timer = StageTimes != null ? System.Diagnostics.Stopwatch.StartNew() : null;
         _contexts.BeginFrame(h);
         _contexts.ReadCompressedHeader(frameView, frameOffset, h);
+        await MarkStageAsync(timer, "compressed header");
         _parser.Parse(frameView, frameOffset, frame.Span, h, _contexts, _prevBuffer);
+        await MarkStageAsync(timer, "tile parse");
         Reconstruct(h);
+        await MarkStageAsync(timer, "reconstruction");
         if (afterRecon != null) await afterRecon(h);
+        timer?.Restart();
         LoopFilter(h);
+        await MarkStageAsync(timer, "loop filter");
         _contexts.Adapt(h, _parser.Counts, _parser.TileCols);
+        await MarkStageAsync(timer, "adaptation");
         _contexts.EndFrame(h);
         _parser.EndFrame(h);
         _reader.FinishFrame();

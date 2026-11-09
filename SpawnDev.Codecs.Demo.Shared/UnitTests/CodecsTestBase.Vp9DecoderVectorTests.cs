@@ -391,12 +391,16 @@ public abstract partial class CodecsTestBase
         {
             var failures = new List<string>();
             int frames = 0, outputs = 0, files = 0;
+            // VP9_STAGE_TIMES=1 (desktop): wait after every stage and report each stage's total and worst-frame time
+            var stageTimes = !OperatingSystem.IsBrowser() && Environment.GetEnvironmentVariable("VP9_STAGE_TIMES") == "1"
+                ? new Dictionary<string, (double TotalMs, double MaxMs, int Frames)>() : null;
             foreach (var v in Vp9Vectors())
             {
                 if (!modeInfoRef.TryGetValue(v.Name, out var want)) { failures.Add($"{v.Name}: no libvpx reference"); continue; }
                 files++;
                 using var pipe = new Vp9DecodePipeline(acc);
                 if (!OperatingSystem.IsBrowser() && int.TryParse(Environment.GetEnvironmentVariable("VP9_DEBUG_FLAGS"), out int dbg)) pipe.DebugFlags = dbg;
+                pipe.StageTimes = stageTimes;
                 int decoded = 0, shown = 0;
                 foreach (byte[] packet in Vp9Packets.ReadFile(v.File))
                 {
@@ -435,6 +439,9 @@ public abstract partial class CodecsTestBase
             }
         done:
             Console.WriteLine($"{acc.AcceleratorType}: {files} files, {frames} frames decoded, {outputs} output frames == libvpx .md5");
+            if (stageTimes != null)
+                foreach (var (stage, t) in stageTimes)
+                    Console.WriteLine($"VP9_STAGE {stage}: total {t.TotalMs:F0} ms, worst frame {t.MaxMs:F1} ms, mean {t.TotalMs / t.Frames:F2} ms over {t.Frames} frames");
             True(failures.Count == 0, $"{failures.Count} mismatches:\n" + string.Join("\n", failures.Take(40)));
         }
         finally { ReleaseAccelerator(ctx, acc); }
