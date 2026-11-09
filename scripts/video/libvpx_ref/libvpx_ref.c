@@ -4,7 +4,7 @@
  * Reference VP9 decoder for the VP9 decoder's tests: libvpx (BSD-3-Clause, github.com/webmproject/libvpx) built as
  * plain C (generic target, single thread, 8-bit) by build_libvpx_ref.py. libvpx is NOT in this repository.
  *
- * Usage: libvpx_ref [-h] [-c ctx.bin] in.ivf [out.i420]
+ * Usage: libvpx_ref [-h] [-c ctx.bin] [-m] in.ivf [out.i420]
  *   decodes every frame and prints one line per output frame, "<n> <width>x<height> <md5>", where the MD5 is computed
  *   exactly as libvpx's test/md5_helper.h does (each plane row by row over the displayed width; chroma sizes rounded
  *   up), so the lines compare with the conformance vectors' .md5 files. With out.i420 the cropped planes of every
@@ -27,7 +27,83 @@
  * tx_mode, reference_mode, comp_fixed_ref, comp_var_ref[0], comp_var_ref[1] (one byte each). */
 #define CTX_BYTES ((int)offsetof(FRAME_CONTEXT, initialized))
 static FILE *ctx_out;
+static int mi_mode, hooked_frames;
 void (*vp9ref_hook)(struct VP9Decoder *pbi, int stage);
+
+static void md5_hex(MD5Context *md5, char out[33]) {
+  unsigned char d[16];
+  int i;
+  MD5Final(d, md5);
+  for (i = 0; i < 16; ++i) sprintf(out + 2 * i, "%02x", d[i]);
+}
+
+/* -m: per decoded frame "M <n> mi=<md5> counts=<md5|->" after the tiles and "A <n> <md5>" (context after backward
+ * adaptation). The mode info MD5 runs over every mi position in raster order, as int32s: sb_type, segment_id, skip,
+ * tx_size, is_inter, then for intra blocks mode, uv_mode (+ bmi[0..3].as_mode below 8x8), for inter blocks mode,
+ * ref_frame[0], ref_frame[1], interp_filter, mv[0], mv[1] (+ bmi[0..3].as_mv[0], as_mv[1] below 8x8). Only fields the
+ * block type defines (libvpx leaves the others stale). counts = FRAME_COUNTS bytes, frames with backward adaptation. */
+static void mi_hook(struct VP9Decoder *pbi, int stage) {
+  const VP9_COMMON *cm = &pbi->common;
+  MD5Context md5;
+  char hex[33];
+  int r, c, k;
+  if (stage == 2) {
+    MD5Init(&md5);
+    for (r = 0; r < cm->mi_rows; ++r)
+      for (c = 0; c < cm->mi_cols; ++c) {
+        const MODE_INFO *mi = cm->mi_grid_visible[r * cm->mi_stride + c];
+        int v[24], n = 0;
+        const int inter = mi->ref_frame[0] > INTRA_FRAME;
+        v[n++] = mi->sb_type;
+        v[n++] = mi->segment_id;
+        v[n++] = mi->skip;
+        v[n++] = mi->tx_size;
+        v[n++] = inter;
+        if (!inter) {
+          v[n++] = mi->mode;
+          v[n++] = mi->uv_mode;
+          if (mi->sb_type < BLOCK_8X8)
+            for (k = 0; k < 4; ++k) v[n++] = mi->bmi[k].as_mode;
+        } else {
+          v[n++] = mi->mode;
+          v[n++] = mi->ref_frame[0];
+          v[n++] = mi->ref_frame[1];
+          v[n++] = mi->interp_filter;
+          v[n++] = (int)mi->mv[0].as_int;
+          v[n++] = (int)mi->mv[1].as_int;
+          if (mi->sb_type < BLOCK_8X8)
+            for (k = 0; k < 4; ++k) {
+              v[n++] = (int)mi->bmi[k].as_mv[0].as_int;
+              v[n++] = (int)mi->bmi[k].as_mv[1].as_int;
+            }
+        }
+        MD5Update(&md5, (const unsigned char *)v, n * 4);
+      }
+    md5_hex(&md5, hex);
+    printf("M %d mi=%s counts=", hooked_frames, hex);
+    if (!cm->error_resilient_mode && !cm->frame_parallel_decoding_mode) {
+      MD5Init(&md5);
+      MD5Update(&md5, (const unsigned char *)&cm->counts, sizeof(cm->counts));
+      md5_hex(&md5, hex);
+      printf("%s\n", hex);
+    } else {
+      printf("-\n");
+    }
+  } else if (stage == 3) {
+    MD5Init(&md5);
+    MD5Update(&md5, (const unsigned char *)cm->fc, CTX_BYTES - 1);
+    md5_hex(&md5, hex);
+    printf("A %d %s\n", hooked_frames, hex);
+  }
+}
+
+static void ctx_hook(struct VP9Decoder *pbi, int stage);
+static void hook(struct VP9Decoder *pbi, int stage) {
+  if (stage == 0) ++hooked_frames;
+  if (ctx_out && stage <= 1) ctx_hook(pbi, stage);
+  if (mi_mode && stage >= 2) mi_hook(pbi, stage);
+}
+
 static void ctx_hook(struct VP9Decoder *pbi, int stage) {
   const VP9_COMMON *cm = &pbi->common;
   unsigned char extra[5];
@@ -113,13 +189,18 @@ int main(int argc, char **argv) {
         fprintf(stderr, "cannot write %s\n", argv[2]);
         return 2;
       }
-      vp9ref_hook = ctx_hook;
+      vp9ref_hook = hook;
       fprintf(stderr, "ctx_bytes=%d coef=%d switchable=%d inter_mode=%d tx=%d skip=%d nmvc=%d\n", CTX_BYTES,
               (int)offsetof(FRAME_CONTEXT, coef_probs), (int)offsetof(FRAME_CONTEXT, switchable_interp_prob),
               (int)offsetof(FRAME_CONTEXT, inter_mode_probs), (int)offsetof(FRAME_CONTEXT, tx_probs),
               (int)offsetof(FRAME_CONTEXT, skip_probs), (int)offsetof(FRAME_CONTEXT, nmvc));
       argv += 2;
       argc -= 2;
+    } else if (argc > 1 && strcmp(argv[1], "-m") == 0) {
+      mi_mode = 1;
+      vp9ref_hook = hook;
+      ++argv;
+      --argc;
     } else {
       break;
     }

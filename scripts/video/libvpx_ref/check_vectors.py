@@ -20,7 +20,7 @@ for name in names:
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-c", "copy", "-copyinkf", "-f", "ivf", ivf], check=True)
     want = [l.split()[0] for l in open(src + ".md5") if l.strip()]
     r = subprocess.run(exe + [ivf], capture_output=True, text=True, timeout=600)
-    got = [l.split()[2] for l in r.stdout.splitlines() if l.strip() and not l.startswith("H ")]
+    got = [l.split()[2] for l in r.stdout.splitlines() if l[:1].isdigit()]   # frame lines; -h/-m lines start with a letter
     if r.returncode != 0:
         bad.append(f"{name}: exit {r.returncode}: {r.stderr.strip()[:200]}")
     elif got != want:

@@ -24,6 +24,11 @@ context the frame loads and the context after its compressed header (+ tx_mode, 
 packed by scripts/video/libvpx_ref/pack_contexts.py. (Not `.bin.gz`: "bin" is a culture code, MSBuild would move the
 resource into a satellite assembly.)
 
+## libvpx_modeinfo.tsv.gz
+`libvpx_ref -m` for every decoded frame: `M <n> mi=<md5> counts=<md5|->` after the tiles (MD5 of the mode info grid
+as defined in libvpx_ref.c, and of FRAME_COUNTS for frames with backward adaptation) and `A <n> <md5>` (the context
+after backward adaptation), prefixed with the file name and a tab.
+
 ## Vp9ComfyUI
 Files written by ComfyUI 0.42.0's SaveWEBM node (codec vp9, fps 24; crf 32 at 512x512 / 832x480 / 1024x576, crf 10
 and 50 at 512x512, and an RGBA 512x320 batch with alpha), run as a black box through a local server (LoadVideo ->

@@ -62,6 +62,12 @@ PATCHES = {
         ("  new_fb->corrupted = read_compressed_header(pbi, data, first_partition_size);\n",
          "  new_fb->corrupted = read_compressed_header(pbi, data, first_partition_size);\n"
          "  if (vp9ref_hook) vp9ref_hook(pbi, 1);\n"),
+        # stage 2: all tiles decoded (mode info, counts), before backward adaptation; stage 3: after adaptation
+        ("  if (!xd->corrupted) {\n    if (!cm->error_resilient_mode && !cm->frame_parallel_decoding_mode) {\n",
+         "  if (vp9ref_hook) vp9ref_hook(pbi, 2);\n"
+         "  if (!xd->corrupted) {\n    if (!cm->error_resilient_mode && !cm->frame_parallel_decoding_mode) {\n"),
+        ("  // Non frame parallel update frame context here.\n",
+         "  if (vp9ref_hook) vp9ref_hook(pbi, 3);\n  // Non frame parallel update frame context here.\n"),
     ],
 }
 patched = []
