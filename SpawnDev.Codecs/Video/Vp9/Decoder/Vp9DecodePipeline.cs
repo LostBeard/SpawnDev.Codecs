@@ -20,7 +20,7 @@ internal sealed class Vp9DecodePipeline : IDisposable
     private readonly Vp9FrameBuffersGpu _frames;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables, _reconArgs, _lfHdr, _lfTable, _lfArgs;
     private Action<Index1D, ArrayView<int>, ArrayView<int>> _lfInit = null!;
-    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _lfWave = null!;
+    private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _lfWave = null!;
     private MemoryBuffer1D<int, Stride1D.Dense>? _scratch;
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _reconInter = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _reconIntra = null!;
@@ -57,7 +57,7 @@ internal sealed class Vp9DecodePipeline : IDisposable
         _reconIntra = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, ArrayView<int>, int>(Vp9ReconKernels.IntraWaveKernel);
         _lfInit = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(Vp9LoopFilterKernels.FrameInitKernel);
-        _lfWave = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(
+        _lfWave = await _acc.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(
             Vp9LoopFilterKernels.WavefrontKernel);
     }
 
@@ -87,7 +87,8 @@ internal sealed class Vp9DecodePipeline : IDisposable
         for (int k = 0; k < 2 * (sbRows - 1) + sbCols; k++)
         {
             int rMax = Math.Min(sbRows - 1, k / 2);
-            _lfWave(rMax + 1, _frames.Pool, _lfArgs.View, _parser.ModeInfo, _lfTable.View, k);
+            // one thread group per superblock row of the step
+            _lfWave(new KernelConfig(rMax + 1, Vp9Lpf.GroupLanes), _frames.Pool, _lfArgs.View, _parser.ModeInfo, _lfTable.View, k);
         }
     }
 

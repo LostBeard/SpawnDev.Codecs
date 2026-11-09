@@ -24,6 +24,11 @@
 // (r, c) must run after (r, c - 1), after (r - 1, c) and after (r - 1, c + 1) (whose left edge filter writes the last
 // columns of (r - 1, c), which (r, c)'s top edge filter reads), and before (r, c + 1) and (r + 1, c).
 //
+// Inside a superblock (FilterSuperblockGroup): one thread group, one lane per pixel row for the vertical edges, a
+// group barrier, one lane per pixel column for the horizontal edges. Each lane replays libvpx's walk over the edges and
+// filters only its own pixel of each edge, so every row and column sees libvpx's operations in libvpx's order (see
+// "filtering" below).
+//
 // Mode info (the decoder's Vp9Mi layout): records of Vp9Mi.Stride ints at record index mi_row * mi_cols + mi_col of the
 // block's top-left, fields SbType, Mode (libvpx mi->mode: for sub8x8 inter blocks the last sub-block's mode), TxSize,
 // Skip (the value after decode_block's "no coefficients -> skip = 1" for inter blocks >= 8x8), SegmentId, Ref0
@@ -135,6 +140,38 @@ public struct Vp9LfMask
             case 5: m.Lfl5 = (m.Lfl5 & ~bytes) | (fill & bytes); break;
             case 6: m.Lfl6 = (m.Lfl6 & ~bytes) | (fill & bytes); break;
             default: m.Lfl7 = (m.Lfl7 & ~bytes) | (fill & bytes); break;
+        }
+    }
+}
+
+/// <summary>
+/// The masks of libvpx vp9_filter_block_plane_non420 (chroma of 4:2:2 / 4:4:0) for one superblock, byte r of each = mi
+/// row r of the superblock: <c>Vert*</c> = the row's mask_16x16_c / mask_8x8_c / mask_4x4_c (vertical edges, before the
+/// image's first column is masked off), <c>Horz*</c> / <c>Int4</c> = mask_16x16[r] / mask_8x8[r] / mask_4x4[r] /
+/// mask_4x4_int[r]; lfl row r is <c>LflR</c> (byte c &gt;&gt; ss_x).
+/// </summary>
+public struct Vp9LfNon420Mask
+{
+    public ulong Vert16, Vert8, Vert4, Horz16, Horz8, Horz4, Int4;
+    public ulong Lfl0, Lfl1, Lfl2, Lfl3, Lfl4, Lfl5, Lfl6, Lfl7;
+
+    public static ulong Lfl(ref Vp9LfNon420Mask m, int r) => r switch
+    {
+        0 => m.Lfl0, 1 => m.Lfl1, 2 => m.Lfl2, 3 => m.Lfl3, 4 => m.Lfl4, 5 => m.Lfl5, 6 => m.Lfl6, _ => m.Lfl7,
+    };
+
+    public static void SetLfl(ref Vp9LfNon420Mask m, int r, ulong v)
+    {
+        switch (r)
+        {
+            case 0: m.Lfl0 = v; break;
+            case 1: m.Lfl1 = v; break;
+            case 2: m.Lfl2 = v; break;
+            case 3: m.Lfl3 = v; break;
+            case 4: m.Lfl4 = v; break;
+            case 5: m.Lfl5 = v; break;
+            case 6: m.Lfl6 = v; break;
+            default: m.Lfl7 = v; break;
         }
     }
 }
@@ -594,7 +631,50 @@ public static class Vp9Lpf
         AdjustMask(ref m, miRows, miCols, miRow, miCol);
     }
 
-    // ---------------------------------------------------------------- filtering (vp9_loopfilter.c)
+    // ---------------------------------------------------------------- filtering (vp9_loopfilter.c), one lane per pixel row / column
+    //
+    // libvpx filters each plane of a superblock with all of its vertical edges first (filter_selectively_vert_row2 /
+    // filter_selectively_vert, block columns left to right), then all of its horizontal edges (filter_selectively_horiz,
+    // block rows top to bottom). A vertical edge filter reads and writes pixels of one pixel row only; a horizontal edge
+    // filter pixels of one pixel column only. So within the vertical pass the pixel rows are independent of each other,
+    // and within the horizontal pass the pixel columns are. A lane that owns one row (one column) and replays libvpx's
+    // walk over the edges, filtering only its own pixel of each vpx_lpf_* call, applies exactly libvpx's operations to
+    // that row (column), in libvpx's order. The *Lane functions are libvpx's functions with that one change: each
+    // vpx_lpf_* call becomes the lane's pixel of it, when the call covers it, with the same arguments. A _dual call is
+    // its two 8 pixel halves with their own limits, except vpx_lpf_{vertical,horizontal}_16_dual: one 16 pixel span
+    // with the first block's limits (vpx_dsp/loopfilter.c).
+
+    /// <summary>The lane's pixel of a vertical edge filter <paramref name="rows"/> rows high from s: its row <paramref name="i"/>.</summary>
+    private static void V4(ArrayView<byte> p, long s, int pitch, int rows, int i, int bl, int li, int th)
+    {
+        if ((uint)i < (uint)rows) Lpf4At(p, s + (long)i * pitch, 1, bl, li, th);
+    }
+
+    private static void V8(ArrayView<byte> p, long s, int pitch, int rows, int i, int bl, int li, int th)
+    {
+        if ((uint)i < (uint)rows) Lpf8At(p, s + (long)i * pitch, 1, bl, li, th);
+    }
+
+    private static void V16(ArrayView<byte> p, long s, int pitch, int rows, int i, int bl, int li, int th)
+    {
+        if ((uint)i < (uint)rows) Lpf16At(p, s + (long)i * pitch, 1, bl, li, th);
+    }
+
+    /// <summary>The lane's pixel of a horizontal edge filter <paramref name="cols"/> pixels wide from s: its column <paramref name="i"/>.</summary>
+    private static void H4(ArrayView<byte> p, long s, int pitch, int cols, int i, int bl, int li, int th)
+    {
+        if ((uint)i < (uint)cols) Lpf4At(p, s + i, pitch, bl, li, th);
+    }
+
+    private static void H8(ArrayView<byte> p, long s, int pitch, int cols, int i, int bl, int li, int th)
+    {
+        if ((uint)i < (uint)cols) Lpf8At(p, s + i, pitch, bl, li, th);
+    }
+
+    private static void H16(ArrayView<byte> p, long s, int pitch, int cols, int i, int bl, int li, int th)
+    {
+        if ((uint)i < (uint)cols) Lpf16At(p, s + i, pitch, bl, li, th);
+    }
 
     private static int LflByte(ulong row, int k) => (int)((row >> (8 * k)) & 0xff);
 
@@ -602,13 +682,17 @@ public static class Vp9Lpf
     private static int Lim(ArrayView<int> lf, int thr, int lvl) => lf[thr + lvl * 3 + 1];
     private static int Hev(ArrayView<int> lf, int thr, int lvl) => lf[thr + lvl * 3 + 2];
 
-    /// <summary>filter_selectively_vert_row2: two rows of 8x8 blocks; lfl0 / lfl1 are the two rows' levels.</summary>
-    private static void FilterSelectivelyVertRow2(int subsamplingFactor, ArrayView<byte> p, long s, int pitch,
+    /// <summary>
+    /// filter_selectively_vert_row2 (two rows of 8x8 blocks from pixel row s; lfl0 / lfl1 are the two rows' levels) for
+    /// the lane's pixel row <paramref name="row"/> (0..15) of them.
+    /// </summary>
+    private static void FilterSelectivelyVertRow2Lane(int subsamplingFactor, ArrayView<byte> p, long s, int pitch, int row,
         uint mask16x16, uint mask8x8, uint mask4x4, uint mask4x4Int, ArrayView<int> lf, int thr, ulong lfl0, ulong lfl1)
     {
         uint dualMaskCutoff = subsamplingFactor != 0 ? 0xffu : 0xffffu;
         int lflForward = subsamplingFactor != 0 ? 4 : 8;
         uint dualOne = 1u | (1u << lflForward);
+        int i0 = row, i1 = row - 8;   // the lane's row in the first / the second block row
         int k = 0;
         for (uint mask = (mask16x16 | mask8x8 | mask4x4 | mask4x4Int) & dualMaskCutoff; mask != 0; mask = (mask & ~dualOne) >> 1)
         {
@@ -620,51 +704,57 @@ public static class Vp9Lpf
                 if ((mask16x16 & dualOne) != 0)
                 {
                     if ((mask16x16 & dualOne) == dualOne)
-                        Vertical16Dual(p, s0, pitch, Mblim(lf, thr, l0), Lim(lf, thr, l0), Hev(lf, thr, l0));
+                        V16(p, s0, pitch, 16, i0, Mblim(lf, thr, l0), Lim(lf, thr, l0), Hev(lf, thr, l0));   // vertical_16_dual
                     else
                     {
                         bool first = (mask16x16 & 1) != 0;
                         int l = first ? l0 : l1;
-                        Vertical16(p, first ? s0 : s1, pitch, Mblim(lf, thr, l), Lim(lf, thr, l), Hev(lf, thr, l));
+                        V16(p, first ? s0 : s1, pitch, 8, first ? i0 : i1, Mblim(lf, thr, l), Lim(lf, thr, l), Hev(lf, thr, l));
                     }
                 }
 
                 if ((mask8x8 & dualOne) != 0)
                 {
                     if ((mask8x8 & dualOne) == dualOne)
-                        Vertical8Dual(p, s0, pitch, Mblim(lf, thr, l0), Lim(lf, thr, l0), Hev(lf, thr, l0),
-                            Mblim(lf, thr, l1), Lim(lf, thr, l1), Hev(lf, thr, l1));
+                    {
+                        V8(p, s0, pitch, 8, i0, Mblim(lf, thr, l0), Lim(lf, thr, l0), Hev(lf, thr, l0));
+                        V8(p, s1, pitch, 8, i1, Mblim(lf, thr, l1), Lim(lf, thr, l1), Hev(lf, thr, l1));
+                    }
                     else
                     {
                         bool first = (mask8x8 & 1) != 0;
                         int l = first ? l0 : l1;
-                        Vertical8(p, first ? s0 : s1, pitch, Mblim(lf, thr, l), Lim(lf, thr, l), Hev(lf, thr, l));
+                        V8(p, first ? s0 : s1, pitch, 8, first ? i0 : i1, Mblim(lf, thr, l), Lim(lf, thr, l), Hev(lf, thr, l));
                     }
                 }
 
                 if ((mask4x4 & dualOne) != 0)
                 {
                     if ((mask4x4 & dualOne) == dualOne)
-                        Vertical4Dual(p, s0, pitch, Mblim(lf, thr, l0), Lim(lf, thr, l0), Hev(lf, thr, l0),
-                            Mblim(lf, thr, l1), Lim(lf, thr, l1), Hev(lf, thr, l1));
+                    {
+                        V4(p, s0, pitch, 8, i0, Mblim(lf, thr, l0), Lim(lf, thr, l0), Hev(lf, thr, l0));
+                        V4(p, s1, pitch, 8, i1, Mblim(lf, thr, l1), Lim(lf, thr, l1), Hev(lf, thr, l1));
+                    }
                     else
                     {
                         bool first = (mask4x4 & 1) != 0;
                         int l = first ? l0 : l1;
-                        Vertical4(p, first ? s0 : s1, pitch, Mblim(lf, thr, l), Lim(lf, thr, l), Hev(lf, thr, l));
+                        V4(p, first ? s0 : s1, pitch, 8, first ? i0 : i1, Mblim(lf, thr, l), Lim(lf, thr, l), Hev(lf, thr, l));
                     }
                 }
 
                 if ((mask4x4Int & dualOne) != 0)
                 {
                     if ((mask4x4Int & dualOne) == dualOne)
-                        Vertical4Dual(p, s0 + 4, pitch, Mblim(lf, thr, l0), Lim(lf, thr, l0), Hev(lf, thr, l0),
-                            Mblim(lf, thr, l1), Lim(lf, thr, l1), Hev(lf, thr, l1));
+                    {
+                        V4(p, s0 + 4, pitch, 8, i0, Mblim(lf, thr, l0), Lim(lf, thr, l0), Hev(lf, thr, l0));
+                        V4(p, s1 + 4, pitch, 8, i1, Mblim(lf, thr, l1), Lim(lf, thr, l1), Hev(lf, thr, l1));
+                    }
                     else
                     {
                         bool first = (mask4x4Int & 1) != 0;
                         int l = first ? l0 : l1;
-                        Vertical4(p, (first ? s0 : s1) + 4, pitch, Mblim(lf, thr, l), Lim(lf, thr, l), Hev(lf, thr, l));
+                        V4(p, (first ? s0 : s1) + 4, pitch, 8, first ? i0 : i1, Mblim(lf, thr, l), Lim(lf, thr, l), Hev(lf, thr, l));
                     }
                 }
             }
@@ -677,8 +767,11 @@ public static class Vp9Lpf
         }
     }
 
-    /// <summary>filter_selectively_horiz: one row of 8x8 blocks; lfl is the row's levels.</summary>
-    private static void FilterSelectivelyHoriz(ArrayView<byte> p, long s, int pitch, uint mask16x16, uint mask8x8,
+    /// <summary>
+    /// filter_selectively_horiz (one row of 8x8 blocks from pixel s; lfl is the row's levels) for the lane's pixel column
+    /// <paramref name="col"/> of it.
+    /// </summary>
+    private static void FilterSelectivelyHorizLane(ArrayView<byte> p, long s, int pitch, int col, uint mask16x16, uint mask8x8,
         uint mask4x4, uint mask4x4Int, ArrayView<int> lf, int thr, ulong lfl)
     {
         int k = 0;
@@ -688,18 +781,19 @@ public static class Vp9Lpf
             count = 1;
             if ((mask & 1) != 0)
             {
+                int i0 = col - 8 * k, i1 = i0 - 8;   // the lane's column in this block / in the next one
                 int l = LflByte(lfl, k);
                 int bl = Mblim(lf, thr, l), li = Lim(lf, thr, l), th = Hev(lf, thr, l);
                 if ((mask16x16 & 1) != 0)
                 {
                     if ((mask16x16 & 3) == 3)
                     {
-                        Horizontal16Dual(p, s, pitch, bl, li, th);
+                        H16(p, s, pitch, 16, i0, bl, li, th);   // horizontal_16_dual
                         count = 2;
                     }
                     else
                     {
-                        Horizontal16(p, s, pitch, bl, li, th);
+                        H16(p, s, pitch, 8, i0, bl, li, th);
                     }
                 }
                 else if ((mask8x8 & 1) != 0)
@@ -709,19 +803,23 @@ public static class Vp9Lpf
                         // the next block's thresholds
                         int n = LflByte(lfl, k + 1);
                         int bn = Mblim(lf, thr, n), ln = Lim(lf, thr, n), tn = Hev(lf, thr, n);
-                        Horizontal8Dual(p, s, pitch, bl, li, th, bn, ln, tn);
+                        H8(p, s, pitch, 8, i0, bl, li, th);
+                        H8(p, s + 8, pitch, 8, i1, bn, ln, tn);
                         if ((mask4x4Int & 3) == 3)
-                            Horizontal4Dual(p, s + 4L * pitch, pitch, bl, li, th, bn, ln, tn);
+                        {
+                            H4(p, s + 4L * pitch, pitch, 8, i0, bl, li, th);
+                            H4(p, s + 8 + 4L * pitch, pitch, 8, i1, bn, ln, tn);
+                        }
                         else if ((mask4x4Int & 1) != 0)
-                            Horizontal4(p, s + 4L * pitch, pitch, bl, li, th);
+                            H4(p, s + 4L * pitch, pitch, 8, i0, bl, li, th);
                         else if ((mask4x4Int & 2) != 0)
-                            Horizontal4(p, s + 8 + 4L * pitch, pitch, bn, ln, tn);
+                            H4(p, s + 8 + 4L * pitch, pitch, 8, i1, bn, ln, tn);
                         count = 2;
                     }
                     else
                     {
-                        Horizontal8(p, s, pitch, bl, li, th);
-                        if ((mask4x4Int & 1) != 0) Horizontal4(p, s + 4L * pitch, pitch, bl, li, th);
+                        H8(p, s, pitch, 8, i0, bl, li, th);
+                        if ((mask4x4Int & 1) != 0) H4(p, s + 4L * pitch, pitch, 8, i0, bl, li, th);
                     }
                 }
                 else if ((mask4x4 & 1) != 0)
@@ -730,24 +828,28 @@ public static class Vp9Lpf
                     {
                         int n = LflByte(lfl, k + 1);
                         int bn = Mblim(lf, thr, n), ln = Lim(lf, thr, n), tn = Hev(lf, thr, n);
-                        Horizontal4Dual(p, s, pitch, bl, li, th, bn, ln, tn);
+                        H4(p, s, pitch, 8, i0, bl, li, th);
+                        H4(p, s + 8, pitch, 8, i1, bn, ln, tn);
                         if ((mask4x4Int & 3) == 3)
-                            Horizontal4Dual(p, s + 4L * pitch, pitch, bl, li, th, bn, ln, tn);
+                        {
+                            H4(p, s + 4L * pitch, pitch, 8, i0, bl, li, th);
+                            H4(p, s + 8 + 4L * pitch, pitch, 8, i1, bn, ln, tn);
+                        }
                         else if ((mask4x4Int & 1) != 0)
-                            Horizontal4(p, s + 4L * pitch, pitch, bl, li, th);
+                            H4(p, s + 4L * pitch, pitch, 8, i0, bl, li, th);
                         else if ((mask4x4Int & 2) != 0)
-                            Horizontal4(p, s + 8 + 4L * pitch, pitch, bn, ln, tn);
+                            H4(p, s + 8 + 4L * pitch, pitch, 8, i1, bn, ln, tn);
                         count = 2;
                     }
                     else
                     {
-                        Horizontal4(p, s, pitch, bl, li, th);
-                        if ((mask4x4Int & 1) != 0) Horizontal4(p, s + 4L * pitch, pitch, bl, li, th);
+                        H4(p, s, pitch, 8, i0, bl, li, th);
+                        if ((mask4x4Int & 1) != 0) H4(p, s + 4L * pitch, pitch, 8, i0, bl, li, th);
                     }
                 }
                 else
                 {
-                    Horizontal4(p, s + 4L * pitch, pitch, bl, li, th);
+                    H4(p, s + 4L * pitch, pitch, 8, i0, bl, li, th);
                 }
             }
             s += 8 * count;
@@ -759,8 +861,11 @@ public static class Vp9Lpf
         }
     }
 
-    /// <summary>filter_selectively_vert (the non420 path): one row of 8x8 blocks.</summary>
-    private static void FilterSelectivelyVert(ArrayView<byte> p, long s, int pitch, uint mask16x16, uint mask8x8,
+    /// <summary>
+    /// filter_selectively_vert (the non420 path: one row of 8x8 blocks from pixel row s) for the lane's pixel row
+    /// <paramref name="row"/> (0..7) of it.
+    /// </summary>
+    private static void FilterSelectivelyVertLane(ArrayView<byte> p, long s, int pitch, int row, uint mask16x16, uint mask8x8,
         uint mask4x4, uint mask4x4Int, ArrayView<int> lf, int thr, ulong lfl)
     {
         int k = 0;
@@ -770,11 +875,11 @@ public static class Vp9Lpf
             int bl = Mblim(lf, thr, l), li = Lim(lf, thr, l), th = Hev(lf, thr, l);
             if ((mask & 1) != 0)
             {
-                if ((mask16x16 & 1) != 0) Vertical16(p, s, pitch, bl, li, th);
-                else if ((mask8x8 & 1) != 0) Vertical8(p, s, pitch, bl, li, th);
-                else if ((mask4x4 & 1) != 0) Vertical4(p, s, pitch, bl, li, th);
+                if ((mask16x16 & 1) != 0) V16(p, s, pitch, 8, row, bl, li, th);
+                else if ((mask8x8 & 1) != 0) V8(p, s, pitch, 8, row, bl, li, th);
+                else if ((mask4x4 & 1) != 0) V4(p, s, pitch, 8, row, bl, li, th);
             }
-            if ((mask4x4Int & 1) != 0) Vertical4(p, s + 4, pitch, bl, li, th);
+            if ((mask4x4Int & 1) != 0) V4(p, s + 4, pitch, 8, row, bl, li, th);
             s += 8;
             k++;
             mask16x16 >>= 1;
@@ -784,49 +889,42 @@ public static class Vp9Lpf
         }
     }
 
-    /// <summary>
-    /// vp9_filter_block_plane_ss00: a plane without subsampling (Y, or U / V of 4:4:4) of the superblock whose
-    /// top-left pixel is p[at], with the superblock's masks.
-    /// </summary>
-    public static void FilterBlockPlaneSs00(ArrayView<byte> p, long at, int stride, int miRow, int miRows,
-        ref Vp9LfMask m, ArrayView<int> lf, int lfOffset)
-    {
-        int thr = lfOffset + Vp9LfTable.Thr;
-        long dst = at;
-        ulong mask16x16 = m.LeftY2, mask8x8 = m.LeftY1, mask4x4 = m.LeftY0, mask4x4Int = m.Int4x4Y;
-        // vertical pass: 2 rows at a time
-        for (int r = 0; r < 8 && miRow + r < miRows; r += 2)
-        {
-            FilterSelectivelyVertRow2(0, p, dst, stride, (uint)mask16x16, (uint)mask8x8, (uint)mask4x4, (uint)mask4x4Int,
-                lf, thr, Vp9LfMask.Lfl(ref m, r), Vp9LfMask.Lfl(ref m, r + 1));
-            dst += 16L * stride;
-            mask16x16 >>= 16;
-            mask8x8 >>= 16;
-            mask4x4 >>= 16;
-            mask4x4Int >>= 16;
-        }
+    // ---- vp9_filter_block_plane_ss00 / _ss11 / _non420, split into the vertical pass (per pixel row) and the
+    //      horizontal pass (per pixel column)
 
-        // horizontal pass
-        dst = at;
-        mask16x16 = m.AboveY2;
-        mask8x8 = m.AboveY1;
-        mask4x4 = m.AboveY0;
-        mask4x4Int = m.Int4x4Y;
+    /// <summary>
+    /// vp9_filter_block_plane_ss00's vertical pass (a plane without subsampling: Y, or U / V of 4:4:4; top-left pixel of
+    /// the superblock at p[at]) for the lane's pixel row <paramref name="y"/> (0..63).
+    /// </summary>
+    private static void RowSs00(ArrayView<byte> p, long at, int stride, int miRow, int miRows, ref Vp9LfMask m,
+        ArrayView<int> lf, int thr, int y)
+    {
+        // the serial loop: r = 0, 2, 4, 6 (two block rows at a time) while miRow + r < miRows, masks shifted 16 bits
+        // per step, i.e. by 8 * r
+        int r = (y >> 3) & ~1;
+        if (miRow + r >= miRows) return;
+        int sh = 8 * r;
+        FilterSelectivelyVertRow2Lane(0, p, at + 8L * r * stride, stride, y & 15, (uint)(m.LeftY2 >> sh),
+            (uint)(m.LeftY1 >> sh), (uint)(m.LeftY0 >> sh), (uint)(m.Int4x4Y >> sh), lf, thr,
+            Vp9LfMask.Lfl(ref m, r), Vp9LfMask.Lfl(ref m, r + 1));
+    }
+
+    /// <summary>vp9_filter_block_plane_ss00's horizontal pass for the lane's pixel column <paramref name="x"/> (0..63).</summary>
+    private static void ColSs00(ArrayView<byte> p, long at, int stride, int miRow, int miRows, ref Vp9LfMask m,
+        ArrayView<int> lf, int thr, int x)
+    {
         for (int r = 0; r < 8 && miRow + r < miRows; r++)
         {
+            int sh = 8 * r;
             uint m16 = 0, m8 = 0, m4 = 0;
             if (miRow + r != 0)
             {
-                m16 = (uint)(mask16x16 & 0xff);
-                m8 = (uint)(mask8x8 & 0xff);
-                m4 = (uint)(mask4x4 & 0xff);
+                m16 = (uint)((m.AboveY2 >> sh) & 0xff);
+                m8 = (uint)((m.AboveY1 >> sh) & 0xff);
+                m4 = (uint)((m.AboveY0 >> sh) & 0xff);
             }
-            FilterSelectivelyHoriz(p, dst, stride, m16, m8, m4, (uint)(mask4x4Int & 0xff), lf, thr, Vp9LfMask.Lfl(ref m, r));
-            dst += 8L * stride;
-            mask16x16 >>= 8;
-            mask8x8 >>= 8;
-            mask4x4 >>= 8;
-            mask4x4Int >>= 8;
+            FilterSelectivelyHorizLane(p, at + 8L * r * stride, stride, x, m16, m8, m4, (uint)((m.Int4x4Y >> sh) & 0xff),
+                lf, thr, Vp9LfMask.Lfl(ref m, r));
         }
     }
 
@@ -834,73 +932,64 @@ public static class Vp9Lpf
     private static ulong UvLflRow(ulong yRow) =>
         (yRow & 0xff) | ((yRow >> 8) & 0xff00) | ((yRow >> 16) & 0xff0000) | ((yRow >> 24) & 0xff000000);
 
-    /// <summary>vp9_filter_block_plane_ss11: U or V of 4:2:0, the superblock's top-left chroma pixel at p[at].</summary>
-    public static void FilterBlockPlaneSs11(ArrayView<byte> p, long at, int stride, int miRow, int miRows,
-        ref Vp9LfMask m, ArrayView<int> lf, int lfOffset)
+    /// <summary>
+    /// vp9_filter_block_plane_ss11's vertical pass (U or V of 4:2:0, the superblock's top-left chroma pixel at p[at]) for
+    /// the lane's pixel row <paramref name="y"/> (0..31).
+    /// </summary>
+    private static void RowSs11(ArrayView<byte> p, long at, int stride, int miRow, int miRows, ref Vp9LfMask m,
+        ArrayView<int> lf, int thr, int y)
     {
-        int thr = lfOffset + Vp9LfTable.Thr;
-        long dst = at;
-        ulong lflUv0 = 0, lflUv1 = 0, lflUv2 = 0, lflUv3 = 0;   // lfl_uv[16], 4 per uv row (vp9_zero)
+        // the serial loop: r = 0, 4 (two uv block rows at a time) while miRow + r < miRows; the masks as they are for
+        // r = 0, then (mask >> 8) & 0xffff; the levels lfl_uv rows r / 2 and r / 2 + 1 = UvLflRow of lfl_y rows r, r + 2
+        int pair = y >> 4, r = pair * 4;
+        if (miRow + r >= miRows) return;
         uint mask16x16 = m.LeftUv2, mask8x8 = m.LeftUv1, mask4x4 = m.LeftUv0, mask4x4Int = m.Int4x4Uv;
-
-        // vertical pass: 2 rows at a time
-        for (int r = 0; r < 8 && miRow + r < miRows; r += 4)
+        if (pair == 1)
         {
-            ulong row0 = UvLflRow(Vp9LfMask.Lfl(ref m, r)), row1 = UvLflRow(Vp9LfMask.Lfl(ref m, r + 2));
-            if (r == 0) { lflUv0 = row0; lflUv1 = row1; }
-            else { lflUv2 = row0; lflUv3 = row1; }
-            FilterSelectivelyVertRow2(1, p, dst, stride, mask16x16, mask8x8, mask4x4, mask4x4Int, lf, thr, row0, row1);
-            dst += 16L * stride;
             mask16x16 = (mask16x16 >> 8) & 0xffff;
             mask8x8 = (mask8x8 >> 8) & 0xffff;
             mask4x4 = (mask4x4 >> 8) & 0xffff;
             mask4x4Int = (mask4x4Int >> 8) & 0xffff;
         }
+        FilterSelectivelyVertRow2Lane(1, p, at + 16L * pair * stride, stride, y & 15, mask16x16, mask8x8, mask4x4, mask4x4Int,
+            lf, thr, UvLflRow(Vp9LfMask.Lfl(ref m, r)), UvLflRow(Vp9LfMask.Lfl(ref m, r + 2)));
+    }
 
-        // horizontal pass
-        dst = at;
-        mask16x16 = m.AboveUv2;
-        mask8x8 = m.AboveUv1;
-        mask4x4 = m.AboveUv0;
-        mask4x4Int = m.Int4x4Uv;
+    /// <summary>vp9_filter_block_plane_ss11's horizontal pass for the lane's pixel column <paramref name="x"/> (0..31).</summary>
+    private static void ColSs11(ArrayView<byte> p, long at, int stride, int miRow, int miRows, ref Vp9LfMask m,
+        ArrayView<int> lf, int thr, int x)
+    {
+        // uv block row j = r / 2: masks shifted 4 bits per row (2 * r), pixel rows 8 * j, levels lfl_uv row j (the
+        // vertical pass filled it: UvLflRow of lfl_y row r)
         for (int r = 0; r < 8 && miRow + r < miRows; r += 2)
         {
+            int sh = 2 * r;
             bool skipBorder4x4R = miRow + r == miRows - 1;
-            uint m4i = skipBorder4x4R ? 0u : (mask4x4Int & 0xf);
+            uint m4i = skipBorder4x4R ? 0u : ((m.Int4x4Uv >> sh) & 0xf);
             uint m16 = 0, m8 = 0, m4 = 0;
             if (miRow + r != 0)
             {
-                m16 = mask16x16 & 0xf;
-                m8 = mask8x8 & 0xf;
-                m4 = mask4x4 & 0xf;
+                m16 = (m.AboveUv2 >> sh) & 0xf;
+                m8 = (m.AboveUv1 >> sh) & 0xf;
+                m4 = (m.AboveUv0 >> sh) & 0xf;
             }
-            int uvRow = r >> 1;
-            ulong lfl = uvRow == 0 ? lflUv0 : uvRow == 1 ? lflUv1 : uvRow == 2 ? lflUv2 : lflUv3;
-            FilterSelectivelyHoriz(p, dst, stride, m16, m8, m4, m4i, lf, thr, lfl);
-            dst += 8L * stride;
-            mask16x16 >>= 4;
-            mask8x8 >>= 4;
-            mask4x4 >>= 4;
-            mask4x4Int >>= 4;
+            FilterSelectivelyHorizLane(p, at + 4L * r * stride, stride, x, m16, m8, m4, m4i, lf, thr,
+                UvLflRow(Vp9LfMask.Lfl(ref m, r)));
         }
     }
 
-    private static ulong SetByte(ulong v, int i, uint b) => (v & ~(0xffUL << (8 * i))) | ((ulong)(b & 0xff) << (8 * i));
     private static uint GetByte(ulong v, int i) => (uint)((v >> (8 * i)) & 0xff);
 
     /// <summary>
-    /// vp9_filter_block_plane_non420: a chroma plane subsampled other than 4:2:0 / 4:4:4 (4:2:2, 4:4:0), masks built
-    /// from the mode info directly; the superblock's top-left pixel of the plane at p[at].
+    /// The masks and levels of vp9_filter_block_plane_non420 (a chroma plane subsampled other than 4:2:0 / 4:4:4: 4:2:2,
+    /// 4:4:0), built from the mode info directly. libvpx builds row r's masks right before filtering row r's vertical
+    /// edges; building reads no pixels, so building them all first changes nothing. U and V use the same masks.
     /// </summary>
-    public static void FilterBlockPlaneNon420(ArrayView<byte> p, long at, int stride, int ssX, int ssY, ArrayView<int> mi,
-        int gridOffset, int miRows, int miCols, int miRow, int miCol, ArrayView<int> lf, int lfOffset)
+    public static void BuildNon420Mask(ref Vp9LfNon420Mask n, int ssX, int ssY, ArrayView<int> mi, int gridOffset, int miRows,
+        int miCols, int miRow, int miCol, ArrayView<int> lf, int lfOffset)
     {
-        int thr = lfOffset + Vp9LfTable.Thr;
+        n = default;
         int rowStep = 1 << ssY, colStep = 1 << ssX;
-        // per mi row r (byte r): mask_16x16[r], mask_8x8[r], mask_4x4[r], mask_4x4_int[r]; lfl row r = lflRows byte
-        ulong mask16Rows = 0, mask8Rows = 0, mask4Rows = 0, mask4IntRows = 0;
-        Vp9LfMask lfl = default;
-        long dst = at;
         for (int r = 0; r < 8 && miRow + r < miRows; r += rowStep)
         {
             uint mask16x16C = 0, mask8x8C = 0, mask4x4C = 0;
@@ -935,8 +1024,8 @@ public static class Vp9Lpf
                     }
                     if (!skipThisR && (rs & 3) == 0)
                     {
-                        if (!skipBorder4x4R) mask16Rows |= (ulong)bit << (8 * r);
-                        else mask8Rows |= (ulong)bit << (8 * r);
+                        if (!skipBorder4x4R) n.Horz16 |= (ulong)bit << (8 * r);
+                        else n.Horz8 |= (ulong)bit << (8 * r);
                     }
                 }
                 else if (txSize == 2)
@@ -948,8 +1037,8 @@ public static class Vp9Lpf
                     }
                     if (!skipThisR && (rs & 1) == 0)
                     {
-                        if (!skipBorder4x4R) mask16Rows |= (ulong)bit << (8 * r);
-                        else mask8Rows |= (ulong)bit << (8 * r);
+                        if (!skipBorder4x4R) n.Horz16 |= (ulong)bit << (8 * r);
+                        else n.Horz8 |= (ulong)bit << (8 * r);
                     }
                 }
                 else
@@ -962,86 +1051,210 @@ public static class Vp9Lpf
                     }
                     if (!skipThisR)
                     {
-                        if (txSize == 1 || (rs & 3) == 0) mask8Rows |= (ulong)bit << (8 * r);
-                        else mask4Rows |= (ulong)bit << (8 * r);
+                        if (txSize == 1 || (rs & 3) == 0) n.Horz8 |= (ulong)bit << (8 * r);
+                        else n.Horz4 |= (ulong)bit << (8 * r);
                     }
-                    if (!skipThis && txSize < 1 && !skipBorder4x4C) mask4IntRows |= (ulong)bit << (8 * r);
+                    if (!skipThis && txSize < 1 && !skipBorder4x4C) n.Int4 |= (ulong)bit << (8 * r);
                 }
             }
-            SetLflRow(ref lfl, r, lflRow);
-
-            // no filtering on the leftmost column of the image
-            uint borderMask = miCol == 0 ? ~1u : ~0u;
-            FilterSelectivelyVert(p, dst, stride, mask16x16C & borderMask, mask8x8C & borderMask, mask4x4C & borderMask,
-                GetByte(mask4IntRows, r), lf, thr, lflRow);
-            dst += 8L * stride;
+            n.Vert16 |= (ulong)mask16x16C << (8 * r);
+            n.Vert8 |= (ulong)mask8x8C << (8 * r);
+            n.Vert4 |= (ulong)mask4x4C << (8 * r);
+            Vp9LfNon420Mask.SetLfl(ref n, r, lflRow);
         }
+    }
 
-        // horizontal pass
-        dst = at;
-        for (int r = 0; r < 8 && miRow + r < miRows; r += rowStep)
+    private static ulong SetByte(ulong v, int i, uint b) => (v & ~(0xffUL << (8 * i))) | ((ulong)(b & 0xff) << (8 * i));
+
+    /// <summary>
+    /// vp9_filter_block_plane_non420's vertical pass (the superblock's top-left pixel of the plane at p[at]) for the
+    /// lane's pixel row <paramref name="y"/> (0 .. (64 &gt;&gt; ssY) - 1).
+    /// </summary>
+    private static void RowNon420(ArrayView<byte> p, long at, int stride, int ssY, int miRow, int miRows, int miCol,
+        ref Vp9LfNon420Mask n, ArrayView<int> lf, int thr, int y)
+    {
+        // the serial loop: block row j at mi row r = j * row_step, while miRow + r < miRows
+        int j = y >> 3, r = j << ssY;
+        if (r >= 8 || miRow + r >= miRows) return;
+        // no filtering on the leftmost column of the image
+        uint borderMask = miCol == 0 ? ~1u : ~0u;
+        FilterSelectivelyVertLane(p, at + 8L * j * stride, stride, y & 7, GetByte(n.Vert16, r) & borderMask,
+            GetByte(n.Vert8, r) & borderMask, GetByte(n.Vert4, r) & borderMask, GetByte(n.Int4, r), lf, thr,
+            Vp9LfNon420Mask.Lfl(ref n, r));
+    }
+
+    /// <summary>vp9_filter_block_plane_non420's horizontal pass for the lane's pixel column <paramref name="x"/>.</summary>
+    private static void ColNon420(ArrayView<byte> p, long at, int stride, int ssY, int miRow, int miRows,
+        ref Vp9LfNon420Mask n, ArrayView<int> lf, int thr, int x)
+    {
+        int rowStep = 1 << ssY;
+        for (int r = 0, j = 0; r < 8 && miRow + r < miRows; r += rowStep, j++)
         {
             bool skipBorder4x4R = ssY != 0 && miRow + r == miRows - 1;
-            uint mask4x4IntR = skipBorder4x4R ? 0u : GetByte(mask4IntRows, r);
+            uint mask4x4IntR = skipBorder4x4R ? 0u : GetByte(n.Int4, r);
             uint m16 = 0, m8 = 0, m4 = 0;
             if (miRow + r != 0)
             {
-                m16 = GetByte(mask16Rows, r);
-                m8 = GetByte(mask8Rows, r);
-                m4 = GetByte(mask4Rows, r);
+                m16 = GetByte(n.Horz16, r);
+                m8 = GetByte(n.Horz8, r);
+                m4 = GetByte(n.Horz4, r);
             }
-            FilterSelectivelyHoriz(p, dst, stride, m16, m8, m4, mask4x4IntR, lf, thr, Vp9LfMask.Lfl(ref lfl, r));
-            dst += 8L * stride;
+            FilterSelectivelyHorizLane(p, at + 8L * j * stride, stride, x, m16, m8, m4, mask4x4IntR, lf, thr,
+                Vp9LfNon420Mask.Lfl(ref n, r));
         }
     }
 
-    private static void SetLflRow(ref Vp9LfMask m, int r, ulong v)
+    // ---------------------------------------------------------------- one superblock, one thread group
+
+    /// <summary>Lanes of the thread group that filters one superblock: one per pixel row, then one per pixel column.</summary>
+    public const int GroupLanes = 64;
+
+    // The group's shared memory (uint words; a ulong is two words, low first): the superblock's Vp9LfMask, then its
+    // Vp9LfNon420Mask.
+    private const int ShLeftY = 0, ShAboveY = 8, ShInt4x4Y = 16, ShLfl = 18, ShLeftUv = 34, ShAboveUv = 38, ShInt4x4Uv = 42,
+        ShNon420 = 43, ShNon420Lfl = 57;
+
+    /// <summary>The shared memory (uint words) <see cref="FilterSuperblockGroup"/> needs.</summary>
+    public const int GroupSharedWords = 73;
+
+    private static void Put(ArrayView<uint> s, int i, ulong v)
     {
-        switch (r)
+        s[i] = (uint)v;
+        s[i + 1] = (uint)(v >> 32);
+    }
+
+    private static ulong Get(ArrayView<uint> s, int i) => s[i] | ((ulong)s[i + 1] << 32);
+
+    private static void StoreMasks(ArrayView<uint> s, ref Vp9LfMask m, ref Vp9LfNon420Mask n)
+    {
+        for (int t = 0; t < 4; t++)
         {
-            case 0: m.Lfl0 = v; break;
-            case 1: m.Lfl1 = v; break;
-            case 2: m.Lfl2 = v; break;
-            case 3: m.Lfl3 = v; break;
-            case 4: m.Lfl4 = v; break;
-            case 5: m.Lfl5 = v; break;
-            case 6: m.Lfl6 = v; break;
-            default: m.Lfl7 = v; break;
+            Put(s, ShLeftY + 2 * t, Vp9LfMask.LeftY(ref m, t));
+            Put(s, ShAboveY + 2 * t, Vp9LfMask.AboveY(ref m, t));
+            s[ShLeftUv + t] = Vp9LfMask.LeftUv(ref m, t);
+            s[ShAboveUv + t] = Vp9LfMask.AboveUv(ref m, t);
         }
+        Put(s, ShInt4x4Y, m.Int4x4Y);
+        s[ShInt4x4Uv] = m.Int4x4Uv;
+        for (int r = 0; r < 8; r++)
+        {
+            Put(s, ShLfl + 2 * r, Vp9LfMask.Lfl(ref m, r));
+            Put(s, ShNon420Lfl + 2 * r, Vp9LfNon420Mask.Lfl(ref n, r));
+        }
+        Put(s, ShNon420, n.Vert16);
+        Put(s, ShNon420 + 2, n.Vert8);
+        Put(s, ShNon420 + 4, n.Vert4);
+        Put(s, ShNon420 + 6, n.Horz16);
+        Put(s, ShNon420 + 8, n.Horz8);
+        Put(s, ShNon420 + 10, n.Horz4);
+        Put(s, ShNon420 + 12, n.Int4);
+    }
+
+    private static void LoadMasks(ArrayView<uint> s, ref Vp9LfMask m, ref Vp9LfNon420Mask n)
+    {
+        m.LeftY0 = Get(s, ShLeftY); m.LeftY1 = Get(s, ShLeftY + 2); m.LeftY2 = Get(s, ShLeftY + 4); m.LeftY3 = Get(s, ShLeftY + 6);
+        m.AboveY0 = Get(s, ShAboveY); m.AboveY1 = Get(s, ShAboveY + 2); m.AboveY2 = Get(s, ShAboveY + 4); m.AboveY3 = Get(s, ShAboveY + 6);
+        m.Int4x4Y = Get(s, ShInt4x4Y);
+        m.LeftUv0 = s[ShLeftUv]; m.LeftUv1 = s[ShLeftUv + 1]; m.LeftUv2 = s[ShLeftUv + 2]; m.LeftUv3 = s[ShLeftUv + 3];
+        m.AboveUv0 = s[ShAboveUv]; m.AboveUv1 = s[ShAboveUv + 1]; m.AboveUv2 = s[ShAboveUv + 2]; m.AboveUv3 = s[ShAboveUv + 3];
+        m.Int4x4Uv = s[ShInt4x4Uv];
+        m.Lfl0 = Get(s, ShLfl); m.Lfl1 = Get(s, ShLfl + 2); m.Lfl2 = Get(s, ShLfl + 4); m.Lfl3 = Get(s, ShLfl + 6);
+        m.Lfl4 = Get(s, ShLfl + 8); m.Lfl5 = Get(s, ShLfl + 10); m.Lfl6 = Get(s, ShLfl + 12); m.Lfl7 = Get(s, ShLfl + 14);
+        n.Vert16 = Get(s, ShNon420); n.Vert8 = Get(s, ShNon420 + 2); n.Vert4 = Get(s, ShNon420 + 4);
+        n.Horz16 = Get(s, ShNon420 + 6); n.Horz8 = Get(s, ShNon420 + 8); n.Horz4 = Get(s, ShNon420 + 10);
+        n.Int4 = Get(s, ShNon420 + 12);
+        n.Lfl0 = Get(s, ShNon420Lfl); n.Lfl1 = Get(s, ShNon420Lfl + 2); n.Lfl2 = Get(s, ShNon420Lfl + 4); n.Lfl3 = Get(s, ShNon420Lfl + 6);
+        n.Lfl4 = Get(s, ShNon420Lfl + 8); n.Lfl5 = Get(s, ShNon420Lfl + 10); n.Lfl6 = Get(s, ShNon420Lfl + 12); n.Lfl7 = Get(s, ShNon420Lfl + 14);
     }
 
     /// <summary>
-    /// One iteration of libvpx loop_filter_rows' inner loop: the superblock at mi (<paramref name="miRow"/>,
-    /// <paramref name="miCol"/>), all planes. <paramref name="yAt"/> is the index of its top-left luma pixel,
-    /// <paramref name="uAt"/> / <paramref name="vAt"/> of its top-left chroma pixels (row (miRow * 8) &gt;&gt; ssY,
-    /// column (miCol * 8) &gt;&gt; ssX of the plane). Does nothing when the frame's filter level is 0 (libvpx skips
-    /// the whole frame). Superblocks run in raster order (see the file header).
+    /// The vertical pass of every plane of the superblock for lane <paramref name="lane"/>: luma pixel row lane, then the
+    /// chroma pixel rows lane, lane + 64, ... of U's rows followed by V's.
     /// </summary>
     // A real function on Wasm (and on the WebGPU / WebGL backends once ILGPU emits view-taking helpers as functions),
     // not inlined at every call site: keeps the kernels small enough for the browsers' shader and Wasm compilers.
     [MethodImpl(MethodImplOptions.NoInlining)]
-    public static void FilterSuperblock(ArrayView<byte> y, long yAt, int yStride, ArrayView<byte> u, long uAt,
-        ArrayView<byte> v, long vAt, int uvStride, int ssX, int ssY, ArrayView<int> mi, int gridOffset, int miRows,
-        int miCols, int miRow, int miCol, ArrayView<int> lf, int lfOffset)
+    public static void SuperblockRowsLane(int lane, ArrayView<byte> p, long yAt, int yStride, long uAt, long vAt, int uvStride,
+        int ssX, int ssY, int miRows, int miRow, int miCol, Vp9LfMask m, Vp9LfNon420Mask n, ArrayView<int> lf, int lfOffset)
     {
-        if (lf[lfOffset + Vp9LfTable.FrameLevel] == 0) return;
-        Vp9LfMask m = default;
-        BuildSuperblockMask(ref m, mi, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
-        FilterBlockPlaneSs00(y, yAt, yStride, miRow, miRows, ref m, lf, lfOffset);
-        if (ssX == 1 && ssY == 1)
+        int thr = lfOffset + Vp9LfTable.Thr;
+        RowSs00(p, yAt, yStride, miRow, miRows, ref m, lf, thr, lane);
+        int rows = 64 >> ssY;
+        for (int t = lane; t < 2 * rows; t += GroupLanes)
         {
-            FilterBlockPlaneSs11(u, uAt, uvStride, miRow, miRows, ref m, lf, lfOffset);
-            FilterBlockPlaneSs11(v, vAt, uvStride, miRow, miRows, ref m, lf, lfOffset);
+            bool isU = t < rows;
+            long at = isU ? uAt : vAt;
+            int y = isU ? t : t - rows;
+            if (ssX == 1 && ssY == 1) RowSs11(p, at, uvStride, miRow, miRows, ref m, lf, thr, y);
+            else if (ssX == 0 && ssY == 0) RowSs00(p, at, uvStride, miRow, miRows, ref m, lf, thr, y);
+            else RowNon420(p, at, uvStride, ssY, miRow, miRows, miCol, ref n, lf, thr, y);
         }
-        else if (ssX == 0 && ssY == 0)
+    }
+
+    /// <summary>
+    /// The horizontal pass of every plane of the superblock for lane <paramref name="lane"/>: luma pixel column lane, then
+    /// the chroma pixel columns lane, lane + 64, ... of U's columns followed by V's.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static void SuperblockColumnsLane(int lane, ArrayView<byte> p, long yAt, int yStride, long uAt, long vAt, int uvStride,
+        int ssX, int ssY, int miRows, int miRow, Vp9LfMask m, Vp9LfNon420Mask n, ArrayView<int> lf, int lfOffset)
+    {
+        int thr = lfOffset + Vp9LfTable.Thr;
+        ColSs00(p, yAt, yStride, miRow, miRows, ref m, lf, thr, lane);
+        int cols = 64 >> ssX;
+        for (int t = lane; t < 2 * cols; t += GroupLanes)
         {
-            FilterBlockPlaneSs00(u, uAt, uvStride, miRow, miRows, ref m, lf, lfOffset);
-            FilterBlockPlaneSs00(v, vAt, uvStride, miRow, miRows, ref m, lf, lfOffset);
+            bool isU = t < cols;
+            long at = isU ? uAt : vAt;
+            int x = isU ? t : t - cols;
+            if (ssX == 1 && ssY == 1) ColSs11(p, at, uvStride, miRow, miRows, ref m, lf, thr, x);
+            else if (ssX == 0 && ssY == 0) ColSs00(p, at, uvStride, miRow, miRows, ref m, lf, thr, x);
+            else ColNon420(p, at, uvStride, ssY, miRow, miRows, ref n, lf, thr, x);
         }
-        else
+    }
+
+    /// <summary>
+    /// One iteration of libvpx loop_filter_rows' inner loop, the superblock at mi (<paramref name="miRow"/>,
+    /// <paramref name="miCol"/>), all planes, by a thread group of <see cref="GroupLanes"/> lanes: every lane of the group
+    /// calls this (barriers inside), with <paramref name="shared"/> = <see cref="GroupSharedWords"/> words of group shared
+    /// memory. <paramref name="yAt"/> is the index in <paramref name="p"/> of the superblock's top-left luma pixel,
+    /// <paramref name="uAt"/> / <paramref name="vAt"/> of its top-left chroma pixels (row (miRow * 8) &gt;&gt; ssY, column
+    /// (miCol * 8) &gt;&gt; ssX of the plane). <paramref name="active"/> false (the same for the whole group): the group
+    /// filters nothing but still meets the barriers. Does nothing when the frame's filter level is 0 (libvpx skips the
+    /// whole frame). Superblocks run in raster order or on the wavefront (see the file header).
+    /// <list type="number">
+    /// <item>Lane 0 builds the superblock's masks (vp9_build_mask per block, vp9_adjust_mask; the non420 masks for
+    /// 4:2:2 / 4:4:0) into shared memory. Barrier.</item>
+    /// <item>Vertical edges: each lane its pixel rows of every plane. Barrier.</item>
+    /// <item>Horizontal edges: each lane its pixel columns of every plane.</item>
+    /// </list>
+    /// The planes never touch each other's pixels, so running U's and V's passes next to Y's changes nothing.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void FilterSuperblockGroup(ArrayView<uint> shared, bool active, ArrayView<byte> p, long yAt, int yStride,
+        long uAt, long vAt, int uvStride, int ssX, int ssY, ArrayView<int> mi, int gridOffset, int miRows, int miCols,
+        int miRow, int miCol, ArrayView<int> lf, int lfOffset)
+    {
+        int lane = Group.IdxX;
+        bool on = active && lf[lfOffset + Vp9LfTable.FrameLevel] != 0;
+        // barriers stay outside every branch: the whole group meets each one
+        if (on && lane == 0)
         {
-            FilterBlockPlaneNon420(u, uAt, uvStride, ssX, ssY, mi, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
-            FilterBlockPlaneNon420(v, vAt, uvStride, ssX, ssY, mi, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
+            var built = default(Vp9LfMask);
+            BuildSuperblockMask(ref built, mi, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
+            var builtNon420 = default(Vp9LfNon420Mask);
+            if (ssX != ssY) BuildNon420Mask(ref builtNon420, ssX, ssY, mi, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
+            StoreMasks(shared, ref built, ref builtNon420);
         }
+        Group.Barrier();
+        var m = default(Vp9LfMask);
+        var n = default(Vp9LfNon420Mask);
+        if (on)
+        {
+            LoadMasks(shared, ref m, ref n);
+            SuperblockRowsLane(lane, p, yAt, yStride, uAt, vAt, uvStride, ssX, ssY, miRows, miRow, miCol, m, n, lf, lfOffset);
+        }
+        Group.Barrier();
+        if (on) SuperblockColumnsLane(lane, p, yAt, yStride, uAt, vAt, uvStride, ssX, ssY, miRows, miRow, m, n, lf, lfOffset);
     }
 }

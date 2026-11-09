@@ -34,6 +34,9 @@ Inside a superblock:
 That is 64x the lanes per superblock, with the same order per row and column, so the result is bit-exact by
 construction. Chroma uses 32 lanes. Needs explicitly grouped kernels (`LoadStreamKernel`) with a group size of 64.
 
+Built 2026-11-09 (`Vp9Lpf.FilterSuperblockGroup`): lane 0 builds the masks into shared memory, barrier, each lane
+its luma row plus its chroma rows (U then V), barrier, the same for columns. CUDA stage time: not measured yet.
+
 ### S2 Reconstruction at transform-block granularity
 - **Inter prediction:**
   - One thread per (plane, 4x4 unit) of every inter block, using the mode-info grid. The sub-pel filter is per

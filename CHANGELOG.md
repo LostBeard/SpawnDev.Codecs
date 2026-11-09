@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### VP9 decoder: loop filter runs one thread group per superblock (2026-11-09)
+- The loop filter kernel filters each superblock with a thread group of 64 lanes instead of one thread
+  (`Plans/PLAN-VP9-Decoder-GPU-Speed.md` step S1). The k = 2r + c wavefront between superblocks is unchanged.
+- Inside a superblock:
+  - lane 0 builds the edge masks and filter levels into group shared memory (vp9_build_mask, vp9_adjust_mask and,
+    for 4:2:2 / 4:4:0, the non420 masks);
+  - vertical edges: each lane takes one pixel row of each plane;
+  - after a group barrier, horizontal edges: each lane takes one pixel column of each plane.
+- A vertical edge filter only touches one pixel row, and a horizontal one only one pixel column. Each lane replays
+  libvpx's walk over the edges (filter_selectively_vert_row2 / _horiz / _vert) and filters only its own pixel of each
+  edge, so every row and column gets libvpx's operations in libvpx's order. Same output bits.
+- `Vp9Lpf.FilterSuperblock` (one thread per superblock) is replaced by `Vp9Lpf.FilterSuperblockGroup`.
+  `Vp9Lpf_Superblocks_MatchLibvpx` now runs the grouped path too.
+- Verified on the CPU accelerator: `Vp9Decode_EveryFrame_MatchesLibvpx` (311 files, 5000 output frames equal to
+  libvpx's .md5), `Vp9DecoderGpu_PublicApi_MatchesLibvpx`, `Vp9Lpf_Superblocks_MatchLibvpx` (2400 superblocks, all
+  subsamplings) and `Vp9Lpf_EdgeFilters_MatchLibvpx` pass. Red-check: running the horizontal pass before the vertical
+  one fails `Vp9Decode_EveryFrame_MatchesLibvpx` (43 mismatches on the ComfyUI files); restored, it passes. CUDA /
+  OpenCL not measured yet.
+- KNOWN SLOWDOWN on ILGPU's CPU accelerator (the debugging backend, not a GPU): the loop filter went from 3.5 to 351 ms
+  per frame (ComfyUI files, `VP9_STAGE_TIMES=1`), and `Vp9Decode_EveryFrame_MatchesLibvpx` from 247 to 2383 s
+  (timeout 3600 s); `Vp9DecoderGpu_PublicApi_MatchesLibvpx` from about 40 to 221 s. Cause: the CPU accelerator runs
+  kernels that use barriers or shared memory through its cooperative sequential processor (one OS thread per lane, a
+  monitor handoff per lane at every barrier), while lane-independent kernels, like the old one-thread loop filter,
+  take its plain loop path. Raised with the SpawnDev.ILGPU owner.
+
 ### VP9 decoder: WebGPU-valid parse kernel, offline WGSL screen, [NoInlining] DSP helpers; ILGPU 5.4.21 (2026-11-09)
 - SpawnDev.ILGPU 5.4.21 (stable).
 - FIXED (WebGPU / WebGL): the tile parse kernel chose at run time between views of two different buffers. WGSL
