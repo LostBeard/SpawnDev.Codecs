@@ -36,6 +36,8 @@ public sealed record Vp9FrameInfo
     public int FrameToShowBuffer { get; init; } = -1;
     /// <summary>0 = key frame, 1 = inter frame (libvpx FRAME_TYPE).</summary>
     public int FrameType { get; init; }
+    /// <summary>libvpx cm->last_frame_type: the previous decoded frame's type (0 = key).</summary>
+    public int LastFrameType { get; init; }
     public bool ShowFrame { get; init; }
     public bool ErrorResilient { get; init; }
     public bool IntraOnly { get; init; }
@@ -368,7 +370,7 @@ public sealed class Vp9HeaderReader
         nb.Width = _width; nb.Height = _height; nb.SubsamplingX = _ssX; nb.SubsamplingY = _ssY; nb.BitDepth = _bitDepth;
         return new Vp9FrameInfo
         {
-            Profile = _profile, BitDepth = _bitDepth, FrameType = _frameType, ShowFrame = _showFrame, ErrorResilient = errorRes,
+            Profile = _profile, BitDepth = _bitDepth, FrameType = _frameType, LastFrameType = _lastFrameType, ShowFrame = _showFrame, ErrorResilient = errorRes,
             IntraOnly = _intraOnly, ResetFrameContext = resetFrameContext, ColorSpace = _colorSpace, ColorRange = _colorRange,
             SubsamplingX = _ssX, SubsamplingY = _ssY, RefreshFrameFlags = _refreshFrameFlags, RefBuffers = refBuffers,
             SignBias = (int[])_signBias.Clone(), Width = _width, Height = _height, RenderWidth = _renderWidth, RenderHeight = _renderHeight,

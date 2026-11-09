@@ -315,7 +315,10 @@ public abstract partial class CodecsTestBase
                         if (h.ShowExistingFrame) { reader.FinishFrame(); continue; }
                         contexts.BeginFrame(h);
                         var cur = contexts.Contexts.SubView(Vp9Ctx.Current * Vp9Ctx.Bytes, Vp9Ctx.Bytes);
-                        cur.CopyFromCPU(recs[rec].Context.Take(Vp9Ctx.Bytes).Select(b => (int)b).ToArray());   // test: libvpx's loaded context
+                        // our own context chain (resets, loads, adaptation, stores) must load what libvpx loads
+                        var loaded = await cur.CopyToHostAsync();
+                        int ld = Enumerable.Range(0, Vp9Ctx.Bytes).FirstOrDefault(k => loaded[k] != recs[rec].Context[k], -1);
+                        if (ld >= 0) failures.Add($"{v.Name} frame {decoded + 1}: loaded context differs at {ld}: {loaded[ld]} vs libvpx {recs[rec].Context[ld]}");
                         rec += 2;
                         contexts.ReadCompressedHeader(buf.View, offset, h);
                         parser.Parse(buf.View, offset, packet.AsSpan(offset, length), h, contexts, prevBuffer);
@@ -341,6 +344,11 @@ public abstract partial class CodecsTestBase
                             if (Md5Hex(bytes) != w.Counts) failures.Add($"{v.Name} frame {decoded + 1}: counts differ");
                             countsChecked++;
                         }
+                        // backward adaptation (S4): the current context afterwards == libvpx's (A line)
+                        contexts.Adapt(h, parser.Counts, parser.TileCols);
+                        var adapted = await cur.CopyToHostAsync();
+                        if (Md5Hex(adapted.Select(x => (byte)x).ToArray()) != w.Adapted)
+                            failures.Add($"{v.Name} frame {decoded + 1}: context after adaptation differs (adaptation {(!h.ErrorResilient && !h.FrameParallel ? "on" : "off")})");
                         contexts.EndFrame(h);
                         parser.EndFrame(h);
                         reader.FinishFrame();

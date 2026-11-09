@@ -228,7 +228,9 @@ public readonly record struct Vp9CompressedHeaderResult(int TxMode, int Referenc
 public sealed class Vp9FrameContextsGpu : IDisposable
 {
     private readonly Accelerator _acc;
-    private readonly MemoryBuffer1D<int, Stride1D.Dense> _ctx, _defaults, _invMap, _args, _results;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _ctx, _defaults, _invMap, _args, _results, _tables, _sum, _totals, _adaptArgs;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _sumCounts;
+    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _adapt;
     private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _copy;
     private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _compressed;
 
@@ -245,6 +247,30 @@ public sealed class Vp9FrameContextsGpu : IDisposable
         _compressed = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(
             Vp9CompressedHeaderKernels.CompressedHeaderKernel);
         for (int s = 0; s < Vp9Ctx.Slots; s++) _copy(Vp9Ctx.Bytes, _ctx.View, _defaults.View, s, -1);
+        _tables = _acc.Allocate1D(Vp9T.Packed);
+        _sum = _acc.Allocate1D<int>(Vp9Cnt.Size);
+        _totals = _acc.Allocate1D<int>(16);
+        _adaptArgs = _acc.Allocate1D<int>(Vp9AArg.Count);
+        _sumCounts = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(Vp9AdaptKernels.SumCountsKernel);
+        _adapt = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(
+            Vp9AdaptKernels.AdaptKernel);
+    }
+
+    /// <summary>
+    /// After the tiles: libvpx's backward adaptation (when not error resilient and not frame parallel) of the current
+    /// context from the loaded one (frame_contexts[frame_context_idx]) and the frame's counts (one FRAME_COUNTS block per
+    /// tile column in <paramref name="counts"/>).
+    /// </summary>
+    public void Adapt(Vp9FrameInfo h, ArrayView<int> counts, int tileCols)
+    {
+        if (h.ShowExistingFrame || h.ErrorResilient || h.FrameParallel) return;
+        _sumCounts(Vp9Cnt.Size, counts, _sum.View, tileCols);
+        _adaptArgs.View.CopyFromCPU(new[]
+        {
+            h.FrameContextIdx, h.IsIntraOnlyFrame ? 1 : 0, h.LastFrameType == 0 ? 1 : 0,
+            h.InterpFilter == Vp9Interp.Switchable ? 1 : 0, h.AllowHighPrecisionMv ? 1 : 0,
+        });
+        _adapt(1, _ctx.View, _sum.View, _tables.View, _adaptArgs.View, _results.View, _totals.View);
     }
 
     /// <summary>All contexts: 5 x <see cref="Vp9Ctx.Bytes"/> ints (slots 0..3 saved, 4 current).</summary>
@@ -308,5 +334,9 @@ public sealed class Vp9FrameContextsGpu : IDisposable
         _invMap.Dispose();
         _args.Dispose();
         _results.Dispose();
+        _tables.Dispose();
+        _sum.Dispose();
+        _totals.Dispose();
+        _adaptArgs.Dispose();
     }
 }
