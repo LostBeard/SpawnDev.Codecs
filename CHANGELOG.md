@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### SpawnDev.ILGPU 5.4.20-local.1; FLAC analysis in IEEE f64 on WebGPU / WebGL (2026-11-08)
+- ILGPU 5.4.20-local.1: Data's fix for the CUDA divergent-warp bug (a branch on the thread index was emitted as
+  `bra.uni`), which broke VP9 readback on odd sizes; `IlgpuDivergentReturnRepro_PackPlanes_MatchesHost` stays as the
+  guard (CUDA re-run pending the next GPU window).
+- The FLAC encoder's window, autocorrelation and LPC kernels compile under `F64EmulationScope.Use(Ieee)`: WebGPU and
+  WebGL emulate their doubles bit-exactly like desktop .NET, so they pick the same coefficients and write the same
+  file. The scope applies to these loads only (an AsyncLocal; interleaved loads keep the default mode). Removed the
+  unused `StrictFloat64` helper (it flipped the accelerator-wide mode around a synchronous load).
+- `FlacEncoderGpu_SameFileOnEveryBackend`: six encodes (levels 0 / 5 / 7 / 8, mono 24-bit, stereo 16 / 20-bit,
+  block sizes) whose MD5s were produced on the desktop CPU accelerator; every backend must match. Browser lanes
+  pending.
+
 ### VP9 encoder: superframe-marker padding; `Vp9KeyframeDecoderGpu` obsolete (2026-11-08)
 - FIXED: the VP9 bool-coded segments (compressed header, tiles) ended without libvpx `vpx_stop_encode`'s padding:
   when the last byte reads as a superframe index marker (0b110xxxxx) libvpx appends a 0 byte. Without it libvpx's

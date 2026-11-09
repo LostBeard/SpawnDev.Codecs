@@ -104,10 +104,16 @@ public sealed partial class FlacEncoderGpu
         /// <summary>Load every kernel (awaited loads: each compile yields to the browser's event loop first).</summary>
         public async Task LoadAsync(Accelerator a)
         {
-            Window = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<int>>(K.WindowKernel);
+            // The window, autocorrelation and LPC analysis compute in double and must round as IEEE-754 binary64 to pick
+            // the same coefficients (so the same file) on every backend. WebGPU / WebGL emulate f64: these three compile
+            // with ILGPU's bit-exact Ieee emulation (a scope for these loads only; native-f64 backends ignore it).
+            using (F64EmulationScope.Use(F64EmulationMode.Ieee))
+            {
+                Window = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<int>>(K.WindowKernel);
+                Autocorr = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<double>, int>(K.AutocorrKernel);
+                Lpc = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<double>, ArrayView<double>, ArrayView<int>>(K.LpcKernel);
+            }
             Prep = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int>(K.PrepKernel);
-            Autocorr = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, ArrayView<double>, int>(K.AutocorrKernel);
-            Lpc = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<double>, ArrayView<double>, ArrayView<int>>(K.LpcKernel);
             PartSum = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int>(K.PartSumKernel);
             PredCost = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<long>, ArrayView<int>, int>(K.PredCostKernel);
             Subframe = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, ArrayView<int>, ArrayView<long>, int>(K.SubframeKernel);
