@@ -35,7 +35,14 @@ That is 64x the lanes per superblock, with the same order per row and column, so
 construction. Chroma uses 32 lanes. Needs explicitly grouped kernels (`LoadStreamKernel`) with a group size of 64.
 
 Built 2026-11-09 (`Vp9Lpf.FilterSuperblockGroup`): lane 0 builds the masks into shared memory, barrier, each lane
-its luma row plus its chroma rows (U then V), barrier, the same for columns. CUDA stage time: not measured yet.
+its luma row plus its chroma rows (U then V), barrier, the same for columns. Measured over the 6 ComfyUI files
+(ms per frame of loop filter):
+- CUDA: 16.5 -> 1.35 (12x).
+- OpenCL: 1.0.
+- CPU accelerator: 3.5 -> 351. ILGPU's sequential CPU processor hands off between lanes at every barrier; this is
+  with Data.
+- Velocity: about 114 -> 133.
+Bit-exact on CPU, CUDA and OpenCL.
 
 ### S2 Reconstruction at transform-block granularity
 - **Inter prediction:**
