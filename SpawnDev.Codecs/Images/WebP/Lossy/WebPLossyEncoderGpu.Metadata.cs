@@ -26,6 +26,8 @@ public sealed partial class WebPLossyEncoderGpu
     {
         byte[]? icc = Blob(o.IccProfile), exif = Blob(o.Exif), xmp = Blob(o.Xmp);
         var anim = Anim;
+        // The container kernels (UploadBlobsAsync, WriteStillFile) belong to the animation encoder: load them first.
+        await anim.EnsureKernelsAsync();
         anim.ResetPool();
         var scratch = anim.RentFile();
         var e = await FrameEncoder(o)(rgba, width, height, false, scratch);

@@ -69,7 +69,13 @@ public sealed class JpegDecoderGpu : IDisposable
     private readonly StageBuffer<int> _chunkWork;
     private readonly StageBuffer<int> _state;
 
-    /// <summary>Compile the kernels and upload the constants.</summary>
+    /// <summary>
+    /// Compile and load every kernel the decoder uses, so the first decode does not wait for them. The loads are awaited
+    /// one kernel at a time and yield to the browser's event loop before each compile.
+    /// </summary>
+    public Task WarmUpAsync() => _kernels.EnsureKernelsAsync();
+
+    /// <summary>Upload the constants. Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public JpegDecoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
@@ -360,6 +366,8 @@ public sealed class JpegDecoderGpu : IDisposable
     private async Task<int[]> ScanAsync(ArrayView1D<byte, Stride1D.Dense> file, int fileLength, bool headerOnly)
     {
         if (fileLength <= 0 || fileLength > file.Length) throw new ArgumentOutOfRangeException(nameof(fileLength));
+        // Kernels load lazily here, where every entry point starts: the constructor compiles nothing.
+        await _kernels.EnsureKernelsAsync();
         // Bounded launches: the per-chunk summary (parallel), then the resumable walk until it reports phase 2.
         var summary = _chunkWork.Ensure(JpegKernels.ChunkWorkInts(fileLength));
         _kernels.EcsSummary(file, fileLength, summary);

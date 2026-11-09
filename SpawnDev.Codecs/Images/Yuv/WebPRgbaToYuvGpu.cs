@@ -37,27 +37,41 @@ public sealed class WebPRgbaToYuvGpu : IDisposable
     private const int TableSize = 289 + 1021;
 
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int> _convert;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int> _blockStats;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _runStarts;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _cleanupLuma;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int> _cleanupChroma;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int> _convert = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int> _blockStats = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _runStarts = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _cleanupLuma = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int> _cleanupChroma = null!;
     private readonly Accelerator _accelerator;
     private MemoryBuffer1D<int, Stride1D.Dense>? _stats, _runs;
+    // The kernels above load lazily (EnsureKernelsAsync, awaited loads): the constructor compiles nothing.
+    private Task? _kernelsLoad;
 
-    /// <summary>Compile the kernels and upload the libwebp tables.</summary>
+    /// <summary>Upload the libwebp tables. Compiles nothing: await <see cref="EnsureKernelsAsync"/> before <see cref="Convert"/>.</summary>
     public WebPRgbaToYuvGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _tables = accelerator.Allocate1D<int>(TableSize);
         _tables.View.CopyFromCPU(BuildTables());
-        _convert = accelerator.LoadAutoGroupedStreamKernel<
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _convert = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>(ConvertKernel);
-        _blockStats = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int>(BlockStatsKernel);
-        _runStarts = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int>(RunStartKernel);
-        _cleanupLuma = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(CleanupLumaKernel);
-        _cleanupChroma = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int>(CleanupChromaKernel);
+        _blockStats = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int>(BlockStatsKernel);
+        _runStarts = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int, int>(RunStartKernel);
+        _cleanupLuma = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(CleanupLumaKernel);
+        _cleanupChroma = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int>(CleanupChromaKernel);
     }
 
     /// <summary>libwebp's InitGammaTables and kInvAlpha, computed exactly as the C source does (double pow, + .5 truncation).</summary>

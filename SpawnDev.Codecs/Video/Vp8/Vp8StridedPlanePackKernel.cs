@@ -17,16 +17,31 @@ namespace SpawnDev.Codecs.Video.Vp8;
 /// </summary>
 public sealed class Vp8StridedPlanePackKernel : IDisposable
 {
-    private readonly Action<
+    private readonly Accelerator _accelerator;
+    // Loaded lazily (EnsureKernelsAsync, awaited load): the constructor compiles nothing.
+    private Action<
         Index1D,
         ArrayView<byte>, long, int,
-        ArrayView<byte>, long, int> _kernel;
+        ArrayView<byte>, long, int> _kernel = null!;
+    private Task? _kernelsLoad;
 
-    /// <summary>Compile.</summary>
+    /// <summary>Bind to <paramref name="accelerator"/>. Compiles nothing: await <see cref="EnsureKernelsAsync"/> before <see cref="Run"/>.</summary>
     public Vp8StridedPlanePackKernel(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
-        _kernel = accelerator.LoadAutoGroupedStreamKernel<
+        _accelerator = accelerator;
+    }
+
+    /// <summary>Load the kernel once (awaited load: the compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        _kernel = await _accelerator.LoadAutoGroupedStreamKernelAsync<
             Index1D,
             ArrayView<byte>, long, int,
             ArrayView<byte>, long, int>(Vp8StridedPlanePackPackKernel);

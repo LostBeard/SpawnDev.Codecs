@@ -51,7 +51,7 @@ public sealed class PngDecoderGpu : IDisposable
     private readonly StageBuffer<byte> _raw;
     private readonly StageBuffer<byte> _stageOut;
 
-    /// <summary>Compile the kernels and upload the CRC table.</summary>
+    /// <summary>Upload the CRC table. Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public PngDecoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
@@ -207,10 +207,24 @@ public sealed class PngDecoderGpu : IDisposable
     // Pipeline
     // ------------------------------------------------------------------
 
+    // Kernels load lazily (awaited by ScanAsync, where every entry point starts): the constructor compiles nothing.
+    private async Task EnsureKernelsAsync()
+    {
+        await _kernels.EnsureKernelsAsync();
+        await _inflate.EnsureKernelsAsync();
+    }
+
+    /// <summary>
+    /// Compile and load every kernel the decoder uses, so the first decode does not wait for them. The loads are awaited
+    /// one kernel at a time and yield to the browser's event loop before each compile.
+    /// </summary>
+    public Task WarmUpAsync() => EnsureKernelsAsync();
+
     /// <summary>Scan (+ CRC check) and read back the metadata block.</summary>
     private async Task<int[]> ScanAsync(ArrayView1D<byte, Stride1D.Dense> file, int fileLength)
     {
         if (fileLength <= 0 || fileLength > file.Length) throw new ArgumentOutOfRangeException(nameof(fileLength));
+        await EnsureKernelsAsync();
         _crcPieces.Ensure(PngKernels.MaxCrcPieces(fileLength, ChunkCapacity));
         _kernels.Scan(file, fileLength, _chunkTable.View, _idatTable.View, _meta.View, ChunkCapacity);
         _kernels.CheckCrc(file, fileLength, _chunkTable.View, _crcTable.View, _crcPieces.View, _meta.View, ChunkCapacity);

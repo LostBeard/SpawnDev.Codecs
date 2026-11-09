@@ -129,25 +129,42 @@ internal struct JpegBitWriter
 /// <summary>Loads and launches the JPEG encode kernels.</summary>
 public sealed class JpegEncoderKernels : IDisposable
 {
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _prep;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<short>, ArrayView<int>, ArrayView<int>> _fdct;
-    private readonly Action<Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _entropy;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _prefix;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _assemble;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _prep = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<short>, ArrayView<int>, ArrayView<int>> _fdct = null!;
+    private Action<Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _entropy = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _prefix = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _assemble = null!;
 
-    /// <summary>Compile the kernels.</summary>
+    private readonly Accelerator _accelerator;
+    // The kernels above load lazily (EnsureKernelsAsync, awaited loads): the constructor compiles nothing.
+    private Task? _kernelsLoad;
+
+    /// <summary>Bind to <paramref name="accelerator"/>. Compiles nothing: await <see cref="EnsureKernelsAsync"/> before the first launch.</summary>
     public JpegEncoderKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
-        _prep = accelerator.LoadAutoGroupedStreamKernel<
+        _accelerator = accelerator;
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _prep = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(PrepKernel);
-        _fdct = accelerator.LoadAutoGroupedStreamKernel<
+        _fdct = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<short>, ArrayView<int>, ArrayView<int>>(FdctQuantKernel);
-        _entropy = accelerator.LoadAutoGroupedStreamKernel<
+        _entropy = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(EntropyKernel);
-        _prefix = accelerator.LoadAutoGroupedStreamKernel<
+        _prefix = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(PrefixKernel);
-        _assemble = accelerator.LoadAutoGroupedStreamKernel<
+        _assemble = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(AssembleKernel);
     }
 

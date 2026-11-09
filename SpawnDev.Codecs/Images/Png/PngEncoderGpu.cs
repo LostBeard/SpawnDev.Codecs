@@ -102,7 +102,7 @@ public sealed class PngEncoderGpu : IDisposable
     /// <summary>Tests only: the serial-parse oracle (see DeflateBlockRunner.SerialParse).</summary>
     internal bool SerialParse { get; set; }
 
-    /// <summary>Compile the kernels.</summary>
+    /// <summary>An encoder bound to <paramref name="accelerator"/>. Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     /// <param name="accelerator">The accelerator.</param>
     /// <param name="threadsPerWave">Blocks compressed concurrently; 0 = as many as fit in the runner's working-memory budget.</param>
     public PngEncoderGpu(Accelerator accelerator, int threadsPerWave = 0)
@@ -124,6 +124,27 @@ public sealed class PngEncoderGpu : IDisposable
         _crcPieces = new StageBuffer<uint>(accelerator);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
+    }
+
+    /// <summary>The block compressor of <paramref name="blockSize"/> (one per block size, made on first use).</summary>
+    private DeflateBlockRunner GetRunner(int blockSize)
+    {
+        if (!_runners.TryGetValue(blockSize, out var runner))
+        {
+            runner = new DeflateBlockRunner(_accelerator, blockSize, _wave);
+            _runners[blockSize] = runner;
+        }
+        return runner;
+    }
+
+    /// <summary>
+    /// Compile and load every kernel the encoder uses (the DEFLATE kernels with them), so the first encode does not wait
+    /// for them. The loads are awaited one kernel at a time and yield to the browser's event loop before each compile.
+    /// </summary>
+    public async Task WarmUpAsync()
+    {
+        await _kernels.EnsureKernelsAsync();
+        await GetRunner(ZlibCompressorGpu.DefaultBlockSize).Kernels.EnsureKernelsAsync();
     }
 
     // ------------------------------------------------------------------
@@ -175,6 +196,8 @@ public sealed class PngEncoderGpu : IDisposable
         long maxOut = GetMaxEncodedSize(width, height, options);
         if (output.Length < maxOut)
             throw new ArgumentException($"output must hold {maxOut} bytes.", nameof(output));
+        // Kernels load lazily here, where every overload ends up (the DEFLATE runner loads its own): the constructor compiles nothing.
+        await _kernels.EnsureKernelsAsync();
 
         // ---- colour type ----
         int channels, colorType;
@@ -231,11 +254,7 @@ public sealed class PngEncoderGpu : IDisposable
         _kernels.Pack(rgba, _raw.View, _meta.View, (int)pixels);
         _kernels.Filter(_raw.View, _filtered.View, _filterCosts.View, _meta.View, height, rowBytes, adaptive);
 
-        if (!_runners.TryGetValue(options.BlockSize, out var runner))
-        {
-            runner = new DeflateBlockRunner(_accelerator, options.BlockSize, _wave);
-            _runners[options.BlockSize] = runner;
-        }
+        var runner = GetRunner(options.BlockSize);
         runner.ParseCompareBudget = ParseCompareBudget;
         runner.SerialParse = SerialParse;
         int blocks = DeflateBlockRunner.BlocksFor(filteredLen, options.BlockSize);

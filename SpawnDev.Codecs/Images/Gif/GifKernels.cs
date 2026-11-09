@@ -157,24 +157,40 @@ public sealed class GifKernels : IDisposable
     /// <summary>Fill rule: transparent black (0, 0, 0, 0).</summary>
     public const int FillTransparent = 2;
 
-    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _scanInit;
-    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _scanStep;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _identity;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>> _lzwInit;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _lzwStep;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int> _composite;
+    private readonly Accelerator _accelerator;
+    // Loaded lazily by EnsureKernelsAsync (awaited loads; the constructor compiles nothing).
+    private Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _scanInit = null!;
+    private Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _scanStep = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>> _identity = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>> _lzwInit = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _lzwStep = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int> _composite = null!;
+    private Task? _kernelsLoad;
 
-    /// <summary>Compile the kernels.</summary>
+    /// <summary>Bind to <paramref name="accelerator"/>. Compiles nothing: await <see cref="EnsureKernelsAsync"/> before the first launch.</summary>
     public GifKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
-        _scanInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, ArrayView<int>>(ScanInitKernel);
-        _scanStep = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, ArrayView<int>>(ScanStepKernel);
-        _identity = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(IdentityKernel);
-        _lzwInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(LzwInitKernel);
-        _lzwStep = accelerator.LoadAutoGroupedStreamKernel<
+        _accelerator = accelerator;
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _scanInit = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, int, ArrayView<int>>(ScanInitKernel);
+        _scanStep = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, int, ArrayView<int>>(ScanStepKernel);
+        _identity = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>>(IdentityKernel);
+        _lzwInit = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(LzwInitKernel);
+        _lzwStep = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(LzwStepKernel);
-        _composite = accelerator.LoadAutoGroupedStreamKernel<
+        _composite = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int>(CompositeKernel);
     }
 

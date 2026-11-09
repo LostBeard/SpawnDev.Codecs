@@ -48,6 +48,7 @@ public abstract partial class CodecsTestBase
         try
         {
             var conv = new WebPYuvToRgbaGpu(acc);
+            await conv.EnsureKernelsAsync();
             var failures = new List<string>();
             int checkedCount = 0;
             foreach (var name in WebPYuvFixtureNames())

@@ -51,34 +51,52 @@ internal sealed class PngEncodeKernels : IDisposable
     /// <summary>Row bytes one filter-cost thread sums (five filters each).</summary>
     public const int FilterSegment = 4096;
 
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _analyze;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _pack;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _filterCost;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _filterPick;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _filterApply;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _layout;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>> _frameHeader;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _frameChunk;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _frameCopy;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int> _crcPiece;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int> _crcCombine;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>> _analyze = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _pack = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _filterCost = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _filterPick = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _filterApply = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _layout = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>> _frameHeader = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _frameChunk = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _frameCopy = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int> _crcPiece = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int> _crcCombine = null!;
+
+    private readonly Accelerator _accelerator;
+    // The kernels above load lazily (EnsureKernelsAsync, awaited loads): the constructor compiles nothing.
+    private Task? _kernelsLoad;
 
     public PngEncodeKernels(Accelerator accelerator)
     {
-        _analyze = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(AnalyzeKernel);
-        _pack = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(PackKernel);
-        _filterCost = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(FilterCostKernel);
-        _filterPick = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(FilterPickKernel);
-        _filterApply = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(FilterApplyKernel);
-        _layout = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(LayoutKernel);
-        _frameHeader = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>>(FrameHeaderKernel);
-        _frameChunk = accelerator.LoadAutoGroupedStreamKernel<
+        ArgumentNullException.ThrowIfNull(accelerator);
+        _accelerator = accelerator;
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _analyze = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>>(AnalyzeKernel);
+        _pack = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(PackKernel);
+        _filterCost = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(FilterCostKernel);
+        _filterPick = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(FilterPickKernel);
+        _filterApply = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(FilterApplyKernel);
+        _layout = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(LayoutKernel);
+        _frameHeader = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>>(FrameHeaderKernel);
+        _frameChunk = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(FrameChunkKernel);
-        _frameCopy = accelerator.LoadAutoGroupedStreamKernel<
+        _frameCopy = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(FrameCopyKernel);
-        _crcPiece = accelerator.LoadAutoGroupedStreamKernel<
+        _crcPiece = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int>(FrameCrcPieceKernel);
-        _crcCombine = accelerator.LoadAutoGroupedStreamKernel<
+        _crcCombine = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, int>(FrameCrcCombineKernel);
     }
 

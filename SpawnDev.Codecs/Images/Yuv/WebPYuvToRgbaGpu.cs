@@ -18,13 +18,30 @@ namespace SpawnDev.Codecs.Images.Yuv;
 /// <summary>Converts YUV 4:2:0 planes on the accelerator to RGBA8 bit-exactly like libwebp (fancy upsampling).</summary>
 public sealed class WebPYuvToRgbaGpu
 {
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int> _convert;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int> _convert = null!;
 
-    /// <summary>Compile the kernel.</summary>
+    private readonly Accelerator _accelerator;
+    // The kernel loads lazily (EnsureKernelsAsync, awaited load): the constructor compiles nothing.
+    private Task? _kernelsLoad;
+
+    /// <summary>Bind to <paramref name="accelerator"/>. Compiles nothing: await <see cref="EnsureKernelsAsync"/> before <see cref="Convert"/>.</summary>
     public WebPYuvToRgbaGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
-        _convert = accelerator.LoadAutoGroupedStreamKernel<
+        _accelerator = accelerator;
+    }
+
+    /// <summary>Load the kernel once (awaited load: the compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _convert = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int, int>(ConvertKernel);
     }
 

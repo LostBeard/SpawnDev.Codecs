@@ -78,13 +78,15 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
 {
     private readonly Accelerator _accelerator;
     private readonly WebPRgbaToYuvGpu _toYuv;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>> _analysis;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _setup;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>[] _stages;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>>
-        _finishProbas, _finishTokens, _finishHeader, _finishModes, _finishEnd;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>> _assemble;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int> _assembleExtended;
+    // Loaded lazily (EnsureKernelsAsync, awaited by every encode): the constructor compiles nothing.
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>> _analysis = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _setup = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>[] _stages = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>>
+        _finishProbas = null!, _finishTokens = null!, _finishHeader = null!, _finishModes = null!, _finishEnd = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>> _assemble = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int> _assembleExtended = null!;
+    private Task? _kernelsLoad;
     private WebPLosslessEncoderGpu? _alphaEncoder;   // created on the first picture with transparency
     private readonly StageBuffer<byte> _alphaPayload;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables;
@@ -96,31 +98,12 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
 
     private const ulong Partition0SizeLimit = ((1UL << 19) - 2048UL) << 11;
 
-    /// <summary>Compile the kernels and upload the constant tables.</summary>
+    /// <summary>Upload the constant tables. Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public WebPLossyEncoderGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _toYuv = new WebPRgbaToYuvGpu(accelerator);
-        _analysis = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>>(WebPLossyAnalysisKernel.AnalysisKernel);
-        _setup = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(WebPLossySetupKernel.SetupKernel);
-        // the RD loop, one macroblock at a time as five stage kernels (each small enough for a browser shader compiler)
-        _stages = new[]
-        {
-            LoadStage(accelerator, WebPLossyEncodeRowKernel.PrepareStage),
-            LoadStage(accelerator, WebPLossyEncodeRowKernel.Intra16Stage),
-            LoadStage(accelerator, WebPLossyEncodeRowKernel.Intra4Stage),
-            LoadStage(accelerator, WebPLossyEncodeRowKernel.UVStage),
-            LoadStage(accelerator, WebPLossyEncodeRowKernel.RecordStage),
-        };
-        _finishProbas = LoadFinish(accelerator, WebPLossyFinishKernel.FinishProbasKernel);
-        _finishTokens = LoadFinish(accelerator, WebPLossyFinishKernel.FinishTokensKernel);
-        _finishHeader = LoadFinish(accelerator, WebPLossyFinishKernel.FinishHeaderKernel);
-        _finishModes = LoadFinish(accelerator, WebPLossyFinishKernel.FinishModesKernel);
-        _finishEnd = LoadFinish(accelerator, WebPLossyFinishKernel.FinishEndKernel);
-        _assemble = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>>(WebPLossyFinishKernel.AssembleKernel);
-        _assembleExtended = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int>(
-            WebPLossyFinishKernel.AssembleExtendedKernel);
         _alphaPayload = new StageBuffer<byte>(accelerator);
         _tables = accelerator.Allocate1D<int>(WebPLossyEncTables.Size);
         _tables.View.CopyFromCPU(WebPLossyEncTables.Build());
@@ -136,13 +119,58 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
         _tokens = new StageBuffer<int>(accelerator);
     }
 
-    private static Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> LoadStage(
-        Accelerator accelerator, Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> kernel)
-        => accelerator.LoadAutoGroupedStreamKernel(kernel);
+    /// <summary>Load every kernel this encoder uses, once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
 
-    private static Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>> LoadFinish(
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        await _toYuv.EnsureKernelsAsync();
+        _analysis = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>>(WebPLossyAnalysisKernel.AnalysisKernel);
+        _setup = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(WebPLossySetupKernel.SetupKernel);
+        // the RD loop, one macroblock at a time as five stage kernels (each small enough for a browser shader compiler)
+        _stages = new[]
+        {
+            await LoadStage(a, WebPLossyEncodeRowKernel.PrepareStage),
+            await LoadStage(a, WebPLossyEncodeRowKernel.Intra16Stage),
+            await LoadStage(a, WebPLossyEncodeRowKernel.Intra4Stage),
+            await LoadStage(a, WebPLossyEncodeRowKernel.UVStage),
+            await LoadStage(a, WebPLossyEncodeRowKernel.RecordStage),
+        };
+        _finishProbas = await LoadFinish(a, WebPLossyFinishKernel.FinishProbasKernel);
+        _finishTokens = await LoadFinish(a, WebPLossyFinishKernel.FinishTokensKernel);
+        _finishHeader = await LoadFinish(a, WebPLossyFinishKernel.FinishHeaderKernel);
+        _finishModes = await LoadFinish(a, WebPLossyFinishKernel.FinishModesKernel);
+        _finishEnd = await LoadFinish(a, WebPLossyFinishKernel.FinishEndKernel);
+        _assemble = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>>(WebPLossyFinishKernel.AssembleKernel);
+        _assembleExtended = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, int>(
+            WebPLossyFinishKernel.AssembleExtendedKernel);
+    }
+
+    /// <summary>
+    /// Compile and load every kernel the encoder uses (the RGBA to YUV import, the VP8 encode, the lossless ALPH coder and
+    /// the container writer), so the first encode does not wait for them. The loads are awaited one kernel at a time and
+    /// yield to the browser's event loop before each compile.
+    /// </summary>
+    public async Task WarmUpAsync()
+    {
+        await EnsureKernelsAsync();
+        _alphaEncoder ??= new WebPLosslessEncoderGpu(_accelerator);
+        await _alphaEncoder.EnsureStreamKernelsAsync();
+        await Anim.EnsureKernelsAsync();
+    }
+
+    private static async Task<Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>> LoadStage(
+        Accelerator accelerator, Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> kernel)
+        => await accelerator.LoadAutoGroupedStreamKernelAsync(kernel);
+
+    private static async Task<Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>>> LoadFinish(
         Accelerator accelerator, Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>> kernel)
-        => accelerator.LoadAutoGroupedStreamKernel(kernel);
+        => await accelerator.LoadAutoGroupedStreamKernelAsync(kernel);
 
     private static int Align4(int v) => (v + 3) & ~3;
 
@@ -289,6 +317,7 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
     private async Task<(int SimpleLength, int AlphaLength)> EncodeToScratchAsync(ArrayView1D<byte, Stride1D.Dense> rgba, int width, int height, WebPLossyEncodeOptions o)
     {
         if (rgba.Length < (long)width * height * 4) throw new ArgumentException("rgba too short.", nameof(rgba));
+        await EnsureKernelsAsync();
         var l0 = PrepareBuffers(width, height, o);
         var yuv = _yuv.View;
         _toYuv.Convert(rgba, width, height, yuv.SubView(0, (long)width * height), yuv.SubView(l0.YuvU, (long)l0.Cw * l0.Ch),
@@ -320,6 +349,8 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
 
     private async Task<(int Length, bool HasAlpha)> EncodePlanesToScratchAsync(int width, int height, WebPLossyEncodeOptions o, bool alphaPlanePresent)
     {
+        // Every encode reaches its launches through here or EncodeToScratchAsync (both await the kernels first).
+        await EnsureKernelsAsync();
         var yuv = _yuv.View;
         int maxI4 = 256 * 16 * 16;
         while (true)

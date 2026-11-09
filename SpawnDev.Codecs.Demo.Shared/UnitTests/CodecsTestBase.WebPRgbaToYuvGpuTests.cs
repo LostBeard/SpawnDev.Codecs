@@ -98,6 +98,7 @@ public abstract partial class CodecsTestBase
         try
         {
             using var conv = new WebPRgbaToYuvGpu(acc);
+            await conv.EnsureKernelsAsync();
             var text = System.Text.Encoding.UTF8.GetString(ReadEmbedded(WebPRgbToYuvPrefix + "manifest.tsv"));
             var failures = new List<string>();
             int checkedCount = 0, hashed = 0;

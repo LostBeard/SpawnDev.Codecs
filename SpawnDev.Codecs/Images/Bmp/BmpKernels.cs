@@ -28,26 +28,42 @@ namespace SpawnDev.Codecs.Images.Bmp;
 /// <summary>Loads and launches the BMP kernels.</summary>
 public sealed class BmpKernels : IDisposable
 {
-    private readonly Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _scan;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _alphaScan;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _alphaFold;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _convert;
+    private readonly Accelerator _accelerator;
+    // Loaded lazily by EnsureKernelsAsync (awaited loads; the constructor compiles nothing).
+    private Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _scan = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _alphaScan = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int> _alphaFold = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _convert = null!;
+    private Task? _kernelsLoad;
 
     /// <summary>Pixels (then partial flags) one alpha-scan thread folds.</summary>
     public const int AlphaGroup = 1024;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _rle;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _encode;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _rle = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _encode = null!;
 
-    /// <summary>Compile the kernels.</summary>
+    /// <summary>Bind to <paramref name="accelerator"/>. Compiles nothing: await <see cref="EnsureKernelsAsync"/> before the first launch.</summary>
     public BmpKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
-        _scan = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, int, ArrayView<int>>(ScanKernel);
-        _alphaScan = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(AlphaScanKernel);
-        _alphaFold = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(AlphaFoldKernel);
-        _convert = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(ConvertKernel);
-        _rle = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(RleKernel);
-        _encode = accelerator.LoadAutoGroupedStreamKernel<
+        _accelerator = accelerator;
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _scan = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, int, ArrayView<int>>(ScanKernel);
+        _alphaScan = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(AlphaScanKernel);
+        _alphaFold = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(AlphaFoldKernel);
+        _convert = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(ConvertKernel);
+        _rle = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(RleKernel);
+        _encode = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(EncodeKernel);
     }
 

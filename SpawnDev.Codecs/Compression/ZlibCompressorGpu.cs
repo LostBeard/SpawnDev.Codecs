@@ -39,45 +39,63 @@ internal sealed class DeflateKernels : IDisposable
     /// <summary>Blocks one layout launch walks.</summary>
     public const int LayoutChunk = 8192;
 
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _adlerPiece;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>> _adlerBlock;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _init;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _parse;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _pending;
-    private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _chains;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _match;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _walk;
-    private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, int> _emitLanes;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _adlerPiece = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>> _adlerBlock = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int> _init = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _parse = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _pending = null!;
+    private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _chains = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _match = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _walk = null!;
+    private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, int> _emitLanes = null!;
     private readonly int _emitLaneCount;
-    private readonly Action<KernelConfig, ArrayView<int>, ArrayView<int>, int> _count;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _literals;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _plan, _emit;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _result;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _layout;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _copy;
+    private Action<KernelConfig, ArrayView<int>, ArrayView<int>, int> _count = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _literals = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _plan = null!, _emit = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _result = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _layout = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _copy = null!;
+
+    private readonly Accelerator _accelerator;
+    // The kernels above load lazily (EnsureKernelsAsync, awaited by DeflateBlockRunner.RunAsync): the constructor compiles nothing.
+    private Task? _kernelsLoad;
 
     public DeflateKernels(Accelerator accelerator)
     {
-        _adlerPiece = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(AdlerPieceKernel);
-        _adlerBlock = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(AdlerBlockKernel);
-        _init = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(InitKernel);
-        _parse = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(ParseKernel);
-        _pending = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int, int>(PendingKernel);
-        _chains = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(ChainsKernel);
-        _match = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(MatchKernel);
-        _walk = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(WalkKernel);
-        _emitLanes = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, int>(EmitLanesKernel);
+        ArgumentNullException.ThrowIfNull(accelerator);
+        _accelerator = accelerator;
         _emitLaneCount = Math.Min(EmitLanes, accelerator.MaxNumThreadsPerGroup);
-        _count = accelerator.LoadStreamKernel<ArrayView<int>, ArrayView<int>, int>(CountKernel);
-        _literals = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(LiteralsKernel);
-        _plan = accelerator.LoadAutoGroupedStreamKernel<
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _adlerPiece = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(AdlerPieceKernel);
+        _adlerBlock = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(AdlerBlockKernel);
+        _init = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(InitKernel);
+        _parse = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(ParseKernel);
+        _pending = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int, int>(PendingKernel);
+        _chains = await a.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(ChainsKernel);
+        _match = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(MatchKernel);
+        _walk = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(WalkKernel);
+        _emitLanes = await a.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, int>(EmitLanesKernel);
+        _count = await a.LoadStreamKernelAsync<ArrayView<int>, ArrayView<int>, int>(CountKernel);
+        _literals = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(LiteralsKernel);
+        _plan = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(PlanKernel);
-        _emit = accelerator.LoadAutoGroupedStreamKernel<
+        _emit = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(EmitKernel);
-        _result = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(ResultKernel);
-        _layout = accelerator.LoadAutoGroupedStreamKernel<
+        _result = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(ResultKernel);
+        _layout = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(LayoutKernel);
-        _copy = accelerator.LoadAutoGroupedStreamKernel<
+        _copy = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(CopyKernel);
     }
 
@@ -484,6 +502,7 @@ internal sealed class DeflateBlockRunner : IDisposable
         int piecesPerBlock = DeflateKernels.AdlerPiecesPerBlock(BlockSize);
         long slotBytes = (long)blocks * slotCap;
         if (slotBytes > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(length), "input too large for one call");
+        await Kernels.EnsureKernelsAsync();
         BlockCount = blocks;
         SlotCapacity = slotCap;
         SlotBytes = slotBytes;
@@ -595,7 +614,7 @@ public sealed class ZlibCompressorGpu : IDisposable
     private readonly StageBuffer<byte> _stageIn;
     private readonly StageBuffer<byte> _stageOut;
 
-    /// <summary>Compile the kernels.</summary>
+    /// <summary>A compressor bound to <paramref name="accelerator"/>. Compiles no kernels (they load on the first compress).</summary>
     /// <param name="accelerator">The accelerator.</param>
     /// <param name="blockSize">Input bytes per independent block (1 KiB .. 1 MiB). Larger blocks compress better, smaller ones parallelize more.</param>
     /// <param name="threadsPerWave">Blocks compressed concurrently (scratch memory scales with this); 0 = as many as fit in

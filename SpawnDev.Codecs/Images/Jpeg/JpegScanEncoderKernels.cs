@@ -40,27 +40,44 @@ internal struct PhuffState
 /// <summary>Loads and launches the optimized-table / progressive encode kernels.</summary>
 public sealed class JpegScanEncoderKernels : IDisposable
 {
-    private readonly Action<Index1D, ArrayView<int>> _clearHist;
-    private readonly Action<Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
-        ArrayView<int>, ArrayView<byte>, int, int, int, int> _scan;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _gen;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _place;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _finish;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _eoi;
+    private Action<Index1D, ArrayView<int>> _clearHist = null!;
+    private Action<Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
+        ArrayView<int>, ArrayView<byte>, int, int, int, int> _scan = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>> _gen = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _place = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int> _finish = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>> _eoi = null!;
 
-    /// <summary>Compile the kernels.</summary>
+    private readonly Accelerator _accelerator;
+    // The kernels above load lazily (EnsureKernelsAsync, awaited loads): the constructor compiles nothing.
+    private Task? _kernelsLoad;
+
+    /// <summary>Bind to <paramref name="accelerator"/>. Compiles nothing: await <see cref="EnsureKernelsAsync"/> before the first launch.</summary>
     public JpegScanEncoderKernels(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
-        _clearHist = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(ClearHistKernel);
-        _scan = accelerator.LoadAutoGroupedStreamKernel<
+        _accelerator = accelerator;
+    }
+
+    /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
+    public Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _clearHist = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(ClearHistKernel);
+        _scan = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<short>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, ArrayView<byte>, int, int, int, int>(ScanKernel);
-        _gen = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(GenTablesKernel);
-        _place = accelerator.LoadAutoGroupedStreamKernel<
+        _gen = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(GenTablesKernel);
+        _place = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(PlaceKernel);
-        _finish = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(FinishKernel);
-        _eoi = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(EoiKernel);
+        _finish = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(FinishKernel);
+        _eoi = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>>(EoiKernel);
     }
 
     /// <summary>Zero the four symbol-frequency tables.</summary>

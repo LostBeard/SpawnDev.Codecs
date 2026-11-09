@@ -60,7 +60,8 @@ public sealed class WebPDecoderGpu : IDisposable
     private readonly StageBuffer<uint> _pixB;
     private readonly StageBuffer<byte> _frameRgba;
 
-    // Lossy (VP8) path: compiled on first use, so a consumer that only decodes lossless WebP never builds the VP8 kernels.
+    // Lossy (VP8) path: made and compiled on first use (or by WarmUpAsync), so a consumer that only decodes lossless WebP
+    // never builds the VP8 kernels.
     private Vp8FullKeyframeDecoderGpu? _vp8;
     private WebPYuvToRgbaGpu? _yuv;
     private readonly StageBuffer<byte> _planeY;
@@ -68,7 +69,7 @@ public sealed class WebPDecoderGpu : IDisposable
     private readonly StageBuffer<byte> _planeV;
     private readonly StageBuffer<byte> _alphaPlane;
 
-    /// <summary>Compile the kernels and upload the constant tables.</summary>
+    /// <summary>Upload the constant tables. Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     /// <param name="accelerator">The accelerator to decode on.</param>
     /// <param name="initialPoolInts">
     /// Initial capacity of the prefix-code pool in ints (default <see cref="DefaultInitialPoolInts"/>). The pool holds the
@@ -166,10 +167,25 @@ public sealed class WebPDecoderGpu : IDisposable
             throw new ArgumentException("WebP is an 8-bit format: only PixelFormat.Rgba8 is supported.", nameof(format));
     }
 
+    /// <summary>
+    /// Compile and load every kernel the decoder uses (lossless, lossy and alpha paths), so the first decode does not wait
+    /// for them. The loads are awaited one kernel at a time and yield to the browser's event loop before each compile.
+    /// </summary>
+    public async Task WarmUpAsync()
+    {
+        await _kernels.EnsureKernelsAsync();
+        _vp8 ??= new Vp8FullKeyframeDecoderGpu(_accelerator);
+        _yuv ??= new WebPYuvToRgbaGpu(_accelerator);
+        await _vp8.EnsureKernelsAsync();
+        await _yuv.EnsureKernelsAsync();
+    }
+
     /// <summary>Container scan + readback of the metadata block (and the frame table of an animation).</summary>
     private async Task<Layout> ScanAsync(ArrayView1D<byte, Stride1D.Dense> file, int fileLength)
     {
         if (fileLength <= 0 || fileLength > file.Length) throw new ArgumentOutOfRangeException(nameof(fileLength));
+        // Kernels load lazily here, where every entry point starts (the lossy path loads its own): the constructor compiles nothing.
+        await _kernels.EnsureKernelsAsync();
         int frameCapacity = Math.Min(MaxFrames, fileLength / 32 + 1);
         _frames.Ensure((long)frameCapacity * WebPMeta.FrameStride);
         _kernels.Scan(file, fileLength, _meta.View, _frames.View, frameCapacity);
@@ -406,7 +422,8 @@ public sealed class WebPDecoderGpu : IDisposable
         {
             throw new ImageDecodeException(ImageFormat.WebP, "invalid VP8 data: " + ex.Message);
         }
-        _yuv!.Convert(_planeY.View, _planeU.View, _planeV.View, w, h, rgba);
+        await _yuv!.EnsureKernelsAsync();
+        _yuv.Convert(_planeY.View, _planeU.View, _planeV.View, w, h, rgba);
         if (hasAlph)
         {
             await DecodeAlphaCoreAsync(file, layout, frameIndex, _alphaPlane.View);
