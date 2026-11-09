@@ -197,29 +197,35 @@ public abstract partial class CodecsTestBase
     private static void LpfFrameInitKernel(Index1D i, ArrayView<int> hdr, ArrayView<int> lf) =>
         Vp9Lpf.FrameInit(hdr, i * Vp9LfHdr.Ints, lf, i * Vp9LfTable.Ints);
 
-    private static void LpfSbKernel(Index1D i, ArrayView<byte> pix, ArrayView<int> mi, ArrayView<int> lf, ArrayView<int> meta,
+    // one thread group of Vp9Lpf.GroupLanes lanes per case, as the decoder's loop filter kernel runs it
+    private static void LpfSbKernel(ArrayView<byte> pix, ArrayView<int> mi, ArrayView<int> lf, ArrayView<int> meta,
         ArrayView<ulong> masks)
     {
+        var shared = SharedMemory.Allocate<uint>(Vp9Lpf.GroupSharedWords);
+        int i = Grid.IdxX;
         int k = i * LpfSbMeta;
         int ssX = meta[k], ssY = meta[k + 1], miRows = meta[k + 2], miCols = meta[k + 3], miRow = meta[k + 4], miCol = meta[k + 5];
         var miv = mi.SubView(meta[k + 6], meta[k + 7]);
         int gridOffset = meta[k + 13];
         int lfOffset = i * Vp9LfTable.Ints;
-        var m = default(Vp9LfMask);
-        Vp9Lpf.BuildSuperblockMask(ref m, miv, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
-        long o = (long)i.X * LpfSbMaskWords;
-        masks[o] = m.LeftY0; masks[o + 1] = m.LeftY1; masks[o + 2] = m.LeftY2; masks[o + 3] = m.LeftY3;
-        masks[o + 4] = m.AboveY0; masks[o + 5] = m.AboveY1; masks[o + 6] = m.AboveY2; masks[o + 7] = m.AboveY3;
-        masks[o + 8] = m.Int4x4Y;
-        masks[o + 9] = m.LeftUv0; masks[o + 10] = m.LeftUv1; masks[o + 11] = m.LeftUv2; masks[o + 12] = m.LeftUv3;
-        masks[o + 13] = m.AboveUv0; masks[o + 14] = m.AboveUv1; masks[o + 15] = m.AboveUv2; masks[o + 16] = m.AboveUv3;
-        masks[o + 17] = m.Int4x4Uv;
-        masks[o + 18] = m.Lfl0; masks[o + 19] = m.Lfl1; masks[o + 20] = m.Lfl2; masks[o + 21] = m.Lfl3;
-        masks[o + 22] = m.Lfl4; masks[o + 23] = m.Lfl5; masks[o + 24] = m.Lfl6; masks[o + 25] = m.Lfl7;
+        if (Group.IdxX == 0)
+        {
+            var m = default(Vp9LfMask);
+            Vp9Lpf.BuildSuperblockMask(ref m, miv, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
+            long o = (long)i * LpfSbMaskWords;
+            masks[o] = m.LeftY0; masks[o + 1] = m.LeftY1; masks[o + 2] = m.LeftY2; masks[o + 3] = m.LeftY3;
+            masks[o + 4] = m.AboveY0; masks[o + 5] = m.AboveY1; masks[o + 6] = m.AboveY2; masks[o + 7] = m.AboveY3;
+            masks[o + 8] = m.Int4x4Y;
+            masks[o + 9] = m.LeftUv0; masks[o + 10] = m.LeftUv1; masks[o + 11] = m.LeftUv2; masks[o + 12] = m.LeftUv3;
+            masks[o + 13] = m.AboveUv0; masks[o + 14] = m.AboveUv1; masks[o + 15] = m.AboveUv2; masks[o + 16] = m.AboveUv3;
+            masks[o + 17] = m.Int4x4Uv;
+            masks[o + 18] = m.Lfl0; masks[o + 19] = m.Lfl1; masks[o + 20] = m.Lfl2; masks[o + 21] = m.Lfl3;
+            masks[o + 22] = m.Lfl4; masks[o + 23] = m.Lfl5; masks[o + 24] = m.Lfl6; masks[o + 25] = m.Lfl7;
+        }
         // the superblock's top-left pixel sits 8 rows / columns into each window
         int pitchY = meta[k + 11], pitchUv = meta[k + 12];
-        Vp9Lpf.FilterSuperblock(pix, meta[k + 8] + 8L * pitchY + 8, pitchY, pix, meta[k + 9] + 8L * pitchUv + 8,
-            pix, meta[k + 10] + 8L * pitchUv + 8, pitchUv, ssX, ssY, miv, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
+        Vp9Lpf.FilterSuperblockGroup(shared, true, pix, meta[k + 8] + 8L * pitchY + 8, pitchY, meta[k + 9] + 8L * pitchUv + 8,
+            meta[k + 10] + 8L * pitchUv + 8, pitchUv, ssX, ssY, miv, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
     }
 
     private static readonly string[] LpfMaskNames =
@@ -345,9 +351,9 @@ public abstract partial class CodecsTestBase
             using var dLf = acc.Allocate1D<int>((long)count * Vp9LfTable.Ints);
             using var dMasks = acc.Allocate1D<ulong>((long)count * LpfSbMaskWords);
             var init = acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(LpfFrameInitKernel);
-            var sb = acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<ulong>>(LpfSbKernel);
+            var sb = acc.LoadStreamKernel<ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<ulong>>(LpfSbKernel);
             init(new Index1D(count), dHdr.View, dLf.View);
-            sb(new Index1D(count), dPix.View, dMi.View, dLf.View, dMeta.View, dMasks.View);
+            sb(new KernelConfig(count, Vp9Lpf.GroupLanes), dPix.View, dMi.View, dLf.View, dMeta.View, dMasks.View);
             await acc.SynchronizeAsync();
             var got = await dPix.CopyToHostAsync();
             var lf = await dLf.CopyToHostAsync();
