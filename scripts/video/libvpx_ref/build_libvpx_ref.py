@@ -51,6 +51,31 @@ for sym, defs in (("vp9_rtcd", "vp9/common/vp9_rtcd_defs.pl"), ("vpx_dsp_rtcd", 
                           f"--config={mk}", os.path.join(src, defs)], capture_output=True, text=True, check=True).stdout
     open(os.path.join(build, sym + ".h"), "w").write(out)
 
+# Instrumentation: copies of libvpx files with hook calls inserted (each insertion point must occur exactly once).
+# libvpx_ref.c defines the hook; it is called with the decoder and a stage number.
+HOOK_DECL = "struct VP9Decoder;\nextern void (*vp9ref_hook)(struct VP9Decoder *pbi, int stage);\n"
+PATCHES = {
+    "vp9/decoder/vp9_decodeframe.c": [
+        # stage 0: the frame context this frame loads; stage 1: after the compressed header's updates
+        ("  *cm->fc = cm->frame_contexts[cm->frame_context_idx];\n",
+         "  *cm->fc = cm->frame_contexts[cm->frame_context_idx];\n  if (vp9ref_hook) vp9ref_hook(pbi, 0);\n"),
+        ("  new_fb->corrupted = read_compressed_header(pbi, data, first_partition_size);\n",
+         "  new_fb->corrupted = read_compressed_header(pbi, data, first_partition_size);\n"
+         "  if (vp9ref_hook) vp9ref_hook(pbi, 1);\n"),
+    ],
+}
+patched = []
+for rel, edits in PATCHES.items():
+    text = open(os.path.join(src, rel), newline="").read().replace("\r\n", "\n")   # a Windows clone may be CRLF
+    first_include = text.index("#include")
+    text = text[:first_include] + HOOK_DECL + text[first_include:]
+    for old, new in edits:
+        assert text.count(old) == 1, f"{rel}: insertion point occurs {text.count(old)} times: {old!r}"
+        text = text.replace(old, new)
+    out = os.path.join(build, "patched_" + os.path.basename(rel))
+    open(out, "w", newline="").write(text)
+    patched.append((os.path.basename(rel), out))
+
 sources = []
 for pattern in ("vp9/common/*.c", "vp9/decoder/*.c", "vp9/vp9_dx_iface.c", "vp9/vp9_iface_common.c", "vpx_dsp/*.c", "vpx/src/vpx_codec.c",
                 "vpx/src/vpx_decoder.c", "vpx/src/vpx_image.c", "vpx_mem/vpx_mem.c", "vpx_scale/generic/*.c",
@@ -60,6 +85,8 @@ for pattern in ("vp9/common/*.c", "vp9/decoder/*.c", "vp9/vp9_dx_iface.c", "vp9/
 EXCLUDED = {"vp9_mfqe.c", "vp9_postproc.c", "variance.c", "vpx_scale.c", "gen_scalers.c", "psnr.c", "psnrhvs.c",
             "ssim.c"}
 by_name = {os.path.basename(p): p for p in sources if os.path.basename(p) not in EXCLUDED}
+for name, path in patched:
+    by_name[name] = path
 for p in extra:
     by_name[os.path.basename(p)] = p
 sources = sorted(by_name.values()) + [os.path.join(build, "vpx_config.c"), os.path.join(here, "libvpx_ref.c")]

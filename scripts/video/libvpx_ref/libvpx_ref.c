@@ -4,7 +4,7 @@
  * Reference VP9 decoder for the VP9 decoder's tests: libvpx (BSD-3-Clause, github.com/webmproject/libvpx) built as
  * plain C (generic target, single thread, 8-bit) by build_libvpx_ref.py. libvpx is NOT in this repository.
  *
- * Usage: libvpx_ref [-h] in.ivf [out.i420]
+ * Usage: libvpx_ref [-h] [-c ctx.bin] in.ivf [out.i420]
  *   decodes every frame and prints one line per output frame, "<n> <width>x<height> <md5>", where the MD5 is computed
  *   exactly as libvpx's test/md5_helper.h does (each plane row by row over the displayed width; chroma sizes rounded
  *   up), so the lines compare with the conformance vectors' .md5 files. With out.i420 the cropped planes of every
@@ -15,12 +15,33 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 
 #include "vpx/vpx_decoder.h"
 #include "vpx/vp8dx.h"
 #include "md5_utils.h"
 #include "vp9/vp9_dx_iface.h"
 #include "vp9/decoder/vp9_decoder.h"
+
+/* -c: frame context dumps. Stage 0 = the context the frame loads; stage 1 = after its compressed header, followed by
+ * tx_mode, reference_mode, comp_fixed_ref, comp_var_ref[0], comp_var_ref[1] (one byte each). */
+#define CTX_BYTES ((int)offsetof(FRAME_CONTEXT, initialized))
+static FILE *ctx_out;
+void (*vp9ref_hook)(struct VP9Decoder *pbi, int stage);
+static void ctx_hook(struct VP9Decoder *pbi, int stage) {
+  const VP9_COMMON *cm = &pbi->common;
+  unsigned char extra[5];
+  fputc(stage, ctx_out);
+  fwrite(cm->fc, 1, CTX_BYTES, ctx_out);
+  if (stage == 1) {
+    extra[0] = (unsigned char)cm->tx_mode;
+    extra[1] = (unsigned char)cm->reference_mode;
+    extra[2] = (unsigned char)cm->comp_fixed_ref;
+    extra[3] = (unsigned char)cm->comp_var_ref[0];
+    extra[4] = (unsigned char)cm->comp_var_ref[1];
+    fwrite(extra, 1, 5, ctx_out);
+  }
+}
 
 static void print_header(vpx_codec_ctx_t *codec, int packet, int sub) {
   const VP9Decoder *pbi = ((vpx_codec_alg_priv_t *)codec->priv)->pbi;
@@ -82,10 +103,26 @@ int main(int argc, char **argv) {
   vpx_codec_ctx_t codec;
   vpx_codec_dec_cfg_t cfg;
   int n = 0, plane, y, headers = 0, packet = 0;
-  if (argc > 1 && strcmp(argv[1], "-h") == 0) {
-    headers = 1;
-    ++argv;
-    --argc;
+  for (;;) {
+    if (argc > 1 && strcmp(argv[1], "-h") == 0) {
+      headers = 1;
+      ++argv;
+      --argc;
+    } else if (argc > 2 && strcmp(argv[1], "-c") == 0) {
+      if (!(ctx_out = fopen(argv[2], "wb"))) {
+        fprintf(stderr, "cannot write %s\n", argv[2]);
+        return 2;
+      }
+      vp9ref_hook = ctx_hook;
+      fprintf(stderr, "ctx_bytes=%d coef=%d switchable=%d inter_mode=%d tx=%d skip=%d nmvc=%d\n", CTX_BYTES,
+              (int)offsetof(FRAME_CONTEXT, coef_probs), (int)offsetof(FRAME_CONTEXT, switchable_interp_prob),
+              (int)offsetof(FRAME_CONTEXT, inter_mode_probs), (int)offsetof(FRAME_CONTEXT, tx_probs),
+              (int)offsetof(FRAME_CONTEXT, skip_probs), (int)offsetof(FRAME_CONTEXT, nmvc));
+      argv += 2;
+      argc -= 2;
+    } else {
+      break;
+    }
   }
   if (argc < 2) {
     fprintf(stderr, "usage: libvpx_ref [-h] in.ivf [out.i420]\n");

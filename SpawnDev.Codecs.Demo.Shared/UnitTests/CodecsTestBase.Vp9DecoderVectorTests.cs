@@ -2,7 +2,10 @@
 // ComfyUI SaveWEBM files (TestData/Vp9Conformance/SOURCES.md). Every vector comes with libvpx's MD5 of every displayed
 // frame.
 
+using ILGPU;
+using ILGPU.Runtime;
 using SpawnDev.Codecs.Video.Vp9;
+using SpawnDev.ILGPU;
 using SpawnDev.Codecs.Video.Vp9.Decoder;
 using SpawnDev.UnitTesting;
 using static SpawnDev.Codecs.Demo.Shared.UnitTests.TestHelpers;
@@ -202,5 +205,118 @@ public abstract partial class CodecsTestBase
         }
         Console.WriteLine($"{frames} frame headers compared");
         True(failures.Count == 0, $"{failures.Count} mismatches:\n" + string.Join("\n", failures.Take(40)));
+    }
+
+    /// <summary>One libvpx_ref -c record: stage 0 = the context a frame loads, stage 1 = after its compressed header
+    /// (+ tx_mode, reference_mode, comp_fixed_ref, comp_var_ref[0..1]).</summary>
+    private sealed record Vp9CtxRecord(int Stage, byte[] Context, byte[] Extra);
+
+    /// <summary>TestData/Vp9Conformance/libvpx_contexts.gz (scripts/video/libvpx_ref/pack_contexts.py): file name -> records.</summary>
+    private static Dictionary<string, List<Vp9CtxRecord>> LibvpxContexts()
+    {
+        const int ctxBytes = 2040;
+        using var gz = new System.IO.Compression.GZipStream(new MemoryStream(ReadEmbedded(Vp9VectorPrefix + "libvpx_contexts.gz")),
+            System.IO.Compression.CompressionMode.Decompress);
+        var ms = new MemoryStream();
+        gz.CopyTo(ms);
+        byte[] d = ms.ToArray();
+        var all = new Dictionary<string, List<Vp9CtxRecord>>();
+        int at = 0;
+        while (at < d.Length)
+        {
+            int nameLen = d[at] | (d[at + 1] << 8);
+            string name = System.Text.Encoding.ASCII.GetString(d, at + 2, nameLen);
+            at += 2 + nameLen;
+            int count = BitConverter.ToInt32(d, at);
+            at += 4;
+            var list = new List<Vp9CtxRecord>(count);
+            var prev = new byte[ctxBytes];
+            for (int i = 0; i < count; i++)
+            {
+                int stage = d[at++];
+                var ctxBytesArr = new byte[ctxBytes];
+                for (int k = 0; k < ctxBytes; k++) ctxBytesArr[k] = (byte)(d[at + k] ^ prev[k]);
+                at += ctxBytes;
+                byte[] extra = Array.Empty<byte>();
+                if (stage == 1) { extra = d.AsSpan(at, 5).ToArray(); at += 5; }
+                list.Add(new Vp9CtxRecord(stage, ctxBytesArr, extra));
+                prev = ctxBytesArr;
+            }
+            all[name] = list;
+        }
+        return all;
+    }
+
+    /// <summary>
+    /// S1 (accelerator half): for every frame of every VP9 test file, the compressed header kernel turns libvpx's loaded
+    /// context into libvpx's context after the compressed header, byte for byte, with the same tx_mode, reference_mode
+    /// and compound references; and while no earlier frame of the stream used backward adaptation (S4), our own context
+    /// handling (past-independence resets, load, store) loads exactly the context libvpx loads.
+    /// </summary>
+    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL")]
+    public async Task Vp9CompressedHeader_EveryFrame_MatchesLibvpx()
+    {
+        var reference = LibvpxContexts();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            using var contexts = new Vp9FrameContextsGpu(acc);
+            var failures = new List<string>();
+            int frames = 0, managedChecked = 0;
+            foreach (var v in Vp9Vectors())
+            {
+                if (!reference.TryGetValue(v.Name, out var recs)) { failures.Add($"{v.Name}: no libvpx context dump"); continue; }
+                var reader = new Vp9HeaderReader();
+                int rec = 0, n = 0;
+                bool adaptationFree = true;
+                foreach (byte[] packet in Vp9Packets.ReadFile(v.File))
+                {
+                    using var buf = acc.Allocate1D(packet);
+                    foreach (var (offset, length) in Vp9Packets.Split(packet))
+                    {
+                        n++;
+                        var h = reader.ReadFrame(packet.AsSpan(offset, length));
+                        if (h.ShowExistingFrame) { reader.FinishFrame(); continue; }
+                        if (rec + 1 >= recs.Count || recs[rec].Stage != 0 || recs[rec + 1].Stage != 1)
+                        { failures.Add($"{v.Name} frame {n}: context records out of step"); goto nextFile; }
+                        var loaded = recs[rec].Context;
+                        var after = recs[rec + 1];
+                        rec += 2;
+
+                        contexts.BeginFrame(h);
+                        var cur = contexts.Contexts.SubView(Vp9Ctx.Current * Vp9Ctx.Bytes, Vp9Ctx.Bytes);
+                        if (adaptationFree)
+                        {
+                            var ours = await cur.CopyToHostAsync();
+                            int bad = Enumerable.Range(0, Vp9Ctx.Bytes).FirstOrDefault(k => ours[k] != loaded[k], -1);
+                            if (bad >= 0) failures.Add($"{v.Name} frame {n}: loaded context differs at {bad}: {ours[bad]} vs libvpx {loaded[bad]}");
+                            managedChecked++;
+                        }
+                        cur.CopyFromCPU(loaded.Take(Vp9Ctx.Bytes).Select(b => (int)b).ToArray());   // test: start from libvpx's
+                        contexts.ReadCompressedHeader(buf.View, offset, h);
+                        var res = await contexts.ReadResultsAsync();
+                        var got = await cur.CopyToHostAsync();
+                        int diff = Enumerable.Range(0, Vp9Ctx.Bytes).FirstOrDefault(k => got[k] != after.Context[k], -1);
+                        if (diff >= 0) failures.Add($"{v.Name} frame {n}: context after the compressed header differs at {diff}: {got[diff]} vs libvpx {after.Context[diff]}");
+                        if (res.TxMode != after.Extra[0] || res.ReferenceMode != after.Extra[1] || res.Error)
+                            failures.Add($"{v.Name} frame {n}: tx_mode {res.TxMode} ref_mode {res.ReferenceMode} error {res.Error} vs libvpx {after.Extra[0]} {after.Extra[1]}");
+                        if (res.ReferenceMode != 0 && (res.CompFixedRef != after.Extra[2] || res.CompVarRef0 != after.Extra[3] || res.CompVarRef1 != after.Extra[4]))
+                            failures.Add($"{v.Name} frame {n}: compound refs {res.CompFixedRef},{res.CompVarRef0},{res.CompVarRef1} vs libvpx {after.Extra[2]},{after.Extra[3]},{after.Extra[4]}");
+                        contexts.EndFrame(h);
+                        reader.FinishFrame();
+                        if (!h.ErrorResilient && !h.FrameParallel) adaptationFree = false;
+                        frames++;
+                        if (failures.Count > 40) goto done;
+                    }
+                }
+                if (rec != recs.Count) failures.Add($"{v.Name}: {rec} of {recs.Count} context records used");
+            nextFile:;
+            }
+        done:
+            Console.WriteLine($"{acc.AcceleratorType}: {frames} compressed headers compared, {managedChecked} loaded contexts checked");
+            True(failures.Count == 0, $"{failures.Count} mismatches:\n" + string.Join("\n", failures.Take(40)));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
     }
 }
