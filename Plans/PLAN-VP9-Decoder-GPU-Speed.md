@@ -75,6 +75,65 @@ The bool decoder is serial within a tile; libvpx parallelises only across tiles.
 - overlapping parse(N+1) with recon(N) when the next frame does not depend on this frame's backward adaptation
   (`frame_parallel_decoding_mode`, error-resilient streams; ComfyUI's encoder settings to be checked).
 
+Measured 2026-11-09 (CPU accelerator, temporary counters in the parse kernel, 6 ComfyUI files / 252 frames):
+
+| per frame (mean) | count | share |
+|---|---|---|
+| bool decodes | 97.6k | |
+| - coefficient tokens | 87.1k | 89.2% |
+| - mode info (segment, skip, tx, modes, refs, MVs) | 9.0k | 9.2% |
+| - partitions | 1.5k | 1.5% |
+| EOB checks / ZERO tokens / non-zero tokens (TWO+) | 12.3k / 29.0k / 9.8k (4.5k) | |
+| transform blocks / blocks / partitions | 2.6k / 679 / 864 | |
+| blocks: skip / inter / intra (inter with an MV search) | 119 / 611 / 68 (531) | |
+| bitstream bytes read by the refill | 7.3k | |
+
+- The parse time is the coefficient loop: about 39k coefficient positions per frame against 679 blocks.
+- Header flags (libvpx_ref -h, `libvpx_headers.tsv.gz`):
+  - ComfyUI: all 252 frames frame-parallel (no backward adaptation, counts off).
+  - Vectors: 1909 of 4858 frames (1470 error-resilient, the rest frame-parallel); only 59 of 305 files on every frame.
+- Before, per coefficient the thread made about 8 to 10 device loads, each waited on in order:
+  - the band;
+  - the three probabilities, one after each bool;
+  - the scan position, twice for a non-zero token;
+  - two neighbour indices;
+  - two token-cache reads of entries it had just written.
+  ILGPU has no pass that removes repeated loads, and the views are plain global pointers, so the GPU's assembler cannot
+  move a load above the token-cache / coefficient stores between them.
+- Dequantisation and the coefficient scatter cost one multiply and one store per non-zero coefficient. A store does not
+  stall the thread, so moving them out (the first idea above) would barely shorten the serial chain. Not done.
+
+Built 2026-11-09: the coefficient loop on local memory (`Vp9ParseKernels.DecodeCoefs`):
+- One packed scan entry per coefficient (`Vp9PScan`: position | neighbour 0 << 10 | neighbour 1 << 20), fetched one
+  coefficient ahead.
+- The band computed (`CoefBand`, checked against libvpx's tables when the table is built).
+- The three node probabilities of a context loaded together.
+- The token cache, the left entropy contexts, the above / left partition contexts and the partition stack in the
+  thread's local memory (`Vp9PLocal`, 6.5 KB; a tile column is at most 64 superblocks).
+  - The above entropy contexts (another 12 KB as ints) stay in the work buffer, so the locals fit WGSL's 8192-byte limit
+    on a function's variables (S4).
+  - A version with them local too measured 2.40 ms/frame on the CPU accelerator.
+- The bool read's renormalising shift from a leading zero count instead of a compare chain.
+- Dequant factors read once per plane of a block instead of per transform block.
+
+Results:
+- Bit-exact on the CPU accelerator:
+  - EveryFrame: 311 files, 5112 frames, 5000 outputs == libvpx .md5.
+  - Parse_ModeInfo: 5112 frames, 2951 with counts checked.
+  - PublicApi: 332 pictures.
+- Red-checked (prefetch of the wrong entry, wrong energy class, stale probability: all fail).
+- ParseKernel WGSL: 87.1 -> 72.9 MB.
+- CPU accelerator tile parse (ComfyUI), quiet A/B (base, S3, base, S3):
+  - 3.32 / 3.23 -> 2.67 / 2.68 ms/frame (-18%);
+  - without the first frame (kernel compile): 2.34 / 2.31 -> 2.00 / 1.97 (-15%);
+  - the whole test is not slower (base 104.8 / 103.2 s, S3 102.2 / 102.3 s).
+- CUDA / OpenCL: to be measured.
+
+Next for S3:
+- Mode info (9% of the bools, but many neighbour loads per block): the arguments and neighbour records in locals.
+- Frame overlap for frame-parallel streams. This needs the mode info / superblock / coefficient buffers double-buffered
+  and a second stream; it can hide at most reconstruction + loop filter.
+
 ### S4 WebGPU / WebGL
 - These depend on ILGPU emitting view-taking helpers as WGSL / GLSL functions (Data, SpawnDev.ILGPU
   Plans/view-helpers-as-functions-2026-11-09.md).

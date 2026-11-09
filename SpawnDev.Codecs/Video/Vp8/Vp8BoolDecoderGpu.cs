@@ -154,7 +154,7 @@ public static class Vp8BoolDecoderGpu
     /// Refill the value register from the input buffer. Mirrors libvpx
     /// <c>vp8dx_bool_decoder_fill</c>.
     /// </summary>
-    private static void Fill(ref Vp8BoolDecoderGpuState state, ArrayView<byte> buf)
+    internal static void Fill(ref Vp8BoolDecoderGpuState state, ArrayView<byte> buf)
     {
         int shift = BdValueSize - 8 - (state.Count + 8);
         int bytesLeft = state.BufEnd - state.BufPos;
