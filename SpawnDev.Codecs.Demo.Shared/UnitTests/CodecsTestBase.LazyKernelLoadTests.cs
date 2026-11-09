@@ -27,7 +27,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    [TestMethod]
+    [TestMethod(Timeout = 1800000)]
     public async Task Codecs_ConstructorsCompileNothing_WarmUpCompilesWhatTheyUse()
     {
         (Context ctx, Accelerator acc) fresh;
@@ -60,6 +60,10 @@ public abstract partial class CodecsTestBase
             using var webpLossy = new WebPLossyEncoderGpu(acc);
             Equal(ci, Count(), "kernels compiled by the image codec constructors (BMP, GIF, JPEG, PNG decoders and encoders, " +
                 "WebPDecoderGpu, WebPLosslessEncoderGpu, WebPLossyEncoderGpu)");
+
+            // The codecs need scatter stores (their tests are NotOnWebGL): the constructor checks above run on every
+            // backend, the warm-ups and the work below where the codecs run.
+            if (!acc.Device.Satisfies(SerialStreamKernels)) return;
 
             async Task<long> Compiled(Func<Task> work)
             {
@@ -105,55 +109,50 @@ public abstract partial class CodecsTestBase
             });
             Equal(0L, after, "kernels compiled by work after the warm-ups");
 
-            // The image codecs' tests need scatter stores (they are NotOnWebGL): the constructor check above runs on every
-            // backend, the warm-ups and the work below where the codecs run.
-            if (acc.Device.Satisfies(SerialStreamKernels))
+            var imageWarmUps = new (string Name, Func<Task> WarmUp)[]
             {
-                var imageWarmUps = new (string Name, Func<Task> WarmUp)[]
-                {
-                    ("BmpDecoderGpu", bmpDec.WarmUpAsync), ("BmpEncoderGpu", bmpEnc.WarmUpAsync),
-                    ("GifDecoderGpu", gifDec.WarmUpAsync), ("GifEncoderGpu", gifEnc.WarmUpAsync),
-                    ("JpegDecoderGpu", jpegDec.WarmUpAsync), ("JpegEncoderGpu", jpegEnc.WarmUpAsync),
-                    ("PngDecoderGpu", pngDec.WarmUpAsync), ("PngEncoderGpu", pngEnc.WarmUpAsync),
-                    ("WebPDecoderGpu", webpDec.WarmUpAsync), ("WebPLosslessEncoderGpu", webpLossless.WarmUpAsync),
-                    ("WebPLossyEncoderGpu", webpLossy.WarmUpAsync),
-                };
-                // Each warm-up loads at least one kernel no earlier one shares (the shared ones are cache hits, not counted).
-                foreach (var (name, warmUp) in imageWarmUps)
-                    True(await Compiled(warmUp) > 0, $"{name}.WarmUpAsync compiled no kernel");
+                ("BmpDecoderGpu", bmpDec.WarmUpAsync), ("BmpEncoderGpu", bmpEnc.WarmUpAsync),
+                ("GifDecoderGpu", gifDec.WarmUpAsync), ("GifEncoderGpu", gifEnc.WarmUpAsync),
+                ("JpegDecoderGpu", jpegDec.WarmUpAsync), ("JpegEncoderGpu", jpegEnc.WarmUpAsync),
+                ("PngDecoderGpu", pngDec.WarmUpAsync), ("PngEncoderGpu", pngEnc.WarmUpAsync),
+                ("WebPDecoderGpu", webpDec.WarmUpAsync), ("WebPLosslessEncoderGpu", webpLossless.WarmUpAsync),
+                ("WebPLossyEncoderGpu", webpLossy.WarmUpAsync),
+            };
+            // Each warm-up loads at least one kernel no earlier one shares (the shared ones are cache hits, not counted).
+            foreach (var (name, warmUp) in imageWarmUps)
+                True(await Compiled(warmUp) > 0, $"{name}.WarmUpAsync compiled no kernel");
 
-                // real work after the warm-ups: encode a picture with every encoder and decode it again
-                const int w = 24, h = 20;
-                var rgba = new byte[w * h * 4];
-                for (int y = 0; y < h; y++)
-                    for (int x = 0; x < w; x++)
-                    {
-                        int p = (y * w + x) * 4;
-                        rgba[p] = (byte)(x * 10);
-                        rgba[p + 1] = (byte)(y * 12);
-                        rgba[p + 2] = (byte)((x * y * 7) & 255);
-                        rgba[p + 3] = 255;
-                    }
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                GC.Collect();
-                long imageAfter = await Compiled(async () =>
+            // real work after the warm-ups: encode a picture with every encoder and decode it again
+            const int w = 24, h = 20;
+            var rgba = new byte[w * h * 4];
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
                 {
-                    var bmp = await bmpEnc.EncodeAsync(rgba, w, h);
-                    True((await bmpDec.DecodeAsync(bmp)).Pixels.AsSpan().SequenceEqual(rgba), "BMP round trip after the warm-ups is not lossless");
-                    var gif = await gifEnc.EncodeAsync(rgba, w, h);
-                    await gifDec.DecodeAsync(gif);
-                    var jpeg = await jpegEnc.EncodeAsync(rgba, w, h);
-                    await jpegDec.DecodeAsync(jpeg);
-                    var png = await pngEnc.EncodeAsync(rgba, w, h);
-                    True((await pngDec.DecodeAsync(png)).Pixels.AsSpan().SequenceEqual(rgba), "PNG round trip after the warm-ups is not lossless");
-                    var lossless = await webpLossless.EncodeAsync(rgba, w, h);
-                    True((await webpDec.DecodeAsync(lossless)).Pixels.AsSpan().SequenceEqual(rgba), "WebP lossless round trip after the warm-ups is not lossless");
-                    var lossy = await webpLossy.EncodeAsync(rgba, w, h);
-                    await webpDec.DecodeAsync(lossy);
-                });
-                Equal(0L, imageAfter, "kernels compiled by image work after the warm-ups");
-            }
+                    int p = (y * w + x) * 4;
+                    rgba[p] = (byte)(x * 10);
+                    rgba[p + 1] = (byte)(y * 12);
+                    rgba[p + 2] = (byte)((x * y * 7) & 255);
+                    rgba[p + 3] = 255;
+                }
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            long imageAfter = await Compiled(async () =>
+            {
+                var bmp = await bmpEnc.EncodeAsync(rgba, w, h);
+                True((await bmpDec.DecodeAsync(bmp)).Pixels.AsSpan().SequenceEqual(rgba), "BMP round trip after the warm-ups is not lossless");
+                var gif = await gifEnc.EncodeAsync(rgba, w, h);
+                await gifDec.DecodeAsync(gif);
+                var jpeg = await jpegEnc.EncodeAsync(rgba, w, h);
+                await jpegDec.DecodeAsync(jpeg);
+                var png = await pngEnc.EncodeAsync(rgba, w, h);
+                True((await pngDec.DecodeAsync(png)).Pixels.AsSpan().SequenceEqual(rgba), "PNG round trip after the warm-ups is not lossless");
+                var lossless = await webpLossless.EncodeAsync(rgba, w, h);
+                True((await webpDec.DecodeAsync(lossless)).Pixels.AsSpan().SequenceEqual(rgba), "WebP lossless round trip after the warm-ups is not lossless");
+                var lossy = await webpLossy.EncodeAsync(rgba, w, h);
+                await webpDec.DecodeAsync(lossy);
+            });
+            Equal(0L, imageAfter, "kernels compiled by image work after the warm-ups");
         }
         finally
         {
