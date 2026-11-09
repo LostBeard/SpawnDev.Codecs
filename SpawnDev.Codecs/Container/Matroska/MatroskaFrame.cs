@@ -46,4 +46,10 @@ public sealed record MatroskaFrame
     /// represents (0-based). Always 0 when the block had no lacing.
     /// </summary>
     public required int LaceIndex { get; init; }
+
+    /// <summary>
+    /// BlockAdditional data with BlockAddID 1 from the enclosing BlockGroup's BlockAdditions (WebM alpha: a second VP8 / VP9
+    /// stream holding the alpha plane, AlphaMode 1), or null.
+    /// </summary>
+    public byte[]? BlockAdditional { get; init; }
 }

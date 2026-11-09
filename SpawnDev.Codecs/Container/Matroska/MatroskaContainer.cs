@@ -146,12 +146,37 @@ public sealed class MatroskaContainer
                     {
                         var block = blockGroup.First<BinaryElement>("Block");
                         if (block is null) continue;
+                        byte[]? additional = null;
+                        var additions = blockGroup.First<MasterElement>("BlockAdditions");
+                        if (additions != null)
+                            foreach (var more in additions.Find<MasterElement>("BlockMore"))
+                            {
+                                ulong addId = more.First<UintElement>("BlockAddID")?.Data ?? 1UL;   // default 1
+                                var data = more.First<BinaryElement>("BlockAdditional");
+                                if (addId == 1 && data != null) { additional = ReadBinary(data); break; }
+                            }
                         foreach (var f in ParseBlockElement(block, clusterTs, isSimpleBlock: false))
-                            yield return f;
+                            yield return additional == null ? f : f with { BlockAdditional = additional };
                     }
                 }
             }
         }
+    }
+
+    /// <summary>All bytes of a binary element's body.</summary>
+    private static byte[] ReadBinary(BinaryElement element)
+    {
+        var s = element.Data;
+        var buf = new byte[s.Length];
+        s.Position = 0;
+        int read = 0;
+        while (read < buf.Length)
+        {
+            int got = s.Read(buf, read, buf.Length - read);
+            if (got <= 0) break;
+            read += got;
+        }
+        return read == buf.Length ? buf : buf.AsSpan(0, read).ToArray();
     }
 
     /// <summary>Read the binary element's bytes and hand them to the parser.</summary>

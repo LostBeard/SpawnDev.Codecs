@@ -72,20 +72,26 @@ public static class Vp9Packets
     /// <summary>
     /// The VP9 packets of a WebM / Matroska file (its first V_VP9 track) or an IVF file (FourCC VP90), in file order.
     /// </summary>
-    public static IEnumerable<byte[]> ReadFile(byte[] file)
+    public static IEnumerable<byte[]> ReadFile(byte[] file) => ReadFileWithAlpha(file).Select(p => p.Packet);
+
+    /// <summary>
+    /// As <see cref="ReadFile"/>, with each packet's alpha packet (WebM BlockAdditional, BlockAddID 1: a second VP9 stream
+    /// holding the alpha plane in its luma) or null.
+    /// </summary>
+    public static IEnumerable<(byte[] Packet, byte[]? Alpha)> ReadFileWithAlpha(byte[] file)
     {
         ArgumentNullException.ThrowIfNull(file);
         if (file.Length >= 4 && file[0] == (byte)'D' && file[1] == (byte)'K' && file[2] == (byte)'I' && file[3] == (byte)'F')
         {
             var header = IvfReader.ParseHeader(file);
             if (header.FourCc != "VP90") throw new InvalidDataException($"IVF FourCC {header.FourCc} is not VP90.");
-            foreach (var f in IvfReader.EnumerateFrames(file)) yield return f.Data.ToArray();
+            foreach (var f in IvfReader.EnumerateFrames(file)) yield return (f.Data.ToArray(), null);
             yield break;
         }
         var mkv = new MatroskaContainer(new MemoryStream(file, writable: false));
         var track = mkv.Tracks.FirstOrDefault(t => t.CodecId == "V_VP9")
             ?? throw new InvalidDataException("No V_VP9 track in the file.");
         foreach (var f in mkv.Frames)
-            if (f.TrackNumber == track.TrackNumber) yield return f.Data;
+            if (f.TrackNumber == track.TrackNumber) yield return (f.Data, f.BlockAdditional);
     }
 }

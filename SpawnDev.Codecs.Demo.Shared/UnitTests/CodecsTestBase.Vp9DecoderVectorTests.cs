@@ -476,6 +476,41 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
+    /// <summary>
+    /// WebM alpha (ComfyUI SaveWEBM with RGBA input: AlphaMode 1, a second VP9 stream in BlockAdditional): the alpha planes
+    /// <see cref="Vp9DecoderGpu.DecodeFileAsync"/> returns equal libvpx's (FFmpeg's libvpx-vp9 decoder, yuva420p A plane,
+    /// comfyui_vp9_rgba_512x320_crf32.webm.alpha.md5), and the colour pictures still equal the .md5.
+    /// </summary>
+    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL")]
+    public async Task Vp9DecoderGpu_WebMAlpha_MatchesLibvpx()
+    {
+        const string name = "comfyui_vp9_rgba_512x320_crf32.webm";
+        byte[] file = ReadEmbedded(Vp9ComfyPrefix + name);
+        string[] colour = Md5Lines(ReadEmbedded(Vp9ComfyPrefix + name + ".md5"));
+        string[] alpha = Md5Lines(ReadEmbedded(Vp9ComfyPrefix + name + ".alpha.md5"));
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            using var dec = new Vp9DecoderGpu(acc);
+            var failures = new List<string>();
+            int n = 0;
+            await foreach (var frame in dec.DecodeFileAsync(file))
+            {
+                if (n >= colour.Length) { failures.Add("more pictures than libvpx"); break; }
+                if (Md5Hex(frame.Planes) != colour[n]) failures.Add($"picture {n + 1}: colour differs");
+                if (frame.Alpha == null) failures.Add($"picture {n + 1}: no alpha");
+                else if (frame.Alpha.LongLength != (long)frame.Format.Width * frame.Format.Height) failures.Add($"picture {n + 1}: alpha has {frame.Alpha.Length} bytes");
+                else if (Md5Hex(frame.Alpha) != alpha[n]) failures.Add($"picture {n + 1}: alpha differs");
+                n++;
+            }
+            if (n != colour.Length) failures.Add($"{n} pictures, libvpx {colour.Length}");
+            Console.WriteLine($"{acc.AcceleratorType}: {n} pictures with alpha");
+            True(failures.Count == 0, string.Join("\n", failures));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
     /// <summary>One libvpx_ref -c record: stage 0 = the context a frame loads, stage 1 = after its compressed header
     /// (+ tx_mode, reference_mode, comp_fixed_ref, comp_var_ref[0..1]).</summary>
     private sealed record Vp9CtxRecord(int Stage, byte[] Context, byte[] Extra);
