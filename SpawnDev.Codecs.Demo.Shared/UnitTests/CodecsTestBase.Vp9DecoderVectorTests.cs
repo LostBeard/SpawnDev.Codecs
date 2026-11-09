@@ -29,6 +29,13 @@ public abstract partial class CodecsTestBase
     /// </summary>
     private static IEnumerable<Vp9Vector> Vp9Vectors()
     {
+        // diagnostics: VP9_FILE_FILTER=substring limits every VP9 test to the matching files (desktop)
+        string? only = OperatingSystem.IsBrowser() ? null : Environment.GetEnvironmentVariable("VP9_FILE_FILTER");
+        return only == null ? Vp9VectorsAll() : Vp9VectorsAll().Where(v => v.Name.Contains(only));
+    }
+
+    private static IEnumerable<Vp9Vector> Vp9VectorsAll()
+    {
         var asm = typeof(CodecsTestBase).Assembly;
         foreach (string res in asm.GetManifestResourceNames().Order(StringComparer.Ordinal))
         {
@@ -397,7 +404,11 @@ public abstract partial class CodecsTestBase
                         int n = decoded;
                         var h = await pipe.DecodeFrameAsync(packet.AsMemory(offset, length), buf.View, offset, async fh =>
                         {
-                            if (Md5Hex(await pipe.ReadPlanesAsync(fh.NewBuffer)) != want[n].Pre)
+                            var pre = await pipe.ReadPlanesAsync(fh.NewBuffer);
+                            // diagnostics: VP9_DUMP_PLANES=dir writes <backend>_<file>_<n>.yuv (pre loop filter)
+                            string? dump = OperatingSystem.IsBrowser() ? null : Environment.GetEnvironmentVariable("VP9_DUMP_PLANES");
+                            if (dump != null) File.WriteAllBytes(Path.Combine(dump, $"{acc.AcceleratorType}_{v.Name}_{n + 1}.yuv"), pre);
+                            if (Md5Hex(pre) != want[n].Pre)
                                 failures.Add($"{v.Name} frame {n + 1}: reconstruction differs ({fh.Width}x{fh.Height}, type {fh.FrameType}, intra-only {fh.IntraOnly}, lossless {fh.Lossless})");
                         });
                         if (h.ShowExistingFrame) { show = h.FrameToShowBuffer; continue; }
