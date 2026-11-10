@@ -102,6 +102,16 @@ lanes (VP9 batch encode at unaligned sizes).
   Plans/webgpu-d3d12-device-hung-trace-replay-upstream-report.md, attachment _upstream_reports/vp9-webgpu-device-hung.zip);
   TJ files it. The drain comes out once the cause is fixed. Regression test:
   WebGPU `Batch_ArrayViewOverload` then `Batch_Unaligned` in one page (the order the suite runs them).
+  - 2026-11-10, a second trigger: `Vp9DecoderGpu_DecodesOwnKeyframeEncoder_LikeKeyframeDecoder` on WebGPU (fenced as
+    GiantShader until now; lifted locally for a watched run). Case 1 (64x64 q30: encode, the old keyframe decoder, the
+    full `Vp9DecoderGpu`, each followed by a wait) passes; case 2's encode (64x64 q120) dies with
+    DXGI_ERROR_DEVICE_HUNG, reproduced 3 of 3. Last dispatches: `Vp9EncodeWavefrontBatchKernel` [1x1x1, group 64] x4,
+    `Vp9EntropyStepKernel` x2, the uncompressed-header emit, `Vp9AssembleKernel`. The encoder alone (q 1..200,
+    Batch tests, 128x128 self-consistency) and the old decoder alone pass on WebGPU; the test passes on Velocity and
+    CUDA. The full decoder runs group-barrier kernels (loop-filter wavefront, intra wavefront) with work queued behind
+    them, the same pattern as the original trigger. Not yet tried: the same drain after the decoder's group kernels
+    (would be a new workaround: needs TJ's approval). The test stays fenced on WebGPU meanwhile; every other VP9
+    decoder test passes on WebGPU (EveryFrame 311 files bit-exact, PublicApi, WebMAlpha, TypedArrayOverloads).
 
 - **ILGPU 5.4.6-local.2** (2026-10-26): integer divisions no longer hoisted out of their guards (Wasm traps), WebGL sends a
   program's GLSL once (not per dispatch) and refuses kernels over the device's Transform Feedback varying limit at load,

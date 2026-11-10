@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### SpawnDev.ILGPU 5.4.24; VP9 decoder bit-exact on WebGPU (2026-11-10)
+- SpawnDev.ILGPU 5.4.23 -> 5.4.24 (WGSL / GLSL short-circuit conditions no longer copy the code behind them).
+- The full VP9 decoder runs on WebGPU, bit-exact with libvpx: Vp9Decode_EveryFrame (311 files), PublicApi, WebMAlpha
+  and TypedArrayOverloads, in watched runs (Chrome's GPU process at most 1 GB). The tests stay in the GiantShader
+  category for now (see Docs/status.md, VP9 WebGPU device hang: a full decode followed by a keyframe encode on the
+  same WebGPU device hangs D3D12, below ILGPU).
+- `Vp9DecoderGpu_DecodesOwnKeyframeEncoder_LikeKeyframeDecoder` names the case and step that fails, waits after each
+  step, and on WebGPU adds the device-lost reason and the last dispatches to the failure.
+
 ### VP9 decoder: inverse transform call sites; loop filter back to its CUDA speed (2026-11-10)
 - The inverse transform (`Vp9Itx.InverseTransformAdd`, in the inter residual and intra wavefront kernels) called the
   2-D transform from 13 places (one per libvpx eob variant). It now works out libvpx's choice first (DC only, or the

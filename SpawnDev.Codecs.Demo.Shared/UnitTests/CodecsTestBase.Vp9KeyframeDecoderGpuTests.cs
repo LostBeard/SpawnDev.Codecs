@@ -227,6 +227,14 @@ public abstract partial class CodecsTestBase
         try
         {
             var rng = new Random(0x5EED);
+            // WebGPU diagnostics for a failure: the device-lost reason and the last dispatches (kernel, grid, group size)
+            string lost = "";
+            if (acc is SpawnDev.ILGPU.WebGPU.WebGPUAccelerator wg) wg.DeviceLost += (reason, message) => lost = $"{reason}: {message}";
+            string Diagnostics() => acc is SpawnDev.ILGPU.WebGPU.WebGPUAccelerator
+                ? $" | device lost: {lost} | last dispatches: " + string.Join("; ",
+                    SpawnDev.ILGPU.WebGPU.WebGPUAccelerator.DispatchLog.TakeLast(8).Select(d =>
+                        $"{d.KernelName} [{d.GridDimX}x{d.GridDimY}x{d.GridDimZ}, group {d.WorkgroupSize}]"))
+                : "";
             foreach (var (w, h, q, flat) in new[] { (64, 64, 30, false), (64, 64, 120, false), (128, 128, 30, false), (64, 64, 60, true), (192, 128, 80, false) })
             {
                 var y = new byte[w * h];
@@ -234,13 +242,26 @@ public abstract partial class CodecsTestBase
                 var v = new byte[w * h / 4];
                 if (flat) { Array.Fill(y, (byte)128); Array.Fill(u, (byte)128); Array.Fill(v, (byte)128); }
                 else { rng.NextBytes(y); rng.NextBytes(u); rng.NextBytes(v); }
-                using var enc = new Vp9KeyframeEncoderGpu(acc);
-                var (bytes, ry, ru, rv) = await enc.EncodeKeyFrameWithReconAsync(y, u, v, w, h, q);
-                using var old = new Vp9KeyframeDecoderGpu(acc);
-                var oldFrame = await old.DecodeKeyFrameAsync(bytes);
-                using var full = new Vp9DecoderGpu(acc);
-                var frame = await full.DecodePacketAsync(bytes);
                 string tag = $"{w}x{h} q{q}{(flat ? " flat" : "")}";
+                // Each step waits for the accelerator before the next, so a failure (a lost WebGPU device surfaces at
+                // the next wait) names the case and step that caused it.
+                async Task<T> Step<T>(string step, Func<Task<T>> work)
+                {
+                    try
+                    {
+                        var r = await work();
+                        await acc.SynchronizeAsync();
+                        return r;
+                    }
+                    catch (Exception ex) { throw new Exception($"{tag}: {step}: {ex.GetType().Name}: {ex.Message}{Diagnostics()}"); }   // no inner: the runner reports the innermost
+                }
+                using var enc = new Vp9KeyframeEncoderGpu(acc);
+                var (bytes, ry, ru, rv) = await Step("Vp9KeyframeEncoderGpu.EncodeKeyFrameWithReconAsync",
+                    () => enc.EncodeKeyFrameWithReconAsync(y, u, v, w, h, q));
+                using var old = new Vp9KeyframeDecoderGpu(acc);
+                var oldFrame = await Step("Vp9KeyframeDecoderGpu.DecodeKeyFrameAsync", () => old.DecodeKeyFrameAsync(bytes));
+                using var full = new Vp9DecoderGpu(acc);
+                var frame = await Step("Vp9DecoderGpu.DecodePacketAsync", () => full.DecodePacketAsync(bytes));
                 True(frame != null, $"{tag}: the full decoder shows no picture");
                 Equal(new Vp9PictureFormat(w, h, 1, 1), frame!.Format, $"{tag}: format");
                 byte[] planes = frame.Planes;
