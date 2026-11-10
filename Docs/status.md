@@ -109,9 +109,14 @@ lanes (VP9 batch encode at unaligned sizes).
     `Vp9EntropyStepKernel` x2, the uncompressed-header emit, `Vp9AssembleKernel`. The encoder alone (q 1..200,
     Batch tests, 128x128 self-consistency) and the old decoder alone pass on WebGPU; the test passes on Velocity and
     CUDA. The full decoder runs group-barrier kernels (loop-filter wavefront, intra wavefront) with work queued behind
-    them, the same pattern as the original trigger. Not yet tried: the same drain after the decoder's group kernels
-    (would be a new workaround: needs TJ's approval). The test stays fenced on WebGPU meanwhile; every other VP9
-    decoder test passes on WebGPU (EveryFrame 311 files bit-exact, PublicApi, WebMAlpha, TypedArrayOverloads).
+    them, the same pattern as the original trigger. The test stays fenced on WebGPU; every other VP9 decoder test
+    passes on WebGPU (EveryFrame 311 files bit-exact, PublicApi, WebMAlpha, TypedArrayOverloads).
+    - Data's replay of this trace (855 WebGPU calls) hangs in a fresh Chrome without ILGPU too (2 of 2): below ILGPU.
+    - TJ-approved trial (2026-11-10, ILGPU 5.4.25): a drain after the decoder's loop filter does NOT prevent it, and
+      the test already waits after every step, so the GPU is idle between the decode and the next encode. Without the
+      obsolete keyframe decoder it still hangs; with the encodes alone it passes. So a full `Vp9DecoderGpu` decode
+      leaves something that a later encoder dispatch hangs on, and draining does not clear it. The drain was not
+      adopted.
 
 - **ILGPU 5.4.6-local.2** (2026-10-26): integer divisions no longer hoisted out of their guards (Wasm traps), WebGL sends a
   program's GLSL once (not per dispatch) and refuses kernels over the device's Transform Feedback varying limit at load,
