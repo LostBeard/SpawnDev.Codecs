@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### SpawnDev.ILGPU 5.4.25 (2026-11-10)
+- SpawnDev.ILGPU 5.4.24 -> 5.4.25: WGSL no longer lets a helper fall off its end after a loop with an early return
+  (`Bc7EncoderGpu.ModeKernel` failed to compile on WebGPU: "missing return at end of function"). The WebGPU lazy-load
+  guard passes again, now including the BCn and VP9 decoder warm-ups.
+
 ### SpawnDev.ILGPU 5.4.24; VP9 decoder bit-exact on WebGPU (2026-11-10)
 - SpawnDev.ILGPU 5.4.23 -> 5.4.24 (WGSL / GLSL short-circuit conditions no longer copy the code behind them).
 - The full VP9 decoder runs on WebGPU, bit-exact with libvpx: Vp9Decode_EveryFrame (311 files), PublicApi, WebMAlpha
