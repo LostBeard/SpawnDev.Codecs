@@ -120,9 +120,10 @@ public abstract partial class CodecsTestBase
             True(flacEncWarm > 0, "FlacEncoderGpu.WarmUpAsync compiled no kernel. " + warmCounts);
             True(mp3Warm > 0, "Mp3DecoderGpu.WarmUpAsync compiled no kernel. " + warmCounts);
             True(opusWarm > 0, "OggOpusEncoder.WarmUpAsync compiled no kernel. " + warmCounts);
-            // The VP9 decoder's kernels are GiantShader on the browser GPU backends (Tint can take Chrome's GPU process to
-            // many GB): its warm-up is checked on the desktop and Wasm lanes only. Its constructor check above runs everywhere.
-            if (acc.AcceleratorType is not (AcceleratorType.WebGPU or AcceleratorType.WebGL))
+            // The VP9 decoder's warm-up compiles its kernels without running them. On WebGPU they compile in Chrome in at
+            // most a few seconds and under 0.6 GB each since 2026-11-10 (call-site rewrites); WebGL still cannot hold
+            // them (GLSL). Its constructor check above runs everywhere.
+            if (acc.AcceleratorType is not AcceleratorType.WebGL)
             {
                 long vp9Warm = await Compiled(vp9.WarmUpAsync);
                 True(vp9Warm >= 10, $"Vp9DecoderGpu.WarmUpAsync compiled {vp9Warm} kernels; the decode uses 10");
