@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### VP9 decoder: inter prediction back to fast on Velocity (2026-11-10)
+- The one-body `Convolve` (5e76f1e) made Velocity's reconstruction 1.8x slower (ComfyUI files, Vector256 74 -> 130
+  ms/frame): the copy / horizontal / vertical / 2-D choice sat inside the pixel loops, so the SIMD lanes paid for it
+  per pixel. Now the four convolve loops are back, each called from one place, the choice made once. Reconstruction
+  ms/frame against the code before the rewrites (e29dd73) and master before this fix: Velocity Vector256 49.5 (74.5,
+  130), Vector128 71 (113, 217), CPU accelerator 5.3 (6.0), CUDA 1.95 (= master 1.94). InterPredict WGSL about 5.1k
+  lines fully inlined (4.1k with one body; 134k originally).
+- The loop filter rewrite (35e2c9a) made Velocity's loop filter 3x faster (Vector256 265 -> 82 ms/frame).
+
 ### SpawnDev.ILGPU 5.4.25 (2026-11-10)
 - SpawnDev.ILGPU 5.4.24 -> 5.4.25: WGSL no longer lets a helper fall off its end after a loop with an early return
   (`Bc7EncoderGpu.ModeKernel` failed to compile on WebGPU: "missing return at end of function"). The WebGPU lazy-load

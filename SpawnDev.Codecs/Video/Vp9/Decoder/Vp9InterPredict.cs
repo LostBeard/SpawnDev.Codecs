@@ -333,52 +333,78 @@ internal static class Vp9InterPred
         Fetch(src, p, x, y + 3, edge) * k.T3 + Fetch(src, p, x, y + 4, edge) * k.T4 + Fetch(src, p, x, y + 5, edge) * k.T5 +
         Fetch(src, p, x, y + 6, edge) * k.T6 + Fetch(src, p, x, y + 7, edge) * k.T7;
 
-    /// <summary>
-    /// The convolves of vpx_convolve.c in one body: copy (no filter: vpx_convolve_copy / _avg), horizontal
-    /// (<paramref name="hf"/>: convolve_horiz, vpx_convolve8_horiz / _avg_horiz, vpx_scaled_horiz / _avg_horiz), vertical
-    /// (<paramref name="vf"/>: convolve_vert and its variants) and 2-D (both: vpx_convolve8 / _avg, vpx_scaled_2d / _avg_2d:
-    /// the horizontal pass over intermediate_height = (((h - 1) * y_step_q4 + y0_q4) &gt;&gt; SUBPEL_BITS) + SUBPEL_TAPS
-    /// rows from y0 - 3 into byte values, then the vertical pass over them, column by column; see the file header). Each
-    /// output pixel gets exactly its own convolve's arithmetic. One body because D3D's shader compiler inlines every
-    /// function: a call site per convolve variant was another copy of the 8-tap filters and the tap tables.
-    /// Output column x is filtered at the 1/16-pel position x0_q4 + x * x_step_q4 (src -= SUBPEL_TAPS / 2 - 1), output
-    /// row y at y0_q4 + y * y_step_q4; unfiltered directions read column x0 + x / row y0 + y.
-    /// </summary>
-    private static void Convolve(ArrayView<byte> src, in Vp9InterRefPlane p, int x0, int y0, bool edge, int filter, bool hf,
-        bool vf, int x0Q4, int xStepQ4, int y0Q4, int yStepQ4, ArrayView<byte> dst, int dstAt, int dstStride, int w, int h,
-        bool avg, ArrayView<int> temp, int tempAt)
+    // The four convolves of vpx_convolve.c, each called from one place (PredictOne). One merged body with the choice
+    // inside the pixel loops made Velocity's reconstruction 1.8x slower (divergent per-pixel branches on SIMD lanes);
+    // four bodies with one call site each cost about as much WGSL.
+
+    /// <summary>vpx_convolve_copy_c / vpx_convolve_avg_c: the w x h block at (x0, y0).</summary>
+    private static void ConvolveCopy(ArrayView<byte> src, in Vp9InterRefPlane p, int x0, int y0, bool edge,
+        ArrayView<byte> dst, int dstAt, int dstStride, int w, int h, bool avg)
     {
-        bool both = hf & vf;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                Store(dst, dstAt + y * dstStride + x, Fetch(src, p, x0 + x, y0 + y, edge), avg);
+    }
+
+    /// <summary>convolve_horiz / convolve_avg_horiz (vpx_convolve8_horiz, _avg_horiz, vpx_scaled_horiz, _avg_horiz):
+    /// rows y0.., output x filtered at 1/16-pel position x0_q4 + x * x_step_q4 (src -= SUBPEL_TAPS / 2 - 1).</summary>
+    private static void ConvolveHoriz(ArrayView<byte> src, in Vp9InterRefPlane p, int x0, int y0, bool edge, int filter,
+        int x0Q4, int xStepQ4, ArrayView<byte> dst, int dstAt, int dstStride, int w, int h, bool avg)
+    {
+        for (int y = 0; y < h; y++)
+        {
+            int xQ4 = x0Q4;
+            for (int x = 0; x < w; x++)
+            {
+                var k = Kernel(filter, xQ4 & SubpelMask);
+                int sum = DotRow(src, p, x0 - (SubpelTaps / 2 - 1) + (xQ4 >> SubpelBits), y0 + y, edge, k);
+                Store(dst, dstAt + y * dstStride + x, RoundClip(sum), avg);
+                xQ4 += xStepQ4;
+            }
+        }
+    }
+
+    /// <summary>convolve_vert / convolve_avg_vert (vpx_convolve8_vert, _avg_vert, vpx_scaled_vert, _avg_vert): columns
+    /// x0.., output y filtered at 1/16-pel position y0_q4 + y * y_step_q4 (src -= src_stride * (SUBPEL_TAPS / 2 - 1)).</summary>
+    private static void ConvolveVert(ArrayView<byte> src, in Vp9InterRefPlane p, int x0, int y0, bool edge, int filter,
+        int y0Q4, int yStepQ4, ArrayView<byte> dst, int dstAt, int dstStride, int w, int h, bool avg)
+    {
+        for (int x = 0; x < w; x++)
+        {
+            int yQ4 = y0Q4;
+            for (int y = 0; y < h; y++)
+            {
+                var k = Kernel(filter, yQ4 & SubpelMask);
+                int sum = DotCol(src, p, x0 + x, y0 - (SubpelTaps / 2 - 1) + (yQ4 >> SubpelBits), edge, k);
+                Store(dst, dstAt + y * dstStride + x, RoundClip(sum), avg);
+                yQ4 += yStepQ4;
+            }
+        }
+    }
+
+    /// <summary>vpx_convolve8_c / vpx_convolve8_avg_c (also vpx_scaled_2d / _avg_2d): horizontal pass over
+    /// intermediate_height = (((h - 1) * y_step_q4 + y0_q4) &gt;&gt; SUBPEL_BITS) + SUBPEL_TAPS rows from y0 - 3 into byte
+    /// values, then the vertical pass over them; done column by column (see the file header).</summary>
+    private static void Convolve2D(ArrayView<byte> src, in Vp9InterRefPlane p, int x0, int y0, bool edge, int filter,
+        int x0Q4, int xStepQ4, int y0Q4, int yStepQ4, ArrayView<byte> dst, int dstAt, int dstStride, int w, int h, bool avg,
+        ArrayView<int> temp, int tempAt)
+    {
         int intermediateHeight = (((h - 1) * yStepQ4 + y0Q4) >> SubpelBits) + SubpelTaps;
         int xQ4 = x0Q4;
         for (int x = 0; x < w; x++)
         {
-            Vp9Kernel8 kx = default;
-            if (hf) kx = Kernel(filter, xQ4 & SubpelMask);
-            int col = hf ? x0 - (SubpelTaps / 2 - 1) + (xQ4 >> SubpelBits) : x0 + x;
-            // 2-D: the horizontal pass, this column's intermediate rows
-            if (both)
-                for (int r = 0; r < intermediateHeight; r++)
-                    temp[tempAt + r] = RoundClip(DotRow(src, p, col, y0 - (SubpelTaps / 2 - 1) + r, edge, kx));
+            var kx = Kernel(filter, xQ4 & SubpelMask);
+            int col = x0 - (SubpelTaps / 2 - 1) + (xQ4 >> SubpelBits);
+            for (int r = 0; r < intermediateHeight; r++)
+                temp[tempAt + r] = RoundClip(DotRow(src, p, col, y0 - (SubpelTaps / 2 - 1) + r, edge, kx));
             int yQ4 = y0Q4;
             for (int y = 0; y < h; y++)
             {
-                Vp9Kernel8 ky = default;
-                if (vf) ky = Kernel(filter, yQ4 & SubpelMask);
-                int v;
-                if (both)
-                {
-                    int t = tempAt + (yQ4 >> SubpelBits);
-                    v = RoundClip(temp[t] * ky.T0 + temp[t + 1] * ky.T1 + temp[t + 2] * ky.T2 + temp[t + 3] * ky.T3 +
-                                  temp[t + 4] * ky.T4 + temp[t + 5] * ky.T5 + temp[t + 6] * ky.T6 + temp[t + 7] * ky.T7);
-                }
-                else if (vf)
-                    v = RoundClip(DotCol(src, p, col, y0 - (SubpelTaps / 2 - 1) + (yQ4 >> SubpelBits), edge, ky));
-                else if (hf)
-                    v = RoundClip(DotRow(src, p, col, y0 + y, edge, kx));
-                else
-                    v = Fetch(src, p, col, y0 + y, edge);
-                Store(dst, dstAt + y * dstStride + x, v, avg);
+                var ky = Kernel(filter, yQ4 & SubpelMask);
+                int t = tempAt + (yQ4 >> SubpelBits);
+                int sum = temp[t] * ky.T0 + temp[t + 1] * ky.T1 + temp[t + 2] * ky.T2 + temp[t + 3] * ky.T3 +
+                          temp[t + 4] * ky.T4 + temp[t + 5] * ky.T5 + temp[t + 6] * ky.T6 + temp[t + 7] * ky.T7;
+                Store(dst, dstAt + y * dstStride + x, RoundClip(sum), avg);
                 yQ4 += yStepQ4;
             }
             xQ4 += xStepQ4;
@@ -618,6 +644,10 @@ internal static class Vp9InterPred
         }
         else if (!scaleX & !fx) hf = false;
         else if (!scaleY & !fy) vf = false;
-        Convolve(src, p, ox, oy, edge, filter, hf, vf, qx, xs, qy, ys, dst, at, dstStride, rw, rh, avg, scratch, scratchAt);
+        // one call site per convolve, the choice made once (not inside the pixel loops)
+        if (hf & vf) Convolve2D(src, p, ox, oy, edge, filter, qx, xs, qy, ys, dst, at, dstStride, rw, rh, avg, scratch, scratchAt);
+        else if (hf) ConvolveHoriz(src, p, ox, oy, edge, filter, qx, xs, dst, at, dstStride, rw, rh, avg);
+        else if (vf) ConvolveVert(src, p, ox, oy, edge, filter, qy, ys, dst, at, dstStride, rw, rh, avg);
+        else ConvolveCopy(src, p, ox, oy, edge, dst, at, dstStride, rw, rh, avg);
     }
 }
