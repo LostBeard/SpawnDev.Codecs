@@ -22,9 +22,10 @@ internal static partial class Vp9ParseKernels
     /// - the token cache in the thread's local memory (<paramref name="loc"/>), not device memory: the context of every
     ///   coefficient reads two entries written moments before;
     /// - the three node probabilities of a context loaded together, before the first bool needs them.
+    /// The EOB / ZERO / ONE nodes (most tokens) stay unrolled; the larger tokens go through the kernel's one tree reader.
     /// </summary>
     private static int DecodeCoefs(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, ArrayView<int> ctx, int fc, ArrayView<int> t,
-        ArrayView<int> loc, ArrayView<int> dq, int dqAt, int tx, int type, int refType, int dqDc, int dqAc,
+        ArrayView<int> a, ArrayView<int> loc, ArrayView<int> dq, int dqAt, int tx, int type, int refType, int dqDc, int dqAc,
         int c0Ctx, int scanPk, ArrayView<int> counts, int cnt)
     {
         const int Tc = Vp9PLocal.TokenCache;
@@ -53,7 +54,8 @@ internal static partial class Vp9ParseKernels
                 dqv = dqAc;
                 loc[Tc + (pk & 1023)] = 0;
                 ++c;
-                if (c >= maxEob) return c;   // zero tokens at the end (no eob token)
+                if (c >= maxEob) break;   // zero tokens at the end (no eob token): leaves both loops (no early return,
+                                          // which WGSL's structured control flow would pay for with a copy of the loop's tail)
                 pk = pkNext;
                 pkNext = t[scanPk + c + 1];
                 coefCtx = (1 + loc[Tc + ((pk >> 10) & 1023)] + loc[Tc + (pk >> 20)]) >> 1;   // get_coef_context
@@ -62,51 +64,22 @@ internal static partial class Vp9ParseKernels
                 p1 = ctx[prob + 1];
                 p2 = ctx[prob + 2];
             }
+            if (c >= maxEob) break;
             int pos = pk & 1023;
-            int v;
+            int val = 1, cache = 1;   // ONE_TOKEN
             if (Read(ref r, d, p2) != 0)
             {
-                int p = Vp9T.Pareto8Full + (p2 - 1) * 8;
+                // TWO_TOKEN and up: vp9_coef_con_tree under the pivot node's Pareto probabilities, then the token's extra
+                // bits (one tree read and one extra-bits loop instead of a branch per token)
                 if (cnt >= 0) counts[cntBase + (band * 6 + coefCtx) * 4 + 2]++;
-                if (Read(ref r, d, t[p]) != 0)
-                {
-                    int val;
-                    if (Read(ref r, d, t[p + 3]) != 0)
-                    {
-                        loc[Tc + pos] = 5;
-                        if (Read(ref r, d, t[p + 5]) != 0)
-                        {
-                            if (Read(ref r, d, t[p + 7]) != 0) val = 67 + ReadCoeff(ref r, d, t, Vp9T.Cat6Prob, 14);
-                            else val = 35 + ReadCoeff(ref r, d, t, Vp9T.Cat5Prob, 5);
-                        }
-                        else if (Read(ref r, d, t[p + 6]) != 0) val = 19 + ReadCoeff(ref r, d, t, Vp9T.Cat4Prob, 4);
-                        else val = 11 + ReadCoeff(ref r, d, t, Vp9T.Cat3Prob, 3);
-                    }
-                    else
-                    {
-                        loc[Tc + pos] = 4;
-                        if (Read(ref r, d, t[p + 4]) != 0) val = 7 + ReadCoeff(ref r, d, t, Vp9T.Cat2Prob, 2);
-                        else val = 5 + ReadCoeff(ref r, d, t, Vp9T.Cat1Prob, 1);
-                    }
-                    v = (val * dqv) >> dqShift;
-                }
-                else if (Read(ref r, d, t[p + 1]) != 0)
-                {
-                    loc[Tc + pos] = 3;
-                    v = ((3 + Read(ref r, d, t[p + 2])) * dqv) >> dqShift;
-                }
-                else
-                {
-                    loc[Tc + pos] = 2;
-                    v = (2 * dqv) >> dqShift;
-                }
+                int token = ReadSym(ref r, d, t, ctx, a, Vp9PScan.CoefConTree, SrcTab, Vp9T.Pareto8Full + (p2 - 1) * 8);
+                int info = t[Vp9PScan.TokenInfo + token];
+                cache = info & 7;
+                val = ((info >> 3) & 127) + ReadCoeff(ref r, d, t, info >> 14, (info >> 10) & 15);
             }
-            else
-            {
-                if (cnt >= 0) counts[cntBase + (band * 6 + coefCtx) * 4 + 1]++;
-                loc[Tc + pos] = 1;
-                v = dqv >> dqShift;
-            }
+            else if (cnt >= 0) counts[cntBase + (band * 6 + coefCtx) * 4 + 1]++;
+            loc[Tc + pos] = cache;
+            int v = (val * dqv) >> dqShift;
             int signed = Read(ref r, d, 128) != 0 ? -v : v;
             dq[dqAt + pos] = (short)signed;
             ++c;
@@ -156,7 +129,7 @@ internal static partial class Vp9ParseKernels
     /// xd->max_blocks_wide / high (0 = the block is inside the frame).
     /// </summary>
     private static int DecodeBlockTokens(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, ArrayView<int> ctx, int fc, ArrayView<int> t,
-        ArrayView<int> work, ArrayView<int> loc, ArrayView<int> dq, int dqAt, int plane, int tx, int txType, int dqDc, int dqAc,
+        ArrayView<int> a, ArrayView<int> work, ArrayView<int> loc, ArrayView<int> dq, int dqAt, int plane, int tx, int txType, int dqDc, int dqAc,
         int aboveAt, int leftAt, int x, int y, int maxW, int maxH, int refType, ArrayView<int> counts, int cnt)
     {
         int n = 1 << tx;
@@ -167,14 +140,14 @@ internal static partial class Vp9ParseKernels
             lc |= loc[leftAt + y + k];
         }
         int coefCtx = (ac != 0 ? 1 : 0) + (lc != 0 ? 1 : 0);
-        int eob = DecodeCoefs(ref r, d, ctx, fc, t, loc, dq, dqAt, tx, plane == 0 ? 0 : 1, refType,
+        int eob = DecodeCoefs(ref r, d, ctx, fc, t, a, loc, dq, dqAt, tx, plane == 0 ? 0 : 1, refType,
             dqDc, dqAc, coefCtx, Vp9PScan.Offset(tx, txType), counts, cnt);
         // the context entries past the frame edge are cleared (libvpx's shifted little-endian store)
         int validA = n, validL = n;
         if (tx > 0)
         {
-            if (maxW != 0 && n + x > maxW) validA = maxW - x;
-            if (maxH != 0 && n + y > maxH) validL = maxH - y;
+            if (maxW != 0 & n + x > maxW) validA = maxW - x;
+            if (maxH != 0 & n + y > maxH) validL = maxH - y;
         }
         int nz = eob > 0 ? 1 : 0;
         for (int k = 0; k < n; k++)
@@ -232,14 +205,15 @@ internal static partial class Vp9ParseKernels
         int txMode = results[Vp9CompArgs.RTxMode];
         bool ok = true;
         bool inter = false;
-        if (a[Vp9PArg.IntraOnly] != 0)
-            ReadIntraFrameModeInfo(ref r, d, ctx, fc, t, a, mi, maps, rec, above, left, bsize, txMode, miOffset, xMis, yMis, counts, cnt);
-        else
+        // vp9_read_mode_info: read_intra_frame_mode_info (intra-only frames) and read_inter_frame_mode_info share their
+        // order (segment id, skip, [is_inter], tx size, modes), so one sequence serves both, each read at one call site
+        bool intraOnly = a[Vp9PArg.IntraOnly] != 0;
+        int segId = ReadSegmentId(ref r, d, t, ctx, a, maps, mi, rec, above, left, miOffset, xMis, yMis, intraOnly);
+        mi[b + Vp9Mi.SegmentId] = segId;
+        int skip = ReadSkip(ref r, d, ctx, fc, a, mi, above, left, segId, counts, cnt);
+        mi[b + Vp9Mi.Skip] = skip;
+        if (!intraOnly)
         {
-            int segId = ReadInterSegmentId(ref r, d, t, a, maps, mi, rec, above, left, miOffset, xMis, yMis);
-            mi[b + Vp9Mi.SegmentId] = segId;
-            int skip = ReadSkip(ref r, d, ctx, fc, a, mi, above, left, segId, counts, cnt);
-            mi[b + Vp9Mi.Skip] = skip;
             // read_is_inter_block
             if (SegFeatureActive(a, segId, SegLvlRefFrame)) inter = SegData(a, segId, SegLvlRefFrame) != Vp9Mi.IntraFrame;
             else
@@ -249,9 +223,18 @@ internal static partial class Vp9ParseKernels
                 if (cnt >= 0) counts[cnt + Vp9Cnt.IntraInter + c * 2 + bit]++;
                 inter = bit != 0;
             }
-            mi[b + Vp9Mi.TxSize] = ReadTxSize(ref r, d, ctx, fc, t, mi, above, left, bsize, txMode, skip == 0 || !inter, counts, cnt);
-            if (inter) ok = ReadInterBlockModeInfo(ref r, d, ctx, fc, t, a, mi, maps, results, p, rec, above, left, bsize, bmodeWl, bmodeHl, counts, cnt);
-            else ReadIntraBlockModeInfo(ref r, d, ctx, fc, t, mi, rec, bsize, counts, cnt);
+        }
+        mi[b + Vp9Mi.TxSize] = ReadTxSize(ref r, d, ctx, fc, t, mi, above, left, bsize, txMode, intraOnly | skip == 0 | !inter, counts, cnt);
+        if (inter) ok = ReadInterBlockModeInfo(ref r, d, ctx, fc, t, a, mi, maps, results, p, rec, above, left, bsize, bmodeWl, bmodeHl, counts, cnt);
+        else
+        {
+            mi[b + Vp9Mi.Ref0] = Vp9Mi.IntraFrame;
+            mi[b + Vp9Mi.Ref1] = Vp9Mi.NoRefFrame;
+            if (!intraOnly) mi[b + Vp9Mi.Interp] = Vp9Mi.SwitchableFilters;
+            ReadIntraModes(ref r, d, ctx, fc, t, a, mi, rec, above, left, bsize, bmodeWl, bmodeHl, intraOnly, counts, cnt);
+        }
+        if (!intraOnly)
+        {
             // the frame's MV buffer (vp9_read_mode_info)
             int curMv = a[Vp9PArg.CurMvOffset];
             for (int h = 0; h < yMis; h++)
@@ -283,7 +266,7 @@ internal static partial class Vp9ParseKernels
                 for (int k = 0; k < n4h; k++) loc[leftAt + k] = 0;
             }
         }
-        if (inter && skipFlag != 0) return true;
+        if (skipFlag != 0) return true;   // no tokens (intra blocks too: their transform blocks are all skipped)
 
         bool lossless = a[Vp9PArg.Lossless] != 0;
         int segIdB = mi[b + Vp9Mi.SegmentId];
@@ -311,13 +294,12 @@ internal static partial class Vp9ParseKernels
                     int txType = 0;
                     if (!inter)
                     {
-                        if (skipFlag != 0) continue;
                         int mode = plane == 0 ? mi[b + Vp9Mi.Mode] : mi[b + Vp9Mi.UvMode];
-                        if (bsize < Block8x8 && plane == 0) mode = mi[b + Vp9Mi.BmiMode + (row << 1) + col];
+                        if (bsize < Block8x8 & plane == 0) mode = mi[b + Vp9Mi.BmiMode + (row << 1) + col];
                         txType = plane != 0 || lossless ? 0 : t[Vp9T.IntraModeToTxTypeLookup + mode];
                     }
                     int dqAt = plane == 0 ? dqY : plane == 1 ? dqU : dqV;
-                    int eob = DecodeBlockTokens(ref r, d, ctx, fc, t, work, loc, dq, dqAt, plane, txSize, txType, dqDc, dqAc,
+                    int eob = DecodeBlockTokens(ref r, d, ctx, fc, t, a, work, loc, dq, dqAt, plane, txSize, txType, dqDc, dqAc,
                         aboveAt, leftAt, col, row, ctxMaxW, ctxMaxH, inter ? 1 : 0, counts, cnt);
                     eobTotal += eob;
                     int adv = 16 << (txSize << 1);
@@ -326,7 +308,7 @@ internal static partial class Vp9ParseKernels
                     else { sbBuf[sbEob + Vp9PLayout.SbEobV + eobV] = eob; eobV++; dqV += adv; }
                 }
         }
-        if (inter && bsize >= Block8x8 && eobTotal == 0)
+        if (inter & bsize >= Block8x8 & eobTotal == 0)
         {
             mi[b + Vp9Mi.Skip] = 1;   // skip loopfilter (and the neighbours' skip / tx contexts see it)
             dqY = saveDqY; dqU = saveDqU; dqV = saveDqV;
@@ -403,47 +385,47 @@ internal static partial class Vp9ParseKernels
                         // The probabilities come from the keyframe table (intra-only frames) or the frame context. Each buffer
                         // is indexed in its own branch: WGSL cannot choose at run time between views of different buffers.
                         int probAt = intraOnly ? Vp9T.KfPartitionProbs + pctx * 3 : fc + Vp9Ctx.Partition + pctx * 3;
-                        int partition;
-                        if (hasRows && hasCols)
-                            partition = intraOnly ? ReadTree(ref r, d, t, Vp9T.PartitionTree, t, probAt)
-                                                  : ReadTree(ref r, d, t, Vp9T.PartitionTree, ctx, probAt);
-                        else if (!hasRows && hasCols)
-                            partition = Read(ref r, d, intraOnly ? t[probAt + 1] : ctx[probAt + 1]) != 0 ? PartitionSplit : PartitionHorz;
-                        else if (hasRows)
-                            partition = Read(ref r, d, intraOnly ? t[probAt + 2] : ctx[probAt + 2]) != 0 ? PartitionSplit : PartitionVert;
-                        else partition = PartitionSplit;
+                        // all rows and columns inside: the partition tree; only the columns: one bool (probs[1], HORZ or
+                        // SPLIT); only the rows: one bool (probs[2], VERT or SPLIT); neither: SPLIT
+                        int partition = PartitionSplit;
+                        if (hasRows || hasCols)
+                            partition = ReadSym(ref r, d, t, ctx, a,
+                                hasRows && hasCols ? Vp9T.PartitionTree : hasCols ? Vp9PScan.PartHorzTree : Vp9PScan.PartVertTree,
+                                intraOnly ? SrcTab : SrcCtx, probAt + (hasRows && hasCols ? 0 : hasCols ? 1 : 2));
                         if (cnt >= 0) counts[cnt + Vp9Cnt.Partition + pctx * 4 + partition]++;
                         sbBuf[sb * Vp9PLayout.SbStride + Vp9PLayout.SbPartitions + parts] = partition;
                         parts++;
                         int subsize = t[Vp9T.SubsizeLookup + partition * 13 + bsize];
-                        bool ok = true;
+                        // The partition's blocks (process_partition's parse_block calls) as a loop over ONE ParseBlock call
+                        // site: block k is at (rr + k * dr, cc + k * dc). 8x8: one block of subsize (below 8x8 its
+                        // sub-block shape in wl / hl); NONE one; HORZ / VERT two when the second half is inside the frame.
+                        int blocks = 0, bwl = n4l2, bhl = n4l2, wl = 0, hl = 0, dr = 0, dc = 0;
                         if (hbs == 0)
                         {
-                            int wl = (partition & PartitionVert) != 0 ? 0 : 1;
-                            int hl = (partition & PartitionHorz) != 0 ? 0 : 1;
-                            ok = ParseBlock(ref r, d, a, ctx, t, mi, sb, sbBuf, dq, work, loc, maps, counts, results, cnt, rr, cc, colStart, colEnd,
-                                subsize, 1, 1, wl, hl, ref dqY, ref dqU, ref dqV, ref eobY, ref eobU, ref eobV);
+                            blocks = 1;
+                            bwl = 1;
+                            bhl = 1;
+                            wl = (partition & PartitionVert) != 0 ? 0 : 1;
+                            hl = (partition & PartitionHorz) != 0 ? 0 : 1;
                         }
-                        else if (partition == PartitionNone)
-                            ok = ParseBlock(ref r, d, a, ctx, t, mi, sb, sbBuf, dq, work, loc, maps, counts, results, cnt, rr, cc, colStart, colEnd,
-                                subsize, n4l2, n4l2, 0, 0, ref dqY, ref dqU, ref dqV, ref eobY, ref eobU, ref eobV);
+                        else if (partition == PartitionNone) blocks = 1;
                         else if (partition == PartitionHorz)
                         {
-                            ok = ParseBlock(ref r, d, a, ctx, t, mi, sb, sbBuf, dq, work, loc, maps, counts, results, cnt, rr, cc, colStart, colEnd,
-                                subsize, n4l2, n8l2, 0, 0, ref dqY, ref dqU, ref dqV, ref eobY, ref eobU, ref eobV);
-                            if (ok && hasRows)
-                                ok = ParseBlock(ref r, d, a, ctx, t, mi, sb, sbBuf, dq, work, loc, maps, counts, results, cnt, rr + hbs, cc, colStart, colEnd,
-                                    subsize, n4l2, n8l2, 0, 0, ref dqY, ref dqU, ref dqV, ref eobY, ref eobU, ref eobV);
+                            blocks = hasRows ? 2 : 1;
+                            bhl = n8l2;
+                            dr = hbs;
                         }
                         else if (partition == PartitionVert)
                         {
-                            ok = ParseBlock(ref r, d, a, ctx, t, mi, sb, sbBuf, dq, work, loc, maps, counts, results, cnt, rr, cc, colStart, colEnd,
-                                subsize, n8l2, n4l2, 0, 0, ref dqY, ref dqU, ref dqV, ref eobY, ref eobU, ref eobV);
-                            if (ok && hasCols)
-                                ok = ParseBlock(ref r, d, a, ctx, t, mi, sb, sbBuf, dq, work, loc, maps, counts, results, cnt, rr, cc + hbs, colStart, colEnd,
-                                    subsize, n8l2, n4l2, 0, 0, ref dqY, ref dqU, ref dqV, ref eobY, ref eobU, ref eobV);
+                            blocks = hasCols ? 2 : 1;
+                            bwl = n8l2;
+                            dc = hbs;
                         }
-                        else
+                        bool ok = true;
+                        for (int k = 0; k < blocks & ok; k++)
+                            ok = ParseBlock(ref r, d, a, ctx, t, mi, sb, sbBuf, dq, work, loc, maps, counts, results, cnt, rr + k * dr, cc + k * dc,
+                                colStart, colEnd, subsize, bwl, bhl, wl, hl, ref dqY, ref dqU, ref dqV, ref eobY, ref eobU, ref eobV);
+                        if (hbs != 0 & partition == PartitionSplit)
                         {
                             // PARTITION_SPLIT above 8x8: children in reverse so (rr, cc) is visited first
                             for (int k = 3; k >= 0; k--)
@@ -457,7 +439,7 @@ internal static partial class Vp9ParseKernels
                         }
                         if (!ok) { status = 2; break; }
                         // dec_update_partition_context
-                        if ((bsize == Block8x8 || partition != PartitionSplit) && bsize >= Block8x8)
+                        if ((bsize == Block8x8 | partition != PartitionSplit) & bsize >= Block8x8)
                         {
                             int pa = t[Vp9T.PartitionContextLookup + subsize * 2], pl = t[Vp9T.PartitionContextLookup + subsize * 2 + 1];
                             for (int k = 0; k < num8; k++)

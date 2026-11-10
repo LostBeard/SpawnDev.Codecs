@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### VP9 decoder: tile parse kernel 64x smaller after inlining, for Chrome on Windows (2026-11-09)
+- Chrome on Windows compiles WGSL with D3D's compiler, which inlines every function, so the code it compiles is call
+  sites x body. `Vp9ParseKernels.ParseKernel` was about 763k lines that way (113,564 WGSL lines, with `ParseBlock` a
+  111k-line function called from 6 places). It is now 11,464 WGSL lines, about 11,900 fully inlined, with 24 bool
+  reads in the whole kernel (`Plans/PLAN-VP9-Decoder-GPU-Speed.md`, S4):
+  - one `ParseBlock` call site (a loop over the partition's blocks);
+  - one `FindMvRefs` site (one pass per sub-block below 8x8; its searches are one ordered candidate stream with one
+    add-to-list site), one `ReadMv` site (the MV components a loop);
+  - key frame and inter frame mode info share one sequence; intra modes, reference frames, segment id, inter mode and
+    interp filter are loops over one read each;
+  - one tree reader (`ReadSym`, probabilities from the context, the tables or the arguments, each buffer indexed in
+    its own branch); partition edge cases and coefficient tokens from TWO up are trees in the tables (`Vp9PScan`);
+  - single-exit helpers and & / | for side-effect-free conditions: WGSL's structured control flow copied a helper's
+    tail after an early return and a body behind a short-circuit condition (including the refill loop of every bool
+    read, `Vp8BoolDecoderGpu.Fill`).
+- Bit-exact on the CPU accelerator (Parse_ModeInfo 5112 frames with 2951 counts checked, EveryFrame, PublicApi);
+  red-checked. CPU accelerator tile parse unchanged (ComfyUI, without the first frame: 1.91 / 2.00 -> 1.93 ms/frame).
+- The WGSL screen's ParseKernel budget is 0.62 MB (was 9.9 MB). `VP9_WGSL_DUMP=dir` writes each kernel's WGSL.
+
 ### VP9 decoder: tile parse coefficient loop on local memory (2026-11-09)
 - The serial tile parse thread spends 89% of its bool decodes on coefficient tokens (ComfyUI files: 87k of 98k bools per
   frame, `Plans/PLAN-VP9-Decoder-GPU-Speed.md` step S3). Its coefficient loop (`Vp9ParseKernels.DecodeCoefs`) now
