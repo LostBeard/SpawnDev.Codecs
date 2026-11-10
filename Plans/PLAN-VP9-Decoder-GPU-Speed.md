@@ -186,8 +186,14 @@ Next for S3:
   _avg and scaled variants, every pixel its own convolve's arithmetic), one `PredictOne` site (sub-8x8 4x4 calls and
   the whole-block call as one grid), one `PredictRef` site (references in a loop, one `refs` view). InterPredict 5.4 MB
   -> 0.21 MB, fully inlined 75,515 -> 4,114 lines (was 28 convolve copies).
-  - Next: IntraWave (61k inlined) and InterResidual (56k): the same look at their call sites (the inverse transforms
-    and the intra predictors).
+- Inverse transform call sites, done 2026-11-10: libvpx's choice worked out first, then one `Transform2DAdd` site per
+  transform size (size constant, inlined). InterResidual 56k -> 11.7k, IntraWave 61k -> 15.7k lines fully inlined.
+- Lesson from CUDA (ComfyUI A/B, interleaved runs): one call site with a size or kind as a run-time value costs speed
+  (loop filter +12%, reconstruction +7%), and so does a loop over every possible call (each slot's setup runs even
+  when it is off). Keep one site per constant size, and loop over the calls that run (a bitmask, lowest bit first).
+  Measured after: loop filter 1.36 ms/frame (= base), reconstruction 1.96 (base 2.12).
+- Chrome / DXC (Data, isolated Chrome, 5e76f1e): Parse 2.7 s (was killed above 3 GB), InterPredict 0.4 s (67 s),
+  Wavefront 1.2 s (98 s), InterResidual 8.2 s, IntraWave 10.9 s; the last two to remeasure after this change.
 
 ## Order
 S1 first: contained, bit-exact by construction, and about a third of the frame time. Then S2 inter, S2 intra, S3.

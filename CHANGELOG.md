@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### VP9 decoder: inverse transform call sites; loop filter back to its CUDA speed (2026-11-10)
+- The inverse transform (`Vp9Itx.InverseTransformAdd`, in the inter residual and intra wavefront kernels) called the
+  2-D transform from 13 places (one per libvpx eob variant). It now works out libvpx's choice first (DC only, or the
+  transform of the first rows, skipping all-zero rows for 32x32 above eob 135) and calls it once per transform size,
+  the size a constant, so each size's 1D transforms appear twice (row and column pass) and its loops keep fixed
+  bounds. Fully inlined WGSL: InterResidual 56,457 -> 11,656 lines, IntraWave 60,538 -> 15,737.
+- The loop filter rewrite (35e2c9a) made CUDA's loop filter 12% slower (ComfyUI files, 1.36 -> 1.51 ms/frame): one
+  filter body with the size a run-time value, and a loop over every possible libvpx call per block. Now one call site
+  per filter size (each folds to its own filter) and the loop visits only the calls that run. Loop filter 1.36 ->
+  1.36 ms/frame (base 1.37 / 1.38, new 1.35 / 1.37 interleaved), Wavefront about 13.9k lines fully inlined.
+- CUDA reconstruction (ComfyUI files) 2.12 -> 1.96 ms/frame against the code before the 32-bit offsets, all bit-exact.
+  Two other versions were measured and dropped: one 1D transform call site (each coefficient row copied into the
+  scratch first: recon +20%) and one transform call site with the size a run-time value (+7%).
+- Bit-exact: Vp9Itx, Vp9IntraPred, Vp9Lpf edge / superblock tests against libvpx (red-checked: 32x32 eob 34 row
+  band, 16x16 shift, 8x8 dual second call, inner 4 edge of the first block), full Vp9Decode_EveryFrame on the CPU
+  accelerator.
+
 ### VP9 decoder: inter prediction kernel 18x smaller after inlining, one convolve body (2026-11-10)
 - The inter prediction kernel inlined the convolves at 28 call sites: each reference (2) x libvpx's call shape
   (each 4x4 below BLOCK_8X8, or the whole block: 2) x the 7 convolve calls of the predict table (copy, horizontal,

@@ -37,6 +37,7 @@
 // Frame table (Vp9LfTable, ints): lf_info.lvl[seg][ref][mode], lf_info.lfthr[lvl] mblim / lim / hev_thr and the frame
 // filter level; FrameInit builds it from the frame header (Vp9LfHdr) on the accelerator.
 
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using ILGPU;
 
@@ -224,16 +225,20 @@ public static class Vp9Lpf
     /// <summary>
     /// One pixel position of a <paramref name="kind"/>-tap edge (4, 8 or 16: vpx_lpf_*_4 / _8 / _16's per-pixel work);
     /// the edge lies between s[at - step] and s[at]. The 16 filter falls back to the 8 filter where its outer pixels are
-    /// not flat, and the 8 filter to the 4 filter where its inner ones are not (libvpx filter16 / filter8 / filter4):
-    /// one body for the three, so a kernel that filters edges of every size has one copy of it (D3D's shader compiler
-    /// inlines every function, so each call site of a filter is another copy).
+    /// not flat, and the 8 filter to the 4 filter where its inner ones are not (libvpx filter16 / filter8 / filter4).
+    /// Callers pass the size as a constant (see LaneEdge): inlined, each call folds to that size's filter, and a kernel
+    /// has one copy per size and call site (D3D's shader compiler inlines every function, so each call site of a filter
+    /// is another copy).
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void LpfAt(ArrayView<byte> s, int kind, int at, int step, int blimit, int limit, int thresh)
     {
         int p3 = s[at - 4 * step], p2 = s[at - 3 * step], p1 = s[at - 2 * step], p0 = s[at - step];
         int q0 = s[at], q1 = s[at + step], q2 = s[at + 2 * step], q3 = s[at + 3 * step];
         int mask = FilterMask(limit, blimit, p3, p2, p1, p0, q0, q1, q2, q3);
-        bool flat = (kind >= 8) & FlatMask4(p3, p2, p1, p0, q0, q1, q2, q3);
+        // flat (filter8's test) only for the 8 and 16 filters: the 4 filter never computes it
+        bool flat = false;
+        if (kind >= 8) flat = FlatMask4(p3, p2, p1, p0, q0, q1, q2, q3);
         bool flat2 = false;
         int p7 = 0, p6 = 0, p5 = 0, p4 = 0, q4 = 0, q5 = 0, q6 = 0, q7 = 0;
         if (kind == 16)
@@ -641,7 +646,15 @@ public static class Vp9Lpf
         int thr, int level)
     {
         if ((uint)i < (uint)n)
-            LpfAt(p, kind, s + i * along, across, Mblim(lf, thr, level), Lim(lf, thr, level), Hev(lf, thr, level));
+        {
+            int at = s + i * along;
+            int bl = Mblim(lf, thr, level), li = Lim(lf, thr, level), th = Hev(lf, thr, level);
+            // one call site per filter size, each with its size a constant: inlined, each folds to its own filter (one
+            // body for all three, with the size a run-time value, made CUDA's loop filter 12% slower)
+            if (kind == 16) LpfAt(p, 16, at, across, bl, li, th);
+            else if (kind == 8) LpfAt(p, 8, at, across, bl, li, th);
+            else LpfAt(p, 4, at, across, bl, li, th);
+        }
     }
 
     private static int LflByte(ulong row, int k) => (int)((row >> (8 * k)) & 0xff);
@@ -670,18 +683,22 @@ public static class Vp9Lpf
                 // libvpx's calls, in order: group g = the 16, 8, 4 and inner 4 (4 pixels right) filters. A group with the
                 // edge in both block rows is one vertical_16_dual call (16 rows, the first row's levels) or one call per
                 // block row (8 and 4: _dual = its two halves); with the edge in one block row, one call on that row.
-                for (int j = 0; j < 8; j++)
+                // The calls that run: bit 2 * g + h (h 1: the second block row's call of an 8 / 4 _dual), visited in
+                // that order, only the set bits.
+                uint b16 = mask16x16 & dualOne, b8 = mask8x8 & dualOne, b4 = mask4x4 & dualOne, bi = mask4x4Int & dualOne;
+                uint calls = (b16 != 0 ? 1u : 0u) | (b8 != 0 ? 4u : 0u) | (b8 == dualOne ? 8u : 0u) | (b4 != 0 ? 16u : 0u) |
+                             (b4 == dualOne ? 32u : 0u) | (bi != 0 ? 64u : 0u) | (bi == dualOne ? 128u : 0u);
+                for (; calls != 0; calls &= calls - 1)
                 {
+                    int j = 31 - BitOperations.LeadingZeroCount(calls & (0u - calls));
                     int g = j >> 1;
                     uint mg = g == 0 ? mask16x16 : g == 1 ? mask8x8 : g == 2 ? mask4x4 : mask4x4Int;
-                    uint b = mg & dualOne;
-                    bool both = b == dualOne;
+                    bool both = (mg & dualOne) == dualOne;
                     bool second = both ? (j & 1) != 0 : (mg & 1) == 0;
-                    bool on = (b != 0) & (((j & 1) == 0) | (both & (g != 0)));
                     int rows = both & (g == 0) ? 16 : 8;
                     int kind = g == 0 ? 16 : g == 1 ? 8 : 4;
                     int start = (second ? s + 8 * pitch : s) + (g == 3 ? 4 : 0);
-                    if (on) LaneEdge(p, kind, start, pitch, 1, rows, second ? i1 : i0, lf, thr, second ? l1 : l0);
+                    LaneEdge(p, kind, start, pitch, 1, rows, second ? i1 : i0, lf, thr, second ? l1 : l0);
                 }
             }
             s += 8;
@@ -717,15 +734,18 @@ public static class Vp9Lpf
                 int l = LflByte(lfl, k), ln = dual ? LflByte(lfl, k + 1) : l;
                 // libvpx's calls, in order: the filter on this block (16 dual: on both), on the next block, then the inner
                 // 4 edges (4 rows down) of this block and of the next one (the 16 filter has none)
-                for (int j = 0; j < 4; j++)
+                // (bit j of calls: j & 1 = the next block, j >= 2 = the inner edges; only the set bits, in that order)
+                bool small = (kind == 8) | (kind == 4);
+                uint calls = (kind != 0 ? 1u : 0u) | (small & dual ? 2u : 0u) |
+                             ((kind != 16) & ((mask4x4Int & 1) != 0) ? 4u : 0u) |
+                             ((kind != 16) & dual & ((mask4x4Int & 2) != 0) ? 8u : 0u);
+                for (; calls != 0; calls &= calls - 1)
                 {
+                    int j = 31 - BitOperations.LeadingZeroCount(calls & (0u - calls));
                     bool next = (j & 1) != 0, inner = j >= 2;
-                    bool on = inner
-                        ? (kind != 16) & ((mask4x4Int & (next ? 2u : 1u)) != 0) & (!next | dual)
-                        : (kind != 0) & (!next | (dual & (kind != 16)));
                     int n = (!inner) & (kind == 16) & dual ? 16 : 8;
                     int start = s + (next ? 8 : 0) + (inner ? 4 * pitch : 0);
-                    if (on) LaneEdge(p, inner ? 4 : kind, start, 1, pitch, n, next ? i1 : i0, lf, thr, next ? ln : l);
+                    LaneEdge(p, inner ? 4 : kind, start, 1, pitch, n, next ? i1 : i0, lf, thr, next ? ln : l);
                 }
             }
             s += 8 * count;

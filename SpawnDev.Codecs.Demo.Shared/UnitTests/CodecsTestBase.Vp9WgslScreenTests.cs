@@ -22,8 +22,8 @@ public abstract partial class CodecsTestBase
     // 5.4.23-local.3, which emits view-taking helpers, ref state and LocalMemory views as WGSL functions instead of
     // inlining them. Re-measured 2026-11-10 on 5.4.23 after the reconstruction and loop-filter kernels moved from 64-bit
     // to 32-bit pixel / coefficient / scratch offsets (64-bit math is emulated in WGSL): loop-filter Wavefront 9.0 MB
-    // (fully inlined 189k -> 116k lines; then 0.55 MB, about 11k inlined, after its call-site rewrite: one filter body), InterPredict 5.4 MB (134k -> 76k; then 0.21 MB, about 4.1k inlined, after its call-site rewrite: one convolve body), IntraWave 1.3 MB (2.7 MB; 116k -> 61k),
-    // InterResidual 1.1 MB (2.4 MB; 102k -> 56k),
+    // (fully inlined 189k -> 116k lines; then 0.75 MB, about 14k inlined, after its call-site rewrite: one filter body per size), InterPredict 5.4 MB (134k -> 76k; then 0.21 MB, about 4.1k inlined, after its call-site rewrite: one convolve body), IntraWave 1.3 MB (2.7 MB; 116k -> 61k; 0.72 MB, about 16k, with one inverse transform site per size),
+    // InterResidual 1.1 MB (2.4 MB; 102k -> 56k; 0.51 MB, about 12k, likewise),
     // CompressedHeader 0.43 MB (6.4 MB before the table-driven rewrite: one DiffUpdate call site instead of one per
     // syntax element), ParseKernel 0.55 MB (11,563 lines, about 11,900 with every function inlined as D3D does; before
     // the call-site rewrite 9.0 MB / 113,564 lines, but ParseBlock was a 111k-line WGSL function called from 6 places,
@@ -35,10 +35,10 @@ public abstract partial class CodecsTestBase
         (typeof(Vp9CompressedHeaderKernels), "CompressedHeaderKernel", 471586),
         (typeof(Vp9ParseKernels), "ParseKernel", 600774),
         (typeof(Vp9ReconKernels), "InterPredictKernel", 229652),
-        (typeof(Vp9ReconKernels), "InterResidualKernel", 1193293),
-        (typeof(Vp9ReconKernels), "IntraWaveKernel", 1425491),
+        (typeof(Vp9ReconKernels), "InterResidualKernel", 563233),
+        (typeof(Vp9ReconKernels), "IntraWaveKernel", 794108),
         (typeof(Vp9LoopFilterKernels), "FrameInitKernel", 24780),
-        (typeof(Vp9LoopFilterKernels), "WavefrontKernel", 600699),
+        (typeof(Vp9LoopFilterKernels), "WavefrontKernel", 829819),
         (typeof(Vp9AdaptKernels), "SumCountsKernel", 3579),
         (typeof(Vp9AdaptKernels), "AdaptKernel", 354152),
         (typeof(Vp9OutputKernels), "PackPlanesKernel", 19703),

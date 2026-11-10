@@ -74,38 +74,35 @@ internal static class Vp9Itx
             else Iwht4x4_1Add(coef, coefAt, dst, dstAt, stride);
             return;
         }
-        if (txSize == 0)
+        // The transform libvpx's dispatch picks, as parameters, then one call: vp9_iht{4x4,8x8,16x16}_add with tx_type
+        // other than DCT_DCT -> vp9_iht*_add (all rows); DCT_DCT and 32x32 -> vp9_idct*_add, whose eob variant is DC only
+        // (vpx_idct*_1_add: eob 1, and eob 0 at 4x4) or the transform of the first rows (vpx_idct8x8_12 / _64,
+        // vpx_idct16x16_10 / _38 / _256, vpx_idct32x32_34 / _135 / _1024, the last skipping all-zero rows). One call
+        // site each, so a kernel has one copy of the 1D transforms (D3D's shader compiler inlines every function).
+        int n = 4 << txSize;
+        int shift = txSize == 0 ? 4 : txSize == 1 ? 5 : 6;
+        bool dct = (txSize == 3) | (txType == DctDct);
+        int type = txSize == 3 ? DctDct : txType;
+        bool dcOnly = dct & (txSize == 0 ? eob <= 1 : eob == 1);
+        int rows = n;
+        bool skipZeroRows = false;
+        if (dct)
         {
-            // vp9_iht4x4_add -> vp9_idct4x4_add (DCT_DCT) / vp9_iht4x4_16_add
-            if (txType != DctDct) Transform2DAdd(coef, coefAt, 4, txType, 4, false, 4, dst, dstAt, stride, scratch, scratchAt);
-            else if (eob > 1) Transform2DAdd(coef, coefAt, 4, DctDct, 4, false, 4, dst, dstAt, stride, scratch, scratchAt);   // vpx_idct4x4_16_add
-            else DcOnlyAdd(coef, coefAt, 4, 4, dst, dstAt, stride);                                                          // vpx_idct4x4_1_add
+            if (txSize == 1) rows = eob <= 12 ? 4 : 8;
+            else if (txSize == 2) rows = eob <= 10 ? 4 : eob <= 38 ? 8 : 16;
+            else if (txSize == 3)
+            {
+                rows = eob <= 34 ? 8 : eob <= 135 ? 16 : 32;
+                skipZeroRows = eob > 135;
+            }
         }
-        else if (txSize == 1)
-        {
-            // vp9_iht8x8_add -> vp9_idct8x8_add (DCT_DCT) / vp9_iht8x8_64_add
-            if (txType != DctDct) Transform2DAdd(coef, coefAt, 8, txType, 8, false, 5, dst, dstAt, stride, scratch, scratchAt);
-            else if (eob == 1) DcOnlyAdd(coef, coefAt, 8, 5, dst, dstAt, stride);                                             // vpx_idct8x8_1_add
-            else if (eob <= 12) Transform2DAdd(coef, coefAt, 8, DctDct, 4, false, 5, dst, dstAt, stride, scratch, scratchAt);  // vpx_idct8x8_12_add
-            else Transform2DAdd(coef, coefAt, 8, DctDct, 8, false, 5, dst, dstAt, stride, scratch, scratchAt);                 // vpx_idct8x8_64_add
-        }
-        else if (txSize == 2)
-        {
-            // vp9_iht16x16_add -> vp9_idct16x16_add (DCT_DCT) / vp9_iht16x16_256_add
-            if (txType != DctDct) Transform2DAdd(coef, coefAt, 16, txType, 16, false, 6, dst, dstAt, stride, scratch, scratchAt);
-            else if (eob == 1) DcOnlyAdd(coef, coefAt, 16, 6, dst, dstAt, stride);                                             // vpx_idct16x16_1_add
-            else if (eob <= 10) Transform2DAdd(coef, coefAt, 16, DctDct, 4, false, 6, dst, dstAt, stride, scratch, scratchAt);  // vpx_idct16x16_10_add
-            else if (eob <= 38) Transform2DAdd(coef, coefAt, 16, DctDct, 8, false, 6, dst, dstAt, stride, scratch, scratchAt);  // vpx_idct16x16_38_add
-            else Transform2DAdd(coef, coefAt, 16, DctDct, 16, false, 6, dst, dstAt, stride, scratch, scratchAt);                // vpx_idct16x16_256_add
-        }
-        else
-        {
-            // vp9_idct32x32_add
-            if (eob == 1) DcOnlyAdd(coef, coefAt, 32, 6, dst, dstAt, stride);                                                  // vpx_idct32x32_1_add
-            else if (eob <= 34) Transform2DAdd(coef, coefAt, 32, DctDct, 8, false, 6, dst, dstAt, stride, scratch, scratchAt);  // vpx_idct32x32_34_add
-            else if (eob <= 135) Transform2DAdd(coef, coefAt, 32, DctDct, 16, false, 6, dst, dstAt, stride, scratch, scratchAt); // vpx_idct32x32_135_add
-            else Transform2DAdd(coef, coefAt, 32, DctDct, 32, true, 6, dst, dstAt, stride, scratch, scratchAt);                 // vpx_idct32x32_1024_add
-        }
+        // one Transform2DAdd site per size, the size a constant: inlined, each keeps only its size's 1D transforms and
+        // its fixed-size loops (one site with the size a run-time value made CUDA reconstruction 7% slower)
+        if (dcOnly) DcOnlyAdd(coef, coefAt, n, shift, dst, dstAt, stride);
+        else if (txSize == 0) Transform2DAdd(coef, coefAt, 4, type, rows, skipZeroRows, 4, dst, dstAt, stride, scratch, scratchAt);
+        else if (txSize == 1) Transform2DAdd(coef, coefAt, 8, type, rows, skipZeroRows, 5, dst, dstAt, stride, scratch, scratchAt);
+        else if (txSize == 2) Transform2DAdd(coef, coefAt, 16, type, rows, skipZeroRows, 6, dst, dstAt, stride, scratch, scratchAt);
+        else Transform2DAdd(coef, coefAt, 32, type, rows, skipZeroRows, 6, dst, dstAt, stride, scratch, scratchAt);
     }
 
     /// <summary>
@@ -115,27 +112,29 @@ internal static class Vp9Itx
     /// added to dst after ROUND_POWER_OF_TWO(out, <paramref name="shift"/>). tx_type picks the 1D transforms as libvpx's
     /// IHT tables { cols, rows }: rows ADST for DCT_ADST / ADST_ADST, columns ADST for ADST_DCT / ADST_ADST.
     /// </summary>
+    // Two Transform1D call sites (the row pass reads the coefficients, the column pass the scratch: WGSL cannot choose
+    // between views of different buffers at run time), so a kernel has two copies of each size's 1D transforms.
+    // Copying each row into the scratch first to share one site made CUDA reconstruction about 20% slower.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Transform2DAdd(ArrayView<int> coef, int coefAt, int n, int txType, int rows, bool skipZeroRows, int shift,
         ArrayView<byte> dst, int dstAt, int stride, ArrayView<int> scratch, int scratchAt)
     {
-        bool rowAdst = txType == DctAdst || txType == AdstAdst;
-        bool colAdst = txType == AdstDct || txType == AdstAdst;
+        bool rowAdst = (txType == DctAdst) | (txType == AdstAdst);
+        bool colAdst = (txType == AdstDct) | (txType == AdstAdst);
         for (int r = 0; r < n; r++)
         {
             int o = scratchAt + r * n;
             bool zero = r >= rows;
-            if (!zero && skipZeroRows)
+            if (!zero & skipZeroRows)
             {
                 int any = 0;
                 for (int j = 0; j < n; j++) any |= (short)coef[coefAt + r * n + j];
                 zero = any == 0;
             }
             if (zero)
-            {
                 for (int j = 0; j < n; j++) scratch[o + j] = 0;
-                continue;
-            }
-            Transform1D(n, rowAdst, coef, coefAt + r * n, 1, scratch, o, 1);
+            else
+                Transform1D(n, rowAdst, coef, coefAt + r * n, 1, scratch, o, 1);
         }
         int col = scratchAt + n * n;
         int half = 1 << (shift - 1);
@@ -150,6 +149,7 @@ internal static class Vp9Itx
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Transform1D(int n, bool adst, ArrayView<int> src, int sAt, int sStep, ArrayView<int> dst, int dAt, int dStep)
     {
         if (n == 4)
