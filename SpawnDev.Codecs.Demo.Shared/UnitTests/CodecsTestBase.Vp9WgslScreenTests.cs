@@ -20,14 +20,17 @@ public abstract partial class CodecsTestBase
 {
     // (class, kernel method, WGSL character budget), each today's size + 10%. Measured 2026-11-09 on SpawnDev.ILGPU
     // 5.4.23-local.3, which emits view-taking helpers, ref state and LocalMemory views as WGSL functions instead of
-    // inlining them: ParseKernel 9.0 MB (113,564 lines; 87.1 MB on 5.4.21), loop-filter Wavefront 9.2 MB,
-    // InterPredict 5.6 MB, IntraWave 2.7 MB, InterResidual 2.4 MB, CompressedHeader 0.47 MB (6.4 MB before the
-    // table-driven rewrite: one DiffUpdate call site instead of one per syntax element).
+    // inlining them: loop-filter Wavefront 9.2 MB, InterPredict 5.6 MB, IntraWave 2.7 MB, InterResidual 2.4 MB,
+    // CompressedHeader 0.47 MB (6.4 MB before the table-driven rewrite: one DiffUpdate call site instead of one per
+    // syntax element), ParseKernel 0.56 MB (11,464 lines, about 11,900 with every function inlined as D3D does; before
+    // the call-site rewrite 9.0 MB / 113,564 lines, but ParseBlock was a 111k-line WGSL function called from 6 places,
+    // so about 763k lines inlined). A WGSL function's call sites multiply it on D3D, so the line count alone can hide
+    // a regression: VP9_WGSL_DUMP=dir writes the WGSL to look at.
     private static readonly (Type Owner, string Kernel, long Budget)[] Vp9WgslKernels =
     {
         (typeof(Vp9CompressedHeaderKernels), "CopyContextKernel", 3734),
         (typeof(Vp9CompressedHeaderKernels), "CompressedHeaderKernel", 522395),
-        (typeof(Vp9ParseKernels), "ParseKernel", 9884585),
+        (typeof(Vp9ParseKernels), "ParseKernel", 617970),
         (typeof(Vp9ReconKernels), "InterPredictKernel", 6148984),
         (typeof(Vp9ReconKernels), "InterResidualKernel", 2691056),
         (typeof(Vp9ReconKernels), "IntraWaveKernel", 2971359),
@@ -52,6 +55,9 @@ public abstract partial class CodecsTestBase
             try
             {
                 string wgsl = ShaderCompiler.Generate(method, CapabilityProfiles.WebGPUBaseline).Source ?? "";
+                // diagnostics: VP9_WGSL_DUMP=dir writes <class>.<kernel>.wgsl (to see which code repeats)
+                string? dump = OperatingSystem.IsBrowser() ? null : Environment.GetEnvironmentVariable("VP9_WGSL_DUMP");
+                if (dump != null) File.WriteAllText(Path.Combine(dump, $"{owner.Name}.{kernel}.wgsl"), wgsl);
                 chars = wgsl.Length;
                 lines = 1;
                 foreach (char c in wgsl) if (c == '\n') lines++;

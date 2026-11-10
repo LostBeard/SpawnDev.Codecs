@@ -168,7 +168,9 @@ public static class Vp8BoolDecoderGpu
             loopEnd = x;
         }
 
-        if (x < 0 || bitsLeft != 0)
+        // | not ||: a short-circuit condition in front of the loop makes WGSL's structured control flow emit the loop
+        // twice, at every inlined bool read
+        if ((x < 0) | (bitsLeft != 0))
         {
             while (shift >= loopEnd)
             {

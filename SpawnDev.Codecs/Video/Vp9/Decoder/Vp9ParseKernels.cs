@@ -74,14 +74,43 @@ internal static class Vp9PScan
 
     public const int Ints = 4 * (17 + 65 + 257 + 1025);
 
-    /// <summary><see cref="Vp9T.Packed"/> followed by the packed scans (built once from libvpx's constant tables).</summary>
+    // After the scans, the parse kernel's own small trees (vpx_tree_index form: a leaf is -value), so a single bool with a
+    // partition result and the coefficient token tree go through the kernel's one tree reader:
+    /// <summary>read_partition with only the columns inside the frame: bit ? PARTITION_SPLIT : PARTITION_HORZ.</summary>
+    public const int PartHorzTree = Vp9T.Count + Ints;
+    /// <summary>read_partition with only the rows inside the frame: bit ? PARTITION_SPLIT : PARTITION_VERT.</summary>
+    public const int PartVertTree = PartHorzTree + 2;
+    /// <summary>libvpx vp9_coef_con_tree (TWO_TOKEN .. CATEGORY6_TOKEN under the pivot node, probabilities vp9_pareto8_full).</summary>
+    public const int CoefConTree = PartVertTree + 2;
+    /// <summary>
+    /// Per token (index = token, TWO_TOKEN 2 .. CATEGORY6_TOKEN 10): its token cache value (vp9_pt_energy_class, bits 0-2),
+    /// its smallest value (bits 3-9), its number of extra bits (bits 10-13) and the extra bits' probabilities (offset in
+    /// <see cref="Tables"/>, bits 14 and up).
+    /// </summary>
+    public const int TokenInfo = CoefConTree + 16;
+    /// <summary>All of <see cref="Tables"/>.</summary>
+    public const int TotalInts = TokenInfo + 11;
+
+    /// <summary><see cref="Vp9T.Packed"/> followed by the packed scans and the small trees (built once from libvpx's constant tables).</summary>
     public static readonly int[] Tables = Build();
 
     private static int[] Build()
     {
         var t = Vp9T.Packed;
-        var all = new int[Vp9T.Count + Ints];
+        var all = new int[TotalInts];
         Array.Copy(t, all, Vp9T.Count);
+        // PARTITION_HORZ 1, PARTITION_VERT 2, PARTITION_SPLIT 3
+        all[PartHorzTree] = -1; all[PartHorzTree + 1] = -3;
+        all[PartVertTree] = -2; all[PartVertTree + 1] = -3;
+        // vp9_coef_con_tree: TWO 2, THREE 3, FOUR 4, CATEGORY1..6 5..10
+        int[] con = { 2, 6, -2, 4, -3, -4, 8, 10, -5, -6, 12, 14, -7, -8, -9, -10 };
+        Array.Copy(con, 0, all, CoefConTree, con.Length);
+        // dct_value_tokens: smallest value and extra bits per token (CAT1_MIN_VAL 5 .. CAT6_MIN_VAL 67; 8-bit cat6 = 14 bits)
+        int[] minVal = { 0, 0, 2, 3, 4, 5, 7, 11, 19, 35, 67 };
+        int[] bits = { 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 14 };
+        int[] probs = { 0, 0, 0, 0, 0, Vp9T.Cat1Prob, Vp9T.Cat2Prob, Vp9T.Cat3Prob, Vp9T.Cat4Prob, Vp9T.Cat5Prob, Vp9T.Cat6Prob };
+        for (int tok = 2; tok <= 10; tok++)
+            all[TokenInfo + tok] = t[Vp9T.PtEnergyClass + tok] | (minVal[tok] << 3) | (bits[tok] << 10) | (probs[tok] << 14);
         for (int tx = 0; tx < 4; tx++)
             for (int type = 0; type < 4; type++)
             {
@@ -110,7 +139,7 @@ internal static class Vp9Cnt
 internal static partial class Vp9ParseKernels
 {
     // libvpx enums
-    private const int Block4x4 = 0, Block4x8 = 1, Block8x4 = 2, Block8x8 = 3, Block64x64 = 12;
+    private const int Block8x8 = 3, Block64x64 = 12;
     private const int PartitionNone = 0, PartitionHorz = 1, PartitionVert = 2, PartitionSplit = 3;
     private const int DcPred = 0, NearestMv = 10, NearMv = 11, ZeroMv = 12, NewMv = 13;
     private const int SegLvlAltQ = 0, SegLvlRefFrame = 2, SegLvlSkip = 3;
@@ -150,11 +179,30 @@ internal static partial class Vp9ParseKernels
         return bit;
     }
 
-    /// <summary>vpx_read_tree: tree and probabilities are int views (packed tables / context).</summary>
-    private static int ReadTree(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, ArrayView<int> tree, int treeAt, ArrayView<int> probs, int probAt)
+    /// <summary>Where <see cref="ReadSym"/> finds the probabilities: the frame context, the constant tables, the frame arguments.</summary>
+    private const int SrcCtx = 0, SrcTab = 1, SrcArg = 2;
+
+    /// <summary>A single bool as a tree: libvpx vp9_mv_class0_tree is {-0, -1}.</summary>
+    private const int BoolTree = Vp9T.MvClass0Tree;
+
+    /// <summary>
+    /// vpx_read_tree, the kernel's one tree reader (trees in the tables, probabilities from <paramref name="src"/>).
+    /// Chrome on Windows compiles WGSL through D3D's compiler, which inlines every function, so the code it compiles is
+    /// call sites x body: the parse kernel keeps every bool read (Read and this) to as few call sites as possible and
+    /// walks syntax elements in loops instead of repeating reads per element. Each buffer is indexed in its own branch
+    /// (WGSL cannot choose at run time between views of different buffers); a constant <paramref name="src"/> folds the
+    /// choice away at its call site.
+    /// </summary>
+    private static int ReadSym(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, ArrayView<int> t, ArrayView<int> ctx, ArrayView<int> a,
+        int treeAt, int src, int probAt)
     {
         int i = 0;
-        while ((i = tree[treeAt + i + Read(ref r, d, probs[probAt + (i >> 1)])]) > 0) { }
+        do
+        {
+            int at = probAt + (i >> 1);
+            int prob = src == SrcCtx ? ctx[at] : src == SrcTab ? t[at] : a[at];
+            i = t[treeAt + i + Read(ref r, d, prob)];
+        } while (i > 0);
         return -i;
     }
 
@@ -165,14 +213,11 @@ internal static partial class Vp9ParseKernels
     private static int PackMv(int row, int col) => (row & 0xFFFF) | (col << 16);
 
     private static bool SegFeatureActive(ArrayView<int> a, int segId, int feature) =>
-        a[Vp9PArg.SegEnabled] != 0 && (a[Vp9PArg.SegMask + segId] & (1 << feature)) != 0;
+        a[Vp9PArg.SegEnabled] != 0 & (a[Vp9PArg.SegMask + segId] & (1 << feature)) != 0;   // & not &&: see ReadSegmentId
 
     private static int SegData(ArrayView<int> a, int segId, int feature) => a[Vp9PArg.SegData + segId * 4 + feature];
 
     // ---------------------------------------------------------------- mode info: segment id, skip, tx size
-
-    private static int ReadSegmentId(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, ArrayView<int> t, ArrayView<int> a) =>
-        ReadTree(ref r, d, t, Vp9T.SegmentTree, a, Vp9PArg.SegTree);
 
     private static void SetSegmentId(ArrayView<int> maps, ArrayView<int> a, int miOffset, int xMis, int yMis, int segId)
     {
@@ -188,57 +233,61 @@ internal static partial class Vp9ParseKernels
             for (int x = 0; x < xMis; x++) maps[cur + miOffset + y * miCols + x] = maps[last + miOffset + y * miCols + x];
     }
 
-    private static int ReadIntraSegmentId(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, ArrayView<int> t, ArrayView<int> a,
-        ArrayView<int> maps, int miOffset, int xMis, int yMis)
+    /// <summary>
+    /// read_intra_segment_id (<paramref name="intraOnly"/>) / read_inter_segment_id, one function: the temporal prediction
+    /// flag (inter frames with temporal update) and the segment tree are steps of one loop over one tree read.
+    /// </summary>
+    private static int ReadSegmentId(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, ArrayView<int> t, ArrayView<int> ctx, ArrayView<int> a,
+        ArrayView<int> maps, ArrayView<int> mi, int rec, int above, int left, int miOffset, int xMis, int yMis, bool intraOnly)
     {
-        if (a[Vp9PArg.SegEnabled] == 0) return 0;
-        if (a[Vp9PArg.SegUpdateMap] == 0)
+        // One exit per helper (here and in every inlined helper of the kernel): inlined, an early return makes WGSL's
+        // structured control flow repeat the code after it, and short-circuit conditions (&&, ||) in front of a body
+        // do the same to the body, so conditions without side effects use & and |.
+        int segId = 0;
+        if (a[Vp9PArg.SegEnabled] != 0)
         {
-            CopySegmentId(maps, a, miOffset, xMis, yMis);
-            return 0;
-        }
-        int segId = ReadSegmentId(ref r, d, t, a);
-        SetSegmentId(maps, a, miOffset, xMis, yMis, segId);
-        return segId;
-    }
-
-    private static int ReadInterSegmentId(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, ArrayView<int> t, ArrayView<int> a,
-        ArrayView<int> maps, ArrayView<int> mi, int rec, int above, int left, int miOffset, int xMis, int yMis)
-    {
-        if (a[Vp9PArg.SegEnabled] == 0) return 0;
-        int miCols = a[Vp9PArg.MiCols], last = a[Vp9PArg.LastSegOffset];
-        int predicted = 8;   // dec_get_segment_id: the smallest id over the block's positions in the last map
-        for (int y = 0; y < yMis; y++)
-            for (int x = 0; x < xMis; x++)
+            if (!intraOnly)
             {
-                int s = maps[last + miOffset + y * miCols + x];
-                if (s < predicted) predicted = s;
+                int miCols = a[Vp9PArg.MiCols], last = a[Vp9PArg.LastSegOffset];
+                segId = 8;   // dec_get_segment_id: the smallest id over the block's positions in the last map
+                for (int y = 0; y < yMis; y++)
+                    for (int x = 0; x < xMis; x++)
+                    {
+                        int s = maps[last + miOffset + y * miCols + x];
+                        if (s < segId) segId = s;
+                    }
             }
-        if (a[Vp9PArg.SegUpdateMap] == 0)
-        {
-            CopySegmentId(maps, a, miOffset, xMis, yMis);
-            return predicted;
+            if (a[Vp9PArg.SegUpdateMap] == 0) CopySegmentId(maps, a, miOffset, xMis, yMis);   // the predicted id (0 intra)
+            else
+            {
+                // step 0: seg_id_predicted (prob seg.pred_probs[ctx]); step 1: the segment tree (seg.tree_probs)
+                for (int step = !intraOnly & a[Vp9PArg.SegTemporal] != 0 ? 0 : 1; step < 2; step++)
+                {
+                    int v = ReadSym(ref r, d, t, ctx, a, step == 0 ? BoolTree : Vp9T.SegmentTree, SrcArg,
+                        step == 0 ? Vp9PArg.SegPred + Vp9ParseContexts.SegIdPredContext(mi, above, left) : Vp9PArg.SegTree);
+                    if (step == 1) segId = v;
+                    else
+                    {
+                        mi[rec * Vp9Mi.Stride + Vp9Mi.SegIdPredicted] = v;
+                        if (v != 0) break;   // predicted
+                    }
+                }
+                SetSegmentId(maps, a, miOffset, xMis, yMis, segId);
+            }
         }
-        int segId;
-        if (a[Vp9PArg.SegTemporal] != 0)
-        {
-            int prob = a[Vp9PArg.SegPred + Vp9ParseContexts.SegIdPredContext(mi, above, left)];
-            int pred = Read(ref r, d, prob);
-            mi[rec * Vp9Mi.Stride + Vp9Mi.SegIdPredicted] = pred;
-            segId = pred != 0 ? predicted : ReadSegmentId(ref r, d, t, a);
-        }
-        else segId = ReadSegmentId(ref r, d, t, a);
-        SetSegmentId(maps, a, miOffset, xMis, yMis, segId);
         return segId;
     }
 
     private static int ReadSkip(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, ArrayView<int> ctx, int fc, ArrayView<int> a,
         ArrayView<int> mi, int above, int left, int segId, ArrayView<int> counts, int cnt)
     {
-        if (SegFeatureActive(a, segId, SegLvlSkip)) return 1;
-        int c = Vp9ParseContexts.SkipContext(mi, above, left);
-        int skip = Read(ref r, d, ctx[fc + Vp9Ctx.Skip + c]);
-        if (cnt >= 0) counts[cnt + Vp9Cnt.Skip + c * 2 + skip]++;
+        int skip = 1;
+        if (!SegFeatureActive(a, segId, SegLvlSkip))
+        {
+            int c = Vp9ParseContexts.SkipContext(mi, above, left);
+            skip = Read(ref r, d, ctx[fc + Vp9Ctx.Skip + c]);
+            if (cnt >= 0) counts[cnt + Vp9Cnt.Skip + c * 2 + skip]++;
+        }
         return skip;
     }
 
@@ -246,26 +295,23 @@ internal static partial class Vp9ParseKernels
         ArrayView<int> mi, int above, int left, int bsize, int txMode, bool allowSelect, ArrayView<int> counts, int cnt)
     {
         int maxTx = t[Vp9T.MaxTxsizeLookup + bsize];
-        if (allowSelect && txMode == TxModeSelect && bsize >= Block8x8)
+        int biggest = t[Vp9T.TxModeToBiggestTxSize + txMode];
+        int txSize = maxTx < biggest ? maxTx : biggest;
+        if (allowSelect & txMode == TxModeSelect & bsize >= Block8x8)
         {
             int c = Vp9ParseContexts.TxSizeContext(mi, above, left, maxTx);
             // get_tx_probs: p8x8[ctx][1], p16x16[ctx][2], p32x32[ctx][3]
             int probs = maxTx == 1 ? fc + Vp9Ctx.Tx8 + c : maxTx == 2 ? fc + Vp9Ctx.Tx16 + c * 2 : fc + Vp9Ctx.Tx32 + c * 3;
-            int tx = Read(ref r, d, ctx[probs]);
-            if (tx != 0 && maxTx >= 2)
-            {
-                tx += Read(ref r, d, ctx[probs + 1]);
-                if (tx != 1 && maxTx >= 3) tx += Read(ref r, d, ctx[probs + 2]);
-            }
+            // read_selected_tx_size: unary, tx_probs[k] for the bit after k ones, at most maxTx bits
+            txSize = 0;
+            while (txSize < maxTx && Read(ref r, d, ctx[probs + txSize]) != 0) txSize++;
             if (cnt >= 0)
             {
                 int at = maxTx == 1 ? cnt + Vp9Cnt.Tx8 + c * 2 : maxTx == 2 ? cnt + Vp9Cnt.Tx16 + c * 3 : cnt + Vp9Cnt.Tx32 + c * 4;
-                counts[at + tx]++;
+                counts[at + txSize]++;
             }
-            return tx;
         }
-        int biggest = t[Vp9T.TxModeToBiggestTxSize + txMode];
-        return maxTx < biggest ? maxTx : biggest;
+        return txSize;
     }
 
     // ---------------------------------------------------------------- intra mode info
@@ -287,89 +333,48 @@ internal static partial class Vp9ParseKernels
         return Vp9T.KfYModeProb + (aboveMode * 10 + leftMode) * 9;
     }
 
-    private static void ReadIntraFrameModeInfo(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, ArrayView<int> ctx, int fc,
-        ArrayView<int> t, ArrayView<int> a, ArrayView<int> mi, ArrayView<int> maps, int rec, int above, int left, int bsize,
-        int txMode, int miOffset, int xMis, int yMis, ArrayView<int> counts, int cnt)
+    /// <summary>
+    /// The intra modes of a block, read_intra_frame_mode_info's (<paramref name="kf"/>: key frame / intra-only
+    /// probabilities from the tables, not counted) or read_intra_block_mode_info's (frame context, counted): one y mode
+    /// per 4x4 sub-block below 8x8 (the 4x8 / 8x4 halves copied), else one, then the uv mode, all steps of one loop over
+    /// one tree read.
+    /// </summary>
+    private static void ReadIntraModes(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, ArrayView<int> ctx, int fc, ArrayView<int> t,
+        ArrayView<int> a, ArrayView<int> mi, int rec, int above, int left, int bsize, int bmodeWl, int bmodeHl, bool kf,
+        ArrayView<int> counts, int cnt)
     {
         int b = rec * Vp9Mi.Stride;
-        int segId = ReadIntraSegmentId(ref r, d, t, a, maps, miOffset, xMis, yMis);
-        mi[b + Vp9Mi.SegmentId] = segId;
-        mi[b + Vp9Mi.Skip] = ReadSkip(ref r, d, ctx, fc, a, mi, above, left, segId, counts, cnt);
-        mi[b + Vp9Mi.TxSize] = ReadTxSize(ref r, d, ctx, fc, t, mi, above, left, bsize, txMode, true, counts, cnt);
-        mi[b + Vp9Mi.Ref0] = Vp9Mi.IntraFrame;
-        mi[b + Vp9Mi.Ref1] = Vp9Mi.NoRefFrame;
-        int mode;
-        if (bsize == Block4x4)
+        bool sub8 = bsize < Block8x8;
+        int n4w = sub8 ? 1 << bmodeWl : 2, n4h = sub8 ? 1 << bmodeHl : 2;
+        int sizeGroup = sub8 ? 0 : t[Vp9T.SizeGroupLookup + bsize];
+        int j = 0, mode = 0;
+        while (true)
         {
-            for (int i = 0; i < 4; i++)
-                mi[b + Vp9Mi.BmiMode + i] = ReadTree(ref r, d, t, Vp9T.IntraModeTree, t, KfYModeProbs(mi, rec, above, left, i));
-            mode = mi[b + Vp9Mi.BmiMode + 3];
+            bool uv = j >= 4;   // the y modes are sub-blocks 0..3, then the uv mode
+            int probAt = uv ? (kf ? Vp9T.KfUvModeProb : fc + Vp9Ctx.UvMode) + mode * 9
+                : kf ? KfYModeProbs(mi, rec, above, left, j) : fc + Vp9Ctx.YMode + sizeGroup * 9;
+            int m = ReadSym(ref r, d, t, ctx, a, Vp9T.IntraModeTree, kf ? SrcTab : SrcCtx, probAt);
+            if (!kf & cnt >= 0) counts[cnt + (uv ? Vp9Cnt.UvMode + mode * 10 : Vp9Cnt.YMode + sizeGroup * 10) + m]++;
+            if (uv)
+            {
+                mi[b + Vp9Mi.UvMode] = m;
+                break;
+            }
+            if (sub8)
+            {
+                mi[b + Vp9Mi.BmiMode + j] = m;
+                if (n4h == 2) mi[b + Vp9Mi.BmiMode + j + 2] = m;
+                if (n4w == 2) mi[b + Vp9Mi.BmiMode + j + 1] = m;
+            }
+            mode = m;   // the block's mode is its last sub-block's
+            mi[b + Vp9Mi.Mode] = m;
+            int idx = (j & 1) + n4w, idy = j >> 1;
+            if (idx >= 2)
+            {
+                idx = 0;
+                idy += n4h;
+            }
+            j = idy >= 2 ? 4 : idy * 2 + idx;
         }
-        else if (bsize == Block4x8)
-        {
-            int m0 = ReadTree(ref r, d, t, Vp9T.IntraModeTree, t, KfYModeProbs(mi, rec, above, left, 0));
-            mi[b + Vp9Mi.BmiMode] = m0;
-            mi[b + Vp9Mi.BmiMode + 2] = m0;
-            mode = ReadTree(ref r, d, t, Vp9T.IntraModeTree, t, KfYModeProbs(mi, rec, above, left, 1));
-            mi[b + Vp9Mi.BmiMode + 1] = mode;
-            mi[b + Vp9Mi.BmiMode + 3] = mode;
-        }
-        else if (bsize == Block8x4)
-        {
-            int m0 = ReadTree(ref r, d, t, Vp9T.IntraModeTree, t, KfYModeProbs(mi, rec, above, left, 0));
-            mi[b + Vp9Mi.BmiMode] = m0;
-            mi[b + Vp9Mi.BmiMode + 1] = m0;
-            mode = ReadTree(ref r, d, t, Vp9T.IntraModeTree, t, KfYModeProbs(mi, rec, above, left, 2));
-            mi[b + Vp9Mi.BmiMode + 2] = mode;
-            mi[b + Vp9Mi.BmiMode + 3] = mode;
-        }
-        else mode = ReadTree(ref r, d, t, Vp9T.IntraModeTree, t, KfYModeProbs(mi, rec, above, left, 0));
-        mi[b + Vp9Mi.Mode] = mode;
-        mi[b + Vp9Mi.UvMode] = ReadTree(ref r, d, t, Vp9T.IntraModeTree, t, Vp9T.KfUvModeProb + mode * 9);
-    }
-
-    private static int ReadIntraModeY(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, ArrayView<int> ctx, int fc, ArrayView<int> t,
-        int sizeGroup, ArrayView<int> counts, int cnt)
-    {
-        int m = ReadTree(ref r, d, t, Vp9T.IntraModeTree, ctx, fc + Vp9Ctx.YMode + sizeGroup * 9);
-        if (cnt >= 0) counts[cnt + Vp9Cnt.YMode + sizeGroup * 10 + m]++;
-        return m;
-    }
-
-    private static void ReadIntraBlockModeInfo(ref Vp8BoolDecoderGpuState r, ArrayView<byte> d, ArrayView<int> ctx, int fc,
-        ArrayView<int> t, ArrayView<int> mi, int rec, int bsize, ArrayView<int> counts, int cnt)
-    {
-        int b = rec * Vp9Mi.Stride, mode;
-        if (bsize == Block4x4)
-        {
-            for (int i = 0; i < 4; i++) mi[b + Vp9Mi.BmiMode + i] = ReadIntraModeY(ref r, d, ctx, fc, t, 0, counts, cnt);
-            mode = mi[b + Vp9Mi.BmiMode + 3];
-        }
-        else if (bsize == Block4x8)
-        {
-            int m0 = ReadIntraModeY(ref r, d, ctx, fc, t, 0, counts, cnt);
-            mi[b + Vp9Mi.BmiMode] = m0;
-            mi[b + Vp9Mi.BmiMode + 2] = m0;
-            mode = ReadIntraModeY(ref r, d, ctx, fc, t, 0, counts, cnt);
-            mi[b + Vp9Mi.BmiMode + 1] = mode;
-            mi[b + Vp9Mi.BmiMode + 3] = mode;
-        }
-        else if (bsize == Block8x4)
-        {
-            int m0 = ReadIntraModeY(ref r, d, ctx, fc, t, 0, counts, cnt);
-            mi[b + Vp9Mi.BmiMode] = m0;
-            mi[b + Vp9Mi.BmiMode + 1] = m0;
-            mode = ReadIntraModeY(ref r, d, ctx, fc, t, 0, counts, cnt);
-            mi[b + Vp9Mi.BmiMode + 2] = mode;
-            mi[b + Vp9Mi.BmiMode + 3] = mode;
-        }
-        else mode = ReadIntraModeY(ref r, d, ctx, fc, t, t[Vp9T.SizeGroupLookup + bsize], counts, cnt);
-        mi[b + Vp9Mi.Mode] = mode;
-        int uv = ReadTree(ref r, d, t, Vp9T.IntraModeTree, ctx, fc + Vp9Ctx.UvMode + mode * 9);
-        if (cnt >= 0) counts[cnt + Vp9Cnt.UvMode + mode * 10 + uv]++;
-        mi[b + Vp9Mi.UvMode] = uv;
-        mi[b + Vp9Mi.Interp] = Vp9Mi.SwitchableFilters;
-        mi[b + Vp9Mi.Ref0] = Vp9Mi.IntraFrame;
-        mi[b + Vp9Mi.Ref1] = Vp9Mi.NoRefFrame;
     }
 }

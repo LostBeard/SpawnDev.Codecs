@@ -139,6 +139,37 @@ Next for S3:
   Plans/view-helpers-as-functions-2026-11-09.md).
 - Until then the `GiantShader` fence stays.
 - `Vp9DecoderKernels_GenerateWgsl_WithinSizeBudget` tracks the kernel sizes.
+- What counts on Chrome / Windows is the size after full inlining: D3D's compiler (DXC) inlines every WGSL function,
+  and making helpers functions ([NoInlining]) made DXC slower, not faster (reverted, f202c88). So the work is fewer
+  call sites, not fewer functions.
+- Compressed header, done 2026-11-09 (3a20c7c): table-driven, one DiffUpdate call site. WGSL 119,048 -> 7,739 lines,
+  DXC 39 s -> 0.9 s.
+- Tile parse kernel, done 2026-11-09. Measured on SpawnDev.ILGPU 5.4.23-local.3 (VP9_WGSL_DUMP + an offline inliner
+  over the WGSL):
+  - Before: 113,564 WGSL lines, but `ParseBlock` was a 111,113-line WGSL function called from 6 sites, so about
+    762,800 lines after inlining. Inside it every bool read was inlined at hundreds of sites (5,115 calls of the
+    64-bit shift emulation alone).
+  - After: 11,464 WGSL lines, about 11,900 fully inlined (64x smaller); 24 bool reads in the whole kernel.
+  - What multiplied, and what was done (each body now appears once):
+    - `ParseBlock` x 7 sites in the partition walk -> one site in a loop over the partition's blocks.
+    - `FindMvRefs` x 8 (`AppendSub8x8Mvs` x 6, NEWMV, 8x8 up), each with 4 `Candidate` and 8 add-to-list sites -> one
+      site in one pass per sub-block; inside, libvpx's four searches are one ordered stream of 27 candidates with one
+      add-to-list site.
+    - `ReadMv` x 4 (8 `ReadMvComponent`, 8 `IncMvComponent`) -> one site; the components are a loop.
+    - The keyframe and inter-frame mode info share one sequence (segment id, skip, is_inter, tx size, modes); the y
+      and uv modes are steps of one loop over one tree read; reference frames, the segment id's prediction flag and
+      tree, the inter mode and the interp filter are loops over one read each.
+    - One tree reader (`ReadSym`) with the probability source per value (context / tables / arguments, each buffer
+      indexed in its own branch); the partition's edge cases and the coefficient tokens from TWO up are trees in the
+      tables (`Vp9PScan`), so `DecodeCoefs` has 6 bool reads instead of 19 (EOB / ZERO / ONE stay unrolled).
+    - WGSL's structured control flow copies code: an early return in an inlined helper repeated the helper's tail
+      (`ReadInterBlockModeInfo` after its segment-skip return, about 3.3k lines; `DecodeCoefs` after its return inside
+      the zero-token loop), and a short-circuit condition in front of a body repeated the body (the refill loop of
+      every bool read, `Vp8BoolDecoderGpu.Fill`). Helpers are single-exit and side-effect-free conditions use & / |.
+  - CPU accelerator tile parse (ComfyUI, A/B back to back, without the first frame): base 1.91 / 2.00 ms/frame, new
+    1.93: unchanged. CUDA and the Chrome / DXC compile: to be measured.
+  - Next if needed: the reference-frame contexts (about 1.8k of the 11.9k lines) load the same neighbour fields many
+    times; loading them once into locals would shrink them.
 
 ## Order
 S1 first: contained, bit-exact by construction, and about a third of the frame time. Then S2 inter, S2 intra, S3.
