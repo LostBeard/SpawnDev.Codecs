@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### VP9 decoder: loop filter kernel 10x smaller after inlining, one filter body (2026-11-10)
+- The loop-filter wavefront kernel inlined a filter body at every vpx_lpf_* call in libvpx's code (about 96 copies:
+  14 calls in filter_selectively_horiz, 12 in filter_selectively_vert_row2, each function called once per plane
+  layout). Now:
+  - one filter body (`LpfAt`): the 4, 8 and 16 filters share the mask and flat computation; the 16 filter falls
+    back to the 8 and the 8 to the 4 as in libvpx's filter16 / filter8 / filter4;
+  - each filter-selectively function issues libvpx's calls in libvpx's order through one call site (`LaneEdge`);
+  - each pass (vertical, horizontal) runs luma and chroma of every layout (ss00, ss11, non420) through one call
+    site.
+- WGSL: 9.0 MB -> 0.55 MB; fully inlined (what D3D compiles) 116,468 -> about 11,000 lines (188,891 before the
+  32-bit offsets).
+- Bit-exact: Vp9Lpf edge-filter and superblock tests against libvpx (red-checked with three mutations), full
+  Vp9Decode_EveryFrame on the CPU accelerator.
+
 ### VP9 decoder: 32-bit offsets in reconstruction and loop filter, about half the WGSL after inlining (2026-11-10)
 - The reconstruction kernels (inter prediction, inter residual, intra wavefront) and the loop-filter wavefront
   addressed pixels, coefficients and scratch with `long` offsets. WGSL has no 64-bit integers, so every pixel tap was

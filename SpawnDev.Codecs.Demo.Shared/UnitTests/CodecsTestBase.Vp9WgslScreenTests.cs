@@ -22,7 +22,7 @@ public abstract partial class CodecsTestBase
     // 5.4.23-local.3, which emits view-taking helpers, ref state and LocalMemory views as WGSL functions instead of
     // inlining them. Re-measured 2026-11-10 on 5.4.23 after the reconstruction and loop-filter kernels moved from 64-bit
     // to 32-bit pixel / coefficient / scratch offsets (64-bit math is emulated in WGSL): loop-filter Wavefront 9.0 MB
-    // (fully inlined 189k -> 116k lines), InterPredict 5.4 MB (134k -> 76k), IntraWave 1.3 MB (2.7 MB; 116k -> 61k),
+    // (fully inlined 189k -> 116k lines; then 0.55 MB, about 11k inlined, after its call-site rewrite: one filter body), InterPredict 5.4 MB (134k -> 76k), IntraWave 1.3 MB (2.7 MB; 116k -> 61k),
     // InterResidual 1.1 MB (2.4 MB; 102k -> 56k),
     // CompressedHeader 0.43 MB (6.4 MB before the table-driven rewrite: one DiffUpdate call site instead of one per
     // syntax element), ParseKernel 0.55 MB (11,563 lines, about 11,900 with every function inlined as D3D does; before
@@ -38,7 +38,7 @@ public abstract partial class CodecsTestBase
         (typeof(Vp9ReconKernels), "InterResidualKernel", 1193293),
         (typeof(Vp9ReconKernels), "IntraWaveKernel", 1425491),
         (typeof(Vp9LoopFilterKernels), "FrameInitKernel", 24780),
-        (typeof(Vp9LoopFilterKernels), "WavefrontKernel", 9952305),
+        (typeof(Vp9LoopFilterKernels), "WavefrontKernel", 600699),
         (typeof(Vp9AdaptKernels), "SumCountsKernel", 3579),
         (typeof(Vp9AdaptKernels), "AdaptKernel", 354152),
         (typeof(Vp9OutputKernels), "PackPlanesKernel", 19703),

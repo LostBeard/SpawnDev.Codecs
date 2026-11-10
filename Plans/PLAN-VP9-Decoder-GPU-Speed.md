@@ -175,9 +175,14 @@ Next for S3:
   InterResidual 5,702, InterPredict 4,621). Now `int`, with host checks that the frame buffers and the scratch fit.
   Fully inlined lines: Wavefront 188,891 -> 116,468, InterPredict 134,149 -> 75,515, InterResidual 101,910 -> 56,457,
   IntraWave 115,872 -> 60,538.
-  - Next: the loop filter's 64-bit edge masks (`Vp9LfMask`, libvpx's uint64 masks; 585 emulated calls left) as two
-    32-bit halves; Data's `||` dedup fix in ILGPU (InterPredict 78k -> 34k WGSL lines, Wavefront 115k -> 74k on
-    3a20c7c) stacks on top.
+  - Data's `||` dedup fix in ILGPU (5ec0dba: InterPredict 75,562 -> 31,972 WGSL lines on 21d8906) stacks on top.
+- Loop filter call sites, done 2026-11-10: one filter body (`LpfAt`, 4 / 8 / 16 sharing the mask and flat path), one
+  call site per filter-selectively function (libvpx's calls in order from a loop over call slots), one per pass for
+  all plane layouts. Wavefront 9.0 MB -> 0.55 MB, fully inlined 116,468 -> about 11,000 lines (was about 96 filter
+  copies).
+  - Next if needed: its 64-bit edge masks (`Vp9LfMask`, libvpx's uint64 masks; about 450 emulated calls left) as two
+    32-bit halves. Then InterPredict (75k lines; 32k with the dedup fix) is the largest kernel: the same call-site
+    treatment for its convolve paths.
 
 ## Order
 S1 first: contained, bit-exact by construction, and about a third of the frame time. Then S2 inter, S2 intra, S3.
