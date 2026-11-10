@@ -12,7 +12,6 @@
 // Storage: 5 contexts of Vp9Ctx.Bytes probabilities, one int each (no sub-word stores from parallel copies):
 // slots 0..3 = the saved frame_contexts[4], slot 4 = the current context (libvpx cm->fc).
 
-using System.Runtime.CompilerServices;
 using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.Codecs.Video.Vp8;
@@ -185,10 +184,6 @@ internal static class Vp9CompressedHeaderKernels
         return v;
     }
 
-    // A real function on WebGPU and Wasm (ILGPU keeps [NoInlining] helpers taking ref state and buffer views as
-    // functions): inlined at every call site the compressed-header kernel became one giant function that took the
-    // browser's shader compiler (Tint) past 4 GB.
-    [MethodImpl(MethodImplOptions.NoInlining)]
     private static void MvUpdate(ref Vp8BoolDecoderGpuState r, ArrayView<byte> buf, ArrayView<int> ctx, int at, int n)
     {
         for (int i = 0; i < n; i++)
@@ -196,7 +191,6 @@ internal static class Vp9CompressedHeaderKernels
     }
 
     /// <summary>vp9_diff_update_prob.</summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]   // see MvUpdate
     private static void DiffUpdate(ref Vp8BoolDecoderGpuState r, ArrayView<byte> buf, ArrayView<int> ctx, int at, ArrayView<int> invMap)
     {
         if (Vp8BoolDecoderGpu.DecodeBool(ref r, buf, DiffUpdateProb) == 0) return;

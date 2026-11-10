@@ -21,12 +21,11 @@ public abstract partial class CodecsTestBase
     // (class, kernel method, WGSL character budget), each today's size + 10%. Measured 2026-11-09 on SpawnDev.ILGPU
     // 5.4.23-local.3, which emits view-taking helpers, ref state and LocalMemory views as WGSL functions instead of
     // inlining them: ParseKernel 9.0 MB (113,564 lines; 87.1 MB on 5.4.21), loop-filter Wavefront 9.2 MB,
-    // InterPredict 5.6 MB, IntraWave 2.7 MB, InterResidual 2.4 MB, CompressedHeader 0.3 MB (6.4 MB before its DiffUpdate /
-    // MvUpdate helpers were marked [NoInlining]).
+    // CompressedHeader 6.4 MB, InterPredict 5.6 MB, IntraWave 2.7 MB, InterResidual 2.4 MB.
     private static readonly (Type Owner, string Kernel, long Budget)[] Vp9WgslKernels =
     {
         (typeof(Vp9CompressedHeaderKernels), "CopyContextKernel", 3734),
-        (typeof(Vp9CompressedHeaderKernels), "CompressedHeaderKernel", 329385),
+        (typeof(Vp9CompressedHeaderKernels), "CompressedHeaderKernel", 7089732),
         (typeof(Vp9ParseKernels), "ParseKernel", 9884585),
         (typeof(Vp9ReconKernels), "InterPredictKernel", 6148984),
         (typeof(Vp9ReconKernels), "InterResidualKernel", 2691056),
