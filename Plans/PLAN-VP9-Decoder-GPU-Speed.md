@@ -181,8 +181,13 @@ Next for S3:
   all plane layouts. Wavefront 9.0 MB -> 0.55 MB, fully inlined 116,468 -> about 11,000 lines (was about 96 filter
   copies).
   - Next if needed: its 64-bit edge masks (`Vp9LfMask`, libvpx's uint64 masks; about 450 emulated calls left) as two
-    32-bit halves. Then InterPredict (75k lines; 32k with the dedup fix) is the largest kernel: the same call-site
-    treatment for its convolve paths.
+    32-bit halves.
+- Inter prediction call sites, done 2026-11-10: one `Convolve` body (copy / horizontal / vertical / 2-D, each with its
+  _avg and scaled variants, every pixel its own convolve's arithmetic), one `PredictOne` site (sub-8x8 4x4 calls and
+  the whole-block call as one grid), one `PredictRef` site (references in a loop, one `refs` view). InterPredict 5.4 MB
+  -> 0.21 MB, fully inlined 75,515 -> 4,114 lines (was 28 convolve copies).
+  - Next: IntraWave (61k inlined) and InterResidual (56k): the same look at their call sites (the inverse transforms
+    and the intra predictors).
 
 ## Order
 S1 first: contained, bit-exact by construction, and about a third of the frame time. Then S2 inter, S2 intra, S3.

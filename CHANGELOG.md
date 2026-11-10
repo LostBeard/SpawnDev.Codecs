@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### VP9 decoder: inter prediction kernel 18x smaller after inlining, one convolve body (2026-11-10)
+- The inter prediction kernel inlined the convolves at 28 call sites: each reference (2) x libvpx's call shape
+  (each 4x4 below BLOCK_8X8, or the whole block: 2) x the 7 convolve calls of the predict table (copy, horizontal,
+  vertical, 2-D, unscaled and scaled), each with its 8-tap dot products and the tap tables. Now:
+  - one `Convolve` body for copy, horizontal, vertical and 2-D (each with its _avg and scaled variants); every output
+    pixel gets its own convolve's arithmetic, and only the 2-D convolve uses the scratch column, as before;
+  - one `PredictOne` call site (the 4x4 calls below BLOCK_8X8 and the whole-block call are one grid of calls) and one
+    `PredictRef` call site (the references are a loop). Both references are read from one view, the frame buffers
+    (`PredictBlockPlane` / `PredictBlockPlaneRegion` take `refs` instead of `ref0` and `ref1`).
+- WGSL: 5.4 MB -> 0.21 MB; fully inlined 75,515 -> 4,114 lines (134,149 before the 32-bit offsets).
+- Bit-exact: Vp9InterPred_AllCases against libvpx on the CPU accelerator and Velocity (red-checked: vertical taps,
+  sub-8x8 MV order, compound reference, scaled-vertical mode), full Vp9Decode_EveryFrame on the CPU accelerator.
+
 ### VP9 decoder: loop filter kernel 10x smaller after inlining, one filter body (2026-11-10)
 - The loop-filter wavefront kernel inlined a filter body at every vpx_lpf_* call in libvpx's code (about 96 copies:
   14 calls in filter_selectively_horiz, 12 in filter_selectively_vert_row2, each function called once per plane

@@ -117,7 +117,7 @@ public abstract partial class CodecsTestBase
             r1.Offset = cases[a1]; r1.Stride = cases[a1 + 1]; r1.CropWidth = cases[a1 + 2]; r1.CropHeight = cases[a1 + 3];
             r1.XScaleFp = cases[a1 + 4]; r1.YScaleFp = cases[a1 + 5]; r1.XStepQ4 = cases[a1 + 6]; r1.YStepQ4 = cases[a1 + 7];
             Vp9InterPred.PredictBlockPlane(ssX, ssY, cases[c + 2], cases[c + 3], cases[c + 4], cases[c + 5],
-                mi, i.X * Vp9Mi.Stride, refs, r0, refs, r1,
+                mi, i.X * Vp9Mi.Stride, refs, r0, r1,
                 dst, cases[c + InterCaseDst + plane], InterDstStride, scratch, i.X * Vp9InterPred.ScratchInts);
         }
     }
@@ -142,7 +142,7 @@ public abstract partial class CodecsTestBase
         r1.XScaleFp = cases[a1 + 4]; r1.YScaleFp = cases[a1 + 5]; r1.XStepQ4 = cases[a1 + 6]; r1.YStepQ4 = cases[a1 + 7];
         for (int ux = 0; ux < n4w; ux++)
             Vp9InterPred.PredictBlockPlaneRegion(ssX, ssY, cases[c + 2], cases[c + 3], cases[c + 4], cases[c + 5],
-                mi, miAt, refs, r0, refs, r1, dst, cases[c + InterCaseDst + plane], InterDstStride, ux * 4, uy * 4, 4, 4,
+                mi, miAt, refs, r0, r1, dst, cases[c + InterCaseDst + plane], InterDstStride, ux * 4, uy * 4, 4, 4,
                 scratch, t * Vp9InterPred.RegionScratchInts);
     }
 

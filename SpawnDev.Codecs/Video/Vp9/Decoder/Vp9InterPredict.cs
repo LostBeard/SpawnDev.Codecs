@@ -333,74 +333,52 @@ internal static class Vp9InterPred
         Fetch(src, p, x, y + 3, edge) * k.T3 + Fetch(src, p, x, y + 4, edge) * k.T4 + Fetch(src, p, x, y + 5, edge) * k.T5 +
         Fetch(src, p, x, y + 6, edge) * k.T6 + Fetch(src, p, x, y + 7, edge) * k.T7;
 
-    /// <summary>vpx_convolve_copy_c / vpx_convolve_avg_c: the w x h block at (x0, y0).</summary>
-    private static void ConvolveCopy(ArrayView<byte> src, in Vp9InterRefPlane p, int x0, int y0, bool edge,
-        ArrayView<byte> dst, int dstAt, int dstStride, int w, int h, bool avg)
+    /// <summary>
+    /// The convolves of vpx_convolve.c in one body: copy (no filter: vpx_convolve_copy / _avg), horizontal
+    /// (<paramref name="hf"/>: convolve_horiz, vpx_convolve8_horiz / _avg_horiz, vpx_scaled_horiz / _avg_horiz), vertical
+    /// (<paramref name="vf"/>: convolve_vert and its variants) and 2-D (both: vpx_convolve8 / _avg, vpx_scaled_2d / _avg_2d:
+    /// the horizontal pass over intermediate_height = (((h - 1) * y_step_q4 + y0_q4) &gt;&gt; SUBPEL_BITS) + SUBPEL_TAPS
+    /// rows from y0 - 3 into byte values, then the vertical pass over them, column by column; see the file header). Each
+    /// output pixel gets exactly its own convolve's arithmetic. One body because D3D's shader compiler inlines every
+    /// function: a call site per convolve variant was another copy of the 8-tap filters and the tap tables.
+    /// Output column x is filtered at the 1/16-pel position x0_q4 + x * x_step_q4 (src -= SUBPEL_TAPS / 2 - 1), output
+    /// row y at y0_q4 + y * y_step_q4; unfiltered directions read column x0 + x / row y0 + y.
+    /// </summary>
+    private static void Convolve(ArrayView<byte> src, in Vp9InterRefPlane p, int x0, int y0, bool edge, int filter, bool hf,
+        bool vf, int x0Q4, int xStepQ4, int y0Q4, int yStepQ4, ArrayView<byte> dst, int dstAt, int dstStride, int w, int h,
+        bool avg, ArrayView<int> temp, int tempAt)
     {
-        for (int y = 0; y < h; y++)
-            for (int x = 0; x < w; x++)
-                Store(dst, dstAt + y * dstStride + x, Fetch(src, p, x0 + x, y0 + y, edge), avg);
-    }
-
-    /// <summary>convolve_horiz / convolve_avg_horiz (vpx_convolve8_horiz, _avg_horiz, vpx_scaled_horiz, _avg_horiz):
-    /// rows y0.., output x filtered at 1/16-pel position x0_q4 + x * x_step_q4 (src -= SUBPEL_TAPS / 2 - 1).</summary>
-    private static void ConvolveHoriz(ArrayView<byte> src, in Vp9InterRefPlane p, int x0, int y0, bool edge, int filter,
-        int x0Q4, int xStepQ4, ArrayView<byte> dst, int dstAt, int dstStride, int w, int h, bool avg)
-    {
-        for (int y = 0; y < h; y++)
-        {
-            int xQ4 = x0Q4;
-            for (int x = 0; x < w; x++)
-            {
-                var k = Kernel(filter, xQ4 & SubpelMask);
-                int sum = DotRow(src, p, x0 - (SubpelTaps / 2 - 1) + (xQ4 >> SubpelBits), y0 + y, edge, k);
-                Store(dst, dstAt + y * dstStride + x, RoundClip(sum), avg);
-                xQ4 += xStepQ4;
-            }
-        }
-    }
-
-    /// <summary>convolve_vert / convolve_avg_vert (vpx_convolve8_vert, _avg_vert, vpx_scaled_vert, _avg_vert): columns
-    /// x0.., output y filtered at 1/16-pel position y0_q4 + y * y_step_q4 (src -= src_stride * (SUBPEL_TAPS / 2 - 1)).</summary>
-    private static void ConvolveVert(ArrayView<byte> src, in Vp9InterRefPlane p, int x0, int y0, bool edge, int filter,
-        int y0Q4, int yStepQ4, ArrayView<byte> dst, int dstAt, int dstStride, int w, int h, bool avg)
-    {
-        for (int x = 0; x < w; x++)
-        {
-            int yQ4 = y0Q4;
-            for (int y = 0; y < h; y++)
-            {
-                var k = Kernel(filter, yQ4 & SubpelMask);
-                int sum = DotCol(src, p, x0 + x, y0 - (SubpelTaps / 2 - 1) + (yQ4 >> SubpelBits), edge, k);
-                Store(dst, dstAt + y * dstStride + x, RoundClip(sum), avg);
-                yQ4 += yStepQ4;
-            }
-        }
-    }
-
-    /// <summary>vpx_convolve8_c / vpx_convolve8_avg_c (also vpx_scaled_2d / _avg_2d): horizontal pass over
-    /// intermediate_height = (((h - 1) * y_step_q4 + y0_q4) &gt;&gt; SUBPEL_BITS) + SUBPEL_TAPS rows from y0 - 3 into byte
-    /// values, then the vertical pass over them; done column by column (see the file header).</summary>
-    private static void Convolve2D(ArrayView<byte> src, in Vp9InterRefPlane p, int x0, int y0, bool edge, int filter,
-        int x0Q4, int xStepQ4, int y0Q4, int yStepQ4, ArrayView<byte> dst, int dstAt, int dstStride, int w, int h, bool avg,
-        ArrayView<int> temp, int tempAt)
-    {
+        bool both = hf & vf;
         int intermediateHeight = (((h - 1) * yStepQ4 + y0Q4) >> SubpelBits) + SubpelTaps;
         int xQ4 = x0Q4;
         for (int x = 0; x < w; x++)
         {
-            var kx = Kernel(filter, xQ4 & SubpelMask);
-            int col = x0 - (SubpelTaps / 2 - 1) + (xQ4 >> SubpelBits);
-            for (int r = 0; r < intermediateHeight; r++)
-                temp[tempAt + r] = RoundClip(DotRow(src, p, col, y0 - (SubpelTaps / 2 - 1) + r, edge, kx));
+            Vp9Kernel8 kx = default;
+            if (hf) kx = Kernel(filter, xQ4 & SubpelMask);
+            int col = hf ? x0 - (SubpelTaps / 2 - 1) + (xQ4 >> SubpelBits) : x0 + x;
+            // 2-D: the horizontal pass, this column's intermediate rows
+            if (both)
+                for (int r = 0; r < intermediateHeight; r++)
+                    temp[tempAt + r] = RoundClip(DotRow(src, p, col, y0 - (SubpelTaps / 2 - 1) + r, edge, kx));
             int yQ4 = y0Q4;
             for (int y = 0; y < h; y++)
             {
-                var ky = Kernel(filter, yQ4 & SubpelMask);
-                int t = tempAt + (yQ4 >> SubpelBits);
-                int sum = temp[t] * ky.T0 + temp[t + 1] * ky.T1 + temp[t + 2] * ky.T2 + temp[t + 3] * ky.T3 +
-                          temp[t + 4] * ky.T4 + temp[t + 5] * ky.T5 + temp[t + 6] * ky.T6 + temp[t + 7] * ky.T7;
-                Store(dst, dstAt + y * dstStride + x, RoundClip(sum), avg);
+                Vp9Kernel8 ky = default;
+                if (vf) ky = Kernel(filter, yQ4 & SubpelMask);
+                int v;
+                if (both)
+                {
+                    int t = tempAt + (yQ4 >> SubpelBits);
+                    v = RoundClip(temp[t] * ky.T0 + temp[t + 1] * ky.T1 + temp[t + 2] * ky.T2 + temp[t + 3] * ky.T3 +
+                                  temp[t + 4] * ky.T4 + temp[t + 5] * ky.T5 + temp[t + 6] * ky.T6 + temp[t + 7] * ky.T7);
+                }
+                else if (vf)
+                    v = RoundClip(DotCol(src, p, col, y0 - (SubpelTaps / 2 - 1) + (yQ4 >> SubpelBits), edge, ky));
+                else if (hf)
+                    v = RoundClip(DotRow(src, p, col, y0 + y, edge, kx));
+                else
+                    v = Fetch(src, p, col, y0 + y, edge);
+                Store(dst, dstAt + y * dstStride + x, v, avg);
                 yQ4 += yStepQ4;
             }
             xQ4 += xStepQ4;
@@ -464,9 +442,9 @@ internal static class Vp9InterPred
     /// 3 BILINEAR), Ref1 (&gt; 0 = compound, has_second_ref), Mv0 / Mv1 (mi-&gt;mv[ref].as_int: row in the low 16 bits, col
     /// in the high 16, 1/8 luma pel) and, below BLOCK_8X8, BmiMv0 / BmiMv1 + 0..3 (bmi[i].as_mv[ref], duplicated for
     /// 4x8 / 8x4 as read_inter_block_mode_info stores them).</param>
-    /// <param name="ref0">The first reference's pixels (mi-&gt;ref_frame[0]).</param>
+    /// <param name="refs">The reference frames' pixels: both references are planes of this one view (the decoder's
+    /// frame buffers; WGSL cannot choose between views of different buffers at run time).</param>
     /// <param name="ref0Plane">This plane of the first reference: offset, stride, crop size, scale factors.</param>
-    /// <param name="ref1">The second reference's pixels (mi-&gt;ref_frame[1]); not read unless compound.</param>
     /// <param name="ref1Plane">This plane of the second reference; not read unless compound.</param>
     /// <param name="dst">Destination plane (libvpx pd-&gt;dst).</param>
     /// <param name="dstAt">Index of the block's top-left pixel in <paramref name="dst"/>.</param>
@@ -480,11 +458,11 @@ internal static class Vp9InterPred
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static void PredictBlockPlane(int ssX, int ssY, int miRow, int miCol, int miRows, int miCols,
         ArrayView<int> mi, int miAt,
-        ArrayView<byte> ref0, Vp9InterRefPlane ref0Plane, ArrayView<byte> ref1, Vp9InterRefPlane ref1Plane,
+        ArrayView<byte> refs, Vp9InterRefPlane ref0Plane, Vp9InterRefPlane ref1Plane,
         ArrayView<byte> dst, int dstAt, int dstStride, ArrayView<int> scratch, int scratchAt)
     {
         // the whole block: every block lies inside its 64 x 64 superblock
-        PredictBlockPlaneRegion(ssX, ssY, miRow, miCol, miRows, miCols, mi, miAt, ref0, ref0Plane, ref1, ref1Plane,
+        PredictBlockPlaneRegion(ssX, ssY, miRow, miCol, miRows, miCols, mi, miAt, refs, ref0Plane, ref1Plane,
             dst, dstAt, dstStride, 0, 0, 64, 64, scratch, scratchAt);
     }
 
@@ -506,7 +484,7 @@ internal static class Vp9InterPred
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static void PredictBlockPlaneRegion(int ssX, int ssY, int miRow, int miCol, int miRows, int miCols,
         ArrayView<int> mi, int miAt,
-        ArrayView<byte> ref0, Vp9InterRefPlane ref0Plane, ArrayView<byte> ref1, Vp9InterRefPlane ref1Plane,
+        ArrayView<byte> refs, Vp9InterRefPlane ref0Plane, Vp9InterRefPlane ref1Plane,
         ArrayView<byte> dst, int dstAt, int dstStride, int rx, int ry, int rw, int rh, ArrayView<int> scratch, int scratchAt)
     {
         int bsize = mi[miAt + Vp9Mi.SbType];
@@ -516,15 +494,16 @@ internal static class Vp9InterPred
         // set_mi_row_col
         int toTop = -((miRow * 8) * 8), toBottom = ((miRows - bh - miRow) * 8) * 8;
         int toLeft = -((miCol * 8) * 8), toRight = ((miCols - bw - miCol) * 8) * 8;
-        PredictRef(ssX, ssY, miRow, miCol, bsize, bw, bh, toLeft, toRight, toTop, toBottom, filter, mi, miAt, 0,
-            ref0, ref0Plane, dst, dstAt, dstStride, rx, ry, rw, rh, scratch, scratchAt);
-        if (compound)
-            PredictRef(ssX, ssY, miRow, miCol, bsize, bw, bh, toLeft, toRight, toTop, toBottom, filter, mi, miAt, 1,
-                ref1, ref1Plane, dst, dstAt, dstStride, rx, ry, rw, rh, scratch, scratchAt);
+        // one PredictRef call site: the first reference, then the second (compound) one averaged in
+        for (int refIdx = 0; refIdx < (compound ? 2 : 1); refIdx++)
+            PredictRef(ssX, ssY, miRow, miCol, bsize, bw, bh, toLeft, toRight, toTop, toBottom, filter, mi, miAt, refIdx,
+                refs, refIdx == 0 ? ref0Plane : ref1Plane, dst, dstAt, dstStride, rx, ry, rw, rh, scratch, scratchAt);
     }
 
     /// <summary>The body of dec_build_inter_predictors_sb's loop for one reference and one plane, producing only the
-    /// pixels of the region (rx, ry, rw, rh) of the plane block.</summary>
+    /// pixels of the region (rx, ry, rw, rh) of the plane block. libvpx's dec_build_inter_predictors calls: one per 4x4
+    /// below BLOCK_8X8 (each with its own MV, average_split_mvs in raster order), else one for the whole block; a grid of
+    /// calls either way, with one call site.</summary>
     private static void PredictRef(int ssX, int ssY, int miRow, int miCol, int bsize, int bw, int bh,
         int toLeft, int toRight, int toTop, int toBottom, int filter, ArrayView<int> mi, int miAt, int refIdx,
         ArrayView<byte> src, Vp9InterRefPlane p, ArrayView<byte> dst, int dstAt, int dstStride,
@@ -535,31 +514,25 @@ internal static class Vp9InterPred
         int miX = miCol * 8, miY = miRow * 8;
         bool avg = refIdx == 1;
         int rx1 = rx + rw, ry1 = ry + rh;
-        if (bsize < Block8x8)
-        {
-            int bmiAt = miAt + Vp9Mi.BmiMv0 + 4 * refIdx;
-            for (int y = 0; y < n4h; y++)
-                for (int x = 0; x < n4w; x++)
+        bool split = bsize < Block8x8;
+        int uw = split ? 4 : n4wX4, uh = split ? 4 : n4hX4;   // one call's size
+        int nx = split ? n4w : 1, ny = split ? n4h : 1;
+        int bmiAt = miAt + Vp9Mi.BmiMv0 + 4 * refIdx;
+        for (int y = 0; y < ny; y++)
+            for (int x = 0; x < nx; x++)
+            {
+                // the part of this call inside the region
+                int ux = uw * x, uy = uh * y;
+                int cx0 = ux > rx ? ux : rx, cx1 = ux + uw < rx1 ? ux + uw : rx1;
+                int cy0 = uy > ry ? uy : ry, cy1 = uy + uh < ry1 ? uy + uh : ry1;
+                if ((cx0 < cx1) & (cy0 < cy1))
                 {
-                    // the part of this 4x4 call inside the region
-                    int cx0 = 4 * x > rx ? 4 * x : rx, cx1 = 4 * x + 4 < rx1 ? 4 * x + 4 : rx1;
-                    int cy0 = 4 * y > ry ? 4 * y : ry, cy1 = 4 * y + 4 < ry1 ? 4 * y + 4 : ry1;
-                    if (cx0 >= cx1 || cy0 >= cy1) continue;
-                    int mv = AverageSplitMv(mi, bmiAt, ssX, ssY, y * n4w + x);   // libvpx's i++ over the 4x4s in raster order
-                    PredictOne(src, p, ssX, ssY, n4wX4, n4hX4, 4 * x, 4 * y, 4, 4, cx0 - 4 * x, cy0 - 4 * y, cx1 - cx0, cy1 - cy0,
+                    int mv = split ? AverageSplitMv(mi, bmiAt, ssX, ssY, y * n4w + x) : mi[miAt + Vp9Mi.Mv0 + refIdx];
+                    PredictOne(src, p, ssX, ssY, n4wX4, n4hX4, ux, uy, uw, uh, cx0 - ux, cy0 - uy, cx1 - cx0, cy1 - cy0,
                         miX, miY, toLeft, toRight, toTop, toBottom, filter, MvRow(mv), MvCol(mv), avg, dst, dstAt, dstStride,
                         scratch, scratchAt);
                 }
-        }
-        else
-        {
-            int cx1 = n4wX4 < rx1 ? n4wX4 : rx1, cy1 = n4hX4 < ry1 ? n4hX4 : ry1;
-            if (rx >= cx1 || ry >= cy1) return;
-            int mv = mi[miAt + Vp9Mi.Mv0 + refIdx];
-            PredictOne(src, p, ssX, ssY, n4wX4, n4hX4, 0, 0, n4wX4, n4hX4, rx, ry, cx1 - rx, cy1 - ry,
-                miX, miY, toLeft, toRight, toTop, toBottom, filter, MvRow(mv), MvCol(mv), avg, dst, dstAt, dstStride,
-                scratch, scratchAt);
-        }
+            }
     }
 
     /// <summary>dec_build_inter_predictors(plane, bw, bh, x, y, w, h, mi_x, mi_y, kernel, sf, mv, is_scaled, ref): the
@@ -634,18 +607,17 @@ internal static class Vp9InterPred
         // sf->predict[subpel_x != 0][subpel_y != 0][ref] as vp9_setup_scale_factors_for_frame fills it
         bool scaleX = p.XStepQ4 != SubpelShifts, scaleY = p.YStepQ4 != SubpelShifts;
         bool fx = subpelX != 0, fy = subpelY != 0;
-        if (!scaleX && !scaleY)
+        // which directions filter: unscaled, the sub-pel ones (copy / horiz / vert / 2-D); x unscaled and whole-pel with
+        // y scaled: [0][*] = vpx_scaled_vert; y unscaled and whole-pel with x scaled: [*][0] = vpx_scaled_horiz; else
+        // vpx_scaled_2d
+        bool hf = true, vf = true;
+        if (!scaleX & !scaleY)
         {
-            if (!fx && !fy) ConvolveCopy(src, p, ox, oy, edge, dst, at, dstStride, rw, rh, avg);
-            else if (!fy) ConvolveHoriz(src, p, ox, oy, edge, filter, qx, xs, dst, at, dstStride, rw, rh, avg);
-            else if (!fx) ConvolveVert(src, p, ox, oy, edge, filter, qy, ys, dst, at, dstStride, rw, rh, avg);
-            else Convolve2D(src, p, ox, oy, edge, filter, qx, xs, qy, ys, dst, at, dstStride, rw, rh, avg, scratch, scratchAt);
+            hf = fx;
+            vf = fy;
         }
-        else if (!scaleX && !fx)   // x unscaled, y scaled: [0][*] = vpx_scaled_vert
-            ConvolveVert(src, p, ox, oy, edge, filter, qy, ys, dst, at, dstStride, rw, rh, avg);
-        else if (!scaleY && !fy)   // y unscaled, x scaled: [*][0] = vpx_scaled_horiz
-            ConvolveHoriz(src, p, ox, oy, edge, filter, qx, xs, dst, at, dstStride, rw, rh, avg);
-        else                       // vpx_scaled_2d
-            Convolve2D(src, p, ox, oy, edge, filter, qx, xs, qy, ys, dst, at, dstStride, rw, rh, avg, scratch, scratchAt);
+        else if (!scaleX & !fx) hf = false;
+        else if (!scaleY & !fy) vf = false;
+        Convolve(src, p, ox, oy, edge, filter, hf, vf, qx, xs, qy, ys, dst, at, dstStride, rw, rh, avg, scratch, scratchAt);
     }
 }

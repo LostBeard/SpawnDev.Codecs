@@ -121,7 +121,7 @@ internal static class Vp9ReconKernels
         int dstAt = a[Vp9RArg.Cur + plane * 4] + py0 * stride + px0;
         int ref0 = mi[b + Vp9Mi.Ref0], ref1 = mi[b + Vp9Mi.Ref1];
         Vp9InterPred.PredictBlockPlaneRegion(sx, sy, bRow, bCol, miRows, miCols, mi, b,
-            pool, RefPlane(a, ref0, plane), pool, RefPlane(a, ref1 > 0 ? ref1 : ref0, plane), pool, dstAt, stride,
+            pool, RefPlane(a, ref0, plane), RefPlane(a, ref1 > 0 ? ref1 : ref0, plane), pool, dstAt, stride,
             ux * 4 - px0, uy * 4 - py0, 4, 4, scratch, (int)index * Vp9InterPred.RegionScratchInts);
     }
 
