@@ -67,103 +67,128 @@ internal static class Vp9CompressedHeaderKernels
     }
 
     /// <summary>One thread: read_compressed_header into the current context (slot 4).</summary>
+    // The compressed header as a table of segments (BuildSegments), walked by one loop: every probability update goes
+    // through ONE DiffUpdate call site and one MV-update site. Repeated per syntax element, the inlined helpers made the
+    // kernel huge after inlining (Chrome's D3D shader compiler inlines every function, so only fewer call sites help).
+    // Segment = 4 ints: kind, condition, offset (relative to the current context), count.
+    internal const int SegDiff = 0, SegMv = 1, SegTxMode = 2, SegCoefBit = 3, SegRefMode = 4;
+    internal const int CondAlways = 0, CondTxSelect = 1, CondCoefUpdate = 2, CondInter = 3, CondSwitchable = 4,
+        CondRefSelect = 5, CondNotCompoundOnly = 6, CondNotSingle = 7, CondAllowHp = 8;
+
+    /// <summary>
+    /// The segments in libvpx read_compressed_header order (read_tx_mode / tx_mode_probs, read_coef_probs, skip, inter
+    /// mode, switchable interp, intra-inter, reference mode and its probs, y mode, partition, read_mv_probs).
+    /// </summary>
+    internal static int[] BuildSegments()
+    {
+        var s = new List<int>();
+        void Add(int kind, int cond, int at, int count) { s.Add(kind); s.Add(cond); s.Add(at); s.Add(count); }
+        Add(SegTxMode, CondAlways, 0, 0);
+        Add(SegDiff, CondTxSelect, Vp9Ctx.Tx8, 2);
+        Add(SegDiff, CondTxSelect, Vp9Ctx.Tx16, 4);
+        Add(SegDiff, CondTxSelect, Vp9Ctx.Tx32, 6);
+        for (int tx = 0; tx < 4; tx++)
+        {
+            Add(SegCoefBit, CondAlways, tx, 0);   // update flag for this tx size (read only when tx <= the biggest)
+            for (int plane = 0; plane < 2; plane++)
+                for (int refType = 0; refType < 2; refType++)
+                    for (int band = 0; band < 6; band++)
+                        Add(SegDiff, CondCoefUpdate, Vp9Ctx.Coef + ((((tx * 2 + plane) * 2 + refType) * 6 + band) * 6) * 3,
+                            (band == 0 ? 3 : 6) * 3);   // BAND_COEFF_CONTEXTS x UNCONSTRAINED_NODES
+        }
+        Add(SegDiff, CondAlways, Vp9Ctx.Skip, 3);
+        Add(SegDiff, CondInter, Vp9Ctx.InterMode, 21);
+        Add(SegDiff, CondSwitchable, Vp9Ctx.SwitchableInterp, 8);
+        Add(SegDiff, CondInter, Vp9Ctx.IntraInter, 4);
+        Add(SegRefMode, CondInter, 0, 0);
+        Add(SegDiff, CondRefSelect, Vp9Ctx.CompInter, 5);
+        Add(SegDiff, CondNotCompoundOnly, Vp9Ctx.SingleRef, 10);
+        Add(SegDiff, CondNotSingle, Vp9Ctx.CompRef, 5);
+        Add(SegDiff, CondInter, Vp9Ctx.YMode, 36);
+        Add(SegDiff, CondInter, Vp9Ctx.Partition, 48);
+        Add(SegMv, CondInter, Vp9Ctx.MvJoints, 3);
+        for (int c = 0; c < 2; c++)
+        {
+            int comp = Vp9Ctx.MvComp + c * Vp9Ctx.MvCompStride;
+            Add(SegMv, CondInter, comp + Vp9Ctx.MvSign, 1);
+            Add(SegMv, CondInter, comp + Vp9Ctx.MvClasses, 10);
+            Add(SegMv, CondInter, comp + Vp9Ctx.MvClass0, 1);
+            Add(SegMv, CondInter, comp + Vp9Ctx.MvBits, 10);
+        }
+        for (int c = 0; c < 2; c++)
+        {
+            int comp = Vp9Ctx.MvComp + c * Vp9Ctx.MvCompStride;
+            Add(SegMv, CondInter, comp + Vp9Ctx.MvClass0Fp, 6);
+            Add(SegMv, CondInter, comp + Vp9Ctx.MvFp, 3);
+        }
+        for (int c = 0; c < 2; c++)
+        {
+            int comp = Vp9Ctx.MvComp + c * Vp9Ctx.MvCompStride;
+            Add(SegMv, CondAllowHp, comp + Vp9Ctx.MvClass0Hp, 1);
+            Add(SegMv, CondAllowHp, comp + Vp9Ctx.MvHp, 1);
+        }
+        return s.ToArray();
+    }
+
     public static void CompressedHeaderKernel(Index1D index, ArrayView<byte> frame, ArrayView<int> ctx, ArrayView<int> invMap,
-        ArrayView<int> args, ArrayView<int> results)
+        ArrayView<int> args, ArrayView<int> results, ArrayView<int> segs)
     {
         int fc = Vp9Ctx.Current * Vp9Ctx.Bytes;
         var r = Vp8BoolDecoderGpu.Init(frame, args[Vp9CompArgs.Offset], args[Vp9CompArgs.Size]);
         int error = Vp8BoolDecoderGpu.DecodeBool(ref r, frame, 128);   // marker bit (vpx_reader_init fails when set)
-
-        int txMode = 0;
-        if (args[Vp9CompArgs.Lossless] == 0)
-        {
-            txMode = ReadLiteral(ref r, frame, 2);
-            if (txMode == 3) txMode += ReadBit(ref r, frame);   // ALLOW_32X32 -> TX_MODE_SELECT
-        }
-        if (txMode == 4)
-        {
-            for (int i = 0; i < 2; i++) DiffUpdate(ref r, frame, ctx, fc + Vp9Ctx.Tx8 + i, invMap);
-            for (int i = 0; i < 2; i++)
-                for (int j = 0; j < 2; j++) DiffUpdate(ref r, frame, ctx, fc + Vp9Ctx.Tx16 + i * 2 + j, invMap);
-            for (int i = 0; i < 2; i++)
-                for (int j = 0; j < 3; j++) DiffUpdate(ref r, frame, ctx, fc + Vp9Ctx.Tx32 + i * 3 + j, invMap);
-        }
-        int maxTx = txMode < 3 ? txMode : 3;   // tx_mode_to_biggest_tx_size
-        for (int tx = 0; tx <= maxTx; tx++)
-        {
-            if (ReadBit(ref r, frame) == 0) continue;
-            for (int plane = 0; plane < 2; plane++)
-                for (int refType = 0; refType < 2; refType++)
-                    for (int band = 0; band < 6; band++)
-                    {
-                        int contexts = band == 0 ? 3 : 6;   // BAND_COEFF_CONTEXTS
-                        for (int c = 0; c < contexts; c++)
-                            for (int node = 0; node < 3; node++)
-                                DiffUpdate(ref r, frame, ctx,
-                                    fc + Vp9Ctx.Coef + ((((tx * 2 + plane) * 2 + refType) * 6 + band) * 6 + c) * 3 + node, invMap);
-                    }
-        }
-        for (int k = 0; k < 3; k++) DiffUpdate(ref r, frame, ctx, fc + Vp9Ctx.Skip + k, invMap);
-
+        bool inter = args[Vp9CompArgs.IntraOnly] == 0;
+        int txMode = 0, maxTx = 0, coefUpdate = 0;
         int refMode = 0, compFixed = -1, compVar0 = -1, compVar1 = -1;
-        if (args[Vp9CompArgs.IntraOnly] == 0)
+        int segments = (int)(segs.Length / 4);
+        for (int s = 0; s < segments; s++)
         {
-            for (int i = 0; i < 7; i++)
-                for (int j = 0; j < 3; j++) DiffUpdate(ref r, frame, ctx, fc + Vp9Ctx.InterMode + i * 3 + j, invMap);
-            if (args[Vp9CompArgs.Switchable] != 0)
-                for (int j = 0; j < 4; j++)
-                    for (int i = 0; i < 2; i++) DiffUpdate(ref r, frame, ctx, fc + Vp9Ctx.SwitchableInterp + j * 2 + i, invMap);
-            for (int i = 0; i < 4; i++) DiffUpdate(ref r, frame, ctx, fc + Vp9Ctx.IntraInter + i, invMap);
-
-            int biasLast = args[Vp9CompArgs.SignBias], biasGolden = args[Vp9CompArgs.SignBias + 1], biasAlt = args[Vp9CompArgs.SignBias + 2];
-            bool compoundAllowed = biasGolden != biasLast || biasAlt != biasLast;
-            if (compoundAllowed)
-                refMode = ReadBit(ref r, frame) != 0 ? (ReadBit(ref r, frame) != 0 ? 2 : 1) : 0;   // SINGLE / COMPOUND / SELECT
-            if (refMode != 0)
+            int kind = segs[s * 4], cond = segs[s * 4 + 1], at = segs[s * 4 + 2], count = segs[s * 4 + 3];
+            bool on = cond == CondAlways
+                || (cond == CondTxSelect && txMode == 4)
+                || (cond == CondCoefUpdate && coefUpdate != 0)
+                || (cond == CondInter && inter)
+                || (cond == CondSwitchable && inter && args[Vp9CompArgs.Switchable] != 0)
+                || (cond == CondRefSelect && inter && refMode == 2)
+                || (cond == CondNotCompoundOnly && inter && refMode != 1)
+                || (cond == CondNotSingle && inter && refMode != 0)
+                || (cond == CondAllowHp && inter && args[Vp9CompArgs.AllowHp] != 0);
+            if (!on) continue;
+            if (kind == SegTxMode)
             {
-                // vp9_setup_compound_reference_mode (LAST 1, GOLDEN 2, ALTREF 3)
-                if (biasLast == biasGolden) { compFixed = 3; compVar0 = 1; compVar1 = 2; }
-                else if (biasLast == biasAlt) { compFixed = 2; compVar0 = 1; compVar1 = 3; }
-                else { compFixed = 1; compVar0 = 2; compVar1 = 3; }
-            }
-            if (refMode == 2)
-                for (int i = 0; i < 5; i++) DiffUpdate(ref r, frame, ctx, fc + Vp9Ctx.CompInter + i, invMap);
-            if (refMode != 1)
-                for (int i = 0; i < 5; i++)
+                if (args[Vp9CompArgs.Lossless] == 0)
                 {
-                    DiffUpdate(ref r, frame, ctx, fc + Vp9Ctx.SingleRef + i * 2, invMap);
-                    DiffUpdate(ref r, frame, ctx, fc + Vp9Ctx.SingleRef + i * 2 + 1, invMap);
+                    txMode = ReadLiteral(ref r, frame, 2);
+                    if (txMode == 3) txMode += ReadBit(ref r, frame);   // ALLOW_32X32 -> TX_MODE_SELECT
                 }
-            if (refMode != 0)
-                for (int i = 0; i < 5; i++) DiffUpdate(ref r, frame, ctx, fc + Vp9Ctx.CompRef + i, invMap);
-            for (int j = 0; j < 4; j++)
-                for (int i = 0; i < 9; i++) DiffUpdate(ref r, frame, ctx, fc + Vp9Ctx.YMode + j * 9 + i, invMap);
-            for (int j = 0; j < 16; j++)
-                for (int i = 0; i < 3; i++) DiffUpdate(ref r, frame, ctx, fc + Vp9Ctx.Partition + j * 3 + i, invMap);
-
-            // read_mv_probs
-            MvUpdate(ref r, frame, ctx, fc + Vp9Ctx.MvJoints, 3);
-            for (int c = 0; c < 2; c++)
-            {
-                int comp = fc + Vp9Ctx.MvComp + c * Vp9Ctx.MvCompStride;
-                MvUpdate(ref r, frame, ctx, comp + Vp9Ctx.MvSign, 1);
-                MvUpdate(ref r, frame, ctx, comp + Vp9Ctx.MvClasses, 10);
-                MvUpdate(ref r, frame, ctx, comp + Vp9Ctx.MvClass0, 1);
-                MvUpdate(ref r, frame, ctx, comp + Vp9Ctx.MvBits, 10);
+                maxTx = txMode < 3 ? txMode : 3;   // tx_mode_to_biggest_tx_size
             }
-            for (int c = 0; c < 2; c++)
+            else if (kind == SegCoefBit)
             {
-                int comp = fc + Vp9Ctx.MvComp + c * Vp9Ctx.MvCompStride;
-                for (int j = 0; j < 2; j++) MvUpdate(ref r, frame, ctx, comp + Vp9Ctx.MvClass0Fp + j * 3, 3);
-                MvUpdate(ref r, frame, ctx, comp + Vp9Ctx.MvFp, 3);
+                coefUpdate = at <= maxTx ? ReadBit(ref r, frame) : 0;   // read_coef_probs: tx sizes past the biggest read nothing
             }
-            if (args[Vp9CompArgs.AllowHp] != 0)
-                for (int c = 0; c < 2; c++)
+            else if (kind == SegRefMode)
+            {
+                int biasLast = args[Vp9CompArgs.SignBias], biasGolden = args[Vp9CompArgs.SignBias + 1], biasAlt = args[Vp9CompArgs.SignBias + 2];
+                bool compoundAllowed = biasGolden != biasLast || biasAlt != biasLast;
+                if (compoundAllowed)
+                    refMode = ReadBit(ref r, frame) != 0 ? (ReadBit(ref r, frame) != 0 ? 2 : 1) : 0;   // SINGLE / COMPOUND / SELECT
+                if (refMode != 0)
                 {
-                    int comp = fc + Vp9Ctx.MvComp + c * Vp9Ctx.MvCompStride;
-                    MvUpdate(ref r, frame, ctx, comp + Vp9Ctx.MvClass0Hp, 1);
-                    MvUpdate(ref r, frame, ctx, comp + Vp9Ctx.MvHp, 1);
+                    // vp9_setup_compound_reference_mode (LAST 1, GOLDEN 2, ALTREF 3)
+                    if (biasLast == biasGolden) { compFixed = 3; compVar0 = 1; compVar1 = 2; }
+                    else if (biasLast == biasAlt) { compFixed = 2; compVar0 = 1; compVar1 = 3; }
+                    else { compFixed = 1; compVar0 = 2; compVar1 = 3; }
                 }
+            }
+            else
+            {
+                for (int k = 0; k < count; k++)
+                {
+                    if (kind == SegDiff) DiffUpdate(ref r, frame, ctx, fc + at + k, invMap);
+                    else if (Vp8BoolDecoderGpu.DecodeBool(ref r, frame, MvUpdateProb) != 0)   // update_mv_probs
+                        ctx[fc + at + k] = (ReadLiteral(ref r, frame, 7) << 1) | 1;
+                }
+            }
         }
         // vpx_reader_has_error: bits were read past the end of the partition
         if (r.Count > Vp8BoolDecoderGpu.BdValueSize && r.Count < Vp8BoolDecoderGpu.LotsOfBits) error = 1;
@@ -182,12 +207,6 @@ internal static class Vp9CompressedHeaderKernels
         int v = 0;
         for (int b = bits - 1; b >= 0; b--) v |= ReadBit(ref r, buf) << b;
         return v;
-    }
-
-    private static void MvUpdate(ref Vp8BoolDecoderGpuState r, ArrayView<byte> buf, ArrayView<int> ctx, int at, int n)
-    {
-        for (int i = 0; i < n; i++)
-            if (Vp8BoolDecoderGpu.DecodeBool(ref r, buf, MvUpdateProb) != 0) ctx[at + i] = (ReadLiteral(ref r, buf, 7) << 1) | 1;
     }
 
     /// <summary>vp9_diff_update_prob.</summary>
@@ -228,11 +247,11 @@ public readonly record struct Vp9CompressedHeaderResult(int TxMode, int Referenc
 public sealed class Vp9FrameContextsGpu : IDisposable
 {
     private readonly Accelerator _acc;
-    private readonly MemoryBuffer1D<int, Stride1D.Dense> _ctx, _defaults, _invMap, _args, _results, _tables, _sum, _totals, _adaptArgs;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _ctx, _defaults, _invMap, _args, _results, _tables, _sum, _totals, _adaptArgs, _segs;
     private Action<Index1D, ArrayView<int>, ArrayView<int>, int> _sumCounts = null!;
     private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _adapt = null!;
     private Action<Index1D, ArrayView<int>, ArrayView<int>, int, int> _copy = null!;
-    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _compressed = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _compressed = null!;
 
     /// <summary>Contexts on <paramref name="accelerator"/>; <see cref="LoadKernelsAsync"/> loads the kernels and sets the slots to libvpx's defaults.</summary>
     public Vp9FrameContextsGpu(Accelerator accelerator)
@@ -242,6 +261,7 @@ public sealed class Vp9FrameContextsGpu : IDisposable
         _defaults = _acc.Allocate1D(Vp9DecoderTables.DefaultFrameContext.Select(b => (int)b).ToArray());
         _invMap = _acc.Allocate1D(Vp9DecoderTables.InvMapTable.Select(b => (int)b).ToArray());
         _args = _acc.Allocate1D<int>(Vp9CompArgs.Count);
+        _segs = _acc.Allocate1D(Vp9CompressedHeaderKernels.BuildSegments());   // constant table (syntax order)
         _results = _acc.Allocate1D<int>(Vp9CompArgs.ResultCount);
         _tables = _acc.Allocate1D(Vp9T.Packed);
         _sum = _acc.Allocate1D<int>(Vp9Cnt.Size);
@@ -256,7 +276,7 @@ public sealed class Vp9FrameContextsGpu : IDisposable
     internal async Task LoadKernelsAsync()
     {
         _copy = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int, int>(Vp9CompressedHeaderKernels.CopyContextKernel);
-        _compressed = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(
+        _compressed = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(
             Vp9CompressedHeaderKernels.CompressedHeaderKernel);
         _sumCounts = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(Vp9AdaptKernels.SumCountsKernel);
         _adapt = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(
@@ -314,7 +334,7 @@ public sealed class Vp9FrameContextsGpu : IDisposable
         args[Vp9CompArgs.SignBias + 1] = h.SignBias[2];
         args[Vp9CompArgs.SignBias + 2] = h.SignBias[3];
         _args.View.CopyFromCPU(args);   // nine scalars of frame metadata
-        _compressed(1, frame, _ctx.View, _invMap.View, _args.View, _results.View);
+        _compressed(1, frame, _ctx.View, _invMap.View, _args.View, _results.View, _segs.View);
     }
 
     /// <summary>The compressed header's results (tx mode, reference mode, compound refs, error) on the accelerator.</summary>
@@ -340,6 +360,7 @@ public sealed class Vp9FrameContextsGpu : IDisposable
         _ctx.Dispose();
         _defaults.Dispose();
         _invMap.Dispose();
+        _segs.Dispose();
         _args.Dispose();
         _results.Dispose();
         _tables.Dispose();
