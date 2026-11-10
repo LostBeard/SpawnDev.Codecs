@@ -25,9 +25,9 @@ public abstract partial class CodecsTestBase
 
     private static void Vp9ItxFixtureKernel(Index1D i, ArrayView<int> p, ArrayView<int> coef, ArrayView<byte> dst, ArrayView<int> scratch)
     {
-        long b = (long)i.X * Vp9ItxParams;
+        int b = i.X * Vp9ItxParams;
         Vp9Itx.InverseTransformAdd(coef, p[b + 5], p[b], p[b + 1], p[b + 2] != 0, p[b + 3], dst, p[b + 6], p[b + 4],
-            scratch, (long)i.X * Vp9Itx.ScratchInts);
+            scratch, i.X * Vp9Itx.ScratchInts);
     }
 
     [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]

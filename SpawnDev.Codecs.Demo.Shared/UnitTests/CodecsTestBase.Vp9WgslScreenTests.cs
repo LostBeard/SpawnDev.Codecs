@@ -20,24 +20,27 @@ public abstract partial class CodecsTestBase
 {
     // (class, kernel method, WGSL character budget), each today's size + 10%. Measured 2026-11-09 on SpawnDev.ILGPU
     // 5.4.23-local.3, which emits view-taking helpers, ref state and LocalMemory views as WGSL functions instead of
-    // inlining them: loop-filter Wavefront 9.2 MB, InterPredict 5.6 MB, IntraWave 2.7 MB, InterResidual 2.4 MB,
-    // CompressedHeader 0.47 MB (6.4 MB before the table-driven rewrite: one DiffUpdate call site instead of one per
-    // syntax element), ParseKernel 0.56 MB (11,464 lines, about 11,900 with every function inlined as D3D does; before
+    // inlining them. Re-measured 2026-11-10 on 5.4.23 after the reconstruction and loop-filter kernels moved from 64-bit
+    // to 32-bit pixel / coefficient / scratch offsets (64-bit math is emulated in WGSL): loop-filter Wavefront 9.0 MB
+    // (fully inlined 189k -> 116k lines), InterPredict 5.4 MB (134k -> 76k), IntraWave 1.3 MB (2.7 MB; 116k -> 61k),
+    // InterResidual 1.1 MB (2.4 MB; 102k -> 56k),
+    // CompressedHeader 0.43 MB (6.4 MB before the table-driven rewrite: one DiffUpdate call site instead of one per
+    // syntax element), ParseKernel 0.55 MB (11,563 lines, about 11,900 with every function inlined as D3D does; before
     // the call-site rewrite 9.0 MB / 113,564 lines, but ParseBlock was a 111k-line WGSL function called from 6 places,
     // so about 763k lines inlined). A WGSL function's call sites multiply it on D3D, so the line count alone can hide
     // a regression: VP9_WGSL_DUMP=dir writes the WGSL to look at.
     private static readonly (Type Owner, string Kernel, long Budget)[] Vp9WgslKernels =
     {
         (typeof(Vp9CompressedHeaderKernels), "CopyContextKernel", 3734),
-        (typeof(Vp9CompressedHeaderKernels), "CompressedHeaderKernel", 522395),
-        (typeof(Vp9ParseKernels), "ParseKernel", 617970),
-        (typeof(Vp9ReconKernels), "InterPredictKernel", 6148984),
-        (typeof(Vp9ReconKernels), "InterResidualKernel", 2691056),
-        (typeof(Vp9ReconKernels), "IntraWaveKernel", 2971359),
+        (typeof(Vp9CompressedHeaderKernels), "CompressedHeaderKernel", 471586),
+        (typeof(Vp9ParseKernels), "ParseKernel", 600774),
+        (typeof(Vp9ReconKernels), "InterPredictKernel", 5931714),
+        (typeof(Vp9ReconKernels), "InterResidualKernel", 1193293),
+        (typeof(Vp9ReconKernels), "IntraWaveKernel", 1425491),
         (typeof(Vp9LoopFilterKernels), "FrameInitKernel", 24780),
-        (typeof(Vp9LoopFilterKernels), "WavefrontKernel", 10143101),
+        (typeof(Vp9LoopFilterKernels), "WavefrontKernel", 9952305),
         (typeof(Vp9AdaptKernels), "SumCountsKernel", 3579),
-        (typeof(Vp9AdaptKernels), "AdaptKernel", 404973),
+        (typeof(Vp9AdaptKernels), "AdaptKernel", 354152),
         (typeof(Vp9OutputKernels), "PackPlanesKernel", 19703),
     };
 

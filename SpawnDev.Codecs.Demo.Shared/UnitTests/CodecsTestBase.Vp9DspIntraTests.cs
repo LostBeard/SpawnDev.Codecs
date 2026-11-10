@@ -27,11 +27,11 @@ public abstract partial class CodecsTestBase
 
     private static void Vp9IntraPredTestKernel(Index1D i, ArrayView<int> prm, ArrayView<byte> win, ArrayView<int> scratch)
     {
-        long p = (long)i.X * Vp9IntraCaseInts;
+        int p = i.X * Vp9IntraCaseInts;
         int stride = prm[p + 17];
         Vp9IntraPred.Predict(prm[p + 2], prm[p + 0], prm[p + 1], prm[p + 3], prm[p + 4], prm[p + 5] != 0, prm[p + 6] != 0,
             prm[p + 7], prm[p + 8], prm[p + 9], prm[p + 10], prm[p + 11], prm[p + 12], prm[p + 13], prm[p + 14],
-            win, prm[p + 16] + stride + 1, stride, scratch, (long)i.X * Vp9IntraPred.ScratchInts);
+            win, prm[p + 16] + stride + 1, stride, scratch, i.X * Vp9IntraPred.ScratchInts);
     }
 
     [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]

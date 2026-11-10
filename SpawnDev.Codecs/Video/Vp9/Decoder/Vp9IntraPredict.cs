@@ -84,7 +84,7 @@ internal static class Vp9IntraPred
     [MethodImpl(MethodImplOptions.NoInlining)]
     public static void Predict(int bwlIn, int txSize, int mode, int aoff, int loff, bool haveAboveMi, bool haveLeftMi,
         int mbToLeftEdge, int mbToTopEdge, int mbToRightEdge, int mbToBottomEdge, int subsamplingX, int subsamplingY,
-        int frameWidth, int frameHeight, ArrayView<byte> dst, long dstAt, int stride, ArrayView<int> scratch, long scratchAt)
+        int frameWidth, int frameHeight, ArrayView<byte> dst, int dstAt, int stride, ArrayView<int> scratch, int scratchAt)
     {
         // vp9_predict_intra_block
         int bw = 1 << bwlIn;
@@ -99,9 +99,9 @@ internal static class Vp9IntraPred
         int bs = 4 << txSize;
         int x0 = (-mbToLeftEdge >> (3 + subsamplingX)) + x;
         int y0 = (-mbToTopEdge >> (3 + subsamplingY)) + y;
-        long left = scratchAt + LeftAt;
-        long above = scratchAt + AboveAt;
-        long aboveRef = dstAt - stride;
+        int left = scratchAt + LeftAt;
+        int above = scratchAt + AboveAt;
+        int aboveRef = dstAt - stride;
         int ext = ExtendModes(mode);
 
         // NEED_LEFT
@@ -114,12 +114,12 @@ internal static class Vp9IntraPred
                     // slower path: the block needs border extension
                     int extendBottom = frameHeight - y0;
                     int i = 0;
-                    for (; i < extendBottom; ++i) scratch[left + i] = dst[dstAt + (long)i * stride - 1];
-                    for (; i < bs; ++i) scratch[left + i] = dst[dstAt + (long)(extendBottom - 1) * stride - 1];
+                    for (; i < extendBottom; ++i) scratch[left + i] = dst[dstAt + i * stride - 1];
+                    for (; i < bs; ++i) scratch[left + i] = dst[dstAt + (extendBottom - 1) * stride - 1];
                 }
                 else
                 {
-                    for (int i = 0; i < bs; ++i) scratch[left + i] = dst[dstAt + (long)i * stride - 1];
+                    for (int i = 0; i < bs; ++i) scratch[left + i] = dst[dstAt + i * stride - 1];
                 }
             }
             else
@@ -266,17 +266,17 @@ internal static class Vp9IntraPred
     private static int Avg3(int a, int b, int c) => (a + 2 * b + c + 2) >> 2;
     private static int Avg2(int a, int b) => (a + b + 1) >> 1;
 
-    private static void Put(ArrayView<byte> dst, long at, int stride, int c, int r, int v) => dst[at + (long)r * stride + c] = (byte)v;
-    private static int Get(ArrayView<byte> dst, long at, int stride, int c, int r) => dst[at + (long)r * stride + c];
+    private static void Put(ArrayView<byte> dst, int at, int stride, int c, int r, int v) => dst[at + r * stride + c] = (byte)v;
+    private static int Get(ArrayView<byte> dst, int at, int stride, int c, int r) => dst[at + r * stride + c];
 
-    private static void Fill(ArrayView<byte> dst, long at, int stride, int bs, int v)
+    private static void Fill(ArrayView<byte> dst, int at, int stride, int bs, int v)
     {
         for (int r = 0; r < bs; r++)
             for (int c = 0; c < bs; c++) Put(dst, at, stride, c, r, v);
     }
 
     // dc_predictor
-    private static void Dc(ArrayView<byte> dst, long at, int stride, int bs, ArrayView<int> s, long above, long left)
+    private static void Dc(ArrayView<byte> dst, int at, int stride, int bs, ArrayView<int> s, int above, int left)
     {
         int sum = 0, count = 2 * bs;
         for (int i = 0; i < bs; i++) sum += s[above + i] + s[left + i];
@@ -284,7 +284,7 @@ internal static class Vp9IntraPred
     }
 
     // dc_top_predictor (edge = above) / dc_left_predictor (edge = left)
-    private static void DcEdge(ArrayView<byte> dst, long at, int stride, int bs, ArrayView<int> s, long edge)
+    private static void DcEdge(ArrayView<byte> dst, int at, int stride, int bs, ArrayView<int> s, int edge)
     {
         int sum = 0;
         for (int i = 0; i < bs; i++) sum += s[edge + i];
@@ -292,14 +292,14 @@ internal static class Vp9IntraPred
     }
 
     // v_predictor
-    private static void V(ArrayView<byte> dst, long at, int stride, int bs, ArrayView<int> s, long above)
+    private static void V(ArrayView<byte> dst, int at, int stride, int bs, ArrayView<int> s, int above)
     {
         for (int r = 0; r < bs; r++)
             for (int c = 0; c < bs; c++) Put(dst, at, stride, c, r, s[above + c]);
     }
 
     // h_predictor
-    private static void H(ArrayView<byte> dst, long at, int stride, int bs, ArrayView<int> s, long left)
+    private static void H(ArrayView<byte> dst, int at, int stride, int bs, ArrayView<int> s, int left)
     {
         for (int r = 0; r < bs; r++)
         {
@@ -309,7 +309,7 @@ internal static class Vp9IntraPred
     }
 
     // tm_predictor: clip_pixel(left[r] + above[c] - above[-1])
-    private static void Tm(ArrayView<byte> dst, long at, int stride, int bs, ArrayView<int> s, long above, long left)
+    private static void Tm(ArrayView<byte> dst, int at, int stride, int bs, ArrayView<int> s, int above, int left)
     {
         int ytopLeft = s[above - 1];
         for (int r = 0; r < bs; r++)
@@ -321,7 +321,7 @@ internal static class Vp9IntraPred
     }
 
     // d45_predictor (8x8 .. 32x32)
-    private static void D45(ArrayView<byte> dst, long at, int stride, int bs, ArrayView<int> s, long above)
+    private static void D45(ArrayView<byte> dst, int at, int stride, int bs, ArrayView<int> s, int above)
     {
         int aboveRight = s[above + bs - 1];
         for (int x = 0; x < bs - 1; ++x) Put(dst, at, stride, x, 0, Avg3(s[above + x], s[above + x + 1], s[above + x + 2]));
@@ -335,7 +335,7 @@ internal static class Vp9IntraPred
     }
 
     // vpx_d45_predictor_4x4_c
-    private static void D45x4(ArrayView<byte> dst, long at, int stride, ArrayView<int> s, long above)
+    private static void D45x4(ArrayView<byte> dst, int at, int stride, ArrayView<int> s, int above)
     {
         int A = s[above], B = s[above + 1], C = s[above + 2], D = s[above + 3];
         int E = s[above + 4], F = s[above + 5], G = s[above + 6], H = s[above + 7];
@@ -354,7 +354,7 @@ internal static class Vp9IntraPred
     }
 
     // d63_predictor (8x8 .. 32x32)
-    private static void D63(ArrayView<byte> dst, long at, int stride, int bs, ArrayView<int> s, long above)
+    private static void D63(ArrayView<byte> dst, int at, int stride, int bs, ArrayView<int> s, int above)
     {
         for (int c = 0; c < bs; ++c)
         {
@@ -381,7 +381,7 @@ internal static class Vp9IntraPred
     }
 
     // vpx_d63_predictor_4x4_c
-    private static void D63x4(ArrayView<byte> dst, long at, int stride, ArrayView<int> s, long above)
+    private static void D63x4(ArrayView<byte> dst, int at, int stride, ArrayView<int> s, int above)
     {
         int A = s[above], B = s[above + 1], C = s[above + 2], D = s[above + 3];
         int E = s[above + 4], F = s[above + 5], G = s[above + 6];
@@ -398,7 +398,7 @@ internal static class Vp9IntraPred
     }
 
     // d207_predictor (8x8 .. 32x32)
-    private static void D207(ArrayView<byte> dst, long at, int stride, int bs, ArrayView<int> s, long left)
+    private static void D207(ArrayView<byte> dst, int at, int stride, int bs, ArrayView<int> s, int left)
     {
         // first column
         for (int r = 0; r < bs - 1; ++r) Put(dst, at, stride, 0, r, Avg2(s[left + r], s[left + r + 1]));
@@ -416,7 +416,7 @@ internal static class Vp9IntraPred
     }
 
     // vpx_d207_predictor_4x4_c
-    private static void D207x4(ArrayView<byte> dst, long at, int stride, ArrayView<int> s, long left)
+    private static void D207x4(ArrayView<byte> dst, int at, int stride, ArrayView<int> s, int left)
     {
         int I = s[left], J = s[left + 1], K = s[left + 2], L = s[left + 3];
         Put(dst, at, stride, 0, 0, Avg2(I, J));
@@ -430,7 +430,7 @@ internal static class Vp9IntraPred
     }
 
     // d117_predictor (8x8 .. 32x32)
-    private static void D117(ArrayView<byte> dst, long at, int stride, int bs, ArrayView<int> s, long above, long left)
+    private static void D117(ArrayView<byte> dst, int at, int stride, int bs, ArrayView<int> s, int above, int left)
     {
         // first row
         for (int c = 0; c < bs; c++) Put(dst, at, stride, c, 0, Avg2(s[above + c - 1], s[above + c]));
@@ -446,7 +446,7 @@ internal static class Vp9IntraPred
     }
 
     // vpx_d117_predictor_4x4_c
-    private static void D117x4(ArrayView<byte> dst, long at, int stride, ArrayView<int> s, long above, long left)
+    private static void D117x4(ArrayView<byte> dst, int at, int stride, ArrayView<int> s, int above, int left)
     {
         int I = s[left], J = s[left + 1], K = s[left + 2];
         int X = s[above - 1], A = s[above], B = s[above + 1], C = s[above + 2], D = s[above + 3];
@@ -464,7 +464,7 @@ internal static class Vp9IntraPred
 
     // d135_predictor border[i] (border runs from the bottom-left up the left edge and along the top):
     // dst(c, r) = border[bs - 1 - r + c]
-    private static int D135Border(int i, int bs, ArrayView<int> s, long above, long left)
+    private static int D135Border(int i, int bs, ArrayView<int> s, int above, int left)
     {
         if (i < bs - 2) return Avg3(s[left + bs - 3 - i], s[left + bs - 2 - i], s[left + bs - 1 - i]);
         if (i == bs - 2) return Avg3(s[above - 1], s[left], s[left + 1]);
@@ -475,14 +475,14 @@ internal static class Vp9IntraPred
     }
 
     // d135_predictor (8x8 .. 32x32)
-    private static void D135(ArrayView<byte> dst, long at, int stride, int bs, ArrayView<int> s, long above, long left)
+    private static void D135(ArrayView<byte> dst, int at, int stride, int bs, ArrayView<int> s, int above, int left)
     {
         for (int r = 0; r < bs; ++r)
             for (int c = 0; c < bs; ++c) Put(dst, at, stride, c, r, D135Border(bs - 1 - r + c, bs, s, above, left));
     }
 
     // vpx_d135_predictor_4x4_c
-    private static void D135x4(ArrayView<byte> dst, long at, int stride, ArrayView<int> s, long above, long left)
+    private static void D135x4(ArrayView<byte> dst, int at, int stride, ArrayView<int> s, int above, int left)
     {
         int I = s[left], J = s[left + 1], K = s[left + 2], L = s[left + 3];
         int X = s[above - 1], A = s[above], B = s[above + 1], C = s[above + 2], D = s[above + 3];
@@ -497,7 +497,7 @@ internal static class Vp9IntraPred
     }
 
     // d153_predictor (8x8 .. 32x32)
-    private static void D153(ArrayView<byte> dst, long at, int stride, int bs, ArrayView<int> s, long above, long left)
+    private static void D153(ArrayView<byte> dst, int at, int stride, int bs, ArrayView<int> s, int above, int left)
     {
         // column 0
         Put(dst, at, stride, 0, 0, Avg2(s[above - 1], s[left]));
@@ -514,7 +514,7 @@ internal static class Vp9IntraPred
     }
 
     // vpx_d153_predictor_4x4_c
-    private static void D153x4(ArrayView<byte> dst, long at, int stride, ArrayView<int> s, long above, long left)
+    private static void D153x4(ArrayView<byte> dst, int at, int stride, ArrayView<int> s, int above, int left)
     {
         int I = s[left], J = s[left + 1], K = s[left + 2], L = s[left + 3];
         int X = s[above - 1], A = s[above], B = s[above + 1], C = s[above + 2];

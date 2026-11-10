@@ -170,6 +170,14 @@ Next for S3:
     1.93: unchanged. CUDA and the Chrome / DXC compile: to be measured.
   - Next if needed: the reference-frame contexts (about 1.8k of the 11.9k lines) load the same neighbour fields many
     times; loading them once into locals would shrink them.
+- Reconstruction and loop filter: 32-bit offsets, done 2026-11-10. Their pixel, coefficient and scratch offsets were
+  `long`, so in WGSL every tap was emulated 64-bit math (helper calls: Wavefront 10,881, IntraWave 6,882,
+  InterResidual 5,702, InterPredict 4,621). Now `int`, with host checks that the frame buffers and the scratch fit.
+  Fully inlined lines: Wavefront 188,891 -> 116,468, InterPredict 134,149 -> 75,515, InterResidual 101,910 -> 56,457,
+  IntraWave 115,872 -> 60,538.
+  - Next: the loop filter's 64-bit edge masks (`Vp9LfMask`, libvpx's uint64 masks; 585 emulated calls left) as two
+    32-bit halves; Data's `||` dedup fix in ILGPU (InterPredict 78k -> 34k WGSL lines, Wavefront 115k -> 74k on
+    3a20c7c) stacks on top.
 
 ## Order
 S1 first: contained, bit-exact by construction, and about a third of the frame time. Then S2 inter, S2 intra, S3.

@@ -64,8 +64,8 @@ internal static class Vp9Itx
     // A real function on Wasm (and on the WebGPU / WebGL backends once ILGPU emits view-taking helpers as functions),
     // not inlined at every call site: keeps the kernels small enough for the browsers' shader and Wasm compilers.
     [MethodImpl(MethodImplOptions.NoInlining)]
-    public static void InverseTransformAdd(ArrayView<int> coef, long coefAt, int txSize, int txType, bool lossless, int eob,
-        ArrayView<byte> dst, long dstAt, int stride, ArrayView<int> scratch, long scratchAt)
+    public static void InverseTransformAdd(ArrayView<int> coef, int coefAt, int txSize, int txType, bool lossless, int eob,
+        ArrayView<byte> dst, int dstAt, int stride, ArrayView<int> scratch, int scratchAt)
     {
         if (lossless)
         {
@@ -115,14 +115,14 @@ internal static class Vp9Itx
     /// added to dst after ROUND_POWER_OF_TWO(out, <paramref name="shift"/>). tx_type picks the 1D transforms as libvpx's
     /// IHT tables { cols, rows }: rows ADST for DCT_ADST / ADST_ADST, columns ADST for ADST_DCT / ADST_ADST.
     /// </summary>
-    private static void Transform2DAdd(ArrayView<int> coef, long coefAt, int n, int txType, int rows, bool skipZeroRows, int shift,
-        ArrayView<byte> dst, long dstAt, int stride, ArrayView<int> scratch, long scratchAt)
+    private static void Transform2DAdd(ArrayView<int> coef, int coefAt, int n, int txType, int rows, bool skipZeroRows, int shift,
+        ArrayView<byte> dst, int dstAt, int stride, ArrayView<int> scratch, int scratchAt)
     {
         bool rowAdst = txType == DctAdst || txType == AdstAdst;
         bool colAdst = txType == AdstDct || txType == AdstAdst;
         for (int r = 0; r < n; r++)
         {
-            long o = scratchAt + r * n;
+            int o = scratchAt + r * n;
             bool zero = r >= rows;
             if (!zero && skipZeroRows)
             {
@@ -137,20 +137,20 @@ internal static class Vp9Itx
             }
             Transform1D(n, rowAdst, coef, coefAt + r * n, 1, scratch, o, 1);
         }
-        long col = scratchAt + n * n;
+        int col = scratchAt + n * n;
         int half = 1 << (shift - 1);
         for (int i = 0; i < n; i++)
         {
             Transform1D(n, colAdst, scratch, scratchAt + i, n, scratch, col, 1);
             for (int j = 0; j < n; j++)
             {
-                long p = dstAt + (long)j * stride + i;
+                int p = dstAt + j * stride + i;
                 dst[p] = ClipPixelAdd(dst[p], (scratch[col + j] + half) >> shift);
             }
         }
     }
 
-    private static void Transform1D(int n, bool adst, ArrayView<int> src, long sAt, int sStep, ArrayView<int> dst, long dAt, int dStep)
+    private static void Transform1D(int n, bool adst, ArrayView<int> src, int sAt, int sStep, ArrayView<int> dst, int dAt, int dStep)
     {
         if (n == 4)
         {
@@ -171,7 +171,7 @@ internal static class Vp9Itx
     }
 
     /// <summary>vpx_idct{4x4,8x8,16x16,32x32}_1_add: DC only.</summary>
-    private static void DcOnlyAdd(ArrayView<int> coef, long coefAt, int n, int shift, ArrayView<byte> dst, long dstAt, int stride)
+    private static void DcOnlyAdd(ArrayView<int> coef, int coefAt, int n, int shift, ArrayView<byte> dst, int dstAt, int stride)
     {
         int o = (short)R14((short)coef[coefAt] * C16);   // tran_low_t out
         o = (short)R14(o * C16);
@@ -179,19 +179,19 @@ internal static class Vp9Itx
         for (int j = 0; j < n; j++)
             for (int i = 0; i < n; i++)
             {
-                long p = dstAt + (long)j * stride + i;
+                int p = dstAt + j * stride + i;
                 dst[p] = ClipPixelAdd(dst[p], a1);
             }
     }
 
     /// <summary>vpx_iwht4x4_16_add_c: the lossless 4x4 inverse Walsh-Hadamard transform.</summary>
-    private static void Iwht4x4_16Add(ArrayView<int> coef, long coefAt, ArrayView<byte> dst, long dstAt, int stride,
-        ArrayView<int> scratch, long scratchAt)
+    private static void Iwht4x4_16Add(ArrayView<int> coef, int coefAt, ArrayView<byte> dst, int dstAt, int stride,
+        ArrayView<int> scratch, int scratchAt)
     {
         int a1, b1, c1, d1, e1;
         for (int i = 0; i < 4; i++)
         {
-            long ip = coefAt + i * 4;
+            int ip = coefAt + i * 4;
             a1 = (short)coef[ip] >> UnitQuantShift;
             c1 = (short)coef[ip + 1] >> UnitQuantShift;
             d1 = (short)coef[ip + 2] >> UnitQuantShift;
@@ -203,7 +203,7 @@ internal static class Vp9Itx
             c1 = e1 - c1;
             a1 -= b1;
             d1 += c1;
-            long op = scratchAt + i * 4;
+            int op = scratchAt + i * 4;
             scratch[op] = (short)a1;
             scratch[op + 1] = (short)b1;
             scratch[op + 2] = (short)c1;
@@ -211,7 +211,7 @@ internal static class Vp9Itx
         }
         for (int i = 0; i < 4; i++)
         {
-            long ip = scratchAt + i;
+            int ip = scratchAt + i;
             a1 = scratch[ip];
             c1 = scratch[ip + 4];
             d1 = scratch[ip + 8];
@@ -223,16 +223,16 @@ internal static class Vp9Itx
             c1 = e1 - c1;
             a1 -= b1;
             d1 += c1;
-            long p = dstAt + i;
+            int p = dstAt + i;
             dst[p] = ClipPixelAdd(dst[p], a1);
             dst[p + stride] = ClipPixelAdd(dst[p + stride], b1);
-            dst[p + 2L * stride] = ClipPixelAdd(dst[p + 2L * stride], c1);
-            dst[p + 3L * stride] = ClipPixelAdd(dst[p + 3L * stride], d1);
+            dst[p + 2 * stride] = ClipPixelAdd(dst[p + 2 * stride], c1);
+            dst[p + 3 * stride] = ClipPixelAdd(dst[p + 3 * stride], d1);
         }
     }
 
     /// <summary>vpx_iwht4x4_1_add_c: the lossless transform of a DC-only block.</summary>
-    private static void Iwht4x4_1Add(ArrayView<int> coef, long coefAt, ArrayView<byte> dst, long dstAt, int stride)
+    private static void Iwht4x4_1Add(ArrayView<int> coef, int coefAt, ArrayView<byte> dst, int dstAt, int stride)
     {
         int a1 = (short)coef[coefAt] >> UnitQuantShift;
         int e1 = a1 >> 1;
@@ -243,11 +243,11 @@ internal static class Vp9Itx
             int ip = i == 0 ? tmp0 : tmp1;
             e1 = ip >> 1;
             a1 = ip - e1;
-            long p = dstAt + i;
+            int p = dstAt + i;
             dst[p] = ClipPixelAdd(dst[p], a1);
             dst[p + stride] = ClipPixelAdd(dst[p + stride], e1);
-            dst[p + 2L * stride] = ClipPixelAdd(dst[p + 2L * stride], e1);
-            dst[p + 3L * stride] = ClipPixelAdd(dst[p + 3L * stride], e1);
+            dst[p + 2 * stride] = ClipPixelAdd(dst[p + 2 * stride], e1);
+            dst[p + 3 * stride] = ClipPixelAdd(dst[p + 3 * stride], e1);
         }
     }
 
@@ -257,7 +257,7 @@ internal static class Vp9Itx
     // is a tran_low_t store (int16).
 
     /// <summary>libvpx idct4_c.</summary>
-    private static void Idct4(ArrayView<int> src, long sAt, int sStep, ArrayView<int> dst, long dAt, int dStep)
+    private static void Idct4(ArrayView<int> src, int sAt, int sStep, ArrayView<int> dst, int dAt, int dStep)
     {
         int in0 = (short)src[sAt + 0 * sStep]; int in1 = (short)src[sAt + 1 * sStep]; int in2 = (short)src[sAt + 2 * sStep]; int in3 = (short)src[sAt + 3 * sStep];
         int a0, a1, a2, a3, t1, t2;
@@ -276,7 +276,7 @@ internal static class Vp9Itx
     }
 
     /// <summary>libvpx iadst4_c (all-zero input: zero output, as libvpx's early out).</summary>
-    private static void Iadst4(ArrayView<int> src, long sAt, int sStep, ArrayView<int> dst, long dAt, int dStep)
+    private static void Iadst4(ArrayView<int> src, int sAt, int sStep, ArrayView<int> dst, int dAt, int dStep)
     {
         int in0 = (short)src[sAt + 0 * sStep]; int in1 = (short)src[sAt + 1 * sStep]; int in2 = (short)src[sAt + 2 * sStep]; int in3 = (short)src[sAt + 3 * sStep];
         int s0, s1, s2, s3, s4, s5, s6, s7;
@@ -308,7 +308,7 @@ internal static class Vp9Itx
     }
 
     /// <summary>libvpx idct8_c.</summary>
-    private static void Idct8(ArrayView<int> src, long sAt, int sStep, ArrayView<int> dst, long dAt, int dStep)
+    private static void Idct8(ArrayView<int> src, int sAt, int sStep, ArrayView<int> dst, int dAt, int dStep)
     {
         int in0 = (short)src[sAt + 0 * sStep]; int in1 = (short)src[sAt + 1 * sStep]; int in2 = (short)src[sAt + 2 * sStep]; int in3 = (short)src[sAt + 3 * sStep];
         int in4 = (short)src[sAt + 4 * sStep]; int in5 = (short)src[sAt + 5 * sStep]; int in6 = (short)src[sAt + 6 * sStep]; int in7 = (short)src[sAt + 7 * sStep];
@@ -358,7 +358,7 @@ internal static class Vp9Itx
     }
 
     /// <summary>libvpx iadst8_c. x / s are tran_high_t / int (32-bit, never truncated); only the outputs are int16.</summary>
-    private static void Iadst8(ArrayView<int> src, long sAt, int sStep, ArrayView<int> dst, long dAt, int dStep)
+    private static void Iadst8(ArrayView<int> src, int sAt, int sStep, ArrayView<int> dst, int dAt, int dStep)
     {
         int in0 = (short)src[sAt + 0 * sStep]; int in1 = (short)src[sAt + 1 * sStep]; int in2 = (short)src[sAt + 2 * sStep]; int in3 = (short)src[sAt + 3 * sStep];
         int in4 = (short)src[sAt + 4 * sStep]; int in5 = (short)src[sAt + 5 * sStep]; int in6 = (short)src[sAt + 6 * sStep]; int in7 = (short)src[sAt + 7 * sStep];
@@ -427,7 +427,7 @@ internal static class Vp9Itx
     }
 
     /// <summary>libvpx idct16_c.</summary>
-    private static void Idct16(ArrayView<int> src, long sAt, int sStep, ArrayView<int> dst, long dAt, int dStep)
+    private static void Idct16(ArrayView<int> src, int sAt, int sStep, ArrayView<int> dst, int dAt, int dStep)
     {
         int in0 = (short)src[sAt + 0 * sStep]; int in1 = (short)src[sAt + 1 * sStep]; int in2 = (short)src[sAt + 2 * sStep]; int in3 = (short)src[sAt + 3 * sStep];
         int in4 = (short)src[sAt + 4 * sStep]; int in5 = (short)src[sAt + 5 * sStep]; int in6 = (short)src[sAt + 6 * sStep]; int in7 = (short)src[sAt + 7 * sStep];
@@ -575,7 +575,7 @@ internal static class Vp9Itx
     }
 
     /// <summary>libvpx iadst16_c. x / s are tran_high_t (32-bit, never truncated); only the outputs are int16.</summary>
-    private static void Iadst16(ArrayView<int> src, long sAt, int sStep, ArrayView<int> dst, long dAt, int dStep)
+    private static void Iadst16(ArrayView<int> src, int sAt, int sStep, ArrayView<int> dst, int dAt, int dStep)
     {
         int in0 = (short)src[sAt + 0 * sStep]; int in1 = (short)src[sAt + 1 * sStep]; int in2 = (short)src[sAt + 2 * sStep]; int in3 = (short)src[sAt + 3 * sStep];
         int in4 = (short)src[sAt + 4 * sStep]; int in5 = (short)src[sAt + 5 * sStep]; int in6 = (short)src[sAt + 6 * sStep]; int in7 = (short)src[sAt + 7 * sStep];
@@ -734,7 +734,7 @@ internal static class Vp9Itx
     }
 
     /// <summary>libvpx idct32_c.</summary>
-    private static void Idct32(ArrayView<int> src, long sAt, int sStep, ArrayView<int> dst, long dAt, int dStep)
+    private static void Idct32(ArrayView<int> src, int sAt, int sStep, ArrayView<int> dst, int dAt, int dStep)
     {
         int in0 = (short)src[sAt + 0 * sStep]; int in1 = (short)src[sAt + 1 * sStep]; int in2 = (short)src[sAt + 2 * sStep]; int in3 = (short)src[sAt + 3 * sStep];
         int in4 = (short)src[sAt + 4 * sStep]; int in5 = (short)src[sAt + 5 * sStep]; int in6 = (short)src[sAt + 6 * sStep]; int in7 = (short)src[sAt + 7 * sStep];

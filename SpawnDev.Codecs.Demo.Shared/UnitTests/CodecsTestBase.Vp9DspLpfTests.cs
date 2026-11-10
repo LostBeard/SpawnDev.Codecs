@@ -99,7 +99,7 @@ public abstract partial class CodecsTestBase
 
     private static void LpfEdgeKernel(Index1D i, ArrayView<byte> pix, ArrayView<int> c)
     {
-        long at = (long)i.X * LpfEdgeBytes + 8 * LpfEdgeWindow + 8;
+        int at = i.X * LpfEdgeBytes + 8 * LpfEdgeWindow + 8;
         int k = i * LpfEdgeArgs;
         int b0 = c[k + 1], l0 = c[k + 2], t0 = c[k + 3], b1 = c[k + 4], l1 = c[k + 5], t1 = c[k + 6];
         const int p = LpfEdgeWindow;
@@ -212,7 +212,7 @@ public abstract partial class CodecsTestBase
         {
             var m = default(Vp9LfMask);
             Vp9Lpf.BuildSuperblockMask(ref m, miv, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
-            long o = (long)i * LpfSbMaskWords;
+            int o = i * LpfSbMaskWords;
             masks[o] = m.LeftY0; masks[o + 1] = m.LeftY1; masks[o + 2] = m.LeftY2; masks[o + 3] = m.LeftY3;
             masks[o + 4] = m.AboveY0; masks[o + 5] = m.AboveY1; masks[o + 6] = m.AboveY2; masks[o + 7] = m.AboveY3;
             masks[o + 8] = m.Int4x4Y;
@@ -224,8 +224,8 @@ public abstract partial class CodecsTestBase
         }
         // the superblock's top-left pixel sits 8 rows / columns into each window
         int pitchY = meta[k + 11], pitchUv = meta[k + 12];
-        Vp9Lpf.FilterSuperblockGroup(shared, true, pix, meta[k + 8] + 8L * pitchY + 8, pitchY, meta[k + 9] + 8L * pitchUv + 8,
-            meta[k + 10] + 8L * pitchUv + 8, pitchUv, ssX, ssY, miv, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
+        Vp9Lpf.FilterSuperblockGroup(shared, true, pix, meta[k + 8] + 8 * pitchY + 8, pitchY, meta[k + 9] + 8 * pitchUv + 8,
+            meta[k + 10] + 8 * pitchUv + 8, pitchUv, ssX, ssY, miv, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
     }
 
     private static readonly string[] LpfMaskNames =

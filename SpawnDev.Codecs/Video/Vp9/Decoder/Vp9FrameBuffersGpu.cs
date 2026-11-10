@@ -57,6 +57,11 @@ internal sealed class Vp9FrameBuffersGpu : IDisposable
         if (_pool == null || layout.Bytes > _slotBytes)
         {
             long slot = Math.Max(layout.Bytes, _slotBytes);
+            // The kernels address the pool with 32-bit offsets (64-bit math is emulated, and slow to compile, on WebGPU):
+            // every frame buffer must end below 2 GiB.
+            if (slot * Vp9HeaderReader.FrameBuffers > int.MaxValue)
+                throw new NotSupportedException($"VP9 frames of {width}x{height} need {slot * Vp9HeaderReader.FrameBuffers:N0} " +
+                    $"bytes of frame buffers; the decoder addresses at most {int.MaxValue:N0}.");
             var pool = _acc.Allocate1D<byte>(slot * Vp9HeaderReader.FrameBuffers);
             if (_pool != null)
                 for (int i = 0; i < Vp9HeaderReader.FrameBuffers; i++)

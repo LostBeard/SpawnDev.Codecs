@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### VP9 decoder: 32-bit offsets in reconstruction and loop filter, about half the WGSL after inlining (2026-11-10)
+- The reconstruction kernels (inter prediction, inter residual, intra wavefront) and the loop-filter wavefront
+  addressed pixels, coefficients and scratch with `long` offsets. WGSL has no 64-bit integers, so every pixel tap was
+  emulated 64-bit adds, subtracts and conversions: 10,881 emulated-64-bit helper calls in the loop-filter kernel alone.
+  They now use `int` offsets. Fully inlined WGSL (what D3D's compiler in Chrome on Windows compiles), lines:
+  - loop-filter Wavefront 188,891 -> 116,468 (the 585 64-bit calls left are its 64-bit edge masks);
+  - InterPredict 134,149 -> 75,515; InterResidual 101,910 -> 56,457; IntraWave 115,872 -> 60,538.
+- The host checks that the frame buffers and the reconstruction scratch fit 32-bit offsets and throws
+  `NotSupportedException` naming the frame size otherwise. The frame buffer starts were already limited to 32 bits.
+- The WGSL screen's budgets are tightened to the new sizes.
+
 ### Compressors: constructors compile nothing, kernels load awaited (2026-11-09)
 - `ShuffleFilterGpu`, `WeightPackGpu`, and the GDeflate, LZ4 frame and Snappy compressors and decompressors no longer
   compile their kernels in the constructor (synchronous compiles froze a browser page). Each loads its kernels on the

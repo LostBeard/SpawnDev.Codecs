@@ -41,7 +41,7 @@ internal static class Vp9RArg
     /// ints [c / 4 * 5, (c + n * n) / 4 * 5). Coefficient ranges of different transform blocks do not overlap, so neither
     /// do these, and n * n * 5 / 4 &gt;= n * n + n = <see cref="Vp9Itx"/>'s need for n &gt;= 4.
     /// </summary>
-    public static long ResidualScratchAt(int dqAt) => (long)(dqAt >> 2) * 5;
+    public static int ResidualScratchAt(int dqAt) => (dqAt >> 2) * 5;
 }
 
 internal static class Vp9ReconKernels
@@ -118,11 +118,11 @@ internal static class Vp9ReconKernels
         if (miC >= bCol + bw || miR >= bRow + bh) return;
         int stride = a[Vp9RArg.Cur + plane * 4 + 1];
         int px0 = (bCol * 8) >> sx, py0 = (bRow * 8) >> sy;
-        long dstAt = a[Vp9RArg.Cur + plane * 4] + (long)py0 * stride + px0;
+        int dstAt = a[Vp9RArg.Cur + plane * 4] + py0 * stride + px0;
         int ref0 = mi[b + Vp9Mi.Ref0], ref1 = mi[b + Vp9Mi.Ref1];
         Vp9InterPred.PredictBlockPlaneRegion(sx, sy, bRow, bCol, miRows, miCols, mi, b,
             pool, RefPlane(a, ref0, plane), pool, RefPlane(a, ref1 > 0 ? ref1 : ref0, plane), pool, dstAt, stride,
-            ux * 4 - px0, uy * 4 - py0, 4, 4, scratch, (long)(int)index * Vp9InterPred.RegionScratchInts);
+            ux * 4 - px0, uy * 4 - py0, 4, 4, scratch, (int)index * Vp9InterPred.RegionScratchInts);
     }
 
     /// <summary>
@@ -171,14 +171,14 @@ internal static class Vp9ReconKernels
         else { dqAt = sbBuf[e + Vp9PLayout.BlkDqV] + j * adv; eob = sbBuf[tb + Vp9PLayout.SbEobV + sbBuf[e + Vp9PLayout.BlkEobV] + j]; }
         if (eob <= 0 || (a[Vp9RArg.DebugFlags] & 1) != 0) return;
         int stride = a[Vp9RArg.Cur + plane * 4 + 1];
-        long dstAt = a[Vp9RArg.Cur + plane * 4] + (long)(uy * 4) * stride + ux * 4;
+        int dstAt = a[Vp9RArg.Cur + plane * 4] + (uy * 4) * stride + ux * 4;
         Vp9Itx.InverseTransformAdd(dq, dqAt, txSize, 0, a[Vp9RArg.Lossless] != 0, eob, pool, dstAt, stride,
             scratch, Vp9RArg.ResidualScratchAt(dqAt));
     }
 
     /// <summary>recon_block for one intra block (bwl / bhl as process_partition passes them).</summary>
     private static void ReconIntraBlock(ArrayView<byte> pool, ArrayView<int> a, ArrayView<int> t, ArrayView<int> mi, ArrayView<int> sbBuf,
-        ArrayView<int> dq, ArrayView<int> scratch, long scr, int sb, int miRow, int miCol, int colStart, int bwl, int bhl,
+        ArrayView<int> dq, ArrayView<int> scratch, int scr, int sb, int miRow, int miCol, int colStart, int bwl, int bhl,
         ref int dqY, ref int dqU, ref int dqV, ref int eobY, ref int eobU, ref int eobV)
     {
         int miCols = a[Vp9RArg.MiCols], miRows = a[Vp9RArg.MiRows];
@@ -202,12 +202,12 @@ internal static class Vp9ReconKernels
             int maxBlocksWide = n4w + (toRight >= 0 ? 0 : toRight >> (5 + sx));
             int maxBlocksHigh = n4h + (toBottom >= 0 ? 0 : toBottom >> (5 + sy));
             int stride = a[Vp9RArg.Cur + plane * 4 + 1];
-            long planeAt = a[Vp9RArg.Cur + plane * 4];
+            int planeAt = a[Vp9RArg.Cur + plane * 4];
             int px0 = (miCol * 8) >> sx, py0 = (miRow * 8) >> sy;
             for (int row = 0; row < maxBlocksHigh; row += step)
                 for (int col = 0; col < maxBlocksWide; col += step)
                 {
-                    long dstAt = planeAt + (long)(py0 + row * 4) * stride + px0 + col * 4;
+                    int dstAt = planeAt + (py0 + row * 4) * stride + px0 + col * 4;
                     int mode = plane == 0 ? mi[b + Vp9Mi.Mode] : mi[b + Vp9Mi.UvMode];
                     if (bsize < Vp9Mi.Block8x8 && plane == 0) mode = mi[b + Vp9Mi.BmiMode + (row << 1) + col];
                     if ((a[Vp9RArg.DebugFlags] & 2) == 0)
@@ -240,7 +240,7 @@ internal static class Vp9ReconKernels
 
     /// <summary>Reconstruct the intra blocks of superblock <paramref name="sb"/>, in parse order.</summary>
     private static void ReconIntraSuperblock(ArrayView<byte> pool, ArrayView<int> a, ArrayView<int> t, ArrayView<int> mi, ArrayView<int> sbBuf,
-        ArrayView<int> dq, ArrayView<int> scratch, long scr, int sb)
+        ArrayView<int> dq, ArrayView<int> scratch, int scr, int sb)
     {
         int miCols = a[Vp9RArg.MiCols];
         int tb = sb * Vp9PLayout.SbStride;
@@ -271,6 +271,6 @@ internal static class Vp9ReconKernels
         int sbCols = (a[Vp9RArg.MiCols] + 7) >> 3;
         if (c < 0 || c >= sbCols) return;
         int sb = r * sbCols + c;
-        ReconIntraSuperblock(pool, a, t, mi, sbBuf, dq, scratch, (long)sb * Vp9RArg.Scratch, sb);
+        ReconIntraSuperblock(pool, a, t, mi, sbBuf, dq, scratch, sb * Vp9RArg.Scratch, sb);
     }
 }

@@ -166,8 +166,11 @@ internal sealed class Vp9DecodePipeline : IDisposable
         int residUnits = h.MiCols * 2 * (h.MiRows * 2) + 2 * ((h.MiCols * 2) >> h.SubsamplingX) * ((h.MiRows * 2) >> h.SubsamplingY);
         // one scratch buffer for the launches, which run one after another: per prediction unit, per inter transform
         // block (Vp9RArg.ResidualScratchAt over the frame's coefficients), per intra superblock thread
+        // (in 64 bits here: the kernels index it with 32-bit offsets, so it must stay below 2^31 ints)
         long scratchInts = Math.Max((long)sbRows * sbCols * Vp9RArg.Scratch,
-            Math.Max((long)predUnits * Vp9InterPred.RegionScratchInts, Vp9RArg.ResidualScratchAt(sbRows * sbCols * _parser.DqStride)));
+            Math.Max((long)predUnits * Vp9InterPred.RegionScratchInts, ((long)sbRows * sbCols * _parser.DqStride >> 2) * 5));
+        if (scratchInts > int.MaxValue)
+            throw new NotSupportedException($"VP9 frames of {h.Width}x{h.Height} need {scratchInts:N0} scratch ints; the decoder addresses at most {int.MaxValue:N0}.");
         if (_scratch == null || _scratch.Length < scratchInts)
         {
             _scratch?.Dispose();

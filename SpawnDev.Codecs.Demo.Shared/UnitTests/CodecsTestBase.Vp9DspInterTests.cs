@@ -106,19 +106,19 @@ public abstract partial class CodecsTestBase
     private static void Vp9InterPredTestKernel(Index1D i, ArrayView<int> cases, ArrayView<int> mi, ArrayView<byte> refs,
         ArrayView<byte> dst, ArrayView<int> scratch)
     {
-        long c = (long)i.X * InterCaseInts;
+        int c = i.X * InterCaseInts;
         for (int plane = 0; plane < 3; plane++)
         {
             int ssX = plane == 0 ? 0 : cases[c], ssY = plane == 0 ? 0 : cases[c + 1];
-            long a0 = c + InterCaseRefs + plane * 8, a1 = c + InterCaseRefs + (3 + plane) * 8;
+            int a0 = c + InterCaseRefs + plane * 8, a1 = c + InterCaseRefs + (3 + plane) * 8;
             Vp9InterRefPlane r0, r1;
             r0.Offset = cases[a0]; r0.Stride = cases[a0 + 1]; r0.CropWidth = cases[a0 + 2]; r0.CropHeight = cases[a0 + 3];
             r0.XScaleFp = cases[a0 + 4]; r0.YScaleFp = cases[a0 + 5]; r0.XStepQ4 = cases[a0 + 6]; r0.YStepQ4 = cases[a0 + 7];
             r1.Offset = cases[a1]; r1.Stride = cases[a1 + 1]; r1.CropWidth = cases[a1 + 2]; r1.CropHeight = cases[a1 + 3];
             r1.XScaleFp = cases[a1 + 4]; r1.YScaleFp = cases[a1 + 5]; r1.XStepQ4 = cases[a1 + 6]; r1.YStepQ4 = cases[a1 + 7];
             Vp9InterPred.PredictBlockPlane(ssX, ssY, cases[c + 2], cases[c + 3], cases[c + 4], cases[c + 5],
-                mi, (long)i.X * Vp9Mi.Stride, refs, r0, refs, r1,
-                dst, cases[c + InterCaseDst + plane], InterDstStride, scratch, (long)i.X * Vp9InterPred.ScratchInts);
+                mi, i.X * Vp9Mi.Stride, refs, r0, refs, r1,
+                dst, cases[c + InterCaseDst + plane], InterDstStride, scratch, i.X * Vp9InterPred.ScratchInts);
         }
     }
 
@@ -128,13 +128,13 @@ public abstract partial class CodecsTestBase
         ArrayView<byte> dst, ArrayView<int> scratch)
     {
         int t = i, caseIdx = t / 48, plane = (t % 48) / 16, uy = t % 16;
-        long c = (long)caseIdx * InterCaseInts;
+        int c = caseIdx * InterCaseInts;
         int ssX = plane == 0 ? 0 : cases[c], ssY = plane == 0 ? 0 : cases[c + 1];
-        long miAt = (long)caseIdx * Vp9Mi.Stride;
+        int miAt = caseIdx * Vp9Mi.Stride;
         int bsize = mi[miAt + Vp9Mi.SbType];
         int n4w = (Vp9InterPred.Num8x8Wide(bsize) << 1) >> ssX, n4h = (Vp9InterPred.Num8x8High(bsize) << 1) >> ssY;
         if (uy >= n4h) return;
-        long a0 = c + InterCaseRefs + plane * 8, a1 = c + InterCaseRefs + (3 + plane) * 8;
+        int a0 = c + InterCaseRefs + plane * 8, a1 = c + InterCaseRefs + (3 + plane) * 8;
         Vp9InterRefPlane r0, r1;
         r0.Offset = cases[a0]; r0.Stride = cases[a0 + 1]; r0.CropWidth = cases[a0 + 2]; r0.CropHeight = cases[a0 + 3];
         r0.XScaleFp = cases[a0 + 4]; r0.YScaleFp = cases[a0 + 5]; r0.XStepQ4 = cases[a0 + 6]; r0.YStepQ4 = cases[a0 + 7];
@@ -143,7 +143,7 @@ public abstract partial class CodecsTestBase
         for (int ux = 0; ux < n4w; ux++)
             Vp9InterPred.PredictBlockPlaneRegion(ssX, ssY, cases[c + 2], cases[c + 3], cases[c + 4], cases[c + 5],
                 mi, miAt, refs, r0, refs, r1, dst, cases[c + InterCaseDst + plane], InterDstStride, ux * 4, uy * 4, 4, 4,
-                scratch, (long)t * Vp9InterPred.RegionScratchInts);
+                scratch, t * Vp9InterPred.RegionScratchInts);
     }
 
     [TestMethod(Timeout = 900000, Category = "NotOnWebGL")]

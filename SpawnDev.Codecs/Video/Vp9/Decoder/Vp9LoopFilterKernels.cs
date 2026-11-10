@@ -37,8 +37,8 @@ internal static class Vp9LoopFilterKernels
         int miRow = r * 8, miCol = c * 8;
         int ssX = a[Vp9LArg.SsX], ssY = a[Vp9LArg.SsY];
         int yStride = a[Vp9LArg.YStride], uvStride = a[Vp9LArg.UvStride];
-        long yAt = a[Vp9LArg.Y] + (long)miRow * 8 * yStride + miCol * 8;
-        long uvRow = (long)((miRow * 8) >> ssY) * uvStride + ((miCol * 8) >> ssX);
+        int yAt = a[Vp9LArg.Y] + miRow * 8 * yStride + miCol * 8;
+        int uvRow = ((miRow * 8) >> ssY) * uvStride + ((miCol * 8) >> ssX);
         Vp9Lpf.FilterSuperblockGroup(shared, active, pool, yAt, yStride, a[Vp9LArg.U] + uvRow, a[Vp9LArg.V] + uvRow, uvStride,
             ssX, ssY, mi, a[Vp9LArg.GridOffset], miRows, miCols, miRow, miCol, lf, 0);
     }
