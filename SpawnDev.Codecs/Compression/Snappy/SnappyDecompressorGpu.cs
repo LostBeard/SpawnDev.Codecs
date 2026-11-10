@@ -78,12 +78,14 @@ public sealed class SnappyDecompressorGpu : IDisposable
 
     private readonly Accelerator _accelerator;
     private readonly LaunchPacer _pacer;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _rawHeader;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _rawScan;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _walk;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _chunkScan;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _decode;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<uint>> _chunkCheck;
+    // Loaded lazily by EnsureKernelsAsync (awaited loads; the constructor compiles nothing).
+    private Task? _kernelsLoad;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>> _rawHeader = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _rawScan = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _walk = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _chunkScan = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _decode = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<uint>> _chunkCheck = null!;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _prm;
     private MemoryBuffer1D<int, Stride1D.Dense>? _segs;
     // Stand-in table of the counting walk (never written; WebGPU refuses one buffer bound to two read_write slots).
@@ -93,24 +95,39 @@ public sealed class SnappyDecompressorGpu : IDisposable
     private readonly MemoryBuffer1D<uint, Stride1D.Dense> _crcTable;
     private readonly StageBuffer<byte> _stageIn, _stageOut;
 
-    /// <summary>Compiles the kernels.</summary>
+    /// <summary>Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public SnappyDecompressorGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _pacer = new LaunchPacer(accelerator);
-        _rawHeader = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(RawHeaderKernel);
-        _rawScan = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(RawScanKernel);
-        _walk = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(WalkKernel);
-        _chunkScan = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(ChunkScanKernel);
-        _decode = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(DecodeKernel);
-        _chunkCheck = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<uint>>(ChunkCheckKernel);
         _prm = accelerator.Allocate1D<int>(PrmInts);
         _noSegs = accelerator.Allocate1D<int>(1);
         _noOut = accelerator.Allocate1D<byte>(1);
         _crcTable = accelerator.Allocate1D(Crc32Gpu.BuildTable(Crc32Gpu.CastagnoliPolynomial));
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
+    }
+
+    /// <summary>Compiles the kernels now (the first call does otherwise). Awaited loads: each compile yields to the
+    /// browser's event loop first.</summary>
+    public Task WarmUpAsync() => EnsureKernelsAsync();
+
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _rawHeader = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>>(RawHeaderKernel);
+        _rawScan = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(RawScanKernel);
+        _walk = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(WalkKernel);
+        _chunkScan = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(ChunkScanKernel);
+        _decode = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(DecodeKernel);
+        _chunkCheck = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<uint>>(ChunkCheckKernel);
     }
 
     // ------------------------------------------------------------------
@@ -170,6 +187,7 @@ public sealed class SnappyDecompressorGpu : IDisposable
     /// <summary>Validates the stream and lays its segments out. Returns the total decompressed length.</summary>
     private async Task<int> PrepareAsync(ArrayView1D<byte, Stride1D.Dense> input, int length, SnappyFormat format)
     {
+        await EnsureKernelsAsync();
         if (length < 0 || length > input.Length) throw new ArgumentOutOfRangeException(nameof(length), $"{length} bytes; the input holds {input.Length}.");
         if (format != SnappyFormat.Raw && format != SnappyFormat.Framed) throw new ArgumentOutOfRangeException(nameof(format));
         _segCount = 0;
@@ -289,6 +307,7 @@ public sealed class SnappyDecompressorGpu : IDisposable
 
     private async Task DecodeAsync(ArrayView1D<byte, Stride1D.Dense> input, int length, ArrayView1D<byte, Stride1D.Dense> output, int total, SnappyFormat format)
     {
+        await EnsureKernelsAsync();
         if (total > output.Length) throw new SnappyFormatException(SnappyError.OutputTooSmall, total);
         if (_segCount == 0) return;
         var data = input.SubView(0, length);

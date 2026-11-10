@@ -50,23 +50,25 @@ public sealed class GDeflateCompressorGpu : IDisposable
     private readonly int _wave;
     private readonly LaunchPacer _pacer;
     private readonly int _scratchPer, _slotBytes;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, int> _init;
-    private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _chains;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _match;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _walk;
-    private readonly Action<KernelConfig, ArrayView<int>, ArrayView<int>, int> _plan;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _literals;
+    // Loaded lazily by EnsureKernelsAsync (awaited loads; the constructor compiles nothing).
+    private Task? _kernelsLoad;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, int> _init = null!;
+    private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _chains = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int> _match = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _walk = null!;
+    private Action<KernelConfig, ArrayView<int>, ArrayView<int>, int> _plan = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _literals = null!;
     private readonly int _planLanes;
-    private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _emit;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _layout;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _copy;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _header;
+    private Action<KernelConfig, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _emit = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _layout = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _copy = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>> _header = null!;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _prm, _scratch, _offsets;
     private readonly MemoryBuffer1D<byte, Stride1D.Dense> _slots;
     private readonly StageBuffer<byte> _stageIn, _stageOut;
 
     /// <summary>
-    /// Compiles the kernels and allocates one wave's working memory (~570 KB per tile of <paramref name="wave"/>; 0 picks
+    /// Compiles no kernels (see <see cref="WarmUpAsync"/>); allocates one wave's working memory (~570 KB per tile of <paramref name="wave"/>; 0 picks
     /// <see cref="DesktopWave"/> or <see cref="BrowserWave"/> by accelerator).
     /// </summary>
     public GDeflateCompressorGpu(Accelerator accelerator, int wave = 0)
@@ -84,23 +86,38 @@ public sealed class GDeflateCompressorGpu : IDisposable
         _scratchPer = DeflateGpu.ScratchInts(TileSize) + DeflateGpu.GDeflateWriterInts;
         // A multiple of 4: every packet of a tile is then one aligned word that only its lane writes.
         _slotBytes = (DeflateGpu.MaxGDeflateTileOutput(TileSize) + 3) & ~3;
-        _init = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, int>(InitKernel);
-        _chains = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(ChainsKernel);
-        _match = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(MatchKernel);
-        _walk = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(WalkKernel);
-        _plan = accelerator.LoadStreamKernel<ArrayView<int>, ArrayView<int>, int>(PlanKernel);
         _planLanes = Math.Min(PlanLanes, accelerator.MaxNumThreadsPerGroup);
-        _literals = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(LiteralsKernel);
-        _emit = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(EmitKernel);
-        _layout = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(LayoutKernel);
-        _copy = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(CopyKernel);
-        _header = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(HeaderKernel);
         _prm = accelerator.Allocate1D<int>(PrmInts);
         _scratch = accelerator.Allocate1D<int>((long)wave * _scratchPer);
         _offsets = accelerator.Allocate1D<int>(wave);
         _slots = accelerator.Allocate1D<byte>((long)wave * _slotBytes);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
+    }
+
+    /// <summary>Compiles the kernels now (the first call does otherwise). Awaited loads: each compile yields to the
+    /// browser's event loop first.</summary>
+    public Task WarmUpAsync() => EnsureKernelsAsync();
+
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _init = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(InitKernel);
+        _chains = await a.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(ChainsKernel);
+        _match = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int, int>(MatchKernel);
+        _walk = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(WalkKernel);
+        _plan = await a.LoadStreamKernelAsync<ArrayView<int>, ArrayView<int>, int>(PlanKernel);
+        _literals = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(LiteralsKernel);
+        _emit = await a.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(EmitKernel);
+        _layout = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(LayoutKernel);
+        _copy = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(CopyKernel);
+        _header = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>>(HeaderKernel);
     }
 
     /// <summary>Largest stream <paramref name="length"/> input bytes can produce.</summary>
@@ -121,6 +138,7 @@ public sealed class GDeflateCompressorGpu : IDisposable
     /// </summary>
     public async Task<int> CompressAsync(ArrayView1D<byte, Stride1D.Dense> input, int length, ArrayView1D<byte, Stride1D.Dense> output, int level = 2)
     {
+        await EnsureKernelsAsync();
         if (length < 1 || length > input.Length) throw new ArgumentOutOfRangeException(nameof(length), $"{length} bytes; the input holds {input.Length} (GDeflate streams hold at least one byte).");
         if (level < 0 || level > DeflateGpu.LevelHuffmanOnly) throw new ArgumentOutOfRangeException(nameof(level));
         int tiles = (int)((length + (long)TileSize - 1) / TileSize);

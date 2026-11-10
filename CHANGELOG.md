@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Compressors: constructors compile nothing, kernels load awaited (2026-11-09)
+- `ShuffleFilterGpu`, `WeightPackGpu`, and the GDeflate, LZ4 frame and Snappy compressors and decompressors no longer
+  compile their kernels in the constructor (synchronous compiles froze a browser page). Each loads its kernels on the
+  first call with awaited loads, which yield to the browser's event loop before each compile, and has a `WarmUpAsync`
+  to load them ahead of time. `WeightPackGpu` loads the pack and the unpack kernels separately, so an unpack-only user
+  compiles only the unpack side.
+- The lazy-load guard (`Codecs_ConstructorsCompileNothing_WarmUpCompilesWhatTheyUse`) now covers them: constructors
+  compile nothing, every warm-up compiles something, and round trips after the warm-ups (byte and bit shuffle,
+  WeightPack, GDeflate, LZ4 frame, Snappy raw and framed) compile nothing more and are lossless.
+
 ### VP9 decoder: tile parse kernel 64x smaller after inlining, for Chrome on Windows (2026-11-09)
 - Chrome on Windows compiles WGSL with D3D's compiler, which inlines every function, so the code it compiles is call
   sites x body. `Vp9ParseKernels.ParseKernel` was about 763k lines that way (113,564 WGSL lines, with `ParseBlock` a

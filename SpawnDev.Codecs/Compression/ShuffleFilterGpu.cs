@@ -46,21 +46,38 @@ public sealed class ShuffleFilterGpu : IDisposable
     private readonly Accelerator _accelerator;
     private readonly LaunchPacer _pacer;
     // (src, dst, element size, bitshuffle block elements, length, launch offset); at most 7 kernel parameters in all.
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int> _shuffle, _unshuffle, _bitShuffle, _bitUnshuffle;
+    // Loaded lazily by EnsureKernelsAsync (awaited loads; the constructor compiles nothing).
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int> _shuffle = null!, _unshuffle = null!, _bitShuffle = null!, _bitUnshuffle = null!;
+    private Task? _kernelsLoad;
     private readonly StageBuffer<byte> _stageIn, _stageOut;
 
-    /// <summary>Compiles the filter kernels for <paramref name="accelerator"/>.</summary>
+    /// <summary>Filters on <paramref name="accelerator"/>. Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public ShuffleFilterGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _pacer = new LaunchPacer(accelerator);
-        _shuffle = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(ShuffleKernel);
-        _unshuffle = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(UnshuffleKernel);
-        _bitShuffle = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(BitShuffleKernel);
-        _bitUnshuffle = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(BitUnshuffleKernel);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
+    }
+
+    /// <summary>Compiles the filter kernels now (the first filter call does otherwise). Awaited loads: each compile yields to
+    /// the browser's event loop first.</summary>
+    public Task WarmUpAsync() => EnsureKernelsAsync();
+
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _shuffle = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(ShuffleKernel);
+        _unshuffle = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(UnshuffleKernel);
+        _bitShuffle = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(BitShuffleKernel);
+        _bitUnshuffle = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int>(BitUnshuffleKernel);
     }
 
     /// <summary>The reference library's default bitshuffle block (in elements) for <paramref name="elementSize"/>-byte elements.</summary>
@@ -175,6 +192,7 @@ public sealed class ShuffleFilterGpu : IDisposable
             if ((long)block * elementSize > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(blockElements));
         }
 
+        await EnsureKernelsAsync();
         for (int offset = 0; offset < length; offset += LaunchBytes)
         {
             int count = Math.Min(LaunchBytes, length - offset);

@@ -77,21 +77,23 @@ public sealed class Lz4FrameCompressorGpu : IDisposable
     private readonly Accelerator _accelerator;
     private readonly int _waveBlocks;
     private readonly LaunchPacer _pacer;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>> _clearTables;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _step;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _layout;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _copy;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _blockHeaders;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _header;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _tail;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, int> _xxhStripes;
+    // Loaded lazily by EnsureKernelsAsync (awaited loads; the constructor compiles nothing).
+    private Task? _kernelsLoad;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>> _clearTables = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _step = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _layout = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _copy = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _blockHeaders = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>> _header = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _tail = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, int> _xxhStripes = null!;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _prm, _state, _table, _offsets;
     // _empty: the input view of an empty input (WebGPU refuses one buffer bound to two read_write slots).
     private readonly MemoryBuffer1D<byte, Stride1D.Dense> _slots, _empty;
     private readonly StageBuffer<byte> _stageIn, _stageOut;
 
     /// <summary>
-    /// Compiles the kernels and allocates one wave's working memory (~82 KB per block of <paramref name="waveBlocks"/>:
+    /// Compiles no kernels (see <see cref="WarmUpAsync"/>); allocates one wave's working memory (~82 KB per block of <paramref name="waveBlocks"/>:
     /// ~42 MB at the default 512).
     /// </summary>
     public Lz4FrameCompressorGpu(Accelerator accelerator, int waveBlocks = DefaultWaveBlocks)
@@ -101,14 +103,6 @@ public sealed class Lz4FrameCompressorGpu : IDisposable
         _accelerator = accelerator;
         _waveBlocks = waveBlocks;
         _pacer = new LaunchPacer(accelerator);
-        _clearTables = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>>(ClearKernel);
-        _step = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(StepKernel);
-        _layout = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(LayoutKernel);
-        _copy = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(CopyKernel);
-        _blockHeaders = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(BlockHeaderKernel);
-        _header = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(HeaderKernel);
-        _tail = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(TailKernel);
-        _xxhStripes = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, int>(ContentStripesKernel);
         _prm = accelerator.Allocate1D<int>(PrmInts);
         _state = accelerator.Allocate1D<int>((long)_waveBlocks * StateInts);
         _table = accelerator.Allocate1D<int>((long)_waveBlocks * HashSize);
@@ -117,6 +111,29 @@ public sealed class Lz4FrameCompressorGpu : IDisposable
         _empty = accelerator.Allocate1D<byte>(1);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
+    }
+
+    /// <summary>Compiles the kernels now (the first call does otherwise). Awaited loads: each compile yields to the
+    /// browser's event loop first.</summary>
+    public Task WarmUpAsync() => EnsureKernelsAsync();
+
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _clearTables = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(ClearKernel);
+        _step = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(StepKernel);
+        _layout = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(LayoutKernel);
+        _copy = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(CopyKernel);
+        _blockHeaders = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(BlockHeaderKernel);
+        _header = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>>(HeaderKernel);
+        _tail = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(TailKernel);
+        _xxhStripes = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, int>(ContentStripesKernel);
     }
 
     /// <summary>Largest frame <paramref name="length"/> input bytes can produce with any options.</summary>
@@ -136,6 +153,7 @@ public sealed class Lz4FrameCompressorGpu : IDisposable
     /// </summary>
     public async Task<int> CompressAsync(ArrayView1D<byte, Stride1D.Dense> input, int length, ArrayView1D<byte, Stride1D.Dense> output, Lz4FrameOptions? options = null)
     {
+        await EnsureKernelsAsync();
         options ??= new Lz4FrameOptions();
         if (length < 0 || length > input.Length) throw new ArgumentOutOfRangeException(nameof(length), $"{length} bytes; the input holds {input.Length}.");
         if (options.Acceleration < 1 || options.Acceleration > 65537) throw new ArgumentOutOfRangeException(nameof(options), "Acceleration must be 1..65537.");

@@ -98,16 +98,18 @@ public sealed class GDeflateDecompressorGpu : IDisposable
     private readonly Accelerator _accelerator;
     private readonly int _wave;
     private readonly LaunchPacer _pacer;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _header;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _decode;
-    private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int> _decodeLanes;
+    // Loaded lazily by EnsureKernelsAsync (awaited loads; the constructor compiles nothing).
+    private Task? _kernelsLoad;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>> _header = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _decode = null!;
+    private Action<KernelConfig, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int> _decodeLanes = null!;
     private readonly GDeflateDecodeMode _mode;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _prm, _scratch;
     private readonly MemoryBuffer1D<byte, Stride1D.Dense> _noOut;
     private readonly StageBuffer<byte> _stageIn, _stageOut;
 
     /// <summary>
-    /// Compiles the kernels; <see cref="GDeflateDecodeMode.ThreadPerTile"/> also allocates one wave's working memory (~9 KB
+    /// Compiles no kernels (see <see cref="WarmUpAsync"/>); <see cref="GDeflateDecodeMode.ThreadPerTile"/> also allocates one wave's working memory (~9 KB
     /// per tile of <paramref name="wave"/>; the lanes mode keeps it in shared memory).
     /// </summary>
     public GDeflateDecompressorGpu(Accelerator accelerator, int wave = DefaultWave, GDeflateDecodeMode mode = GDeflateDecodeMode.LanesPerTile)
@@ -118,14 +120,29 @@ public sealed class GDeflateDecompressorGpu : IDisposable
         _wave = wave;
         _mode = mode;
         _pacer = new LaunchPacer(accelerator);
-        _header = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(HeaderKernel);
-        _decode = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(DecodeKernel);
-        _decodeLanes = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int>(DecodeLanesKernel);
         _prm = accelerator.Allocate1D<int>(PrmInts);
         _scratch = accelerator.Allocate1D<int>(mode == GDeflateDecodeMode.ThreadPerTile ? (long)wave * ScratchInts : 1);
         _noOut = accelerator.Allocate1D<byte>(1);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
+    }
+
+    /// <summary>Compiles the kernels now (the first call does otherwise). Awaited loads: each compile yields to the
+    /// browser's event loop first.</summary>
+    public Task WarmUpAsync() => EnsureKernelsAsync();
+
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _header = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>>(HeaderKernel);
+        _decode = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(DecodeKernel);
+        _decodeLanes = await a.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int>(DecodeLanesKernel);
     }
 
     // ------------------------------------------------------------------
@@ -182,6 +199,7 @@ public sealed class GDeflateDecompressorGpu : IDisposable
 
     private async Task<int> PrepareAsync(ArrayView1D<byte, Stride1D.Dense> input, int length)
     {
+        await EnsureKernelsAsync();
         if (length < 0 || length > input.Length) throw new ArgumentOutOfRangeException(nameof(length), $"{length} bytes; the input holds {input.Length}.");
         if (length == 0) throw new GDeflateFormatException(GDeflateError.Empty, 0);
         var prm = new int[PrmInts];
@@ -197,6 +215,7 @@ public sealed class GDeflateDecompressorGpu : IDisposable
 
     private async Task DecodeAsync(ArrayView1D<byte, Stride1D.Dense> input, int length, ArrayView1D<byte, Stride1D.Dense> output, int total)
     {
+        await EnsureKernelsAsync();
         if (total > output.Length) throw new GDeflateFormatException(GDeflateError.OutputTooSmall, total);
         var data = input.SubView(0, length);
         var outView = total > 0 ? output.SubView(0, total) : _noOut.View;

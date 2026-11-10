@@ -77,35 +77,52 @@ public sealed class Lz4FrameDecompressorGpu : IDisposable
 
     private readonly Accelerator _accelerator;
     private readonly LaunchPacer _pacer;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _walk;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _scan;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>> _layout;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _decode;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _blockCheck;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _frameCheck;
+    // Loaded lazily by EnsureKernelsAsync (awaited loads; the constructor compiles nothing).
+    private Task? _kernelsLoad;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _walk = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _scan = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>> _layout = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _decode = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _blockCheck = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _frameCheck = null!;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _prm;
     private MemoryBuffer1D<int, Stride1D.Dense>? _blocks, _frames;
     // Stand-in tables of the counting walk (never written; WebGPU refuses one buffer bound to two read_write slots).
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _noBlocks, _noFrames;
     private readonly StageBuffer<byte> _stageIn, _stageOut;
 
-    /// <summary>Compiles the kernels.</summary>
+    /// <summary>Compiles no kernels (see <see cref="WarmUpAsync"/>).</summary>
     public Lz4FrameDecompressorGpu(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _pacer = new LaunchPacer(accelerator);
-        _walk = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(WalkKernel);
-        _scan = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(ScanKernel);
-        _layout = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(LayoutKernel);
-        _decode = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(DecodeKernel);
-        _blockCheck = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(BlockCheckKernel);
-        _frameCheck = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(FrameCheckKernel);
         _prm = accelerator.Allocate1D<int>(PrmInts);
         _noBlocks = accelerator.Allocate1D<int>(1);
         _noFrames = accelerator.Allocate1D<int>(1);
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
+    }
+
+    /// <summary>Compiles the kernels now (the first call does otherwise). Awaited loads: each compile yields to the
+    /// browser's event loop first.</summary>
+    public Task WarmUpAsync() => EnsureKernelsAsync();
+
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
+    {
+        var a = _accelerator;
+        _walk = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(WalkKernel);
+        _scan = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(ScanKernel);
+        _layout = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>>(LayoutKernel);
+        _decode = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(DecodeKernel);
+        _blockCheck = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(BlockCheckKernel);
+        _frameCheck = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>>(FrameCheckKernel);
     }
 
     /// <summary>Thrown for a frame the decoder refuses; <see cref="Reason"/> says why, <see cref="Offset"/> where (input byte, or block index for block-level checks).</summary>
@@ -176,6 +193,7 @@ public sealed class Lz4FrameDecompressorGpu : IDisposable
     /// <summary>Walk (count, then record), scan, layout. Returns the total decompressed length.</summary>
     private async Task<int> PrepareAsync(ArrayView1D<byte, Stride1D.Dense> input, int length)
     {
+        await EnsureKernelsAsync();
         if (length < 0 || length > input.Length) throw new ArgumentOutOfRangeException(nameof(length), $"{length} bytes; the input holds {input.Length}.");
         if (length == 0) throw new Lz4FormatException(Lz4Error.Empty, 0);
         var data = input.SubView(0, length);
@@ -263,6 +281,7 @@ public sealed class Lz4FrameDecompressorGpu : IDisposable
 
     private async Task DecodeAsync(ArrayView1D<byte, Stride1D.Dense> input, int length, ArrayView1D<byte, Stride1D.Dense> output, int total)
     {
+        await EnsureKernelsAsync();
         if (total > output.Length) throw new Lz4FormatException(Lz4Error.OutputTooSmall, total);
         if (_blockCount == 0) return;
         var data = input.SubView(0, length);

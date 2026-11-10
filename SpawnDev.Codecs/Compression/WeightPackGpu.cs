@@ -69,16 +69,19 @@ public sealed class WeightPackGpu : IDisposable
     private readonly LaunchPacer _pacer;
     private readonly ShuffleFilterGpu _shuffle;
     private readonly int _packLanes;
-    private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, int, int> _cCount;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int> _cPlan;
-    private readonly Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<uint>, ArrayView<int>, int, int> _cEmit;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _cLayout;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<uint>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _cCopy;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>> _cHeader;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _dLayout;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _dInit;
-    private readonly Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _dStep;
-    private readonly Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _dCheck;
+    // Loaded lazily (awaited loads; the constructor compiles nothing): the pack kernels by the first pack, the unpack
+    // kernels by the first unpack.
+    private Task? _packLoad, _unpackLoad;
+    private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, int, int> _cCount = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int> _cPlan = null!;
+    private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<uint>, ArrayView<int>, int, int> _cEmit = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _cLayout = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<uint>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _cCopy = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>> _cHeader = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _dLayout = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _dInit = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _dStep = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _dCheck = null!;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _prm, _counts, _tails, _dScratch;
     private readonly MemoryBuffer1D<byte, Stride1D.Dense> _hdr;
     private readonly MemoryBuffer1D<uint, Stride1D.Dense> _words;
@@ -86,7 +89,7 @@ public sealed class WeightPackGpu : IDisposable
     private readonly StageBuffer<int> _offsets;
 
     /// <summary>
-    /// Compiles the kernels and allocates the working memory: ~86 MB to compress, ~9.5 KB per chunk of
+    /// Allocates the working memory (compiles no kernels; see <see cref="WarmUpAsync"/>): ~86 MB to compress, ~9.5 KB per chunk of
     /// <paramref name="decompressWave"/> to decompress (~78 MB at the default 8192).
     /// </summary>
     public WeightPackGpu(Accelerator accelerator, int decompressWave = DecompressWave)
@@ -100,16 +103,6 @@ public sealed class WeightPackGpu : IDisposable
         // A power of two that divides ChunkBytes: 256, or the device's largest group (64 on the CPU accelerator).
         _packLanes = MaxPackLanes;
         while (_packLanes > accelerator.MaxNumThreadsPerGroup) _packLanes >>= 1;
-        _cCount = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, int, int>(CompressCountKernel);
-        _cPlan = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int>(CompressPlanKernel);
-        _cEmit = accelerator.LoadStreamKernel<ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<uint>, ArrayView<int>, int, int>(CompressEmitKernel);
-        _cLayout = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(CompressLayoutKernel);
-        _cCopy = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<uint>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(CompressCopyKernel);
-        _cHeader = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>>(CompressHeaderKernel);
-        _dLayout = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(DecompressLayoutKernel);
-        _dInit = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(DecompressInitKernel);
-        _dStep = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(DecompressStepKernel);
-        _dCheck = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(DecompressCheckKernel);
         _prm = accelerator.Allocate1D<int>(PrmInts);
         _counts = accelerator.Allocate1D<int>((long)CompressWave * 256);
         _tails = accelerator.Allocate1D<int>((long)CompressWave * DeflateGpu.PlanTailInts);
@@ -120,6 +113,48 @@ public sealed class WeightPackGpu : IDisposable
         _stageIn = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
         _offsets = new StageBuffer<int>(accelerator);
+    }
+
+    /// <summary>Compiles the kernels now (the first pack or unpack compiles its own otherwise). Awaited loads: each compile
+    /// yields to the browser's event loop first.</summary>
+    public async Task WarmUpAsync()
+    {
+        await EnsurePackKernelsAsync();
+        await EnsureUnpackKernelsAsync();
+    }
+
+    private Task EnsurePackKernelsAsync()
+    {
+        if (_packLoad == null || _packLoad.IsFaulted || _packLoad.IsCanceled) _packLoad = LoadPackKernelsAsync();
+        return _packLoad;
+    }
+
+    private Task EnsureUnpackKernelsAsync()
+    {
+        if (_unpackLoad == null || _unpackLoad.IsFaulted || _unpackLoad.IsCanceled) _unpackLoad = LoadUnpackKernelsAsync();
+        return _unpackLoad;
+    }
+
+    private async Task LoadPackKernelsAsync()
+    {
+        var a = _accelerator;
+        _cCount = await a.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, int, int>(CompressCountKernel);
+        _cPlan = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, int>(CompressPlanKernel);
+        _cEmit = await a.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<uint>, ArrayView<int>, int, int>(CompressEmitKernel);
+        _cLayout = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(CompressLayoutKernel);
+        _cCopy = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<uint>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(CompressCopyKernel);
+        _cHeader = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>>(CompressHeaderKernel);
+        await _shuffle.WarmUpAsync();
+    }
+
+    private async Task LoadUnpackKernelsAsync()
+    {
+        var a = _accelerator;
+        _dLayout = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(DecompressLayoutKernel);
+        _dInit = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(DecompressInitKernel);
+        _dStep = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(DecompressStepKernel);
+        _dCheck = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(DecompressCheckKernel);
+        await _shuffle.WarmUpAsync();
     }
 
     /// <summary>Chunks per plane of <paramref name="elements"/> elements.</summary>
@@ -150,6 +185,7 @@ public sealed class WeightPackGpu : IDisposable
         if (cap > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(length), "The packed form must stay under 2 GiB per call.");
         if (output.Length < cap) throw new ArgumentException($"The output holds {output.Length} bytes; {cap} are needed (GetMaxPackedSize).", nameof(output));
 
+        await EnsurePackKernelsAsync();
         int elements = length / elementSize;
         int perPlane = ChunksPerPlane(elements);
         int chunks = elementSize * perPlane;
@@ -251,6 +287,7 @@ public sealed class WeightPackGpu : IDisposable
         int chunks = elementSize * perPlane;
         if (HeaderBytes + 4L * chunks > length) throw new InvalidDataException("WeightPack: the chunk table is truncated.");
         if (total == 0) return 0;
+        await EnsureUnpackKernelsAsync();
 
         var prm = new int[PrmInts];
         prm[PElem] = elementSize;

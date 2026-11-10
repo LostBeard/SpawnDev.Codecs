@@ -1,6 +1,6 @@
 // Kernel loading of the codecs (FLAC, MP3 decode / encode, Opus encode / decode with its SILK and CELT layers, Vorbis
-// encode / decode, VP9 decode, and the still-image encoders and decoders: BMP, GIF, JPEG, PNG, WebP lossless / lossy,
-// BCn): constructors compile nothing, WarmUpAsync compiles every kernel the codec uses (awaited loads, so a browser page
+// encode / decode, VP9 decode, the still-image encoders and decoders: BMP, GIF, JPEG, PNG, WebP lossless / lossy,
+// BCn, and the compressors: shuffle filters, WeightPack, GDeflate, LZ4 frame, Snappy): constructors compile nothing, WarmUpAsync compiles every kernel the codec uses (awaited loads, so a browser page
 // keeps running), and work after the warm-up compiles nothing more.
 //
 // Lore (SpawnGen) measured the page frozen 30-104 s while Codecs compiled its kernels synchronously in constructors and
@@ -16,6 +16,10 @@ using SpawnDev.Codecs.Audio.Opus;
 using SpawnDev.Codecs.Audio.Opus.Celt;
 using SpawnDev.Codecs.Audio.Opus.Silk;
 using SpawnDev.Codecs.Audio.Vorbis;
+using SpawnDev.Codecs.Compression;
+using SpawnDev.Codecs.Compression.GDeflate;
+using SpawnDev.Codecs.Compression.Lz4;
+using SpawnDev.Codecs.Compression.Snappy;
 using SpawnDev.Codecs.Images.Bmp;
 using SpawnDev.Codecs.Images.Gif;
 using SpawnDev.Codecs.Images.Jpeg;
@@ -81,6 +85,19 @@ public abstract partial class CodecsTestBase
             using var bcnDec = new BcnDecoderGpu(acc);
             Equal(ci, Count(), "kernels compiled by the image codec constructors (BMP, GIF, JPEG, PNG decoders and encoders, " +
                 "WebPDecoderGpu, WebPLosslessEncoderGpu, WebPLossyEncoderGpu, BcnEncoderGpu, BcnDecoderGpu)");
+
+            // the compressors (small waves: the working memory, not the kernels, scales with them)
+            long cz = Count();
+            using var shuffle = new ShuffleFilterGpu(acc);
+            using var weightPack = new WeightPackGpu(acc, decompressWave: 16);
+            using var gdeflateEnc = new GDeflateCompressorGpu(acc, wave: 4);
+            using var gdeflateDec = new GDeflateDecompressorGpu(acc, wave: 4);
+            using var lz4Enc = new Lz4FrameCompressorGpu(acc, waveBlocks: 4);
+            using var lz4Dec = new Lz4FrameDecompressorGpu(acc);
+            using var snappyEnc = new SnappyCompressorGpu(acc, waveBlocks: 4);
+            using var snappyDec = new SnappyDecompressorGpu(acc);
+            Equal(cz, Count(), "kernels compiled by the compressor constructors (ShuffleFilterGpu, WeightPackGpu, GDeflate, LZ4 frame " +
+                "and Snappy compressors and decompressors)");
 
             // The codecs need scatter stores (their tests are NotOnWebGL): the constructor checks above run on every
             // backend, the warm-ups and the work below where the codecs run.
@@ -241,6 +258,41 @@ public abstract partial class CodecsTestBase
                 await Step($"BcnDecoderGpu.DecodeAsync ({format})", async () => await bcnDec.DecodeAsync(blocks, format, w, h));
             }
             True(imageSteps.Count == 0, $"{acc.AcceleratorType}: kernels compiled by image work after the warm-ups: " + string.Join(", ", imageSteps));
+
+            // ShuffleFilterGpu first: WeightPackGpu's warm-up loads the shuffle kernels too (cache hits then)
+            var compressorWarmUps = new (string Name, Func<Task> WarmUp)[]
+            {
+                ("ShuffleFilterGpu", shuffle.WarmUpAsync), ("WeightPackGpu", weightPack.WarmUpAsync),
+                ("GDeflateCompressorGpu", gdeflateEnc.WarmUpAsync), ("GDeflateDecompressorGpu", gdeflateDec.WarmUpAsync),
+                ("Lz4FrameCompressorGpu", lz4Enc.WarmUpAsync), ("Lz4FrameDecompressorGpu", lz4Dec.WarmUpAsync),
+                ("SnappyCompressorGpu", snappyEnc.WarmUpAsync), ("SnappyDecompressorGpu", snappyDec.WarmUpAsync),
+            };
+            foreach (var (name, warmUp) in compressorWarmUps)
+                True(await Compiled(warmUp) > 0, $"{name}.WarmUpAsync compiled no kernel");
+
+            // real work after the warm-ups: every filter and compressor both ways on 100 KB of float-like data
+            var data = new byte[100_000];
+            for (int i = 0; i < data.Length; i += 4)
+                BitConverter.GetBytes((float)Math.Sin(i * 0.0013) * 3f).CopyTo(data, i);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            var zipSteps = new List<string>();
+            async Task Zip(string name, Func<Task<byte[]>> roundTrip)
+            {
+                byte[] back = null!;
+                long n = await Compiled(async () => back = await roundTrip());
+                if (n != 0) zipSteps.Add($"{name}: {n}");
+                True(back.AsSpan().SequenceEqual(data), $"{name} round trip after the warm-ups is not lossless");
+            }
+            await Zip("ShuffleFilterGpu (byte)", async () => await shuffle.UnshuffleAsync(await shuffle.ShuffleAsync(data, 4), 4));
+            await Zip("ShuffleFilterGpu (bit)", async () => await shuffle.BitUnshuffleAsync(await shuffle.BitShuffleAsync(data, 4), 4));
+            await Zip("WeightPackGpu", async () => await weightPack.UnpackAsync(await weightPack.PackAsync(data, 4)));
+            await Zip("GDeflate", async () => await gdeflateDec.DecompressAsync(await gdeflateEnc.CompressAsync(data)));
+            await Zip("LZ4 frame", async () => await lz4Dec.DecompressAsync(await lz4Enc.CompressAsync(data)));
+            foreach (var format in new[] { SnappyFormat.Raw, SnappyFormat.Framed })
+                await Zip($"Snappy ({format})", async () => await snappyDec.DecompressAsync(await snappyEnc.CompressAsync(data, format), format));
+            True(zipSteps.Count == 0, $"{acc.AcceleratorType}: kernels compiled by compressor work after the warm-ups: " + string.Join(", ", zipSteps));
         }
         finally
         {
