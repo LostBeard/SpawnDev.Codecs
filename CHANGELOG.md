@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### VP9 decoder on WebGPU: the device-hang cause fixed, workaround removed (2026-11-11)
+- The real cause of the WebGPU device hang after a VP9 decode (see the next entries) was not the tile parse's
+  length but its per-thread state: a 6.5 KB dynamically indexed function-scope array. On Chrome WebGPU (D3D12,
+  NVIDIA) a long dispatch with such an array, followed by any dispatch in the same submission, leaves the device to
+  hang a later large kernel. Confirmed live (state in device memory: 3/3 pass; the original array: hang) and by a
+  codec-free replay. The parse thread's state now lives in device memory, and the wait after the parse is gone.
+- No speed change: tile parse ms/frame CUDA 14.8, Velocity Vector256 3.3, Vector128 3.2, CPU accelerator 2.8
+  (interleaved A/B, bit-exact). All 281 VP9 WebGPU tests pass; EveryFrame bit-exact on every file on WebGPU and CUDA.
+
 ### VP9 decoder tests run on the WebGPU lane (2026-11-11)
 - The WebGPU test lane no longer leaves out the GiantShader tests (the full VP9 decoder pipeline). Full WebGPU lane
   with them: 1188 passed, 0 failed, 50 min; Chrome's GPU process peaked at 2.27 GB. WebGL still leaves them out.

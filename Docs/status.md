@@ -126,7 +126,22 @@ lanes (VP9 batch encode at unaligned sizes).
       preemption of the long dispatch.
     - Workaround tested (TJ OK'd testing): on WebGPU, `SynchronizeAsync` right after the parse (ends the submit). The
       own-encoder test passes 2/2 (was 5/5 DEVICE_HUNG); WebGPU EveryFrame bit-exact (311 files), about +5% time.
-      Adopted 2026-11-11 (TJ approved; `// WORKAROUND:` in Vp9DecodePipeline). Real fix: the parse as shorter launches.
+      Adopted 2026-11-11 (TJ approved; `// WORKAROUND:` in Vp9DecodePipeline).
+    - ROOT CAUSE and FIX (2026-11-11): not the parse's length (Data's 376 ms synthetic spin without arrays + a
+      dispatch stays alive, and the hanging case is a single superblock, so shorter launches could not help) but
+      ParseKernel's 6.5 KB dynamically indexed function-scope array (`LocalMemory`; WGSL `var v : array<i32, 1592>`
+      plus `array<i32, 64>`, which DXC makes an indexable temp / scratch). Live: parse state moved to the device
+      work buffer, no parse wait: own-encoder test 3/3 pass; same build with the original array: DEVICE_HUNG 1/1.
+      Codec-free (Data's replay): a synthetic one-thread loop with the same two arrays, then a trivial dispatch:
+      lost; the same loop with nothing after it, or a 377 ms loop without arrays: alive. FIX: the parse thread's
+      state lives in the work buffer (`Vp9PLocal`), the parse wait WORKAROUND is removed. Tile parse ms/frame
+      unchanged (CUDA 14.8, Velocity V256 3.3, V128 3.2, CPU accelerator 2.8; interleaved A/B, bit-exact); all 281
+      VP9 WebGPU tests pass, EveryFrame bit-exact on every file on WebGPU and CUDA.
+    - Case 1 (the encoder's group-kernel drain above) has the same ingredients (Vp9EncodeWavefrontGroupKernel /
+      BatchKernel: five 256-entry function-scope arrays per thread), but it no longer reproduces: with the drain
+      removed and the original arrays, the two Batch tests alone pass 2/2 and the full VP9 WebGPU filter 281/281
+      (2026-11-11). A device-scratch version of those arrays passes everything (output identical, CUDA encode about
+      0.5-0.8% slower) but is not committed without a reproduction to prove it; the drain stays.
     - WebGPU GiantShader fence lifted 2026-11-11: the full WebGPU lane (fence off, ILGPU 5.4.28-local.1) passed 1188/1188
       in 50 min, all 6 VP9 decoder tests included, GPU process peak 2.27 GB under the watchdog. WebGL keeps the fence.
 

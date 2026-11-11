@@ -318,20 +318,24 @@ internal static partial class Vp9ParseKernels
     }
 
     /// <summary>
-    /// One thread per tile column: every superblock of the column, tile row after tile row. The left entropy contexts, the
-    /// above / left partition contexts, the token cache and the partition stack live in the thread's local memory
-    /// (<see cref="Vp9PLocal"/>); <paramref name="work"/> holds the above entropy contexts (3 planes x 2 per aligned mi
-    /// column, from 0) and the per tile column status words (at <see cref="Vp9PArg.StatusOffset"/>).
+    /// One thread per tile column: every superblock of the column, tile row after tile row. <paramref name="work"/> holds
+    /// the above entropy contexts (3 planes x 2 per aligned mi column, from 0), the per tile column status words (at
+    /// <see cref="Vp9PArg.StatusOffset"/>), then each thread's state: <see cref="Vp9PLocal"/> (the above / left partition
+    /// contexts, the left entropy contexts, the token cache) and the partition stack.
     /// </summary>
     public static void ParseKernel(Index1D index, ArrayView<byte> d, ArrayView<int> a, ArrayView<int> ctx, ArrayView<int> t,
         ArrayView<int> mi, ArrayView<int> sbBuf, ArrayView<int> dq, ArrayView<int> work, ArrayView<int> maps,
         ArrayView<int> counts, ArrayView<int> results)
     {
-        var loc = LocalMemory.Allocate<int>(Vp9PLocal.Ints);
-        var stack = LocalMemory.Allocate<int>(4 * Vp9PLayout.StackEntries);
         int tileCol = index;
         int log2Cols = a[Vp9PArg.Log2TileCols], log2Rows = a[Vp9PArg.Log2TileRows];
         int tileCols = 1 << log2Cols, tileRows = 1 << log2Rows;
+        // The thread's state is in device memory, not a function-scope array (LocalMemory): in Chrome WebGPU (D3D12,
+        // NVIDIA) this kernel with a 6.5 KB dynamically indexed function-scope array, followed by any dispatch in the
+        // same submission, left the device to hang a later large kernel (DXGI_ERROR_DEVICE_HUNG; Docs/status.md).
+        int state = a[Vp9PArg.StatusOffset] + tileCols + tileCol * Vp9PLocal.ThreadInts;
+        var loc = work.SubView(state, Vp9PLocal.Ints);
+        var stack = work.SubView(state + Vp9PLocal.Ints, Vp9PLocal.StackInts);
         int miCols = a[Vp9PArg.MiCols], miRows = a[Vp9PArg.MiRows];
         int sbCols = (miCols + 7) >> 3, sbRows = (miRows + 7) >> 3;
         int colStart = ((tileCol * sbCols) >> log2Cols) << 3;

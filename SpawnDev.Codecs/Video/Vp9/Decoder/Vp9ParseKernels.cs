@@ -49,15 +49,19 @@ internal static class Vp9PLayout
 }
 
 /// <summary>
-/// The parse thread's local memory (one int array per tile column thread), so the hot loop's read-after-write state
-/// does not go through device memory: the above partition contexts (mi columns relative to the tile start; a tile column
-/// is at most 64 superblocks = 512 mi wide), the left entropy and partition contexts of the superblock row, and the
-/// token cache (libvpx token_cache, by coefficient position). 1592 ints + the 64-int partition stack = 6.5 KB, inside
-/// WGSL's 8192-byte limit on a function's variables (the above entropy contexts, 3 x 1024 more, stay in the work buffer).
+/// The parse thread's state (one region per tile column thread in the work buffer, after the status words): the above
+/// partition contexts (mi columns relative to the tile start; a tile column is at most 64 superblocks = 512 mi wide),
+/// the left entropy and partition contexts of the superblock row, and the token cache (libvpx token_cache, by
+/// coefficient position); then the partition stack. In device memory, not a function-scope array: see
+/// <see cref="Vp9ParseKernels.ParseKernel"/>.
 /// </summary>
 internal static class Vp9PLocal
 {
     public const int AbovePart = 0, LeftCtx = 512, LeftPart = LeftCtx + 48, TokenCache = LeftPart + 8, Ints = TokenCache + 1024;
+    /// <summary>The partition stack's ints (4 per entry).</summary>
+    public const int StackInts = 4 * Vp9PLayout.StackEntries;
+    /// <summary>A thread's whole region: <see cref="Ints"/> then the stack.</summary>
+    public const int ThreadInts = Ints + StackInts;
 }
 
 /// <summary>

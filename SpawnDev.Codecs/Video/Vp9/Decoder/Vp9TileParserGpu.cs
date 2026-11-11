@@ -95,10 +95,10 @@ public sealed class Vp9TileParserGpu : IDisposable
     private const int MaxAlignedCols = 65536 / 8;
 
     /// <summary>
-    /// Above entropy contexts (3 planes x 2 per mi column) + status words. The rest of the parse thread's context state is
-    /// in its local memory (<see cref="Vp9PLocal"/>).
+    /// Above entropy contexts (3 planes x 2 per mi column) + status words + each parse thread's state
+    /// (<see cref="Vp9PLocal.ThreadInts"/> per tile column).
     /// </summary>
-    private static long WorkSize(int tileCols) => 3L * 2 * MaxAlignedCols + tileCols;
+    private static long WorkSize(int tileCols) => 3L * 2 * MaxAlignedCols + tileCols + (long)tileCols * Vp9PLocal.ThreadInts;
 
     /// <summary>
     /// libvpx vp9_setup_past_independence clears both segmentation maps (call after <see cref="Vp9HeaderReader.ReadFrame"/>).
