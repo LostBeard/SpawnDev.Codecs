@@ -13,10 +13,9 @@ namespace SpawnDev.Codecs.Demo.UnitTests;
 /// kernel tests on the browser's WebGPU backend (WGSL codegen).
 /// </summary>
 // Discovery leaves out tests this lane can only skip: CpuOnly (CPU-only tests run once, in CpuCodecsTests); DesktopOnly (the Pillow / libwebp oracles need a desktop process).
-// GiantShader: tests compiling kernels whose WGSL / GLSL can drive Chrome's GPU process (Tint) to many GB and starve
-// the PC (the full VP9 decoder pipeline); they run on the desktop and Wasm lanes until screened, one at a time
-// under a GPU-process memory watchdog.
-[ExcludeCategories("CpuOnly", "DesktopOnly", "GiantShader")]
+// GiantShader tests (the full VP9 decoder pipeline) run here since 2026-11-11: their WGSL was cut down and screened
+// (Vp9WgslScreenTests budgets), and the full lane peaked at 2.27 GB in Chrome's GPU process. WebGL still leaves them out.
+[ExcludeCategories("CpuOnly", "DesktopOnly")]
 public class WebGPUCodecsTests : CodecsTestBase
 {
     /// <summary>

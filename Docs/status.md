@@ -127,6 +127,8 @@ lanes (VP9 batch encode at unaligned sizes).
     - Workaround tested (TJ OK'd testing): on WebGPU, `SynchronizeAsync` right after the parse (ends the submit). The
       own-encoder test passes 2/2 (was 5/5 DEVICE_HUNG); WebGPU EveryFrame bit-exact (311 files), about +5% time.
       Adopted 2026-11-11 (TJ approved; `// WORKAROUND:` in Vp9DecodePipeline). Real fix: the parse as shorter launches.
+    - WebGPU GiantShader fence lifted 2026-11-11: the full WebGPU lane (fence off, ILGPU 5.4.28-local.1) passed 1188/1188
+      in 50 min, all 6 VP9 decoder tests included, GPU process peak 2.27 GB under the watchdog. WebGL keeps the fence.
 
 - **ILGPU 5.4.6-local.2** (2026-10-26): integer divisions no longer hoisted out of their guards (Wasm traps), WebGL sends a
   program's GLSL once (not per dispatch) and refuses kernels over the device's Transform Feedback varying limit at load,

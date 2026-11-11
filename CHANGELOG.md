@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### VP9 decoder tests run on the WebGPU lane (2026-11-11)
+- The WebGPU test lane no longer leaves out the GiantShader tests (the full VP9 decoder pipeline). Full WebGPU lane
+  with them: 1188 passed, 0 failed, 50 min; Chrome's GPU process peaked at 2.27 GB. WebGL still leaves them out.
+- The lazy-load guard counts kernel loads (compiles plus shader-cache hits). On WebGPU it needs SpawnDev.ILGPU 5.4.28
+  (preloaded byte kernels held for the accelerator's lifetime); on 5.4.27 it reports one load in
+  `WebPLossyEncoderGpu.EncodeAsync`.
+
 ### VP9 decoder on WebGPU: no device hang when an encode follows a decode (2026-11-11)
 - On Chrome WebGPU (D3D12, NVIDIA), a VP9 decode followed by a keyframe encode on the same device hung the GPU
   (DXGI_ERROR_DEVICE_HUNG). Cause, found by replaying the recorded WebGPU calls without our code: the tile parse is
