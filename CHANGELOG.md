@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### VP9 decoder on WebGPU: no device hang when an encode follows a decode (2026-11-11)
+- On Chrome WebGPU (D3D12, NVIDIA), a VP9 decode followed by a keyframe encode on the same device hung the GPU
+  (DXGI_ERROR_DEVICE_HUNG). Cause, found by replaying the recorded WebGPU calls without our code: the tile parse is
+  one long single-thread dispatch (about 130 ms on a dense keyframe), and any dispatch after it in the same
+  submission leaves the device unable to run a later large kernel. Below ILGPU (Dawn D3D12 / driver).
+- WORKAROUND (WebGPU only): the decoder waits for the accelerator right after the tile parse, so the parse ends its
+  submission. The decode-then-encode test passes (it failed every time before); WebGPU EveryFrame stays bit-exact
+  (311 files), about 5% slower. Other backends unchanged. Comes out when the parse runs as shorter launches.
+
 ### SpawnDev.ILGPU 5.4.27: VP9 loop filter 20% faster on Velocity Vector256 (2026-11-11)
 - SpawnDev.ILGPU 5.4.26 -> 5.4.27: Velocity picks the team count of barrier kernels adaptively. ComfyUI files,
   loop filter ms/frame: Vector256 81.5 -> 64-66; Vector128, CPU accelerator and CUDA unchanged; reconstruction

@@ -141,6 +141,15 @@ internal sealed class Vp9DecodePipeline : IDisposable
         _contexts.ReadCompressedHeader(frameView, frameOffset, h);
         await MarkStageAsync(timer, "compressed header");
         _parser.Parse(frameView, frameOffset, frame.Span, h, _contexts, _prevBuffer);
+        // WORKAROUND: on Chrome WebGPU (D3D12, NVIDIA RTX 4070) the tile parse (one long single-thread dispatch, about
+        // 100+ ms on a dense keyframe) followed by any dispatch in the same submission leaves the device in a state
+        // where a later large kernel (a keyframe encoder's) dies with DXGI_ERROR_DEVICE_HUNG. Data's replay of the
+        // recorded WebGPU calls reproduces it without our code (a synthetic spin in the second kernel's place still
+        // hangs), so the fault is below ILGPU (Dawn D3D12 / driver; WDDM preemption of the long dispatch is the
+        // suspect). Ending the submission after the parse (a wait) prevents it: approved by TJ 2026-11-11; tracked in
+        // Docs/status.md (VP9 WebGPU device hang). Comes out when the parse runs as shorter launches, or the cause is
+        // fixed upstream.
+        if (_acc.AcceleratorType == AcceleratorType.WebGPU) await _acc.SynchronizeAsync();
         await MarkStageAsync(timer, "tile parse");
         Reconstruct(h);
         await MarkStageAsync(timer, "reconstruction");
