@@ -117,6 +117,16 @@ lanes (VP9 batch encode at unaligned sizes).
       obsolete keyframe decoder it still hangs; with the encodes alone it passes. So a full `Vp9DecoderGpu` decode
       leaves something that a later encoder dispatch hangs on, and draining does not clear it. The drain was not
       adopted.
+    - Root cause narrowed (Data's replay bisection, 2026-11-11, fresh Chrome, no app code): the decoder's
+      `ParseKernel` (one long single-thread dispatch, about 130 ms on this dense keyframe) followed by ANY dispatch in
+      the same submit poisons the device: with `IntraWaveKernel` replaced by a synthetic spin (no codec code, even 1e3
+      iterations) it still hangs at the next encoder kernel; a short parse or nothing after it in that submit
+      survives. Not out-of-bounds (a bounds-asserted CPU run is clean; clamping all 1,147 WGSL storage indices
+      still hangs), not a pass boundary (Parse and IntraWave already sit in separate passes). Suspect: WDDM
+      preemption of the long dispatch.
+    - Workaround tested (TJ OK'd testing): on WebGPU, `SynchronizeAsync` right after the parse (ends the submit). The
+      own-encoder test passes 2/2 (was 5/5 DEVICE_HUNG); WebGPU EveryFrame bit-exact (311 files), about +5% time.
+      Awaiting TJ's approval to adopt. Real fix: the parse as shorter launches.
 
 - **ILGPU 5.4.6-local.2** (2026-10-26): integer divisions no longer hoisted out of their guards (Wasm traps), WebGL sends a
   program's GLSL once (not per dispatch) and refuses kernels over the device's Transform Feedback varying limit at load,
