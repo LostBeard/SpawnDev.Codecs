@@ -6,7 +6,9 @@
 // Lore (SpawnGen) measured the page frozen 30-104 s while Codecs compiled its kernels synchronously in constructors and
 // on first use. ILGPU 5.4.19's LoadAutoGroupedStreamKernelAsync yields to the event loop before each compile; the
 // codecs now load through it, lazily, from their async entry points. Uses a FRESH accelerator: the shared one's kernel
-// cache would hide a constructor compile (a cache hit does not count in CompiledKernelCount).
+// cache would hide a constructor compile. It counts kernel LOADS: the accelerator's compiles plus hits in SpawnDev.ILGPU's
+// process-wide shader cache (WebGPU / WebGL / Wasm reuse a kernel another accelerator in the page already compiled; a
+// hit does not count in CompiledKernelCount, so an earlier test's FLAC kernels made the FLAC warm-ups look empty).
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -45,14 +47,14 @@ public abstract partial class CodecsTestBase
         var (ctx, acc) = fresh;
         try
         {
-            long Count() => acc.CompiledKernelCount;
+            long Count() => acc.CompiledKernelCount + ShaderArtifactCache.Hits;   // loads: compiles + shader-cache hits
             long c0 = Count();
             using var flacDec = new FlacDecoderGpu(acc);
             using var flacEnc = new FlacEncoderGpu(acc);
             using var mp3 = new Mp3DecoderGpu(acc);
             using var opus = new OpusEncoderGpu(acc, 48000, 2, OpusEncoderApplication.Audio);
             using var vp9 = new Vp9DecoderGpu(acc);
-            Equal(c0, Count(), "kernels compiled by the constructors (FlacDecoderGpu, FlacEncoderGpu, Mp3DecoderGpu, OpusEncoderGpu, Vp9DecoderGpu)");
+            Equal(c0, Count(), "kernels loaded by the constructors (FlacDecoderGpu, FlacEncoderGpu, Mp3DecoderGpu, OpusEncoderGpu, Vp9DecoderGpu)");
 
             // the other audio codecs: the MP3 encoder, the Opus decoder and its SILK / CELT layers (also on their own), the
             // SILK frame orchestrator, the Vorbis encoder and decoder
@@ -65,7 +67,7 @@ public abstract partial class CodecsTestBase
             var vorbisOptions = new VorbisAudioEncoderOptions { SampleRateHz = 44100, Channels = 1, BlockSize = 1024 };
             using var vorbisEnc = new VorbisAudioEncoderGpu(acc, vorbisOptions);
             using var vorbisDec = new VorbisAudioDecoderGpu(acc, vorbisEnc.Identification, vorbisEnc.Setup);
-            Equal(ca, Count(), "kernels compiled by the constructors (Mp3EncoderGpu, OpusDecoderGpu, SilkPacketDecoderGpu, " +
+            Equal(ca, Count(), "kernels loaded by the constructors (Mp3EncoderGpu, OpusDecoderGpu, SilkPacketDecoderGpu, " +
                 "CeltDecoderGpu, SilkDecodeFrameGpuOrchestrator, VorbisAudioEncoderGpu, VorbisAudioDecoderGpu)");
 
             // the still-image codecs, also before anything of theirs is loaded
@@ -83,7 +85,7 @@ public abstract partial class CodecsTestBase
             using var webpLossy = new WebPLossyEncoderGpu(acc);
             using var bcnEnc = new BcnEncoderGpu(acc);
             using var bcnDec = new BcnDecoderGpu(acc);
-            Equal(ci, Count(), "kernels compiled by the image codec constructors (BMP, GIF, JPEG, PNG decoders and encoders, " +
+            Equal(ci, Count(), "kernels loaded by the image codec constructors (BMP, GIF, JPEG, PNG decoders and encoders, " +
                 "WebPDecoderGpu, WebPLosslessEncoderGpu, WebPLossyEncoderGpu, BcnEncoderGpu, BcnDecoderGpu)");
 
             // the compressors (small waves: the working memory, not the kernels, scales with them)
@@ -96,7 +98,7 @@ public abstract partial class CodecsTestBase
             using var lz4Dec = new Lz4FrameDecompressorGpu(acc);
             using var snappyEnc = new SnappyCompressorGpu(acc, waveBlocks: 4);
             using var snappyDec = new SnappyDecompressorGpu(acc);
-            Equal(cz, Count(), "kernels compiled by the compressor constructors (ShuffleFilterGpu, WeightPackGpu, GDeflate, LZ4 frame " +
+            Equal(cz, Count(), "kernels loaded by the compressor constructors (ShuffleFilterGpu, WeightPackGpu, GDeflate, LZ4 frame " +
                 "and Snappy compressors and decompressors)");
 
             // The codecs need scatter stores (their tests are NotOnWebGL): the constructor checks above run on every
@@ -113,13 +115,13 @@ public abstract partial class CodecsTestBase
             long flacEncWarm = await Compiled(flacEnc.WarmUpAsync);
             long mp3Warm = await Compiled(mp3.WarmUpAsync);
             long opusWarm = await Compiled(() => OggOpusEncoder.WarmUpAsync(acc));
-            string warmCounts = $"{acc.AcceleratorType}: compiled by warm-ups: FLAC decoder {flacDecWarm}, FLAC encoder {flacEncWarm}, " +
+            string warmCounts = $"{acc.AcceleratorType}: loaded by warm-ups: FLAC decoder {flacDecWarm}, FLAC encoder {flacEncWarm}, " +
                 $"MP3 decoder {mp3Warm}, Ogg Opus {opusWarm}; constructors {Count() - c0 - flacDecWarm - flacEncWarm - mp3Warm - opusWarm}";
             Console.WriteLine(warmCounts);
-            True(flacDecWarm > 0, "FlacDecoderGpu.WarmUpAsync compiled no kernel. " + warmCounts);
-            True(flacEncWarm > 0, "FlacEncoderGpu.WarmUpAsync compiled no kernel. " + warmCounts);
-            True(mp3Warm > 0, "Mp3DecoderGpu.WarmUpAsync compiled no kernel. " + warmCounts);
-            True(opusWarm > 0, "OggOpusEncoder.WarmUpAsync compiled no kernel. " + warmCounts);
+            True(flacDecWarm > 0, "FlacDecoderGpu.WarmUpAsync loaded no kernel. " + warmCounts);
+            True(flacEncWarm > 0, "FlacEncoderGpu.WarmUpAsync loaded no kernel. " + warmCounts);
+            True(mp3Warm > 0, "Mp3DecoderGpu.WarmUpAsync loaded no kernel. " + warmCounts);
+            True(opusWarm > 0, "OggOpusEncoder.WarmUpAsync loaded no kernel. " + warmCounts);
             // The VP9 decoder's warm-up compiles its kernels without running them. On WebGPU they compile in Chrome in at
             // most a few seconds and under 0.6 GB each since 2026-11-10 (call-site rewrites); WebGL still cannot hold
             // them (GLSL). Its constructor check above runs everywhere.
@@ -138,7 +140,7 @@ public abstract partial class CodecsTestBase
                 ("VorbisAudioDecoderGpu", vorbisDec.WarmUpAsync),
             };
             foreach (var (name, warmUp) in audioWarmUps)
-                True(await Compiled(warmUp) > 0, $"{name}.WarmUpAsync compiled no kernel");
+                True(await Compiled(warmUp) > 0, $"{name}.WarmUpAsync loaded no kernel");
             var opusFixture = LoadOpusFixture("switch_modes_48k_stereo_loss");
 
             // real work after the warm-ups: a FLAC encode at another level + decode both ways, an Opus encode from int16
@@ -198,7 +200,7 @@ public abstract partial class CodecsTestBase
                 await vorbisEnc.EncodeStreamAsync(mono);
                 foreach (var packet in vorbisPackets) await vorbisDec.DecodePacketAsync(packet);
             });
-            Equal(0L, after, "kernels compiled by work after the warm-ups");
+            Equal(0L, after, "kernels loaded by work after the warm-ups");
 
             var imageWarmUps = new (string Name, Func<Task> WarmUp)[]
             {
@@ -212,7 +214,7 @@ public abstract partial class CodecsTestBase
             };
             // Each warm-up loads at least one kernel no earlier one shares (the shared ones are cache hits, not counted).
             foreach (var (name, warmUp) in imageWarmUps)
-                True(await Compiled(warmUp) > 0, $"{name}.WarmUpAsync compiled no kernel");
+                True(await Compiled(warmUp) > 0, $"{name}.WarmUpAsync loaded no kernel");
 
             // real work after the warm-ups: encode a picture with every encoder and decode it again
             const int w = 24, h = 20;
@@ -258,7 +260,7 @@ public abstract partial class CodecsTestBase
                 await Step($"BcnEncoderGpu.EncodeAsync ({format})", async () => blocks = await bcnEnc.EncodeAsync(rgba, w, h, format));
                 await Step($"BcnDecoderGpu.DecodeAsync ({format})", async () => await bcnDec.DecodeAsync(blocks, format, w, h));
             }
-            True(imageSteps.Count == 0, $"{acc.AcceleratorType}: kernels compiled by image work after the warm-ups: " + string.Join(", ", imageSteps));
+            True(imageSteps.Count == 0, $"{acc.AcceleratorType}: kernels loaded by image work after the warm-ups: " + string.Join(", ", imageSteps));
 
             // ShuffleFilterGpu first: WeightPackGpu's warm-up loads the shuffle kernels too (cache hits then)
             var compressorWarmUps = new (string Name, Func<Task> WarmUp)[]
@@ -269,7 +271,7 @@ public abstract partial class CodecsTestBase
                 ("SnappyCompressorGpu", snappyEnc.WarmUpAsync), ("SnappyDecompressorGpu", snappyDec.WarmUpAsync),
             };
             foreach (var (name, warmUp) in compressorWarmUps)
-                True(await Compiled(warmUp) > 0, $"{name}.WarmUpAsync compiled no kernel");
+                True(await Compiled(warmUp) > 0, $"{name}.WarmUpAsync loaded no kernel");
 
             // real work after the warm-ups: every filter and compressor both ways on 100 KB of float-like data
             var data = new byte[100_000];
@@ -293,7 +295,7 @@ public abstract partial class CodecsTestBase
             await Zip("LZ4 frame", async () => await lz4Dec.DecompressAsync(await lz4Enc.CompressAsync(data)));
             foreach (var format in new[] { SnappyFormat.Raw, SnappyFormat.Framed })
                 await Zip($"Snappy ({format})", async () => await snappyDec.DecompressAsync(await snappyEnc.CompressAsync(data, format), format));
-            True(zipSteps.Count == 0, $"{acc.AcceleratorType}: kernels compiled by compressor work after the warm-ups: " + string.Join(", ", zipSteps));
+            True(zipSteps.Count == 0, $"{acc.AcceleratorType}: kernels loaded by compressor work after the warm-ups: " + string.Join(", ", zipSteps));
         }
         finally
         {
