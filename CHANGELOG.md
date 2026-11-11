@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### SpawnDev.ILGPU 5.4.26: VP9 reconstruction 5-7x faster on Velocity (2026-11-11)
+- SpawnDev.ILGPU 5.4.25 -> 5.4.26: Velocity runs barrier-free kernels on its host path when that is faster
+  (adaptive, per kernel), with one multiprocessor per logical core. ComfyUI files, reconstruction ms/frame:
+  Velocity Vector256 50.5 -> 9.3, Vector128 70.5 -> 10.3; loop filter, tile parse, CPU accelerator and CUDA
+  unchanged (interleaved A/B). Full Velocity EveryFrame bit-exact on Vector256 (1456 s) and Vector128 (1761 s).
+
 ### VP9 decoder: inter prediction back to fast on Velocity (2026-11-10)
 - The one-body `Convolve` (5e76f1e) made Velocity's reconstruction 1.8x slower (ComfyUI files, Vector256 74 -> 130
   ms/frame): the copy / horizontal / vertical / 2-D choice sat inside the pixel loops, so the SIMD lanes paid for it
