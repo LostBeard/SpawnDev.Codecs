@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### SpawnDev.ILGPU 5.4.27: VP9 loop filter 20% faster on Velocity Vector256 (2026-11-11)
+- SpawnDev.ILGPU 5.4.26 -> 5.4.27: Velocity picks the team count of barrier kernels adaptively. ComfyUI files,
+  loop filter ms/frame: Vector256 81.5 -> 64-66; Vector128, CPU accelerator and CUDA unchanged; reconstruction
+  unchanged (interleaved A/B). Full Velocity EveryFrame bit-exact on Vector256 (987 s, was 1456 s).
+
 ### SpawnDev.ILGPU 5.4.26: VP9 reconstruction 5-7x faster on Velocity (2026-11-11)
 - SpawnDev.ILGPU 5.4.25 -> 5.4.26: Velocity runs barrier-free kernels on its host path when that is faster
   (adaptive, per kernel), with one multiprocessor per logical core. ComfyUI files, reconstruction ms/frame:
