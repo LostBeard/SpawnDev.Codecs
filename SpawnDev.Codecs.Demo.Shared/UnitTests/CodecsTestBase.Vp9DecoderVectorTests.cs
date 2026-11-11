@@ -440,8 +440,14 @@ public abstract partial class CodecsTestBase
         done:
             Console.WriteLine($"{acc.AcceleratorType}: {files} files, {frames} frames decoded, {outputs} output frames == libvpx .md5");
             if (stageTimes != null)
+            {
                 foreach (var (stage, t) in stageTimes)
                     Console.WriteLine($"VP9_STAGE {stage}: total {t.TotalMs:F0} ms, worst frame {t.MaxMs:F1} ms, mean {t.TotalMs / t.Frames:F2} ms over {t.Frames} frames");
+                // Velocity's adaptive team-count measurements (SpawnDev.ILGPU 5.4.27+; read by name so older versions
+                // still build): a count in the hundreds means the choice keeps re-measuring instead of settling.
+                if (acc.GetType().GetProperty("TeamCountDecisions")?.GetValue(acc) is long decisions)
+                    Console.WriteLine($"VP9_STAGE velocity team-count decisions: {decisions}");
+            }
             True(failures.Count == 0, $"{failures.Count} mismatches:\n" + string.Join("\n", failures.Take(40)));
         }
         finally { ReleaseAccelerator(ctx, acc); }
