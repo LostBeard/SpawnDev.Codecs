@@ -1,0 +1,10 @@
+av1_only
+av1_keyframes
+av1_opus
+opus_only
+opus_441_mono
+av1_fps24
+av1_fps25
+av1_fps2997
+av1_fps16
+av1_opus_12s

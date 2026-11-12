@@ -35,8 +35,10 @@ ffmpeg / ffprobe tools as a black box is fine.
      ComfyUI: max |diff| 1.54e-5 (about -96 dB), 185 of 192000 samples bit-equal. Bit-exact parity there would mean
      matching ffmpeg's own float Opus decoder (black box only); parked, reported to TJ.
    - [ ] Tests on every backend against the references.
-2. [ ] **MP4 (ISO BMFF) muxer** for AV1 (+ Opus), from the public specs (ISO/IEC 14496-12, AV1-ISOBMFF binding,
-   Opus-in-ISOBMFF) and black-box ffmpeg `-c copy` output.
+2. [x] **MP4 (ISO BMFF) muxer** for AV1 (+ Opus), from the public specs (ISO/IEC 14496-12, AV1-ISOBMFF binding,
+   Opus-in-ISOBMFF) and black-box ffmpeg `-c copy` output. `Mp4Writer`: byte-identical with ffmpeg on 10 fixtures
+   (2026-11-12). Not covered yet: a track starting after 0 (empty edit: throws), colr, > 4 GiB (co64 / wide mdat are
+   written but untested against ffmpeg), constant sample sizes.
    - Target layout (ffmpeg 8.1 `-c copy -fflags +bitexact`, AV1 + Opus, 2026-11-12): ftyp 32, free 8, mdat, moov
      (mvhd; video trak: tkhd, edts/elst, mdia/mdhd/hdlr/minf (vmhd, dinf/dref, stbl: stsd/av01 (av1C, colr, pasp,
      btrt), stts, stss, stsc, stsz, stco); audio trak: smhd, stsd/Opus (dOps, btrt), stts, stsc, stsz, stco, sgpd +

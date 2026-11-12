@@ -61,6 +61,7 @@
 		<EmbeddedResource Include="TestData\WebPYuv\*" />
 		<EmbeddedResource Include="TestData\Yuv420Rgb16\*" />
 		<EmbeddedResource Include="TestData\LoadVideo\*" />
+		<EmbeddedResource Include="TestData\Mp4Mux\*" />
 		<EmbeddedResource Include="TestData\WebPLossy\*" />
 		<EmbeddedResource Include="TestData\WebPRgbToYuv\*" />
 		<EmbeddedResource Include="TestData\WebPLossyEnc\*" />

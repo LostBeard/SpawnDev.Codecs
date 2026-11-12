@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Mp4Writer: AV1 + Opus in MP4 (2026-11-12)
+- `Container.Mp4.Mp4Writer`: an ISO BMFF muxer for AV1 video (`Mp4Av1Track`: av1C, size, timescale; `VideoTimescale`
+  gives ffmpeg's choice) and Opus audio (`Mp4OpusTrack`: the OpusHead; pre-skip as negative decode times and the edit
+  list, roll-recovery sample groups). Packets are interleaved by decode time whatever order the caller feeds them;
+  non-seekable outputs buffer the media data. Written from the public specs and ffmpeg's output observed as a black
+  box: byte-identical with `ffmpeg -c copy -fflags +bitexact` on 10 fixtures (AV1 alone and all-key, AV1 + Opus, Opus
+  alone at 48 kHz stereo and 44.1 kHz mono, 24 / 25 / 29.97 / 16 fps, 12 s interleaved), in file order and track by
+  track (`scripts/video/make_mp4_mux_fixtures.py`). For SpawnGen's SaveVideo (mp4 / av1).
+
 ### ComfyUI LoadVideo parity: Yuv420ToRgb16Gpu and WebMVideoLoaderGpu (2026-11-12)
 - `Yuv420ToRgb16Gpu`: YUV 4:2:0 -> RGB exactly as ComfyUI's LoadVideo (16-bit RGB, bilinear chroma, BT.601 limited;
   float32 = value * float32(1/65535)). The rule was derived as a black box (ComfyUI and FFmpeg not read):
