@@ -124,9 +124,33 @@ public abstract partial class CodecsTestBase
             var samples = Mp4Samples(mp4, out _);
             Equal(blocks.Count, samples.Count);
             for (int k = 0; k < blocks.Count; k++) True(blocks[k].AsSpan().SequenceEqual(samples[k]), $"sample {k}: MP4 != WebM");
+
+            // MKV: DocType "matroska", the same blocks, and it loads
+            var mkv = await enc.EncodeAsync(frames, w, h, 24, 1, sound, new VideoFileEncodeOptions { Container = VideoContainer.Mkv });
+            var mkvDoc = new MatroskaContainer(new MemoryStream(mkv));
+            True(mkvDoc.IsMatroska, $"DocType {mkvDoc.DocType}");
+            var mkvBlocks = mkvDoc.Frames.Where(f => f.TrackNumber == 1).Select(f => f.Data).ToList();
+            Equal(blocks.Count, mkvBlocks.Count);
+            for (int k = 0; k < blocks.Count; k++) True(blocks[k].AsSpan().SequenceEqual(mkvBlocks[k]), $"block {k}: MKV != WebM");
+            var mkvLoaded = await new WebMVideoLoaderGpu(acc).LoadAsync(mkv);
+            Equal(n, mkvLoaded.Frames.Count);
+            Equal(audioFrames * channels, mkvLoaded.Audio!.Samples.Length);
             Console.WriteLine($"{acc.AcceleratorType}: VP9 {w}x{h} worst PSNR {worst:F1} dB, audio {audio.Samples.Length / channels} frames, webm {webm.Length} B, mp4 {mp4.Length} B");
         }
         finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    /// <summary>libvpx / libaom quantizer_to_qindex: q * 4 up to 61, 62 -> 249, 63 -> 255; 0 clamps to 1.</summary>
+    [TestMethod(Category = "CpuOnly")]
+    public void VideoFileEncodeOptions_QIndexFromCrf_MatchesQuantizerToQindex()
+    {
+        Equal(1, VideoFileEncodeOptions.QIndexFromCrf(0));
+        Equal(96, VideoFileEncodeOptions.QIndexFromCrf(24));
+        Equal(128, VideoFileEncodeOptions.QIndexFromCrf(32));
+        Equal(244, VideoFileEncodeOptions.QIndexFromCrf(61));
+        Equal(249, VideoFileEncodeOptions.QIndexFromCrf(62));
+        Equal(255, VideoFileEncodeOptions.QIndexFromCrf(63));
+        Throws<ArgumentOutOfRangeException>(() => VideoFileEncodeOptions.QIndexFromCrf(64));
     }
 
     [TestMethod(Timeout = 1800000, Category = "NotOnWebGL")]

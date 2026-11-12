@@ -27,6 +27,8 @@ public enum VideoContainer
     Mp4,
     /// <summary>WebM (Matroska).</summary>
     WebM,
+    /// <summary>Matroska (.mkv): the WebM layout with DocType "matroska".</summary>
+    Mkv,
 }
 
 /// <summary>Options of <see cref="VideoFileEncoderGpu.EncodeAsync"/>.</summary>
@@ -41,6 +43,18 @@ public sealed record VideoFileEncodeOptions
     public int? QIndex { get; init; }
     /// <summary>Opus bitrate in bits per second. Null: 64000 mono, 96000 stereo.</summary>
     public int? AudioBitrate { get; init; }
+
+    /// <summary>
+    /// The base quantizer index for a libvpx / libaom style quantizer (crf / cq-level, 0..63): their quantizer_to_qindex
+    /// table (q * 4 for 0..61, 62 -> 249, 63 -> 255), at least 1 (lossless is not implemented). A fixed quantizer on
+    /// key frames: the same crf gives a larger file than a rate-controlled inter-coded encode.
+    /// </summary>
+    public static int QIndexFromCrf(int crf)
+    {
+        if (crf < 0 || crf > 63) throw new ArgumentOutOfRangeException(nameof(crf), "crf is 0..63.");
+        int q = crf <= 61 ? crf * 4 : crf == 62 ? 249 : 255;
+        return Math.Max(1, q);
+    }
 }
 
 /// <summary>Encodes RGB frames (+ audio) into an MP4 or WebM file on the accelerator.</summary>
@@ -90,7 +104,7 @@ public sealed class VideoFileEncoderGpu : IDisposable
 
         using var ms = new MemoryStream();
         if (options.Container == VideoContainer.Mp4) WriteMp4(ms, packets, width, height, fpsNum, fpsDen, av1, opus);
-        else WriteWebM(ms, packets, width, height, fpsNum, fpsDen, av1, opus);
+        else WriteWebM(ms, packets, width, height, fpsNum, fpsDen, av1, opus, options.Container == VideoContainer.Mkv ? "matroska" : "webm");
         return ms.ToArray();
     }
 
@@ -158,9 +172,10 @@ public sealed class VideoFileEncoderGpu : IDisposable
         w.Finish();
     }
 
-    private static void WriteWebM(Stream s, List<byte[]> packets, int width, int height, int fpsNum, int fpsDen, bool av1, OpusPacketStream? opus)
+    private static void WriteWebM(Stream s, List<byte[]> packets, int width, int height, int fpsNum, int fpsDen, bool av1, OpusPacketStream? opus,
+        string docType)
     {
-        using var w = new WebMWriter(s, leaveOpen: true);
+        using var w = new WebMWriter(s, new WebMWriterOptions { DocType = docType }, leaveOpen: true);
         long frameNs = 1_000_000_000L * fpsDen / fpsNum;
         int video = w.AddVideoTrack(new WebMVideoTrack
         {

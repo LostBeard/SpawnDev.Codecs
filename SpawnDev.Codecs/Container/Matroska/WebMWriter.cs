@@ -47,6 +47,11 @@ public sealed record WebMWriterOptions
     public int? ClusterTimeLimitMs { get; init; }
     /// <summary>Cluster size limit in bytes. Null: 5 MiB for seekable output, 32 KiB otherwise.</summary>
     public int? ClusterSizeLimit { get; init; }
+    /// <summary>
+    /// EBML DocType: "webm" (default) or "matroska" (a .mkv file: the same element layout, which every Matroska reader
+    /// accepts; not byte-identical with ffmpeg's matroska muxer, which writes some extra elements).
+    /// </summary>
+    public string DocType { get; init; } = "webm";
 }
 
 /// <summary>Fields shared by WebM video and audio tracks.</summary>
@@ -206,6 +211,7 @@ public sealed class WebMWriter : IDisposable
         _sizeLimit = _options.ClusterSizeLimit ?? (_seekable ? 5 * 1024 * 1024 : 32 * 1024);
         if (_timeLimit <= 0) throw new ArgumentOutOfRangeException(nameof(options), "ClusterTimeLimitMs must be positive.");
         if (_sizeLimit <= 0) throw new ArgumentOutOfRangeException(nameof(options), "ClusterSizeLimit must be positive.");
+        if (_options.DocType is not ("webm" or "matroska")) throw new ArgumentException("DocType must be \"webm\" or \"matroska\".", nameof(options));
     }
 
     /// <summary>Add a video track. Returns its track number (1-based).</summary>
@@ -467,7 +473,7 @@ public sealed class WebMWriter : IDisposable
         ebml.WriteUInt(MatroskaIds.EbmlReadVersion, 1);
         ebml.WriteUInt(MatroskaIds.EbmlMaxIdLength, 4);
         ebml.WriteUInt(MatroskaIds.EbmlMaxSizeLength, 8);
-        ebml.WriteString(MatroskaIds.DocType, "webm");
+        ebml.WriteString(MatroskaIds.DocType, _options.DocType);
         ebml.WriteUInt(MatroskaIds.DocTypeVersion, _docTypeIsV4 ? 4UL : 2UL);
         _docTypeVersionOffset = ebml.Length - 1;
         ebml.WriteUInt(MatroskaIds.DocTypeReadVersion, 2);
