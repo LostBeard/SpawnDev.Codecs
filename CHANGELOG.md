@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### ComfyUI LoadVideo parity: Yuv420ToRgb16Gpu and WebMVideoLoaderGpu (2026-11-12)
+- `Yuv420ToRgb16Gpu`: YUV 4:2:0 -> RGB exactly as ComfyUI's LoadVideo (16-bit RGB, bilinear chroma, BT.601 limited;
+  float32 = value * float32(1/65535)). The rule was derived as a black box (ComfyUI and FFmpeg not read):
+  `Docs/comfyui-loadvideo-yuv-to-rgb.md`. All 108 frames of the three ComfyUI-written VP9 test files are bit-exact with
+  ComfyUI's own IMAGE tensors on CUDA, Velocity, the CPU accelerator and WebGPU; 15 odd-size random pictures match the
+  oracle (ffmpeg `-sws_flags bilinear -pix_fmt gbrp16le`). One planes view (Y, U, V tight), so WebGPU binds it once.
+  The matrix uses int32 arithmetic split at 9 bits (equal to the 64-bit form); against plain 64-bit: CUDA 1.9x faster,
+  Velocity / CPU accelerator 2-4% faster, WebGPU equal.
+- `WebMVideoLoaderGpu.LoadAsync(byte[])`: one call from a VP9 WebM to RGB frames (bit-exact with ComfyUI), the frame
+  rate (from DefaultDuration, the rational ffprobe reports: exactly 24, 25, 30000/1001, 24000/1001, 60, 15, 12.5, 50,
+  8; 59.94 differs by 5e-6) and the Opus audio (pre-skip and DiscardPadding trimmed: ComfyUI's sample count). Audio
+  values: our decoder is libopus fixed point, ComfyUI's ffmpeg decodes in float: max |diff| 3.3e-4 (about -70 dB).
+  AV1 / VP8 video: not yet (keyframe decoders only), so ComfyUI's own SaveVideo (AV1) files do not load yet.
+
 ### Matroska reader: the track fields a decoder needs (2026-11-11)
 - `MatroskaTrack` now carries CodecPrivate, DefaultDuration, CodecDelay, SeekPreRoll, PixelWidth / PixelHeight,
   AlphaMode, SamplingFrequency, Channels and BitDepth; `MatroskaFrame` carries a BlockGroup's DiscardPadding. Checked
