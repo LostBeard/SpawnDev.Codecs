@@ -44,7 +44,7 @@ ffmpeg / ffprobe tools as a black box is fine.
      btrt), stts, stss, stsc, stsz, stco); audio trak: smhd, stsd/Opus (dOps, btrt), stts, stsc, stsz, stco, sgpd +
      sbgp (Opus roll recovery); udta/meta). Fixtures will be byte-identical targets like the WebMMux ones.
 3. [ ] **VP9 inter frames in the encoder** (file size for 121-frame Wan clips).
-4. [ ] **One-call frames -> MP4 / WebM** (`VideoFileEncoderGpu`, written 2026-11-12, uncommitted): VP9 any width whose
+4. [x] **One-call frames -> MP4 / WebM** (`VideoFileEncoderGpu`, d08056a, local.16): VP9 any width whose
    8-aligned value is a multiple of 16, AV1 multiples of 64; Opus audio. Passes on Velocity and the CPU accelerator;
    CUDA blocked on an ILGPU bug (`(byte)(int)float` >= 128 gives 127 on CUDA; reported to Data with a repro).
 5. [ ] **VP9 encoder task #23**: the right-edge partition (PARTITION_VERT 8x16 leaf, and the corner), so widths rounding
