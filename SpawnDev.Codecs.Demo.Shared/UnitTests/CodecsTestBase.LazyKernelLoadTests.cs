@@ -6,9 +6,9 @@
 // Lore (SpawnGen) measured the page frozen 30-104 s while Codecs compiled its kernels synchronously in constructors and
 // on first use. ILGPU 5.4.19's LoadAutoGroupedStreamKernelAsync yields to the event loop before each compile; the
 // codecs now load through it, lazily, from their async entry points. Uses a FRESH accelerator: the shared one's kernel
-// cache would hide a constructor compile. It counts kernel LOADS: the accelerator's compiles plus hits in SpawnDev.ILGPU's
-// process-wide shader cache (WebGPU / WebGL / Wasm reuse a kernel another accelerator in the page already compiled; a
-// hit does not count in CompiledKernelCount, so an earlier test's FLAC kernels made the FLAC warm-ups look empty).
+// cache would hide a constructor compile. It counts kernel LOADS (Accelerator.LoadedKernelCount, SpawnDev.ILGPU 5.4.28:
+// the accelerator's compiles plus its hits in the process-wide shader cache; WebGPU / WebGL / Wasm reuse a kernel another
+// accelerator in the page already compiled, and a hit does not count in CompiledKernelCount).
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -47,7 +47,7 @@ public abstract partial class CodecsTestBase
         var (ctx, acc) = fresh;
         try
         {
-            long Count() => acc.CompiledKernelCount + ShaderArtifactCache.Hits;   // loads: compiles + shader-cache hits
+            long Count() => acc.LoadedKernelCount;   // loads: compiles + shader-cache hits, this accelerator only
             long c0 = Count();
             using var flacDec = new FlacDecoderGpu(acc);
             using var flacEnc = new FlacEncoderGpu(acc);
