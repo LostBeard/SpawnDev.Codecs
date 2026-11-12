@@ -36,16 +36,39 @@ segmentation off, loop filter level 0, one tile. Fixed quantizer (same q index a
 
 ## Stages (each: decodable, verified on every backend, then the next)
 
-1. [ ] **Reference plumbing + P-frame syntax, zero motion.** `Vp9EncoderGpu`; key frame recon in the pool; kernels
-   2, 4-8 with MV = 0; skip flag when a leaf has no coefficients. `VideoFileEncoderGpu` uses it (key frame interval
-   option; sync samples only on key frames in MP4 / WebM).
-2. [ ] **Motion search.** Full-pel search + sub-pel refinement with the real EIGHTTAP filter; NEARESTMV / NEARMV /
-   ZEROMV / NEWMV chosen in the entropy pass from the searched MV; MV coding.
+1. [ ] **Reference plumbing + P-frame syntax.** `Vp9EncoderGpu`; key frame recon in the pool; kernels 2, 4-8; skip
+   flag when a leaf has no coefficients; NEARESTMV / NEARMV / ZEROMV / NEWMV chosen in the entropy pass from the
+   leaf's MV; MV coding.
+   - [x] Code + test `Vp9EncoderGpu_InterFrames_DecoderMatchesEncoderReconstruction` (4affcf4): CPU accelerator,
+     red-checked (7 mutations red).
+   - [x] External decoder: ffmpeg 8.1 (black box) decodes the clips to the encoder's reconstruction (d9c74f4).
+   - [ ] CUDA, Velocity, WebGPU lanes (WGSL size of the entropy step: screen first, watchdog on the first run).
+   - [ ] Browser's own VP9 decoder in the browser lanes.
+   - [ ] `VideoFileEncoderGpu` uses it (key frame interval option; sync samples only on key frames in MP4 / WebM);
+     TypedArray overload.
+2. [ ] **Motion search.** Pyramid full-pel search (+-38 pixels), half / quarter-pel refinement and a merge with the
+   neighbours' MVs, scored with the decoder's own predictor (`Vp9MotionSearchKernels`, d9c74f4).
+   - [x] Code + tests on the CPU accelerator: a moving picture's inter frames are 41-42% of zero motion's at q 40.
+   - [ ] Red-check the new guards; CUDA, Velocity, WebGPU lanes.
+   - [ ] Measure on real clips (ComfyUI / Wan): file size and PSNR vs key frames only, and the search's cost
+     settings (`Vp9MArg.LengthCost`, `NewMvCost`).
+   - [ ] Inter quantizer rounding: with round-to-nearest an inter frame re-codes the previous frame's quantization
+     noise (a perfectly predicted moving picture was only 2.4x smaller). Measure a dead zone for inter blocks as a
+     rate-distortion comparison (PSNR at equal bytes), then decide.
 3. [ ] **Large skipped partitions** (32x32 / 64x64 when all leaves under them are skipped with one MV).
 4. [ ] **Backward adaptation + previous-frame MV candidates** (`error_resilient_mode = 0`; counts written by the
    entropy pass; the decoder's `Vp9AdaptKernels`).
 5. [ ] **Loop filter** on the reconstruction (decoder's kernels; key frames too).
 6. [ ] Measure, then decide: intra blocks in inter frames, scene-cut key frames, high-precision MVs, golden / altref.
+
+## Found on the way (owned, not yet fixed)
+- Key frame compressed header (`Vp9FrameCompressedHeaderKernel` and its CPU reference): after tx_mode it writes 4
+  zero bits at probability 128 where the syntax has 5 (the TX_MODE_SELECT bit + 4 coefficient update flags).
+  Every decoder reads the same values because every later symbol of that header is a zero (the coded value sits at
+  the bottom of the range), so files are valid; the inter header writes the exact sequence. Fix both writers
+  together, with the byte comparison tests, when the key frame path is next touched.
+- Source planes are zero padded to the 64 grid: at pictures that are not a multiple of 8 the padded strip inside
+  the last 8x8 costs bits on every frame. Repeat the edge instead (changes key frame bytes: CPU reference too).
 
 ## Tests (per stage)
 - Every frame: encoder's frame buffer == `Vp9DecoderGpu` output (no drift over a clip, sizes with every edge leaf
