@@ -71,6 +71,12 @@ public sealed record OggOpusEncodeOptions
 /// typed array (browser accelerators) and an <see cref="ArrayView1D{T, TStride}"/> overload; each returns the file, or
 /// writes it to a caller's <see cref="Stream"/>.
 /// </summary>
+/// <summary>One Opus packet: its bytes, 48 kHz decode time (the first is -PreSkip) and duration.</summary>
+public sealed record EncodedOpusPacket(byte[] Data, long Pts, int Duration);
+
+/// <summary>An encoded Opus stream for a container: the OpusHead (RFC 7845), the pre-skip and the packets.</summary>
+public sealed record OpusPacketStream(byte[] OpusHead, int PreSkip, int Channels, IReadOnlyList<EncodedOpusPacket> Packets);
+
 public static class OggOpusEncoder
 {
     /// <summary>Packets gathered on the accelerator per readback (one second of 20 ms packets).</summary>
@@ -222,6 +228,73 @@ public static class OggOpusEncoder
         ArgumentNullException.ThrowIfNull(accelerator);
         ArgumentNullException.ThrowIfNull(output);
         options ??= new OggOpusEncodeOptions();
+        OggOpusWriter? writer = null;
+        try
+        {
+            await EncodeCoreAsync(accelerator, pcm, sampleRate, channels, options,
+                preSkip => writer = new OggOpusWriter(output, new OggOpusWriterOptions
+                {
+                    Channels = channels,
+                    PreSkip = preSkip,
+                    InputSampleRate = options.InputSampleRate ?? sampleRate,
+                    Vendor = options.Vendor,
+                    Tags = options.Tags,
+                    Serial = options.Serial,
+                }, leaveOpen: true),
+                (packet, pts, duration) => writer!.WritePacket(packet, pts, duration));
+            writer?.Finish();
+        }
+        finally { writer?.Dispose(); }
+    }
+
+    /// <summary>
+    /// Encode interleaved int16 PCM already on the accelerator into raw Opus packets (20 ms each) plus the OpusHead and
+    /// pre-skip a container needs (MP4 / WebM): the same packets <see cref="EncodeAsync(Accelerator, ArrayView1D{short, Stride1D.Dense}, int, int, Stream, OggOpusEncodeOptions?)"/>
+    /// puts in its Ogg pages. Packet k decodes at 48 kHz time <c>-PreSkip + 960 k</c>.
+    /// </summary>
+    public static async Task<OpusPacketStream> EncodePacketsAsync(Accelerator accelerator, ArrayView1D<short, Stride1D.Dense> pcm, int sampleRate, int channels,
+        OggOpusEncodeOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(accelerator);
+        options ??= new OggOpusEncodeOptions();
+        int skip = 0;
+        var packets = new List<EncodedOpusPacket>();
+        await EncodeCoreAsync(accelerator, pcm, sampleRate, channels, options, preSkip => skip = preSkip,
+            (packet, pts, duration) => packets.Add(new EncodedOpusPacket(packet.ToArray(), pts, duration)));
+        var head = OggOpusWriter.BuildOpusHead(new OggOpusWriterOptions { Channels = channels, PreSkip = skip, InputSampleRate = options.InputSampleRate ?? sampleRate });
+        return new OpusPacketStream(head, skip, channels, packets);
+    }
+
+    /// <summary>As <see cref="EncodePacketsAsync(Accelerator, ArrayView1D{short, Stride1D.Dense}, int, int, OggOpusEncodeOptions?)"/> for interleaved float PCM (managed).</summary>
+    public static async Task<OpusPacketStream> EncodePacketsAsync(Accelerator accelerator, ReadOnlyMemory<float> pcm, int sampleRate, int channels,
+        OggOpusEncodeOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(accelerator);
+        long n = pcm.Length;
+        using var f = accelerator.Allocate1D<float>(Math.Max(1, n));
+        Upload(f.View, pcm.Span);
+        using var s16 = accelerator.Allocate1D<short>(Math.Max(1, n));
+        if (n > 0)
+        {
+            var convert = await OpusEncoderGpu.GetFloatToS16Async(accelerator);
+            var pacer = new LaunchPacer(accelerator);
+            for (long at = 0; at < n; at += ConvertChunk)
+            {
+                int count = (int)Math.Min(ConvertChunk, n - at);
+                convert(count, f.View.SubView(at, count), s16.View.SubView(at, count));
+                await pacer.LaunchedAsync();
+            }
+        }
+        return await EncodePacketsAsync(accelerator, s16.View.SubView(0, n), sampleRate, channels, options);
+    }
+
+    /// <summary>
+    /// The encode every overload shares: <paramref name="begin"/> gets the pre-skip (48 kHz samples) before the first
+    /// packet, then <paramref name="packet"/> gets each packet with its 48 kHz decode time and duration.
+    /// </summary>
+    private static async Task EncodeCoreAsync(Accelerator accelerator, ArrayView1D<short, Stride1D.Dense> pcm, int sampleRate, int channels,
+        OggOpusEncodeOptions options, Action<int> begin, PacketSink packet)
+    {
         if (channels is not (1 or 2)) throw new ArgumentOutOfRangeException(nameof(channels), "1 or 2 channels.");
         if (sampleRate is not (8000 or 12000 or 16000 or 24000 or 48000))
             throw new ArgumentOutOfRangeException(nameof(sampleRate), "Opus encodes 8, 12, 16, 24 or 48 kHz.");
@@ -245,20 +318,8 @@ public static class OggOpusEncoder
         long packets = samples == 0 ? 0 : (samples + lookahead + frame - 1) / frame;
         long finalGranule = samples * scale + preSkip;
 
-        using var writer = new OggOpusWriter(output, new OggOpusWriterOptions
-        {
-            Channels = channels,
-            PreSkip = preSkip,
-            InputSampleRate = options.InputSampleRate ?? sampleRate,
-            Vendor = options.Vendor,
-            Tags = options.Tags,
-            Serial = options.Serial,
-        }, leaveOpen: true);
-        if (packets == 0)
-        {
-            writer.Finish();
-            return;
-        }
+        begin(preSkip);
+        if (packets == 0) return;
 
         // Frames wholly inside the input are encoded from it in place; the rest (the input's last partial frame and the
         // lookahead) from a zeroed tail buffer that starts with the input's leftover samples.
@@ -288,7 +349,7 @@ public static class OggOpusEncoder
                     long index = first + i;
                     long pts = -preSkip + index * frameTicks;
                     int duration = index < packets - 1 ? frameTicks : (int)(finalGranule - preSkip - pts);
-                    writer.WritePacket(data.AsSpan(at, lengths[i]), pts, duration);
+                    packet(data.AsSpan(at, lengths[i]), pts, duration);
                     at += lengths[i];
                 }
                 first += used;
@@ -296,8 +357,9 @@ public static class OggOpusEncoder
                 bytes = 0;
             }
         }
-        writer.Finish();
     }
+
+    private delegate void PacketSink(ReadOnlySpan<byte> packet, long pts, int duration);
 
     /// <summary>
     /// Compile and load every kernel the encode uses (encodes 50 ms of stereo silence from int16 and from float), so the
