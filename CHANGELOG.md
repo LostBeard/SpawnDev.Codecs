@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### MKV output and crf mapping (2026-11-12)
+- `WebMWriterOptions.DocType`: "webm" (default) or "matroska" (a valid .mkv with the same layout; not byte-identical
+  with ffmpeg's matroska muxer). `VideoContainer.Mkv` in VideoFileEncoderGpu (SpawnGen's SaveVideo mkv). WebM output
+  unchanged (byte-identical fixtures pass); the MKV holds the WebM's blocks and loads back with WebMVideoLoaderGpu.
+- `VideoFileEncodeOptions.QIndexFromCrf(crf)`: libvpx / libaom quantizer_to_qindex (crf * 4, 62 -> 249, 63 -> 255).
+
 ### VideoFileEncoderGpu: frames + fps + audio -> MP4 / WebM in one call (2026-11-12)
 - `Video.VideoFileEncoderGpu.EncodeAsync(frames, width, height, fpsNum, fpsDen, audio, options)`: RGB frames in
   ComfyUI's IMAGE layout (float32 H x W x 3) -> RGBA8 (x * 255 clamped, truncated) -> YUV 4:2:0 -> VP9 or AV1 keyframes
