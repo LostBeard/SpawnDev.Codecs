@@ -43,7 +43,7 @@
 // V1 simplifications (mirror Vp9KeyframeEncoder.EncodeKeyFrame):
 //   - Profile 0, YUV 4:2:0
 //   - Any positive width + height (padded to the 64-pixel superblock grid on the accelerator).
-//     v1 entropy kernel caps at 512-pixel width.
+//     The entropy kernel caps the width at 512 mi columns (4096 pixels; Vp9FrameEntropyKernel.MaxMiColsAligned).
 //   - All Y blocks DC_PRED + Tx16x16; all UV blocks DC_PRED + Tx8x8.
 //   - tx_mode = Allow32x32, single tile, LF off, segmentation off,
 //     default coef probs.
@@ -185,6 +185,11 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         if (baseQIndex <= 0 || baseQIndex > 255)
             throw new ArgumentOutOfRangeException(nameof(baseQIndex),
                 "baseQIndex must be in [1, 255].");
+        // A 16x16 block whose right half lies past the last 8-pixel column needs the right-edge partition (and the
+        // corner case) that the v1 walker does not emit yet (task #23): the decoded picture would be wrong there.
+        if (((width + 7) >> 3) % 2 != 0)
+            throw new NotSupportedException(
+                $"VP9 keyframe encoder: width {width} rounds up to an odd number of 8-pixel columns; the right-edge partition is not implemented yet (task #23). Use a width whose 8-aligned value is a multiple of 16.");
     }
 
     // ------------------------------------------------------------------
