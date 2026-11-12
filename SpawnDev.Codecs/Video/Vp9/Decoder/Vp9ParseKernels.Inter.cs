@@ -14,13 +14,13 @@ namespace SpawnDev.Codecs.Video.Vp9.Decoder;
 internal static partial class Vp9ParseKernels
 {
     /// <summary>Block geometry for MV clamping (libvpx MACROBLOCKD mb_to_*_edge, 1/8 pel) and tile bounds.</summary>
-    private struct BlockPos
+    internal struct BlockPos
     {
         public int MiRow, MiCol, MiColStart, MiColEnd, ToLeft, ToRight, ToTop, ToBottom;
     }
 
     /// <summary>Record index of the block at (miRow + dr, miCol + dc), -1 when libvpx's is_inside fails.</summary>
-    private static int Candidate(ArrayView<int> mi, ArrayView<int> a, in BlockPos p, int dr, int dc)
+    internal static int Candidate(ArrayView<int> mi, ArrayView<int> a, in BlockPos p, int dr, int dc)
     {
         int row = p.MiRow + dr, col = p.MiCol + dc;
         int cand = -1;
@@ -62,7 +62,7 @@ internal static partial class Vp9ParseKernels
     ///   9-24  (neighbour (s - 9) / 2, its mv[(s - 9) % 2]) with a different reference, scaled (only if a neighbour was found);
     ///   25-26 the previous frame's mv[s - 25] with a different reference, scaled.
     /// </summary>
-    private static int FindMvRefs(ArrayView<int> mi, ArrayView<int> maps, ArrayView<int> a, ArrayView<int> t, in BlockPos p,
+    internal static int FindMvRefs(ArrayView<int> mi, ArrayView<int> maps, ArrayView<int> a, ArrayView<int> t, in BlockPos p,
         int bsize, int mode, int refFrame, int block, out int list0, out int list1)
     {
         list0 = 0;
@@ -148,7 +148,7 @@ internal static partial class Vp9ParseKernels
         return (row < 0 ? -row : row) < 64 & (col < 0 ? -col : col) < 64;
     }
 
-    private static int LowerMvPrecision(int mv, bool allowHp)
+    internal static int LowerMvPrecision(int mv, bool allowHp)
     {
         int row = MvRow(mv), col = MvCol(mv);
         if (!(allowHp & UseMvHp(mv)))

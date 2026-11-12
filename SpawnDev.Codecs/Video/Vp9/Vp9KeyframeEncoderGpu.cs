@@ -147,6 +147,11 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         _dUshortConsts.View.CopyFromCPU(Vp9KeyframeConstantsGpu.BuildUshortConstsBuffer());
     }
 
+    /// <summary>The packed entropy constants on the accelerator (<see cref="Vp9KeyframeConstantsGpu"/>), shared with <see cref="Vp9EncoderGpu"/>.</summary>
+    internal ArrayView<byte> ByteConsts => _dByteConsts.View;
+    /// <summary>The packed scan / neighbor tables on the accelerator (<see cref="Vp9KeyframeConstantsGpu"/>).</summary>
+    internal ArrayView<ushort> UshortConsts => _dUshortConsts.View;
+
     // ------------------------------------------------------------------
     // Geometry shared by every overload
     // ------------------------------------------------------------------
@@ -234,13 +239,40 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
     /// Runs the kernel chain and drains it. Leaves the encoded length in <c>_dOutFrameLen</c> and
     /// the recon planes in <c>_d*Recon</c> (read by <see cref="EncodeKeyFrameWithReconAsync"/>).
     /// </summary>
+    private Task EncodeCoreAsync(
+        ArrayView1D<byte, Stride1D.Dense> yPlane,
+        ArrayView1D<byte, Stride1D.Dense> uPlane,
+        ArrayView1D<byte, Stride1D.Dense> vPlane,
+        int width, int height,
+        ArrayView1D<byte, Stride1D.Dense> output,
+        int baseQIndex) =>
+        EncodeCoreAsync(yPlane, uPlane, vPlane, width, height, output, baseQIndex, false, default, default, default);
+
+    /// <summary>
+    /// Encode a keyframe with its reconstruction written into the caller's planes (64-aligned strides and rows, the
+    /// layout of a frame buffer): <see cref="Vp9EncoderGpu"/> keeps it as the next frame's reference, with no copy.
+    /// </summary>
+    internal async Task<int> EncodeKeyFrameIntoAsync(
+        ArrayView1D<byte, Stride1D.Dense> yPlane,
+        ArrayView1D<byte, Stride1D.Dense> uPlane,
+        ArrayView1D<byte, Stride1D.Dense> vPlane,
+        int width, int height,
+        ArrayView1D<byte, Stride1D.Dense> output,
+        int baseQIndex,
+        ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon)
+    {
+        await EncodeCoreAsync(yPlane, uPlane, vPlane, width, height, output, baseQIndex, true, yRecon, uRecon, vRecon);
+        return CheckLength((await _dOutFrameLen!.CopyToHostAsync())[0]);
+    }
+
     private async Task EncodeCoreAsync(
         ArrayView1D<byte, Stride1D.Dense> yPlane,
         ArrayView1D<byte, Stride1D.Dense> uPlane,
         ArrayView1D<byte, Stride1D.Dense> vPlane,
         int width, int height,
         ArrayView1D<byte, Stride1D.Dense> output,
-        int baseQIndex)
+        int baseQIndex,
+        bool callerRecon, ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon)
     {
         ValidateArgs(width, height, baseQIndex);
 
@@ -298,9 +330,15 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         int displayMiRows = (height + 7) >> 3;
 
         // ---- 4. Sequential encode (forward + inverse pipeline) ----
+        if (!callerRecon)
+        {
+            yRecon = _dYRecon!.View;
+            uRecon = _dURecon!.View;
+            vRecon = _dVRecon!.View;
+        }
         await _sequentialKernel.RunAsync(
             _dY!.View, _dU!.View, _dV!.View,
-            _dYRecon!.View, _dURecon!.View, _dVRecon!.View,
+            yRecon, uRecon, vRecon,
             _dYCoefs!.View, _dUCoefs!.View, _dVCoefs!.View,
             _dDequant!.View,
             mbCols, mbRows,

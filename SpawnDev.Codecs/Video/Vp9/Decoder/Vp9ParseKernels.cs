@@ -143,9 +143,9 @@ internal static class Vp9Cnt
 internal static partial class Vp9ParseKernels
 {
     // libvpx enums
-    private const int Block8x8 = 3, Block64x64 = 12;
+    internal const int Block8x8 = 3, Block64x64 = 12;
     private const int PartitionNone = 0, PartitionHorz = 1, PartitionVert = 2, PartitionSplit = 3;
-    private const int DcPred = 0, NearestMv = 10, NearMv = 11, ZeroMv = 12, NewMv = 13;
+    internal const int DcPred = 0, NearestMv = 10, NearMv = 11, ZeroMv = 12, NewMv = 13;
     private const int SegLvlAltQ = 0, SegLvlRefFrame = 2, SegLvlSkip = 3;
     private const int TxModeSelect = 4;
     private const int MvUpp = (1 << 14) - 1, MvLow = -(1 << 14);
@@ -212,9 +212,9 @@ internal static partial class Vp9ParseKernels
 
     // ---------------------------------------------------------------- MVs (int_mv.as_int: row low 16 bits, col high)
 
-    private static int MvRow(int mv) => (short)(mv & 0xFFFF);
-    private static int MvCol(int mv) => mv >> 16;
-    private static int PackMv(int row, int col) => (row & 0xFFFF) | (col << 16);
+    internal static int MvRow(int mv) => (short)(mv & 0xFFFF);
+    internal static int MvCol(int mv) => mv >> 16;
+    internal static int PackMv(int row, int col) => (row & 0xFFFF) | (col << 16);
 
     private static bool SegFeatureActive(ArrayView<int> a, int segId, int feature) =>
         a[Vp9PArg.SegEnabled] != 0 & (a[Vp9PArg.SegMask + segId] & (1 << feature)) != 0;   // & not &&: see ReadSegmentId
