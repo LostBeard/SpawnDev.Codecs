@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### VideoFileEncoderGpu: frames + fps + audio -> MP4 / WebM in one call (2026-11-12)
+- `Video.VideoFileEncoderGpu.EncodeAsync(frames, width, height, fpsNum, fpsDen, audio, options)`: RGB frames in
+  ComfyUI's IMAGE layout (float32 H x W x 3) -> RGBA8 (x * 255 clamped, truncated) -> YUV 4:2:0 -> VP9 or AV1 keyframes
+  on the accelerator; optional audio (interleaved float) -> Opus; muxed by Mp4Writer (vp09 / av01 + Opus) or WebMWriter.
+  VP9: widths whose 8-aligned value is a multiple of 16 (task #23 for the rest); AV1: multiples of 64. Round trip on
+  CUDA, Velocity, the CPU accelerator and WebGPU: an 80x50 VP9 WebM loads back with WebMVideoLoaderGpu as 6 frames at
+  exactly 24 fps (worst frame 30.0 dB, the RGB <-> 4:2:0 conversion's own limit on that pattern) and the exact input
+  audio sample count; the MP4's samples equal the WebM's blocks; AV1 MP4 carries the right av1C.
+- Needs SpawnDev.ILGPU 5.4.29 on CUDA: 5.4.28 folded `(byte)(int)f` into one float -> 8-bit conversion that CUDA
+  saturates at 127 (found by this test; fixed by Data in ILGPU).
+- `OggOpusEncoder.EncodePacketsAsync`: raw Opus packets + OpusHead + pre-skip for containers (the Ogg path shares the
+  same encode). `Av1Isobmff`: av1C records and ISOBMFF samples. `Mp4Writer` VP9 tracks (vpcC, ffmpeg's level).
+- VP9 keyframe encoder: widths rounding up to an odd number of 8-pixel columns now throw instead of encoding the right
+  edge wrong (task #23); new fidelity test against the source picture (all sizes > 45 dB at q 1 and 30).
+
 ### Mp4Writer: AV1 + Opus in MP4 (2026-11-12)
 - `Container.Mp4.Mp4Writer`: an ISO BMFF muxer for AV1 video (`Mp4Av1Track`: av1C, size, timescale; `VideoTimescale`
   gives ffmpeg's choice) and Opus audio (`Mp4OpusTrack`: the OpusHead; pre-skip as negative decode times and the edit
