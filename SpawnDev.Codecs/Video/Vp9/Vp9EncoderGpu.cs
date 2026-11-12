@@ -9,6 +9,8 @@
 // kernels on them, so the reference it keeps is what any decoder reconstructs (see Vp9InterEncodeKernels.cs):
 //
 //   PlanePadKernel                       tight source planes -> the source buffer (frame buffer layout)
+//   Vp9MotionSearchKernels               the motion search: pyramid, full-pel MV per leaf (before the setup), then
+//                                        sub-pel refinement and the merge with the neighbours' MVs (after it)
 //   Vp9InterEncodeKernels.SetupKernel    mode info, grid, block table of every leaf
 //   Vp9ReconKernels.InterPredictKernel   the prediction, into the new frame buffer         (the decoder's kernel)
 //   Vp9InterEncodeKernels.ForwardKernel  residual, forward DCT, quantizer: levels, dq, eobs, skip
@@ -46,8 +48,8 @@ public sealed class Vp9EncoderGpu : IDisposable
 
     // per picture size
     private int _width = -1, _height = -1;
-    private MemoryBuffer1D<byte, Stride1D.Dense>? _src, _tile;
-    private MemoryBuffer1D<int, Stride1D.Dense>? _mi, _sb, _dq, _scratch, _mvs;
+    private MemoryBuffer1D<byte, Stride1D.Dense>? _src, _tile, _half, _quarter, _leafPred;
+    private MemoryBuffer1D<int, Stride1D.Dense>? _mi, _sb, _dq, _scratch, _mvs, _mvsB;
     private bool _mvsSet;
     private MemoryBuffer1D<short, Stride1D.Dense>? _levels;
     private int _dqStride;
@@ -59,6 +61,10 @@ public sealed class Vp9EncoderGpu : IDisposable
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _residual = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
         ArrayView<byte>, ArrayView<ushort>, ArrayView<int>, ArrayView<int>, int> _entropy = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int> _downsample = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _fullPel = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
+        ArrayView<int>, int> _refine = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<long>> _compressed = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int> _uncompressed = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long>? _pack;
@@ -75,9 +81,15 @@ public sealed class Vp9EncoderGpu : IDisposable
     public int KeyFrameInterval { get; set; } = 128;
 
     /// <summary>
-    /// Tests / diagnostics: the MV of every 16x16 position of the next inter frames, row-major over
-    /// <c>((width + 15) / 16) x ((height + 15) / 16)</c> positions (libvpx int_mv: row in the low 16 bits, col in the
-    /// high, in 1/8 pixel, even components). Null = zero motion, until the motion search exists (stage 2 of the plan).
+    /// Inter frames search each block's motion in the previous frame (the default). Off: every block predicts from the
+    /// same position (zero motion), which is all a still picture needs.
+    /// </summary>
+    public bool MotionSearch { get; set; } = true;
+
+    /// <summary>
+    /// Tests / diagnostics: the MV of every 16x16 position of the next inter frames instead of the motion search's,
+    /// row-major over <c>((width + 15) / 16) x ((height + 15) / 16)</c> positions (libvpx int_mv: row in the low 16
+    /// bits, col in the high, in 1/8 pixel, even components).
     /// </summary>
     internal int[]? DebugMvs { get; set; }
 
@@ -92,7 +104,7 @@ public sealed class Vp9EncoderGpu : IDisposable
         _tables = _acc.Allocate1D(Vp9T.Packed);
         // libvpx's default probabilities: what every frame of an error resilient stream is coded with
         _ctx = _acc.Allocate1D(Vp9DecoderTables.DefaultFrameContext.Select(b => (int)b).ToArray());
-        _args = _acc.Allocate1D<int>(Vp9IArg.Count);
+        _args = _acc.Allocate1D<int>(Vp9MArg.Count);
         _entropyArgs = _acc.Allocate1D<int>(Vp9EArg.Count);
         _state = _acc.Allocate1D<int>(Vp9InterEntropy.StateInts);
         _maps = _acc.Allocate1D<int>(Vp9PLayout.MvStride);   // previous-frame MVs: not used by error resilient frames
@@ -132,6 +144,12 @@ public sealed class Vp9EncoderGpu : IDisposable
             ArrayView<int>, ArrayView<int>>(Vp9ReconKernels.InterResidualKernel);
         _entropy = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<short>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<ushort>, ArrayView<int>, ArrayView<int>, int>(Vp9InterEntropy.StepKernel);
+        _downsample = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int>(
+            Vp9MotionSearchKernels.DownsampleKernel);
+        _fullPel = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>,
+            ArrayView<int>>(Vp9MotionSearchKernels.FullPelKernel);
+        _refine = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>,
+            ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(Vp9MotionSearchKernels.RefineKernel);
         _compressed = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<long>>(Vp9InterHeaderKernels.CompressedHeaderKernel);
         _uncompressed = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int>(
             Vp9InterHeaderKernels.UncompressedHeaderKernel);
@@ -147,6 +165,7 @@ public sealed class Vp9EncoderGpu : IDisposable
         if (((width + 7) >> 3) > Vp9InterEntropy.MaxMiCols)
             throw new NotSupportedException($"VP9 encode: pictures wider than {Vp9InterEntropy.MaxMiCols * 8} pixels are not supported.");
         _src?.Dispose(); _tile?.Dispose(); _mi?.Dispose(); _sb?.Dispose(); _dq?.Dispose(); _scratch?.Dispose(); _levels?.Dispose(); _mvs?.Dispose();
+        _mvsB?.Dispose(); _half?.Dispose(); _quarter?.Dispose(); _leafPred?.Dispose();
         _width = width;
         _height = height;
         _refBuffer = -1;
@@ -166,9 +185,17 @@ public sealed class Vp9EncoderGpu : IDisposable
         long predUnits = PredUnits(sbCols, sbRows);
         _scratch = _acc.Allocate1D<int>(Math.Max(predUnits * Vp9InterPred.RegionScratchInts, ((long)sbCount * _dqStride >> 2) * 5));
         _tile = _acc.Allocate1D<byte>(GetMaxEncodedSize(width, height));
-        _mvs = _acc.Allocate1D<int>(((miCols + 1) >> 1) * ((miRows + 1) >> 1));
+        int leafCount = ((miCols + 1) >> 1) * ((miRows + 1) >> 1);
+        _mvs = _acc.Allocate1D<int>(leafCount);
         _mvs.MemSetToZero();
         _mvsSet = false;
+        // the motion search: the luma pyramid (source then reference, tightly packed, per level), a second MV buffer
+        // (each refinement pass reads one and writes the other), one 16x16 block of prediction per leaf
+        int halfW = (width + 1) >> 1, halfH = (height + 1) >> 1;
+        _mvsB = _acc.Allocate1D<int>(leafCount);
+        _half = _acc.Allocate1D<byte>(2L * halfW * halfH);
+        _quarter = _acc.Allocate1D<byte>(2L * ((halfW + 1) >> 1) * ((halfH + 1) >> 1));
+        _leafPred = _acc.Allocate1D<byte>((long)leafCount * Vp9MotionSearchKernels.LeafBytes);
 
         // the entropy pass's arguments depend only on the size
         var e = new int[Vp9EArg.Count];
@@ -257,7 +284,7 @@ public sealed class Vp9EncoderGpu : IDisposable
         _pad.Run(vPlane, 0, uvWidth, uvWidth, uvHeight, src.SubView(layout.VOffset, uvBytes), layout.UvStride, layout.UvRows);
 
         // the decoder's reconstruction arguments (Vp9DecodePipeline.Reconstruct) + the encoder's
-        var a = new int[Vp9IArg.Count];
+        var a = new int[Vp9MArg.Count];
         a[Vp9RArg.MiCols] = miCols;
         a[Vp9RArg.MiRows] = miRows;
         a[Vp9RArg.SsX] = 1;
@@ -296,6 +323,20 @@ public sealed class Vp9EncoderGpu : IDisposable
         a[Vp9IArg.DqYAc] = Vp9Dequantizer.AcQuant(baseQIndex, 0);
         a[Vp9IArg.DqUvDc] = Vp9Dequantizer.DcQuant(baseQIndex, 0);
         a[Vp9IArg.DqUvAc] = Vp9Dequantizer.AcQuant(baseQIndex, 0);
+        int hw = (width + 1) >> 1, hh = (height + 1) >> 1, qw = (hw + 1) >> 1, qh = (hh + 1) >> 1;
+        a[Vp9MArg.Width] = width;
+        a[Vp9MArg.Height] = height;
+        a[Vp9MArg.HalfW] = hw;
+        a[Vp9MArg.HalfH] = hh;
+        a[Vp9MArg.QuarterW] = qw;
+        a[Vp9MArg.QuarterH] = qh;
+        a[Vp9MArg.Stride] = layout.YStride;
+        a[Vp9MArg.SrcAt] = 0;
+        a[Vp9MArg.RefAt] = checked((int)refBase);
+        // costs in SAD units of a 16x16 block, scaled with the quantizer step (a bit is worth about one step of error)
+        int acStep = a[Vp9IArg.DqYAc];
+        a[Vp9MArg.LengthCost] = 1 + acStep / 32;
+        a[Vp9MArg.NewMvCost] = acStep * 3 / 2;
         _args.View.CopyFromCPU(a);   // frame metadata scalars
 
         int leaves = ((miCols + 1) >> 1) * ((miRows + 1) >> 1);
@@ -305,14 +346,34 @@ public sealed class Vp9EncoderGpu : IDisposable
             _mvs!.View.CopyFromCPU(DebugMvs);   // tests only
             _mvsSet = true;
         }
-        else if (_mvsSet)
+        else if (_mvsSet && !MotionSearch)
         {
             _mvs!.MemSetToZero();
             _mvsSet = false;
         }
         int residUnits = miCols * 2 * (miRows * 2) + 2 * ((miCols * 2) >> 1) * ((miRows * 2) >> 1);
         var pool = _frames.Pool;
+        bool search = MotionSearch && DebugMvs == null;
+        if (search)
+        {
+            // the pyramid of the source and of the reference, then every leaf's full-pel MV
+            _downsample(hw * hh, src, _half!.View, 0, layout.YStride, width, height, 0, hw);
+            _downsample(hw * hh, pool, _half.View, checked((int)refBase), layout.YStride, width, height, hw * hh, hw);
+            _downsample(qw * qh, _half.View, _quarter!.View, 0, hw, hw, hh, 0, qw);
+            _downsample(qw * qh, _half.View, _quarter.View, hw * hh, hw, hw, hh, qw * qh, qw);
+            _fullPel(leaves, _quarter.View, _half.View, src, pool, _args.View, _mvs!.View);
+            _mvsSet = true;
+        }
         _setup(leaves, _args.View, _mi!.View, _sb!.View, _mvs!.View);
+        if (search)
+        {
+            // half-pel, quarter-pel, then two passes of merging with the neighbours' MVs; the last pass leaves the
+            // MVs in the mode info
+            _refine(leaves, pool, src, _leafPred!.View, _args.View, _mi.View, _mvs.View, _mvsB!.View, _scratch!.View, 0);
+            _refine(leaves, pool, src, _leafPred.View, _args.View, _mi.View, _mvsB.View, _mvs.View, _scratch.View, 1);
+            _refine(leaves, pool, src, _leafPred.View, _args.View, _mi.View, _mvs.View, _mvsB.View, _scratch.View, 2);
+            _refine(leaves, pool, src, _leafPred.View, _args.View, _mi.View, _mvsB.View, _mvs.View, _scratch.View, 2);
+        }
         _predict(PredUnits(sbCols, sbRows), pool, _args.View, _mi.View, _scratch!.View);
         _forward(leaves, pool, src, _args.View, _mi.View, _sb.View, _dq!.View, _levels!.View, _key.UshortConsts);
         _residual(residUnits, pool, _args.View, _tables.View, _mi.View, _sb.View, _dq.View, _scratch.View);
@@ -384,6 +445,7 @@ public sealed class Vp9EncoderGpu : IDisposable
         _compressedHeader.Dispose(); _uncompressedHeader.Dispose();
         _compressedLen.Dispose(); _uncompressedLen.Dispose(); _tileLen.Dispose(); _frameLen.Dispose();
         _src?.Dispose(); _tile?.Dispose(); _mi?.Dispose(); _sb?.Dispose(); _dq?.Dispose(); _scratch?.Dispose(); _levels?.Dispose(); _mvs?.Dispose();
+        _mvsB?.Dispose(); _half?.Dispose(); _quarter?.Dispose(); _leafPred?.Dispose();
         _stageY.Dispose(); _stageU.Dispose(); _stageV.Dispose(); _stageOut.Dispose();
     }
 }

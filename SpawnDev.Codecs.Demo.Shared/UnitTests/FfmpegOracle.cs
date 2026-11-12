@@ -66,6 +66,45 @@ internal static class FfmpegOracle
         }
     }
 
+    /// <summary>FFmpeg's decode of the video in <paramref name="file"/> (<paramref name="ext"/> names the format) as one tight
+    /// I420 array per frame (Y, then U, then V, chroma (w+1)/2 x (h+1)/2). Every frame is kept (no frame dropping or
+    /// duplication); any ffmpeg error output, a non-zero exit or a partial frame throws.</summary>
+    [UnsupportedOSPlatform("browser")]
+    public static List<byte[]> DecodeVideoI420(byte[] file, string ext, int width, int height)
+    {
+        RequireAvailable();
+        string work = Path.Combine(Path.GetTempPath(), "spawndev-ffv-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(work);
+        try
+        {
+            string input = Path.Combine(work, "in" + ext), output = Path.Combine(work, "out.yuv");
+            File.WriteAllBytes(input, file);
+            var psi = new ProcessStartInfo("ffmpeg")
+            {
+                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
+            };
+            foreach (var arg in new[] { "-hide_banner", "-v", "error", "-i", input, "-f", "rawvideo", "-pix_fmt", "yuv420p", "-vsync", "passthrough", "-y", output })
+                psi.ArgumentList.Add(arg);
+            using var proc = Process.Start(psi) ?? throw new InvalidOperationException("could not start ffmpeg");
+            string stderr = proc.StandardError.ReadToEnd();
+            proc.StandardOutput.ReadToEnd();
+            if (!proc.WaitForExit(120_000)) { proc.Kill(true); throw new Exception("ffmpeg timed out"); }
+            if (proc.ExitCode != 0 || stderr.Trim().Length > 0) throw new Exception($"ffmpeg reported: {stderr.Trim()} (exit {proc.ExitCode})");
+            var raw = File.ReadAllBytes(output);
+            int frameBytes = width * height + 2 * ((width + 1) / 2) * ((height + 1) / 2);
+            if (raw.Length % frameBytes != 0)
+                throw new Exception($"ffmpeg wrote {raw.Length} bytes, not a whole number of {width}x{height} I420 frames ({frameBytes} bytes each)");
+            var frames = new List<byte[]>(raw.Length / frameBytes);
+            for (int at = 0; at < raw.Length; at += frameBytes)
+                frames.Add(raw.AsSpan(at, frameBytes).ToArray());
+            return frames;
+        }
+        finally
+        {
+            try { Directory.Delete(work, true); } catch { /* best effort */ }
+        }
+    }
+
     /// <summary>Run an FFmpeg tool (ffprobe, ffmpeg) on a file and return its stdout; stderr output fails.</summary>
     [UnsupportedOSPlatform("browser")]
     public static string Probe(byte[] file, string ext, params string[] args)

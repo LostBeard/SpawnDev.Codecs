@@ -47,7 +47,7 @@ internal static class Vp9RArg
 internal static class Vp9ReconKernels
 {
     /// <summary>The inter prediction reference plane for MV reference <paramref name="refFrame"/> (1 LAST .. 3 ALTREF).</summary>
-    private static Vp9InterRefPlane RefPlane(ArrayView<int> a, int refFrame, int plane)
+    internal static Vp9InterRefPlane RefPlane(ArrayView<int> a, int refFrame, int plane)
     {
         int r = refFrame < 1 ? 0 : refFrame - 1;
         int at = Vp9RArg.Ref + (r * 3 + plane) * 4, sc = Vp9RArg.Scale + r * 4;

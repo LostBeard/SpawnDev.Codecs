@@ -4,7 +4,8 @@
 // difference is drift. Then the fidelity against the source, per frame (no decay over the clip).
 //
 // Sizes cover every edge leaf (bottom 16x8: 80x50; right 8x16: 72x64; both and the corner 8x8: 70x50, 200x9).
-// Motion fields (until the motion search exists the test supplies them): zero; one MV for every block (sub-pixel);
+// Motion fields: fields 0-4 are supplied by the test (they pin the syntax whatever the search finds), field 5 is the
+// encoder's motion search. Zero; one MV for every block (sub-pixel);
 // a field that mixes zero, repeated, opposite and far MVs (so NEARESTMV, NEARMV, ZEROMV and NEWMV are all coded, and
 // MVs point outside the picture); zero motion over a clip whose left half is flat mid-gray in every frame: the key frame
 // reconstructs it exactly (DC prediction of 128), so the inter frames' blocks there have no coefficients and are coded
@@ -64,18 +65,17 @@ public abstract partial class CodecsTestBase
             var report = new List<string>();
             const int frames = 5;
             foreach (var (w, h) in new[] { (64, 64), (144, 72), (80, 50), (72, 64), (70, 50), (200, 9) })
-                foreach (int field in new[] { 0, 1, 2, 3, 4 })
+                foreach (int field in new[] { 0, 1, 2, 3, 4, 5 })
                     foreach (var (q, floor) in new[] { (1, 50.0), (30, 38.0) })
                     {
                         string tag = $"{w}x{h} field {field} q{q}";
                         int cols = (w + 15) / 16, rows = (h + 15) / 16;
-                        int[]? mvs = null;
+                        int[]? mvs = field == 5 ? null : new int[cols * rows];   // null: the motion search
                         if (field == 1 || field == 2)
                         {
-                            mvs = new int[cols * rows];
                             // field 1: every block (-0.5, +0.75) pixel; field 2: a mix by position
                             int[] mix = { 0, PackIntMv(-4, 6), PackIntMv(-4, 6), PackIntMv(4, -6), PackIntMv(250, -380), 0, PackIntMv(-130, 2), PackIntMv(-4, 6) };
-                            for (int i = 0; i < mvs.Length; i++) mvs[i] = field == 1 ? PackIntMv(-4, 6) : mix[(i * 5 + i / cols * 3) % mix.Length];
+                            for (int i = 0; i < mvs!.Length; i++) mvs[i] = field == 1 ? PackIntMv(-4, 6) : mix[(i * 5 + i / cols * 3) % mix.Length];
                         }
                         using var enc = new Vp9EncoderGpu(acc) { DebugMvs = mvs };
                         using var dec = new Vp9DecoderGpu(acc);
@@ -130,6 +130,75 @@ public abstract partial class CodecsTestBase
             }
             Console.WriteLine($"{acc.AcceleratorType}: " + string.Join(" | ", report));
             True(failures.Count == 0, $"{failures.Count} failures:\n" + string.Join("\n", failures.Take(12)));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    /// <summary>A textured picture (smooth waves + coarse grain) sampled at (x, y): the same picture at any offset.</summary>
+    private static byte Vp9TestTexture(int x, int y)
+    {
+        double v = 128 + 55 * Math.Sin(x * 0.21) * Math.Cos(y * 0.17) + 30 * Math.Sin((x + y) * 0.05);
+        uint g = (uint)((x >> 2) * 73856093) ^ (uint)((y >> 2) * 19349663);
+        g ^= g >> 13; g *= 0x5bd1e995; g ^= g >> 15;
+        return (byte)Math.Clamp(v + (g & 31) - 16, 0, 255);
+    }
+
+    /// <summary>
+    /// The motion search earns its keep: a picture that moves 3 pixels right and 2 down per frame. With the search the
+    /// inter frames must be much smaller than with zero motion, at the same quantizer and no worse a picture; the
+    /// decoder must still match the encoder's reconstruction on every frame.
+    /// </summary>
+    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL,GiantShader")]
+    public async Task Vp9EncoderGpu_MotionSearch_ShrinksMovingPicture()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            var failures = new List<string>();
+            var report = new List<string>();
+            const int frames = 6, q = 40;
+            foreach (var (w, h) in new[] { (192, 128), (176, 100) })
+            {
+                int cw = (w + 1) / 2, ch = (h + 1) / 2;
+                var bytesPer = new int[2];
+                var worstPer = new double[2];
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    using var enc = new Vp9EncoderGpu(acc) { MotionSearch = pass == 1 };
+                    using var dec = new Vp9DecoderGpu(acc);
+                    worstPer[pass] = double.MaxValue;
+                    for (int n = 0; n < frames; n++)
+                    {
+                        var y = new byte[w * h]; var u = new byte[cw * ch]; var v = new byte[cw * ch];
+                        for (int r = 0; r < h; r++) for (int c = 0; c < w; c++) y[r * w + c] = Vp9TestTexture(c - 3 * n + 64, r - 2 * n + 64);
+                        for (int r = 0; r < ch; r++)
+                            for (int c = 0; c < cw; c++)
+                            {
+                                u[r * cw + c] = (byte)(64 + Vp9TestTexture(2 * c - 3 * n + 300, 2 * r - 2 * n + 300) / 2);
+                                v[r * cw + c] = (byte)(64 + Vp9TestTexture(2 * c - 3 * n + 600, 2 * r - 2 * n + 600) / 2);
+                            }
+                        var (bytes, isKey) = await enc.EncodeFrameAsync(y, u, v, w, h, q);
+                        var recon = await enc.ReadReconAsync();
+                        var shown = await dec.DecodePacketAsync(bytes);
+                        if (shown == null || !shown.Planes.AsSpan().SequenceEqual(recon))
+                        {
+                            failures.Add($"{w}x{h} search {pass} frame {n}: decoder != encoder reconstruction");
+                            break;
+                        }
+                        if (!isKey) bytesPer[pass] += bytes.Length;
+                        double se = 0;
+                        for (int i = 0; i < y.Length; i++) { double d = y[i] - recon[i]; se += d * d; }
+                        worstPer[pass] = Math.Min(worstPer[pass], 10 * Math.Log10(65025 / Math.Max(se / y.Length, 1e-9)));
+                    }
+                }
+                report.Add($"{w}x{h} q{q}: inter bytes zero motion {bytesPer[0]}, search {bytesPer[1]} ({100.0 * bytesPer[1] / Math.Max(bytesPer[0], 1):F0}%), " +
+                    $"worst Y {worstPer[0]:F1} / {worstPer[1]:F1} dB");
+                if (bytesPer[1] * 2 > bytesPer[0]) failures.Add($"{w}x{h}: the search's inter frames are {bytesPer[1]} bytes, zero motion's {bytesPer[0]}: expected under half");
+                if (worstPer[1] < worstPer[0] - 0.5) failures.Add($"{w}x{h}: the search's picture is worse: {worstPer[1]:F1} dB vs {worstPer[0]:F1} dB");
+            }
+            Console.WriteLine($"{acc.AcceleratorType}: " + string.Join(" | ", report));
+            True(failures.Count == 0, string.Join("\n", failures));
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
