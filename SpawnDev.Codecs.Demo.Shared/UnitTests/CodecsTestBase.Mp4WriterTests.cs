@@ -82,6 +82,44 @@ public abstract partial class CodecsTestBase
         True(failures.Count == 0, $"{failures.Count} of {checkedOrders} differ:\n" + string.Join("\n", failures));
     }
 
+    /// <summary>
+    /// Av1Isobmff on every AV1 fixture: BuildAv1C of ffmpeg's first video sample (it keeps the sequence header in key
+    /// samples) equals the av1C ffmpeg wrote, and ToSample removes a temporal delimiter put in front of each sample (ffmpeg
+    /// samples carry none) and changes nothing else.
+    /// </summary>
+    [TestMethod(Category = "CpuOnly")]
+    public async Task Av1Isobmff_Av1CAndSamples_MatchFfmpeg()
+    {
+        await Task.Yield();
+        var cases = System.Text.Encoding.UTF8.GetString(ReadEmbedded(Mp4MuxPrefix + "manifest.txt"))
+            .Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        int records = 0, samples = 0;
+        foreach (var name in cases)
+        {
+            var file = ReadEmbedded(Mp4MuxPrefix + name + ".mp4");
+            using var json = JsonDocument.Parse(ReadEmbedded(Mp4MuxPrefix + name + ".json"));
+            foreach (var t in json.RootElement.GetProperty("tracks").EnumerateArray())
+            {
+                if (t.GetProperty("type").GetString() != "video") continue;
+                int index = t.GetProperty("index").GetInt32();
+                var packets = json.RootElement.GetProperty("packets").EnumerateArray().Where(p => p.GetProperty("track").GetInt32() == index).ToList();
+                byte[] Bytes(JsonElement p) { var d = p.GetProperty("data"); return file.AsSpan(d[0].GetInt32(), d[1].GetInt32()).ToArray(); }
+                var av1c = Av1Isobmff.BuildAv1C(Bytes(packets[0]));
+                Equal(t.GetProperty("extradata").GetString()!.ToUpperInvariant(), Convert.ToHexString(av1c), $"{name}: av1C");
+                records++;
+                foreach (var p in packets)
+                {
+                    var s = Bytes(p);
+                    var tu = new byte[] { 0x12, 0x00 }.Concat(s).ToArray();   // temporal delimiter OBU (type 2, size 0)
+                    True(Av1Isobmff.ToSample(tu).AsSpan().SequenceEqual(s), $"{name}: ToSample changed a sample");
+                    samples++;
+                }
+            }
+        }
+        True(records >= 7, $"only {records} AV1 tracks");
+        Console.WriteLine($"{records} av1C records == ffmpeg, {samples} samples");
+    }
+
     /// <summary>ffmpeg's video timescale: the rate's numerator scaled by the smallest power of two reaching 10000.</summary>
     [TestMethod(Category = "CpuOnly")]
     public void Mp4Writer_VideoTimescale_MatchesFfmpeg()

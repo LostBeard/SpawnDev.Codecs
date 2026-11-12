@@ -75,6 +75,9 @@ public sealed record Av1SequenceHeader
     /// <summary>seq_level_idx[0] (operating point 0 level index).</summary>
     public int SeqLevelIdx0 { get; init; }
 
+    /// <summary>seq_tier[0] (operating point 0 tier; 0 when the level is 7 or below).</summary>
+    public int SeqTier0 { get; init; }
+
     /// <summary>enable_interintra_compound flag.</summary>
     public bool EnableInterintraCompound { get; init; }
 
@@ -165,7 +168,7 @@ public static class Av1SequenceHeaderParser
         bool decoderModelInfoPresent = false;
         bool initialDisplayDelayPresent = false;
 
-        int seqLevelIdx0 = 0;
+        int seqLevelIdx0 = 0, seqTier0 = 0;
         if (reducedStill)
         {
             // OP count = 1; operating_point_idc = 0; per spec, just one
@@ -192,7 +195,8 @@ public static class Av1SequenceHeaderParser
                 br.ReadBits(12); // operating_point_idc[i]
                 int level = (int)br.ReadBits(5);
                 if (i == 0) seqLevelIdx0 = level;
-                if (level > 7) br.ReadBits(1); // seq_tier[i]
+                int tier = level > 7 ? (int)br.ReadBits(1) : 0; // seq_tier[i]
+                if (i == 0) seqTier0 = tier;
                 if (decoderModelInfoPresent)
                 {
                     bool present = br.ReadFlag();
@@ -344,6 +348,7 @@ public static class Av1SequenceHeaderParser
             EnableFilterIntra = enableFilterIntra,
             EnableIntraEdgeFilter = enableIntraEdgeFilter,
             SeqLevelIdx0 = seqLevelIdx0,
+            SeqTier0 = seqTier0,
             EnableInterintraCompound = enableInterintraCompound,
             EnableMaskedCompound = enableMaskedCompound,
             EnableWarpedMotion = enableWarpedMotion,
