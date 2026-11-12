@@ -99,11 +99,24 @@ public sealed class MatroskaContainer
                 var codecId = entry.First<StringElement>("CodecID")?.Data;
                 // A TrackEntry without a codec ID is malformed - skip quietly.
                 if (trackNumber is null || trackType is null || codecId is null) continue;
+                var codecPrivate = entry.First<BinaryElement>("CodecPrivate");
+                var video = entry.First<MasterElement>("Video");
+                var audio = entry.First<MasterElement>("Audio");
                 yield return new MatroskaTrack
                 {
                     TrackNumber = trackNumber.Value,
                     TrackType = trackType.Value,
                     CodecId = codecId,
+                    CodecPrivate = codecPrivate == null ? null : ReadBinary(codecPrivate),
+                    DefaultDurationNs = entry.First<UintElement>("DefaultDuration")?.Data,
+                    CodecDelayNs = entry.First<UintElement>("CodecDelay")?.Data,
+                    SeekPreRollNs = entry.First<UintElement>("SeekPreRoll")?.Data,
+                    PixelWidth = video?.First<UintElement>("PixelWidth")?.Data,
+                    PixelHeight = video?.First<UintElement>("PixelHeight")?.Data,
+                    AlphaMode = video?.First<UintElement>("AlphaMode")?.Data,
+                    SamplingFrequency = audio?.First<FloatElement>("SamplingFrequency")?.Data,
+                    Channels = audio?.First<UintElement>("Channels")?.Data,
+                    BitDepth = audio?.First<UintElement>("BitDepth")?.Data,
                 };
             }
         }
@@ -155,8 +168,9 @@ public sealed class MatroskaContainer
                                 var data = more.First<BinaryElement>("BlockAdditional");
                                 if (addId == 1 && data != null) { additional = ReadBinary(data); break; }
                             }
+                        long? discard = blockGroup.First<IntElement>("DiscardPadding")?.Data;
                         foreach (var f in ParseBlockElement(block, clusterTs, isSimpleBlock: false))
-                            yield return additional == null ? f : f with { BlockAdditional = additional };
+                            yield return additional == null && discard == null ? f : f with { BlockAdditional = additional, DiscardPaddingNs = discard };
                     }
                 }
             }

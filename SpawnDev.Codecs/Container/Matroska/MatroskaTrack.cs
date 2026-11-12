@@ -30,6 +30,36 @@ public sealed record MatroskaTrack
     /// </summary>
     public required string CodecId { get; init; }
 
+    /// <summary>CodecPrivate (e.g. the OpusHead or the Vorbis headers), or null.</summary>
+    public byte[]? CodecPrivate { get; init; }
+
+    /// <summary>DefaultDuration in nanoseconds (one frame / one audio block), or null.</summary>
+    public ulong? DefaultDurationNs { get; init; }
+
+    /// <summary>CodecDelay in nanoseconds (Opus pre-skip), or null.</summary>
+    public ulong? CodecDelayNs { get; init; }
+
+    /// <summary>SeekPreRoll in nanoseconds, or null.</summary>
+    public ulong? SeekPreRollNs { get; init; }
+
+    /// <summary>Video/PixelWidth, or null.</summary>
+    public ulong? PixelWidth { get; init; }
+
+    /// <summary>Video/PixelHeight, or null.</summary>
+    public ulong? PixelHeight { get; init; }
+
+    /// <summary>Video/AlphaMode (1 = the BlockAdditional of each block carries an alpha picture), or null.</summary>
+    public ulong? AlphaMode { get; init; }
+
+    /// <summary>Audio/SamplingFrequency in Hz, or null.</summary>
+    public double? SamplingFrequency { get; init; }
+
+    /// <summary>Audio/Channels, or null.</summary>
+    public ulong? Channels { get; init; }
+
+    /// <summary>Audio/BitDepth, or null.</summary>
+    public ulong? BitDepth { get; init; }
+
     /// <summary>True when <see cref="TrackType"/> codes a video track (1).</summary>
     public bool IsVideo => TrackType == (ulong)MatroskaTrackType.Video;
 

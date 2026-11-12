@@ -52,4 +52,10 @@ public sealed record MatroskaFrame
     /// stream holding the alpha plane, AlphaMode 1), or null.
     /// </summary>
     public byte[]? BlockAdditional { get; init; }
+
+    /// <summary>
+    /// DiscardPadding of the enclosing BlockGroup in nanoseconds (audio the decoder drops at the end of this block, e.g.
+    /// Opus end trimming), or null.
+    /// </summary>
+    public long? DiscardPaddingNs { get; init; }
 }

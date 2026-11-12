@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Matroska reader: the track fields a decoder needs (2026-11-11)
+- `MatroskaTrack` now carries CodecPrivate, DefaultDuration, CodecDelay, SeekPreRoll, PixelWidth / PixelHeight,
+  AlphaMode, SamplingFrequency, Channels and BitDepth; `MatroskaFrame` carries a BlockGroup's DiscardPadding. Checked
+  against the 21 ffmpeg-written WebMMux fixtures (every track field and every packet's bytes and discard padding).
+
+### SpawnDev.ILGPU 5.4.28 (2026-11-11)
+- SpawnDev.ILGPU 5.4.27 -> 5.4.28: WebGPU keeps its preloaded byte copy / fill kernels for the accelerator's lifetime
+  (a GC no longer makes the next unaligned clear load one again), and `Accelerator.LoadedKernelCount`, which the
+  lazy-load guard now uses (compiles plus shader-cache hits, per accelerator). Guard passes on CUDA, Velocity, the CPU
+  accelerator and WebGPU.
+
 ### VP9 decoder on WebGPU: the device-hang cause fixed, workaround removed (2026-11-11)
 - The real cause of the WebGPU device hang after a VP9 decode (see the next entries) was not the tile parse's
   length but its per-thread state: a 6.5 KB dynamically indexed function-scope array. On Chrome WebGPU (D3D12,
