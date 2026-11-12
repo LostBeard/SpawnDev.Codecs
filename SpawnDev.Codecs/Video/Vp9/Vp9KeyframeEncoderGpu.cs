@@ -185,11 +185,6 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         if (baseQIndex <= 0 || baseQIndex > 255)
             throw new ArgumentOutOfRangeException(nameof(baseQIndex),
                 "baseQIndex must be in [1, 255].");
-        // A 16x16 block whose right half lies past the last 8-pixel column needs the right-edge partition (and the
-        // corner case) that the v1 walker does not emit yet (task #23): the decoded picture would be wrong there.
-        if (((width + 7) >> 3) % 2 != 0)
-            throw new NotSupportedException(
-                $"VP9 keyframe encoder: width {width} rounds up to an odd number of 8-pixel columns; the right-edge partition is not implemented yet (task #23). Use a width whose 8-aligned value is a multiple of 16.");
     }
 
     // ------------------------------------------------------------------
@@ -309,7 +304,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             _dYCoefs!.View, _dUCoefs!.View, _dVCoefs!.View,
             _dDequant!.View,
             mbCols, mbRows,
-            frameMiRows: displayMiRows);
+            frameMiRows: displayMiRows, frameMiCols: displayMiCols);
 
         // ---- 5. Entropy ----
         await _entropyKernel.RunAsync(
@@ -454,7 +449,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         // collapses 47 per-diagonal launches into one kernel via Group.Barrier.
         // displayMiRows drives boundary forced-split MB encoding (top BLOCK_16X8
         // with 2 Tx8x8 luma + 2 Tx4x4 chroma) at the bottom-edge MB row.
-        int seqFrameMiRows = (height + 7) >> 3;
+        int seqFrameMiRows = (height + 7) >> 3, seqFrameMiCols = (width + 7) >> 3;
         await TraceLaunchAsync(_accelerator, "batch: compressed header");
         bool wavefrontSingleDispatched = await _sequentialKernel.TryRunBatchSingleDispatchAsync(
             dAllY.View, dAllU.View, dAllV.View,
@@ -464,7 +459,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             mbCols, mbRows, frameCount,
             yLen, uvLen,
             yCoefStride, uvCoefStride, dequantStride,
-            seqFrameMiRows);
+            seqFrameMiRows, seqFrameMiCols);
         if (!wavefrontSingleDispatched)
         {
             await _sequentialKernel.RunBatchAsync(
@@ -475,7 +470,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
                 mbCols, mbRows, frameCount,
                 yLen, uvLen,
                 yCoefStride, uvCoefStride, dequantStride,
-                seqFrameMiRows);
+                seqFrameMiRows, seqFrameMiCols);
         }
 
         // Phase 3: BATCH entropy. Display mi dims drive boundary forced-split.

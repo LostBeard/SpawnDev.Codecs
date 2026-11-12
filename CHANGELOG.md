@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### VP9 keyframe encoder: any picture size (task #23, 2026-11-12)
+- The walker now codes the right-edge leaf (PARTITION_VERT, the left BLOCK_8X16: two Tx8x8 luma stacked + Tx4x4
+  chroma) and the corner (SPLIT implied, the top-left BLOCK_8X8 with its own PARTITION_NONE), mirroring the bottom-edge
+  BLOCK_16X8; the reconstruction kernel encodes the same leaf (one loop over the sub-blocks for every edge shape: 3
+  helper call sites instead of 6). Partition contexts follow libvpx's partition_context_lookup per leaf (16X8 left
+  context 14, was 12; 8X16 {14, 12}; 8X8 {14, 14}). Widths rounding up to an odd number of 8-pixel columns no longer
+  throw. Fidelity against the source (q 1, luma): 70x50 74.5 dB (was 31.6 and wrong at the right edge), 72x64 138.1,
+  200x9 57.2; every earlier size unchanged.
+
 ### MKV output and crf mapping (2026-11-12)
 - `WebMWriterOptions.DocType`: "webm" (default) or "matroska" (a valid .mkv with the same layout; not byte-identical
   with ffmpeg's matroska muxer). `VideoContainer.Mkv` in VideoFileEncoderGpu (SpawnGen's SaveVideo mkv). WebM output

@@ -47,6 +47,6 @@ ffmpeg / ffprobe tools as a black box is fine.
 4. [x] **One-call frames -> MP4 / WebM** (`VideoFileEncoderGpu`, d08056a, local.16): VP9 any width whose
    8-aligned value is a multiple of 16, AV1 multiples of 64; Opus audio. Passes on Velocity and the CPU accelerator;
    CUDA blocked on an ILGPU bug (`(byte)(int)float` >= 128 gives 127 on CUDA; reported to Data with a repro).
-5. [ ] **VP9 encoder task #23**: the right-edge partition (PARTITION_VERT 8x16 leaf, and the corner), so widths rounding
-   up to an odd number of 8-pixel columns encode; until then they throw (70282fc). Found by the new fidelity test.
+5. [x] **VP9 encoder task #23**: the right-edge partition (PARTITION_VERT 8x16 leaf, and the corner), so widths rounding
+   up to an odd number of 8-pixel columns encode (2026-11-12). Found by the fidelity test, verified by it.
 6. [ ] **AV1 encoder: sizes that are not multiples of 64** (edge superblocks).

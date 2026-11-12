@@ -77,6 +77,11 @@ public struct Vp9FrameSeqEncodeBatchParams
     /// the BLOCK_16X8 (top-half) encode path instead of BLOCK_16X16.
     /// </summary>
     public int FrameMiRows;
+    /// <summary>
+    /// Display mi cols = (DisplayWidth+7)>>3 (0: mbCols*2, no right edge). When the MB's right mi column lies past it,
+    /// the MB is a right-edge (BLOCK_8X16) or corner (BLOCK_8X8) leaf.
+    /// </summary>
+    public int FrameMiCols;
 }
 
 /// <summary>
@@ -151,7 +156,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<int> dequant,
         int mbCols, int mbRows,
-        int frameMiRows = 0)
+        int frameMiRows = 0, int frameMiCols = 0)
     {
         if (mbCols <= 0) throw new ArgumentOutOfRangeException(nameof(mbCols));
         if (mbRows <= 0) throw new ArgumentOutOfRangeException(nameof(mbRows));
@@ -174,7 +179,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             mbCols, mbRows, 1,
             mbCols * 16 * mbRows * 16, mbCols * 8 * mbRows * 8,
             (int)(mbCount * 256), (int)(mbCount * 64), 4,
-            frameMiRows);
+            frameMiRows, frameMiCols);
     }
 
     /// <summary>
@@ -189,11 +194,12 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         int mbCols, int mbRows, int frameCount,
         int yStride, int uvStride,
         int yCoefStride, int uvCoefStride, int dequantStride,
-        int frameMiRows = 0)
+        int frameMiRows = 0, int frameMiCols = 0)
     {
         if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
-        // Default frameMiRows = mbRows*2 (no boundary).
+        // Default frameMiRows = mbRows*2, frameMiCols = mbCols*2 (no boundary).
         if (frameMiRows == 0) frameMiRows = mbRows * 2;
+        if (frameMiCols == 0) frameMiCols = mbCols * 2;
         int totalDiagonals = mbCols + mbRows - 1;
         var pacer = new LaunchPacer(_accelerator);
         for (int d = 0; d < totalDiagonals; d++)
@@ -214,6 +220,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
                 DiagAndRMin = diagAndRMin,
                 DiagCount = diagCount,
                 FrameMiRows = frameMiRows,
+                FrameMiCols = frameMiCols,
             };
             _batchKernel(frameCount * diagCount,
                 yPlane, uPlane, vPlane,
@@ -238,13 +245,14 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         int mbCols, int mbRows, int frameCount,
         int yStride, int uvStride,
         int yCoefStride, int uvCoefStride, int dequantStride,
-        int frameMiRows = 0)
+        int frameMiRows = 0, int frameMiCols = 0)
     {
         if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
         int peakDiag = mbCols < mbRows ? mbCols : mbRows;
         int totalDiagonals = mbCols + mbRows - 1;
         if (peakDiag > 1024) return false;
         if (frameMiRows == 0) frameMiRows = mbRows * 2;
+        if (frameMiCols == 0) frameMiCols = mbCols * 2;
 
         var p = new Vp9FrameSeqEncodeBatchParams
         {
@@ -258,6 +266,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             DiagAndRMin = 0,
             DiagCount = peakDiag,
             FrameMiRows = frameMiRows,
+            FrameMiCols = frameMiCols,
         };
         // diagonals [dStart, dEnd) per launch (dStart rides in DiagAndRMin).
         var pacer = new LaunchPacer(_accelerator);
@@ -340,7 +349,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             bool active = posInDiag < diagCount && mbRow >= 0 && mbRow < mbRows && mbCol >= 0 && mbCol < mbCols;
             if (active)
             {
-                bool isBoundary = IsBoundaryMb(mbRow, p.FrameMiRows);
+                int shape = BoundaryShape(mbRow, mbCol, p.FrameMiRows, p.FrameMiCols);
                 EncodeMacroblock(
                     mbRow, mbCol, mbCols, yStride, uvStride,
                     fY, fU, fV,
@@ -350,7 +359,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
                     residual, coefsInt, coefsShort,
                     fdctScratch, idctScratch,
                     aboveLuma, leftLuma, aboveChroma, leftChroma,
-                    isBoundary);
+                    shape);
             }
             Group.Barrier();
         }
@@ -361,6 +370,17 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
     /// boundary given display mi rows. SB16 is 2 mi tall; boundary fires
     /// when miRow + 1 &gt;= frameMiRows where miRow = mbRow*2.
     /// </summary>
+    /// <summary>
+    /// The MB's leaf at the display edge: 0 inside, 1 bottom edge (its lower mi row is outside: BLOCK_16X8), 2 right
+    /// edge (its right mi column is outside: BLOCK_8X16), 3 both (BLOCK_8X8).
+    /// </summary>
+    private static int BoundaryShape(int mbRow, int mbCol, int frameMiRows, int frameMiCols)
+    {
+        int bottom = frameMiRows < mbRow * 2 + 2 ? 1 : 0;
+        int right = frameMiCols < mbCol * 2 + 2 ? 2 : 0;
+        return bottom | right;
+    }
+
     private static bool IsBoundaryMb(int mbRow, int frameMiRows)
     {
         // mbRow * 2 = miRow of MB top. SB16's bottom mi at miRow+1.
@@ -412,7 +432,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         var aboveChroma = LocalMemory.Allocate<byte>(8);
         var leftChroma = LocalMemory.Allocate<byte>(8);
 
-        bool isBoundary = IsBoundaryMb(mbRow, p.FrameMiRows);
+        int shape = BoundaryShape(mbRow, mbCol, p.FrameMiRows, p.FrameMiCols);
         EncodeMacroblock(
             mbRow, mbCol, p.MbCols, yStride, uvStride,
             fY, fU, fV,
@@ -422,7 +442,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             residual, coefsInt, coefsShort,
             fdctScratch, idctScratch,
             aboveLuma, leftLuma, aboveChroma, leftChroma,
-            isBoundary);
+            shape);
     }
 
     /// <summary>Encode a single 16x16 macroblock (Y + U + V).</summary>
@@ -444,14 +464,13 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             yCoefs, uCoefs, vCoefs, yDcQ, yAcQ, uvDcQ, uvAcQ,
             residual, coefsInt, coefsShort, fdctScratch, idctScratch,
             aboveLuma, leftLuma, aboveChroma, leftChroma,
-            isBoundary: false);
+            shape: 0);
     }
 
     /// <summary>
-    /// Encode one MB. When <paramref name="isBoundary"/> is true the MB is at
-    /// the bottom-edge SB16 boundary: encode only the top BLOCK_16X8 region
-    /// (rows 0..7 within the MB) using 2 Tx8x8 luma + 2 Tx4x4 chroma transforms,
-    /// matching the walker's PARTITION_HORZ + top-leaf emit.
+    /// Encode one MB. <paramref name="shape"/>: 0 the whole BLOCK_16X16; at the frame's display edge only the part
+    /// inside it, as the walker codes it (see <see cref="BoundaryShape"/>): 1 the top BLOCK_16X8 (bottom edge), 2 the
+    /// left BLOCK_8X16 (right edge), 3 the top-left BLOCK_8X8 (the corner).
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void EncodeMacroblock(
@@ -465,7 +484,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         ArrayView<int> fdctScratch, ArrayView<int> idctScratch,
         ArrayView<byte> aboveLuma, ArrayView<byte> leftLuma,
         ArrayView<byte> aboveChroma, ArrayView<byte> leftChroma,
-        bool isBoundary)
+        int shape)
     {
         long mbIdx = (long)mbRow * mbCols + mbCol;
         long yBase = (long)mbRow * 16 * yStride + mbCol * 16;
@@ -475,7 +494,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         int leftAvail = mbCol > 0 ? 1 : 0;
         int variant = ComputeVariant(topAvail, leftAvail);
 
-        if (!isBoundary)
+        if (shape == 0)
         {
             EncodeLumaBlock16x16(
                 yBase, yStride,
@@ -503,48 +522,44 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         }
         else
         {
-            // Boundary MB: encode top BLOCK_16X8 only.
-            // Y: 2 Tx8x8 over (rows 0..7, cols 0..7) and (rows 0..7, cols 8..15).
-            EncodeBoundaryLuma8x8(yBase + 0, yStride,
-                yPlane, yRecon, yCoefs, mbIdx * 256 + 0,
-                yDcQ, yAcQ, topAvail, leftAvail, variant,
-                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
-                aboveLuma, leftLuma);
-
-            // For the right 8x8: top neighbor still topAvail (same row above);
-            // left neighbor is the LEFT 8x8's right column (always available).
-            int rightLeftAvail = 1;
-            int rightVariant = ComputeVariant(topAvail, rightLeftAvail);
-            EncodeBoundaryLuma8x8(yBase + 8, yStride,
-                yPlane, yRecon, yCoefs, mbIdx * 256 + 64,
-                yDcQ, yAcQ, topAvail, rightLeftAvail, rightVariant,
-                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
-                aboveLuma, leftLuma);
-
-            // Chroma U: 2 Tx4x4 over top 8x4 region.
-            EncodeBoundaryChroma4x4(uvBase + 0, uvStride,
-                uPlane, uRecon, uCoefs, mbIdx * 64 + 0,
-                uvDcQ, uvAcQ, topAvail, leftAvail, variant,
-                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
-                aboveChroma, leftChroma);
-            int rightChromaVariant = ComputeVariant(topAvail, 1);
-            EncodeBoundaryChroma4x4(uvBase + 4, uvStride,
-                uPlane, uRecon, uCoefs, mbIdx * 64 + 16,
-                uvDcQ, uvAcQ, topAvail, 1, rightChromaVariant,
-                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
-                aboveChroma, leftChroma);
-
-            // Chroma V: same shape.
-            EncodeBoundaryChroma4x4(uvBase + 0, uvStride,
-                vPlane, vRecon, vCoefs, mbIdx * 64 + 0,
-                uvDcQ, uvAcQ, topAvail, leftAvail, variant,
-                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
-                aboveChroma, leftChroma);
-            EncodeBoundaryChroma4x4(uvBase + 4, uvStride,
-                vPlane, vRecon, vCoefs, mbIdx * 64 + 16,
-                uvDcQ, uvAcQ, topAvail, 1, rightChromaVariant,
-                residual, coefsInt, coefsShort, fdctScratch, idctScratch,
-                aboveChroma, leftChroma);
+            // Boundary MB, the leaf the walker emits (task #23 adds the right edge and the corner):
+            //   shape 1, bottom edge: PARTITION_HORZ, the top BLOCK_16X8 (two 8x8 side by side);
+            //   shape 2, right edge:  PARTITION_VERT, the left BLOCK_8X16 (two 8x8 stacked);
+            //   shape 3, the corner:  forced SPLIT, the top-left BLOCK_8X8 only.
+            // Luma Tx8x8 per 8x8, chroma Tx4x4 per 4x4, in the decoder's order (luma sub-blocks, then U, then V). The second
+            // sub-block's top (vertical stack) or left (side by side) neighbour is the first one, always available. One
+            // call site per helper and plane (Chrome's D3D compiler inlines every call).
+            int subs = shape == 3 ? 1 : 2;
+            for (int k = 0; k < subs; k++)
+            {
+                int rOff = shape == 2 ? k * 8 : 0, cOff = shape == 1 ? k * 8 : 0;
+                int t = rOff > 0 ? 1 : topAvail, l = cOff > 0 ? 1 : leftAvail;
+                EncodeBoundaryLuma8x8(yBase + (long)rOff * yStride + cOff, yStride,
+                    yPlane, yRecon, yCoefs, mbIdx * 256 + k * 64,
+                    yDcQ, yAcQ, t, l, ComputeVariant(t, l),
+                    residual, coefsInt, coefsShort, fdctScratch, idctScratch,
+                    aboveLuma, leftLuma);
+            }
+            for (int k = 0; k < subs; k++)
+            {
+                int rOff = shape == 2 ? k * 4 : 0, cOff = shape == 1 ? k * 4 : 0;
+                int t = rOff > 0 ? 1 : topAvail, l = cOff > 0 ? 1 : leftAvail;
+                EncodeBoundaryChroma4x4(uvBase + (long)rOff * uvStride + cOff, uvStride,
+                    uPlane, uRecon, uCoefs, mbIdx * 64 + k * 16,
+                    uvDcQ, uvAcQ, t, l, ComputeVariant(t, l),
+                    residual, coefsInt, coefsShort, fdctScratch, idctScratch,
+                    aboveChroma, leftChroma);
+            }
+            for (int k = 0; k < subs; k++)
+            {
+                int rOff = shape == 2 ? k * 4 : 0, cOff = shape == 1 ? k * 4 : 0;
+                int t = rOff > 0 ? 1 : topAvail, l = cOff > 0 ? 1 : leftAvail;
+                EncodeBoundaryChroma4x4(uvBase + (long)rOff * uvStride + cOff, uvStride,
+                    vPlane, vRecon, vCoefs, mbIdx * 64 + k * 16,
+                    uvDcQ, uvAcQ, t, l, ComputeVariant(t, l),
+                    residual, coefsInt, coefsShort, fdctScratch, idctScratch,
+                    aboveChroma, leftChroma);
+            }
         }
     }
 

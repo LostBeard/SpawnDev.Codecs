@@ -511,51 +511,65 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         bool hasRows = (miRow16 + 1) < frameMiRows;
         bool hasCols = (miCol16 + 1) < frameMiCols;
 
-        bool leaf = false;
-        int is16x8 = 0;
+        // The leaf inside the display (shape: 0 BLOCK_16X16, 1 top BLOCK_16X8, 2 left BLOCK_8X16, 3 top-left BLOCK_8X8)
+        // and the partition coded for it, per the VP9 partition syntax at the frame edge:
+        //   rows and cols inside: PARTITION_NONE (the tree);
+        //   cols only (bottom edge): one bit at probs[1], 0 = PARTITION_HORZ;
+        //   rows only (right edge):  one bit at probs[2], 0 = PARTITION_VERT;
+        //   neither (corner): SPLIT implied (no bit), then the top-left 8x8 reads its own partition: NONE.
+        int shape;
         if (hasRows && hasCols)
         {
-            // Standard path: NONE + BLOCK_16X16 leaf.
             EmitPartitionNone(ref state, outBuf, byteConsts,
                 sizeIdx: 1, bsl: 1, miRow: miRow16, miCol: miCol16,
                 abovePartCtx, leftPartCtx);
-            leaf = true;
+            shape = 0;
         }
         else if (hasCols)
         {
-            // Bottom-edge boundary: emit PARTITION_HORZ (1-bit value 0 at probs[1]) and encode the top BLOCK_16X8
-            // leaf only; the bottom sub-block's top-left is at miRow16+1 >= frameMiRows, so the decoder skips it.
             EmitPartitionBoundary1Bit(ref state, outBuf, byteConsts,
                 sizeIdx: 1, bsl: 1, miRow: miRow16, miCol: miCol16,
                 abovePartCtx, leftPartCtx, probIdx: 1, value: 0);
-            leaf = true;
-            is16x8 = 1;
+            shape = 1;
         }
-        // else hasRows-only or corner: not implemented in v1 (1920x1080
-        // doesn't hit these cases). Tracked as task #23 for full 4K + arbitrary
-        // dim support.
-
-        if (leaf)
+        else if (hasRows)
         {
-            EncodeLeaf(
-                ref state, outBuf,
-                yCoefs, uCoefs, vCoefs,
-                byteConsts, ushortConsts,
-                aboveYMode, aboveSkip, aboveTxSize,
-                aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
-                leftYMode, leftSkip, leftTxSize,
-                leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
-                tokenCache,
-                miRow16 >> 1, miCol16 >> 1, miRow16, miCol16, mbCols, is16x8);
+            EmitPartitionBoundary1Bit(ref state, outBuf, byteConsts,
+                sizeIdx: 1, bsl: 1, miRow: miRow16, miCol: miCol16,
+                abovePartCtx, leftPartCtx, probIdx: 2, value: 0);
+            shape = 2;
+        }
+        else
+        {
+            EmitPartitionNone(ref state, outBuf, byteConsts,
+                sizeIdx: 0, bsl: 0, miRow: miRow16, miCol: miCol16,
+                abovePartCtx, leftPartCtx);
+            shape = 3;
         }
 
-        // UpdatePartitionContext: same for 16x16+NONE and 16x16+HORZ in our path.
-        for (int i = 0; i < 2; i++)
+        EncodeLeaf(
+            ref state, outBuf,
+            yCoefs, uCoefs, vCoefs,
+            byteConsts, ushortConsts,
+            aboveYMode, aboveSkip, aboveTxSize,
+            aboveYEntropyCtx, aboveUEntropyCtx, aboveVEntropyCtx,
+            leftYMode, leftSkip, leftTxSize,
+            leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
+            tokenCache,
+            miRow16 >> 1, miCol16 >> 1, miRow16, miCol16, mbCols, shape);
+
+        // Partition contexts (libvpx dec_update_partition_context: partition_context_lookup[subsize], {above, left}, over
+        // the 8x8 width of the block whose partition was coded): NONE 16X16 {12, 12} x2, HORZ 16X8 {12, 14} x2, VERT 8X16
+        // {14, 12} x2; the corner's 16x16 SPLIT writes nothing, its 8x8 NONE writes 8X8 {14, 14} x1.
+        int pa = shape == 2 || shape == 3 ? 14 : 12;
+        int pl = shape == 1 || shape == 3 ? 14 : 12;
+        int span = shape == 3 ? 1 : 2;
+        for (int i = 0; i < span; i++)
         {
             int c = miCol16 + i;
             int r = (miRow16 + i) & 7;
-            if (c < MaxMiColsAligned) abovePartCtx[c] = 12;
-            leftPartCtx[r] = 12;
+            if (c < MaxMiColsAligned) abovePartCtx[c] = (byte)pa;
+            leftPartCtx[r] = (byte)pl;
         }
     }
 
@@ -622,9 +636,10 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
     }
 
     /// <summary>
-    /// One leaf: BLOCK_16X16 (<paramref name="is16x8"/> 0: one Tx16x16 Y + one Tx8x8 U + one Tx8x8 V) or the top-half
-    /// BLOCK_16X8 at the bottom frame edge (1: two Tx8x8 Y + two Tx4x4 U + two Tx4x4 V, per the VP9 spec for BLOCK_16X8
-    /// with TX_MODE=ALLOW_32X32). Skip flag, Y mode and UV mode are the same for both (DC_PRED, skip=0 in v1).
+    /// One leaf (<paramref name="shape"/>): 0 BLOCK_16X16 (one Tx16x16 Y + one Tx8x8 U + one Tx8x8 V); at the display
+    /// edge only the part inside it, per the VP9 spec with TX_MODE=ALLOW_32X32: 1 the top BLOCK_16X8 (two Tx8x8 Y side by
+    /// side + two Tx4x4 U + two Tx4x4 V), 2 the left BLOCK_8X16 (the same, stacked), 3 the top-left BLOCK_8X8 (one Tx8x8
+    /// Y + one Tx4x4 U + one Tx4x4 V). Skip flag, Y mode and UV mode are the same for all (DC_PRED, skip=0 in v1).
     /// The transforms are coded in ONE loop with one block-coder call site: written out per transform (3 + 6 call
     /// sites) the block coder was inlined 9 times, and the walker's WGSL ran Chrome's shader compiler (Tint) out of
     /// memory.
@@ -638,7 +653,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<byte> leftYMode, ArrayView<byte> leftSkip, ArrayView<byte> leftTxSize,
         ArrayView<byte> leftYEntropyCtx, ArrayView<byte> leftUEntropyCtx, ArrayView<byte> leftVEntropyCtx,
         ArrayView<byte> tokenCache,
-        int mbR, int mbC, int miRow, int miCol, int mbCols, int is16x8)
+        int mbR, int mbC, int miRow, int miCol, int mbCols, int shape)
     {
         // ---- Skip flag ----
         // skip_context = above + left (each is 0 or 1).
@@ -668,10 +683,12 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
 
         // ---- Update mode-info contexts ----
         // BLOCK_16X16: b4Wide = b4High = 4, miWide = miHigh = 2, Tx16x16. BLOCK_16X8: b4High = 2, miHigh = 1, Tx8x8.
-        int b4High = is16x8 != 0 ? 2 : 4;
-        int miHigh = is16x8 != 0 ? 1 : 2;
-        byte txSize = (byte)(is16x8 != 0 ? (int)Vp9TxSize.Tx8x8 : (int)Vp9TxSize.Tx16x16);
-        for (int i = 0; i < 4; i++)
+        // 16X16: 4 x 4 cells of 4 px, 2 x 2 mi, Tx16x16; 16X8 / 8X16 / 8X8: the halved side(s), Tx8x8.
+        int b4Wide = shape == 2 || shape == 3 ? 2 : 4;
+        int b4High = shape == 1 || shape == 3 ? 2 : 4;
+        int miWide = b4Wide >> 1, miHigh = b4High >> 1;
+        byte txSize = (byte)(shape != 0 ? (int)Vp9TxSize.Tx8x8 : (int)Vp9TxSize.Tx16x16);
+        for (int i = 0; i < b4Wide; i++)
         {
             int c = b4Col + i;
             if (c < MaxMiColsAligned * 2) aboveYMode[c] = 0; // DcPred
@@ -681,7 +698,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             int r = (leftB4Idx + i) & 15;
             leftYMode[r] = 0; // DcPred
         }
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < miWide; i++)
         {
             int c = miCol + i;
             if (c < MaxMiColsAligned) { aboveSkip[c] = (byte)skipFlag; aboveTxSize[c] = txSize; }
@@ -698,33 +715,36 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         // Tx8x8 are stored at yCoefs[mbIdx*256 + 0..63] and [+64..127]. U / V: 8x8 at (mbR*8, mbC*8): above cell mbC*2,
         // left cell (mbR & 3)*2; the 16x8 leaf's two Tx4x4 are at [mbIdx*64 + 0..15] and [+16..31].
         long mbIdx = (long)mbR * mbCols + mbC;
-        int jobs = is16x8 != 0 ? 6 : 3;
+        // Transforms per plane: 1 (16X16, 8X8) or 2 (16X8 side by side, 8X16 stacked), in the decoder's order.
+        int two = shape == 1 || shape == 2 ? 1 : 0;
+        int jobs = two != 0 ? 6 : 3;
         for (int j = 0; j < jobs; j++)
         {
-            int plane = is16x8 != 0 ? (j >> 1) : j;
-            int half = is16x8 != 0 ? (j & 1) : 0;
+            int plane = two != 0 ? (j >> 1) : j;
+            int half = two != 0 ? (j & 1) : 0;
+            int across = shape == 1 ? half : 0, down = shape == 2 ? half : 0;
             long coefBase;
             int coefCount, aboveCell, leftCell, cellsPerTx, isTx4x4, tx, planeType;
             if (plane == 0)
             {
                 coefBase = mbIdx * 256 + half * 64;
-                coefCount = is16x8 != 0 ? 64 : 256;
-                aboveCell = mbC * 4 + half * 2;
-                leftCell = (mbR & 3) * 4;
-                cellsPerTx = is16x8 != 0 ? 2 : 4;
+                coefCount = shape != 0 ? 64 : 256;
+                aboveCell = mbC * 4 + across * 2;
+                leftCell = (mbR & 3) * 4 + down * 2;
+                cellsPerTx = shape != 0 ? 2 : 4;
                 isTx4x4 = 0;
-                tx = is16x8 != 0 ? (int)Vp9TxSize.Tx8x8 : (int)Vp9TxSize.Tx16x16;
+                tx = shape != 0 ? (int)Vp9TxSize.Tx8x8 : (int)Vp9TxSize.Tx16x16;
                 planeType = (int)Vp9BlockCoefEnums.PlaneType.Y;
             }
             else
             {
                 coefBase = mbIdx * 64 + half * 16;
-                coefCount = is16x8 != 0 ? 16 : 64;
-                aboveCell = mbC * 2 + half;
-                leftCell = (mbR & 3) * 2;
-                cellsPerTx = is16x8 != 0 ? 1 : 2;
-                isTx4x4 = is16x8;
-                tx = is16x8 != 0 ? (int)Vp9TxSize.Tx4x4 : (int)Vp9TxSize.Tx8x8;
+                coefCount = shape != 0 ? 16 : 64;
+                aboveCell = mbC * 2 + across;
+                leftCell = (mbR & 3) * 2 + down;
+                cellsPerTx = shape != 0 ? 1 : 2;
+                isTx4x4 = shape != 0 ? 1 : 0;
+                tx = shape != 0 ? (int)Vp9TxSize.Tx4x4 : (int)Vp9TxSize.Tx8x8;
                 planeType = (int)Vp9BlockCoefEnums.PlaneType.Uv;
             }
             EncodePlaneCoefs(

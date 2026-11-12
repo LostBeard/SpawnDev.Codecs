@@ -3,7 +3,7 @@
 // design: a picture region the walker does not encode correctly (2026-11-12: the right-edge partition, task #23) passed
 // them all. Near-lossless quantizer (q 1): every plane far above any lossy level; moderate q: still high.
 //
-// Also: widths whose 8-aligned value is not a multiple of 16 are rejected (until task #23) rather than encoded wrong.
+// Sizes cover every edge leaf: bottom (16x8: 80x50), right (8x16: 72x64), both plus the corner (8x8: 70x50, 200x9).
 
 using SpawnDev.Codecs.Video.Vp9;
 using SpawnDev.Codecs.Video.Vp9.Decoder;
@@ -23,7 +23,7 @@ public abstract partial class CodecsTestBase
         {
             var failures = new List<string>();
             var report = new List<string>();
-            foreach (var (name, w, h) in new[] { ("smooth", 64, 64), ("noise", 64, 64), ("smooth", 80, 50), ("noise", 144, 72) })
+            foreach (var (name, w, h) in new[] { ("smooth", 64, 64), ("noise", 64, 64), ("smooth", 80, 50), ("noise", 144, 72), ("smooth", 70, 50), ("noise", 70, 50), ("smooth", 72, 64), ("noise", 200, 9) })
             {
                 int cw = (w + 1) / 2, ch = (h + 1) / 2;
                 var y = new byte[w * h]; var u = new byte[cw * ch]; var v = new byte[cw * ch];
@@ -43,8 +43,6 @@ public abstract partial class CodecsTestBase
                     if (Math.Min(py, Math.Min(pu, pv)) < floor) failures.Add($"{name} {w}x{h} q{q}: Y {py:F1} U {pu:F1} V {pv:F1} dB < {floor}");
                 }
             }
-            using (var enc = new Vp9KeyframeEncoderGpu(acc))
-                await ThrowsAsync<NotSupportedException>(() => enc.EncodeKeyFrameAsync(new byte[70 * 50], new byte[35 * 25], new byte[35 * 25], 70, 50, 30));
             Console.WriteLine($"{acc.AcceleratorType}: " + string.Join(" | ", report));
             True(failures.Count == 0, string.Join("\n", failures));
         }
