@@ -6,7 +6,7 @@
 // SpawnDev.Codecs.Demo.Shared/TestData/Mp4Mux (scripts/video/make_mp4_mux_fixtures.py). Host-side container work only.
 //
 // Layout: ftyp (isom, minor 0x200; isom, av01 when a track is AV1, iso2, mp41), free (8), mdat, then moov: mvhd (ms),
-// (the av01 sample entry carries av1C, pasp and btrt)
+// (the av01 sample entry carries av1C, pasp and btrt; vp09 carries vpcC (level from the VP9 level table) and btrt)
 // one trak per track (tkhd, edts/elst, mdia: mdhd, hdlr, minf: vmhd / smhd, dinf/dref, stbl: stsd, stts, stss when not
 // every sample is a sync sample, stsc, stsz, stco (co64 past 4 GiB), and for Opus sgpd + sbgp 'roll'), udta/meta.
 // Packets go into mdat in decode-time order across tracks (ties: the lower track); each run of one track's packets is a
@@ -34,6 +34,36 @@ public sealed record Mp4Av1Track
     public (int H, int V) PixelAspect { get; init; } = (1, 1);
 }
 
+/// <summary>
+/// A VP9 video track for <see cref="Mp4Writer"/> (vp09 sample entry with a vpcC record, VP Codec ISO media file
+/// format binding). Defaults: profile 0, 8-bit, 4:2:0 (chroma subsampling code 1), limited range, colour unspecified.
+/// </summary>
+public sealed record Mp4Vp9Track
+{
+    /// <summary>Picture width.</summary>
+    public required int Width { get; init; }
+    /// <summary>Picture height.</summary>
+    public required int Height { get; init; }
+    /// <summary>Media timescale (ticks per second); <see cref="Mp4Writer.VideoTimescale"/> gives ffmpeg's choice.</summary>
+    public required int Timescale { get; init; }
+    /// <summary>VP9 profile (0..3).</summary>
+    public int Profile { get; init; }
+    /// <summary>Level times 10 (10 = 1.0, 21 = 2.1); null: from the picture size and frame rate, as ffmpeg does.</summary>
+    public int? Level { get; init; }
+    /// <summary>Bits per sample.</summary>
+    public int BitDepth { get; init; } = 8;
+    /// <summary>vpcC chroma subsampling code (0: 4:2:0 vertical, 1: 4:2:0 colocated, 2: 4:2:2, 3: 4:4:4).</summary>
+    public int ChromaSubsampling { get; init; } = 1;
+    /// <summary>Full range video.</summary>
+    public bool FullRange { get; init; }
+    /// <summary>ISO/IEC 23091-2 colour primaries (2 = unspecified).</summary>
+    public int ColourPrimaries { get; init; } = 2;
+    /// <summary>ISO/IEC 23091-2 transfer characteristics (2 = unspecified).</summary>
+    public int TransferCharacteristics { get; init; } = 2;
+    /// <summary>ISO/IEC 23091-2 matrix coefficients (2 = unspecified).</summary>
+    public int MatrixCoefficients { get; init; } = 2;
+}
+
 /// <summary>An Opus audio track for <see cref="Mp4Writer"/> (timescale 48000).</summary>
 public sealed record Mp4OpusTrack
 {
@@ -47,7 +77,11 @@ public sealed class Mp4Writer : IDisposable
     private sealed class Track
     {
         public Mp4Av1Track? Video;
+        public Mp4Vp9Track? Vp9;
         public Mp4OpusTrack? Audio;
+        public bool IsVideo => Video != null || Vp9 != null;
+        public int Width => Video?.Width ?? Vp9!.Width;
+        public int Height => Video?.Height ?? Vp9!.Height;
         public int Timescale;
         public readonly Queue<(byte[] Data, long Dts, long Duration, bool Key)> Pending = new();
         public readonly List<int> Sizes = new();
@@ -99,6 +133,39 @@ public sealed class Mp4Writer : IDisposable
         _tracks.Add(new Track { Video = track, Timescale = track.Timescale });
         return _tracks.Count;
     }
+
+    /// <summary>Add a VP9 track; returns its track number (1-based, file order).</summary>
+    public int AddVideoTrack(Mp4Vp9Track track)
+    {
+        ArgumentNullException.ThrowIfNull(track);
+        if (_started) throw new InvalidOperationException("Add every track before the first frame.");
+        if (track.Width <= 0 || track.Height <= 0 || track.Width > 65535 || track.Height > 65535) throw new ArgumentOutOfRangeException(nameof(track));
+        if (track.Timescale <= 0) throw new ArgumentOutOfRangeException(nameof(track), "Timescale must be positive.");
+        _tracks.Add(new Track { Vp9 = track, Timescale = track.Timescale });
+        return _tracks.Count;
+    }
+
+    /// <summary>
+    /// The VP9 level (times 10) of a stream: the lowest level of the public VP9 level table whose maximum picture size
+    /// and luma sample rate hold <paramref name="width"/> x <paramref name="height"/> at <paramref name="framesPerSecond"/>
+    /// (ffmpeg's vpcC level on the fixtures: 64x48@24 10, 360p30 21, 720p30 31, 1080p30 40).
+    /// </summary>
+    public static int Vp9Level(int width, int height, double framesPerSecond)
+    {
+        long size = (long)width * height;
+        double rate = size * framesPerSecond;
+        foreach (var (level, maxSize, maxRate) in Vp9Levels)
+            if (size <= maxSize && rate <= maxRate) return level;
+        return 62;
+    }
+
+    private static readonly (int Level, long MaxSize, double MaxRate)[] Vp9Levels =
+    {
+        (10, 36864, 829440), (11, 73728, 2764800), (20, 122880, 4608000), (21, 245760, 9216000), (30, 552960, 20736000),
+        (31, 983040, 36864000), (40, 2228224, 83558400), (41, 2228224, 160432128), (50, 8912896, 311951360),
+        (51, 8912896, 588251136), (52, 8912896, 1176502272), (60, 35651584, 1176502272), (61, 35651584, 2353004544),
+        (62, 35651584, 4706009088),
+    };
 
     /// <summary>Add an Opus track; returns its track number (1-based, file order).</summary>
     public int AddAudioTrack(Mp4OpusTrack track)
@@ -274,7 +341,7 @@ public sealed class Mp4Writer : IDisposable
     private void WriteTrak(Stream m, int index, long durationMs)
     {
         var t = _tracks[index];
-        bool video = t.Video != null;
+        bool video = t.IsVideo;
         long media = t.Durations.Sum();
         long mediaTime = Math.Max(0, -t.FirstDts);
         Box(m, "trak", k =>
@@ -284,7 +351,7 @@ public sealed class Mp4Writer : IDisposable
                 U32(b, 0); U32(b, 0); U32(b, (uint)(index + 1)); U32(b, 0); U32(b, (uint)durationMs);
                 Zero(b, 8); U16(b, 0); U16(b, video ? (ushort)0 : (ushort)1); U16(b, video ? (ushort)0 : (ushort)0x0100); U16(b, 0);
                 Matrix(b);
-                U32(b, video ? (uint)t.Video!.Width << 16 : 0); U32(b, video ? (uint)t.Video!.Height << 16 : 0);
+                U32(b, video ? (uint)t.Width << 16 : 0); U32(b, video ? (uint)t.Height << 16 : 0);
             });
             Box(k, "edts", e => Full(e, "elst", 0, 0, b =>
             {
@@ -316,7 +383,27 @@ public sealed class Mp4Writer : IDisposable
         Full(st, "stsd", 0, 0, b =>
         {
             U32(b, 1);
-            if (t.Video is { } v)
+            if (t.Vp9 is { } p)
+            {
+                double fps = media == 0 ? 0 : (double)t.Sizes.Count * t.Timescale / media;
+                int level = p.Level ?? Vp9Level(p.Width, p.Height, fps);
+                Box(b, "vp09", e =>
+                {
+                    Zero(e, 6); U16(e, 1); Zero(e, 16);
+                    U16(e, (ushort)p.Width); U16(e, (ushort)p.Height);
+                    U32(e, 0x00480000); U32(e, 0x00480000); U32(e, 0); U16(e, 1);
+                    Zero(e, 32); U16(e, 0x0018); U16(e, 0xFFFF);
+                    Full(e, "vpcC", 1, 0, c =>
+                    {
+                        c.WriteByte((byte)p.Profile); c.WriteByte((byte)level);
+                        c.WriteByte((byte)((p.BitDepth << 4) | (p.ChromaSubsampling << 1) | (p.FullRange ? 1 : 0)));
+                        c.WriteByte((byte)p.ColourPrimaries); c.WriteByte((byte)p.TransferCharacteristics); c.WriteByte((byte)p.MatrixCoefficients);
+                        U16(c, 0);
+                    });
+                    Btrt(e, bitrate);
+                });
+            }
+            else if (t.Video is { } v)
             {
                 Box(b, "av01", e =>
                 {
@@ -355,7 +442,7 @@ public sealed class Mp4Writer : IDisposable
         foreach (long d in t.Durations)
             if (runs.Count > 0 && runs[^1].Delta == d) runs[^1] = (runs[^1].Count + 1, d); else runs.Add((1, d));
         Full(st, "stts", 0, 0, b => { U32(b, (uint)runs.Count); foreach (var r in runs) { U32(b, (uint)r.Count); U32(b, (uint)r.Delta); } });
-        if (t.Video != null && !t.AllSync)
+        if (t.IsVideo && !t.AllSync)
             Full(st, "stss", 0, 0, b => { U32(b, (uint)t.Sync.Count); foreach (int n in t.Sync) U32(b, (uint)n); });
         // stsc: a new entry when the samples per chunk change
         var stsc = new List<(int First, int Samples)>();

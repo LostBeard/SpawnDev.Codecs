@@ -29,7 +29,9 @@ public abstract partial class CodecsTestBase
             {
                 var extradata = Convert.FromHexString(t.GetProperty("extradata").GetString()!);
                 int timescale = int.Parse(t.GetProperty("timebase").GetString()!.Split('/')[1]);
-                if (t.GetProperty("type").GetString() == "video")
+                if (t.GetProperty("type").GetString() == "video" && t.GetProperty("codec").GetString() == "vp9")
+                    w.AddVideoTrack(new Mp4Vp9Track { Width = t.GetProperty("width").GetInt32(), Height = t.GetProperty("height").GetInt32(), Timescale = timescale });
+                else if (t.GetProperty("type").GetString() == "video")
                     w.AddVideoTrack(new Mp4Av1Track { Av1C = extradata, Width = t.GetProperty("width").GetInt32(), Height = t.GetProperty("height").GetInt32(), Timescale = timescale });
                 else
                     w.AddAudioTrack(new Mp4OpusTrack { OpusHead = extradata });
@@ -100,7 +102,7 @@ public abstract partial class CodecsTestBase
             using var json = JsonDocument.Parse(ReadEmbedded(Mp4MuxPrefix + name + ".json"));
             foreach (var t in json.RootElement.GetProperty("tracks").EnumerateArray())
             {
-                if (t.GetProperty("type").GetString() != "video") continue;
+                if (t.GetProperty("type").GetString() != "video" || t.GetProperty("codec").GetString() != "av1") continue;
                 int index = t.GetProperty("index").GetInt32();
                 var packets = json.RootElement.GetProperty("packets").EnumerateArray().Where(p => p.GetProperty("track").GetInt32() == index).ToList();
                 byte[] Bytes(JsonElement p) { var d = p.GetProperty("data"); return file.AsSpan(d[0].GetInt32(), d[1].GetInt32()).ToArray(); }

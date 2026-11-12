@@ -7,4 +7,10 @@ av1_fps24
 av1_fps25
 av1_fps2997
 av1_fps16
+vp9_only
+vp9_opus
+vp9_odd_size
+vp9_level_360p30
+vp9_level_720p30
+vp9_level_1080p30
 av1_opus_12s

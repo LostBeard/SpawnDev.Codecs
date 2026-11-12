@@ -72,6 +72,19 @@ cases.append(mux('opus_441_mono', [a441]))
 for rate, tag in (('24', '24'), ('25', '25'), ('30000/1001', '2997'), ('16', '16')):
     v = video('v' + tag, 32, 32, rate, 1, 12)
     cases.append(mux('av1_fps' + tag, [v]))
+def vp9(name, w, h, rate, seconds, gop):
+    p = os.path.join(tmp, name + '.ivf')
+    ff('-f', 'lavfi', '-i', f'testsrc2=size={w}x{h}:rate={rate}:duration={seconds}', '-c:v', 'libvpx-vp9', '-deadline', 'realtime',
+       '-cpu-used', '8', '-g', str(gop), '-crf', '40', '-b:v', '0', '-pix_fmt', 'yuv420p', p)
+    return p
+
+p9 = vp9('p9', 64, 48, 24, 1, 12)
+cases.append(mux('vp9_only', [p9]))
+cases.append(mux('vp9_opus', [p9, a48]))
+p9odd = vp9('p9odd', 70, 50, 25, 1, 25)
+cases.append(mux('vp9_odd_size', [p9odd]))
+for w, h in ((640, 360), (1280, 720), (1920, 1080)):   # the vpcC level ffmpeg derives from size and rate
+    cases.append(mux(f'vp9_level_{h}p30', [vp9(f'p9l{h}', w, h, 30, 0.2, 6)]))
 vlong = video('vlong', 32, 32, 24, 12, 48)
 along = audio('along', 48000, 2, 12)
 cases.append(mux('av1_opus_12s', [vlong, along]))
