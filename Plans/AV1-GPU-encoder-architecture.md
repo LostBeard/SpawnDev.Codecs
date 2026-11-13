@@ -232,9 +232,14 @@ contexts, no prediction across its edge), so tiles are the unit of parallelism:
   - Wasm is SLOWER on the default grid: 104 tiles 114 -> 96 -> 123 to 127 ms (one tile 834 -> 302 -> 180 to 189;
     batch of 8: 108 -> 139 per frame). Per pass, 104 tiles: transform 31, symbols 87, range coder 52 ms. Against
     the desktop CPU accelerator on the same machine (transform about 10, symbols 7, range coder 1.5) the
-    transform is 3x slower in Wasm, the symbol pass 13x and the range coder pass 35x: the two new passes hit
-    something the Wasm backend does badly. Both carry their state through nested calls by reference (`ref int n`,
-    `ref re`); the transform pass does not. Open, next: pass that state by value and measure.
+    transform is 3x slower in Wasm, the symbol pass 13x and the range coder pass 35x: the more branches per unit
+    of work, the worse Wasm does. Cause, read in the backend the same afternoon (not yet confirmed by an isolated
+    measurement): SpawnDev.ILGPU's Wasm backend emits a kernel with more than one basic block as a state machine
+    (`loop` + `br_table` over all blocks, `WasmKernelFunctionGenerator.GenerateStateMachineCode`), so EVERY branch
+    between basic blocks is a trip through the table. The transform is long straight-line code; the range coder
+    is a few tiny blocks per symbol. (My first guess, state passed by reference, is wrong: after inlining and SSA
+    construction the IR is the same for every backend.) The fix belongs in SpawnDev.ILGPU: structured control
+    flow for kernels without barriers. Open.
   - Batches. A batch of 16 on CUDA is 11% slower per frame than this morning (0.92 -> 1.02), batches of 2 / 4 / 8
     are 2.38 / 1.58 / 1.24 ms per frame (stage 1: 3.21 / 1.85 / 1.35), 32: 0.88. Per pass for 16 frames:
     transform 6.7 ms, symbols 3.5, range coder 2.9, where the single pass took about 11.7 for the same work:
