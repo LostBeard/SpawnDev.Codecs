@@ -34,7 +34,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <PackageReference Include="SpawnDev.ILGPU" Version="5.4.29" />
+	  <PackageReference Include="SpawnDev.ILGPU" Version="5.4.30" />
 	  <PackageReference Include="SpawnDev.EBML" Version="3.0.1" />
 	  <!-- ZERO external dependencies past this line. The CPU reference Opus
 	       encoder + decoder (which use Concentus) live in

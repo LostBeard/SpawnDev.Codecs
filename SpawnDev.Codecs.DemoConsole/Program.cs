@@ -29,6 +29,11 @@ if (args.Length > 0 && args[0] == "zlib-encode")
 if (args.Length > 0 && args[0] == "bcn-encode")
     return await BcnEncode.Run(args);
 
+// `vp9-encode-bench <clip.webm> [--backend cpu|velocity|cuda|opencl] [--frames N] [--q 20,40,60] [--intervals 1,128]
+// [--out dir]`: VideoFileEncoderGpu (VP9) on a real clip: video bytes, PSNR and speed per quantizer and key frame interval.
+if (args.Length > 0 && args[0] == "vp9-encode-bench")
+    return await Vp9EncodeBench.Run(args);
+
 // `dump-ptx|dump-glsl <Namespace.Type> <MethodName> <out>`: one kernel's PTX (for ptxas -v) or WebGL GLSL (+ its
 // transform-feedback output count).
 if (args.Length > 0 && (args[0] == "dump-ptx" || args[0] == "dump-glsl"))

@@ -434,6 +434,16 @@ public sealed class Vp9EncoderGpu : IDisposable
         return await dst.View.CopyToHostAsync();
     }
 
+    /// <summary>
+    /// Tests / diagnostics: the MV of every 16x16 position of the last inter frame (the layout of
+    /// <see cref="DebugMvs"/>): what the motion search chose. A few ints per frame, tests only.
+    /// </summary>
+    internal async Task<int[]> ReadMvsAsync()
+    {
+        if (_mvs == null) throw new InvalidOperationException("No frame has been encoded.");
+        return await _mvs.View.CopyToHostAsync();
+    }
+
     /// <summary>Release every resource the encoder owns.</summary>
     public void Dispose()
     {

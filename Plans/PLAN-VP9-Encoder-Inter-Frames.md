@@ -42,16 +42,29 @@ segmentation off, loop filter level 0, one tile. Fixed quantizer (same q index a
    - [x] Code + test `Vp9EncoderGpu_InterFrames_DecoderMatchesEncoderReconstruction` (4affcf4): CPU accelerator,
      red-checked (7 mutations red).
    - [x] External decoder: ffmpeg 8.1 (black box) decodes the clips to the encoder's reconstruction (d9c74f4).
-   - [ ] CUDA, Velocity, WebGPU lanes (WGSL size of the entropy step: screen first, watchdog on the first run).
+   - [ ] CUDA, Velocity, WebGPU lanes (watchdog on the first WebGPU run, one test alone).
+     - [x] Offline WGSL screen + compile-only probe by Data (2026-11-12, ILGPU 5.4.30, RTX 4070 D3D12): all kernels
+       valid; the entropy step is 19,464 inlined lines (below three kernels the WebGPU lane already runs), compiles
+       in 3.1 s, GPU process peak 342 MB. Nothing was dispatched: run-time behaviour is still unproven there.
    - [ ] Browser's own VP9 decoder in the browser lanes.
-   - [ ] `VideoFileEncoderGpu` uses it (key frame interval option; sync samples only on key frames in MP4 / WebM);
-     TypedArray overload.
+   - [x] `VideoFileEncoderGpu` uses it: `VideoFileEncodeOptions.KeyFrameInterval` (default 128); only key frames
+     are sync samples (MP4 stss, WebM keyframe flag == the bitstream's frame type); each inter frame within 1 dB of
+     the same frame coded as a key frame. CPU accelerator, red-checked (5 mutations).
+   - [ ] `VideoFileEncoderGpu`: frames already on the accelerator (ArrayView) and TypedArray overloads.
 2. [ ] **Motion search.** Pyramid full-pel search (+-38 pixels), half / quarter-pel refinement and a merge with the
    neighbours' MVs, scored with the decoder's own predictor (`Vp9MotionSearchKernels`, d9c74f4).
    - [x] Code + tests on the CPU accelerator: a moving picture's inter frames are 41-42% of zero motion's at q 40.
-   - [ ] Red-check the new guards; CUDA, Velocity, WebGPU lanes.
+   - [x] The search finds the motion (`Vp9EncoderGpu_MotionSearch_FindsTheMotion`): a picture moving by a known
+     amount, every leaf inside the picture has exactly that MV: (3, 2), (-29, 22), (26, -30), (2.5, -1.5),
+     (-0.75, 4.25) pixels per frame. Red-checked on the CPU accelerator, 8 mutations, each red in the case aimed
+     at it: full-pel result dropped (also the shrink assertion), 1/4 size level off, full size level off, half-pel
+     off, quarter-pel off, merge candidates off, NEWMV charge off. Not red-checked: the 1/2 size level (no case
+     isolates it).
+   - [ ] CUDA, Velocity, WebGPU lanes.
    - [ ] Measure on real clips (ComfyUI / Wan): file size and PSNR vs key frames only, and the search's cost
-     settings (`Vp9MArg.LengthCost`, `NewMvCost`).
+     settings (`Vp9MArg.LengthCost`, `NewMvCost`). Tool: `DemoConsole vp9-encode-bench <clip.webm>`.
+     Known: on a still picture with fresh noise in every frame (+-3) 3 of 120 leaves take a quarter-pel MV and the
+     inter frames are 0.4% larger than zero motion's (2.5% without the NEWMV charge): the charge is a little low.
    - [ ] Inter quantizer rounding: with round-to-nearest an inter frame re-codes the previous frame's quantization
      noise (a perfectly predicted moving picture was only 2.4x smaller). Measure a dead zone for inter blocks as a
      rate-distortion comparison (PSNR at equal bytes), then decide.
@@ -67,6 +80,10 @@ segmentation off, loop filter level 0, one tile. Fixed quantizer (same q index a
   Every decoder reads the same values because every later symbol of that header is a zero (the coded value sits at
   the bottom of the range), so files are valid; the inter header writes the exact sequence. Fix both writers
   together, with the byte comparison tests, when the key frame path is next touched.
+- `ForwardKernel` on WebGPU: 59% of its inlined lines are emulated 64-bit operations (144 `i64_mul_i32` in the
+  16x16 butterflies; Data's screen, 2026-11-12). libvpx's 8-bit build does this transform in 32 bits
+  (`tran_high_t` = int32 without high bit depth), so 32-bit math should be exact here: change it under the byte
+  comparison tests of the key frame encoder (same helpers).
 - Source planes are zero padded to the 64 grid: at pictures that are not a multiple of 8 the padded strip inside
   the last 8x8 costs bits on every frame. Repeat the edge instead (changes key frame bytes: CPU reference too).
 

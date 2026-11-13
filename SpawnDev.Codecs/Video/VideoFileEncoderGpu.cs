@@ -2,11 +2,13 @@
 //
 // One call from RGB frames (ComfyUI's IMAGE layout: float32 H x W x 3 per frame, values in [0, 1]) + frame rate +
 // optional audio to an MP4 or WebM file. Per frame on the accelerator: float RGB -> RGBA8 (ComfyUI's save: x * 255
-// clamped and truncated), RGBA8 -> YUV 4:2:0 (WebPRgbaToYuvGpu, BT.601 limited range), then the keyframe encoder (VP9: any
+// clamped and truncated), RGBA8 -> YUV 4:2:0 (WebPRgbaToYuvGpu, BT.601 limited range), then the encoder (VP9: any
 // size; AV1: multiples of 64); the encoded packet is the one readback per frame. Audio: Opus packets (OggOpusEncoder's
 // encode; 8, 12, 16, 24 or 48 kHz input). Muxing: Mp4Writer or WebMWriter (host-side framing).
 //
-// Every frame is a key frame (the encoders are keyframe-only), so files are larger than inter-coded ones.
+// VP9 (Vp9EncoderGpu): a key frame every VideoFileEncodeOptions.KeyFrameInterval frames, the frames between predicted
+// from the frame before (motion search); the containers mark only the key frames as sync samples. AV1: every frame
+// is a key frame (Av1KeyframeEncoderGpu), so its files are larger than inter-coded ones.
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -43,11 +45,17 @@ public sealed record VideoFileEncodeOptions
     public int? QIndex { get; init; }
     /// <summary>Opus bitrate in bits per second. Null: 64000 mono, 96000 stereo.</summary>
     public int? AudioBitrate { get; init; }
+    /// <summary>
+    /// VP9: a key frame at least every this many frames; the frames between are predicted from the frame before them
+    /// (much smaller files for moving pictures that change little from frame to frame). Null: 128. 1: every frame a
+    /// key frame. AV1 writes key frames only so far.
+    /// </summary>
+    public int? KeyFrameInterval { get; init; }
 
     /// <summary>
     /// The base quantizer index for a libvpx / libaom style quantizer (crf / cq-level, 0..63): their quantizer_to_qindex
-    /// table (q * 4 for 0..61, 62 -> 249, 63 -> 255), at least 1 (lossless is not implemented). A fixed quantizer on
-    /// key frames: the same crf gives a larger file than a rate-controlled inter-coded encode.
+    /// table (q * 4 for 0..61, 62 -> 249, 63 -> 255), at least 1 (lossless is not implemented). A fixed quantizer for
+    /// every frame (no rate control): the same crf does not give the file size libvpx / libaom give.
     /// </summary>
     public static int QIndexFromCrf(int crf)
     {
@@ -62,7 +70,7 @@ public sealed class VideoFileEncoderGpu : IDisposable
 {
     private readonly Accelerator _acc;
     private readonly WebPRgbaToYuvGpu _toYuv;
-    private Vp9KeyframeEncoderGpu? _vp9;
+    private Vp9EncoderGpu? _vp9;
     private Av1KeyframeEncoderGpu? _av1;
     private Action<Index1D, ArrayView<float>, ArrayView<byte>>? _toRgba;
 
@@ -93,9 +101,11 @@ public sealed class VideoFileEncoderGpu : IDisposable
         if (av1 && (width % 64 != 0 || height % 64 != 0))
             throw new NotSupportedException($"AV1 encodes sizes that are multiples of 64 so far ({width}x{height}); use VP9 for other sizes.");
         int q = options.QIndex ?? (av1 ? 32 : 30);
+        int keyInterval = options.KeyFrameInterval ?? 128;
+        if (keyInterval < 1) throw new ArgumentOutOfRangeException(nameof(options), "KeyFrameInterval must be at least 1.");
 
-        // video packets (every frame a key frame)
-        var packets = await EncodeVideoAsync(frames, width, height, av1, q);
+        // video packets (AV1: every frame a key frame; VP9: key frames keyInterval apart, inter frames between)
+        var packets = await EncodeVideoAsync(frames, width, height, av1, q, keyInterval);
         // audio packets
         OpusPacketStream? opus = null;
         if (audio != null && audio.Samples.Length > 0)
@@ -108,13 +118,21 @@ public sealed class VideoFileEncoderGpu : IDisposable
         return ms.ToArray();
     }
 
-    private async Task<List<byte[]>> EncodeVideoAsync(IReadOnlyList<float[]> frames, int width, int height, bool av1, int q)
+    private async Task<List<(byte[] Data, bool Key)>> EncodeVideoAsync(IReadOnlyList<float[]> frames, int width, int height, bool av1, int q,
+        int keyInterval)
     {
         _toRgba ??= await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<byte>>(ToRgbaKernel);
         await _toYuv.EnsureKernelsAsync();
         int pixels = width * height;
         long chroma = WebPRgbaToYuvGpu.ChromaPlaneSize(width, height);
-        int max = av1 ? Av1KeyframeEncoderGpu.GetMaxEncodedSize(width, height) : Vp9KeyframeEncoderGpu.GetMaxEncodedSize(width, height);
+        int max = av1 ? Av1KeyframeEncoderGpu.GetMaxEncodedSize(width, height) : Vp9EncoderGpu.GetMaxEncodedSize(width, height);
+        if (!av1)
+        {
+            // one file = one sequence: it starts with a key frame
+            _vp9 ??= new Vp9EncoderGpu(_acc);
+            _vp9.Reset();
+            _vp9.KeyFrameInterval = keyInterval;
+        }
         // separate buffers: WebGPU rejects two read_write bindings of one buffer that share a 4-byte word
         using var rgbF = _acc.Allocate1D<float>((long)pixels * 3);
         using var rgba = _acc.Allocate1D<byte>((long)pixels * 4);
@@ -123,17 +141,23 @@ public sealed class VideoFileEncoderGpu : IDisposable
         using var v = _acc.Allocate1D<byte>(chroma);
         using var alpha = _acc.Allocate1D<byte>(pixels);
         using var output = _acc.Allocate1D<byte>(max);
-        var packets = new List<byte[]>(frames.Count);
+        var packets = new List<(byte[] Data, bool Key)>(frames.Count);
         foreach (var frame in frames)
         {
             rgbF.View.CopyFromCPU(frame);
             _toRgba(pixels, rgbF.View, rgba.View);
             _toYuv.Convert(rgba.View, width, height, y.View, u.View, v.View, alpha.View);
             int n;
+            bool key = true;
             if (av1) n = await (_av1 ??= new Av1KeyframeEncoderGpu(_acc)).EncodeKeyFrameAsync(y.View, u.View, v.View, width, height, output.View, q);
-            else n = await (_vp9 ??= new Vp9KeyframeEncoderGpu(_acc)).EncodeKeyFrameAsync(y.View, u.View, v.View, width, height, output.View, q);
+            else
+            {
+                var encoded = await _vp9!.EncodeFrameAsync(y.View, u.View, v.View, width, height, output.View, q);
+                n = encoded.Length;
+                key = encoded.IsKeyFrame;
+            }
             var bytes = await output.View.SubView(0, n).CopyToHostAsync();
-            packets.Add(av1 ? Av1Isobmff.ToSample(bytes) : bytes);
+            packets.Add((av1 ? Av1Isobmff.ToSample(bytes) : bytes, key));
         }
         return packets;
     }
@@ -154,32 +178,32 @@ public sealed class VideoFileEncoderGpu : IDisposable
     /// <summary>Round half away from zero (ffmpeg's default rescale rounding).</summary>
     private static long RoundDiv(long num, long den) => num >= 0 ? (num + den / 2) / den : -((-num + den / 2) / den);
 
-    private static void WriteMp4(Stream s, List<byte[]> packets, int width, int height, int fpsNum, int fpsDen, bool av1, OpusPacketStream? opus)
+    private static void WriteMp4(Stream s, List<(byte[] Data, bool Key)> packets, int width, int height, int fpsNum, int fpsDen, bool av1, OpusPacketStream? opus)
     {
         using var w = new Mp4Writer(s, leaveOpen: true);
         int ts = Mp4Writer.VideoTimescale(fpsNum, fpsDen);
         int video = av1
-            ? w.AddVideoTrack(new Mp4Av1Track { Av1C = Av1Isobmff.BuildAv1C(packets[0]), Width = width, Height = height, Timescale = ts })
+            ? w.AddVideoTrack(new Mp4Av1Track { Av1C = Av1Isobmff.BuildAv1C(packets[0].Data), Width = width, Height = height, Timescale = ts })
             : w.AddVideoTrack(new Mp4Vp9Track { Width = width, Height = height, Timescale = ts });
         int audio = opus != null ? w.AddAudioTrack(new Mp4OpusTrack { OpusHead = opus.OpusHead }) : 0;
         for (int k = 0; k < packets.Count; k++)
         {
             long dts = (long)k * ts * fpsDen / fpsNum, next = (long)(k + 1) * ts * fpsDen / fpsNum;
-            w.WriteFrame(video, packets[k], dts, next - dts, true);
+            w.WriteFrame(video, packets[k].Data, dts, next - dts, packets[k].Key);
         }
         if (opus != null)
             foreach (var p in opus.Packets) w.WriteFrame(audio, p.Data, p.Pts, p.Duration, true);
         w.Finish();
     }
 
-    private static void WriteWebM(Stream s, List<byte[]> packets, int width, int height, int fpsNum, int fpsDen, bool av1, OpusPacketStream? opus,
+    private static void WriteWebM(Stream s, List<(byte[] Data, bool Key)> packets, int width, int height, int fpsNum, int fpsDen, bool av1, OpusPacketStream? opus,
         string docType)
     {
         using var w = new WebMWriter(s, new WebMWriterOptions { DocType = docType }, leaveOpen: true);
         long frameNs = 1_000_000_000L * fpsDen / fpsNum;
         int video = w.AddVideoTrack(new WebMVideoTrack
         {
-            CodecId = av1 ? "V_AV1" : "V_VP9", CodecPrivate = av1 ? Av1Isobmff.BuildAv1C(packets[0]) : null,
+            CodecId = av1 ? "V_AV1" : "V_VP9", CodecPrivate = av1 ? Av1Isobmff.BuildAv1C(packets[0].Data) : null,
             Width = width, Height = height, DefaultDurationNs = frameNs,
         });
         int audio = opus != null ? w.AddAudioTrack(new WebMAudioTrack
@@ -188,7 +212,7 @@ public sealed class VideoFileEncoderGpu : IDisposable
         }) : 0;
         long frameMs = RoundDiv(1000L * fpsDen, fpsNum);
         for (int k = 0; k < packets.Count; k++)
-            w.WriteFrame(video, packets[k], RoundDiv(1000L * k * fpsDen, fpsNum), true, frameMs);
+            w.WriteFrame(video, packets[k].Data, RoundDiv(1000L * k * fpsDen, fpsNum), packets[k].Key, frameMs);
         if (opus != null)
             foreach (var p in opus.Packets)
             {

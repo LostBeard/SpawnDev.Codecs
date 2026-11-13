@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### VP9 inter frames in the encoder (2026-11-12; CPU accelerator verified, GPU lanes pending)
+- `Video.Vp9.Vp9EncoderGpu`: a key frame, then frames predicted from the frame before (`KeyFrameInterval`, default
+  128). The encoder writes the decoder's own layouts and runs the decoder's prediction and residual kernels on them,
+  so its reference is what a decoder shows: every frame of the test clips decodes (Vp9DecoderGpu and ffmpeg 8.1) to
+  the encoder's reconstruction byte for byte, at every edge leaf shape (80x50, 72x64, 70x50, 200x9).
+- Motion search (`MotionSearch`, default on): a three-level pyramid (+-38 pixels), half and quarter-pel refinement
+  scored on the decoder's real prediction, and a merge with the neighbours' MVs. A picture moving by (3, 2),
+  (-29, 22), (26, -30), (2.5, -1.5) or (-0.75, 4.25) pixels per frame gets exactly that MV on every leaf inside the
+  picture; a moving textured picture's inter frames are 41% of zero motion's bytes at q 40.
+- `VideoFileEncoderGpu` writes VP9 with inter frames: `VideoFileEncodeOptions.KeyFrameInterval` (null = 128, 1 = key
+  frames only as before). Only key frames are sync samples (MP4 stss, WebM keyframe flag). AV1 stays key frames only.
+- `DemoConsole vp9-encode-bench <clip.webm>`: bytes, PSNR and speed per quantizer and key frame interval on a real clip.
+- SpawnDev.ILGPU 5.4.29 -> 5.4.30.
+
 ### VP9 keyframe encoder: any picture size (task #23, 2026-11-12)
 - The walker now codes the right-edge leaf (PARTITION_VERT, the left BLOCK_8X16: two Tx8x8 luma stacked + Tx4x4
   chroma) and the corner (SPLIT implied, the top-left BLOCK_8X8 with its own PARTITION_NONE), mirroring the bottom-edge

@@ -2,9 +2,12 @@
 //
 // Round trips (the muxers themselves are byte-identical with ffmpeg in their own tests):
 //  - VP9 WebM at an unaligned size (80x50) with stereo audio, read back by WebMVideoLoaderGpu: 6 frames of 80x50, exactly 24
-//    fps, every frame's PSNR against the input above a floor (keyframes at q 30), and exactly the input's audio sample
-//    count (the Opus pre-skip and end trimming round-trip).
+//    fps, every frame's PSNR against the input above a floor (a key frame + 5 inter frames at q 30), and exactly the
+//    input's audio sample count (the Opus pre-skip and end trimming round-trip).
 //  - The same frames as VP9 MP4: the MP4's samples (read back from stsz / stco / stsc) are exactly the WebM's blocks.
+//  - Key frames: the container's flags (WebM SimpleBlock keyframe bit, MP4 stss) equal the bitstream's frame types
+//    at the default interval, at KeyFrameInterval 3 (key frames 0 and 3) and at 1 (all key frames, no stss); the
+//    video with inter frames is smaller than the key-frame-only video.
 //  - AV1 MP4 at 64x64: the av1C in the file equals Av1Isobmff.BuildAv1C of the first sample, and the samples carry no
 //    temporal delimiter.
 
@@ -21,7 +24,12 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    private static List<float[]> TestFrames(int w, int h, int n)
+    /// <summary>
+    /// Test frames: red slides 7 pixels per frame, green is still, blue drifts diagonally. Red is a ramp that wraps (a
+    /// full-scale edge that moves: under 4:2:0 that edge alone holds a frame near 30 dB), or with
+    /// <paramref name="smooth"/> one period of a sine (no edge: the PSNR then measures the coding).
+    /// </summary>
+    private static List<float[]> TestFrames(int w, int h, int n, bool smooth = false)
     {
         var frames = new List<float[]>();
         for (int k = 0; k < n; k++)
@@ -31,7 +39,7 @@ public abstract partial class CodecsTestBase
                 for (int x = 0; x < w; x++)
                 {
                     int i = (y * w + x) * 3;
-                    f[i] = (x + 7f * k) % w / w;
+                    f[i] = smooth ? 0.5f + 0.45f * MathF.Sin(2 * MathF.PI * (x + 7f * k) / w) : (x + 7f * k) % w / w;
                     f[i + 1] = (float)y / h;
                     f[i + 2] = 0.5f + 0.4f * MathF.Sin((x + y + k) * 0.2f);
                 }
@@ -77,6 +85,32 @@ public abstract partial class CodecsTestBase
         return samples;
     }
 
+    /// <summary>
+    /// A shown VP9 profile 0 frame's first byte: frame_marker (2 bits) = 2, profile 0, show_existing_frame 0, then
+    /// frame_type (bit 2): 0 = key frame.
+    /// </summary>
+    private static bool Vp9PacketIsKey(byte[] packet)
+    {
+        if ((packet[0] & 0xF8) != 0x80) throw new Exception($"not a profile 0 VP9 frame header: 0x{packet[0]:X2}");
+        return (packet[0] & 0x04) == 0;
+    }
+
+    /// <summary>The 1-based sync sample numbers of the MP4's first track (stss), or null when it has no stss box.</summary>
+    private static int[]? Mp4SyncSamples(byte[] mp4)
+    {
+        static int U32(byte[] d, int at) => (d[at] << 24) | (d[at + 1] << 16) | (d[at + 2] << 8) | d[at + 3];
+        static int Find(byte[] d, string type, int from, int to)
+        {
+            for (int i = from; i + 4 <= to; i++)
+                if (d[i] == type[0] && d[i + 1] == type[1] && d[i + 2] == type[2] && d[i + 3] == type[3]) return i - 4;   // box start
+            return -1;
+        }
+        int trak = Find(mp4, "trak", 0, mp4.Length);
+        int stss = Find(mp4, "stss", trak, trak + U32(mp4, trak));   // inside the first trak only
+        if (stss < 0) return null;
+        return Enumerable.Range(0, U32(mp4, stss + 12)).Select(i => U32(mp4, stss + 16 + 4 * i)).ToArray();
+    }
+
     [TestMethod(Timeout = 1800000, Category = "NotOnWebGL")]
     public async Task VideoFileEncoderGpu_Vp9WebMAndMp4_RoundTrip()
     {
@@ -85,7 +119,7 @@ public abstract partial class CodecsTestBase
         try
         {
             const int w = 80, h = 50, n = 6, rate = 48000, channels = 2;
-            var frames = TestFrames(w, h, n);
+            var frames = TestFrames(w, h, n, smooth: true);
             int audioFrames = 15000;   // 0.3125 s: not a multiple of the 20 ms packet
             var pcm = new float[audioFrames * channels];
             for (int i = 0; i < audioFrames; i++) { pcm[2 * i] = 0.5f * MathF.Sin(i * 0.0576f); pcm[2 * i + 1] = 0.3f * MathF.Sin(i * 0.0864f); }
@@ -114,16 +148,84 @@ public abstract partial class CodecsTestBase
                 worst = Math.Min(worst, psnr);
                 perFrame.Add($"{psnr:F1}");
             }
-            True(worst > 28, $"worst frame PSNR {worst:F1} dB (frames: {string.Join(", ", perFrame)})");
+            // q 30 on a smooth clip: quantizer noise alone is about 39.8 dB in RGB (AC step 37 / 8 per pixel, uniform, through
+            // the BT.601 matrix); measured 39.6 to 40.5 dB (CPU accelerator, 2026-11-12)
+            True(worst > 38, $"worst frame PSNR {worst:F1} dB (frames: {string.Join(", ", perFrame)})");
             var audio = loaded.Audio ?? throw new Exception("no audio");
             Equal(channels, audio.Channels);
             Equal(audioFrames * channels, audio.Samples.Length);
 
-            // MP4 samples == WebM blocks (the same packets)
-            var blocks = new MatroskaContainer(new MemoryStream(webm)).Frames.Where(f => f.TrackNumber == 1).Select(f => f.Data).ToList();
+            // MP4 samples == WebM blocks (the same packets: the second file starts its own sequence with a key frame)
+            var webmVideo = new MatroskaContainer(new MemoryStream(webm)).Frames.Where(f => f.TrackNumber == 1).ToList();
+            var blocks = webmVideo.Select(f => f.Data).ToList();
             var samples = Mp4Samples(mp4, out _);
             Equal(blocks.Count, samples.Count);
             for (int k = 0; k < blocks.Count; k++) True(blocks[k].AsSpan().SequenceEqual(samples[k]), $"sample {k}: MP4 != WebM");
+
+            // Key frames (default interval 128 > 6 frames): the first frame only, the rest predicted from the frame
+            // before. The container's flag must be the bitstream's own frame type: a player seeks to sync samples.
+            Equal(n, blocks.Count);
+            for (int k = 0; k < n; k++)
+            {
+                True(Vp9PacketIsKey(blocks[k]) == (k == 0), $"frame {k}: bitstream key frame = {Vp9PacketIsKey(blocks[k])}");
+                True(webmVideo[k].IsKeyframe == (k == 0), $"frame {k}: WebM keyframe flag = {webmVideo[k].IsKeyframe}");
+            }
+            Equal("1", string.Join(",", Mp4SyncSamples(mp4) ?? throw new Exception("MP4 with inter frames has no stss")));
+
+            // KeyFrameInterval 3: key frames 0 and 3 in the bitstream, in the WebM flags and in stss; it loads, and the
+            // frames after the second key frame are as good as the rest.
+            var opt3 = new VideoFileEncodeOptions { Container = VideoContainer.WebM, KeyFrameInterval = 3 };
+            var webm3 = await enc.EncodeAsync(frames, w, h, 24, 1, null, opt3);
+            var video3 = new MatroskaContainer(new MemoryStream(webm3)).Frames.Where(f => f.TrackNumber == 1).ToList();
+            Equal(n, video3.Count);
+            for (int k = 0; k < n; k++)
+            {
+                True(Vp9PacketIsKey(video3[k].Data) == (k % 3 == 0), $"interval 3 frame {k}: bitstream key frame = {Vp9PacketIsKey(video3[k].Data)}");
+                True(video3[k].IsKeyframe == (k % 3 == 0), $"interval 3 frame {k}: WebM keyframe flag = {video3[k].IsKeyframe}");
+            }
+            var loaded3 = await new WebMVideoLoaderGpu(acc).LoadAsync(webm3);
+            Equal(n, loaded3.Frames.Count);
+            for (int k = 0; k < n; k++)
+            {
+                double se = 0;
+                for (int i = 0; i < frames[k].Length; i++) { double d = (frames[k][i] - loaded3.Frames[k][i]) * 255; se += d * d; }
+                double psnr = 10 * Math.Log10(255.0 * 255 / Math.Max(se / frames[k].Length, 1e-9));
+                True(psnr > 38, $"interval 3 frame {k}: PSNR {psnr:F1} dB");
+            }
+            var mp43 = await enc.EncodeAsync(frames, w, h, 24, 1, null, opt3 with { Container = VideoContainer.Mp4 });
+            Equal("1,4", string.Join(",", Mp4SyncSamples(mp43) ?? throw new Exception("interval 3 MP4 has no stss")));
+
+            // KeyFrameInterval 1: every frame a key frame, so no stss box (all samples are sync samples); and the
+            // reason inter frames exist: the default file's video is smaller than the key-frame-only file's.
+            var mp4Keys = await enc.EncodeAsync(frames, w, h, 24, 1, null, new VideoFileEncodeOptions { Container = VideoContainer.Mp4, KeyFrameInterval = 1 });
+            var keySamples = Mp4Samples(mp4Keys, out _);
+            Equal(n, keySamples.Count);
+            for (int k = 0; k < n; k++) True(Vp9PacketIsKey(keySamples[k]), $"interval 1 frame {k} is not a key frame");
+            True(Mp4SyncSamples(mp4Keys) == null, "interval 1 MP4 has an stss box");
+            int interVideo = blocks.Sum(b => b.Length), keyVideo = keySamples.Sum(s => s.Length);
+            True(interVideo < keyVideo, $"video with inter frames {interVideo} B, key frames only {keyVideo} B");
+            // An inter frame is as good a picture as the same frame coded as a key frame at the same quantizer, within
+            // 1.5 dB: a key frame of a smooth picture beats the quantizer's noise floor a little (coefficients it rounds
+            // to zero were nearly zero), an inter frame sits on it (measured: at most 1.0 dB below, not growing).
+            var loadedKeys = await new WebMVideoLoaderGpu(acc).LoadAsync(
+                await enc.EncodeAsync(frames, w, h, 24, 1, null, new VideoFileEncodeOptions { Container = VideoContainer.WebM, KeyFrameInterval = 1 }));
+            Equal(n, loadedKeys.Frames.Count);
+            var keyPsnr = new List<string>();
+            for (int k = 0; k < n; k++)
+            {
+                double se = 0, seKey = 0;
+                for (int i = 0; i < frames[k].Length; i++)
+                {
+                    double d = (frames[k][i] - loaded.Frames[k][i]) * 255, dk = (frames[k][i] - loadedKeys.Frames[k][i]) * 255;
+                    se += d * d;
+                    seKey += dk * dk;
+                }
+                double psnr = 10 * Math.Log10(255.0 * 255 / Math.Max(se / frames[k].Length, 1e-9));
+                double psnrKey = 10 * Math.Log10(255.0 * 255 / Math.Max(seKey / frames[k].Length, 1e-9));
+                keyPsnr.Add($"{psnrKey:F1}");
+                True(psnr > psnrKey - 1.5, $"frame {k}: {psnr:F1} dB with inter frames, {psnrKey:F1} dB as a key frame");
+            }
+            await ThrowsAsync<ArgumentOutOfRangeException>(() => enc.EncodeAsync(frames, w, h, 24, 1, null, new VideoFileEncodeOptions { KeyFrameInterval = 0 }));
 
             // MKV: DocType "matroska", the same blocks, and it loads
             var mkv = await enc.EncodeAsync(frames, w, h, 24, 1, sound, new VideoFileEncodeOptions { Container = VideoContainer.Mkv });
@@ -135,7 +237,8 @@ public abstract partial class CodecsTestBase
             var mkvLoaded = await new WebMVideoLoaderGpu(acc).LoadAsync(mkv);
             Equal(n, mkvLoaded.Frames.Count);
             Equal(audioFrames * channels, mkvLoaded.Audio!.Samples.Length);
-            Console.WriteLine($"{acc.AcceleratorType}: VP9 {w}x{h} worst PSNR {worst:F1} dB, audio {audio.Samples.Length / channels} frames, webm {webm.Length} B, mp4 {mp4.Length} B");
+            Console.WriteLine($"{acc.AcceleratorType}: VP9 {w}x{h} worst PSNR {worst:F1} dB (frames: {string.Join(", ", perFrame)}; as key frames: {string.Join(", ", keyPsnr)}), audio {audio.Samples.Length / channels} frames, " +
+                $"webm {webm.Length} B, mp4 {mp4.Length} B, video {interVideo} B with inter frames / {keyVideo} B key frames only ({100.0 * interVideo / keyVideo:F0}%)");
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }

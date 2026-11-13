@@ -202,4 +202,121 @@ public abstract partial class CodecsTestBase
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
+
+    private static double Vp9Lattice(int x, int y, uint seed)
+    {
+        uint g = (uint)(x * 73856093) ^ (uint)(y * 19349663) ^ (seed * 83492791u);
+        g ^= g >> 13; g *= 0x5bd1e995; g ^= g >> 15; g *= 0x27d4eb2d; g ^= g >> 16;
+        return (g & 0xFFFF) / 65535.0;
+    }
+
+    /// <summary>Smoothly interpolated random lattice with <paramref name="cell"/> pixels between its points: not periodic.</summary>
+    private static double Vp9ValueNoise(double x, double y, double cell, uint seed)
+    {
+        double fx = x / cell, fy = y / cell;
+        int x0 = (int)Math.Floor(fx), y0 = (int)Math.Floor(fy);
+        double tx = fx - x0, ty = fy - y0;
+        tx = tx * tx * (3 - 2 * tx);
+        ty = ty * ty * (3 - 2 * ty);
+        double a = Vp9Lattice(x0, y0, seed), b = Vp9Lattice(x0 + 1, y0, seed), c = Vp9Lattice(x0, y0 + 1, seed), d = Vp9Lattice(x0 + 1, y0 + 1, seed);
+        return a + (b - a) * tx + (c - a) * ty + (a - b - c + d) * tx * ty;
+    }
+
+    /// <summary>A picture defined at every real position (three scales of detail), so it can move by a fraction of a pixel.</summary>
+    private static double Vp9SmoothTexture(double x, double y, uint seed)
+        => 128 + 90 * (Vp9ValueNoise(x, y, 24, seed) - 0.5) + 70 * (Vp9ValueNoise(x, y, 9, seed + 1) - 0.5) + 40 * (Vp9ValueNoise(x, y, 4, seed + 2) - 0.5);
+
+    /// <summary>
+    /// The motion search finds the motion: a picture that moves by a known amount per frame, and the MV the search
+    /// leaves for every leaf whose block and reference block are inside the picture must be exactly that motion.
+    /// One motion per part of the search: a few whole pixels (full size level), far motions in both directions (only
+    /// the 1/4 size level reaches them), half-pel, quarter-pel; and a still picture with different noise in every
+    /// frame, where every MV must stay zero (the merge pass: a noise fit is not worth an MV in the stream).
+    /// </summary>
+    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL,GiantShader")]
+    public async Task Vp9EncoderGpu_MotionSearch_FindsTheMotion()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            var failures = new List<string>();
+            var report = new List<string>();
+            const int frames = 3, q = 20;
+            var cases = new (double Mx, double My, int Noise)[] { (3, 2, 0), (-29, 22, 0), (26, -30, 0), (2.5, -1.5, 0), (-0.75, 4.25, 0), (0, 0, 3) };
+            foreach (var (w, h) in new[] { (192, 128), (176, 100) })
+                foreach (var (mx, my, noise) in cases)
+                {
+                    string tag = $"{w}x{h} motion ({mx}, {my}){(noise > 0 ? $" noise {noise}" : "")}";
+                    int cw = (w + 1) / 2, ch = (h + 1) / 2, cols = (w + 15) / 16, rows = (h + 15) / 16;
+                    int expected = PackIntMv((int)Math.Round(-my * 8), (int)Math.Round(-mx * 8));
+                    using var enc = new Vp9EncoderGpu(acc);
+                    using var still = new Vp9EncoderGpu(acc) { MotionSearch = false };   // the noise case's yardstick: zero motion
+                    using var dec = new Vp9DecoderGpu(acc);
+                    int interior = 0, exact = 0, interBytes = 0, stillBytes = 0;
+                    string firstWrong = "";
+                    for (int n = 0; n < frames; n++)
+                    {
+                        var y = new byte[w * h]; var u = new byte[cw * ch]; var v = new byte[cw * ch];
+                        var grain = new Random(1000 + n);
+                        for (int r = 0; r < h; r++)
+                            for (int c = 0; c < w; c++)
+                                y[r * w + c] = (byte)Math.Clamp(Math.Round(Vp9SmoothTexture(c - mx * n, r - my * n, 1)) + grain.Next(-noise, noise + 1), 0, 255);
+                        for (int r = 0; r < ch; r++)
+                            for (int c = 0; c < cw; c++)
+                            {
+                                u[r * cw + c] = (byte)Math.Clamp(Math.Round(64 + Vp9SmoothTexture(2 * c - mx * n, 2 * r - my * n, 11) / 2), 0, 255);
+                                v[r * cw + c] = (byte)Math.Clamp(Math.Round(64 + Vp9SmoothTexture(2 * c - mx * n, 2 * r - my * n, 21) / 2), 0, 255);
+                            }
+                        var (bytes, isKey) = await enc.EncodeFrameAsync(y, u, v, w, h, q);
+                        var recon = await enc.ReadReconAsync();
+                        var shown = await dec.DecodePacketAsync(bytes);
+                        if (shown == null || !shown.Planes.AsSpan().SequenceEqual(recon))
+                        {
+                            failures.Add($"{tag} frame {n}: decoder != encoder reconstruction");
+                            break;
+                        }
+                        if (noise > 0)
+                        {
+                            var (stillFrame, _) = await still.EncodeFrameAsync(y, u, v, w, h, q);
+                            if (!isKey) stillBytes += stillFrame.Length;
+                        }
+                        if (isKey) continue;
+                        interBytes += bytes.Length;
+                        var mvs = await enc.ReadMvsAsync();
+                        for (int r16 = 0; r16 < rows; r16++)
+                            for (int c16 = 0; c16 < cols; c16++)
+                            {
+                                // the leaf's 16x16 block inside the picture, and the block it is predicted from, with
+                                // the interpolation filter's reach (3 pixels before, 4 after), inside the reference
+                                double x0 = c16 * 16, y0 = r16 * 16, rx = x0 - mx, ry = y0 - my;
+                                if (x0 + 15 > w - 1 || y0 + 15 > h - 1 || rx - 3 < 0 || ry - 3 < 0 || rx + 15 + 4 > w - 1 || ry + 15 + 4 > h - 1) continue;
+                                interior++;
+                                int mv = mvs[r16 * cols + c16];
+                                if (mv == expected) exact++;
+                                else if (firstWrong.Length == 0)
+                                    firstWrong = $", first wrong: leaf ({c16}, {r16}) frame {n} MV (row {(short)(mv & 0xFFFF)}, col {mv >> 16}) / 8";
+                            }
+                    }
+                    report.Add($"{tag}: {exact}/{interior} leaves exact, inter {interBytes} B{(noise > 0 ? $" (zero motion {stillBytes} B)" : "")}");
+                    if (interior < 16) failures.Add($"{tag}: only {interior} leaves inside the picture: the case checks too little");
+                    if (noise > 0)
+                    {
+                        // Sub-pixel prediction smooths the reference's noise, so a noise fit can beat zero motion by
+                        // a little: the merge pass charges an MV of the leaf's own (NewMvCost) and all but a few
+                        // leaves stay at zero. Measured on the CPU accelerator (2026-11-12): 117/120 and 88/90 leaves
+                        // zero, inter frames 0.4% / 0.3% over zero motion's; with the charge removed 89/120 and
+                        // 73/90, 2.5% / 1.6% over.
+                        if (exact * 100 < interior * 95) failures.Add($"{tag}: {exact} of {interior} leaves stay at zero motion (expected at least 95%){firstWrong}");
+                        if (interBytes * 100 > stillBytes * 101) failures.Add($"{tag}: the search's inter frames are {interBytes} B, zero motion's {stillBytes} B: more than 1% over");
+                        continue;
+                    }
+                    if (exact != interior)
+                        failures.Add($"{tag}: {exact} of {interior} leaves have the motion (row {(short)(expected & 0xFFFF)}, col {expected >> 16}) / 8{firstWrong}");
+                }
+            Console.WriteLine($"{acc.AcceleratorType}: " + string.Join(" | ", report));
+            True(failures.Count == 0, $"{failures.Count} failures:\n" + string.Join("\n", failures));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
 }
