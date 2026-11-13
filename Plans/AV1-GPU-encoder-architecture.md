@@ -27,6 +27,11 @@ contexts, no prediction across its edge), so tiles are the unit of parallelism:
   six decoders enforces them (832x480 in 13 tile columns decodes on all), and the sequence header signals
   `seq_level_idx` 0 for every picture size, which was already inaccurate above 147,456 pixels before the tiles
   (open: signal the level the picture size needs; the writer has no tier bit for levels above 3.3 yet).
+  Experiment 2026-11-13 (not committed: a level override plus the `seq_tier` bit for levels above 3.3): keyframes
+  of this encoder at 832x480 (levels 2.0, 3.0, 6.0, maximum), 1920x1080 (2.0, 4.0, maximum) and 3840x2160 (2.0, 5.1,
+  maximum) decode to the same picture on libdav1d, libaom, NVDEC, D3D11VA and D3D12VA (FFmpeg 8.1, RTX 4070)
+  whatever level is signalled, and ffprobe reports the level written. So an honest level does not break these
+  decoders. Not tested: browsers (the MP4 codec string carries the level), other vendors' hardware decoders.
 - Kernel (`Av1FrameSequentialEncodeKernel`, ONE kernel for single frames and batches, where there were two):
   working thread = `frame * tileCount + tile`. The thread takes its own copy of the parameters with the tile
   rectangle; the above-context arrays are per tile (`AboveStride` = tile width in mi) and their offsets are rebased
