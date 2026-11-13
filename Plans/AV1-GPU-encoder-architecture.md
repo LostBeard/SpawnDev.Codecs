@@ -233,13 +233,18 @@ contexts, no prediction across its edge), so tiles are the unit of parallelism:
     batch of 8: 108 -> 139 per frame). Per pass, 104 tiles: transform 31, symbols 87, range coder 52 ms. Against
     the desktop CPU accelerator on the same machine (transform about 10, symbols 7, range coder 1.5) the
     transform is 3x slower in Wasm, the symbol pass 13x and the range coder pass 35x: the more branches per unit
-    of work, the worse Wasm does. Cause, read in the backend the same afternoon (not yet confirmed by an isolated
-    measurement): SpawnDev.ILGPU's Wasm backend emits a kernel with more than one basic block as a state machine
-    (`loop` + `br_table` over all blocks, `WasmKernelFunctionGenerator.GenerateStateMachineCode`), so EVERY branch
-    between basic blocks is a trip through the table. The transform is long straight-line code; the range coder
-    is a few tiny blocks per symbol. (My first guess, state passed by reference, is wrong: after inlining and SSA
-    construction the IR is the same for every backend.) The fix belongs in SpawnDev.ILGPU: structured control
-    flow for kernels without barriers. Open.
+    of work, the worse Wasm does. Cause: SpawnDev.ILGPU's Wasm backend emits a kernel with more than one basic
+    block as a state machine (`loop` + `br_table` over all blocks,
+    `WasmKernelFunctionGenerator.GenerateStateMachineCode`), so EVERY branch between basic blocks is a trip
+    through the table, and that trip gets dearer as the kernel gets larger. Measured with a probe (one thread, a
+    loop of xorshift steps, each followed by a data-dependent branch with a store; ns per step for a loop body of
+    12 / 120 / 960 steps): desktop CPU accelerator 1.65 / 1.73 / 2.32, Wasm 2.66 / 3.85 / 22.76 (CUDA 4.70 / 3.76 /
+    4.44; WebGPU 6.64 / 4.62 / 25.55, which also degrades at the largest size). The same steps without branches:
+    0.41 native, 0.42 Wasm. So straight-line Wasm is at native speed, a small branchy kernel is 1.6x off, and a
+    kernel with a couple of thousand basic blocks, which is what these passes are after inlining, is 10x off and
+    more. (My first guess, state passed by reference, is wrong: after inlining and SSA construction the IR is
+    the same for every backend.) The fix belongs in SpawnDev.ILGPU: structured control flow for kernels without
+    barriers. Open. The probe is in the ILGPU repository's `_scratch/branch-cost-probe`.
   - Batches. A batch of 16 on CUDA is 11% slower per frame than this morning (0.92 -> 1.02), batches of 2 / 4 / 8
     are 2.38 / 1.58 / 1.24 ms per frame (stage 1: 3.21 / 1.85 / 1.35), 32: 0.88. Per pass for 16 frames:
     transform 6.7 ms, symbols 3.5, range coder 2.9, where the single pass took about 11.7 for the same work:
