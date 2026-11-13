@@ -267,8 +267,27 @@ public static class Av1KeyframeConstantsGpu
     /// <summary>Length: 4 * 2 * 21 * 5 = 840.</summary>
     public const int CoeffLpsMultiCdfTx4x4Length = TokenCdfQCtxs * PlaneTypes * LevelContexts * (BrCdfSize + 1);
 
+    // ---- Picture-edge partition CDFs (appended; a block that crosses the bottom or right edge of the picture) ----
+
+    /// <summary>
+    /// The 2-symbol CDF of <c>split_or_horz</c> per partition context: a block whose lower half is outside the
+    /// picture can only be PARTITION_HORZ (symbol 0) or PARTITION_SPLIT (symbol 1). Derived from the partition CDF
+    /// row (libaom partition_gather_vert_alike). Flat: [ctx][3]; rows of the 8x8 contexts (0..3, never used at an
+    /// edge: the picture is a whole number of 8x8 blocks) and of the 128x128 contexts (16..19) are zero.
+    /// </summary>
+    public const int PartitionSplitOrHorzCdfOffset = CoeffLpsMultiCdfTx4x4Offset + CoeffLpsMultiCdfTx4x4Length;
+    /// <summary>Length of each edge partition table: 20 contexts * 3 entries.</summary>
+    public const int PartitionEdgeCdfLength = 20 * 3;
+
+    /// <summary>
+    /// The 2-symbol CDF of <c>split_or_vert</c> per partition context: a block whose right half is outside the
+    /// picture can only be PARTITION_VERT (symbol 0) or PARTITION_SPLIT (symbol 1) (libaom
+    /// partition_gather_horz_alike). Same layout as <see cref="PartitionSplitOrHorzCdfOffset"/>.
+    /// </summary>
+    public const int PartitionSplitOrVertCdfOffset = PartitionSplitOrHorzCdfOffset + PartitionEdgeCdfLength;
+
     /// <summary>Total ushort buffer entries.</summary>
-    public const int UshortConstsTotalEntries = CoeffLpsMultiCdfTx4x4Offset + CoeffLpsMultiCdfTx4x4Length;
+    public const int UshortConstsTotalEntries = PartitionSplitOrVertCdfOffset + PartitionEdgeCdfLength;
 
     /// <summary>
     /// Build the byte constants buffer for upload. Caller materialises
@@ -409,8 +428,27 @@ public static class Av1KeyframeConstantsGpu
         // CoeffLpsMultiCdf for Tx4x4.
         PackCoeffLpsMultiCdfTx4x4(buf);
 
+        // Picture-edge partition CDFs, from the 10-symbol partition rows (block sizes 16x16, 32x32, 64x64).
+        for (int c = 0; c < 20; c++)
+        {
+            var row = partition[c];
+            if (row.Length < 10) continue;   // 8x8 (4 symbols) and 128x128 (8 symbols) rows: not used at an edge here
+            // partition symbols: NONE 0, HORZ 1, VERT 2, SPLIT 3, HORZ_A 4, HORZ_B 5, VERT_A 6, VERT_B 7, HORZ_4 8, VERT_4 9
+            int splitOrHorz = PartitionSymbolProb(row, 2) + PartitionSymbolProb(row, 3) + PartitionSymbolProb(row, 4)
+                + PartitionSymbolProb(row, 6) + PartitionSymbolProb(row, 7) + PartitionSymbolProb(row, 9);
+            int splitOrVert = PartitionSymbolProb(row, 1) + PartitionSymbolProb(row, 3) + PartitionSymbolProb(row, 4)
+                + PartitionSymbolProb(row, 5) + PartitionSymbolProb(row, 6) + PartitionSymbolProb(row, 8);
+            // inverse CDF of a 2-symbol alphabet: entry 0 = P(symbol 1) = P(SPLIT), entry 1 = 0
+            buf[PartitionSplitOrHorzCdfOffset + c * 3] = (ushort)splitOrHorz;
+            buf[PartitionSplitOrVertCdfOffset + c * 3] = (ushort)splitOrVert;
+        }
+
         return buf;
     }
+
+    /// <summary>Probability (q15) of one symbol of an inverse-CDF row (libaom cdf_element_prob).</summary>
+    private static int PartitionSymbolProb(ushort[] icdf, int symbol) =>
+        (symbol > 0 ? icdf[symbol - 1] : 1 << 15) - icdf[symbol];
 
     private static void PackTxbSkipCdf(ushort[] buf)
     {

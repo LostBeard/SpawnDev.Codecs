@@ -3,13 +3,14 @@
 // accelerator).
 //
 // Oracle: the CPU Av1KeyframeEncoder.EncodeKeyFrame temporal unit (TD + SH + Frame OBU), byte for byte, on
-// 64-aligned pictures (the encoder's current size limit); the single-frame encode for the batch path.
+// 64-aligned pictures (other sizes: CodecsTestBase.Av1KeyframeEncoderGpuAnySizeTests.cs); the single-frame encode
+// for the batch path.
 // What each test can fail on:
 //  - ArrayView1D_*  : the temporal unit is written into the CALLER's view (pre-filled with 0xAB, so a kernel
 //                     that wrote elsewhere or stopped short leaves 0xAB and mismatches the CPU bytes).
 //  - Batch_*        : frame-major batch (N frames in one dispatch, caller-owned outputs and lengths) must equal
 //                     N single-frame encodes.
-//  - Rejects_*      : unsupported sizes / quantizers throw before any dispatch.
+//  - Rejects_*      : impossible sizes, short planes and bad quantizers throw before any dispatch.
 //  - TypedArray_*   : browser only; JS bytes in, JS bytes out, equal to the managed result.
 
 using ILGPU;
@@ -171,7 +172,7 @@ public abstract partial class CodecsTestBase
     }
 
     [TestMethod(Timeout = 600000, Category = "NotOnWebGL")]
-    public async Task Av1KeyframeEncoderGpu_Rejects_UnalignedSizeAndBadQuantizer()
+    public async Task Av1KeyframeEncoderGpu_Rejects_BadSizeShortPlanesAndBadQuantizer()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         RequireFeatures(acc, SerialStreamKernels);
@@ -180,12 +181,23 @@ public abstract partial class CodecsTestBase
             using var enc = new Av1KeyframeEncoderGpu(acc);
             var plane = new byte[64 * 64];
             var chroma = new byte[64 * 64 / 4];
-            bool threwSize = false, threwQ = false;
+            bool threwZero = false, threwHuge = false, threwShortLuma = false, threwShortChroma = false, threwQ = false;
+            try { await enc.EncodeKeyFrameAsync(plane, chroma, chroma, 0, 64, 32); }
+            catch (ArgumentOutOfRangeException) { threwZero = true; }
+            try { await enc.EncodeKeyFrameAsync(plane, chroma, chroma, 64, Av1KeyframeEncoderGpu.MaxDimension + 1, 32); }
+            catch (ArgumentOutOfRangeException) { threwHuge = true; }
+            // 70x64 is a supported size now: a 64x64 luma plane is too short for it
             try { await enc.EncodeKeyFrameAsync(plane, chroma, chroma, 70, 64, 32); }
-            catch (NotSupportedException) { threwSize = true; }
+            catch (ArgumentException e) when (e is not ArgumentOutOfRangeException) { threwShortLuma = true; }
+            // 63x63 needs 32x32 chroma planes ((63 + 1) / 2), not 31x31
+            try { await enc.EncodeKeyFrameAsync(plane, new byte[31 * 31], new byte[31 * 31], 63, 63, 32); }
+            catch (ArgumentException e) when (e is not ArgumentOutOfRangeException) { threwShortChroma = true; }
             try { await enc.EncodeKeyFrameAsync(plane, chroma, chroma, 64, 64, 0); }
             catch (ArgumentOutOfRangeException) { threwQ = true; }
-            True(threwSize, "a width that is not a multiple of 64 must throw NotSupportedException");
+            True(threwZero, "width 0 must throw ArgumentOutOfRangeException");
+            True(threwHuge, "a height above MaxDimension must throw ArgumentOutOfRangeException");
+            True(threwShortLuma, "a luma plane shorter than width * height must throw ArgumentException");
+            True(threwShortChroma, "chroma planes shorter than ((width + 1) / 2) * ((height + 1) / 2) must throw ArgumentException");
             True(threwQ, "baseQIndex 0 must throw ArgumentOutOfRangeException");
         }
         finally { ReleaseAccelerator(ctx, acc); }

@@ -13,31 +13,28 @@
 // scratchInt[StStarted ..] between launches. The host launches
 // ceil(slots / LeavesPerLaunch) steps (a bound it knows; no readback).
 //
-// Pipeline (mirrors Av1KeyframeEncoder.cs lines 388-438):
+// Pipeline (mirrors Av1KeyframeEncoder.EncodeSingleTile / EncodePartition):
 //   - For each 64x64 superblock in raster order:
 //       reset left partition + entropy + mode + skip arrays
-//       EncodeSuperblock(64x64 at miRow, miCol):
-//         emit partition CDF -> SPLIT (sym 3)
-//         for each 32x32 sub-block:
-//           emit partition CDF -> SPLIT (sym 3)
-//           for each 16x16 sub-block:
-//             emit partition CDF -> NONE (sym 0)
-//             EncodeLeaf(16x16 at miRow, miCol):
-//               emit skip CDF (=0)
-//               emit Y mode KF CDF (=DC, sym 0)
-//               emit UV mode CDF (=DC, sym 0)
-//               EncodePlane(Y, TX_16X16)
-//               EncodePlane(U, TX_8X8)
-//               EncodePlane(V, TX_8X8)
-//               update mode + skip arrays
-//             update partition context
+//       64x64: SPLIT; each 32x32 inside the picture: SPLIT;
+//       each 16x16 inside the picture:
+//         whole block inside: partition NONE, one BLOCK_16X16 leaf
+//               skip = 0, Y mode DC, UV mode DC
+//               EncodePlane(Y, TX_16X16), EncodePlane(U, TX_8X8), EncodePlane(V, TX_8X8)
+//         crossing the bottom / right edge: SPLIT, then each 8x8 inside the picture: partition NONE, one
+//         BLOCK_8X8 leaf (Y TX_8X8, U / V TX_4X4)
 //   - Av1RangeEncoderGpu.Done -> write tileLen
 //
+// Picture edges (any width and height). The coded picture is MiCols x MiRows 4x4 units, each rounded up to a whole
+// number of 8x8 blocks. A SPLIT of a block that crosses the edge is coded as the AV1 syntax requires: the full
+// partition symbol when both halves start inside, split_or_horz (lower half outside) or split_or_vert (right half
+// outside) from the 2-symbol CDFs in the constants buffer, and nothing when both are outside (the split is implied).
+// Source pixels past the picture (up to 7 columns / rows) repeat the last column / row; the reconstruction planes
+// have the coded size (ReconWidth x ReconHeight), which is what a decoder predicts from.
+//
 // V1 simplifications match Av1KeyframeEncoder.cs:
-//   - Width + height multiples of 64 (every block fully present, no
-//     forced-split edge cases).
 //   - Profile 0, YUV 4:2:0, 8-bit.
-//   - DC_PRED only, all blocks BLOCK_16X16 leaves.
+//   - DC_PRED only; BLOCK_16X16 leaves, BLOCK_8X8 leaves where a 16x16 crosses the picture edge.
 //   - tx_mode = LARGEST, reduced_tx_set = 1.
 //   - Single tile.
 //
@@ -87,11 +84,11 @@ public struct Av1FrameSeqEncodeParams
     /// <summary>Frame base q-index in [1, 255].</summary>
     public int BaseQIndex;
 
-    /// <summary>Y plane offset within the src/recon byte buffer (always 0).</summary>
+    /// <summary>Y plane offset within the src byte buffer (always 0; the recon Y plane is at 0 too).</summary>
     public int YPlaneOff;
-    /// <summary>U plane offset within the src/recon byte buffer.</summary>
+    /// <summary>U plane offset within the src byte buffer (planes tightly packed: Width x Height, then chroma).</summary>
     public int UPlaneOff;
-    /// <summary>V plane offset within the src/recon byte buffer.</summary>
+    /// <summary>V plane offset within the src byte buffer.</summary>
     public int VPlaneOff;
 
     // ScratchByte regions. Each is offset into the single scratchByte buffer.
@@ -126,6 +123,20 @@ public struct Av1FrameSeqEncodeParams
     public int FrameMiCols;
     /// <summary>Frame mi-rows.</summary>
     public int FrameMiRows;
+
+    /// <summary>Source chroma plane width, <c>(Width + 1) &gt;&gt; 1</c>.</summary>
+    public int ChromaWidth;
+    /// <summary>Source chroma plane height, <c>(Height + 1) &gt;&gt; 1</c>.</summary>
+    public int ChromaHeight;
+    /// <summary>Recon luma width = coded width, <c>FrameMiCols * 4</c> (a multiple of 8, &gt;= Width). Recon chroma
+    /// planes are <c>ReconWidth / 2</c> x <c>ReconHeight / 2</c>.</summary>
+    public int ReconWidth;
+    /// <summary>Recon luma height = coded height, <c>FrameMiRows * 4</c>.</summary>
+    public int ReconHeight;
+    /// <summary>U plane offset within the recon byte buffer (<c>ReconWidth * ReconHeight</c>).</summary>
+    public int ReconUOff;
+    /// <summary>V plane offset within the recon byte buffer.</summary>
+    public int ReconVOff;
 }
 
 /// <summary>Per-frame slot strides for the batch AV1 frame walker.</summary>
@@ -133,7 +144,7 @@ public struct Av1FrameBatchStrides
 {
     /// <summary>src bytes per frame (yLen + 2*uvLen).</summary>
     public int SrcStride;
-    /// <summary>recon bytes per frame (same as src).</summary>
+    /// <summary>recon bytes per frame (coded size: ReconWidth * ReconHeight * 3 / 2).</summary>
     public int ReconStride;
     /// <summary>tileBytes per frame (worst-case).</summary>
     public int TileStride;
@@ -419,9 +430,10 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
 
     /// <summary>
     /// One 16x16 position of the superblock z-order walk (slot = sb * 16 + q32 * 4 + q16): the left-context
-    /// reset at the start of a superblock row, the partition symbols that precede the block (64x64 SPLIT at the
-    /// superblock's first slot, 32x32 SPLIT at a 32x32 block's first slot), then the 16x16 NONE leaf. Out-of-frame
-    /// blocks are skipped exactly as the recursive walk skipped them.
+    /// reset at the start of a superblock row, the partition syntax that precedes the block (64x64 SPLIT at the
+    /// superblock's first slot, 32x32 SPLIT at a 32x32 block's first slot), then the 16x16 NONE leaf, or, where the
+    /// 16x16 crosses the picture edge, its SPLIT and the 8x8 NONE leaves inside the picture. Out-of-frame blocks are
+    /// skipped exactly as the recursive walk skips them.
     /// </summary>
     private static void EncodeLeafSlot(
         ref Av1RangeEncoderGpuState re, ArrayView<byte> outBuf,
@@ -455,8 +467,7 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
                     scratchByte[p.LeftSkipOff + i] = 0;
                 }
             }
-            EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
-                sbMiRow, sbMiCol, BsizeBlock64x64, PartitionSplit);
+            EmitSplit(ref re, outBuf, constsUshort, scratchByte, p, sbMiRow, sbMiCol, BsizeBlock64x64, 8);
         }
 
         int q32 = q >> 2;
@@ -467,36 +478,174 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         if (!in32) return;
 
         if (q16 == 0)
-            EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
-                miRow32, miCol32, BsizeBlock32x32, PartitionSplit);
+            EmitSplit(ref re, outBuf, constsUshort, scratchByte, p, miRow32, miCol32, BsizeBlock32x32, 4);
 
         int miRow16 = miRow32 + (q16 >> 1) * 4;
         int miCol16 = miCol32 + (q16 & 1) * 4;
         bool in16 = (miRow16 < frameMiRows) & (miCol16 < frameMiCols);
         if (!in16) return;
 
-        EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
-            miRow16, miCol16, BsizeBlock16x16, PartitionNone);
+        // The picture is a whole number of 8x8 blocks (2 mi), so a 16x16 that starts inside is either whole or has
+        // only its upper half, its left half or its top-left 8x8 inside. Whole: PARTITION_NONE and one 16x16 leaf.
+        // Crossing the bottom / right edge: PARTITION_NONE is not codable; SPLIT, then the 8x8 leaves inside.
+        bool whole16 = (miRow16 + 2 < frameMiRows) & (miCol16 + 2 < frameMiCols);
+        if (whole16)
+            EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
+                miRow16, miCol16, BsizeBlock16x16, PartitionNone);
+        else
+            EmitSplit(ref re, outBuf, constsUshort, scratchByte, p, miRow16, miCol16, BsizeBlock16x16, 2);
 
-        EncodeLeafBlock(ref re, outBuf,
-            src, recon, constsByte, constsUshort,
-            qDc, qAc,
-            scratchByte, scratchInt, scratchShort,
-            miRow16, miCol16, p);
+        // One loop and ONE EncodeLeaf call site for both cases (a second call site would be a second copy of the
+        // whole leaf pipeline in the generated shader): 1 iteration for the 16x16 leaf, 4 for the 8x8 positions.
+        int leafCount = whole16 ? 1 : 4;
+        int leafBsize = whole16 ? BsizeBlock16x16 : BsizeBlock8x8;
+        for (int k = 0; k < leafCount; k++)
+        {
+            int miRowLeaf = miRow16 + (k >> 1) * 2;
+            int miColLeaf = miCol16 + (k & 1) * 2;
+            bool inside = (miRowLeaf < frameMiRows) & (miColLeaf < frameMiCols);
+            if (inside)
+            {
+                // An 8x8 block that starts inside is whole: always the full (4-symbol) partition CDF.
+                if (!whole16)
+                    EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p,
+                        miRowLeaf, miColLeaf, BsizeBlock8x8, PartitionNone);
 
-        UpdatePartitionContext(scratchByte, p, miRow16, miCol16, BsizeBlock16x16);
+                EncodeLeaf(ref re, outBuf,
+                    src, recon, constsByte, constsUshort,
+                    qDc, qAc,
+                    scratchByte, scratchInt, scratchShort,
+                    miRowLeaf, miColLeaf, whole16, p);
+
+                UpdatePartitionContext(scratchByte, p, miRowLeaf, miColLeaf, leafBsize);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The partition syntax of a block the walker splits (libaom write_partition / AV1 spec 5.11.4): the full
+    /// partition symbol when the block's lower and right halves both start inside the picture, split_or_horz when
+    /// only the lower half is outside, split_or_vert when only the right half is outside, nothing when both are
+    /// (PARTITION_SPLIT is implied). <paramref name="halfMi"/> is half the block size in mi units.
+    /// </summary>
+    private static void EmitSplit(
+        ref Av1RangeEncoderGpuState re, ArrayView<byte> outBuf,
+        ArrayView<ushort> constsUshort,
+        ArrayView<byte> scratchByte, Av1FrameSeqEncodeParams p,
+        int miRow, int miCol, int bsize, int halfMi)
+    {
+        bool hasRows = miRow + halfMi < p.FrameMiRows;
+        bool hasCols = miCol + halfMi < p.FrameMiCols;
+        if (hasRows & hasCols)
+        {
+            EmitPartitionCdf(ref re, outBuf, constsUshort, scratchByte, p, miRow, miCol, bsize, PartitionSplit);
+        }
+        else if (hasCols)
+        {
+            // bottom edge: SPLIT (1) or HORZ (0)
+            int ctx = GetPartitionContext(scratchByte, p, miRow, miCol, bsize);
+            Av1RangeEncoderGpu.EncodeCdfQ15(ref re, outBuf, 1, constsUshort,
+                Av1KeyframeConstantsGpu.PartitionSplitOrHorzCdfOffset + ctx * 3, 2);
+        }
+        else if (hasRows)
+        {
+            // right edge: SPLIT (1) or VERT (0)
+            int ctx = GetPartitionContext(scratchByte, p, miRow, miCol, bsize);
+            Av1RangeEncoderGpu.EncodeCdfQ15(ref re, outBuf, 1, constsUshort,
+                Av1KeyframeConstantsGpu.PartitionSplitOrVertCdfOffset + ctx * 3, 2);
+        }
     }
 
     // ===========================================================================
-    // Leaf block encode (one BLOCK_16X16)
+    // Leaf block encode (one BLOCK_16X16, or one BLOCK_8X8 at the picture edge)
     // ===========================================================================
 
-    private static void EncodeLeafBlock(
+    /// <summary>
+    /// One leaf: the mode info (the same for both sizes: CFL is allowed for an 8x8 block too, so the UV mode CDF row
+    /// is the same), then the three planes. <paramref name="is16"/>: BLOCK_16X16 (Y TX_16X16, U / V TX_8X8);
+    /// otherwise BLOCK_8X8 at the picture edge (Y TX_8X8, U / V TX_4X4).
+    /// <para>
+    /// Three <see cref="EncodePlane"/> call sites, one per transform size, each with the size a CONSTANT (the body
+    /// folds to that size; a run-time size keeps every size's code live and is slower on every backend). The 8x8
+    /// site serves the chroma of a 16x16 leaf and the luma of an edge leaf, so the edge leaves add only the 4x4
+    /// site to the shader.
+    /// </para>
+    /// </summary>
+    private static void EncodeLeaf(
         ref Av1RangeEncoderGpuState re, ArrayView<byte> outBuf,
         ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
         int qDc, int qAc,
         ArrayView<byte> scratchByte, ArrayView<int> scratchInt, ArrayView<short> scratchShort,
+        int miRow, int miCol, bool is16, Av1FrameSeqEncodeParams p)
+    {
+        EmitLeafModeInfo(ref re, outBuf, constsByte, constsUshort, scratchByte, miRow, miCol, p);
+
+        int miSize = is16 ? 4 : 2;                 // leaf size in mi; every transform of the leaf spans it
+        int chromaX = (miCol * 4) >> 1, chromaY = (miRow * 4) >> 1;
+        int reconChromaW = p.ReconWidth >> 1, reconChromaH = p.ReconHeight >> 1;
+
+        // ---- TX_16X16: luma of a 16x16 leaf ----
+        if (is16)
+            EncodePlane(ref re, outBuf,
+                src, p.YPlaneOff, p.Width, p.Width, p.Height,
+                recon, 0, p.ReconWidth,
+                constsByte, constsUshort, qDc, qAc,
+                scratchByte, scratchInt, scratchShort,
+                miRow, miCol, plane: 0,
+                xPx: miCol * 4, yPx: miRow * 4,
+                txW: 16, txH: 16, txSizeIdx: 2,
+                txWMi: miSize, txHMi: miSize,
+                planeH: p.ReconHeight,
+                p);
+
+        // ---- TX_8X8: U then V of a 16x16 leaf; luma of an 8x8 leaf ----
+        int first8 = is16 ? 1 : 0;
+        int last8 = is16 ? 2 : 0;
+        for (int plane = first8; plane <= last8; plane++)
+        {
+            bool luma = plane == 0;
+            EncodePlane(ref re, outBuf,
+                src, luma ? p.YPlaneOff : (plane == 1 ? p.UPlaneOff : p.VPlaneOff),
+                luma ? p.Width : p.ChromaWidth, luma ? p.Width : p.ChromaWidth, luma ? p.Height : p.ChromaHeight,
+                recon, luma ? 0 : (plane == 1 ? p.ReconUOff : p.ReconVOff), luma ? p.ReconWidth : reconChromaW,
+                constsByte, constsUshort, qDc, qAc,
+                scratchByte, scratchInt, scratchShort,
+                miRow, miCol, plane,
+                xPx: luma ? miCol * 4 : chromaX, yPx: luma ? miRow * 4 : chromaY,
+                txW: 8, txH: 8, txSizeIdx: 1,
+                txWMi: miSize, txHMi: miSize,
+                planeH: luma ? p.ReconHeight : reconChromaH,
+                p);
+        }
+
+        // ---- TX_4X4: U then V of an 8x8 leaf ----
+        if (!is16)
+        {
+            for (int plane = 1; plane <= 2; plane++)
+            {
+                EncodePlane(ref re, outBuf,
+                    src, plane == 1 ? p.UPlaneOff : p.VPlaneOff, p.ChromaWidth, p.ChromaWidth, p.ChromaHeight,
+                    recon, plane == 1 ? p.ReconUOff : p.ReconVOff, reconChromaW,
+                    constsByte, constsUshort, qDc, qAc,
+                    scratchByte, scratchInt, scratchShort,
+                    miRow, miCol, plane,
+                    xPx: chromaX, yPx: chromaY,
+                    txW: 4, txH: 4, txSizeIdx: 0,
+                    txWMi: miSize, txHMi: miSize,
+                    planeH: reconChromaH,
+                    p);
+            }
+        }
+
+        UpdateLeafModeContext(scratchByte, p, miRow, miCol, miSize);
+    }
+
+    /// <summary>The mode info of a leaf (16x16 or 8x8): skip = 0, Y mode DC_PRED, UV mode DC_PRED.</summary>
+    private static void EmitLeafModeInfo(
+        ref Av1RangeEncoderGpuState re, ArrayView<byte> outBuf,
+        ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
+        ArrayView<byte> scratchByte,
         int miRow, int miCol, Av1FrameSeqEncodeParams p)
     {
         int leftMiIdx = miRow & 31;
@@ -516,46 +665,17 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         long yModeCdfBase = Av1KeyframeConstantsGpu.KfYModeCdfOffset + (aboveCtx * 5 + leftCtx) * 14;
         Av1RangeEncoderGpu.EncodeCdfQ15(ref re, outBuf, 0, constsUshort, yModeCdfBase, 13);
 
-        // ---- UV mode CDF: emit DC. cflAllowed=1 -> 14 syms. ----
+        // ---- UV mode CDF: emit DC. cflAllowed=1 (16x16 and 8x8 blocks) -> 14 syms. ----
         long uvModeCdfBase = Av1KeyframeConstantsGpu.UvModeCdfV1RowOffset;
         Av1RangeEncoderGpu.EncodeCdfQ15(ref re, outBuf, 0, constsUshort, uvModeCdfBase, 14);
+    }
 
-        // ---- Per-plane: predict + residual + transform + quantize + emit coefs + recon ----
-        EncodePlane(ref re, outBuf,
-            src, p.YPlaneOff, p.Width, recon, p.YPlaneOff, p.Width,
-            constsByte, constsUshort, qDc, qAc,
-            scratchByte, scratchInt, scratchShort,
-            miRow, miCol, plane: 0,
-            xPx: miCol * 4, yPx: miRow * 4,
-            txW: 16, txH: 16, txSizeIdx: 2,
-            txWMi: 4, txHMi: 4,
-            planeH: p.Height,
-            p);
-
-        EncodePlane(ref re, outBuf,
-            src, p.UPlaneOff, p.Width >> 1, recon, p.UPlaneOff, p.Width >> 1,
-            constsByte, constsUshort, qDc, qAc,
-            scratchByte, scratchInt, scratchShort,
-            miRow, miCol, plane: 1,
-            xPx: (miCol * 4) >> 1, yPx: (miRow * 4) >> 1,
-            txW: 8, txH: 8, txSizeIdx: 1,
-            txWMi: 4, txHMi: 4,
-            planeH: p.Height >> 1,
-            p);
-
-        EncodePlane(ref re, outBuf,
-            src, p.VPlaneOff, p.Width >> 1, recon, p.VPlaneOff, p.Width >> 1,
-            constsByte, constsUshort, qDc, qAc,
-            scratchByte, scratchInt, scratchShort,
-            miRow, miCol, plane: 2,
-            xPx: (miCol * 4) >> 1, yPx: (miRow * 4) >> 1,
-            txW: 8, txH: 8, txSizeIdx: 1,
-            txWMi: 4, txHMi: 4,
-            planeH: p.Height >> 1,
-            p);
-
-        // ---- Update mode + skip context arrays. BLOCK_16X16 = 4 mi wide / 4 mi high. ----
-        for (int i = 0; i < 4; i++)
+    /// <summary>Mode + skip context arrays after a leaf of <paramref name="miSize"/> mi (4 = 16x16, 2 = 8x8): DC, not skipped.</summary>
+    private static void UpdateLeafModeContext(
+        ArrayView<byte> scratchByte, Av1FrameSeqEncodeParams p, int miRow, int miCol, int miSize)
+    {
+        int leftMiIdx = miRow & 31;
+        for (int i = 0; i < miSize; i++)
         {
             if (miCol + i < p.FrameMiCols)
             {
@@ -574,7 +694,7 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
 
     private static void EncodePlane(
         ref Av1RangeEncoderGpuState re, ArrayView<byte> outBuf,
-        ArrayView<byte> srcBuf, int srcPlaneOff, int srcStride,
+        ArrayView<byte> srcBuf, int srcPlaneOff, int srcStride, int srcW, int srcH,
         ArrayView<byte> reconBuf, int reconPlaneOff, int reconStride,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
         int qDc, int qAc,
@@ -586,6 +706,10 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         int planeH,
         Av1FrameSeqEncodeParams p)
     {
+        // txW / txH / txSizeIdx are CONSTANTS at every call site (see EncodeLeaf).
+        // txSizeIdx: 2 = TX_16X16, 1 = TX_8X8, 0 = TX_4X4 (chroma of an edge 8x8 block). srcW x srcH is the source
+        // plane; the block may extend past it at the picture's right / bottom edge (the coded size is rounded up to
+        // 8), where the last source column / row is repeated.
         int n = txW * txH;
 
         // Build edge buffers from the recon plane.
@@ -604,11 +728,15 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         // Compute residual = src - predict into scratchShort[0..+n).
         for (int r = 0; r < txH; r++)
         {
-            int sOff = srcPlaneOff + (yPx + r) * srcStride + xPx;
+            int sy = yPx + r;
+            if (sy >= srcH) sy = srcH - 1;
+            int sRow = srcPlaneOff + sy * srcStride;
             int pOff = p.PredictOff + r * txW;
             for (int c = 0; c < txW; c++)
             {
-                short s = (short)srcBuf[sOff + c];
+                int sx = xPx + c;
+                if (sx >= srcW) sx = srcW - 1;
+                short s = (short)srcBuf[sRow + sx];
                 short pp = (short)scratchByte[pOff + c];
                 scratchShort[r * txW + c] = (short)(s - pp);
             }
@@ -621,6 +749,11 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
             Av1Forward2dTransformGpu.Forward8x8DctDct(
                 scratchShort, 0, scratchInt, 0, scratchInt, n);
         }
+        else if (txSizeIdx == 0)
+        {
+            Av1Forward2dTransformGpu.Forward4x4DctDct(
+                scratchShort, 0, scratchInt, 0, scratchInt, n);
+        }
         else
         {
             Av1Forward2dTransformGpu.Forward16x16DctDct(
@@ -631,9 +764,10 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         Av1ForwardQuantizerGpu.QuantizeBlock(scratchInt, 0, n, qDc, qAc);
 
         // Compute entropy contexts.
-        // Per CPU contract (Av1KeyframeEncoder.EncodePlane lines 815-822) chroma
-        // uses luma-mi indices for ctx lookup; v1 has planeBsizeIsTxsize=true and
-        // planeBsizeLargerThanTxBsize=false for both Y and UV.
+        // Per CPU contract (Av1KeyframeEncoder.EncodePlane) chroma uses luma-mi indices for ctx lookup (a chroma
+        // 4x4 unit is two luma mi, both written with the same value); the plane block size equals the transform
+        // size for every leaf (16x16: Y TX_16X16 / UV TX_8X8; 8x8: Y TX_8X8 / UV TX_4X4), so
+        // planeBsizeIsTxsize=true and planeBsizeLargerThanTxBsize=false for both Y and UV.
         int txbSkipCtx = GetTxbSkipContext(scratchByte, p, plane, miRow, miCol, txWMi, txHMi);
         int dcSignCtx = GetDcSignContext(scratchByte, p, plane, miRow, miCol, txWMi, txHMi);
 
@@ -685,8 +819,8 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         long iTransOutBase = 2 * n;
         long iTransScratchBase = 3 * n;
 
-        // libaom GetTxScale = 0 for both Tx8x8 and Tx16x16 (only 64-tall/wide
-        // sizes get scale = 1).
+        // libaom GetTxScale = 0 for Tx4x4, Tx8x8 and Tx16x16 (only sizes with more than 256 coefficients
+        // get a scale).
         int shift = 0;
         int maxV = (1 << 15) - 1;
         int minV = -(1 << 15);
@@ -714,6 +848,11 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
             if (txSizeIdx == 1)
             {
                 Av1Inverse2dTransformGpu.Inverse8x8DctDct(
+                    scratchInt, dqBase, scratchInt, iTransOutBase, scratchInt, iTransScratchBase);
+            }
+            else if (txSizeIdx == 0)
+            {
+                Av1Inverse2dTransformGpu.Inverse4x4DctDct(
                     scratchInt, dqBase, scratchInt, iTransOutBase, scratchInt, iTransScratchBase);
             }
             else
@@ -845,18 +984,19 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         Av1RangeEncoderGpu.EncodeCdfQ15(ref re, outBuf, partition, constsUshort, cdfBase, nsyms);
     }
 
-    /// <summary>Update partition context arrays after emitting PARTITION_NONE at subsize.</summary>
+    /// <summary>Update partition context arrays after emitting PARTITION_NONE at subsize (BLOCK_16X16 or BLOCK_8X8).</summary>
     private static void UpdatePartitionContext(
         ArrayView<byte> scratchByte, Av1FrameSeqEncodeParams p,
         int miRow, int miCol, int subsize)
     {
-        // libaom partition_context_lookup table values for BLOCK_16X16:
+        // libaom partition_context_lookup table values:
         //   BLOCK_16X16 (subsize=6): above=28, left=28
-        // (v1 walker only lands here with subsize=BLOCK_16X16.)
-        byte aboveVal = 28;
-        byte leftVal = 28;
-        int bw = 4; // BLOCK_16X16 mi width
-        int bh = 4;
+        //   BLOCK_8X8   (subsize=3): above=30, left=30
+        bool is16 = subsize == BsizeBlock16x16;
+        byte aboveVal = is16 ? (byte)28 : (byte)30;
+        byte leftVal = aboveVal;
+        int bw = is16 ? 4 : 2; // mi width
+        int bh = bw;
 
         for (int c = miCol; c < miCol + bw && c < p.FrameMiCols; c++)
             scratchByte[p.AbovePartOff + c] = aboveVal;

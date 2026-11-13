@@ -16,8 +16,11 @@
 //   - TypedArray  : browser. JS planes in via CopyFromJS, JS Uint8Array out; nothing enters the .NET heap.
 //   - ReadOnlyMemory<byte> : managed. Desktop and small inputs; a terminal CPU sink/source.
 //
-// V1 limits (named, not hidden): width and height must be multiples of 64 (boundary superblocks need the walker's
-// forced-split syntax: tracked as task #23); 8-bit 4:2:0; DC prediction only; no loop filter / CDEF / restoration.
+// Any picture size. Planes are tightly packed 4:2:0: luma width x height, chroma ((width + 1) / 2) x ((height + 1) / 2).
+// The coded size is each dimension rounded up to 8; blocks crossing the bottom / right edge use the AV1 edge partition
+// syntax and 8x8 leaves, and source pixels past the picture repeat its last column / row (see the kernel's header).
+//
+// V1 limits (named, not hidden): 8-bit 4:2:0; DC prediction only; no loop filter / CDEF / restoration.
 
 using System.Runtime.Versioning;
 using ILGPU;
@@ -44,6 +47,10 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
     private readonly MemoryBuffer1D<short, global::ILGPU.Stride1D.Dense> _dDcAcQuant;
     private readonly MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense> _blob;
     private readonly MemoryBuffer1D<int, global::ILGPU.Stride1D.Dense> _outLen;
+
+    // Recon readback (diagnostic entry points): crops the coded-size recon planes to the picture, on the accelerator.
+    private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long>? _packRecon;
+    private readonly StageBuffer<byte> _stageRecon;
 
     // Per-resolution cached buffers - reallocated only when (width,height) changes.
     private int _cachedWidth = -1;
@@ -94,24 +101,36 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         _stageV = new StageBuffer<byte>(accelerator);
         _stageOut = new StageBuffer<byte>(accelerator);
         _stageLens = new StageBuffer<int>(accelerator);
+        _stageRecon = new StageBuffer<byte>(accelerator);
     }
 
     // ------------------------------------------------------------------
     // Geometry
     // ------------------------------------------------------------------
 
+    /// <summary>Largest picture dimension: the AV1 frame size fields hold up to 16 bits.</summary>
+    public const int MaxDimension = 65536;
+
     private static void RequireSupportedSize(int width, int height)
     {
-        if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
-        if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
-        // Spec-compliant boundary forced-split at non-aligned dims (e.g. 1920x1080) is tracked as task #23.
-        if ((width & 63) != 0 || (height & 63) != 0)
-            throw new NotSupportedException(
-                $"AV1 v1 GPU encoder requires width and height to be multiples of 64; got {width}x{height}. " +
-                "Non-aligned support requires walker boundary forced-split work (tracked task #23).");
+        if (width <= 0 || width > MaxDimension) throw new ArgumentOutOfRangeException(nameof(width), $"width must be in [1, {MaxDimension}].");
+        if (height <= 0 || height > MaxDimension) throw new ArgumentOutOfRangeException(nameof(height), $"height must be in [1, {MaxDimension}].");
     }
 
-    private static long WorstCaseTile(int width, int height) => (long)(width >> 4) * (height >> 4) * 2048L + 256L;
+    /// <summary>Chroma plane width of a 4:2:0 picture <paramref name="width"/> wide: <c>(width + 1) / 2</c>.</summary>
+    public static int ChromaWidth(int width) => (width + 1) >> 1;
+
+    /// <summary>Chroma plane height of a 4:2:0 picture <paramref name="height"/> high: <c>(height + 1) / 2</c>.</summary>
+    public static int ChromaHeight(int height) => (height + 1) >> 1;
+
+    /// <summary>The coded size of a dimension: rounded up to a whole number of 8x8 blocks.</summary>
+    private static int Coded(int dimension) => (dimension + 7) & ~7;
+
+    /// <summary>Bytes of the recon planes (coded size, 4:2:0).</summary>
+    private static int ReconLength(int width, int height) => Coded(width) * Coded(height) * 3 / 2;
+
+    // 2048 bytes per 16x16 leaf slot (every 16x16 position of the superblock grid the picture touches).
+    private static long WorstCaseTile(int width, int height) => (long)((width + 15) >> 4) * ((height + 15) >> 4) * 2048L + 256L;
 
     /// <summary>
     /// Size in bytes of the output buffer one encoded keyframe needs for a <paramref name="width"/> x
@@ -128,9 +147,10 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         int width, int height, int baseQIndex, out int scratchByteLen, out int scratchIntLen, out int scratchShortLen)
     {
         int yLen = width * height;
-        int uvLen = yLen / 4;
+        int uvLen = ChromaWidth(width) * ChromaHeight(height);
         int frameMiCols = ((width + 7) >> 3) << 1;
         int frameMiRows = ((height + 7) >> 3) << 1;
+        int reconW = frameMiCols * 4, reconH = frameMiRows * 4;
         var p = new Av1FrameSeqEncodeParams
         {
             Width = width,
@@ -141,6 +161,12 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
             VPlaneOff = yLen + uvLen,
             FrameMiCols = frameMiCols,
             FrameMiRows = frameMiRows,
+            ChromaWidth = ChromaWidth(width),
+            ChromaHeight = ChromaHeight(height),
+            ReconWidth = reconW,
+            ReconHeight = reconH,
+            ReconUOff = reconW * reconH,
+            ReconVOff = reconW * reconH + (reconW >> 1) * (reconH >> 1),
         };
         int byteOff = 0;
         p.AboveEntropyOff = byteOff; byteOff += 3 * frameMiCols;
@@ -169,9 +195,10 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         if (baseQIndex <= 0 || baseQIndex > 255)
             throw new ArgumentOutOfRangeException(nameof(baseQIndex), "baseQIndex must be in [1, 255].");
         long yLen = (long)width * height;
+        long uvLen = (long)ChromaWidth(width) * ChromaHeight(height);
         if (y.Length < frames * yLen) throw new ArgumentException("yPlane too short.", nameof(y));
-        if (u.Length < frames * (yLen / 4)) throw new ArgumentException("uPlane too short.", nameof(u));
-        if (v.Length < frames * (yLen / 4)) throw new ArgumentException("vPlane too short.", nameof(v));
+        if (u.Length < frames * uvLen) throw new ArgumentException("uPlane too short.", nameof(u));
+        if (v.Length < frames * uvLen) throw new ArgumentException("vPlane too short.", nameof(v));
     }
 
     // ------------------------------------------------------------------
@@ -184,10 +211,10 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
     /// <see cref="GetMaxEncodedSize"/> bytes). Only the length scalar crosses to the host. Returns the length.
     /// </summary>
     /// <param name="yPlane">Luma plane, <c>width * height</c> bytes.</param>
-    /// <param name="uPlane">Cb plane, <c>width * height / 4</c> bytes.</param>
-    /// <param name="vPlane">Cr plane, <c>width * height / 4</c> bytes.</param>
-    /// <param name="width">Picture width, a multiple of 64.</param>
-    /// <param name="height">Picture height, a multiple of 64.</param>
+    /// <param name="uPlane">Cb plane, <c>ChromaWidth(width) * ChromaHeight(height)</c> bytes.</param>
+    /// <param name="vPlane">Cr plane, same size as <paramref name="uPlane"/>.</param>
+    /// <param name="width">Picture width, 1..<see cref="MaxDimension"/>.</param>
+    /// <param name="height">Picture height, 1..<see cref="MaxDimension"/>.</param>
     /// <param name="output">Receives the temporal unit.</param>
     /// <param name="baseQIndex">AV1 base quantizer index, 1..255.</param>
     public async Task<int> EncodeKeyFrameAsync(
@@ -232,11 +259,11 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         int width, int height, int baseQIndex)
     {
         int yLen = width * height;
-        int uvLen = yLen / 4;
+        int uvLen = ChromaWidth(width) * ChromaHeight(height);
         int srcLen = yLen + uvLen + uvLen;
         var p = BuildParams(width, height, baseQIndex, out int scratchByteLen, out int scratchIntLen, out int scratchShortLen);
         long worstCaseTile = WorstCaseTile(width, height);
-        EnsureBuffers(width, height, srcLen, worstCaseTile, scratchByteLen, scratchIntLen, scratchShortLen);
+        EnsureBuffers(width, height, srcLen, ReconLength(width, height), worstCaseTile, scratchByteLen, scratchIntLen, scratchShortLen);
 
         // Planes -> the walker's contiguous Y|U|V source, device to device.
         _dSrc!.View.SubView(0, yLen).CopyFrom(yPlane.SubView(0, yLen));
@@ -244,8 +271,8 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         _dSrc.View.SubView(yLen + uvLen, uvLen).CopyFrom(vPlane.SubView(0, uvLen));
 
         // Pre-zero output buffers per frame (kernel reads them as carry-back state; the walker zeroes its own
-        // scratchByte / scratchInt). Recon is fully
-        // overwritten per pixel so skip its zero-fill.
+        // scratchByte / scratchInt). Every recon pixel a block predicts from was written by an earlier block, so
+        // recon needs no zero-fill.
         _dTile!.View.MemSetToZero();
         _dTileLen!.View.MemSetToZero();
         _dScratchShort!.View.MemSetToZero();
@@ -266,11 +293,11 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
     /// buffers and tile slot). Only the per-frame lengths (written to <paramref name="lengths"/>) are produced.
     /// </summary>
     /// <param name="yPlanes">Frame-major tightly packed luma planes: frame f at <c>f * width * height</c>.</param>
-    /// <param name="uPlanes">Frame-major tightly packed Cb planes: frame f at <c>f * width * height / 4</c>.</param>
+    /// <param name="uPlanes">Frame-major tightly packed Cb planes: frame f at <c>f * ChromaWidth(width) * ChromaHeight(height)</c>.</param>
     /// <param name="vPlanes">Frame-major tightly packed Cr planes, same layout as <paramref name="uPlanes"/>.</param>
     /// <param name="frameCount">Number of frames.</param>
-    /// <param name="width">Picture width, a multiple of 64.</param>
-    /// <param name="height">Picture height, a multiple of 64.</param>
+    /// <param name="width">Picture width, 1..<see cref="MaxDimension"/>.</param>
+    /// <param name="height">Picture height, 1..<see cref="MaxDimension"/>.</param>
     /// <param name="outputs">Frame f's temporal unit is written at <c>f * GetMaxEncodedSize(width, height)</c>.</param>
     /// <param name="lengths">Receives each frame's length; at least <paramref name="frameCount"/> ints.</param>
     /// <param name="baseQIndex">AV1 base quantizer index, 1..255.</param>
@@ -291,14 +318,15 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         if (lengths.Length < frameCount) throw new ArgumentException("lengths must hold frameCount ints.", nameof(lengths));
 
         int yLen = width * height;
-        int uvLen = yLen / 4;
+        int uvLen = ChromaWidth(width) * ChromaHeight(height);
         int srcLen = yLen + uvLen + uvLen;
+        int reconLen = ReconLength(width, height);
         var p = BuildParams(width, height, baseQIndex, out int scratchByteLen, out int scratchIntLen, out int scratchShortLen);
         int worstCaseTile = checked((int)WorstCaseTile(width, height));
 
         // Per-frame slot buffers.
         using var dAllSrc = _accelerator.Allocate1D<byte>((long)frameCount * srcLen);
-        using var dAllRecon = _accelerator.Allocate1D<byte>((long)frameCount * srcLen);
+        using var dAllRecon = _accelerator.Allocate1D<byte>((long)frameCount * reconLen);
         using var dAllTile = _accelerator.Allocate1D<byte>((long)frameCount * worstCaseTile);
         using var dAllTileLen = _accelerator.Allocate1D<long>(frameCount);
         using var dAllScratchByte = _accelerator.Allocate1D<byte>((long)frameCount * scratchByteLen);
@@ -321,7 +349,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         var strides = new Av1FrameBatchStrides
         {
             SrcStride = srcLen,
-            ReconStride = srcLen,
+            ReconStride = reconLen,
             TileStride = worstCaseTile,
             ScratchByteStride = scratchByteLen,
             ScratchIntStride = scratchIntLen,
@@ -364,12 +392,11 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
     private void StagePlanes(ReadOnlyMemory<byte> y, ReadOnlyMemory<byte> u, ReadOnlyMemory<byte> v, int width, int height)
     {
         RequireSupportedSize(width, height);
-        long yLen = (long)width * height;
+        int cw = ChromaWidth(width), ch = ChromaHeight(height);
         DeviceTransfer.UploadPlane(_stageY, y, width, width, height, nameof(y));
-        DeviceTransfer.UploadPlane(_stageU, u, width / 2, width / 2, height / 2, nameof(u));
-        DeviceTransfer.UploadPlane(_stageV, v, width / 2, width / 2, height / 2, nameof(v));
+        DeviceTransfer.UploadPlane(_stageU, u, cw, cw, ch, nameof(u));
+        DeviceTransfer.UploadPlane(_stageV, v, cw, cw, ch, nameof(v));
         _stageOut.Ensure(GetMaxEncodedSize(width, height));
-        _ = yLen;
     }
 
     /// <summary>
@@ -413,11 +440,36 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         int baseQIndex = 32)
     {
         var tile = await EncodeSingleTileAsync(yPlane, uPlane, vPlane, width, height, baseQIndex);
-        int yLen = width * height, uvLen = yLen / 4;
-        var y = await DeviceTransfer.DownloadAsync(_dRecon!.View.SubView(0, yLen), yLen);
-        var u = await DeviceTransfer.DownloadAsync(_dRecon.View.SubView(yLen, uvLen), uvLen);
-        var v = await DeviceTransfer.DownloadAsync(_dRecon.View.SubView(yLen + uvLen, uvLen), uvLen);
+        var (y, u, v) = await ReadReconPlanesAsync(width, height);
         return (tile, y, u, v);
+    }
+
+    /// <summary>
+    /// The reconstruction of the last single-frame encode, cropped to the picture: one tight I420 buffer (Y
+    /// <c>width * height</c>, then Cb, then Cr at <c>ChromaWidth * ChromaHeight</c> each) - what a decoder shows for
+    /// that keyframe. The crop runs on the accelerator; the result is a managed array (a diagnostic / test sink).
+    /// </summary>
+    public async Task<byte[]> ReadReconAsync()
+    {
+        if (_dRecon == null || _cachedWidth <= 0) throw new InvalidOperationException("No frame has been encoded.");
+        int width = _cachedWidth, height = _cachedHeight;
+        int cw = ChromaWidth(width), ch = ChromaHeight(height);
+        int reconW = Coded(width), reconH = Coded(height);
+        int total = width * height + 2 * cw * ch;
+        _stageRecon.Ensure(total);
+        _packRecon ??= await _accelerator.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>,
+            int, int, int, int, int, int, long, long, long>(Vp9.Decoder.Vp9OutputKernels.PackPlanesKernel);
+        long uOff = (long)reconW * reconH;
+        _packRecon(total, _dRecon.View, _stageRecon.View, width, height, cw, ch, reconW, reconW >> 1,
+            0L, uOff, uOff + (long)(reconW >> 1) * (reconH >> 1));
+        return await DeviceTransfer.DownloadAsync(_stageRecon.View, total);
+    }
+
+    private async Task<(byte[] y, byte[] u, byte[] v)> ReadReconPlanesAsync(int width, int height)
+    {
+        byte[] i420 = await ReadReconAsync();
+        int yLen = width * height, uvLen = ChromaWidth(width) * ChromaHeight(height);
+        return (i420.AsSpan(0, yLen).ToArray(), i420.AsSpan(yLen, uvLen).ToArray(), i420.AsSpan(yLen + uvLen, uvLen).ToArray());
     }
 
     /// <summary>
@@ -434,10 +486,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         StagePlanes(yPlane, uPlane, vPlane, width, height);
         int n = await EncodeKeyFrameAsync(_stageY.View, _stageU.View, _stageV.View, width, height, _stageOut.View, baseQIndex);
         var bytes = await DeviceTransfer.DownloadAsync(_stageOut.View, n);
-        int yLen = width * height, uvLen = yLen / 4;
-        var y = await DeviceTransfer.DownloadAsync(_dRecon!.View.SubView(0, yLen), yLen);
-        var u = await DeviceTransfer.DownloadAsync(_dRecon.View.SubView(yLen, uvLen), uvLen);
-        var v = await DeviceTransfer.DownloadAsync(_dRecon.View.SubView(yLen + uvLen, uvLen), uvLen);
+        var (y, u, v) = await ReadReconPlanesAsync(width, height);
         return (bytes, y, u, v);
     }
 
@@ -468,7 +517,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         RequireSupportedSize(width, height);
 
         long yPlane = (long)width * height;
-        long uvPlane = yPlane / 4;
+        long uvPlane = (long)ChromaWidth(width) * ChromaHeight(height);
         int cap = GetMaxEncodedSize(width, height);
         _stageY.Ensure(frameCount * yPlane);
         _stageU.Ensure(frameCount * uvPlane);
@@ -545,7 +594,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         RequireSupportedSize(width, height);
 
         long yPlane = (long)width * height;
-        long uvPlane = yPlane / 4;
+        long uvPlane = (long)ChromaWidth(width) * ChromaHeight(height);
         int cap = GetMaxEncodedSize(width, height);
         _stageY.Ensure(frameCount * yPlane);
         _stageU.Ensure(frameCount * uvPlane);
@@ -574,7 +623,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
     // ------------------------------------------------------------------
 
     /// <summary>Ensure per-frame GPU buffers are sized for (width,height). Reallocates only when the resolution changes.</summary>
-    private void EnsureBuffers(int width, int height, int srcLen, long worstCaseTile,
+    private void EnsureBuffers(int width, int height, int srcLen, int reconLen, long worstCaseTile,
         int scratchByteLen, int scratchIntLen, int scratchShortLen)
     {
         if (_cachedWidth == width && _cachedHeight == height) return;
@@ -582,7 +631,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         _cachedWidth = width;
         _cachedHeight = height;
         _dSrc = _accelerator.Allocate1D<byte>(srcLen);
-        _dRecon = _accelerator.Allocate1D<byte>(srcLen);
+        _dRecon = _accelerator.Allocate1D<byte>(reconLen);
         _dTile = _accelerator.Allocate1D<byte>(worstCaseTile);
         _dTileLen = _accelerator.Allocate1D<long>(1);
         _dScratchByte = _accelerator.Allocate1D<byte>(scratchByteLen);
@@ -619,5 +668,6 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         _stageV.Dispose();
         _stageOut.Dispose();
         _stageLens.Dispose();
+        _stageRecon.Dispose();
     }
 }

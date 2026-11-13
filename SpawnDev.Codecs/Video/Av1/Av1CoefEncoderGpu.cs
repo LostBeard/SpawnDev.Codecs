@@ -4,8 +4,9 @@
 // of Av1CoefEncoder.WriteCoeffsTxb (libaom av1_write_coeffs_txb port).
 //
 // Scope (matches Av1KeyframeEncoder v1 use cases):
-//   - Tx8x8 + DCT_DCT (chroma)
-//   - Tx16x16 + DCT_DCT (luma)
+//   - Tx16x16 + DCT_DCT (luma of a 16x16 block)
+//   - Tx8x8 + DCT_DCT (chroma of a 16x16 block; luma of an 8x8 block at the picture edge)
+//   - Tx4x4 + DCT_DCT (chroma of an 8x8 block at the picture edge; CHROMA ONLY: no Tx4x4 tx_type row is packed)
 //   - Plane 0 = Y, planes 1/2 = UV
 //   - DC_PRED only (intraMode = Av1IntraMode.Dc)
 //   - reducedTxSet = false
@@ -52,7 +53,7 @@ public static class Av1CoefEncoderGpu
     /// bytes per concurrent block); contents replaced.</param>
     /// <param name="levelsBase">Starting offset within
     /// <paramref name="levelsBuf"/> for this block's scratch.</param>
-    /// <param name="txSize">Tx size: pass (int)Av1TxSize.Tx8x8 = 1 or
+    /// <param name="txSize">Tx size: (int)Av1TxSize.Tx4x4 = 0 (chroma planes only), (int)Av1TxSize.Tx8x8 = 1 or
     /// (int)Av1TxSize.Tx16x16 = 2.</param>
     /// <param name="plane">0 = Y, 1 = U, 2 = V.</param>
     /// <param name="qctx">Quantizer-bin index (0..3).</param>
@@ -75,17 +76,22 @@ public static class Av1CoefEncoderGpu
         ArrayView<int> eobOut, ArrayView<int> culLevelOut, int blockIdx)
     {
         int planeType = plane == 0 ? 0 : 1;
-        int txsLocal = txSize == 1 ? 0 : 1; // Tx8x8 -> 0, Tx16x16 -> 1.
-        int width = txSize == 1 ? 8 : 16;
-        int height = txSize == 1 ? 8 : 16;
-        int bhl = txSize == 1 ? 3 : 4;
+        // Tx4x4 (libaom txs_ctx 0) has its own tables in the constants buffer; Tx8x8 / Tx16x16 share tables with a
+        // local size index.
+        bool tx4 = txSize == 0;
+        int txsLocal = txSize == 2 ? 1 : 0; // Tx8x8 -> 0, Tx16x16 -> 1 (unused for Tx4x4).
+        int width = tx4 ? 4 : (txSize == 1 ? 8 : 16);
+        int height = width;
+        int bhl = tx4 ? 2 : (txSize == 1 ? 3 : 4);
         int outW = width;
         int outH = height;
+        int qPlane = qctx * Av1KeyframeConstantsGpu.PlaneTypes + planeType;                    // Tx4x4 table row
+        int qTxPlane = (qctx * 2 + txsLocal) * Av1KeyframeConstantsGpu.PlaneTypes + planeType; // Tx8x8 / Tx16x16 table row
 
         // Scan offset in the packed buffer.
-        int scanOffset = txSize == 1
-            ? Av1KeyframeConstantsGpu.Scan8x8Offset
-            : Av1KeyframeConstantsGpu.Scan16x16Offset;
+        int scanOffset = tx4
+            ? Av1KeyframeConstantsGpu.Scan4x4Offset
+            : (txSize == 1 ? Av1KeyframeConstantsGpu.Scan8x8Offset : Av1KeyframeConstantsGpu.Scan16x16Offset);
         int nCoefs = width * height;
 
         // ---- Compute EOB by walking the scan in reverse. ----
@@ -94,8 +100,11 @@ public static class Av1CoefEncoderGpu
 
         // ---- Step 1: txb_skip - one bin. ----
         int allZero = eob == 0 ? 1 : 0;
-        long skipCdfBase = Av1KeyframeConstantsGpu.TxbSkipCdfOffset
-            + ((long)((qctx * 2 + txsLocal) * Av1KeyframeConstantsGpu.TxbSkipContexts + txbSkipCtx)) * 3;
+        long skipCdfBase = tx4
+            ? Av1KeyframeConstantsGpu.TxbSkipCdfTx4x4Offset
+                + ((long)(qctx * Av1KeyframeConstantsGpu.TxbSkipContexts + txbSkipCtx)) * 3
+            : Av1KeyframeConstantsGpu.TxbSkipCdfOffset
+                + ((long)((qctx * 2 + txsLocal) * Av1KeyframeConstantsGpu.TxbSkipContexts + txbSkipCtx)) * 3;
         Av1RangeEncoderGpu.EncodeCdfQ15(ref re, outBuf, allZero, constsUshort, skipCdfBase, 2);
 
         if (eob == 0)
@@ -122,7 +131,7 @@ public static class Av1CoefEncoderGpu
 
         // ---- Step 3: eob_pt classification. ----
         int eobPt = GetEobPosToken(eob, constsByte, out int eobExtra);
-        int eobMultiSize = txSize == 1 ? 2 : 4; // libaom TxSizeLog2Minus4 - 8x8=2, 16x16=4.
+        int eobMultiSize = tx4 ? 0 : (txSize == 1 ? 2 : 4); // libaom TxSizeLog2Minus4 - 4x4=0, 8x8=2, 16x16=4.
         int eobMultiCtx = (txClass == Av1TxbCommonGpu.TxClass2d) ? 0 : 1;
         WriteEobMulti(ref re, outBuf, constsUshort, eobMultiSize, planeType, eobMultiCtx, eobPt, qctx);
 
@@ -131,9 +140,11 @@ public static class Av1CoefEncoderGpu
         if (eobOffsetBits > 0)
         {
             int eobCtx = eobPt - 3;
-            long extraCdfBase = Av1KeyframeConstantsGpu.EobExtraCdfOffset
-                + ((long)(((qctx * 2 + txsLocal) * Av1KeyframeConstantsGpu.PlaneTypes + planeType)
-                    * Av1KeyframeConstantsGpu.EobCoefContexts + eobCtx)) * 3;
+            long extraCdfBase = tx4
+                ? Av1KeyframeConstantsGpu.EobExtraCdfTx4x4Offset
+                    + ((long)(qPlane * Av1KeyframeConstantsGpu.EobCoefContexts + eobCtx)) * 3
+                : Av1KeyframeConstantsGpu.EobExtraCdfOffset
+                    + ((long)(qTxPlane * Av1KeyframeConstantsGpu.EobCoefContexts + eobCtx)) * 3;
             int shift = eobOffsetBits - 1;
             int firstBit = (eobExtra >> shift) & 1;
             Av1RangeEncoderGpu.EncodeCdfQ15(ref re, outBuf, firstBit, constsUshort, extraCdfBase, 2);
@@ -151,9 +162,9 @@ public static class Av1CoefEncoderGpu
         int levelsOff = Av1TxbCommonGpu.SetLevelsOffset(height);
 
         // NzMapCtxOffset table for this tx size (used by GetLowerLevelsCtx2d).
-        long nzMapCtxOffsetBase = txSize == 1
-            ? Av1KeyframeConstantsGpu.NzMapCtxOffset8x8Offset
-            : Av1KeyframeConstantsGpu.NzMapCtxOffset16x16Offset;
+        long nzMapCtxOffsetBase = tx4
+            ? Av1KeyframeConstantsGpu.NzMapCtxOffset4x4Offset
+            : (txSize == 1 ? Av1KeyframeConstantsGpu.NzMapCtxOffset8x8Offset : Av1KeyframeConstantsGpu.NzMapCtxOffset16x16Offset);
 
         // ---- Step 5+6: write base CDFs in REVERSE scan order. ----
         for (int c = eob - 1; c >= 0; c--)
@@ -167,9 +178,11 @@ public static class Av1CoefEncoderGpu
             {
                 // EOB position: 3-sym CDF (coeff_base_eob).
                 coefCtx = Av1TxbCommonGpu.GetLowerLevelsCtxEob(bhl, width, c);
-                long baseEobCdfBase = Av1KeyframeConstantsGpu.CoeffBaseEobMultiCdfOffset
-                    + ((long)(((qctx * 2 + txsLocal) * Av1KeyframeConstantsGpu.PlaneTypes + planeType)
-                        * Av1KeyframeConstantsGpu.SigCoefContextsEob + coefCtx)) * 4;
+                long baseEobCdfBase = tx4
+                    ? Av1KeyframeConstantsGpu.CoeffBaseEobMultiCdfTx4x4Offset
+                        + ((long)(qPlane * Av1KeyframeConstantsGpu.SigCoefContextsEob + coefCtx)) * 4
+                    : Av1KeyframeConstantsGpu.CoeffBaseEobMultiCdfOffset
+                        + ((long)(qTxPlane * Av1KeyframeConstantsGpu.SigCoefContextsEob + coefCtx)) * 4;
                 int sym = level - 1;
                 if (sym > 2) sym = 2;
                 Av1RangeEncoderGpu.EncodeCdfQ15(ref re, outBuf, sym, constsUshort, baseEobCdfBase, 3);
@@ -184,9 +197,11 @@ public static class Av1CoefEncoderGpu
                     ? Av1TxbCommonGpu.GetLowerLevelsCtxEob(bhl, width, 0)
                     : Av1TxbCommonGpu.GetLowerLevelsCtx2d(levelsBuf, levelsBase,
                         pos, bhl, constsByte, nzMapCtxOffsetBase);
-                long baseCdfBase = Av1KeyframeConstantsGpu.CoeffBaseMultiCdfOffset
-                    + ((long)(((qctx * 2 + txsLocal) * Av1KeyframeConstantsGpu.PlaneTypes + planeType)
-                        * Av1KeyframeConstantsGpu.SigCoefContexts + coefCtx)) * 5;
+                long baseCdfBase = tx4
+                    ? Av1KeyframeConstantsGpu.CoeffBaseMultiCdfTx4x4Offset
+                        + ((long)(qPlane * Av1KeyframeConstantsGpu.SigCoefContexts + coefCtx)) * 5
+                    : Av1KeyframeConstantsGpu.CoeffBaseMultiCdfOffset
+                        + ((long)(qTxPlane * Av1KeyframeConstantsGpu.SigCoefContexts + coefCtx)) * 5;
                 int sym = level;
                 if (sym > 3) sym = 3;
                 Av1RangeEncoderGpu.EncodeCdfQ15(ref re, outBuf, sym, constsUshort, baseCdfBase, 4);
@@ -200,10 +215,12 @@ public static class Av1CoefEncoderGpu
                 int brCtx = (c == eob - 1)
                     ? Av1TxbCommonGpu.GetBrCtxEob(pos, bhl, txClass)
                     : Av1TxbCommonGpu.GetBrCtx(levelsBuf, levelsBase, pos, bhl, txClass);
-                int lpsTxsLocal = txsLocal; // both 0 (Tx8x8) and 1 (Tx16x16) are below the libaom min(txsCtx, 3) cap.
-                long brCdfBase = Av1KeyframeConstantsGpu.CoeffLpsMultiCdfOffset
-                    + ((long)(((qctx * 2 + lpsTxsLocal) * Av1KeyframeConstantsGpu.PlaneTypes + planeType)
-                        * Av1KeyframeConstantsGpu.LevelContexts + brCtx)) * (Av1TxbCommonGpu.BrCdfSize + 1);
+                // Tx4x4, Tx8x8 and Tx16x16 are all below the libaom min(txsCtx, 3) cap.
+                long brCdfBase = tx4
+                    ? Av1KeyframeConstantsGpu.CoeffLpsMultiCdfTx4x4Offset
+                        + ((long)(qPlane * Av1KeyframeConstantsGpu.LevelContexts + brCtx)) * (Av1TxbCommonGpu.BrCdfSize + 1)
+                    : Av1KeyframeConstantsGpu.CoeffLpsMultiCdfOffset
+                        + ((long)(qTxPlane * Av1KeyframeConstantsGpu.LevelContexts + brCtx)) * (Av1TxbCommonGpu.BrCdfSize + 1);
                 for (int idx = 0; idx < Av1TxbCommonGpu.CoeffBaseRange; idx += Av1TxbCommonGpu.BrCdfSize - 1)
                 {
                     int k = baseRange - idx;
@@ -360,7 +377,14 @@ public static class Av1CoefEncoderGpu
         int eobMultiSize, int planeType, int eobMultiCtx, int eobPt, int qctx)
     {
         int sym = eobPt - 1;
-        if (eobMultiSize == 2)
+        if (eobMultiSize == 0)
+        {
+            // 16 (Tx4x4) - 5 syms.
+            long cdfBase = Av1KeyframeConstantsGpu.EobMulti16CdfOffset
+                + ((long)((qctx * Av1KeyframeConstantsGpu.PlaneTypes + planeType) * 2 + eobMultiCtx)) * 6;
+            Av1RangeEncoderGpu.EncodeCdfQ15(ref re, outBuf, sym, constsUshort, cdfBase, 5);
+        }
+        else if (eobMultiSize == 2)
         {
             // 64 (Tx8x8) - 7 syms.
             long cdfBase = Av1KeyframeConstantsGpu.EobMulti64CdfOffset
@@ -374,8 +398,8 @@ public static class Av1CoefEncoderGpu
                 + ((long)((qctx * Av1KeyframeConstantsGpu.PlaneTypes + planeType) * 2 + eobMultiCtx)) * 10;
             Av1RangeEncoderGpu.EncodeCdfQ15(ref re, outBuf, sym, constsUshort, cdfBase, 9);
         }
-        // eobMultiSize 0/1/3/5/6 unused in v1 (Tx16/Tx32 chroma + Tx32+
-        // Tx64 luma not produced by Av1KeyframeEncoder.EncodeSingleTile).
+        // eobMultiSize 1/3/5/6 unused (rectangular sizes and Tx32 / Tx64 are not produced by
+        // Av1KeyframeEncoder.EncodeSingleTile).
     }
 
     private static void WriteGolomb(

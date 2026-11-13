@@ -213,9 +213,28 @@ public abstract partial class CodecsTestBase
             + ((3 * Av1KeyframeConstantsGpu.PlaneTypes + 0) * Av1KeyframeConstantsGpu.LevelContexts + 10) * rowSize + 1;
         Equal(srcLps4, ushortBuf[dstLps4], "CoeffLpsMultiCdf[Tx4x4] sentinel");
 
+        // Picture-edge partition CDFs: P(SPLIT) of split_or_horz / split_or_vert, recomputed here from the partition
+        // row as sums of symbol probabilities (probability of symbol s = icdf[s - 1] - icdf[s], icdf[-1] = 32768).
+        // Context 9 = 32x32 block, left context set, above clear; context 15 = 64x64, both set.
+        foreach (int pc in new[] { 4, 9, 15 })
+        {
+            var row = Av1DefaultPartitionCdfs.DefaultPartitionCdf[pc];
+            int Prob(int sym) => (sym > 0 ? row[sym - 1] : 32768) - row[sym];
+            // VERT 2, SPLIT 3, HORZ_A 4, VERT_A 6, VERT_B 7, VERT_4 9
+            int splitOrHorz = Prob(2) + Prob(3) + Prob(4) + Prob(6) + Prob(7) + Prob(9);
+            // HORZ 1, SPLIT 3, HORZ_A 4, HORZ_B 5, VERT_A 6, HORZ_4 8
+            int splitOrVert = Prob(1) + Prob(3) + Prob(4) + Prob(5) + Prob(6) + Prob(8);
+            True(splitOrHorz > 0 && splitOrHorz < 32768 && splitOrVert > 0 && splitOrVert < 32768,
+                $"edge partition probabilities of context {pc} must be inside (0, 32768): {splitOrHorz}, {splitOrVert}");
+            Equal((ushort)splitOrHorz, ushortBuf[Av1KeyframeConstantsGpu.PartitionSplitOrHorzCdfOffset + pc * 3], $"split_or_horz CDF, context {pc}");
+            Equal((ushort)0, ushortBuf[Av1KeyframeConstantsGpu.PartitionSplitOrHorzCdfOffset + pc * 3 + 1], $"split_or_horz CDF terminator, context {pc}");
+            Equal((ushort)splitOrVert, ushortBuf[Av1KeyframeConstantsGpu.PartitionSplitOrVertCdfOffset + pc * 3], $"split_or_vert CDF, context {pc}");
+            Equal((ushort)0, ushortBuf[Av1KeyframeConstantsGpu.PartitionSplitOrVertCdfOffset + pc * 3 + 1], $"split_or_vert CDF terminator, context {pc}");
+        }
+
         // Smoke: total buffer sizes still match the offset-chain math.
         Equal(
-            Av1KeyframeConstantsGpu.CoeffLpsMultiCdfTx4x4Offset + Av1KeyframeConstantsGpu.CoeffLpsMultiCdfTx4x4Length,
+            Av1KeyframeConstantsGpu.PartitionSplitOrVertCdfOffset + Av1KeyframeConstantsGpu.PartitionEdgeCdfLength,
             Av1KeyframeConstantsGpu.UshortConstsTotalEntries,
             "ushort total math");
         Equal(

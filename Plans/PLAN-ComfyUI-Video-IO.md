@@ -49,4 +49,11 @@ ffmpeg / ffprobe tools as a black box is fine.
    CUDA blocked on an ILGPU bug (`(byte)(int)float` >= 128 gives 127 on CUDA; reported to Data with a repro).
 5. [x] **VP9 encoder task #23**: the right-edge partition (PARTITION_VERT 8x16 leaf, and the corner), so widths rounding
    up to an odd number of 8-pixel columns encode (2026-11-12). Found by the fidelity test, verified by it.
-6. [ ] **AV1 encoder: sizes that are not multiples of 64** (edge superblocks).
+6. [ ] **AV1 encoder: sizes that are not multiples of 64** (edge superblocks). `Av1KeyframeEncoderGpu` takes any
+   size since 2026-11-12 (Data): edge partition syntax, 8x8 leaves where a 16x16 crosses the edge, source repetition
+   past the picture; details in `Plans/AV1-GPU-encoder-architecture.md`.
+   - [x] Kernel + CPU reference; FFmpeg (libdav1d) decodes the temporal unit to the encoder's reconstruction byte for
+     byte at 12 sizes (832x480, 70x50, 200x9, 17x33, 1x1 ...); CPU accelerator 293 / 0, Velocity 17 / 0; red-checked.
+   - [ ] CUDA, OpenCL, WebGPU lanes of the `Av1KeyframeEncoderGpu_AnySize_*` tests.
+   - [ ] `VideoFileEncoderGpu`: remove the AV1 size guard and add the file-level test (Geordi).
+   - [ ] `Av1KeyframeDecoderGpu` still takes multiples of 64 only (not needed by the encoder path).

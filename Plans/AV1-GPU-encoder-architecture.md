@@ -4,7 +4,38 @@
 100% on ILGPU; bit-exact vs CPU `Av1KeyframeEncoder.EncodeSingleTile`
 across CUDA + OpenCL + CPU. Round-trips with companion GPU decoder.
 
-**Status 2026-05-04:** AV1 GPU encoder strictly requires width AND height
+**Status 2026-11-12: the encoder takes any picture size** (the 2026-05-04 plan below is done, with one difference:
+the leaves at the edge are 8x8, not rectangular). What it does at the bottom / right edge:
+
+- Coded size = each dimension rounded up to 8 (`MiCols` / `MiRows` are even). Tight 4:2:0 input planes: luma
+  `width x height`, chroma `((width + 1) / 2) x ((height + 1) / 2)`.
+- A block the walker splits (64x64, 32x32, and a 16x16 that crosses the edge) codes the AV1 edge syntax (spec
+  5.11.4): the full partition symbol when its lower and right halves both start inside the picture,
+  `split_or_horz` / `split_or_vert` (SPLIT = 1) when one of them is outside, nothing when both are. The two
+  2-symbol CDFs per partition context are derived on the host from the partition CDF rows (libaom
+  `partition_gather_vert_alike` / `partition_gather_horz_alike`) and appended to the ushort constants
+  (`PartitionSplitOrHorzCdfOffset`, `PartitionSplitOrVertCdfOffset`).
+- A 16x16 crossing the edge cannot be `PARTITION_NONE`; it splits into `BLOCK_8X8` leaves (always whole, because
+  the coded size is a multiple of 8): luma TX_8X8, chroma TX_4X4 (the Tx4x4 tables prepared in d75c0bc1).
+  Rectangular leaves (16x8 / 8x16) would need the rectangular transforms and their scans; 8x8 leaves reuse what
+  exists and cost a few bits on one row / column of blocks.
+- Source pixels past the picture (up to 7 columns / rows) repeat its last column / row (a clamp in the residual
+  loop, no padded copy). Reconstruction planes have the coded size; `ReadReconAsync` crops them to the picture
+  on the accelerator.
+- Coefficient contexts of chroma are kept at luma-mi positions, both mi of every chroma 4x4 unit written. With
+  16x16 leaves only, writing and reading just the first half gave the same contexts; an 8x8 leaf under the right
+  half of a 16x16 reads the second half (red-checked: the old layout decodes to garbage at 72x40, 70x50, 17x33).
+- Shader size: the leaf pipeline has ONE call site and three `EncodePlane` sites with constant transform sizes
+  (16: luma of a 16x16; 8: chroma of a 16x16 and luma of an 8x8; 4: chroma of an 8x8). Fully inlined WGSL
+  43,065 -> 46,123 lines (a first version with a separate edge-leaf path was 61,833).
+- Oracles: FFmpeg (libdav1d) decodes the temporal unit to the encoder's reconstruction byte for byte
+  (`Av1KeyframeEncoderGpu_AnySize_FfmpegDecodesWhatTheEncoderReconstructs`, desktop lanes), the kernel's bytes
+  equal the CPU reference's (`..._AnySize_MatchesCpuReference`, every lane that runs serial stream kernels), and
+  the CPU reference itself decodes in FFmpeg (`Av1KeyframeEncoder_AnySize_FfmpegDecodesThePicture`).
+  Run so far (2026-11-12): CPU accelerator and Velocity green; CUDA, OpenCL and WebGPU not run yet.
+- NOT done: the GPU decoder (`Av1KeyframeDecoderGpu`) still takes multiples of 64 only.
+
+**Status 2026-05-04 (superseded by the above):** AV1 GPU encoder strictly requires width AND height
 to be multiples of 64. Non-aligned dim support (e.g. FHD 1920x1080) is the
 next major item - VP9 just shipped its boundary forced-split (2026-05-04
 walker + sequential encode work at `Vp9FrameEntropyKernel` +
@@ -137,9 +168,9 @@ flat byte arrays from the existing `Av1Default*Cdfs` tables.
 
 Mirrors `Av1KeyframeEncoder.cs`:
 - Profile 0 (8-bit 4:2:0).
-- Width + height multiples of 64 (no forced-split edge cases at SB level).
-- DC_PRED only, all leaves BLOCK_16X16.
-- TX_16X16 for Y, TX_8X8 for UV.
+- Any width and height (edge handling: see the 2026-11-12 status at the top).
+- DC_PRED only; leaves BLOCK_16X16, BLOCK_8X8 where a 16x16 crosses the picture edge.
+- TX_16X16 for Y, TX_8X8 for UV (8x8 leaves: TX_8X8 for Y, TX_4X4 for UV).
 - DCT_DCT only.
 - `tx_mode = LARGEST`, `reduced_tx_set = 1`.
 - Single tile (no per-tile size prefix).

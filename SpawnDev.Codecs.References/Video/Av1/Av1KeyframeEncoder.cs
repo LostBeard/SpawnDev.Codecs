@@ -1,13 +1,15 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
 // AV1 keyframe encoder. v1 minimal-but-correct emit path that produces a
-// decodable AV1 keyframe bitstream for our 16x16-aligned test frames.
+// decodable AV1 keyframe bitstream for a picture of any size.
 //
 // v1 simplifications (mirrors Vp9KeyframeEncoder shape):
-//   - Profile 0 (8-bit 4:2:0)
-//   - Width and height multiples of 16
+//   - Profile 0 (8-bit 4:2:0); chroma planes are ((width + 1) / 2) x ((height + 1) / 2)
 //   - Every BLOCK_16X16 uses Y intra mode = DC_PRED, transform = TX_16X16 + DCT_DCT
 //   - Every chroma block uses UV intra mode = DC_PRED, transform = TX_8X8 + DCT_DCT
+//   - A 16x16 that crosses the bottom / right edge of the picture is split into BLOCK_8X8 leaves (Y TX_8X8,
+//     chroma TX_4X4); the coded size is each dimension rounded up to 8, and source pixels past the picture
+//     repeat its last column / row
 //   - tx_mode = LARGEST (no per-block tx_size signaling)
 //   - Single tile (Log2NumTiles = 0)
 //   - 64x64 superblocks (Use128x128Superblock = false)
@@ -49,11 +51,11 @@ public static class Av1KeyframeEncoder
     /// </summary>
     /// <param name="ySrc">Y plane bytes, length = ySrcStride * height.</param>
     /// <param name="ySrcStride">Y plane row stride in bytes (&gt;= width).</param>
-    /// <param name="uSrc">U plane bytes (length &gt;= uvSrcStride * height/2).</param>
-    /// <param name="uvSrcStride">UV plane row stride in bytes (&gt;= width/2).</param>
-    /// <param name="vSrc">V plane bytes (length &gt;= uvSrcStride * height/2).</param>
-    /// <param name="width">Frame width in pixels (multiple of 16 for v1).</param>
-    /// <param name="height">Frame height in pixels (multiple of 16 for v1).</param>
+    /// <param name="uSrc">U plane bytes (length &gt;= uvSrcStride * ((height + 1) / 2)).</param>
+    /// <param name="uvSrcStride">UV plane row stride in bytes (&gt;= (width + 1) / 2).</param>
+    /// <param name="vSrc">V plane bytes (length &gt;= uvSrcStride * ((height + 1) / 2)).</param>
+    /// <param name="width">Frame width in pixels.</param>
+    /// <param name="height">Frame height in pixels.</param>
     /// <param name="baseQIndex">Base quantizer index 1..255 (lower = higher quality).</param>
     public static byte[] EncodeKeyFrame(
         ReadOnlySpan<byte> ySrc, int ySrcStride,
@@ -64,8 +66,6 @@ public static class Av1KeyframeEncoder
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
-        if ((width & 15) != 0 || (height & 15) != 0)
-            throw new ArgumentException("Width and height must be multiples of 16 (v1)");
         if (baseQIndex < 1 || baseQIndex > 255)
             throw new ArgumentOutOfRangeException(nameof(baseQIndex),
                 "baseQIndex must be in [1, 255]; lossless not supported in v1.");
@@ -172,10 +172,16 @@ public static class Av1KeyframeEncoder
         public byte[] ReconY = null!;
         public byte[] ReconU = null!;
         public byte[] ReconV = null!;
+        // Recon plane sizes = the CODED size (each picture dimension rounded up to 8).
         public int LumaW;
         public int LumaH;
         public int ChromaW;
         public int ChromaH;
+        // Source plane sizes (the picture); a block past them reads the last column / row.
+        public int SrcLumaW;
+        public int SrcLumaH;
+        public int SrcChromaW;
+        public int SrcChromaH;
     }
 
     /// <summary>
@@ -204,13 +210,17 @@ public static class Av1KeyframeEncoder
             AboveSkip = new bool[frameMiCols],
             LeftYMode = new Av1IntraMode[Av1PartitionContext.MaxMibSize],
             LeftSkip = new bool[Av1PartitionContext.MaxMibSize],
-            ReconY = new byte[width * height],
-            ReconU = new byte[(width / 2) * (height / 2)],
-            ReconV = new byte[(width / 2) * (height / 2)],
-            LumaW = width,
-            LumaH = height,
-            ChromaW = width / 2,
-            ChromaH = height / 2,
+            ReconY = new byte[(frameMiCols * 4) * (frameMiRows * 4)],
+            ReconU = new byte[(frameMiCols * 2) * (frameMiRows * 2)],
+            ReconV = new byte[(frameMiCols * 2) * (frameMiRows * 2)],
+            LumaW = frameMiCols * 4,
+            LumaH = frameMiRows * 4,
+            ChromaW = frameMiCols * 2,
+            ChromaH = frameMiRows * 2,
+            SrcLumaW = width,
+            SrcLumaH = height,
+            SrcChromaW = (width + 1) / 2,
+            SrcChromaH = (height + 1) / 2,
         };
         Array.Fill(state.AboveYMode, Av1IntraMode.Dc);
         Array.Fill(state.LeftYMode, Av1IntraMode.Dc);
@@ -237,7 +247,8 @@ public static class Av1KeyframeEncoder
 
     /// <summary>
     /// Recursively descend the partition tree, emitting partition symbols
-    /// where required and per-leaf block coefficients at BLOCK_16X16.
+    /// where required and per-leaf block coefficients at BLOCK_16X16 (BLOCK_8X8
+    /// where a 16x16 crosses the picture edge).
     /// </summary>
     private static void EncodePartition(
         TileEncodeState st,
@@ -255,18 +266,24 @@ public static class Av1KeyframeEncoder
         int bs = 1 << bsl; // mi units
         int hbs = bs >> 1;
 
-        // For our v1 encoder we want every leaf to be BLOCK_16X16.
-        // BLOCK_16X16 has bsl = 2 (4 mi). Larger sizes recurse to SPLIT;
-        // BLOCK_16X16 issues PARTITION_NONE.
+        // For our v1 encoder every leaf is BLOCK_16X16 where the whole block is inside the picture.
+        // BLOCK_16X16 has bsl = 2 (4 mi). Larger sizes recurse to SPLIT; a whole BLOCK_16X16 issues
+        // PARTITION_NONE. A BLOCK_16X16 crossing the bottom / right edge cannot be PARTITION_NONE (the
+        // syntax only allows SPLIT or HORZ / VERT there): it splits into BLOCK_8X8 leaves, which are
+        // always whole (the picture is a whole number of 8x8 blocks) and issue PARTITION_NONE.
         Av1PartitionType partition;
         if (bsize >= Av1PartitionContext.Block8x8)
         {
             bool hasRows = (miRow + hbs) < frameMiRows;
             bool hasCols = (miCol + hbs) < frameMiCols;
 
-            if (bsize == Block16x16)
+            if (bsize == Av1PartitionContext.Block8x8)
             {
                 partition = Av1PartitionType.None;
+            }
+            else if (bsize == Block16x16)
+            {
+                partition = hasRows && hasCols ? Av1PartitionType.None : Av1PartitionType.Split;
             }
             else
             {
@@ -448,11 +465,16 @@ public static class Av1KeyframeEncoder
         int width, int height,
         int baseQIndex)
     {
-        if (bsize != Block16x16)
+        if (bsize != Block16x16 && bsize != Av1PartitionContext.Block8x8)
         {
             throw new NotSupportedException(
-                $"v1 encoder only emits BLOCK_16X16 leaves, got bsize={bsize}");
+                $"v1 encoder only emits BLOCK_16X16 and BLOCK_8X8 leaves, got bsize={bsize}");
         }
+        bool is16 = bsize == Block16x16;
+        int lumaPx = is16 ? 16 : 8;
+        int chromaPx = lumaPx / 2;
+        var lumaTx = is16 ? Av1TxSize.Tx16x16 : Av1TxSize.Tx8x8;
+        var chromaTx = is16 ? Av1TxSize.Tx8x8 : Av1TxSize.Tx4x4;
 
         // ---- Mode info bits (mirror Av1ModeInfoReader / write_mb_modes_kf) ----
 
@@ -479,7 +501,7 @@ public static class Av1KeyframeEncoder
 
         // Y mode is DC -&gt; not directional -&gt; no angle delta.
 
-        // UV mode: DC_PRED. CFL is allowed for 16x16 (cfl_allowed=1).
+        // UV mode: DC_PRED. CFL is allowed for 16x16 and for 8x8 (blocks up to 32x32): cfl_allowed=1.
         // libaom: uv_mode_cdf[cfl_allowed][y_mode], INTRA_MODES syms when cfl, else INTRA_MODES-1.
         // Wait - the formula is UV_INTRA_MODES - !cfl_allowed = 14 - 0 = 14 syms when cfl_allowed = 1.
         int cflAllowed = 1;
@@ -492,30 +514,30 @@ public static class Av1KeyframeEncoder
 
         // ---- Per-plane: predict, transform, quantize, emit coefs, reconstruct ----
         EncodePlane(st, plane: 0, miRow, miCol,
-            ySrc, ySrcStride, st.ReconY, st.LumaW, st.LumaH,
-            blockWidthPx: 16, blockHeightPx: 16,
-            txSize: Av1TxSize.Tx16x16,
+            ySrc, ySrcStride, st.SrcLumaW, st.SrcLumaH, st.ReconY, st.LumaW, st.LumaH,
+            blockWidthPx: lumaPx, blockHeightPx: lumaPx,
+            txSize: lumaTx,
             qDc: Av1DequantTables.DcQuantQtx(baseQIndex, 0, 8),
             qAc: Av1DequantTables.AcQuantQtx(baseQIndex, 0, 8),
             baseQIndex: baseQIndex);
         EncodePlane(st, plane: 1, miRow, miCol,
-            uSrc, uvSrcStride, st.ReconU, st.ChromaW, st.ChromaH,
-            blockWidthPx: 8, blockHeightPx: 8,
-            txSize: Av1TxSize.Tx8x8,
+            uSrc, uvSrcStride, st.SrcChromaW, st.SrcChromaH, st.ReconU, st.ChromaW, st.ChromaH,
+            blockWidthPx: chromaPx, blockHeightPx: chromaPx,
+            txSize: chromaTx,
             qDc: Av1DequantTables.DcQuantQtx(baseQIndex, 0, 8),
             qAc: Av1DequantTables.AcQuantQtx(baseQIndex, 0, 8),
             baseQIndex: baseQIndex);
         EncodePlane(st, plane: 2, miRow, miCol,
-            vSrc, uvSrcStride, st.ReconV, st.ChromaW, st.ChromaH,
-            blockWidthPx: 8, blockHeightPx: 8,
-            txSize: Av1TxSize.Tx8x8,
+            vSrc, uvSrcStride, st.SrcChromaW, st.SrcChromaH, st.ReconV, st.ChromaW, st.ChromaH,
+            blockWidthPx: chromaPx, blockHeightPx: chromaPx,
+            txSize: chromaTx,
             qDc: Av1DequantTables.DcQuantQtx(baseQIndex, 0, 8),
             qAc: Av1DequantTables.AcQuantQtx(baseQIndex, 0, 8),
             baseQIndex: baseQIndex);
 
         // ---- Update mode-info contexts so subsequent blocks see DC + skip=0 ----
-        int miW = 4; // BLOCK_16X16 = 4 mi wide
-        int miH = 4;
+        int miW = is16 ? 4 : 2; // BLOCK_16X16 = 4 mi wide, BLOCK_8X8 = 2
+        int miH = miW;
         for (int i = 0; i < miW && (miCol + i) < st.AboveYMode.Length; i++)
         {
             st.AboveYMode[miCol + i] = Av1IntraMode.Dc;
@@ -538,7 +560,7 @@ public static class Av1KeyframeEncoder
     private static void EncodePlane(
         TileEncodeState st, int plane,
         int miRow, int miCol,
-        ReadOnlySpan<byte> src, int srcStride,
+        ReadOnlySpan<byte> src, int srcStride, int srcW, int srcH,
         byte[] reconBuf, int planeW, int planeH,
         int blockWidthPx, int blockHeightPx,
         Av1TxSize txSize, short qDc, short qAc,
@@ -586,13 +608,14 @@ public static class Av1KeyframeEncoder
 
                 // Compute residual = source - predict.
                 var residual = new short[txW * txH];
+                // Past the picture (the coded size is rounded up to 8) the last source column / row repeats.
                 for (int r = 0; r < txH; r++)
                 {
-                    int sOff = (yb + r) * srcStride + xb;
+                    int sRow = Math.Min(yb + r, srcH - 1) * srcStride;
                     int pOff = r * txW;
                     for (int c = 0; c < txW; c++)
                     {
-                        residual[r * txW + c] = (short)(src[sOff + c] - predict[pOff + c]);
+                        residual[r * txW + c] = (short)(src[sRow + Math.Min(xb + c, srcW - 1)] - predict[pOff + c]);
                     }
                 }
 
@@ -605,22 +628,20 @@ public static class Av1KeyframeEncoder
                 Av1ForwardQuantizer.QuantizeBlock(coefsRaster, qDc, qAc);
 
                 // Compute entropy contexts for THIS tx block.
-                int txWMi = Math.Max(1, txW >> 2);
-                int txHMi = Math.Max(1, txH >> 2);
-                int miRowTx = miRow + ((ty * txH) >> 2) - ((plane == 0) ? 0 : 0);
-                int miColTx = miCol + ((tc * txW) >> 2) - ((plane == 0) ? 0 : 0);
-                // For chroma we still use luma-mi indexing per Av1EntropyContext convention.
-                if (plane != 0)
-                {
-                    // Av1EntropyContext is keyed by luma mi indices; chroma keys
-                    // are the same indices for the chroma-ref block. Use the
-                    // luma block origin for both above + left lookups.
-                    miRowTx = miRow;
-                    miColTx = miCol;
-                }
-                // v1 encoder: BLOCK_16X16+TX_16X16 (Y) and BLOCK_8X8+TX_8X8 (UV).
-                // Both have planeBsize == txsize_to_bsize[tx_size], so
-                // planeBsizeIsTxsize=true and planeBsizeLargerThanTxBsize=false.
+                // Av1EntropyContext is keyed by LUMA mi indices for every plane. A chroma 4x4 unit covers
+                // two luma mi, so a chroma transform spans twice its own 4x4 count in luma mi (TX_8X8 of a
+                // 16x16 block: 4; TX_4X4 of an 8x8 block: 2) and every one of them is written. (Until the
+                // 8x8 edge leaves existed only the first half was written and read, which is the same context
+                // as long as all blocks are 16x16; an 8x8 block under the right half of a 16x16 reads the
+                // second half.)
+                int lumaMiPerUnit = plane == 0 ? 1 : 2;
+                int txWMi = Math.Max(1, txW >> 2) * lumaMiPerUnit;
+                int txHMi = Math.Max(1, txH >> 2) * lumaMiPerUnit;
+                int miRowTx = miRow + ((ty * txH) >> 2) * lumaMiPerUnit;
+                int miColTx = miCol + ((tc * txW) >> 2) * lumaMiPerUnit;
+                // Every leaf has planeBsize == txsize_to_bsize[tx_size] (16x16: Y TX_16X16 / UV TX_8X8;
+                // 8x8: Y TX_8X8 / UV TX_4X4), so planeBsizeIsTxsize=true and
+                // planeBsizeLargerThanTxBsize=false.
                 int txbSkipCtx = st.EntropyCtx.GetTxbSkipContext(plane, miRowTx, miColTx, txWMi, txHMi,
                     planeBsizeIsTxsize: true, planeBsizeLargerThanTxBsize: false);
                 int dcSignCtx = st.EntropyCtx.GetDcSignContext(plane, miRowTx, miColTx, txWMi, txHMi);
