@@ -87,6 +87,22 @@ segmentation off, loop filter level 0, one tile. Fixed quantizer (same q index a
 3. [ ] **Large skipped partitions** (32x32 / 64x64 when all leaves under them are skipped with one MV).
 4. [ ] **Backward adaptation + previous-frame MV candidates** (`error_resilient_mode = 0`; counts written by the
    entropy pass; the decoder's `Vp9AdaptKernels`).
+   - [x] Code (2026-11-12): the encoder owns a `Vp9FrameContextsGpu` (the decoder's class): BeginFrame, its own
+     compressed header read back by the decoder's reader, the entropy pass codes with that context (coefficient
+     probabilities too: `Vp9BlockCoefEncoderGpu.EncodeBlockAdaptive`) and counts every symbol in the decoder's
+     FRAME_COUNTS layout (kept in the pass's state buffer: no extra binding), Adapt + EndFrame after the tiles;
+     the entropy pass writes the frame's MV map and `FindMvRefs` reads the previous frame's.
+     `Vp9EncoderGpu.BackwardAdaptation` (internal, default on; off = the error resilient frames of before).
+     Key frames are unchanged (refresh_frame_context = 0: the first inter frame starts from the defaults).
+   - [x] CPU accelerator: `Vp9EncoderGpu_BackwardAdaptation_SmallerAndDecodes` (12 frames, 192x128 and 70x50, both
+     modes): decoder == encoder reconstruction on every frame, the encoder's symbol counts and four saved contexts
+     == the decoder's own after every frame, adapting inter frames 88.7% / 90.2% of the error resilient bytes.
+     Red-checked: 20 mutations red (every count, the MV map, the context steps); one (the corner block's implied
+     SPLIT) is red only through the counts / contexts comparison: no coded symbol depends on it yet.
+   - [ ] Velocity, CUDA, WebGPU lanes (NOT run: the entropy step's WGSL grew: screen it first, watchdog on).
+   - [ ] Measure on the real clips (vp9-encode-bench) and against libvpx's files of the same clips at equal PSNR
+     (`DemoConsole vp9-psnr`; ffmpeg -c:v libvpx-vp9 -crf N -b:v 0).
+   - [ ] Forward probability updates in the compressed header (the reader side is already in the loop).
 5. [ ] **Loop filter** on the reconstruction (decoder's kernels; key frames too).
 6. [ ] Measure, then decide: intra blocks in inter frames, scene-cut key frames, high-precision MVs, golden / altref.
 

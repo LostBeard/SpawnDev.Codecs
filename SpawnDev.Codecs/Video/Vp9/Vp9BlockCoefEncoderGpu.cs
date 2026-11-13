@@ -268,6 +268,114 @@ public static class Vp9BlockCoefEncoderGpu
     }
 
     /// <summary>
+    /// <see cref="EncodeBlock"/> for a stream with backward adaptation: the model probabilities come from the frame
+    /// context (<paramref name="probs"/> at <paramref name="probsBase"/>: the [band][ctx][3] ints of this transform
+    /// size, plane type and reference type) and every token is counted as the decoder counts it in decode_coefs
+    /// (<paramref name="counts"/>: <paramref name="cntBase"/> = the [band][ctx][4] block, <paramref name="eobBase"/> =
+    /// the [band][ctx] eob-branch block). A negative <paramref name="cntBase"/> counts nothing.
+    /// </summary>
+    public static int EncodeBlockAdaptive(
+        ref Vp8BoolEncoderGpuState state,
+        ArrayView<byte> outBuf,
+        ArrayView<short> coefs,
+        ArrayView<ushort> scan,
+        ArrayView<ushort> neighbors,
+        ArrayView<int> probs,
+        int probsBase,
+        ArrayView<int> counts,
+        int cntBase,
+        int eobBase,
+        ArrayView<byte> consts,
+        ArrayView<byte> tokenCache,
+        int maxCoefs,
+        int initialCtx,
+        int isTx4x4)
+    {
+        for (int i = 0; i < maxCoefs; i++) tokenCache[i] = 0;
+
+        int eob = 0;
+        for (int i = maxCoefs - 1; i >= 0; i--)
+        {
+            int raster = (int)scan[i];
+            if (coefs[raster] != 0) { eob = i + 1; break; }
+        }
+
+        int c = 0;
+        int firstIter = 1;
+        while (c < maxCoefs)
+        {
+            int band = isTx4x4 != 0
+                ? consts[Band4x4Offset + c]
+                : consts[Band8x8PlusOffset + c];
+            int ctx = firstIter != 0 ? initialCtx : GetCoefContext(neighbors, tokenCache, c);
+            firstIter = 0;
+            int cell = band * 6 + ctx;
+            int m0 = probs[probsBase + cell * 3];
+            int m1 = probs[probsBase + cell * 3 + 1];
+            int m2 = probs[probsBase + cell * 3 + 2];
+
+            // the EOB check is a coded symbol here (not after a ZERO token): eob_branch
+            if (cntBase >= 0) counts[eobBase + cell]++;
+            if (c == eob)
+            {
+                Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 0, m0); // EOB
+                if (cntBase >= 0) counts[cntBase + cell * 4 + 3]++;      // EOB_MODEL_TOKEN
+                return eob;
+            }
+            Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 1, m0);     // !EOB
+
+            while (coefs[(int)scan[c]] == 0)
+            {
+                Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 0, m1); // ZERO
+                if (cntBase >= 0) counts[cntBase + cell * 4]++;          // ZERO_TOKEN
+                c++;
+                if (c >= maxCoefs) return eob;
+
+                band = isTx4x4 != 0
+                    ? consts[Band4x4Offset + c]
+                    : consts[Band8x8PlusOffset + c];
+                ctx = GetCoefContext(neighbors, tokenCache, c);
+                cell = band * 6 + ctx;
+                m1 = probs[probsBase + cell * 3 + 1];
+                m2 = probs[probsBase + cell * 3 + 2];
+            }
+
+            Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 1, m1);     // !ZERO
+
+            int value = coefs[(int)scan[c]];
+            int magnitude = value < 0 ? -value : value;
+
+            byte token;
+            if (magnitude == 1)
+            {
+                Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 0, m2); // ONE
+                if (cntBase >= 0) counts[cntBase + cell * 4 + 1]++;      // ONE_TOKEN
+                token = (byte)Vp9CoefToken.One;
+            }
+            else
+            {
+                Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, 1, m2); // !ONE
+                if (cntBase >= 0) counts[cntBase + cell * 4 + 2]++;      // TWO_TOKEN (two and more)
+
+                token = MagnitudeToToken(magnitude, 0);
+                long pareto8RowBase = (long)Pareto8FullOffset + (long)(m2 - 1) * 8;
+                EmitTreeWalk(ref state, outBuf, consts, pareto8RowBase, token);
+                if (token >= (byte)Vp9CoefToken.Category1 && token <= (byte)Vp9CoefToken.Category6)
+                {
+                    EmitCategoryMagnitude(ref state, outBuf, consts, token, magnitude, 0);
+                }
+            }
+
+            Vp8BoolEncoderGpu.EncodeBool(ref state, outBuf, value < 0 ? 1 : 0, 128);
+
+            int rasterC = (int)scan[c];
+            tokenCache[rasterC] = consts[PtEnergyClassOffset + token];
+            c++;
+        }
+        return eob;
+    }
+
+    /// <summary>
     /// Compute the 0/1/2 entropy context value at scan position
     /// <paramref name="scanPos"/> from the two raster-neighbor energy
     /// classes. Mirrors <see cref="Vp9CoefContext.GetCoefContext"/>.

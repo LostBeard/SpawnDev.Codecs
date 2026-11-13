@@ -301,6 +301,9 @@ public sealed class Vp9FrameContextsGpu : IDisposable
         _adapt(1, _ctx.View, _sum.View, _tables.View, _adaptArgs.View, _results.View, _totals.View);
     }
 
+    /// <summary>Tests: every context slot (5 x <see cref="Vp9Ctx.Bytes"/> ints).</summary>
+    internal async Task<int[]> ReadContextsAsync() => await _ctx.View.CopyToHostAsync();
+
     /// <summary>All contexts: 5 x <see cref="Vp9Ctx.Bytes"/> ints (slots 0..3 saved, 4 current).</summary>
     public ArrayView<int> Contexts => _ctx.View;
 

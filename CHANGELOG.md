@@ -25,6 +25,11 @@
   only at equal PSNR; with the dead zone at q 40 the video is 1.10 MB against 3.64 MB key frames only.
 - `VideoFileEncoderGpu` writes AV1 at any picture size too (Av1KeyframeEncoderGpu's edge superblocks, by Data,
   c5884c9); FFmpeg decodes the 70x50 AV1 and VP9 MP4 files to the source's luma (51.6 and 48.0 dB).
+- Inter frames adapt their probabilities backward and use the previous frame's MVs as candidates (the decoder's own
+  frame contexts and adaptation kernel run in the encoder; `error_resilient_mode` off). CPU accelerator only so
+  far: 10 to 11% fewer inter bytes on the test clips, the encoder's counts and saved contexts equal the decoder's
+  after every frame. GPU lanes not run yet.
+- `DemoConsole vp9-psnr <source.webm> <encoded.webm...>`: bytes and PSNR of any VP9 WebM against a source clip.
 - `DemoConsole vp9-encode-bench <clip.webm>`: bytes, PSNR and speed per quantizer and key frame interval on a real clip.
 - SpawnDev.ILGPU 5.4.29 -> 5.4.30.
 

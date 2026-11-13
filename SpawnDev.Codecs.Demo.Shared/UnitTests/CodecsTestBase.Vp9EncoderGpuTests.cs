@@ -268,6 +268,105 @@ public abstract partial class CodecsTestBase
     private const int DeadZoneMaxPercent = 75;
     private const double DeadZoneMaxLossDb = 3.0;
 
+    /// <summary>
+    /// Backward adaptation (Vp9EncoderGpu.BackwardAdaptation, the default) against error resilient frames (every
+    /// frame coded with the default probabilities) on a clip long enough for the probabilities to settle: a moving,
+    /// noisy picture, 12 frames. Both streams decode to the encoder's reconstruction on every frame (a wrong count or
+    /// probability anywhere desynchronizes the decoder within a frame); the inter frames' first byte says which
+    /// kind they are (error_resilient_mode is its lowest bit); the two reconstructions are the same pictures (the
+    /// entropy coding does not change them, only the MV candidates can change which mode codes an MV); and the
+    /// adapting stream is smaller.
+    /// </summary>
+    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL,GiantShader")]
+    public async Task Vp9EncoderGpu_BackwardAdaptation_SmallerAndDecodes()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            var failures = new List<string>();
+            var report = new List<string>();
+            const int frames = 12, q = 40;
+            foreach (var (w, h) in new[] { (192, 128), (70, 50) })
+            {
+                int cw = (w + 1) / 2, ch = (h + 1) / 2;
+                var bytesPer = new int[2];
+                var recons = new List<byte[]>[] { new(), new() };
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    using var enc = new Vp9EncoderGpu(acc) { BackwardAdaptation = pass == 0 };
+                    using var dec = new Vp9DecoderGpu(acc);
+                    for (int n = 0; n < frames; n++)
+                    {
+                        var y = new byte[w * h]; var u = new byte[cw * ch]; var v = new byte[cw * ch];
+                        var grain = new Random(3000 + n);
+                        for (int r = 0; r < h; r++)
+                            for (int c = 0; c < w; c++)
+                                y[r * w + c] = (byte)Math.Clamp(Math.Round(Vp9SmoothTexture(c - 2.5 * n, r + 1.25 * n, 1)) + grain.Next(-4, 5), 0, 255);
+                        for (int r = 0; r < ch; r++)
+                            for (int c = 0; c < cw; c++)
+                            {
+                                u[r * cw + c] = (byte)Math.Clamp(Math.Round(64 + Vp9SmoothTexture(2 * c - 2.5 * n, 2 * r + 1.25 * n, 11) / 2) + grain.Next(-2, 3), 0, 255);
+                                v[r * cw + c] = (byte)Math.Clamp(Math.Round(64 + Vp9SmoothTexture(2 * c - 2.5 * n, 2 * r + 1.25 * n, 21) / 2) + grain.Next(-2, 3), 0, 255);
+                            }
+                        var (bytes, isKey) = await enc.EncodeFrameAsync(y, u, v, w, h, q);
+                        var recon = await enc.ReadReconAsync();
+                        recons[pass].Add(recon);
+                        Vp9VideoFrame? shown;
+                        try { shown = await dec.DecodePacketAsync(bytes); }
+                        catch (Exception ex) { failures.Add($"{w}x{h} pass {pass} frame {n}: the decoder threw {ex.GetType().Name}: {ex.Message}"); break; }
+                        if (shown == null || !shown.Planes.AsSpan().SequenceEqual(recon))
+                        {
+                            failures.Add($"{w}x{h} pass {pass} frame {n}: decoder != encoder reconstruction");
+                            break;
+                        }
+                        // The decoder's own state against the encoder's, after every frame: the four saved contexts
+                        // (the fifth slot is the frame's working copy: after a key frame a decoder has adapted it and,
+                        // refresh_frame_context being 0, thrown it away) and, for inter frames, every symbol count. A
+                        // count nobody's probabilities depend on yet (the corner block's implied SPLIT) shows only here.
+                        var encCtx = await enc.ReadContextsAsync();
+                        var decCtx = await dec.Pipeline.Contexts.ReadContextsAsync();
+                        int ctxAt = -1;
+                        for (int i = 0; i < 4 * Vp9Ctx.Bytes && ctxAt < 0; i++) if (encCtx[i] != decCtx[i]) ctxAt = i;
+                        if (encCtx.Length != decCtx.Length || ctxAt >= 0)
+                        {
+                            failures.Add($"{w}x{h} pass {pass} frame {n}: frame contexts differ at slot {ctxAt / Vp9Ctx.Bytes} offset {ctxAt % Vp9Ctx.Bytes}: " +
+                                $"encoder {(ctxAt >= 0 ? encCtx[ctxAt] : -1)}, decoder {(ctxAt >= 0 ? decCtx[ctxAt] : -1)}");
+                            break;
+                        }
+                        if (isKey) continue;
+                        var encCounts = await enc.ReadCountsAsync();
+                        var decCounts = await dec.Pipeline.Parser.ReadCountsAsync();
+                        int cntAt = -1;
+                        for (int i = 0; i < encCounts.Length && cntAt < 0; i++) if (encCounts[i] != decCounts[i]) cntAt = i;
+                        if (cntAt >= 0)
+                        {
+                            failures.Add($"{w}x{h} pass {pass} frame {n}: symbol counts differ at {cntAt}: encoder {encCounts[cntAt]}, decoder {decCounts[cntAt]} " +
+                                $"(Vp9Cnt: Partition {Vp9Cnt.Partition}, Coef {Vp9Cnt.Coef}, EobBranch {Vp9Cnt.EobBranch}, InterMode {Vp9Cnt.InterMode}, Skip {Vp9Cnt.Skip}, MvJoints {Vp9Cnt.MvJoints})");
+                            break;
+                        }
+                        bytesPer[pass] += bytes.Length;
+                        bool errorResilient = (bytes[0] & 1) != 0;
+                        if (errorResilient != (pass == 1)) failures.Add($"{w}x{h} pass {pass} frame {n}: error_resilient_mode = {errorResilient}");
+                    }
+                }
+                report.Add($"{w}x{h} q{q}: inter bytes adapting {bytesPer[0]}, error resilient {bytesPer[1]} ({100.0 * bytesPer[0] / Math.Max(bytesPer[1], 1):F1}%)");
+                int same = 0;
+                for (int n = 0; n < Math.Min(recons[0].Count, recons[1].Count); n++) if (recons[0][n].AsSpan().SequenceEqual(recons[1][n])) same++;
+                report.Add($"{same}/{frames} reconstructions identical");
+                if (same != frames) failures.Add($"{w}x{h}: only {same} of {frames} reconstructions are the same with and without adaptation");
+                if (bytesPer[0] * 100 > bytesPer[1] * AdaptationMaxPercent)
+                    failures.Add($"{w}x{h}: adapting {bytesPer[0]} B, error resilient {bytesPer[1]} B: expected at most {AdaptationMaxPercent}%");
+            }
+            Console.WriteLine($"{acc.AcceleratorType}: " + string.Join(" | ", report));
+            True(failures.Count == 0, $"{failures.Count} failures:\n" + string.Join("\n", failures.Take(12)));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    // Measured on the CPU accelerator (2026-11-12): 88.7% (192x128) and 90.2% (70x50) of the error resilient bytes.
+    private const int AdaptationMaxPercent = 94;
+
     private static double Vp9Lattice(int x, int y, uint seed)
     {
         uint g = (uint)(x * 73856093) ^ (uint)(y * 19349663) ^ (seed * 83492791u);

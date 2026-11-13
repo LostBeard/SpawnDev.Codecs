@@ -39,6 +39,11 @@ if (args.Length > 0 && args[0] == "vp9-encode-bench")
 if (args.Length > 0 && args[0] == "av1-encode-bench")
     return await Av1EncodeBench.Run(args);
 
+// `vp9-psnr <source.webm> <encoded1.webm> [...] [--backend ...] [--frames N] [--label text]`: video bytes and PSNR (RGB
+// and luma) of encoded WebM files against a source clip, e.g. libvpx's files of a clip beside this library's.
+if (args.Length > 0 && args[0] == "vp9-psnr")
+    return await Vp9PsnrCompare.Run(args);
+
 // `dump-ptx|dump-glsl <Namespace.Type> <MethodName> <out>`: one kernel's PTX (for ptxas -v) or WebGL GLSL (+ its
 // transform-feedback output count).
 if (args.Length > 0 && (args[0] == "dump-ptx" || args[0] == "dump-glsl"))

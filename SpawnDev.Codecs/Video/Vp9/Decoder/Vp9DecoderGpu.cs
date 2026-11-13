@@ -72,6 +72,8 @@ public sealed class Vp9DecoderGpu : IDisposable
 {
     private readonly Accelerator _acc;
     private readonly Vp9DecodePipeline _pipe;
+    /// <summary>Tests: the pipeline (its symbol counts and frame contexts, compared with the encoder's).</summary>
+    internal Vp9DecodePipeline Pipeline => _pipe;
     private Vp9DecodePipeline? _alphaPipe;   // the WebM alpha stream (a second VP9 stream)
     private MemoryBuffer1D<byte, Stride1D.Dense>? _packet;
     private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long>? _pack;   // loaded by the first decode

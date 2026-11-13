@@ -53,6 +53,8 @@ public sealed class Vp9TileParserGpu : IDisposable
     internal int DqV => _dqV;
     /// <summary>FRAME_COUNTS (<see cref="Vp9Cnt"/>) per tile column.</summary>
     internal ArrayView<int> Counts => _counts!.View;
+    /// <summary>Tests: the first tile column's FRAME_COUNTS of the last parsed frame.</summary>
+    internal async Task<int[]> ReadCountsAsync() => await _counts!.View.SubView(0, Vp9Cnt.Size).CopyToHostAsync();
     internal int TileCols { get; private set; }
     /// <summary>Segmentation maps + MV arrays.</summary>
     internal ArrayView<int> Maps => _maps!.View;

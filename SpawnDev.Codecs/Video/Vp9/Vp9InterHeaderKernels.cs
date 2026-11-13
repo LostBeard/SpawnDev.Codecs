@@ -47,7 +47,7 @@ internal static class Vp9InterHeaderKernels
     /// <paramref name="outLen"/>[0].
     /// </summary>
     public static void UncompressedHeaderKernel(Index1D index, ArrayView<byte> outBuf, ArrayView<long> outLen, ArrayView<long> firstPartitionSize,
-        int width, int baseQIndex)
+        int width, int baseQIndex, int errorResilient)
     {
         var bw = Vp9BitWriterGpu.Init();
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0b10u, 2);   // frame_marker
@@ -55,7 +55,10 @@ internal static class Vp9InterHeaderKernels
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 1);      // show_existing_frame
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 1u, 1);      // frame_type: non-key
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 1u, 1);      // show_frame (so no intra_only bit)
-        Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 1u, 1);      // error_resilient_mode (so no reset_frame_context)
+        // error_resilient_mode 1: every probability at its default in every frame, no reset_frame_context bits.
+        // 0: the frame starts from the saved context 0 and adapts it (reset_frame_context = 0: nothing is reset)
+        Vp9BitWriterGpu.WriteBits(ref bw, outBuf, errorResilient != 0 ? 1u : 0u, 1);
+        if (errorResilient == 0) Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 2);
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0xFFu, 8);   // refresh_frame_flags: every slot
         // ref_frame_idx (3 bits) + sign_bias (1 bit) for LAST, GOLDEN, ALTREF: slot 0, no bias
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 12);
@@ -66,7 +69,9 @@ internal static class Vp9InterHeaderKernels
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 1);      // allow_high_precision_mv
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 1);      // is_filter_switchable
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 1u, 2);      // raw_interpolation_filter: 1 = EIGHTTAP
-        // (error resilient: no refresh_frame_context / frame_parallel_decoding_mode)
+        // not error resilient: refresh_frame_context = 1 (the adapted context is saved), frame_parallel_decoding_mode
+        // = 0 (the decoder counts and adapts); error resilient: neither bit is coded
+        if (errorResilient == 0) Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0b10u, 2);
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 2);      // frame_context_idx
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 6);      // loop filter level
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 3);      // sharpness

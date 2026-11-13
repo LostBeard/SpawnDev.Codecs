@@ -66,7 +66,10 @@ internal static class Vp9InterEntropy
     // 16), left partition contexts.
     public const int StStarted = 0, StDone = 1, StNextSlot = 2, StEnc = 3;
     public const int Above = 8, AbovePart = Above + 6 * MaxMiCols, Left = AbovePart + MaxMiCols, LeftPart = Left + 48;
-    public const int StateInts = LeftPart + 8;
+    /// <summary>The frame's symbol counts (the decoder's FRAME_COUNTS layout, <see cref="Vp9Cnt"/>, one tile column):
+    /// kept in the state buffer, so the kernel binds no more buffers than before.</summary>
+    public const int Counts = LeftPart + 8;
+    public const int StateInts = Counts + Vp9Cnt.Size;
 
     private const int QueueLength = 80;
 
@@ -77,12 +80,13 @@ internal static class Vp9InterEntropy
         n++;
     }
 
-    /// <summary>The partition symbol's context (libvpx partition_plane_context) and its three probabilities' position.</summary>
-    private static int PartitionProbs(ArrayView<int> st, int sizeIdx, int miRow, int miCol)
+    /// <summary>The partition symbol's context (libvpx partition_plane_context): its three probabilities are at
+    /// <c>Vp9Ctx.Partition + context * 3</c>, its four counts at <c>Vp9Cnt.Partition + context * 4</c>.</summary>
+    private static int PartitionCtx(ArrayView<int> st, int sizeIdx, int miRow, int miCol)
     {
         int leftBit = (st[LeftPart + (miRow & 7)] >> sizeIdx) & 1;
         int aboveBit = (st[AbovePart + miCol] >> sizeIdx) & 1;
-        return Vp9Ctx.Partition + (sizeIdx * 4 + leftBit * 2 + aboveBit) * 3;
+        return sizeIdx * 4 + leftBit * 2 + aboveBit;
     }
 
     /// <summary>
@@ -91,11 +95,13 @@ internal static class Vp9InterEntropy
     /// VERT); at the corner SPLIT is implied.
     /// </summary>
     private static void PushSplit(ArrayView<int> queue, ref int n, ArrayView<int> st, ArrayView<int> ctx, int sizeIdx, int miRow, int miCol,
-        int miRows, int miCols)
+        int miRows, int miCols, ArrayView<int> counts, int cnt)
     {
         int half = 1 << sizeIdx >> 1;   // in mi: 4 for 64x64, 2 for 32x32
         bool hasRows = miRow + half < miRows, hasCols = miCol + half < miCols;
-        int probs = PartitionProbs(st, sizeIdx, miRow, miCol);
+        int pctx = PartitionCtx(st, sizeIdx, miRow, miCol);
+        int probs = Vp9Ctx.Partition + pctx * 3;
+        if (cnt >= 0) counts[cnt + Vp9Cnt.Partition + pctx * 4 + 3]++;   // PARTITION_SPLIT: counted when implied too (read_partition)
         if (hasRows & hasCols)
         {
             for (int k = 0; k < 3; k++) Push(queue, ref n, 1, ctx[probs + k]);
@@ -148,9 +154,11 @@ internal static class Vp9InterEntropy
     /// </summary>
     private static void EncodeLeafSlot(ref Vp8BoolEncoderGpuState state, ArrayView<byte> outBuf, ArrayView<short> levels, ArrayView<int> mi,
         ArrayView<int> a, ArrayView<int> ctx, ArrayView<int> t, ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts, ArrayView<int> st,
-        ArrayView<int> maps, ArrayView<int> queue, ArrayView<byte> tokenCache, int slot)
+        ArrayView<int> maps, ArrayView<int> counts, ArrayView<int> queue, ArrayView<byte> tokenCache, int slot)
     {
         int miCols = a[Vp9PArg.MiCols], miRows = a[Vp9PArg.MiRows];
+        // the frame's symbol counts when the frame adapts (counts = the state buffer, at Counts)
+        int cnt = a[Vp9PArg.CountsOn] != 0 ? Counts : -1;
         int sbCols = a[Vp9PArg.SbCols];
         int sb = slot >> 4, q = slot & 15;
         int sbRow = sb / sbCols, sbCol = sb - sbRow * sbCols;
@@ -166,18 +174,22 @@ internal static class Vp9InterEntropy
         {
             if (sbCol == 0)
                 for (int k = 0; k < 56; k++) st[Left + k] = 0;   // left entropy + partition contexts: each superblock row
-            PushSplit(queue, ref n, st, ctx, 3, miRow64, miCol64, miRows, miCols);
+            PushSplit(queue, ref n, st, ctx, 3, miRow64, miCol64, miRows, miCols, counts, cnt);
         }
-        if (q16 == 0) PushSplit(queue, ref n, st, ctx, 2, miRow32, miCol32, miRows, miCols);
+        if (q16 == 0) PushSplit(queue, ref n, st, ctx, 2, miRow32, miCol32, miRows, miCols, counts, cnt);
 
         // the leaf and its partition symbol at the 16x16 block: NONE inside the picture; at the bottom edge one bool at
         // probs[1] (HORZ, the top 16X8), at the right edge one at probs[2] (VERT, the left 8X16); at the corner SPLIT is
         // implied and the top-left 8x8 codes its own partition, NONE
         int shape = Vp9InterEncodeKernels.LeafShape(miRow, miCol, miRows, miCols);
-        int probs16 = PartitionProbs(st, shape == 3 ? 0 : 1, miRow, miCol);
-        if (shape == 1) probs16 += 1;
-        if (shape == 2) probs16 += 2;
-        Push(queue, ref n, 0, ctx[probs16]);
+        if (shape == 3 & cnt >= 0) counts[cnt + Vp9Cnt.Partition + PartitionCtx(st, 1, miRow, miCol) * 4 + 3]++;   // the implied SPLIT of the 16x16
+        int pctx16 = PartitionCtx(st, shape == 3 ? 0 : 1, miRow, miCol);
+        int probs16 = Vp9Ctx.Partition + pctx16 * 3;
+        int partition = 0;   // PARTITION_NONE; HORZ 1 at the bottom edge, VERT 2 at the right edge
+        if (shape == 1) partition = 1;
+        if (shape == 2) partition = 2;
+        Push(queue, ref n, 0, ctx[probs16 + partition]);
+        if (cnt >= 0) counts[cnt + Vp9Cnt.Partition + pctx16 * 4 + partition]++;
         // dec_update_partition_context: partition_context_lookup[subsize] {above, left} over the coded block's width
         int pa = shape == 2 | shape == 3 ? 14 : 12, pl = shape == 1 | shape == 3 ? 14 : 12;
         int span = shape == 3 ? 1 : 2;
@@ -195,11 +207,20 @@ internal static class Vp9InterEntropy
         if (miRow != 0) above = mi[grid + (miRow - 1) * miCols + miCol];
         if (miCol != 0) left = mi[grid + miRow * miCols + miCol - 1];
         int skip = mi[b + Vp9Mi.Skip];
-        Push(queue, ref n, skip, ctx[Vp9Ctx.Skip + Vp9ParseContexts.SkipContext(mi, above, left)]);
-        Push(queue, ref n, 1, ctx[Vp9Ctx.IntraInter + Vp9ParseContexts.IntraInterContext(mi, above, left)]);   // is_inter
+        int skipCtx = Vp9ParseContexts.SkipContext(mi, above, left);
+        int interCtx = Vp9ParseContexts.IntraInterContext(mi, above, left);
+        int refCtx = Vp9ParseContexts.SingleRefP1Context(mi, above, left);
+        Push(queue, ref n, skip, ctx[Vp9Ctx.Skip + skipCtx]);
+        Push(queue, ref n, 1, ctx[Vp9Ctx.IntraInter + interCtx]);   // is_inter
         // tx_size: not coded (tx_mode ALLOW_32X32: the largest the block allows)
         // read_ref_frames, single reference: one bool, 0 = LAST
-        Push(queue, ref n, 0, ctx[Vp9Ctx.SingleRef + Vp9ParseContexts.SingleRefP1Context(mi, above, left) * 2]);
+        Push(queue, ref n, 0, ctx[Vp9Ctx.SingleRef + refCtx * 2]);
+        if (cnt >= 0)
+        {
+            counts[cnt + Vp9Cnt.Skip + skipCtx * 2 + skip]++;
+            counts[cnt + Vp9Cnt.IntraInter + interCtx * 2 + 1]++;
+            counts[cnt + Vp9Cnt.SingleRef + refCtx * 4]++;   // single_ref p1 = 0
+        }
 
         // read_inter_block_mode_info: the mode context from the first two candidates, then the candidates
         int bsize = mi[b + Vp9Mi.SbType];
@@ -215,7 +236,8 @@ internal static class Vp9InterEntropy
             int cand = Vp9ParseKernels.Candidate(mi, a, p, t[search + i * 2], t[search + i * 2 + 1]);
             if (cand >= 0) counter += t[Vp9T.Mode2Counter + mi[cand * Vp9Mi.Stride + Vp9Mi.Mode]];
         }
-        int modeProbs = Vp9Ctx.InterMode + t[Vp9T.CounterToContext + counter] * 3;
+        int modeCtx = t[Vp9T.CounterToContext + counter];
+        int modeProbs = Vp9Ctx.InterMode + modeCtx * 3;
         // NEARMV's search returns both candidates: list0 is what NEARESTMV's and NEWMV's (early break) return
         Vp9ParseKernels.FindMvRefs(mi, maps, a, t, p, bsize, Vp9ParseKernels.NearMv, Vp9Mi.LastFrame, -1, out int l0, out int l1);
         int nearest = Vp9ParseKernels.LowerMvPrecision(l0, false), near = Vp9ParseKernels.LowerMvPrecision(l1, false);
@@ -237,6 +259,19 @@ internal static class Vp9InterEntropy
         }
         if (mv == near & wNear > weight) mode = Vp9ParseKernels.NearMv;
         mi[b + Vp9Mi.Mode] = mode;
+        if (cnt >= 0) counts[cnt + Vp9Cnt.InterMode + modeCtx * 4 + (mode - Vp9ParseKernels.NearestMv)]++;
+        // the MV map of the frame, as the decoder writes it (vp9_read_mode_info): what the candidate search of the
+        // next frame reads as the previous frame's MVs
+        int curMv = a[Vp9PArg.CurMvOffset];
+        for (int y = 0; y < high; y++)
+            for (int x = 0; x < wide; x++)
+            {
+                int at = curMv + (rec + y * miCols + x) * Vp9PLayout.MvStride;
+                maps[at] = mi[b + Vp9Mi.Ref0];
+                maps[at + 1] = mi[b + Vp9Mi.Ref1];
+                maps[at + 2] = mi[b + Vp9Mi.Mv0];
+                maps[at + 3] = mi[b + Vp9Mi.Mv1];
+            }
         Push(queue, ref n, mode == Vp9ParseKernels.ZeroMv ? 0 : 1, p0);
         if (mode != Vp9ParseKernels.ZeroMv)
         {
@@ -259,6 +294,14 @@ internal static class Vp9InterEntropy
             for (int k = 0; k < 2; k++)
                 if ((joint & (2 >> k)) != 0)
                     PushMvComponent(queue, ref n, ctx, t, a, Vp9Ctx.MvComp + k * Vp9Ctx.MvCompStride, k == 0 ? dRow : dCol);
+            if (cnt >= 0)
+            {
+                // vp9_inc_mv on the coded difference (the decoder's own helper)
+                counts[cnt + Vp9Cnt.MvJoints + joint]++;
+                for (int k = 0; k < 2; k++)
+                    if ((joint & (2 >> k)) != 0)
+                        Vp9ParseKernels.IncMvComponent(k == 0 ? dRow : dCol, counts, cnt + Vp9Cnt.MvComp + k * Vp9Cnt.MvCompStride);
+            }
         }
 
         // every queued bool, in order
@@ -287,37 +330,34 @@ internal static class Vp9InterEntropy
                     ac |= st[aboveAt + k];
                     lc |= st[leftAt + k];
                 }
-                int scanAt, neighborsAt, probsAt;
+                int scanAt, neighborsAt;
                 if (tx == 2)
                 {
                     scanAt = Vp9KeyframeConstantsGpu.Scan16x16Offset;
                     neighborsAt = Vp9KeyframeConstantsGpu.Neighbors16x16Offset;
-                    probsAt = Vp9KeyframeConstantsGpu.CoefProbs16x16Offset;
                 }
                 else if (tx == 1)
                 {
                     scanAt = Vp9KeyframeConstantsGpu.Scan8x8Offset;
                     neighborsAt = Vp9KeyframeConstantsGpu.Neighbors8x8Offset;
-                    probsAt = Vp9KeyframeConstantsGpu.CoefProbs8x8Offset;
                 }
                 else
                 {
                     scanAt = Vp9KeyframeConstantsGpu.Scan4x4Offset;
                     neighborsAt = Vp9KeyframeConstantsGpu.Neighbors4x4Offset;
-                    probsAt = Vp9KeyframeConstantsGpu.CoefProbs4x4Offset;
                 }
+                // the frame context's probabilities and the frame's counts of [tx][plane type][inter]
+                int typeRef = (tx * 2 + (plane == 0 ? 0 : 1)) * 2 + 1;
                 int at = dqSb + q * (plane == 0 ? 256 : 64) + half * count;
                 if (plane == 1) at += a[Vp9PArg.DqU];
                 if (plane == 2) at += a[Vp9PArg.DqV];
-                int eob = Vp9BlockCoefEncoderGpu.EncodeBlock(ref state, outBuf, levels.SubView(at, count),
+                int eob = Vp9BlockCoefEncoderGpu.EncodeBlockAdaptive(ref state, outBuf, levels.SubView(at, count),
                     ushortConsts.SubView(scanAt, count), ushortConsts.SubView(neighborsAt, count * 2),
-                    byteConsts.SubView(probsAt, 432),
+                    ctx, Vp9Ctx.Coef + typeRef * 108,
+                    counts, cnt >= 0 ? cnt + Vp9Cnt.Coef + typeRef * 144 : -1, cnt + Vp9Cnt.EobBranch + typeRef * 36,
                     byteConsts.SubView(Vp9KeyframeConstantsGpu.CoefConstsOffset, Vp9KeyframeConstantsGpu.CoefConstsLength),
                     tokenCache, count,
-                    planeType: plane == 0 ? (int)Vp9BlockCoefEnums.PlaneType.Y : (int)Vp9BlockCoefEnums.PlaneType.Uv,
-                    refType: (int)Vp9BlockCoefEnums.RefType.Inter,
                     initialCtx: (ac != 0 ? 1 : 0) + (lc != 0 ? 1 : 0),
-                    isHighBitDepth: 0,
                     isTx4x4: tx == 0 ? 1 : 0);
                 nz = eob > 0 ? 1 : 0;
             }
@@ -359,7 +399,7 @@ internal static class Vp9InterEntropy
             int sbRow = sb / sbCols;
             int row = sbRow * 8 + ((q >> 3) & 1) * 4 + ((q >> 1) & 1) * 2, col = (sb - sbRow * sbCols) * 8 + ((q >> 2) & 1) * 4 + (q & 1) * 2;
             if (row < miRows & col < miCols)
-                EncodeLeafSlot(ref state, outBuf, levels, mi, a, ctx, t, byteConsts, ushortConsts, st, maps, queue, tokenCache, slot);
+                EncodeLeafSlot(ref state, outBuf, levels, mi, a, ctx, t, byteConsts, ushortConsts, st, maps, st, queue, tokenCache, slot);
         }
         if (slot >= slotCount)
         {

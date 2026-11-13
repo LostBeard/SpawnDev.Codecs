@@ -176,7 +176,7 @@ internal static partial class Vp9ParseKernels
         return sign != 0 ? -mag : mag;
     }
 
-    private static void IncMvComponent(int v, ArrayView<int> counts, int comp)
+    internal static void IncMvComponent(int v, ArrayView<int> counts, int comp)
     {
         int s = v < 0 ? 1 : 0;
         counts[comp + Vp9Cnt.MvSign + s]++;

@@ -41,7 +41,16 @@ public sealed class Vp9EncoderGpu : IDisposable
     private readonly PlanePadKernel _pad;
     private readonly Vp9FrameAssembleKernel _assemble;
     private readonly Vp9FrameBuffersGpu _frames;
-    private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables, _ctx, _args, _entropyArgs, _state, _maps;
+    private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables, _args, _entropyArgs, _state;
+    /// <summary>The decoder's own frame contexts (four saved + the current one), its compressed header reader and its
+    /// backward adaptation: the probabilities the encoder codes with are by construction the decoder's.</summary>
+    private readonly Vp9FrameContextsGpu _contexts;
+    /// <summary>MV maps of two frames (the decoder's prev_frame_mvs layout): the one being written, the previous one.</summary>
+    private MemoryBuffer1D<int, Stride1D.Dense>? _maps;
+    private int[] _entropyArgsHost = new int[Vp9EArg.Count];
+    private int _miCount, _mapCur;
+    /// <summary>The previous frame of the sequence: -1 none, 0 key, 1 inter.</summary>
+    private int _lastFrameType = -1;
     private readonly MemoryBuffer1D<byte, Stride1D.Dense> _compressedHeader, _uncompressedHeader;
     private readonly MemoryBuffer1D<long, Stride1D.Dense> _compressedLen, _uncompressedLen, _tileLen, _frameLen;
     private readonly StageBuffer<byte> _stageY, _stageU, _stageV, _stageOut;
@@ -61,12 +70,13 @@ public sealed class Vp9EncoderGpu : IDisposable
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _residual = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
         ArrayView<byte>, ArrayView<ushort>, ArrayView<int>, ArrayView<int>, int> _entropy = null!;
+    // (the entropy step's symbol counts are in its state buffer: Vp9InterEntropy.Counts)
     private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int> _downsample = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _fullPel = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
         ArrayView<int>, int> _refine = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<long>> _compressed = null!;
-    private Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int> _uncompressed = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int> _uncompressed = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long>? _pack;
     private Task? _kernelsLoad;
 
@@ -105,6 +115,14 @@ public sealed class Vp9EncoderGpu : IDisposable
     /// <summary>See <see cref="InterZbinQ7"/>.</summary>
     internal int InterRoundQ7 { get; set; } = 48;
 
+    /// <summary>
+    /// Inter frames adapt their probabilities backward (the default): each frame starts from the context the frame
+    /// before left (libvpx's adaptation of the probabilities to the symbols that frame coded) and its MV candidates
+    /// include the previous frame's MVs. Off: error_resilient_mode, every frame coded with the default probabilities
+    /// (a lost frame then costs no later frame its probabilities).
+    /// </summary>
+    internal bool BackwardAdaptation { get; set; } = true;
+
     /// <summary>An encoder on <paramref name="accelerator"/>.</summary>
     public Vp9EncoderGpu(Accelerator accelerator)
     {
@@ -114,12 +132,11 @@ public sealed class Vp9EncoderGpu : IDisposable
         _assemble = new Vp9FrameAssembleKernel(_acc);
         _frames = new Vp9FrameBuffersGpu(_acc);
         _tables = _acc.Allocate1D(Vp9T.Packed);
-        // libvpx's default probabilities: what every frame of an error resilient stream is coded with
-        _ctx = _acc.Allocate1D(Vp9DecoderTables.DefaultFrameContext.Select(b => (int)b).ToArray());
+        // the frame contexts (the defaults until a frame adapts them) are the decoder's: _contexts
+        _contexts = new Vp9FrameContextsGpu(_acc);
         _args = _acc.Allocate1D<int>(Vp9MArg.Count);
         _entropyArgs = _acc.Allocate1D<int>(Vp9EArg.Count);
         _state = _acc.Allocate1D<int>(Vp9InterEntropy.StateInts);
-        _maps = _acc.Allocate1D<int>(Vp9PLayout.MvStride);   // previous-frame MVs: not used by error resilient frames
         _compressedHeader = _acc.Allocate1D<byte>(128);
         _uncompressedHeader = _acc.Allocate1D<byte>(32);
         _compressedLen = _acc.Allocate1D<long>(1);
@@ -163,7 +180,8 @@ public sealed class Vp9EncoderGpu : IDisposable
         _refine = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(Vp9MotionSearchKernels.RefineKernel);
         _compressed = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<long>>(Vp9InterHeaderKernels.CompressedHeaderKernel);
-        _uncompressed = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int>(
+        await _contexts.LoadKernelsAsync();
+        _uncompressed = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int>(
             Vp9InterHeaderKernels.UncompressedHeaderKernel);
     }
 
@@ -187,6 +205,11 @@ public sealed class Vp9EncoderGpu : IDisposable
         int miCols = (width + 7) >> 3, miRows = (height + 7) >> 3;
         int sbCols = (miCols + 7) >> 3, sbRows = (miRows + 7) >> 3, sbCount = sbCols * sbRows;
         int miCount = miCols * miRows;
+        _miCount = miCount;
+        _maps?.Dispose();
+        _maps = _acc.Allocate1D<int>(2L * miCount * Vp9PLayout.MvStride);
+        _maps.MemSetToZero();
+        _mapCur = 0;
         _dqStride = 4096 + 2 * 1024;   // per superblock: 4096 luma, 1024 per chroma plane (4:2:0)
         _src = _acc.Allocate1D<byte>(layout.Bytes);
         _mi = _acc.Allocate1D<int>((long)miCount * (Vp9Mi.Stride + 1));
@@ -210,7 +233,7 @@ public sealed class Vp9EncoderGpu : IDisposable
         _leafPred = _acc.Allocate1D<byte>((long)leafCount * Vp9MotionSearchKernels.LeafBytes);
 
         // the entropy pass's arguments depend only on the size
-        var e = new int[Vp9EArg.Count];
+        var e = _entropyArgsHost = new int[Vp9EArg.Count];
         e[Vp9PArg.MiCols] = miCols;
         e[Vp9PArg.MiRows] = miRows;
         e[Vp9PArg.SbCols] = sbCols;
@@ -260,6 +283,10 @@ public sealed class Vp9EncoderGpu : IDisposable
                 _frames.Pool.SubView(curBase, yBytes), _frames.Pool.SubView(curBase + layout.UOffset, uvBytes),
                 _frames.Pool.SubView(curBase + layout.VOffset, uvBytes));
             _sinceKey = 1;
+            // A key frame resets every saved context to the defaults. Its header has refresh_frame_context = 0, so
+            // what a decoder adapts from the key frame's symbols is not saved: the next frame starts from the defaults.
+            _contexts.BeginFrame(FrameInfo(key: true, adapt: false));
+            _lastFrameType = 0;
         }
         else
         {
@@ -392,17 +419,38 @@ public sealed class Vp9EncoderGpu : IDisposable
         _forward(leaves, pool, src, _args.View, _mi.View, _sb.View, _dq!.View, _levels!.View, _key.UshortConsts);
         _residual(residUnits, pool, _args.View, _tables.View, _mi.View, _sb.View, _dq.View, _scratch.View);
 
+        // The frame's probabilities: the saved context (or the defaults), then whatever the compressed header changes,
+        // read back by the decoder's own reader (it also leaves the tx mode the adaptation needs).
+        bool adapt = BackwardAdaptation;
+        var info = FrameInfo(key: false, adapt);
+        _contexts.BeginFrame(info);
         _compressed(1, _compressedHeader.View, _compressedLen.View);
+        _contexts.ReadCompressedHeader(_compressedHeader.View, 0, info);
+        var frameContext = _contexts.Contexts.SubView((long)Vp9Ctx.Current * Vp9Ctx.Bytes, Vp9Ctx.Bytes);
+        // the entropy pass's per-frame arguments: counting, the MV maps (this frame's and the previous frame's)
+        var e = _entropyArgsHost;
+        _mapCur ^= 1;
+        e[Vp9PArg.CountsOn] = adapt ? 1 : 0;
+        // vp9_decode_frame: the previous frame's MVs are candidates when it was an inter frame of the same size, shown,
+        // and this frame is not error resilient (every frame here is shown, a new size starts with a key frame)
+        e[Vp9PArg.UsePrevMvs] = adapt && _lastFrameType == 1 ? 1 : 0;
+        e[Vp9PArg.CurMvOffset] = _mapCur * _miCount * Vp9PLayout.MvStride;
+        e[Vp9PArg.PrevMvOffset] = (1 - _mapCur) * _miCount * Vp9PLayout.MvStride;
+        _entropyArgs.View.CopyFromCPU(e);   // frame metadata scalars
         int slots = sbCols * sbRows * 16;
         int steps = (slots + Vp9InterEntropy.LeavesPerLaunch - 1) / Vp9InterEntropy.LeavesPerLaunch;
         var pacer = new LaunchPacer(_acc);
         for (int s = 0; s < steps; s++)
         {
-            _entropy(1, _tile.View, _tileLen.View, _levels.View, _mi.View, _entropyArgs.View, _ctx.View, _tables.View,
-                _key.ByteConsts, _key.UshortConsts, _state.View, _maps.View, Vp9InterEntropy.LeavesPerLaunch);
+            _entropy(1, _tile.View, _tileLen.View, _levels.View, _mi.View, _entropyArgs.View, frameContext, _tables.View,
+                _key.ByteConsts, _key.UshortConsts, _state.View, _maps!.View, Vp9InterEntropy.LeavesPerLaunch);
             await pacer.LaunchedAsync();
         }
-        _uncompressed(1, _uncompressedHeader.View, _uncompressedLen.View, _compressedLen.View, width, baseQIndex);
+        // libvpx's backward adaptation from the frame's counts, then the save (both do nothing for an error resilient frame)
+        _contexts.Adapt(info, _state.View.SubView(Vp9InterEntropy.Counts, Vp9Cnt.Size), 1);
+        _contexts.EndFrame(info);
+        _lastFrameType = 1;
+        _uncompressed(1, _uncompressedHeader.View, _uncompressedLen.View, _compressedLen.View, width, baseQIndex, adapt ? 0 : 1);
         _assemble.Run(_uncompressedHeader.View, _compressedHeader.View, _tile.View, output, _frameLen.View,
             _uncompressedLen.View, _compressedLen.View, _tileLen.View);
         await _acc.SynchronizeAsync();
@@ -410,6 +458,30 @@ public sealed class Vp9EncoderGpu : IDisposable
         if (length < 0) throw new InvalidOperationException("VP9 encode: the tile outgrew its buffer; the frame was not assembled.");
         return (int)length;
     }
+
+    /// <summary>
+    /// What the decoder's frame context class needs to know of a frame this encoder writes (the fields its
+    /// BeginFrame / ReadCompressedHeader / Adapt / EndFrame read; the header kernels write the same choices).
+    /// </summary>
+    private Vp9FrameInfo FrameInfo(bool key, bool adapt) => new()
+    {
+        FrameType = key ? 0 : 1,
+        LastFrameType = _lastFrameType == 0 ? 0 : 1,
+        ShowFrame = true,
+        ErrorResilient = !key && !adapt,
+        FrameParallel = !key && !adapt,
+        RefreshFrameContext = !key && adapt,
+        FrameContextIdx = 0,
+        // key frames and error resilient frames reset every saved context (vp9_setup_past_independence)
+        ContextReset = key || !adapt ? Vp9ContextReset.All : Vp9ContextReset.None,
+        InterpFilter = Vp9Interp.EightTap,
+        AllowHighPrecisionMv = false,
+        UncompressedHeaderBytes = 0,
+        FirstPartitionSize = (int)_compressedHeader.Length,   // the reader's bound: the whole (zeroed) buffer
+        LoopFilter = new Vp9LoopFilterInfo(0, 0, false, false, new int[4], new int[2]),
+        Segmentation = new Vp9SegmentationInfo(false, false, false, false, false, new byte[7], new byte[3], new int[8], new int[8, 4]),
+        Dequant = new short[8, 4],
+    };
 
     /// <summary>
     /// Encode the next frame from managed, tightly packed 4:2:0 planes; returns the frame's bytes (a terminal CPU
@@ -458,6 +530,12 @@ public sealed class Vp9EncoderGpu : IDisposable
         return await _mvs.View.CopyToHostAsync();
     }
 
+    /// <summary>Tests: the last inter frame's symbol counts (the decoder's FRAME_COUNTS layout, <see cref="Vp9Cnt"/>).</summary>
+    internal async Task<int[]> ReadCountsAsync() => await _state.View.SubView(Vp9InterEntropy.Counts, Vp9Cnt.Size).CopyToHostAsync();
+
+    /// <summary>Tests: the frame contexts (four saved + the current one, <see cref="Vp9Ctx"/>).</summary>
+    internal Task<int[]> ReadContextsAsync() => _contexts.ReadContextsAsync();
+
     /// <summary>Release every resource the encoder owns.</summary>
     public void Dispose()
     {
@@ -465,7 +543,7 @@ public sealed class Vp9EncoderGpu : IDisposable
         _pad.Dispose();
         _assemble.Dispose();
         _frames.Dispose();
-        _tables.Dispose(); _ctx.Dispose(); _args.Dispose(); _entropyArgs.Dispose(); _state.Dispose(); _maps.Dispose();
+        _tables.Dispose(); _contexts.Dispose(); _args.Dispose(); _entropyArgs.Dispose(); _state.Dispose(); _maps?.Dispose();
         _compressedHeader.Dispose(); _uncompressedHeader.Dispose();
         _compressedLen.Dispose(); _uncompressedLen.Dispose(); _tileLen.Dispose(); _frameLen.Dispose();
         _src?.Dispose(); _tile?.Dispose(); _mi?.Dispose(); _sb?.Dispose(); _dq?.Dispose(); _scratch?.Dispose(); _levels?.Dispose(); _mvs?.Dispose();
