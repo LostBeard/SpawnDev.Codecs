@@ -2,6 +2,13 @@
 // (the ArrayView overload: only the encoded length crosses to the host per frame). Prints the time per keyframe
 // (median, mean, min over the timed runs, after warm-up encodes that pay for kernel compilation) and the encoded size.
 // Usage: av1-encode-bench [--backend cpu|velocity|cuda|opencl] [--size 832x480] [--frames 12] [--warmup 2] [--q 40]
+//                         [--tile N|max] [--maxtiles N] [--batch N] [--out file.obu]
+// --tile: largest tile size in 64x64 superblocks per side (Av1KeyframeEncoderGpu.TileSizeSuperblocks; default 1 =
+//         one GPU thread per superblock; max = the fewest tiles the picture allows, one thread per frame).
+// --maxtiles: the most tiles per frame (Av1KeyframeEncoderGpu.MaxTiles; default 256, what hardware decoders take).
+// --batch: frames per EncodeKeyFramesBatchAsync call (default 1 = EncodeKeyFrameAsync). A timed run is one call;
+//          the time per keyframe is the call's time divided by the batch size.
+// --out: write the last encoded temporal unit to a file (an .obu file FFmpeg reads: ffmpeg -i file.obu ...).
 // For an A/B of two builds: run the two executables alternately, several times each, with nothing else on the GPU.
 
 using System.Diagnostics;
@@ -25,7 +32,8 @@ internal static class Av1EncodeBench
     public static async Task<int> Run(string[] args)
     {
         string backend = "velocity";
-        int width = 832, height = 480, frames = 12, warmup = 2, q = 40;
+        string? outPath = null;
+        int width = 832, height = 480, frames = 12, warmup = 2, q = 40, tile = 1, batch = 1, maxTiles = Av1TileLayout.HardwareDecoderMaxTiles;
         for (int i = 1; i < args.Length; i++)
         {
             string a = args[i];
@@ -42,9 +50,13 @@ internal static class Av1EncodeBench
             else if (a == "--frames") frames = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--warmup") warmup = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--q") q = int.Parse(v, CultureInfo.InvariantCulture);
+            else if (a == "--tile") tile = v == "max" ? int.MaxValue : int.Parse(v, CultureInfo.InvariantCulture);
+            else if (a == "--batch") batch = int.Parse(v, CultureInfo.InvariantCulture);
+            else if (a == "--maxtiles") maxTiles = int.Parse(v, CultureInfo.InvariantCulture);
+            else if (a == "--out") outPath = v;
             else { Console.WriteLine($"unknown option {a}"); return 2; }
         }
-        if (frames < 1 || warmup < 0) { Console.WriteLine("--frames must be >= 1 and --warmup >= 0"); return 2; }
+        if (frames < 1 || warmup < 0 || tile < 1 || batch < 1 || maxTiles < 1) { Console.WriteLine("--frames, --tile, --maxtiles and --batch must be >= 1 and --warmup >= 0"); return 2; }
 
         using var ctx = backend switch
         {
@@ -72,26 +84,46 @@ internal static class Av1EncodeBench
                 v2[r * cw + c] = Texel(2 * c + 77, 2 * r + 409, 3);
             }
 
-        using var enc = new Av1KeyframeEncoderGpu(acc);
-        using var dY = acc.Allocate1D<byte>(y.Length);
-        using var dU = acc.Allocate1D<byte>(u.Length);
-        using var dV = acc.Allocate1D<byte>(v2.Length);
-        dY.View.CopyFromCPU(y); dU.View.CopyFromCPU(u); dV.View.CopyFromCPU(v2);
-        using var dOut = acc.Allocate1D<byte>(Av1KeyframeEncoderGpu.GetMaxEncodedSize(width, height));
+        using var enc = new Av1KeyframeEncoderGpu(acc) { TileSizeSuperblocks = tile, MaxTiles = maxTiles };
+        var layout = enc.GetTileLayout(width, height);
+        int cap = Av1KeyframeEncoderGpu.GetMaxEncodedSize(width, height);
+        // batch frames of the same picture, frame-major (the batch overload's layout)
+        using var dY = acc.Allocate1D<byte>((long)batch * y.Length);
+        using var dU = acc.Allocate1D<byte>((long)batch * u.Length);
+        using var dV = acc.Allocate1D<byte>((long)batch * v2.Length);
+        for (int f = 0; f < batch; f++)
+        {
+            dY.View.SubView((long)f * y.Length, y.Length).CopyFromCPU(y);
+            dU.View.SubView((long)f * u.Length, u.Length).CopyFromCPU(u);
+            dV.View.SubView((long)f * v2.Length, v2.Length).CopyFromCPU(v2);
+        }
+        using var dOut = acc.Allocate1D<byte>((long)batch * cap);
+        using var dLens = acc.Allocate1D<int>(batch);
+
+        // One timed run = one call (a keyframe, or a batch of them); the length readback closes it.
+        async Task<int> EncodeOnce()
+        {
+            if (batch == 1)
+                return await enc.EncodeKeyFrameAsync(dY.View, dU.View, dV.View, width, height, dOut.View, q);
+            await enc.EncodeKeyFramesBatchAsync(dY.View, dU.View, dV.View, batch, width, height, dOut.View, dLens.View, q);
+            int[] lens = await dLens.CopyToHostAsync();
+            for (int f = 1; f < batch; f++)
+                if (lens[f] != lens[0]) throw new InvalidOperationException($"batch frame {f} is {lens[f]} bytes, frame 0 is {lens[0]} (the frames are the same picture)");
+            return lens[0];
+        }
 
         var compile = Stopwatch.StartNew();
         int len = 0;
-        for (int i = 0; i < warmup; i++)
-            len = await enc.EncodeKeyFrameAsync(dY.View, dU.View, dV.View, width, height, dOut.View, q);
+        for (int i = 0; i < warmup; i++) len = await EncodeOnce();
         compile.Stop();
 
         var ms = new double[frames];
         for (int i = 0; i < frames; i++)
         {
             var sw = Stopwatch.StartNew();
-            len = await enc.EncodeKeyFrameAsync(dY.View, dU.View, dV.View, width, height, dOut.View, q);
+            len = await EncodeOnce();
             sw.Stop();
-            ms[i] = sw.Elapsed.TotalMilliseconds;
+            ms[i] = sw.Elapsed.TotalMilliseconds / batch;
         }
         var sorted = (double[])ms.Clone();
         System.Array.Sort(sorted);
@@ -100,8 +132,17 @@ internal static class Av1EncodeBench
         foreach (double m in ms) mean += m;
         mean /= frames;
         string build = typeof(Av1KeyframeEncoderGpu).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
-        Console.WriteLine($"av1-encode-bench {acc.AcceleratorType} {width}x{height} q{q}: median {F(median, "F2")} ms, mean {F(mean, "F2")} ms, " +
-            $"min {F(sorted[0], "F2")} ms, max {F(sorted[frames - 1], "F2")} ms per keyframe over {frames} frames " +
+        if (outPath != null)
+        {
+            // a terminal file sink: the first frame's temporal unit
+            byte[] unit = await dOut.View.SubView(0, len).CopyToHostAsync();
+            await File.WriteAllBytesAsync(outPath, unit);
+        }
+        string tileText = tile == int.MaxValue ? "max" : tile.ToString(CultureInfo.InvariantCulture);
+        Console.WriteLine($"av1-encode-bench {acc.AcceleratorType} {width}x{height} q{q} tile {tileText} " +
+            $"({layout.TileCols} x {layout.TileRows} = {layout.TileCount} tiles of {layout.TileWidthSb} x {layout.TileHeightSb} superblocks) batch {batch}: " +
+            $"median {F(median, "F2")} ms, mean {F(mean, "F2")} ms, " +
+            $"min {F(sorted[0], "F2")} ms, max {F(sorted[frames - 1], "F2")} ms per keyframe over {frames} {(batch == 1 ? "frames" : "batches")} " +
             $"({F(1000.0 / median, "F2")} fps); {len} bytes; warm-up {warmup} frames {F(compile.Elapsed.TotalMilliseconds, "F0")} ms; SpawnDev.Codecs {build}");
         return 0;
     }

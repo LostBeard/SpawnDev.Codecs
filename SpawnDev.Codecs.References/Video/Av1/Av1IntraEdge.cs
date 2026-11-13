@@ -56,10 +56,17 @@ public sealed class Av1IntraEdge
     /// </summary>
     public static Av1IntraEdge Build(
         byte[] plane, int planeStride, int planeWidth, int planeHeight,
-        int xPx, int yPx, int bw, int bh)
+        int xPx, int yPx, int bw, int bh) =>
+        Build(plane, planeStride, planeWidth, planeHeight, xPx, yPx, bw, bh, yPx > 0, xPx > 0);
+
+    /// <summary>
+    /// Fill the edge buffers for a block whose neighbour availability the caller knows (a block in the first row /
+    /// column of a TILE has no above / left neighbour even when the picture has pixels there).
+    /// </summary>
+    public static Av1IntraEdge Build(
+        byte[] plane, int planeStride, int planeWidth, int planeHeight,
+        int xPx, int yPx, int bw, int bh, bool haveAbove, bool haveLeft)
     {
-        bool haveAbove = yPx > 0;
-        bool haveLeft = xPx > 0;
         var edge = new Av1IntraEdge(bw, bh, haveAbove, haveLeft);
 
         // Per AV1 spec: use 129 (slightly above mid-gray) for missing top

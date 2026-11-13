@@ -1,21 +1,30 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
-// AV1 v1 keyframe per-frame walker, 100% ILGPU. One GPU thread per frame runs
-// the EncodeSingleTile pipeline bit-exact vs the CPU
-// Av1KeyframeEncoder.EncodeSingleTile reference. The host is a pure
-// coordinator: alloc buffers + upload constants + dispatch + read back.
+// AV1 v1 keyframe walker, 100% ILGPU. One GPU thread per TILE runs the tile pipeline (predict, transform, quantize,
+// entropy code, reconstruct) bit-exact vs the CPU Av1KeyframeEncoder reference. The host is a pure coordinator:
+// alloc buffers + upload constants + dispatch + read back.
 //
-// Bounded launches: the walk is linearized into leaf slots (the 16 z-order
-// 16x16 positions of each superblock) and a launch encodes at most
-// LeavesPerLaunch of them (a whole-frame launch was 15 ms at 64x64 on
-// CUDA and grows with the picture). The contexts were already in
-// scratchByte; the range encoder and the slot cursor are kept in
-// scratchInt[StStarted ..] between launches. The host launches
-// ceil(slots / LeavesPerLaunch) steps (a bound it knows; no readback).
+// Tiles are what makes the encoder parallel. An AV1 tile is independent by definition: its own range coder, its
+// own above / left contexts (zero at the tile's top and at the start of each superblock row), and no prediction
+// across its boundary. So every tile of every frame is one working thread of the same launches: working thread =
+// frame * tileCount + tile. With one 64x64 superblock per tile a frame costs about what one superblock costs
+// (CUDA, RTX 4070, 832x480 q40: 799 ms on one thread = 1.25 frames per second; 8.8 ms with 104 tiles; 1.1 ms per
+// frame in a batch of 16). The price is bits (contexts restart and prediction stops at every tile edge: +0.42% at
+// 832x480), so the tile size is the host's choice (Av1TileLayout).
+//
+// The working threads are spread over the launch (SerialThreadPlacement: one group per multiprocessor, one thread
+// per warp while there is room): packed into the first launch group, the same 104 threads took 20.7 ms.
+//
+// Bounded launches: a tile's walk is linearized into leaf slots (the 16 z-order
+// 16x16 positions of each of its superblocks) and a launch encodes at most
+// LeavesPerLaunch of them per tile. The contexts are in the tile's
+// scratchByte slot; the range encoder and the slot cursor are kept in
+// its scratchInt slot [StStarted ..] between launches. The host launches
+// ceil(slots of the largest tile / LeavesPerLaunch) steps (a bound it knows; no readback).
 //
 // Pipeline (mirrors Av1KeyframeEncoder.EncodeSingleTile / EncodePartition):
-//   - For each 64x64 superblock in raster order:
-//       reset left partition + entropy + mode + skip arrays
+//   - For each 64x64 superblock of the tile in raster order:
+//       at the first superblock of a row: reset left partition + entropy + mode + skip arrays
 //       64x64: SPLIT; each 32x32 inside the picture: SPLIT;
 //       each 16x16 inside the picture:
 //         whole block inside: partition NONE, one BLOCK_16X16 leaf
@@ -38,15 +47,15 @@
 //   - tx_mode = LARGEST, reduced_tx_set = 1.
 //   - Single tile.
 //
-// Scratch layout per kernel invocation:
+// Scratch layout per tile (one slot per thread; the above arrays are indexed by the mi column inside the tile):
 //   scratchByte:
-//     [AboveEntropyOff..   ): 3 planes * frameMiCols bytes
+//     [AboveEntropyOff..   ): 3 planes * AboveStride bytes (AboveStride = tile width in mi)
 //     [LeftEntropyOff..    ): 3 planes * 32 bytes
-//     [AbovePartOff..      ): frameMiCols bytes
+//     [AbovePartOff..      ): AboveStride bytes
 //     [LeftPartOff..       ): 32 bytes
-//     [AboveYModeOff..     ): frameMiCols bytes
+//     [AboveYModeOff..     ): AboveStride bytes
 //     [LeftYModeOff..      ): 32 bytes
-//     [AboveSkipOff..      ): frameMiCols bytes
+//     [AboveSkipOff..      ): AboveStride bytes
 //     [LeftSkipOff..       ): 32 bytes
 //     [EdgeAboveOff..      ): 33 bytes (per-block, reused)
 //     [EdgeLeftOff..       ): 33 bytes (per-block, reused)
@@ -137,54 +146,74 @@ public struct Av1FrameSeqEncodeParams
     public int ReconUOff;
     /// <summary>V plane offset within the recon byte buffer.</summary>
     public int ReconVOff;
+
+    /// <summary>Tile columns of the frame (<see cref="Av1TileLayout"/>).</summary>
+    public int TileCols;
+    /// <summary>Tile rows of the frame.</summary>
+    public int TileRows;
+    /// <summary>Tile width in 64x64 superblocks (the last column of tiles may be narrower).</summary>
+    public int TileWidthSb;
+    /// <summary>Tile height in 64x64 superblocks (the last row of tiles may be shorter).</summary>
+    public int TileHeightSb;
+    /// <summary>Per-plane stride of the above entropy context arrays = the tile width in mi (<c>TileWidthSb * 16</c>).</summary>
+    public int AboveStride;
+
+    /// <summary>First mi row of the thread's tile. Set by the kernel per thread; the host leaves it 0.</summary>
+    public int TileMiRowStart;
+    /// <summary>First mi column of the thread's tile. Set by the kernel per thread.</summary>
+    public int TileMiColStart;
+    /// <summary>One past the last mi row of the thread's tile (clipped to the frame). Set by the kernel per thread.</summary>
+    public int TileMiRowEnd;
+    /// <summary>One past the last mi column of the thread's tile (clipped to the frame). Set by the kernel per thread.</summary>
+    public int TileMiColEnd;
 }
 
-/// <summary>Per-frame slot strides for the batch AV1 frame walker.</summary>
+/// <summary>Slot strides of the AV1 tile walker: source and recon per FRAME, everything else per TILE (= per thread).</summary>
 public struct Av1FrameBatchStrides
 {
     /// <summary>src bytes per frame (yLen + 2*uvLen).</summary>
     public int SrcStride;
     /// <summary>recon bytes per frame (coded size: ReconWidth * ReconHeight * 3 / 2).</summary>
     public int ReconStride;
-    /// <summary>tileBytes per frame (worst-case).</summary>
+    /// <summary>tileBytes per tile (worst case of the largest tile).</summary>
     public int TileStride;
-    /// <summary>scratchByte per frame.</summary>
+    /// <summary>scratchByte per tile.</summary>
     public int ScratchByteStride;
-    /// <summary>scratchInt ints per frame (MinScratchIntLength).</summary>
+    /// <summary>scratchInt ints per tile (MinScratchIntLength).</summary>
     public int ScratchIntStride;
-    /// <summary>scratchShort shorts per frame (256).</summary>
+    /// <summary>scratchShort shorts per tile (256).</summary>
     public int ScratchShortStride;
+
+    /// <summary>
+    /// Where the tile threads sit in the launch. Set by <see cref="Av1FrameSequentialEncodeKernel.RunAsync"/>; a
+    /// caller leaves it default.
+    /// </summary>
+    public SerialThreadPlacement Placement;
 }
 
 /// <summary>
-/// AV1 v1 keyframe per-frame walker kernel. One GPU thread per frame runs EncodeSingleTile bit-exact vs
-/// Av1KeyframeEncoder.EncodeSingleTile, in bounded resumable launches of <see cref="LeavesPerLaunch"/> leaf slots.
+/// AV1 v1 keyframe tile walker kernel. One GPU thread per tile of every frame, bit-exact vs the CPU
+/// Av1KeyframeEncoder reference, in bounded resumable launches of <see cref="LeavesPerLaunch"/> leaf slots per tile.
 /// </summary>
 public sealed class Av1FrameSequentialEncodeKernel : IDisposable
 {
     private readonly Accelerator _accelerator;
 
+    // ONE kernel for single frames and batches (a second, near-identical kernel was a second shader of the same
+    // size to compile): working thread = frame * tileCount + tile, placed in the launch by a SerialThreadPlacement.
     private readonly Action<
         Index1D,
-        ArrayView<byte>,    // src (Y + U + V planes)
-        ArrayView<byte>,    // recon (Y + U + V planes)
-        ArrayView<byte>,    // tileBytes (output)
-        ArrayView<long>,    // tileLen (output, 1 element)
+        ArrayView<byte>,    // src (per frame: Y + U + V planes)
+        ArrayView<byte>,    // recon (per frame: Y + U + V planes, coded size)
+        ArrayView<byte>,    // tileBytes (output, one slot per tile)
+        ArrayView<long>,    // tileLen (output, one element per tile)
         ArrayView<byte>,    // constsByte (Av1KeyframeConstantsGpu byte buffer)
         ArrayView<ushort>,  // constsUshort (Av1KeyframeConstantsGpu ushort buffer)
         ArrayView<short>,   // dcAcQuant (DC[0..256) + AC[256..512))
-        ArrayView<byte>,    // scratchByte (state + edge + predict + levels)
-        ArrayView<int>,     // scratchInt (per-block working area + resumable state)
-        ArrayView<short>,   // scratchShort (residual)
-        Av1FrameSeqEncodeParams, int> _kernel;
-
-    private readonly Action<
-        Index1D,
-        ArrayView<byte>, ArrayView<byte>,
-        ArrayView<byte>, ArrayView<long>,
-        ArrayView<byte>, ArrayView<ushort>, ArrayView<short>,
-        ArrayView<byte>, ArrayView<int>, ArrayView<short>,
-        Av1FrameSeqEncodeParams, Av1FrameBatchStrides, int> _batchKernel;
+        ArrayView<byte>,    // scratchByte (per tile: contexts + edge + predict + levels)
+        ArrayView<int>,     // scratchInt (per tile: per-block working area + resumable state)
+        ArrayView<short>,   // scratchShort (per tile: residual)
+        Av1FrameSeqEncodeParams, Av1FrameBatchStrides, int> _tileKernel;
 
     /// <summary>Slot in scratchInt where WriteCoeffsTxb writes eob (per call).</summary>
     public const int EobSlot = 1100;
@@ -213,37 +242,46 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
-        _kernel = accelerator.LoadAutoGroupedStreamKernel<
+        _tileKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<byte>, ArrayView<byte>,
             ArrayView<byte>, ArrayView<long>,
             ArrayView<byte>, ArrayView<ushort>, ArrayView<short>,
             ArrayView<byte>, ArrayView<int>, ArrayView<short>,
-            Av1FrameSeqEncodeParams, int>(Av1EncodeFrameStepKernel);
-        _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
-            Index1D,
-            ArrayView<byte>, ArrayView<byte>,
-            ArrayView<byte>, ArrayView<long>,
-            ArrayView<byte>, ArrayView<ushort>, ArrayView<short>,
-            ArrayView<byte>, ArrayView<int>, ArrayView<short>,
-            Av1FrameSeqEncodeParams, Av1FrameBatchStrides, int>(Av1EncodeFrameBatchStepKernel);
+            Av1FrameSeqEncodeParams, Av1FrameBatchStrides, int>(Av1EncodeTileStepKernel, out var info);
+        _groupSize = info?.MinGroupSize ?? 1;
     }
 
-    /// <summary>Launches one frame of <paramref name="p"/> takes (ceil(leaf slots / LeavesPerLaunch)).</summary>
+    /// <summary>Threads per launch group of the tile kernel on this accelerator (1 when it reports none).</summary>
+    private readonly int _groupSize;
+
+    /// <summary>
+    /// Where <paramref name="tileThreads"/> tile threads sit in a launch on this accelerator (a GPU runs them
+    /// several times faster spread over its multiprocessors and warps than packed into the first group; see
+    /// <see cref="SerialThreadPlacement"/>).
+    /// </summary>
+    public SerialThreadPlacement GetPlacement(int tileThreads) =>
+        SerialThreadPlacement.Create(_accelerator, _groupSize, tileThreads);
+
+    /// <summary>Launches a frame of <paramref name="p"/> takes: ceil(leaf slots of the largest tile / LeavesPerLaunch).</summary>
     private static int StepCount(Av1FrameSeqEncodeParams p)
     {
-        int sbRows = (p.FrameMiRows + 15) >> 4;
-        int sbCols = (p.FrameMiCols + 15) >> 4;
-        return (sbRows * sbCols * 16 + LeavesPerLaunch - 1) / LeavesPerLaunch;
+        int tileSbCols = p.TileWidthSb, tileSbRows = p.TileHeightSb;
+        int frameSbCols = (p.FrameMiCols + 15) >> 4, frameSbRows = (p.FrameMiRows + 15) >> 4;
+        if (tileSbCols > frameSbCols) tileSbCols = frameSbCols;
+        if (tileSbRows > frameSbRows) tileSbRows = frameSbRows;
+        return (tileSbRows * tileSbCols * 16 + LeavesPerLaunch - 1) / LeavesPerLaunch;
     }
 
     /// <summary>
-    /// Batch dispatch: extent=frameCount, each thread runs one AV1 EncodeSingleTile on its frame slot,
-    /// <see cref="LeavesPerLaunch"/> leaves per launch. Each thread has its own range encoder state, its own
-    /// scratch slots, and writes to its own output slot. Zeroes the scratch buffers first (the walker's
+    /// Encode the tiles of <paramref name="frameCount"/> frames: frameCount * tileCount working threads (placed in
+    /// the launch by <see cref="GetPlacement"/>), each walks
+    /// one tile of one frame, <see cref="LeavesPerLaunch"/> leaves per launch, with its own range encoder state, its
+    /// own scratch slots and its own output slot (tile g = frame * tileCount + tile: bytes at
+    /// <c>g * strides.TileStride</c>, length in <c>tileLen[g]</c>). Zeroes the scratch buffers first (the walker's
     /// contexts start at zero). The work is queued (paced with <see cref="LaunchPacer"/>), not awaited.
     /// </summary>
-    public async Task RunBatchAsync(
+    public async Task RunAsync(
         ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> tileBytes, ArrayView<long> tileLen,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
@@ -254,48 +292,26 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         Av1FrameBatchStrides strides)
     {
         if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        if (p.TileCols <= 0 || p.TileRows <= 0 || p.TileWidthSb <= 0 || p.TileHeightSb <= 0)
+            throw new ArgumentException("The tile layout is not set (TileCols, TileRows, TileWidthSb, TileHeightSb).", nameof(p));
         if (strides.ScratchIntStride < MinScratchIntLength)
             throw new ArgumentException($"ScratchIntStride must be at least {MinScratchIntLength}.", nameof(strides));
+        long threads = (long)frameCount * p.TileCols * p.TileRows;
+        if (threads > int.MaxValue) throw new ArgumentException("frameCount * tileCount exceeds the launch extent.", nameof(frameCount));
+        if (tileLen.Length < threads) throw new ArgumentException("tileLen needs one element per tile of every frame.", nameof(tileLen));
         scratchByte.MemSetToZero();
         scratchInt.MemSetToZero();
         int steps = StepCount(p);
+        strides.Placement = GetPlacement((int)threads);
+        long extent = strides.Placement.Extent;
+        if (extent > int.MaxValue) throw new ArgumentException("frameCount * tileCount exceeds the launch extent.", nameof(frameCount));
         var pacer = new LaunchPacer(_accelerator);
         for (int s = 0; s < steps; s++)
         {
-            _batchKernel(new Index1D(frameCount),
+            _tileKernel(new Index1D((int)extent),
                 src, recon, tileBytes, tileLen,
                 constsByte, constsUshort, dcAcQuant,
                 scratchByte, scratchInt, scratchShort, p, strides, LeavesPerLaunch);
-            await pacer.LaunchedAsync();
-        }
-    }
-
-    /// <summary>
-    /// Dispatch the walker on one frame (one GPU thread, <see cref="LeavesPerLaunch"/> leaves per launch). Zeroes
-    /// the scratch buffers first. The work is queued (paced with <see cref="LaunchPacer"/>), not awaited.
-    /// </summary>
-    public async Task RunAsync(
-        ArrayView<byte> src, ArrayView<byte> recon,
-        ArrayView<byte> tileBytes, ArrayView<long> tileLen,
-        ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
-        ArrayView<short> dcAcQuant,
-        ArrayView<byte> scratchByte,
-        ArrayView<int> scratchInt,
-        ArrayView<short> scratchShort,
-        Av1FrameSeqEncodeParams p)
-    {
-        if (scratchInt.Length < MinScratchIntLength)
-            throw new ArgumentException($"scratchInt must hold at least {MinScratchIntLength} ints.", nameof(scratchInt));
-        scratchByte.MemSetToZero();
-        scratchInt.MemSetToZero();
-        int steps = StepCount(p);
-        var pacer = new LaunchPacer(_accelerator);
-        for (int s = 0; s < steps; s++)
-        {
-            _kernel(new Index1D(1),
-                src, recon, tileBytes, tileLen,
-                constsByte, constsUshort, dcAcQuant,
-                scratchByte, scratchInt, scratchShort, p, LeavesPerLaunch);
             await pacer.LaunchedAsync();
         }
     }
@@ -307,29 +323,12 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
     // Kernel entry points
     // ===========================================================================
 
-    private static void Av1EncodeFrameStepKernel(
-        Index1D _,
-        ArrayView<byte> src, ArrayView<byte> recon,
-        ArrayView<byte> tileBytes, ArrayView<long> tileLen,
-        ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
-        ArrayView<short> dcAcQuant,
-        ArrayView<byte> scratchByte,
-        ArrayView<int> scratchInt,
-        ArrayView<short> scratchShort,
-        Av1FrameSeqEncodeParams p,
-        int leavesPerLaunch)
-    {
-        EncodeFrameStep(src, recon, tileBytes, tileLen,
-            constsByte, constsUshort, dcAcQuant,
-            scratchByte, scratchInt, scratchShort, p, leavesPerLaunch);
-    }
-
     /// <summary>
-    /// Batch kernel: thread = one frame. Per-frame buffer slots SubView'd
-    /// at kernel head; body unchanged. Each thread has its own range
-    /// encoder state and writes to its own output slot.
+    /// Working thread = one tile of one frame (<c>g = frame * tileCount + tile</c>, tiles in raster order). Resolves the
+    /// tile's rectangle and its buffer slots, then runs the step. The frame's source and recon are shared by its
+    /// tiles (each tile writes only its own rectangle of the recon and reads only inside it).
     /// </summary>
-    private static void Av1EncodeFrameBatchStepKernel(
+    private static void Av1EncodeTileStepKernel(
         Index1D idx,
         ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> tileBytes, ArrayView<long> tileLen,
@@ -342,23 +341,45 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         Av1FrameBatchStrides s,
         int leavesPerLaunch)
     {
-        int f = idx.X;
+        // Only the placement's working threads of the launch encode a tile; the others return at once.
+        int g = SerialThreadPlacement.WorkingThread(s.Placement, idx.X);
+        if (g < 0) return;
+        int tileCount = p.TileCols * p.TileRows;
+        int f = g / tileCount;
+        int t = g - f * tileCount;
+        int tileRow = t / p.TileCols;
+        int tileCol = t - tileRow * p.TileCols;
+
+        // The thread's own copy of the parameters: its tile rectangle (mi), and the above context arrays rebased so
+        // that "offset + miCol" indexes the tile's arrays by the column inside the tile.
+        var tp = p;
+        tp.TileMiRowStart = tileRow * p.TileHeightSb * 16;
+        tp.TileMiColStart = tileCol * p.TileWidthSb * 16;
+        int rowEnd = tp.TileMiRowStart + p.TileHeightSb * 16;
+        int colEnd = tp.TileMiColStart + p.TileWidthSb * 16;
+        tp.TileMiRowEnd = rowEnd < p.FrameMiRows ? rowEnd : p.FrameMiRows;
+        tp.TileMiColEnd = colEnd < p.FrameMiCols ? colEnd : p.FrameMiCols;
+        tp.AboveEntropyOff = p.AboveEntropyOff - tp.TileMiColStart;
+        tp.AbovePartOff = p.AbovePartOff - tp.TileMiColStart;
+        tp.AboveYModeOff = p.AboveYModeOff - tp.TileMiColStart;
+        tp.AboveSkipOff = p.AboveSkipOff - tp.TileMiColStart;
+
         var fSrc = src.SubView((long)f * s.SrcStride, s.SrcStride);
         var fRecon = recon.SubView((long)f * s.ReconStride, s.ReconStride);
-        var fTile = tileBytes.SubView((long)f * s.TileStride, s.TileStride);
-        var fTileLen = tileLen.SubView(f, 1);
-        var fScratchByte = scratchByte.SubView((long)f * s.ScratchByteStride, s.ScratchByteStride);
-        var fScratchInt = scratchInt.SubView((long)f * s.ScratchIntStride, s.ScratchIntStride);
-        var fScratchShort = scratchShort.SubView((long)f * s.ScratchShortStride, s.ScratchShortStride);
-        EncodeFrameStep(fSrc, fRecon, fTile, fTileLen,
+        var tTile = tileBytes.SubView((long)g * s.TileStride, s.TileStride);
+        var tTileLen = tileLen.SubView(g, 1);
+        var tScratchByte = scratchByte.SubView((long)g * s.ScratchByteStride, s.ScratchByteStride);
+        var tScratchInt = scratchInt.SubView((long)g * s.ScratchIntStride, s.ScratchIntStride);
+        var tScratchShort = scratchShort.SubView((long)g * s.ScratchShortStride, s.ScratchShortStride);
+        EncodeFrameStep(fSrc, fRecon, tTile, tTileLen,
             constsByte, constsUshort, dcAcQuant,
-            fScratchByte, fScratchInt, fScratchShort, p, leavesPerLaunch);
+            tScratchByte, tScratchInt, tScratchShort, tp, leavesPerLaunch);
     }
 
     /// <summary>
-    /// One bounded step: the next <paramref name="leavesPerLaunch"/> leaf slots of the superblock walk. The
-    /// above contexts start at zero (the host zeroes scratchByte); the range encoder and the slot cursor live in
-    /// scratchInt[StStarted ..]. The step that encodes the last slot finishes the range coder and writes tileLen.
+    /// One bounded step of one tile: the next <paramref name="leavesPerLaunch"/> leaf slots of its superblock walk.
+    /// The above contexts start at zero (the host zeroes scratchByte); the range encoder and the slot cursor live in
+    /// scratchInt[StStarted ..]. The step that encodes the tile's last slot finishes its range coder and writes tileLen.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void EncodeFrameStep(
@@ -392,8 +413,9 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         int qDc = (int)dcAcQuant[p.BaseQIndex];
         int qAc = (int)dcAcQuant[256 + p.BaseQIndex];
 
-        int sbCols = (frameMiCols + sbMi - 1) / sbMi;
-        int sbRows = (frameMiRows + sbMi - 1) / sbMi;
+        // superblocks of THIS tile
+        int sbCols = (p.TileMiColEnd - p.TileMiColStart + sbMi - 1) / sbMi;
+        int sbRows = (p.TileMiRowEnd - p.TileMiRowStart + sbMi - 1) / sbMi;
         int slotCount = sbRows * sbCols * 16;
         int slot = scratchInt[StNextSlot];
         int slotEnd = slot + leavesPerLaunch;
@@ -447,16 +469,16 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
     {
         int sb = slot >> 4;
         int q = slot & 15;
-        int sbRow = sb / sbCols;
+        int sbRow = sb / sbCols;                       // superblock row / column inside the tile
         int sbCol = sb - sbRow * sbCols;
-        int sbMiRow = sbRow * 16;
-        int sbMiCol = sbCol * 16;
+        int sbMiRow = p.TileMiRowStart + sbRow * 16;   // frame coordinates
+        int sbMiCol = p.TileMiColStart + sbCol * 16;
 
         if (q == 0)
         {
             if (sbCol == 0)
             {
-                // Reset left context arrays at start of each SB row.
+                // Reset left context arrays at the start of each superblock row of the tile.
                 for (int i = 0; i < 32; i++)
                 {
                     scratchByte[p.LeftEntropyOff + 0 * 32 + i] = 0;
@@ -583,7 +605,7 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
 
         int miSize = is16 ? 4 : 2;                 // leaf size in mi; every transform of the leaf spans it
         int chromaX = (miCol * 4) >> 1, chromaY = (miRow * 4) >> 1;
-        int reconChromaW = p.ReconWidth >> 1, reconChromaH = p.ReconHeight >> 1;
+        int reconChromaW = p.ReconWidth >> 1;
 
         // ---- TX_16X16: luma of a 16x16 leaf ----
         if (is16)
@@ -596,7 +618,6 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
                 xPx: miCol * 4, yPx: miRow * 4,
                 txW: 16, txH: 16, txSizeIdx: 2,
                 txWMi: miSize, txHMi: miSize,
-                planeH: p.ReconHeight,
                 p);
 
         // ---- TX_8X8: U then V of a 16x16 leaf; luma of an 8x8 leaf ----
@@ -615,7 +636,6 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
                 xPx: luma ? miCol * 4 : chromaX, yPx: luma ? miRow * 4 : chromaY,
                 txW: 8, txH: 8, txSizeIdx: 1,
                 txWMi: miSize, txHMi: miSize,
-                planeH: luma ? p.ReconHeight : reconChromaH,
                 p);
         }
 
@@ -633,7 +653,6 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
                     xPx: chromaX, yPx: chromaY,
                     txW: 4, txH: 4, txSizeIdx: 0,
                     txWMi: miSize, txHMi: miSize,
-                    planeH: reconChromaH,
                     p);
             }
         }
@@ -703,7 +722,6 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         int xPx, int yPx,
         int txW, int txH, int txSizeIdx,
         int txWMi, int txHMi,
-        int planeH,
         Av1FrameSeqEncodeParams p)
     {
         // txW / txH / txSizeIdx are CONSTANTS at every call site (see EncodeLeaf).
@@ -713,10 +731,15 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         int n = txW * txH;
 
         // Build edge buffers from the recon plane.
-        BuildEdgeBuffer(reconBuf, reconPlaneOff, reconStride, planeH,
-            xPx, yPx, txW, txH, scratchByte, p);
-        bool haveAbove = yPx > 0;
-        bool haveLeft = xPx > 0;
+        // Neighbours are available only inside the tile (AV1 availability): nothing above the tile's first row,
+        // nothing left of its first column, and the above-right / below-left extensions stop at the tile's right /
+        // bottom edge (another thread is writing the pixels past it).
+        int pxPerMi = plane == 0 ? 4 : 2;
+        bool haveAbove = yPx > p.TileMiRowStart * pxPerMi;
+        bool haveLeft = xPx > p.TileMiColStart * pxPerMi;
+        BuildEdgeBuffer(reconBuf, reconPlaneOff, reconStride,
+            p.TileMiColEnd * pxPerMi, p.TileMiRowEnd * pxPerMi,
+            xPx, yPx, txW, txH, haveAbove, haveLeft, scratchByte, p);
 
         // DC predict into scratchByte[PredictOff..+n).
         Av1DcPredictorGpu.DcPred(
@@ -898,23 +921,25 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         return 3;
     }
 
-    /// <summary>Build the above + left edge buffers from the recon plane.</summary>
+    /// <summary>
+    /// Build the above + left edge buffers from the recon plane. <paramref name="endX"/> / <paramref name="endY"/>:
+    /// one past the last column / row of the tile in this plane; no pixel at or past them is read (the last one
+    /// inside repeats).
+    /// </summary>
     private static void BuildEdgeBuffer(
-        ArrayView<byte> reconBuf, int reconPlaneOff, int reconStride, int planeH,
+        ArrayView<byte> reconBuf, int reconPlaneOff, int reconStride, int endX, int endY,
         int xPx, int yPx, int txW, int txH,
+        bool haveAbove, bool haveLeft,
         ArrayView<byte> scratchByte, Av1FrameSeqEncodeParams p)
     {
         int extLen = 2 * (txW > txH ? txW : txH) + 1;
-        bool haveAbove = yPx > 0;
-        bool haveLeft = xPx > 0;
-        int planeW = reconStride;
 
         // Above row.
         if (haveAbove)
         {
             int rowOff = reconPlaneOff + (yPx - 1) * reconStride + xPx;
             int avail = 2 * (txW > txH ? txW : txH);
-            int pwAvail = planeW - xPx;
+            int pwAvail = endX - xPx;
             int len = avail < pwAvail ? avail : pwAvail;
             for (int i = 0; i < len; i++)
                 scratchByte[p.EdgeAboveOff + i] = reconBuf[rowOff + i];
@@ -931,7 +956,7 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         {
             int colOff = reconPlaneOff + yPx * reconStride + (xPx - 1);
             int avail = 2 * (txW > txH ? txW : txH);
-            int phAvail = planeH - yPx;
+            int phAvail = endY - yPx;
             int len = avail < phAvail ? avail : phAvail;
             for (int i = 0; i < len; i++)
                 scratchByte[p.EdgeLeftOff + i] = reconBuf[colOff + i * reconStride];
@@ -1023,7 +1048,7 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         //         (above_nz ? 1 : 0) + (left_nz ? 1 : 0).
         bool aboveNz = false;
         bool leftNz = false;
-        int planeOff = p.AboveEntropyOff + plane * p.FrameMiCols;
+        int planeOff = p.AboveEntropyOff + plane * p.AboveStride;
         int planeLeftOff = p.LeftEntropyOff + plane * 32;
         for (int i = 0; i < txWMi && miCol + i < p.FrameMiCols; i++)
             if (scratchByte[planeOff + miCol + i] != 0) { aboveNz = true; break; }
@@ -1042,7 +1067,7 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         int plane, int miRow, int miCol, int txWMi, int txHMi)
     {
         int dcSign = 0;
-        int planeOff = p.AboveEntropyOff + plane * p.FrameMiCols;
+        int planeOff = p.AboveEntropyOff + plane * p.AboveStride;
         int planeLeftOff = p.LeftEntropyOff + plane * 32;
         for (int i = 0; i < txWMi && miCol + i < p.FrameMiCols; i++)
         {
@@ -1078,7 +1103,7 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         int plane, int miRow, int miCol, int txWMi, int txHMi, int culLevelWithSign)
     {
         byte v = (byte)(culLevelWithSign & 0xFF);
-        int planeOff = p.AboveEntropyOff + plane * p.FrameMiCols;
+        int planeOff = p.AboveEntropyOff + plane * p.AboveStride;
         int planeLeftOff = p.LeftEntropyOff + plane * 32;
         for (int i = 0; i < txWMi && miCol + i < p.FrameMiCols; i++)
             scratchByte[planeOff + miCol + i] = v;

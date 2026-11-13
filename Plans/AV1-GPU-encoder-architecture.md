@@ -4,6 +4,97 @@
 100% on ILGPU; bit-exact vs CPU `Av1KeyframeEncoder.EncodeSingleTile`
 across CUDA + OpenCL + CPU. Round-trips with companion GPU decoder.
 
+**Status 2026-11-13: tiles. One GPU thread per tile, every tile of every frame in the same launches.**
+
+Before this the walker was one GPU thread per frame: 832x480 took 766-799 ms on CUDA (RTX 4070), 1.25-1.33 keyframes
+per second, about 8 ms per 64x64 superblock. An AV1 tile is independent by definition (its own range coder, its own
+contexts, no prediction across its edge), so tiles are the unit of parallelism:
+
+- `Av1KeyframeEncoderGpu.TileSizeSuperblocks` (default 1): the largest tile size in 64x64 superblocks per side.
+  1 = one superblock per tile (the most threads); `int.MaxValue` = the fewest tiles the picture size allows (one
+  tile up to 4096 wide and 4096 x 2304 in area: the old layout). `Av1TileLayout.Compute` turns it into the uniform
+  tile grid of spec 5.9.15 (`TileColsLog2`, `TileRowsLog2` and their codable range). Uniform spacing only halves, so
+  a request of 3 on 13 superblock columns gives tiles of 2.
+- `Av1KeyframeEncoderGpu.MaxTiles` (default 256 = `Av1TileLayout.HardwareDecoderMaxTiles`): the most tiles of a
+  frame. Measured with FFmpeg 8.1 on the RTX 4070 (keyframes of this encoder, one superblock per tile, output
+  compared byte for byte with libdav1d's): NVDEC (`av1_cuvid`), D3D11VA and D3D12VA decode 104, 135, 192, 240, 252
+  and 256 tiles (256 also as 64 x 4 and 4 x 64) and FAIL at 272, 320 and 510 (NVDEC repeats
+  `cuvidDecodePicture failed` without end; D3D: `HW accel decode slice fail`). libdav1d and libaom decode all of
+  them, and 2040 tiles at 3840x2160. So when one superblock per tile gives more than `MaxTiles`, the layout is the
+  one with the smallest tiles (in superblocks) that stays within it: 1920x1080 = 15 x 17 = 255 tiles of 2 x 1
+  superblocks (not 30 x 17 = 510), 3840x2160 = 15 x 17 tiles of 4 x 2. Raise `MaxTiles` only for streams a software
+  decoder reads. AV1 LEVEL limits (8 to 128 tiles, 4 to 16 tile columns by level) are not applied: none of the
+  six decoders enforces them (832x480 in 13 tile columns decodes on all), and the sequence header signals
+  `seq_level_idx` 0 for every picture size, which was already inaccurate above 147,456 pixels before the tiles
+  (open: signal the level the picture size needs; the writer has no tier bit for levels above 3.3 yet).
+- Kernel (`Av1FrameSequentialEncodeKernel`, ONE kernel for single frames and batches, where there were two):
+  working thread = `frame * tileCount + tile`. The thread takes its own copy of the parameters with the tile
+  rectangle; the above-context arrays are per tile (`AboveStride` = tile width in mi) and their offsets are rebased
+  by `-TileMiColStart`, so the walker's `offset + miCol` indexing is unchanged. A block has an above / left
+  neighbour only inside its tile, and the above-right / below-left edge extensions stop at the tile's edge (no
+  thread reads pixels another thread is writing). The left contexts reset at the first superblock of every
+  superblock row of the tile. Frame source and reconstruction are shared; each tile writes its own rectangle.
+- Thread placement (`SerialThreadPlacement`): an auto-grouped launch puts threads 0..N-1 into the first launch
+  group, i.e. on ONE multiprocessor (CUDA group size for this kernel: 640), 32 divergent threads per warp. The
+  placement spreads the working threads: one launch group per multiprocessor, one thread per warp while there is
+  room, then more lanes per warp. The launch covers more threads; the ones without work return at once. Applied on
+  CUDA and OpenCL NVIDIA with the device's multiprocessor count and warp size, and on WebGPU (group 64, no
+  multiprocessor count reported: 64 groups assumed, two halves per group). Measured on the RTX 4070 only. Packed on
+  the CPU accelerators and for OpenCL devices of other vendors (not measured).
+- Tile group (`Av1ObuAssembleKernel`, two launches per frame): a one-thread kernel sums the tile lengths into
+  offsets; the byte kernel writes the Frame OBU size, the header blob, one 0x00 byte when there is more than one
+  tile (`tile_start_and_end_present_flag` = 0 and the byte alignment), and for every tile but the last a 4-byte
+  little-endian `tile_size_minus_1` before its bytes. An output byte finds its tile by a binary search of the
+  offsets. The frame header codes `context_update_tile_id` = 0 and `tile_size_bytes_minus_1` = 3.
+- CPU reference (`Av1KeyframeEncoder.EncodeKeyFrame(..., tileSizeSuperblocks)`): the same tiles, one after another.
+- Measured 2026-11-13, RTX 4070, 832x480 q40, planes on the device (`av1-encode-bench`, ms per keyframe, median of
+  12; one run each):
+
+  | | CUDA | OpenCL | bytes |
+  |---|---|---|---|
+  | tile max (1 tile, the old layout) | 791.2 | 450.3 | 264,629 |
+  | tile 4 (8 tiles) | 133.2 | 76.6 | 264,819 |
+  | tile 2 (28 tiles) | 33.1 | 20.1 | 265,103 |
+  | tile 1 (104 tiles), the default | 8.73 | 5.09 | 265,749 (+0.42%) |
+  | tile 1, batch of 4 frames | 2.97 | 1.89 | |
+  | tile 1, batch of 16 | 1.15 | 0.88 | |
+  | tile 1, batch of 64 | 0.82 | 0.79 | |
+  | 1280x720 tile 1 (240 tiles) | 9.56 | 5.56 | 613,182 |
+  | 1920x1080 default (255 tiles of 2 x 1 superblocks) | 19.3 | 11.1 | 1,379,100 |
+  | 1920x1080 default, batch of 8 | 4.43 | 3.46 | |
+  | 1920x1080, `MaxTiles` raised (510 tiles; software decoders only) | 10.6 | 6.10 | 1,380,909 |
+  | 3840x2160 default (255 tiles of 4 x 2 superblocks) | 73.8 | 44.7 | 5,500,180 |
+  | 64x64 (one tile) | 8.63 | 4.98 | |
+
+  Without the placement (tile threads packed into the first group) the same runs took: CUDA tile 1 20.5 ms, batch
+  of 16 5.64 ms per frame, 1920x1080 61.1 ms; OpenCL tile 1 15.8 ms, batch of 16 2.04 ms.
+- WebGPU (Chrome 157 D3D12, same GPU, `Av1KeyframeEncoderGpu_Tiles_AreFasterThanOneTile`, fastest of 3): one tile
+  1828 ms per keyframe (0.55 frames per second), 104 tiles 26.5 ms (38 per second), batch of 8: 4.0 ms per frame.
+  Packed, the 104 tiles took 40.6 ms and the batch 5.4 ms per frame. Placement experiment (single / batch of 8, ms
+  per frame): packed 41.3 / 5.1, one thread per group 27.4 / 8.4, two per group in separate halves 26.5 / 5.7, four
+  per group 25.1 / 3.9, 16 per group 28.7 / 3.9.
+- Wasm (same test): one tile 834 ms, 104 tiles 177 ms, batch of 8: 176 ms per frame.
+- What the numbers say is left:
+  - A frame costs what ONE superblock costs on one GPU thread (8.6 ms CUDA, 5.0 ms OpenCL, about 18 ms WebGPU: 16
+    leaves in 4 launches). Faster than that needs parallelism inside a superblock (the 16x16 leaves depend on each
+    other only through DC prediction and the contexts) or a faster thread.
+  - CUDA is 1.7x slower than OpenCL for the same kernel on the same GPU, WebGPU 2.4x slower than CUDA: code
+    generation questions for SpawnDev.ILGPU, open.
+  - The CPU accelerators: 832x480 takes 84-120 ms with or without tiles, and a 256x256 picture takes LONGER (CPU
+    accelerator 189 ms as one tile, 193 ms as 16 tiles; Velocity 224 / 221 ms; 64x64 14 ms, 128x128 55 ms, 512x512
+    57-90 ms). The time does not follow the tile count, so it is not the walker; not yet located. Open, next.
+  - Single tile is 3-5% slower than before the change on CUDA (791 vs 753-766 ms): not investigated.
+- Oracles (`CodecsTestBase.Av1KeyframeEncoderGpuTileTests.cs`): FFmpeg (libdav1d) decodes the tiled temporal unit to
+  the encoder's reconstruction byte for byte (130x66, 200x9, 320x200, 832x480, 1088x1024 at tile sizes 1 / 2 / 3 /
+  max); the kernel's bytes equal the CPU reference's for the same tile size; batches equal single-frame encodes;
+  `Av1TileLayout` against values derived by hand; `SerialThreadPlacement` runs every working thread exactly once;
+  the default layout at 1088x1024 (144 tiles, not 272) decodes on libaom and on every hardware decoder FFmpeg has on
+  the machine; tiles are at least 4x faster than one tile on the GPU backends (`..._AreFasterThanOneTile`, which
+  also writes the times to the run log on every lane). 28 red-checks (mutations that must fail a test), all red.
+- Run 2026-11-13 on the final code: CPU accelerator 35 / 0, Velocity 20 / 0, CUDA 20 / 0, OpenCL 20 / 0 (encoder,
+  layout and placement tests), WebGPU 150 / 0 (every Av1 test), Wasm 16 / 0 (encoder tests); before the tile limit
+  was added, every Av1 test: CPU 298 / 0, CUDA 153 / 0, OpenCL 153 / 0.
+
 **Status 2026-11-12: the encoder takes any picture size** (the 2026-05-04 plan below is done, with one difference:
 the leaves at the edge are 8x8, not rectangular). What it does at the bottom / right edge:
 

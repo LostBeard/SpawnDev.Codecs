@@ -150,12 +150,17 @@ public class ProjectTest
             // Capture console messages (errors + warnings) during the test
             var consoleErrors = new List<string>();
             var consoleWarnings = new List<string>();
+            // A test reports measurements (timings, sizes) with a Console.WriteLine that starts with "[report] ":
+            // those lines are printed with the test's name, so a browser lane's numbers reach the run log.
+            var consoleReports = new List<string>();
             void OnConsole(object? sender, IConsoleMessage msg)
             {
                 if (msg.Type == "error")
                     consoleErrors.Add(msg.Text);
                 else if (msg.Type == "warning")
                     consoleWarnings.Add(msg.Text);
+                else if (msg.Text.StartsWith("[report] ", StringComparison.Ordinal))
+                    consoleReports.Add(msg.Text);
             }
             page.Console += OnConsole;
 
@@ -240,6 +245,8 @@ public class ProjectTest
                 foreach (var warn in consoleWarnings.Take(10))
                     Console.Error.WriteLine($"  WARN: {Clip(warn, 2000)}");
             }
+            foreach (var report in consoleReports.Take(50))
+                Console.WriteLine($"[{Name}] {Clip(report, 4000)}");
 
             ResultMessage = stateMessage;
 

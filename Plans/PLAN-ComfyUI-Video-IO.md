@@ -58,5 +58,13 @@ ffmpeg / ffprobe tools as a black box is fine.
      c5884c96, 2026-11-12; no device loss, GPU process peak 0.78 GB).
    - [ ] Cold compile of the two AV1 encode kernels on Chrome D3D12 rose from 7.7 s / 8.0 s to 9.7 s / 11.6 s with
      this change (GPU process peak 0.96 -> 1.28 GB): recover it with 32-bit transform butterflies (Data, next).
+   - [x] **Speed: tiles (2026-11-13, Data).** One GPU thread per tile instead of one per frame
+     (`Av1KeyframeEncoderGpu.TileSizeSuperblocks`, default one 64x64 superblock per tile; at most `MaxTiles` = 256
+     tiles per frame, the limit of the hardware decoders measured), tile threads spread over the GPU
+     (`SerialThreadPlacement`). 832x480 q40 on the RTX 4070, ms per keyframe: CUDA 791 -> 8.7 (1.26 -> 114 frames
+     per second; 1.15 ms per frame in batches of 16), OpenCL 450 -> 5.1, WebGPU 1879 -> about 26; +0.42% bytes.
+     Decoded byte for byte by libdav1d, libaom, NVDEC, D3D11VA and D3D12VA. `VideoFileEncoderGpu` gets it without
+     a change (it calls `EncodeKeyFrameAsync` per frame); a batched call (`EncodeKeyFramesBatchAsync`) is several
+     times faster per frame again. Details and open items: `Plans/AV1-GPU-encoder-architecture.md`.
    - [ ] `VideoFileEncoderGpu`: remove the AV1 size guard and add the file-level test (Geordi).
    - [ ] `Av1KeyframeDecoderGpu` still takes multiples of 64 only (not needed by the encoder path).

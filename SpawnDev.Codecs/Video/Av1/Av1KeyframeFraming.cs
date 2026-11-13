@@ -3,7 +3,8 @@
 // AV1 keyframe framing: the Temporal Delimiter + Sequence Header OBUs and the uncompressed frame header for a
 // (width, height, q) keyframe. Shared by the GPU encoder (Av1KeyframeEncoderGpu uploads BuildFramingBlob's bytes) and
 // the CPU reference encoder in SpawnDev.Codecs.References. Same settings as the encoder's v1 bitstream: profile 0,
-// 8-bit 4:2:0, single tile, 64x64 superblocks, loop filter / CDEF / LR / segmentation off.
+// 8-bit 4:2:0, 64x64 superblocks, uniform tile spacing (the grid is an Av1TileLayout), loop filter / CDEF / LR /
+// segmentation off.
 //
 using SpawnDev.Codecs.EntropyCoders;
 
@@ -19,7 +20,11 @@ internal static class Av1KeyframeFraming
     /// uploaded to the accelerator where <see cref="Av1ObuAssembleKernel"/> adds the data-dependent Frame OBU size
     /// and the GPU-produced tile bytes.
     /// </summary>
-    internal static byte[] BuildFramingBlob(int width, int height, int baseQIndex, out int aLen, out int bLen)
+    internal static byte[] BuildFramingBlob(int width, int height, int baseQIndex, out int aLen, out int bLen) =>
+        BuildFramingBlob(width, height, baseQIndex, Av1TileLayout.SingleTile(width, height), out aLen, out bLen);
+
+    /// <summary>The framing blob for a frame coded with the tile grid <paramref name="tiles"/>.</summary>
+    internal static byte[] BuildFramingBlob(int width, int height, int baseQIndex, Av1TileLayout tiles, out int aLen, out int bLen)
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
@@ -30,7 +35,7 @@ internal static class Av1KeyframeFraming
         byte[] shObu = Av1ObuWriter.EmitObu(
             Av1ObuType.SequenceHeader, shPayload, hasSizeField: true);
         var sh = SynthesizeSequenceHeader(shConfig);
-        byte[] uncompressedHeader = BuildUncompressedHeader(sh, width, height, baseQIndex);
+        byte[] uncompressedHeader = BuildUncompressedHeader(sh, width, height, baseQIndex, tiles);
 
         aLen = tdObu.Length + shObu.Length;
         bLen = uncompressedHeader.Length;
@@ -133,7 +138,12 @@ internal static class Av1KeyframeFraming
     // ------------------------------------------------------------------
 
     internal static byte[] BuildUncompressedHeader(
-        Av1SequenceHeader sh, int width, int height, int baseQIndex)
+        Av1SequenceHeader sh, int width, int height, int baseQIndex) =>
+        BuildUncompressedHeader(sh, width, height, baseQIndex, Av1TileLayout.SingleTile(width, height));
+
+    /// <summary>The uncompressed frame header for a frame coded with the tile grid <paramref name="tiles"/>.</summary>
+    internal static byte[] BuildUncompressedHeader(
+        Av1SequenceHeader sh, int width, int height, int baseQIndex, Av1TileLayout tiles)
     {
         var bw = new Av1BitWriter();
 
@@ -167,7 +177,7 @@ internal static class Av1KeyframeFraming
         // (libaom encoder gates this on `!disable_cdf_update`.)
 
         // ---- Tile info (Av1CompleteFrameHeaderParser.ReadTileInfo) ----
-        EmitTileInfo(bw, sh, width, height);
+        EmitTileInfo(bw, tiles);
 
         // ---- Quantization ----
         bw.WriteBits(baseQIndex & 0xFF, 8);
@@ -215,9 +225,10 @@ internal static class Av1KeyframeFraming
         // Per AV1 spec sec 5.3.4 + 5.3.5, the Frame OBU lays out as:
         //   frame_header_obu (uncompressed_header)
         //   byte_alignment()
-        //   tile_group_obu (which itself has tile_start_and_end_present_flag
-        //                   inferred 0 for single-tile, then byte_alignment(),
-        //                   then the entropy-coded tile bytes).
+        //   tile_group_obu (tile_start_and_end_present_flag: one bit, 0, when the frame has more than one
+        //                   tile, absent for a single tile; then byte_alignment(); then, per tile, a
+        //                   TileSizeBytes-byte tile_size_minus_1 (not for the last tile) and the
+        //                   entropy-coded tile bytes). The tile group is written by the caller.
         //
         // byte_alignment() is zero-pad to byte boundary; it does NOT emit a
         // trailing 1 bit (that's WriteTrailingBits, used by SH and standalone
@@ -226,70 +237,38 @@ internal static class Av1KeyframeFraming
         return bw.ToArray();
     }
 
-    internal static void EmitTileInfo(Av1BitWriter bw, Av1SequenceHeader sh, int width, int height)
+    /// <summary>Bytes of a <c>tile_size_minus_1</c> field (the header codes <c>tile_size_bytes_minus_1 = 3</c>).</summary>
+    internal const int TileSizeBytes = 4;
+
+    /// <summary>
+    /// AV1 <c>tile_info()</c> with uniform tile spacing for the grid <paramref name="tiles"/>: the increment bits up
+    /// to TileColsLog2 / TileRowsLog2 (a run of ones, then a zero unless the maximum is reached), and, when there is
+    /// more than one tile column or row, context_update_tile_id (0: CDF updates are disabled anyway) and
+    /// tile_size_bytes_minus_1.
+    /// </summary>
+    internal static void EmitTileInfo(Av1BitWriter bw, Av1TileLayout tiles)
     {
-        // Compute the tile geometry the parser uses.
-        // Mirrors libaom av1_get_tile_limits (tile_common.c):
-        //   max_width_sb     = MAX_TILE_WIDTH >> sb_size_log2  (= 64 for 64-px SB)
-        //   max_tile_area_sb = MAX_TILE_AREA  >> (2 * sb_size_log2)  (= 2304 for 64-px SB)
-        //   min_log2_cols = tile_log2(max_width_sb, sb_cols)
-        //   min_log2      = tile_log2(max_tile_area_sb, sb_cols * sb_rows)
-        // MAX_TILE_WIDTH = 4096 px, MAX_TILE_AREA = 4096 * 2304 px (per AV1 spec).
-        int sbSize = sh.Use128x128Superblock ? 128 : 64;
-        int sbSizeLog2 = sh.Use128x128Superblock ? 7 : 6;
-        int miSizeLog2 = 2;
-        int mibSizeLog2 = sbSizeLog2 - miSizeLog2;
-        // mi_cols = ceil(width_px / 4), mi_rows = ceil(height_px / 4).
-        // Width/height are multiples of 16 (v1 invariant) so no rounding needed,
-        // but the spec uses ceiling-div so we follow the formula. Note: AV1 mi
-        // units are 4-px, NOT 8-px; a previous version incorrectly used >>3 which
-        // gave 8-px column count and produced widthSb half what it should be.
-        int miCols = (width + 3) >> 2;
-        int miRows = (height + 3) >> 2;
-        int widthSb = (miCols + (1 << mibSizeLog2) - 1) >> mibSizeLog2;
-        int heightSb = (miRows + (1 << mibSizeLog2) - 1) >> mibSizeLog2;
-
-        int maxWidthSb = 4096 >> sbSizeLog2;            // = 64 for 64-px SB
-        int maxTileAreaSb = (4096 * 2304) >> (2 * sbSizeLog2); // = 2304 for 64-px SB
-        int maxLog2TileCols = TileLog2(1, Math.Min(widthSb, 64));
-        int maxLog2TileRows = TileLog2(1, Math.Min(heightSb, 64));
-        int minLog2TileCols = Math.Max(0, TileLog2(maxWidthSb, widthSb));
-        int minLog2Tiles = Math.Max(minLog2TileCols, TileLog2(maxTileAreaSb, widthSb * heightSb));
-        int minLog2TileRows = Math.Max(0, minLog2Tiles - minLog2TileCols);
-
-        // Single tile: log2_cols = minLog2TileCols, log2_rows = max(0, minLog2Tiles - log2_cols).
-        // For a 16x16 frame, widthSb=heightSb=1, all the maxes are 0, so no
-        // increment bits are emitted for either axis.
         bw.WriteFlag(true); // uniform_tile_spacing_flag
 
-        // log2_cols increments: emit (log2_cols - minLog2TileCols) ones; if &lt; max, emit a 0.
-        int log2Cols = minLog2TileCols;
-        // We choose to stay at min (= 0 for our small frames).
-        if (log2Cols < maxLog2TileCols)
+        for (int k = tiles.MinLog2TileCols; k < tiles.MaxLog2TileCols; k++)
         {
-            bw.WriteBits(0, 1); // first 0 bit terminates the increment run
+            bool increment = k < tiles.TileColsLog2;
+            bw.WriteBits(increment ? 1 : 0, 1);   // increment_tile_cols_log2
+            if (!increment) break;
+        }
+        for (int k = tiles.MinLog2TileRows; k < tiles.MaxLog2TileRows; k++)
+        {
+            bool increment = k < tiles.TileRowsLog2;
+            bw.WriteBits(increment ? 1 : 0, 1);   // increment_tile_rows_log2
+            if (!increment) break;
         }
 
-        // log2_rows increments
-        int log2RowsMin = Math.Max(0, minLog2Tiles - log2Cols);
-        int log2Rows = log2RowsMin;
-        if (log2Rows < maxLog2TileRows)
+        if (tiles.TileColsLog2 > 0 || tiles.TileRowsLog2 > 0)
         {
-            bw.WriteBits(0, 1);
-        }
-
-        // tile_cols * tile_rows == 1 -&gt; no contextUpdateTileId / tileSizeBytes.
-        if ((1 << log2Cols) * (1 << log2Rows) > 1)
-        {
-            bw.WriteBits(0, log2Cols + log2Rows); // context_update_tile_id
-            bw.WriteBits(3 - 1, 2);                // tile_size_bytes_minus_1 = 3 (== 4 bytes)
+            bw.WriteBits(0, tiles.TileColsLog2 + tiles.TileRowsLog2); // context_update_tile_id
+            bw.WriteBits(TileSizeBytes - 1, 2);                        // tile_size_bytes_minus_1
         }
     }
 
-    internal static int TileLog2(int blkSize, int target)
-    {
-        int k = 0;
-        while ((blkSize << k) < target) k++;
-        return k;
-    }
+    internal static int TileLog2(int blkSize, int target) => Av1TileLayout.TileLog2(blkSize, target);
 }

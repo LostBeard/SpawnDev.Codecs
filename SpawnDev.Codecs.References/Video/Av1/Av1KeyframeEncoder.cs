@@ -11,7 +11,9 @@
 //     chroma TX_4X4); the coded size is each dimension rounded up to 8, and source pixels past the picture
 //     repeat its last column / row
 //   - tx_mode = LARGEST (no per-block tx_size signaling)
-//   - Single tile (Log2NumTiles = 0)
+//   - Uniform tile spacing; tiles of at most tileSizeSuperblocks 64x64 superblocks per side (Av1TileLayout).
+//     Each tile has its own range coder and contexts and predicts only from inside itself, so the GPU encoder
+//     runs one thread per tile; this reference encodes them one after another
 //   - 64x64 superblocks (Use128x128Superblock = false)
 //   - Loop filter disabled
 //   - Segmentation disabled
@@ -57,12 +59,18 @@ public static class Av1KeyframeEncoder
     /// <param name="width">Frame width in pixels.</param>
     /// <param name="height">Frame height in pixels.</param>
     /// <param name="baseQIndex">Base quantizer index 1..255 (lower = higher quality).</param>
+    /// <param name="tileSizeSuperblocks">Largest tile size in 64x64 superblocks per side (1 = one superblock per
+    /// tile, the GPU encoder's default; <see cref="int.MaxValue"/> = the fewest tiles the picture allows).</param>
+    /// <param name="maxTiles">The most tiles of the frame (<see cref="Av1TileLayout.Compute"/>; the GPU encoder's
+    /// <c>MaxTiles</c>).</param>
     public static byte[] EncodeKeyFrame(
         ReadOnlySpan<byte> ySrc, int ySrcStride,
         ReadOnlySpan<byte> uSrc, int uvSrcStride,
         ReadOnlySpan<byte> vSrc,
         int width, int height,
-        int baseQIndex = 32)
+        int baseQIndex = 32,
+        int tileSizeSuperblocks = 1,
+        int maxTiles = Av1TileLayout.HardwareDecoderMaxTiles)
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
@@ -84,18 +92,15 @@ public static class Av1KeyframeEncoder
 
         // ---- 3. Build the Frame OBU payload (uncompressed_header + tile_group) ----
 
-        // Build the tile entropy stream first; we need to know its byte length
-        // to size the frame OBU and (in multi-tile streams) emit per-tile size
-        // prefixes. For a single tile no per-tile size is emitted.
-        byte[] tileBytes = EncodeSingleTile(
+        // The tiles' entropy streams first: the tile group needs every tile's byte length (a size prefix before
+        // every tile but the last).
+        var tiles = Av1TileLayout.Compute(width, height, tileSizeSuperblocks, maxTiles);
+        byte[][] tileBytes = EncodeTiles(
             ySrc, ySrcStride, uSrc, uvSrcStride, vSrc,
-            width, height, baseQIndex);
+            width, height, baseQIndex, tiles);
 
-        byte[] uncompressedHeader = Av1KeyframeFraming.BuildUncompressedHeader(sh, width, height, baseQIndex);
-
-        var frameOuter = new byte[uncompressedHeader.Length + tileBytes.Length];
-        Buffer.BlockCopy(uncompressedHeader, 0, frameOuter, 0, uncompressedHeader.Length);
-        Buffer.BlockCopy(tileBytes, 0, frameOuter, uncompressedHeader.Length, tileBytes.Length);
+        byte[] uncompressedHeader = Av1KeyframeFraming.BuildUncompressedHeader(sh, width, height, baseQIndex, tiles);
+        byte[] frameOuter = BuildFramePayload(uncompressedHeader, tileBytes);
 
         byte[] frameObu = Av1ObuWriter.EmitObu(
             Av1ObuType.Frame, frameOuter, hasSizeField: true);
@@ -106,6 +111,33 @@ public static class Av1KeyframeEncoder
         Buffer.BlockCopy(shObu, 0, output, tdObu.Length, shObu.Length);
         Buffer.BlockCopy(frameObu, 0, output, tdObu.Length + shObu.Length, frameObu.Length);
         return output;
+    }
+
+    /// <summary>
+    /// The Frame OBU payload: the uncompressed header, then the tile group: one zero byte when there is more than
+    /// one tile (tile_start_and_end_present_flag = 0 and the byte alignment), then each tile in raster order, every
+    /// tile but the last preceded by its tile_size_minus_1 (4 bytes, little-endian).
+    /// </summary>
+    private static byte[] BuildFramePayload(byte[] uncompressedHeader, byte[][] tileBytes)
+    {
+        int total = uncompressedHeader.Length + (tileBytes.Length > 1 ? 1 : 0);
+        for (int t = 0; t < tileBytes.Length; t++)
+            total += tileBytes[t].Length + (t < tileBytes.Length - 1 ? Av1KeyframeFraming.TileSizeBytes : 0);
+        var payload = new byte[total];
+        Buffer.BlockCopy(uncompressedHeader, 0, payload, 0, uncompressedHeader.Length);
+        int at = uncompressedHeader.Length;
+        if (tileBytes.Length > 1) payload[at++] = 0;
+        for (int t = 0; t < tileBytes.Length; t++)
+        {
+            if (t < tileBytes.Length - 1)
+            {
+                int sizeMinus1 = tileBytes[t].Length - 1;
+                for (int b = 0; b < Av1KeyframeFraming.TileSizeBytes; b++) payload[at++] = (byte)(sizeMinus1 >> (8 * b));
+            }
+            Buffer.BlockCopy(tileBytes[t], 0, payload, at, tileBytes[t].Length);
+            at += tileBytes[t].Length;
+        }
+        return payload;
     }
 
     /// <summary>
@@ -182,10 +214,16 @@ public static class Av1KeyframeEncoder
         public int SrcLumaH;
         public int SrcChromaW;
         public int SrcChromaH;
+        // The tile's first mi row / column: a block there has no above / left neighbour.
+        public int TileMiRowStart;
+        public int TileMiColStart;
+        // One past the tile's last mi row / column (clipped to the frame): no pixel past it is read.
+        public int TileMiRowEnd;
+        public int TileMiColEnd;
     }
 
     /// <summary>
-    /// Encode the single keyframe tile and return the raw range-coder
+    /// Encode the whole keyframe as ONE tile and return the raw range-coder
     /// byte stream. Internal so the GPU walker test can compare
     /// bit-exact against this CPU reference without going through the
     /// full OBU framing.
@@ -196,53 +234,87 @@ public static class Av1KeyframeEncoder
         ReadOnlySpan<byte> vSrc,
         int width, int height, int baseQIndex)
     {
+        var tiles = Av1TileLayout.SingleTile(width, height);
+        if (tiles.TileCount != 1)
+            throw new NotSupportedException($"A {width}x{height} picture cannot be a single AV1 tile (it needs {tiles.TileCount}).");
+        return EncodeTiles(ySrc, ySrcStride, uSrc, uvSrcStride, vSrc, width, height, baseQIndex, tiles)[0];
+    }
+
+    /// <summary>
+    /// Encode every tile of the grid <paramref name="tiles"/> (raster order) and return each tile's raw range-coder
+    /// byte stream. A tile starts with a fresh range coder and zeroed contexts and never reads a pixel or a context
+    /// outside itself; the reconstruction planes are shared (each tile writes its own rectangle).
+    /// </summary>
+    internal static byte[][] EncodeTiles(
+        ReadOnlySpan<byte> ySrc, int ySrcStride,
+        ReadOnlySpan<byte> uSrc, int uvSrcStride,
+        ReadOnlySpan<byte> vSrc,
+        int width, int height, int baseQIndex, Av1TileLayout tiles)
+    {
         int frameMiCols = ((width + 7) >> 3) << 1;     // mi rows in 4-px units
         int frameMiRows = ((height + 7) >> 3) << 1;
         int sbSize = 64;
         int sbMi = sbSize >> 2; // 16 mi units per SB
 
-        var state = new TileEncodeState
-        {
-            Re = new Av1RangeEncoder(),
-            Pctx = new Av1PartitionContext(frameMiCols),
-            EntropyCtx = new Av1EntropyContext(frameMiCols),
-            AboveYMode = new Av1IntraMode[frameMiCols],
-            AboveSkip = new bool[frameMiCols],
-            LeftYMode = new Av1IntraMode[Av1PartitionContext.MaxMibSize],
-            LeftSkip = new bool[Av1PartitionContext.MaxMibSize],
-            ReconY = new byte[(frameMiCols * 4) * (frameMiRows * 4)],
-            ReconU = new byte[(frameMiCols * 2) * (frameMiRows * 2)],
-            ReconV = new byte[(frameMiCols * 2) * (frameMiRows * 2)],
-            LumaW = frameMiCols * 4,
-            LumaH = frameMiRows * 4,
-            ChromaW = frameMiCols * 2,
-            ChromaH = frameMiRows * 2,
-            SrcLumaW = width,
-            SrcLumaH = height,
-            SrcChromaW = (width + 1) / 2,
-            SrcChromaH = (height + 1) / 2,
-        };
-        Array.Fill(state.AboveYMode, Av1IntraMode.Dc);
-        Array.Fill(state.LeftYMode, Av1IntraMode.Dc);
+        var reconY = new byte[(frameMiCols * 4) * (frameMiRows * 4)];
+        var reconU = new byte[(frameMiCols * 2) * (frameMiRows * 2)];
+        var reconV = new byte[(frameMiCols * 2) * (frameMiRows * 2)];
+        var result = new byte[tiles.TileCount][];
 
-        for (int sbRow = 0; sbRow * sbMi < frameMiRows; sbRow++)
-        {
-            state.Pctx.ResetLeft();
-            state.EntropyCtx.ResetLeft();
-            Array.Fill(state.LeftYMode, Av1IntraMode.Dc);
-            Array.Clear(state.LeftSkip);
-            for (int sbCol = 0; sbCol * sbMi < frameMiCols; sbCol++)
+        for (int tileRow = 0; tileRow < tiles.TileRows; tileRow++)
+            for (int tileCol = 0; tileCol < tiles.TileCols; tileCol++)
             {
-                int miRow = sbRow * sbMi;
-                int miCol = sbCol * sbMi;
-                EncodePartition(
-                    state, miRow, miCol, Block64x64,
-                    ySrc, ySrcStride, uSrc, uvSrcStride, vSrc,
-                    width, height, frameMiRows, frameMiCols, baseQIndex);
-            }
-        }
+                int miRowStart = tileRow * tiles.TileHeightSb * sbMi;
+                int miColStart = tileCol * tiles.TileWidthSb * sbMi;
+                int miRowEnd = Math.Min(miRowStart + tiles.TileHeightSb * sbMi, frameMiRows);
+                int miColEnd = Math.Min(miColStart + tiles.TileWidthSb * sbMi, frameMiCols);
 
-        return state.Re.Done();
+                var state = new TileEncodeState
+                {
+                    Re = new Av1RangeEncoder(),
+                    Pctx = new Av1PartitionContext(frameMiCols),
+                    EntropyCtx = new Av1EntropyContext(frameMiCols),
+                    AboveYMode = new Av1IntraMode[frameMiCols],
+                    AboveSkip = new bool[frameMiCols],
+                    LeftYMode = new Av1IntraMode[Av1PartitionContext.MaxMibSize],
+                    LeftSkip = new bool[Av1PartitionContext.MaxMibSize],
+                    ReconY = reconY,
+                    ReconU = reconU,
+                    ReconV = reconV,
+                    LumaW = frameMiCols * 4,
+                    LumaH = frameMiRows * 4,
+                    ChromaW = frameMiCols * 2,
+                    ChromaH = frameMiRows * 2,
+                    SrcLumaW = width,
+                    SrcLumaH = height,
+                    SrcChromaW = (width + 1) / 2,
+                    SrcChromaH = (height + 1) / 2,
+                    TileMiRowStart = miRowStart,
+                    TileMiColStart = miColStart,
+                    TileMiRowEnd = miRowEnd,
+                    TileMiColEnd = miColEnd,
+                };
+                Array.Fill(state.AboveYMode, Av1IntraMode.Dc);
+                Array.Fill(state.LeftYMode, Av1IntraMode.Dc);
+
+                for (int miRow = miRowStart; miRow < miRowEnd; miRow += sbMi)
+                {
+                    state.Pctx.ResetLeft();
+                    state.EntropyCtx.ResetLeft();
+                    Array.Fill(state.LeftYMode, Av1IntraMode.Dc);
+                    Array.Clear(state.LeftSkip);
+                    for (int miCol = miColStart; miCol < miColEnd; miCol += sbMi)
+                    {
+                        EncodePartition(
+                            state, miRow, miCol, Block64x64,
+                            ySrc, ySrcStride, uSrc, uvSrcStride, vSrc,
+                            width, height, frameMiRows, frameMiCols, baseQIndex);
+                    }
+                }
+
+                result[tileRow * tiles.TileCols + tileCol] = state.Re.Done();
+            }
+        return result;
     }
 
     /// <summary>
@@ -598,9 +670,13 @@ public static class Av1KeyframeEncoder
                 int yb = yPx + ty * txH;
 
                 // Build edge buffers from reconstructed pixels.
-                bool haveAbove = yb > 0;
-                bool haveLeft = xb > 0;
-                var edge = Av1IntraEdge.Build(reconBuf, planeW, planeW, planeH, xb, yb, txW, txH);
+                // Neighbours exist only inside the tile: nothing above its first row or left of its first column,
+                // and the above-right / below-left extensions stop at its right / bottom edge.
+                int pxPerMi = plane == 0 ? 4 : 2;
+                bool haveAbove = yb > st.TileMiRowStart * pxPerMi;
+                bool haveLeft = xb > st.TileMiColStart * pxPerMi;
+                var edge = Av1IntraEdge.Build(reconBuf, planeW, st.TileMiColEnd * pxPerMi, st.TileMiRowEnd * pxPerMi,
+                    xb, yb, txW, txH, haveAbove, haveLeft);
 
                 // Predict (DC).
                 var predict = new byte[txW * txH];

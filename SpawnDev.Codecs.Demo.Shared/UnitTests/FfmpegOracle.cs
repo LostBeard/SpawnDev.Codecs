@@ -105,6 +105,68 @@ internal static class FfmpegOracle
         }
     }
 
+    /// <summary>
+    /// Like <see cref="DecodeVideoI420(byte[], string, int, int)"/> with FFmpeg input options that select the decoder
+    /// (<c>-c:v av1_cuvid</c>, <c>-hwaccel d3d11va -c:v av1</c> ...). Made for decoders that can fail badly: the error
+    /// output is kept to its first 2000 characters and the process is killed at <paramref name="timeoutMs"/> (NVDEC on
+    /// a frame it does not support repeats one error line without end: 7 GB in ten minutes, 2026-11-13).
+    /// </summary>
+    [UnsupportedOSPlatform("browser")]
+    public static List<byte[]> DecodeVideoI420(byte[] file, string ext, int width, int height, string[] inputOptions, int timeoutMs = 60_000)
+    {
+        RequireAvailable();
+        string work = Path.Combine(Path.GetTempPath(), "spawndev-ffh-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(work);
+        try
+        {
+            string input = Path.Combine(work, "in" + ext), output = Path.Combine(work, "out.yuv");
+            File.WriteAllBytes(input, file);
+            var psi = new ProcessStartInfo("ffmpeg")
+            {
+                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
+            };
+            foreach (var arg in new[] { "-hide_banner", "-v", "error" }) psi.ArgumentList.Add(arg);
+            foreach (var arg in inputOptions) psi.ArgumentList.Add(arg);
+            foreach (var arg in new[] { "-i", input, "-f", "rawvideo", "-pix_fmt", "yuv420p", "-vsync", "passthrough", "-y", output })
+                psi.ArgumentList.Add(arg);
+            var stderr = new System.Text.StringBuilder();
+            using var proc = new Process { StartInfo = psi };
+            proc.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data == null) return;
+                lock (stderr) { if (stderr.Length < 2000) stderr.AppendLine(e.Data); }
+            };
+            proc.OutputDataReceived += (_, _) => { };
+            if (!proc.Start()) throw new InvalidOperationException("could not start ffmpeg");
+            proc.BeginErrorReadLine();
+            proc.BeginOutputReadLine();
+            if (!proc.WaitForExit(timeoutMs))
+            {
+                proc.Kill(true);
+                proc.WaitForExit(10_000);
+                string head;
+                lock (stderr) head = stderr.ToString().Trim();
+                throw new Exception($"ffmpeg did not finish in {timeoutMs} ms and was stopped: {(head.Length > 300 ? head.Substring(0, 300) : head)}");
+            }
+            proc.WaitForExit();   // drain the redirected streams
+            string err;
+            lock (stderr) err = stderr.ToString().Trim();
+            if (proc.ExitCode != 0 || err.Length > 0) throw new Exception($"ffmpeg reported: {(err.Length > 600 ? err.Substring(0, 600) : err)} (exit {proc.ExitCode})");
+            var raw = File.ReadAllBytes(output);
+            int frameBytes = width * height + 2 * ((width + 1) / 2) * ((height + 1) / 2);
+            if (raw.Length == 0 || raw.Length % frameBytes != 0)
+                throw new Exception($"ffmpeg wrote {raw.Length} bytes, not a whole number of {width}x{height} I420 frames ({frameBytes} bytes each)");
+            var frames = new List<byte[]>(raw.Length / frameBytes);
+            for (int at = 0; at < raw.Length; at += frameBytes)
+                frames.Add(raw.AsSpan(at, frameBytes).ToArray());
+            return frames;
+        }
+        finally
+        {
+            try { Directory.Delete(work, true); } catch { /* best effort */ }
+        }
+    }
+
     /// <summary>Run an FFmpeg tool (ffprobe, ffmpeg) on a file and return its stdout; stderr output fails.</summary>
     [UnsupportedOSPlatform("browser")]
     public static string Probe(byte[] file, string ext, params string[] args)
