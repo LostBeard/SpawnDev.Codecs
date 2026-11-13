@@ -50,7 +50,10 @@ segmentation off, loop filter level 0, one tile. Fixed quantizer (same q index a
    - [x] `VideoFileEncoderGpu` uses it: `VideoFileEncodeOptions.KeyFrameInterval` (default 128); only key frames
      are sync samples (MP4 stss, WebM keyframe flag == the bitstream's frame type); each inter frame within 1 dB of
      the same frame coded as a key frame. CPU accelerator, red-checked (5 mutations).
-   - [ ] `VideoFileEncoderGpu`: frames already on the accelerator (ArrayView) and TypedArray overloads.
+   - [x] `VideoFileEncoderGpu`: frames already on the accelerator (one ArrayView, N x H x W x 3): the managed
+     overload's file byte for byte on the CPU accelerator and CUDA, red-checked.
+   - [ ] `VideoFileEncoderGpu` TypedArray overload (`IReadOnlyList<Float32Array>` -> `Uint8Array`): written, test
+     `VideoFileEncoderGpu_TypedArrayOverload_MatchesManaged` (BrowserOnly) has not run yet.
 2. [ ] **Motion search.** Pyramid full-pel search (+-38 pixels), half / quarter-pel refinement and a merge with the
    neighbours' MVs, scored with the decoder's own predictor (`Vp9MotionSearchKernels`, d9c74f4).
    - [x] Code + tests on the CPU accelerator: a moving picture's inter frames are 41-42% of zero motion's at q 40.

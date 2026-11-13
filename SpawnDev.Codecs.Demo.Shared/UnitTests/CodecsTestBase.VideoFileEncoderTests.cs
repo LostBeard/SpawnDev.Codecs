@@ -17,6 +17,7 @@ using SpawnDev.ILGPU;
 using SpawnDev.Codecs.Container.Matroska;
 using SpawnDev.Codecs.Container.Mp4;
 using SpawnDev.Codecs.Video;
+using Float32Array = SpawnDev.SpawnJS.JSObjects.Float32Array;
 using SpawnDev.UnitTesting;
 using static SpawnDev.Codecs.Demo.Shared.UnitTests.TestHelpers;
 
@@ -227,6 +228,15 @@ public abstract partial class CodecsTestBase
             }
             await ThrowsAsync<ArgumentOutOfRangeException>(() => enc.EncodeAsync(frames, w, h, 24, 1, null, new VideoFileEncodeOptions { KeyFrameInterval = 0 }));
 
+            // Frames already on the accelerator (N x H x W x 3 in one buffer): the same file, byte for byte
+            using (var onDevice = acc.Allocate1D<float>((long)n * w * h * 3))
+            {
+                for (int k = 0; k < n; k++) onDevice.View.SubView((long)k * w * h * 3, w * h * 3).CopyFromCPU(frames[k]);
+                var fromDevice = await enc.EncodeAsync(onDevice.View, n, w, h, 24, 1, sound, new VideoFileEncodeOptions { Container = VideoContainer.WebM });
+                True(fromDevice.AsSpan().SequenceEqual(webm), $"the ArrayView overload's file ({fromDevice.Length} B) differs from the managed overload's ({webm.Length} B)");
+                await ThrowsAsync<ArgumentException>(() => enc.EncodeAsync(onDevice.View, n + 1, w, h, 24, 1));
+            }
+
             // MKV: DocType "matroska", the same blocks, and it loads
             var mkv = await enc.EncodeAsync(frames, w, h, 24, 1, sound, new VideoFileEncodeOptions { Container = VideoContainer.Mkv });
             var mkvDoc = new MatroskaContainer(new MemoryStream(mkv));
@@ -241,6 +251,45 @@ public abstract partial class CodecsTestBase
                 $"webm {webm.Length} B, mp4 {mp4.Length} B, video {interVideo} B with inter frames / {keyVideo} B key frames only ({100.0 * interVideo / keyVideo:F0}%)");
         }
         finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    /// <summary>Browser: frames as JS typed arrays (JS -> GPU) give the managed overload's file, byte for byte.</summary>
+    [TestMethod(Timeout = 1800000, Category = "BrowserOnly,NotOnWebGL")]
+    public async Task VideoFileEncoderGpu_TypedArrayOverload_MatchesManaged()
+    {
+        if (!OperatingSystem.IsBrowser())
+            throw new UnsupportedTestException("TypedArray overloads need a browser accelerator.");
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            using var enc = new VideoFileEncoderGpu(acc);
+            await RunVideoFileTypedArrayMatchesManaged(enc);
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("browser")]
+    private static async Task RunVideoFileTypedArrayMatchesManaged(VideoFileEncoderGpu enc)
+    {
+        const int w = 80, h = 50, n = 4;
+        var frames = TestFrames(w, h, n, smooth: true);
+        var options = new VideoFileEncodeOptions { Container = VideoContainer.WebM };
+        byte[] managed = await enc.EncodeAsync(frames, w, h, 24, 1, null, options);
+        var typed = new List<Float32Array>();
+        try
+        {
+            foreach (var f in frames)
+            {
+                var j = new Float32Array(f.Length);
+                j.Set(f);
+                typed.Add(j);
+            }
+            using var file = await enc.EncodeAsync(typed, w, h, 24, 1, null, options);
+            // Reading back to .NET is the TEST's terminal compare, not the product path.
+            EqualBytes(managed, file.ReadBytes(), "VideoFileEncoderGpu TypedArray file vs managed");
+        }
+        finally { foreach (var j in typed) j.Dispose(); }
     }
 
     /// <summary>libvpx / libaom quantizer_to_qindex: q * 4 up to 61, 62 -> 249, 63 -> 255; 0 clamps to 1.</summary>

@@ -13,6 +13,9 @@
   picture; a moving textured picture's inter frames are 41% of zero motion's bytes at q 40.
 - `VideoFileEncoderGpu` writes VP9 with inter frames: `VideoFileEncodeOptions.KeyFrameInterval` (null = 128, 1 = key
   frames only as before). Only key frames are sync samples (MP4 stss, WebM keyframe flag). AV1 stays key frames only.
+- `VideoFileEncoderGpu.EncodeAsync` overloads: frames already on the accelerator (one `ArrayView1D<float>` holding
+  N x H x W x 3, nothing of the picture crosses to the host) and, in the browser, `IReadOnlyList<Float32Array>`
+  (JS -> GPU, returns a `Uint8Array`). All three funnel into one encode.
 - `DemoConsole vp9-encode-bench <clip.webm>`: bytes, PSNR and speed per quantizer and key frame interval on a real clip.
 - SpawnDev.ILGPU 5.4.29 -> 5.4.30.
 

@@ -19,6 +19,8 @@ using SpawnDev.Codecs.Images.Yuv;
 using SpawnDev.Codecs.Video.Av1;
 using SpawnDev.Codecs.Video.Vp9;
 using SpawnDev.ILGPU;
+using SpawnDev.SpawnJS.JSObjects;
+using System.Runtime.Versioning;
 
 namespace SpawnDev.Codecs.Video;
 
@@ -86,16 +88,69 @@ public sealed class VideoFileEncoderGpu : IDisposable
     /// <paramref name="fpsNum"/> / <paramref name="fpsDen"/> frames per second, with <paramref name="audio"/> (optional,
     /// interleaved float) as an Opus track. Returns the file.
     /// </summary>
-    public async Task<byte[]> EncodeAsync(IReadOnlyList<float[]> frames, int width, int height, int fpsNum, int fpsDen,
+    public Task<byte[]> EncodeAsync(IReadOnlyList<float[]> frames, int width, int height, int fpsNum, int fpsDen,
         LoadedAudio? audio = null, VideoFileEncodeOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(frames);
-        options ??= new VideoFileEncodeOptions();
-        if (frames.Count == 0) throw new ArgumentException("No frames.", nameof(frames));
-        if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException(nameof(width));
-        if (fpsNum <= 0 || fpsDen <= 0) throw new ArgumentOutOfRangeException(nameof(fpsNum));
-        long values = (long)width * height * 3;
+        long values = CheckArguments(frames.Count, width, height, fpsNum, fpsDen);
         if (frames.Any(f => f == null || f.LongLength != values)) throw new ArgumentException($"Every frame must hold width * height * 3 = {values} floats.", nameof(frames));
+        return EncodeCoreAsync(frames.Count, true, (k, stage) => { stage.CopyFromCPU(frames[k]); return stage; },
+            width, height, fpsNum, fpsDen, audio, options);
+    }
+
+    /// <summary>
+    /// As <see cref="EncodeAsync(IReadOnlyList{float[]}, int, int, int, int, LoadedAudio?, VideoFileEncodeOptions?)"/>
+    /// for frames that are already on the accelerator: <paramref name="frames"/> holds
+    /// <paramref name="frameCount"/> frames one after the other (ComfyUI's IMAGE batch layout, N x H x W x 3 floats).
+    /// Nothing of the picture crosses to the host; each encoded packet is the one readback per frame.
+    /// </summary>
+    public Task<byte[]> EncodeAsync(ArrayView1D<float, Stride1D.Dense> frames, int frameCount, int width, int height, int fpsNum, int fpsDen,
+        LoadedAudio? audio = null, VideoFileEncodeOptions? options = null)
+    {
+        long values = CheckArguments(frameCount, width, height, fpsNum, fpsDen);
+        if (frames.Length < frameCount * values)
+            throw new ArgumentException($"frames must hold frameCount * width * height * 3 = {frameCount * values} floats; it holds {frames.Length}.", nameof(frames));
+        return EncodeCoreAsync(frameCount, false, (k, _) => frames.SubView(k * values, values), width, height, fpsNum, fpsDen, audio, options);
+    }
+
+    /// <summary>
+    /// As <see cref="EncodeAsync(IReadOnlyList{float[]}, int, int, int, int, LoadedAudio?, VideoFileEncodeOptions?)"/>
+    /// in the browser, for frames held as JS typed arrays (each <c>height * width * 3</c> floats): every frame goes
+    /// JS -> GPU, never through the .NET heap. The file (the encoded packets and the container's framing, assembled on
+    /// the host) is returned as a <see cref="Uint8Array"/>.
+    /// </summary>
+    [SupportedOSPlatform("browser")]
+    public async Task<Uint8Array> EncodeAsync(IReadOnlyList<Float32Array> frames, int width, int height, int fpsNum, int fpsDen,
+        LoadedAudio? audio = null, VideoFileEncodeOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(frames);
+        long values = CheckArguments(frames.Count, width, height, fpsNum, fpsDen);
+        if (frames.Any(f => f == null || f.Length != values)) throw new ArgumentException($"Every frame must hold width * height * 3 = {values} floats.", nameof(frames));
+        var file = await EncodeCoreAsync(frames.Count, true, (k, stage) => { DeviceTransfer.Upload(stage, frames[k]); return stage; },
+            width, height, fpsNum, fpsDen, audio, options);
+        return new Uint8Array(file);
+    }
+
+    /// <summary>The arguments every overload shares; returns the floats per frame.</summary>
+    private static long CheckArguments(int frameCount, int width, int height, int fpsNum, int fpsDen)
+    {
+        if (frameCount <= 0) throw new ArgumentException("No frames.", "frames");
+        if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
+        if (fpsNum <= 0) throw new ArgumentOutOfRangeException(nameof(fpsNum));
+        if (fpsDen <= 0) throw new ArgumentOutOfRangeException(nameof(fpsDen));
+        return (long)width * height * 3;
+    }
+
+    /// <summary>
+    /// The one encode behind every overload. <paramref name="frame"/> returns frame k as a view on the accelerator;
+    /// with <paramref name="staged"/> it is handed a buffer of one frame to upload into (and return).
+    /// </summary>
+    private async Task<byte[]> EncodeCoreAsync(int frameCount, bool staged,
+        Func<int, ArrayView1D<float, Stride1D.Dense>, ArrayView1D<float, Stride1D.Dense>> frame,
+        int width, int height, int fpsNum, int fpsDen, LoadedAudio? audio, VideoFileEncodeOptions? options)
+    {
+        options ??= new VideoFileEncodeOptions();
         if (options.Codec is not (VideoCodec.Vp9 or VideoCodec.Av1)) throw new NotSupportedException($"{options.Codec}: VP9 or AV1.");
         bool av1 = options.Codec == VideoCodec.Av1;
         if (av1 && (width % 64 != 0 || height % 64 != 0))
@@ -105,7 +160,7 @@ public sealed class VideoFileEncoderGpu : IDisposable
         if (keyInterval < 1) throw new ArgumentOutOfRangeException(nameof(options), "KeyFrameInterval must be at least 1.");
 
         // video packets (AV1: every frame a key frame; VP9: key frames keyInterval apart, inter frames between)
-        var packets = await EncodeVideoAsync(frames, width, height, av1, q, keyInterval);
+        var packets = await EncodeVideoAsync(frameCount, staged, frame, width, height, av1, q, keyInterval);
         // audio packets
         OpusPacketStream? opus = null;
         if (audio != null && audio.Samples.Length > 0)
@@ -118,7 +173,8 @@ public sealed class VideoFileEncoderGpu : IDisposable
         return ms.ToArray();
     }
 
-    private async Task<List<(byte[] Data, bool Key)>> EncodeVideoAsync(IReadOnlyList<float[]> frames, int width, int height, bool av1, int q,
+    private async Task<List<(byte[] Data, bool Key)>> EncodeVideoAsync(int frameCount, bool staged,
+        Func<int, ArrayView1D<float, Stride1D.Dense>, ArrayView1D<float, Stride1D.Dense>> frame, int width, int height, bool av1, int q,
         int keyInterval)
     {
         _toRgba ??= await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<byte>>(ToRgbaKernel);
@@ -134,18 +190,18 @@ public sealed class VideoFileEncoderGpu : IDisposable
             _vp9.KeyFrameInterval = keyInterval;
         }
         // separate buffers: WebGPU rejects two read_write bindings of one buffer that share a 4-byte word
-        using var rgbF = _acc.Allocate1D<float>((long)pixels * 3);
+        // one frame of floats to upload into: only for sources that are not on the accelerator
+        using var stage = staged ? _acc.Allocate1D<float>((long)pixels * 3) : null;
         using var rgba = _acc.Allocate1D<byte>((long)pixels * 4);
         using var y = _acc.Allocate1D<byte>(pixels);
         using var u = _acc.Allocate1D<byte>(chroma);
         using var v = _acc.Allocate1D<byte>(chroma);
         using var alpha = _acc.Allocate1D<byte>(pixels);
         using var output = _acc.Allocate1D<byte>(max);
-        var packets = new List<(byte[] Data, bool Key)>(frames.Count);
-        foreach (var frame in frames)
+        var packets = new List<(byte[] Data, bool Key)>(frameCount);
+        for (int k = 0; k < frameCount; k++)
         {
-            rgbF.View.CopyFromCPU(frame);
-            _toRgba(pixels, rgbF.View, rgba.View);
+            _toRgba(pixels, frame(k, stage != null ? stage.View : default), rgba.View);
             _toYuv.Convert(rgba.View, width, height, y.View, u.View, v.View, alpha.View);
             int n;
             bool key = true;
