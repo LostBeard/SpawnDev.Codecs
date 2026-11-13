@@ -50,7 +50,6 @@ public static class Vp9ForwardDct16x16Gpu
     private const int CosPi30_64 = 1606;
 
     private const int DctConstBits = 14;
-    private const int DctConstRounding = 1 << (DctConstBits - 1);
 
     /// <summary>
     /// Forward DCT one 16x16 block. Reads <paramref name="input"/>
@@ -163,39 +162,25 @@ public static class Vp9ForwardDct16x16Gpu
         int s7 = ih0 - ih7;
 
         int x0 = s0 + s3, x1 = s1 + s2, x2 = s1 - s2, x3 = s0 - s3;
-        long t0 = (long)(x0 + x1) * CosPi16_64;
-        long t1 = (long)(x0 - x1) * CosPi16_64;
-        long t2 = (long)x3 * CosPi8_64 + (long)x2 * CosPi24_64;
-        long t3 = (long)x3 * CosPi24_64 - (long)x2 * CosPi8_64;
-        o0  = RoundShift(t0);
-        o4  = RoundShift(t2);
-        o8  = RoundShift(t1);
-        o12 = RoundShift(t3);
+        o0  = TransformRounding.RoundedProduct(CosPi16_64, x0 + x1, DctConstBits);
+        o4  = TransformRounding.RoundedDot(CosPi8_64, x3, CosPi24_64, x2, DctConstBits);
+        o8  = TransformRounding.RoundedProduct(CosPi16_64, x0 - x1, DctConstBits);
+        o12 = TransformRounding.RoundedDot(CosPi24_64, x3, -CosPi8_64, x2, DctConstBits);
 
-        long u0 = (long)(s6 - s5) * CosPi16_64;
-        long u1 = (long)(s6 + s5) * CosPi16_64;
-        int v2 = RoundShift(u0);
-        int v3 = RoundShift(u1);
+        int v2 = TransformRounding.RoundedProduct(CosPi16_64, s6 - s5, DctConstBits);
+        int v3 = TransformRounding.RoundedProduct(CosPi16_64, s6 + s5, DctConstBits);
 
         int y0 = s4 + v2, y1 = s4 - v2, y2 = s7 - v3, y3 = s7 + v3;
-        long w0 = (long)y0 * CosPi28_64 + (long)y3 * CosPi4_64;
-        long w1 = (long)y1 * CosPi12_64 + (long)y2 * CosPi20_64;
-        long w2 = (long)y2 * CosPi12_64 + (long)y1 * (-CosPi20_64);
-        long w3 = (long)y3 * CosPi28_64 + (long)y0 * (-CosPi4_64);
-        o2  = RoundShift(w0);
-        o6  = RoundShift(w2);
-        o10 = RoundShift(w1);
-        o14 = RoundShift(w3);
+        o2  = TransformRounding.RoundedDot(CosPi28_64, y0, CosPi4_64, y3, DctConstBits);
+        o6  = TransformRounding.RoundedDot(CosPi12_64, y2, -CosPi20_64, y1, DctConstBits);
+        o10 = TransformRounding.RoundedDot(CosPi12_64, y1, CosPi20_64, y2, DctConstBits);
+        o14 = TransformRounding.RoundedDot(CosPi28_64, y3, -CosPi4_64, y0, DctConstBits);
 
         // Odd half. step1[0..7] = locals s10..s17 (s1X where X is the index).
-        long temp1 = (long)(s15 - s12) * CosPi16_64;
-        long temp2 = (long)(s14 - s13) * CosPi16_64;
-        int sa2 = RoundShift(temp1);
-        int sa3 = RoundShift(temp2);
-        temp1 = (long)(s14 + s13) * CosPi16_64;
-        temp2 = (long)(s15 + s12) * CosPi16_64;
-        int sa4 = RoundShift(temp1);
-        int sa5 = RoundShift(temp2);
+        int sa2 = TransformRounding.RoundedProduct(CosPi16_64, s15 - s12, DctConstBits);
+        int sa3 = TransformRounding.RoundedProduct(CosPi16_64, s14 - s13, DctConstBits);
+        int sa4 = TransformRounding.RoundedProduct(CosPi16_64, s14 + s13, DctConstBits);
+        int sa5 = TransformRounding.RoundedProduct(CosPi16_64, s15 + s12, DctConstBits);
 
         int sb0 = s10 + sa3;
         int sb1 = s11 + sa2;
@@ -206,14 +191,10 @@ public static class Vp9ForwardDct16x16Gpu
         int sb6 = s16 + sa5;
         int sb7 = s17 + sa4;
 
-        temp1 = (long)sb1 * (-CosPi8_64) + (long)sb6 * CosPi24_64;
-        temp2 = (long)sb2 * CosPi24_64 + (long)sb5 * CosPi8_64;
-        int sc1 = RoundShift(temp1);
-        int sc2 = RoundShift(temp2);
-        temp1 = (long)sb2 * CosPi8_64 - (long)sb5 * CosPi24_64;
-        temp2 = (long)sb1 * CosPi24_64 + (long)sb6 * CosPi8_64;
-        int sc5 = RoundShift(temp1);
-        int sc6 = RoundShift(temp2);
+        int sc1 = TransformRounding.RoundedDot(-CosPi8_64, sb1, CosPi24_64, sb6, DctConstBits);
+        int sc2 = TransformRounding.RoundedDot(CosPi24_64, sb2, CosPi8_64, sb5, DctConstBits);
+        int sc5 = TransformRounding.RoundedDot(CosPi8_64, sb2, -CosPi24_64, sb5, DctConstBits);
+        int sc6 = TransformRounding.RoundedDot(CosPi24_64, sb1, CosPi8_64, sb6, DctConstBits);
 
         int sd0 = sb0 + sc1;
         int sd1 = sb0 - sc1;
@@ -224,24 +205,13 @@ public static class Vp9ForwardDct16x16Gpu
         int sd6 = sb7 - sc6;
         int sd7 = sb7 + sc6;
 
-        temp1 = (long)sd0 * CosPi30_64 + (long)sd7 * CosPi2_64;
-        temp2 = (long)sd1 * CosPi14_64 + (long)sd6 * CosPi18_64;
-        o1 = RoundShift(temp1);
-        o9 = RoundShift(temp2);
-        temp1 = (long)sd2 * CosPi22_64 + (long)sd5 * CosPi10_64;
-        temp2 = (long)sd3 * CosPi6_64 + (long)sd4 * CosPi26_64;
-        o5  = RoundShift(temp1);
-        o13 = RoundShift(temp2);
-        temp1 = (long)sd3 * (-CosPi26_64) + (long)sd4 * CosPi6_64;
-        temp2 = (long)sd2 * (-CosPi10_64) + (long)sd5 * CosPi22_64;
-        o3  = RoundShift(temp1);
-        o11 = RoundShift(temp2);
-        temp1 = (long)sd1 * (-CosPi18_64) + (long)sd6 * CosPi14_64;
-        temp2 = (long)sd0 * (-CosPi2_64) + (long)sd7 * CosPi30_64;
-        o7  = RoundShift(temp1);
-        o15 = RoundShift(temp2);
+        o1 = TransformRounding.RoundedDot(CosPi30_64, sd0, CosPi2_64, sd7, DctConstBits);
+        o9 = TransformRounding.RoundedDot(CosPi14_64, sd1, CosPi18_64, sd6, DctConstBits);
+        o5  = TransformRounding.RoundedDot(CosPi22_64, sd2, CosPi10_64, sd5, DctConstBits);
+        o13 = TransformRounding.RoundedDot(CosPi6_64, sd3, CosPi26_64, sd4, DctConstBits);
+        o3  = TransformRounding.RoundedDot(-CosPi26_64, sd3, CosPi6_64, sd4, DctConstBits);
+        o11 = TransformRounding.RoundedDot(-CosPi10_64, sd2, CosPi22_64, sd5, DctConstBits);
+        o7  = TransformRounding.RoundedDot(-CosPi18_64, sd1, CosPi14_64, sd6, DctConstBits);
+        o15 = TransformRounding.RoundedDot(-CosPi2_64, sd0, CosPi30_64, sd7, DctConstBits);
     }
-
-    private static int RoundShift(long input) =>
-        (int)((input + DctConstRounding) >> DctConstBits);
 }

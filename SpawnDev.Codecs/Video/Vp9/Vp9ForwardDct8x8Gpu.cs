@@ -37,7 +37,6 @@ public static class Vp9ForwardDct8x8Gpu
     private const int CosPi28_64 = 3196;
 
     private const int DctConstBits = 14;
-    private const int DctConstRounding = 1 << (DctConstBits - 1);
 
     /// <summary>
     /// Forward DCT one 8x8 block. Reads <paramref name="input"/>
@@ -128,36 +127,23 @@ public static class Vp9ForwardDct8x8Gpu
         int x1 = s1 + s2;
         int x2 = s1 - s2;
         int x3 = s0 - s3;
-        long t0 = (long)(x0 + x1) * CosPi16_64;
-        long t1 = (long)(x0 - x1) * CosPi16_64;
-        long t2 = (long)x2 * CosPi24_64 + (long)x3 * CosPi8_64;
-        long t3 = (long)(-x2) * CosPi8_64 + (long)x3 * CosPi24_64;
-        o0 = RoundShift(t0);
-        o2 = RoundShift(t2);
-        o4 = RoundShift(t1);
-        o6 = RoundShift(t3);
+        o0 = TransformRounding.RoundedProduct(CosPi16_64, x0 + x1, DctConstBits);
+        o2 = TransformRounding.RoundedDot(CosPi24_64, x2, CosPi8_64, x3, DctConstBits);
+        o4 = TransformRounding.RoundedProduct(CosPi16_64, x0 - x1, DctConstBits);
+        o6 = TransformRounding.RoundedDot(CosPi8_64, -x2, CosPi24_64, x3, DctConstBits);
 
         // s4..s7 stages - odd half.
-        long u0 = (long)(s6 - s5) * CosPi16_64;
-        long u1 = (long)(s6 + s5) * CosPi16_64;
-        int v2 = RoundShift(u0);
-        int v3 = RoundShift(u1);
+        int v2 = TransformRounding.RoundedProduct(CosPi16_64, s6 - s5, DctConstBits);
+        int v3 = TransformRounding.RoundedProduct(CosPi16_64, s6 + s5, DctConstBits);
 
         int y0 = s4 + v2;
         int y1 = s4 - v2;
         int y2 = s7 - v3;
         int y3 = s7 + v3;
 
-        long w0 = (long)y0 * CosPi28_64 + (long)y3 * CosPi4_64;
-        long w1 = (long)y1 * CosPi12_64 + (long)y2 * CosPi20_64;
-        long w2 = (long)y2 * CosPi12_64 + (long)y1 * (-CosPi20_64);
-        long w3 = (long)y3 * CosPi28_64 + (long)y0 * (-CosPi4_64);
-        o1 = RoundShift(w0);
-        o3 = RoundShift(w2);
-        o5 = RoundShift(w1);
-        o7 = RoundShift(w3);
+        o1 = TransformRounding.RoundedDot(CosPi28_64, y0, CosPi4_64, y3, DctConstBits);
+        o3 = TransformRounding.RoundedDot(CosPi12_64, y2, -CosPi20_64, y1, DctConstBits);
+        o5 = TransformRounding.RoundedDot(CosPi12_64, y1, CosPi20_64, y2, DctConstBits);
+        o7 = TransformRounding.RoundedDot(CosPi28_64, y3, -CosPi4_64, y0, DctConstBits);
     }
-
-    private static int RoundShift(long input) =>
-        (int)((input + DctConstRounding) >> DctConstBits);
 }

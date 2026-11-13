@@ -17,6 +17,11 @@
 // H and L fit in 32 bits when |w0| + |w1| <= 32767:  |H| <= 32767 * 32768 < 2^30,  |L| <= 32767 * 65535 + 32768 < 2^31.
 // The final sum is taken modulo 2^32, which is what "(int)(value64 >> bit)" does.
 //
+// Users: the AV1 transforms (2026-11-12) and the VP9 forward DCTs 4x4 / 8x8 / 16x16 (2026-11-13; offline WGSL screen,
+// SpawnDev.ILGPU 5.4.30, fully inlined lines / emulated 64-bit operations: Vp9EncodeWavefrontBatchKernel 26,819 / 852
+// -> 20,263 / 12, Vp9InterEncodeKernels.ForwardKernel 8,006 / 522 -> 3,994 / 2). NOT converted: the VP9 forward
+// ADSTs and the 32x32 forward DCT, which carry 64-bit values between stages, and the VP9 inverse transforms.
+//
 // The weights are the codecs' cosine / sine constants: AV1 at most 8192 each (cos_bit <= 13), VP9 at most 16384 each
 // and at most 23170 for the two of a rotation (cos + sin <= sqrt(2) * 16384). The host test
 // TransformRounding_EqualsThe64BitFormula checks the bound with the real constant pairs and compares against the

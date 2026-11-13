@@ -26,7 +26,6 @@ namespace SpawnDev.Codecs.Video.Vp9;
 public static class Vp9ForwardDct4x4Gpu
 {
     private const int DctConstBits = 14;
-    private const int DctConstRounding = 1 << (DctConstBits - 1);
 
     private const int Cospi8_64 = 15137;
     private const int Cospi16_64 = 11585;
@@ -62,10 +61,10 @@ public static class Vp9ForwardDct4x4Gpu
             int s2 = h1 - h2;
             int s3 = h0 - h3;
 
-            scratch[outOffset + 0] = FdctRoundShift((long)(s0 + s1) * Cospi16_64);
-            scratch[outOffset + 2] = FdctRoundShift((long)(s0 - s1) * Cospi16_64);
-            scratch[outOffset + 1] = FdctRoundShift((long)s2 * Cospi24_64 + (long)s3 * Cospi8_64);
-            scratch[outOffset + 3] = FdctRoundShift((long)(-s2) * Cospi8_64 + (long)s3 * Cospi24_64);
+            scratch[outOffset + 0] = TransformRounding.RoundedProduct(Cospi16_64, s0 + s1, DctConstBits);
+            scratch[outOffset + 2] = TransformRounding.RoundedProduct(Cospi16_64, s0 - s1, DctConstBits);
+            scratch[outOffset + 1] = TransformRounding.RoundedDot(Cospi24_64, s2, Cospi8_64, s3, DctConstBits);
+            scratch[outOffset + 3] = TransformRounding.RoundedDot(Cospi8_64, -s2, Cospi24_64, s3, DctConstBits);
 
             inputOffset++;
             outOffset += 4;
@@ -85,10 +84,10 @@ public static class Vp9ForwardDct4x4Gpu
             int s2 = h1 - h2;
             int s3 = h0 - h3;
 
-            output[outOffset + 0] = FdctRoundShift((long)(s0 + s1) * Cospi16_64);
-            output[outOffset + 2] = FdctRoundShift((long)(s0 - s1) * Cospi16_64);
-            output[outOffset + 1] = FdctRoundShift((long)s2 * Cospi24_64 + (long)s3 * Cospi8_64);
-            output[outOffset + 3] = FdctRoundShift((long)(-s2) * Cospi8_64 + (long)s3 * Cospi24_64);
+            output[outOffset + 0] = TransformRounding.RoundedProduct(Cospi16_64, s0 + s1, DctConstBits);
+            output[outOffset + 2] = TransformRounding.RoundedProduct(Cospi16_64, s0 - s1, DctConstBits);
+            output[outOffset + 1] = TransformRounding.RoundedDot(Cospi24_64, s2, Cospi8_64, s3, DctConstBits);
+            output[outOffset + 3] = TransformRounding.RoundedDot(Cospi8_64, -s2, Cospi24_64, s3, DctConstBits);
 
             outOffset += 4;
         }
@@ -99,8 +98,4 @@ public static class Vp9ForwardDct4x4Gpu
             output[outBase + i] = (output[outBase + i] + 1) >> 2;
         }
     }
-
-    /// <summary>libvpx fdct_round_shift: (input + 1 &lt;&lt; 13) &gt;&gt; 14.</summary>
-    private static int FdctRoundShift(long input) =>
-        (int)((input + DctConstRounding) >> DctConstBits);
 }

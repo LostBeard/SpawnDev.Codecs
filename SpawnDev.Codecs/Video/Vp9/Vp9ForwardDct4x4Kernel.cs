@@ -33,7 +33,6 @@ public sealed class Vp9ForwardDct4x4Kernel : IDisposable
     private const int CosPi24_64 = 6270;
 
     private const int DctConstBits = 14;
-    private const int DctConstRounding = 1 << (DctConstBits - 1);
 
     private readonly Accelerator _accelerator;
     private readonly Action<Index1D, ArrayView<short>, ArrayView<int>, int> _kernel;
@@ -201,10 +200,10 @@ public sealed class Vp9ForwardDct4x4Kernel : IDisposable
         int x2 = s1 - s2;
         int x3 = s0 - s3;
 
-        o0 = (int)(((long)(x0 + x1) * CosPi16_64 + DctConstRounding) >> DctConstBits);
-        o2 = (int)(((long)(x0 - x1) * CosPi16_64 + DctConstRounding) >> DctConstBits);
-        o1 = (int)(((long)x2 * CosPi24_64 + (long)x3 * CosPi8_64 + DctConstRounding) >> DctConstBits);
-        o3 = (int)(((long)(-x2) * CosPi8_64 + (long)x3 * CosPi24_64 + DctConstRounding) >> DctConstBits);
+        o0 = TransformRounding.RoundedProduct(CosPi16_64, x0 + x1, DctConstBits);
+        o2 = TransformRounding.RoundedProduct(CosPi16_64, x0 - x1, DctConstBits);
+        o1 = TransformRounding.RoundedDot(CosPi24_64, x2, CosPi8_64, x3, DctConstBits);
+        o3 = TransformRounding.RoundedDot(CosPi8_64, -x2, CosPi24_64, x3, DctConstBits);
     }
 
     /// <summary>Release kernel resources. Does NOT dispose the accelerator.</summary>
