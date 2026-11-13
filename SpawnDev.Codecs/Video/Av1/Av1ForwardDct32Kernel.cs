@@ -384,12 +384,10 @@ public sealed class Av1ForwardDct32Kernel : IDisposable
     }
 
     /// <summary>libaom <c>half_btf</c>: kernel-safe variant.</summary>
-    private static int HalfBtf(int w0, int in0, int w1, int in1, int bit)
-    {
-        long result = (long)w0 * in0 + (long)w1 * in1;
-        result += 1L << (bit - 1);
-        return (int)(result >> bit);
-    }
+    // libaom half_btf, in exact 32-bit arithmetic (TransformRounding: no emulated 64-bit multiply on the browser
+    // backends; same result as the 64-bit formula for every input, |w| <= 8192 here).
+    private static int HalfBtf(int w0, int in0, int w1, int in1, int bit) =>
+        TransformRounding.RoundedDot(w0, in0, w1, in1, bit);
 
     /// <summary>
     /// Populates a 64-element cospi table per cos_bit. Mirrors

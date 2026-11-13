@@ -303,12 +303,10 @@ public static class Av1Inverse2dTransformGpu
         else                   { c16 = 946;  c32 = 724;  c48 = 392;  }
     }
 
-    private static int HalfBtf(int w0, int in0, int w1, int in1, int bit)
-    {
-        long result = (long)w0 * in0 + (long)w1 * in1;
-        result += 1L << (bit - 1);
-        return (int)(result >> bit);
-    }
+    // libaom half_btf, in exact 32-bit arithmetic (TransformRounding: no emulated 64-bit multiply on the browser
+    // backends; same result as the 64-bit formula for every input, |w| <= 8192 here).
+    private static int HalfBtf(int w0, int in0, int w1, int in1, int bit) =>
+        TransformRounding.RoundedDot(w0, in0, w1, in1, bit);
 
     private static void ResolveCospi8(int cosBit,
         out int c8, out int c16, out int c24, out int c32,
