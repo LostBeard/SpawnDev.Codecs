@@ -11,6 +11,9 @@
 //          the time per keyframe is the call's time divided by the batch size.
 // --fps: the rate the frames are shown at (Av1KeyframeEncoderGpu.SetFrameRate; default 30): it decides the level signalled.
 // --level: keep the tile grid inside an AV1 level (Av1KeyframeEncoderGpu.LevelLimit), e.g. 4.0 or 5.1; none = no limit.
+// --passes 1: measurements: wait for the device after the transform pass and after the entropy pass and report each.
+// --xf-lanes N --xf-spread N: measurements: the transform pass's launch group (working lanes per tile, group threads
+//   per working lane) instead of the accelerator's own choice (Av1FrameSequentialEncodeKernel.GetTransformGroup).
 // --out: write the last encoded temporal unit to a file (an .obu file FFmpeg reads: ffmpeg -i file.obu ...).
 // --dump-kernel: write the tile kernel as the backend compiles it (PTX on CUDA, OpenCL C on OpenCL) and exit.
 // For an A/B of two builds: run the two executables alternately, several times each, with nothing else on the GPU.
@@ -39,6 +42,8 @@ internal static class Av1EncodeBench
         string? outPath = null, dumpPath = null;
         int width = 832, height = 480, frames = 12, warmup = 2, q = 40, tile = 1, batch = 1, maxTiles = Av1TileLayout.HardwareDecoderMaxTiles;
         int fpsNum = 30, fpsDen = 1, levelLimit = Av1Level.MaximumParameters;
+        var passTotals = new Dictionary<string, double>();
+        var passCounts = new Dictionary<string, int>();
         for (int i = 1; i < args.Length; i++)
         {
             string a = args[i];
@@ -59,6 +64,17 @@ internal static class Av1EncodeBench
             else if (a == "--batch") batch = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--maxtiles") maxTiles = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--out") outPath = v;
+            else if (a == "--passes")
+            {
+                if (v == "1") Av1FrameSequentialEncodeKernel.PassTimer = (name, ms) =>
+                {
+                    passTotals[name] = passTotals.GetValueOrDefault(name) + ms;
+                    passCounts[name] = passCounts.GetValueOrDefault(name) + 1;
+                };
+            }
+            else if (a == "--xf-lanes") Av1FrameSequentialEncodeKernel.TransformGroupOverride.Lanes = int.Parse(v, CultureInfo.InvariantCulture);
+            else if (a == "--xf-spread") Av1FrameSequentialEncodeKernel.TransformGroupOverride.Spread = int.Parse(v, CultureInfo.InvariantCulture);
+            else if (a == "--xf-tiles") Av1FrameSequentialEncodeKernel.TransformGroupOverride.TilesPerGroup = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--fps")
             {
                 var parts = v.Split('/');
@@ -186,6 +202,8 @@ internal static class Av1EncodeBench
         double mbps = len * 8.0 * fpsNum / fpsDen / 1e6;
         if (outPath != null) await File.WriteAllBytesAsync(outPath, unit);
         string tileText = tile == int.MaxValue ? "max" : tile.ToString(CultureInfo.InvariantCulture);
+        foreach (var kv in passTotals)
+            Console.WriteLine($"pass {kv.Key}: {F(kv.Value / passCounts[kv.Key], "F2")} ms per call over {passCounts[kv.Key]} calls (warm-up included)");
         Console.WriteLine($"av1-encode-bench {acc.AcceleratorType} {width}x{height} q{q} tile {tileText} " +
             $"({layout.TileCols} x {layout.TileRows} = {layout.TileCount} tiles of {layout.TileWidthSb} x {layout.TileHeightSb} superblocks) batch {batch}: " +
             $"median {F(median, "F2")} ms, mean {F(mean, "F2")} ms, " +

@@ -1,8 +1,16 @@
 // SpawnDev.Codecs is licensed under MIT (see LICENSE.txt).
 //
-// AV1 v1 keyframe walker, 100% ILGPU. One GPU thread per TILE runs the tile pipeline (predict, transform, quantize,
-// entropy code, reconstruct) bit-exact vs the CPU Av1KeyframeEncoder reference. The host is a pure coordinator:
-// alloc buffers + upload constants + dispatch + read back.
+// AV1 v1 keyframe walker, 100% ILGPU: the tile pipeline (predict, transform, quantize, reconstruct, entropy code)
+// bit-exact vs the CPU Av1KeyframeEncoder reference. The host is a pure coordinator: alloc buffers + upload
+// constants + dispatch + read back.
+//
+// Two passes over every tile (2026-11-13; before, one thread per tile did both, leaf by leaf):
+//   1. Transform pass, parallel INSIDE the tile. A leaf predicts (DC) from the reconstruction above it and to its
+//      left, so the 16x16 positions of an anti-diagonal of the tile are independent: a wavefront. One launch group
+//      per tile; its lanes take the positions of a diagonal, with a barrier between diagonals. Each position:
+//      predict, forward transform, quantize, reconstruct, and its quantized coefficients go to a device buffer.
+//   2. Entropy pass, one thread per tile: the partition, mode and coefficient syntax of the tile into its range
+//      coder, reading the stored coefficients. Serial by nature (one range coder and one set of contexts per tile).
 //
 // Tiles are what makes the encoder parallel. An AV1 tile is independent by definition: its own range coder, its
 // own above / left contexts (zero at the tile's top and at the start of each superblock row), and no prediction
@@ -15,12 +23,12 @@
 // The working threads are spread over the launch (SerialThreadPlacement: one group per multiprocessor, one thread
 // per warp while there is room): packed into the first launch group, the same 104 threads took 20.7 ms.
 //
-// Bounded launches: a tile's walk is linearized into leaf slots (the 16 z-order
-// 16x16 positions of each of its superblocks) and a launch encodes at most
-// LeavesPerLaunch of them per tile. The contexts are in the tile's
-// scratchByte slot; the range encoder and the slot cursor are kept in
-// its scratchInt slot [StStarted ..] between launches. The host launches
-// ceil(slots of the largest tile / LeavesPerLaunch) steps (a bound it knows; no readback).
+// Bounded launches. Transform pass: DiagonalsPerLaunch diagonals per launch (the reconstruction carries the
+// wavefront between launches). Entropy pass: a tile's walk is linearized into leaf slots (the 16 z-order 16x16
+// positions of each of its superblocks) and a launch codes at most LeavesPerLaunch of them per tile. The contexts
+// are in the tile's scratchByte slot; the range encoder and the slot cursor are kept in its scratchInt slot
+// [StStarted ..] between launches. The host launches ceil(slots of the largest tile / LeavesPerLaunch) steps (a
+// bound it knows; no readback).
 //
 // Pipeline (mirrors Av1KeyframeEncoder.EncodeSingleTile / EncodePartition):
 //   - For each 64x64 superblock of the tile in raster order:
@@ -47,7 +55,9 @@
 //   - tx_mode = LARGEST, reduced_tx_set = 1.
 //   - Single tile.
 //
-// Scratch layout per tile (one slot per thread; the above arrays are indexed by the mi column inside the tile):
+// Scratch layout per tile for the entropy pass (one slot per thread; the above arrays are indexed by the mi column
+// inside the tile; the edge / predict regions and the per-block ints below are the transform pass's, which keeps
+// them per lane in its own buffers: XfEdgeAbove, XfEdgeLeft, XfPredict, XfIntLength):
 //   scratchByte:
 //     [AboveEntropyOff..   ): 3 planes * AboveStride bytes (AboveStride = tile width in mi)
 //     [LeftEntropyOff..    ): 3 planes * 32 bytes
@@ -75,6 +85,7 @@
 using System.Runtime.CompilerServices;
 using ILGPU;
 using ILGPU.Runtime;
+using ILGPU.Runtime.OpenCL;
 using SpawnDev.ILGPU;
 
 namespace SpawnDev.Codecs.Video.Av1;
@@ -181,8 +192,21 @@ public struct Av1FrameBatchStrides
     public int ScratchByteStride;
     /// <summary>scratchInt ints per tile (MinScratchIntLength).</summary>
     public int ScratchIntStride;
-    /// <summary>scratchShort shorts per tile (256).</summary>
-    public int ScratchShortStride;
+    /// <summary>Quantized coefficients per tile: leaf slots of the largest tile * CoefsPerSlot. Set by RunAsync.</summary>
+    public int CoefStride;
+    /// <summary>Working lanes of a transform launch group (one group per tile): the lanes of the tile's wavefront. Set by RunAsync.</summary>
+    public int TransformLanesPerTile;
+    /// <summary>
+    /// Group threads per working lane: lane L is group thread L * spread, the threads between idle (they only meet
+    /// the barriers). The group has TransformLanesPerTile * TransformSpread threads. Set by RunAsync.
+    /// </summary>
+    public int TransformSpread;
+    /// <summary>Rounds a tile's lanes take per diagonal: ceil(widest diagonal / lanes per tile). Set by RunAsync.</summary>
+    public int TransformRounds;
+    /// <summary>Tiles a transform launch group holds (each with its lanes). Set by RunAsync.</summary>
+    public int TransformTilesPerGroup;
+    /// <summary>Tiles of the launch (frames * tiles per frame): the last group's lanes past it idle. Set by RunAsync.</summary>
+    public int TransformTileCount;
 
     /// <summary>
     /// Where the tile threads sit in the launch. Set by <see cref="Av1FrameSequentialEncodeKernel.RunAsync"/>; a
@@ -192,101 +216,229 @@ public struct Av1FrameBatchStrides
 }
 
 /// <summary>
-/// AV1 v1 keyframe tile walker kernel. One GPU thread per tile of every frame, bit-exact vs the CPU
-/// Av1KeyframeEncoder reference, in bounded resumable launches of <see cref="LeavesPerLaunch"/> leaf slots per tile.
+/// AV1 v1 keyframe tile encode kernels, bit-exact vs the CPU Av1KeyframeEncoder reference. Two passes over every
+/// tile of every frame: the transform pass (one launch group per tile, the tile's 16x16 positions in anti-diagonal
+/// wavefront order: predict, transform, quantize, reconstruct, quantized coefficients to a device buffer) and the
+/// entropy pass (one thread per tile, bounded resumable launches of <see cref="LeavesPerLaunch"/> leaf slots: the
+/// partition, mode and coefficient syntax into the tile's range coder).
 /// </summary>
 public sealed class Av1FrameSequentialEncodeKernel : IDisposable
 {
     private readonly Accelerator _accelerator;
 
-    // ONE kernel for single frames and batches (a second, near-identical kernel was a second shader of the same
-    // size to compile): working thread = frame * tileCount + tile, placed in the launch by a SerialThreadPlacement.
+    // Transform pass, the GPUs' entry point: explicitly grouped, a group = the lanes of a tile's wavefront (or of a
+    // few tiles), with a barrier between diagonals. Null on the accelerators that use the other entry point.
     private readonly Action<
-        Index1D,
+        KernelConfig,
         ArrayView<byte>,    // src (per frame: Y + U + V planes)
         ArrayView<byte>,    // recon (per frame: Y + U + V planes, coded size)
+        ArrayView<int>,     // coefs (output, per tile: leaf slots * CoefsPerSlot)
+        ArrayView<short>,   // dcAcQuant (DC[0..256) + AC[256..512))
+        ArrayView<byte>,    // xfByte (per lane: edges + predict)
+        ArrayView<int>,     // xfInt (per lane: transform working area)
+        ArrayView<short>,   // xfShort (per lane: residual)
+        Av1FrameSeqEncodeParams, Av1FrameBatchStrides, int, int>? _transformKernel;
+
+    // Transform pass, the CPU accelerators' entry point (CPU, Velocity, Wasm): one thread per tile walks the same
+    // diagonals alone, no barrier. They have a core per tile, not per lane, and a kernel with barriers runs through
+    // their group machinery (Velocity, 832x480: 112 ms for the pass against about 12 this way). Same leaf code
+    // (TransformSlot); an accelerator loads one of the two.
+    private readonly Action<
+        Index1D,
+        ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<short>,
+        ArrayView<byte>, ArrayView<int>, ArrayView<short>,
+        Av1FrameSeqEncodeParams, Av1FrameBatchStrides, int, int>? _transformTileKernel;
+    private readonly int _transformTileGroupSize;
+
+    // Entropy pass: ONE kernel for single frames and batches: working thread = frame * tileCount + tile, placed in
+    // the launch by a SerialThreadPlacement.
+    private readonly Action<
+        Index1D,
         ArrayView<byte>,    // tileBytes (output, one slot per tile)
         ArrayView<long>,    // tileLen (output, one element per tile)
         ArrayView<byte>,    // constsByte (Av1KeyframeConstantsGpu byte buffer)
         ArrayView<ushort>,  // constsUshort (Av1KeyframeConstantsGpu ushort buffer)
-        ArrayView<short>,   // dcAcQuant (DC[0..256) + AC[256..512))
-        ArrayView<byte>,    // scratchByte (per tile: contexts + edge + predict + levels)
-        ArrayView<int>,     // scratchInt (per tile: per-block working area + resumable state)
-        ArrayView<short>,   // scratchShort (per tile: residual)
+        ArrayView<int>,     // coefs (the transform pass's output)
+        ArrayView<byte>,    // scratchByte (per tile: contexts + levels)
+        ArrayView<int>,     // scratchInt (per tile: eob / culLevel slots + resumable state)
         Av1FrameSeqEncodeParams, Av1FrameBatchStrides, int> _tileKernel;
+
+    // The transform pass's own device buffers (grow-only): the quantized coefficients it hands to the entropy pass
+    // and each lane's working area. Device memory, not LocalMemory: a long kernel with large private arrays hangs
+    // the D3D12 device in Chrome (ILGPU issue 10).
+    private MemoryBuffer1D<int, Stride1D.Dense>? _coefs;
+    private MemoryBuffer1D<byte, Stride1D.Dense>? _xfByte;
+    private MemoryBuffer1D<int, Stride1D.Dense>? _xfInt;
+    private MemoryBuffer1D<short, Stride1D.Dense>? _xfShort;
+
+    /// <summary>
+    /// Quantized coefficients stored per 16x16 leaf slot: one 16x16 leaf = Y 256 + U 64 + V 64; four 8x8 leaves at
+    /// the picture edge = 4 * (Y 64 + U 16 + V 16).
+    /// </summary>
+    public const int CoefsPerSlot = 384;
+
+    /// <summary>Coefficients of one 8x8 leaf inside a slot (Y 64 + U 16 + V 16).</summary>
+    private const int CoefsPerLeaf8 = 96;
+
+    // A transform lane's working area. Bytes: above edge (33), left edge (33), predict (256).
+    private const int XfEdgeAbove = 0;
+    private const int XfEdgeLeft = 36;
+    private const int XfPredict = 72;
+    private const int XfByteLength = XfPredict + 256;
+    // Ints: forward transform output / quantized coefs, dequant, inverse transform output and scratch (3n + n + 16).
+    private const int XfIntLength = 1040;
+    private const int XfShortLength = 256;
 
     /// <summary>Slot in scratchInt where WriteCoeffsTxb writes eob (per call).</summary>
     public const int EobSlot = 1100;
     /// <summary>Slot in scratchInt where WriteCoeffsTxb writes culLevel (per call).</summary>
     public const int CulLevelSlot = 1101;
 
-    // Resumable state in scratchInt (after the per-block area): carried between launches.
+    // Resumable state in scratchInt: carried between launches of the entropy pass.
     private const int StStarted = 1102;
     private const int StDone = 1103;
     private const int StNextSlot = 1104;
     private const int StEnc = 1105;   // Av1RangeEncoderGpu.StateInts
 
-    /// <summary>Minimum scratchInt length (per-frame; per-block area reused across blocks + the resumable state).</summary>
+    /// <summary>Minimum scratchInt length per tile (the eob / culLevel slots and the resumable state).</summary>
     public const int MinScratchIntLength = StEnc + Av1RangeEncoderGpu.StateInts;
 
     /// <summary>
-    /// Leaf slots (16x16 positions of the superblock z-order walk, 16 per superblock) one launch encodes per
-    /// frame. A leaf is the full predict / 16x16 + two 8x8 forward transforms / quantize / coefficient coding /
-    /// reconstruction pipeline (about a millisecond for a busy one on a desktop GPU), so a launch stays at a
-    /// few milliseconds whatever the picture size.
+    /// Leaf slots (16x16 positions of the superblock z-order walk, 16 per superblock) one launch of the entropy
+    /// pass codes per tile. A leaf is its partition, mode and coefficient syntax (the transforms are done), so a
+    /// launch stays at a few milliseconds whatever the picture size.
     /// </summary>
-    public const int LeavesPerLaunch = 4;
+    public const int LeavesPerLaunch = 16;
 
-    /// <summary>Compile the kernel.</summary>
+    /// <summary>
+    /// Wavefront diagonals one launch of the transform pass walks. A diagonal costs one leaf per lane (predict, a
+    /// 16x16 and two 8x8 forward transforms, quantize, the inverse transforms), so a launch stays at a few
+    /// milliseconds; a tile of one superblock has 7 diagonals and takes one launch.
+    /// </summary>
+    public const int DiagonalsPerLaunch = 8;
+
+    /// <summary>The most lanes one tile gets (a tile's wavefront is at most as wide as its shorter side).</summary>
+    public const int MaxLanesPerTile = 64;
+
+    /// <summary>
+    /// Measurements (DemoConsole av1-encode-bench --xf-lanes / --xf-spread): the transform group every instance
+    /// uses instead of <see cref="GetTransformGroup"/>'s choice. Lanes 0 = no override.
+    /// </summary>
+    internal static (int Lanes, int Spread, int TilesPerGroup) TransformGroupOverride;
+
+    /// <summary>
+    /// Measurements (av1-encode-bench --passes): when set, RunAsync waits for the device after each pass and reports
+    /// (pass name, milliseconds). Null in normal use: the passes are queued without a wait between them.
+    /// </summary>
+    internal static Action<string, double>? PassTimer;
+
+    /// <summary>Compile the kernels.</summary>
     public Av1FrameSequentialEncodeKernel(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
+        var type = accelerator.AcceleratorType;
+        if (type == AcceleratorType.Cuda || type == AcceleratorType.OpenCL || type == AcceleratorType.WebGPU)
+        {
+            _transformKernel = accelerator.LoadStreamKernel<
+                ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<short>,
+                ArrayView<byte>, ArrayView<int>, ArrayView<short>,
+                Av1FrameSeqEncodeParams, Av1FrameBatchStrides, int, int>(Av1TransformWavefrontKernel);
+        }
+        else
+        {
+            _transformTileKernel = accelerator.LoadAutoGroupedStreamKernel<
+                Index1D,
+                ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<short>,
+                ArrayView<byte>, ArrayView<int>, ArrayView<short>,
+                Av1FrameSeqEncodeParams, Av1FrameBatchStrides, int, int>(Av1TransformTileKernel, out var tileInfo);
+            _transformTileGroupSize = tileInfo?.MinGroupSize ?? 1;
+        }
         _tileKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
-            ArrayView<byte>, ArrayView<byte>,
             ArrayView<byte>, ArrayView<long>,
-            ArrayView<byte>, ArrayView<ushort>, ArrayView<short>,
-            ArrayView<byte>, ArrayView<int>, ArrayView<short>,
+            ArrayView<byte>, ArrayView<ushort>, ArrayView<int>,
+            ArrayView<byte>, ArrayView<int>,
             Av1FrameSeqEncodeParams, Av1FrameBatchStrides, int>(Av1EncodeTileStepKernel, out var info);
         _groupSize = info?.MinGroupSize ?? 1;
     }
 
-    /// <summary>Threads per launch group of the tile kernel on this accelerator (1 when it reports none).</summary>
+    /// <summary>Threads per launch group of the entropy kernel on this accelerator (1 when it reports none).</summary>
     private readonly int _groupSize;
 
     /// <summary>
-    /// Where <paramref name="tileThreads"/> tile threads sit in a launch on this accelerator (a GPU runs them
+    /// Where <paramref name="tileThreads"/> entropy threads sit in a launch on this accelerator (a GPU runs them
     /// several times faster spread over its multiprocessors and warps than packed into the first group; see
     /// <see cref="SerialThreadPlacement"/>).
     /// </summary>
     public SerialThreadPlacement GetPlacement(int tileThreads) =>
         SerialThreadPlacement.Create(_accelerator, _groupSize, tileThreads);
 
-    /// <summary>Launches a frame of <paramref name="p"/> takes: ceil(leaf slots of the largest tile / LeavesPerLaunch).</summary>
-    private static int StepCount(Av1FrameSeqEncodeParams p)
+    /// <summary>
+    /// The transform launch group of the wavefront entry point for <paramref name="tiles"/> tiles whose wavefront is
+    /// at most <paramref name="peak"/> positions wide: working lanes per tile, group threads per working lane, and
+    /// tiles per group (the group has tiles * lanes * spread threads).
+    /// </summary>
+    /// <remarks>
+    /// Measured on CUDA (RTX 4070, 832x480 q40 = 104 tiles of 4 x 4 positions per frame; transform pass of one
+    /// frame / ms per keyframe in a batch of 16). A leaf's transform code branches on its data, so lanes that run
+    /// in step (a warp) pay for each other's branches, and the shape matters:
+    ///   one group per tile, its 4 lanes adjacent (lanes 4, spread 1, 1 tile)    1.4 ms / 1.02   (few tiles)
+    ///   the same lanes a warp apart (4, 32, 1)                                  1.4    / 1.24
+    ///   the lanes of 8 tiles filling a warp (4, 1, 8)                           2.2    / 1.15
+    ///   one lane per tile, 2 per warp, 40 tiles per group (1, 16, 40)           4.9    / 0.96   (many tiles)
+    ///   one lane per tile, one tile per group (1, 1, 1)                         2.6    / 1.15
+    /// Few tiles: latency counts, the wavefront lanes win (up to 8 frames: 1.35 against 1.50 ms per frame). Many
+    /// tiles (more than 32 per multiprocessor): the device is full either way, total work counts, and one lane per
+    /// tile in the placement the serial tile threads had before the split does the least (a wavefront lane idles at
+    /// the barrier while its diagonal's longest leaf finishes). Larger tiles get more lanes (1920x1080 in 32 tiles
+    /// of 16 x 20 positions: 16 lanes 8.8 ms, 8 lanes 11.9, 4 lanes 18.9).
+    /// </remarks>
+    public (int LanesPerTile, int Spread, int TilesPerGroup) GetTransformGroup(int peak, long tiles)
+    {
+        if (TransformGroupOverride.Lanes > 0)
+            return (TransformGroupOverride.Lanes, Math.Max(1, TransformGroupOverride.Spread), Math.Max(1, TransformGroupOverride.TilesPerGroup));
+        int max = Math.Max(1, _accelerator.MaxNumThreadsPerGroup);
+        var type = _accelerator.AcceleratorType;
+        bool nvidia = type == AcceleratorType.Cuda
+            || (type == AcceleratorType.OpenCL && _accelerator.Device is CLDevice cl && cl.Vendor == CLDeviceVendor.Nvidia);
+        int warp = nvidia ? _accelerator.WarpSize : 0;
+        int processors = nvidia ? _accelerator.NumMultiprocessors : 0;
+        if (warp >= 2 && processors > 0 && tiles > 32L * processors && 20 * warp <= max)
+            return (1, warp / 2, 40);
+        int cap = Math.Min(MaxLanesPerTile, max);
+        int lanes = 1;
+        while (lanes < peak && lanes * 2 <= cap) lanes <<= 1;
+        return (lanes, 1, 1);
+    }
+
+    /// <summary>Superblock columns and rows of the largest tile of <paramref name="p"/> (clipped to the frame).</summary>
+    private static (int SbCols, int SbRows) LargestTileSb(Av1FrameSeqEncodeParams p)
     {
         int tileSbCols = p.TileWidthSb, tileSbRows = p.TileHeightSb;
         int frameSbCols = (p.FrameMiCols + 15) >> 4, frameSbRows = (p.FrameMiRows + 15) >> 4;
         if (tileSbCols > frameSbCols) tileSbCols = frameSbCols;
         if (tileSbRows > frameSbRows) tileSbRows = frameSbRows;
-        return (tileSbRows * tileSbCols * 16 + LeavesPerLaunch - 1) / LeavesPerLaunch;
+        return (tileSbCols, tileSbRows);
     }
 
     /// <summary>
-    /// Encode the tiles of <paramref name="frameCount"/> frames: frameCount * tileCount working threads (placed in
-    /// the launch by <see cref="GetPlacement"/>), each walks
-    /// one tile of one frame, <see cref="LeavesPerLaunch"/> leaves per launch, with its own range encoder state, its
-    /// own scratch slots and its own output slot (tile g = frame * tileCount + tile: bytes at
-    /// <c>g * strides.TileStride</c>, length in <c>tileLen[g]</c>). Zeroes the scratch buffers first (the walker's
-    /// contexts start at zero). The work is queued (paced with <see cref="LaunchPacer"/>), not awaited.
+    /// Encode the tiles of <paramref name="frameCount"/> frames (tile g = frame * tileCount + tile). First the
+    /// transform pass: one launch group per tile walks the tile's 16x16 positions in wavefront order (a position
+    /// needs the reconstruction of the one above and the one to its left, so the positions of an anti-diagonal are
+    /// independent), <see cref="DiagonalsPerLaunch"/> diagonals per launch. Then the entropy pass:
+    /// frameCount * tileCount working threads (placed in the launch by <see cref="GetPlacement"/>), each codes one
+    /// tile, <see cref="LeavesPerLaunch"/> leaf slots per launch, with its own range encoder state, its own scratch
+    /// slots and its own output slot (bytes at <c>g * strides.TileStride</c>, length in <c>tileLen[g]</c>). Zeroes
+    /// the scratch buffers first (the contexts start at zero). The work is queued (paced with
+    /// <see cref="LaunchPacer"/>), not awaited.
     /// </summary>
     public async Task RunAsync(
         ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> tileBytes, ArrayView<long> tileLen,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
         ArrayView<short> dcAcQuant,
-        ArrayView<byte> scratchByte, ArrayView<int> scratchInt, ArrayView<short> scratchShort,
+        ArrayView<byte> scratchByte, ArrayView<int> scratchInt,
         Av1FrameSeqEncodeParams p,
         int frameCount,
         Av1FrameBatchStrides strides)
@@ -301,57 +453,115 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         if (tileLen.Length < threads) throw new ArgumentException("tileLen needs one element per tile of every frame.", nameof(tileLen));
         scratchByte.MemSetToZero();
         scratchInt.MemSetToZero();
-        int steps = StepCount(p);
+
+        // ---- Transform pass ----
+        var (tileSbCols, tileSbRows) = LargestTileSb(p);
+        int slots = tileSbRows * tileSbCols * 16;
+        // the largest tile in 16x16 positions (a tile at the picture edge may end inside a superblock)
+        int cols16 = Math.Min(tileSbCols * 4, (p.FrameMiCols + 3) >> 2);
+        int rows16 = Math.Min(tileSbRows * 4, (p.FrameMiRows + 3) >> 2);
+        int diagonals = cols16 + rows16 - 1;
+        int peak = Math.Min(cols16, rows16);
+        var (lanes, spread, tilesPerGroup) = _transformKernel != null ? GetTransformGroup(peak, threads) : (1, 1, 1);
+        int groups = (int)((threads + tilesPerGroup - 1) / tilesPerGroup);
+        strides.CoefStride = checked(slots * CoefsPerSlot);
+        strides.TransformLanesPerTile = lanes;
+        strides.TransformSpread = spread;
+        strides.TransformRounds = (peak + lanes - 1) / lanes;
+        strides.TransformTilesPerGroup = tilesPerGroup;
+        strides.TransformTileCount = (int)threads;
+        EnsureTransformBuffers(threads, strides.CoefStride, threads * lanes);
+        // the tile entry point: one working thread per tile, placed like the entropy threads
+        strides.Placement = SerialThreadPlacement.Create(_accelerator, _transformTileGroupSize, (int)threads);
+        long tileExtent = strides.Placement.Extent;
+        if (tileExtent > int.MaxValue) throw new ArgumentException("frameCount * tileCount exceeds the launch extent.", nameof(frameCount));
+
+        var pacer = new LaunchPacer(_accelerator);
+        var passClock = PassTimer != null ? System.Diagnostics.Stopwatch.StartNew() : null;
+        if (passClock != null) { await _accelerator.SynchronizeAsync(); passClock.Restart(); }
+        for (int d = 0; d < diagonals; d += DiagonalsPerLaunch)
+        {
+            int dEnd = Math.Min(d + DiagonalsPerLaunch, diagonals);
+            if (_transformKernel != null)
+                _transformKernel(new KernelConfig(groups, tilesPerGroup * lanes * spread),
+                    src, recon, _coefs!.View, dcAcQuant,
+                    _xfByte!.View, _xfInt!.View, _xfShort!.View,
+                    p, strides, d, dEnd);
+            else
+                _transformTileKernel!(new Index1D((int)tileExtent),
+                    src, recon, _coefs!.View, dcAcQuant,
+                    _xfByte!.View, _xfInt!.View, _xfShort!.View,
+                    p, strides, d, dEnd);
+            await pacer.LaunchedAsync();
+        }
+
+        if (passClock != null)
+        {
+            await _accelerator.SynchronizeAsync();
+            PassTimer!("transform", passClock.Elapsed.TotalMilliseconds);
+            passClock.Restart();
+        }
+
+        // ---- Entropy pass ----
+        int steps = (slots + LeavesPerLaunch - 1) / LeavesPerLaunch;
         strides.Placement = GetPlacement((int)threads);
         long extent = strides.Placement.Extent;
         if (extent > int.MaxValue) throw new ArgumentException("frameCount * tileCount exceeds the launch extent.", nameof(frameCount));
-        var pacer = new LaunchPacer(_accelerator);
         for (int s = 0; s < steps; s++)
         {
             _tileKernel(new Index1D((int)extent),
-                src, recon, tileBytes, tileLen,
-                constsByte, constsUshort, dcAcQuant,
-                scratchByte, scratchInt, scratchShort, p, strides, LeavesPerLaunch);
+                tileBytes, tileLen,
+                constsByte, constsUshort, _coefs!.View,
+                scratchByte, scratchInt, p, strides, LeavesPerLaunch);
             await pacer.LaunchedAsync();
+        }
+        if (passClock != null)
+        {
+            await _accelerator.SynchronizeAsync();
+            PassTimer!("entropy", passClock.Elapsed.TotalMilliseconds);
         }
     }
 
-    /// <summary>Release the kernel.</summary>
-    public void Dispose() { /* delegate is a value type; nothing to release */ }
+    /// <summary>The transform pass's buffers, grown when a run needs more (never shrunk).</summary>
+    private void EnsureTransformBuffers(long tiles, int coefStride, long laneCount)
+    {
+        long coefLen = tiles * coefStride;
+        if (_coefs == null || _coefs.Length < coefLen)
+        {
+            _coefs?.Dispose();
+            _coefs = _accelerator.Allocate1D<int>(coefLen);
+        }
+        if (_xfByte == null || _xfByte.Length < laneCount * XfByteLength)
+        {
+            _xfByte?.Dispose(); _xfInt?.Dispose(); _xfShort?.Dispose();
+            _xfByte = _accelerator.Allocate1D<byte>(laneCount * XfByteLength);
+            _xfInt = _accelerator.Allocate1D<int>(laneCount * XfIntLength);
+            _xfShort = _accelerator.Allocate1D<short>(laneCount * XfShortLength);
+        }
+    }
+
+    /// <summary>Release the transform pass's buffers (the kernel delegates hold nothing).</summary>
+    public void Dispose()
+    {
+        _coefs?.Dispose(); _coefs = null;
+        _xfByte?.Dispose(); _xfByte = null;
+        _xfInt?.Dispose(); _xfInt = null;
+        _xfShort?.Dispose(); _xfShort = null;
+    }
 
     // ===========================================================================
     // Kernel entry points
     // ===========================================================================
 
     /// <summary>
-    /// Working thread = one tile of one frame (<c>g = frame * tileCount + tile</c>, tiles in raster order). Resolves the
-    /// tile's rectangle and its buffer slots, then runs the step. The frame's source and recon are shared by its
-    /// tiles (each tile writes only its own rectangle of the recon and reads only inside it).
+    /// A thread's own copy of the parameters for tile <paramref name="t"/> of a frame (raster order): the tile's
+    /// rectangle in mi, and the above context arrays rebased so that "offset + miCol" indexes the tile's arrays by
+    /// the column inside the tile.
     /// </summary>
-    private static void Av1EncodeTileStepKernel(
-        Index1D idx,
-        ArrayView<byte> src, ArrayView<byte> recon,
-        ArrayView<byte> tileBytes, ArrayView<long> tileLen,
-        ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
-        ArrayView<short> dcAcQuant,
-        ArrayView<byte> scratchByte,
-        ArrayView<int> scratchInt,
-        ArrayView<short> scratchShort,
-        Av1FrameSeqEncodeParams p,
-        Av1FrameBatchStrides s,
-        int leavesPerLaunch)
+    private static Av1FrameSeqEncodeParams TileParams(Av1FrameSeqEncodeParams p, int t)
     {
-        // Only the placement's working threads of the launch encode a tile; the others return at once.
-        int g = SerialThreadPlacement.WorkingThread(s.Placement, idx.X);
-        if (g < 0) return;
-        int tileCount = p.TileCols * p.TileRows;
-        int f = g / tileCount;
-        int t = g - f * tileCount;
         int tileRow = t / p.TileCols;
         int tileCol = t - tileRow * p.TileCols;
-
-        // The thread's own copy of the parameters: its tile rectangle (mi), and the above context arrays rebased so
-        // that "offset + miCol" indexes the tile's arrays by the column inside the tile.
         var tp = p;
         tp.TileMiRowStart = tileRow * p.TileHeightSb * 16;
         tp.TileMiColStart = tileCol * p.TileWidthSb * 16;
@@ -363,17 +573,164 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         tp.AbovePartOff = p.AbovePartOff - tp.TileMiColStart;
         tp.AboveYModeOff = p.AboveYModeOff - tp.TileMiColStart;
         tp.AboveSkipOff = p.AboveSkipOff - tp.TileMiColStart;
+        return tp;
+    }
+
+    /// <summary>
+    /// Transform pass. Group = one tile of one frame (<c>Grid.IdxX = frame * tileCount + tile</c>); its working
+    /// lanes (group thread L * TransformSpread is lane L, the threads between only meet the barriers) walk the
+    /// tile's 16x16 positions diagonal by diagonal (<paramref name="diagStart"/> .. <paramref name="diagEnd"/>),
+    /// with a barrier after each: position (row, col) is on diagonal row + col, and what it predicts from (the
+    /// reconstruction above it and to its left) is on diagonal row + col - 1. Lane L takes positions L,
+    /// L + lanes, ... of a diagonal. Each position: predict, forward transform, quantize, reconstruct; the
+    /// quantized coefficients go to the tile's coefficient slots (the entropy pass's z-order slot index).
+    /// </summary>
+    private static void Av1TransformWavefrontKernel(
+        ArrayView<byte> src, ArrayView<byte> recon,
+        ArrayView<int> coefs,
+        ArrayView<short> dcAcQuant,
+        ArrayView<byte> xfByte, ArrayView<int> xfInt, ArrayView<short> xfShort,
+        Av1FrameSeqEncodeParams p,
+        Av1FrameBatchStrides s,
+        int diagStart, int diagEnd)
+    {
+        int groupThread = Group.IdxX;
+        int unit = groupThread / s.TransformSpread;
+        int tileInGroup = unit / s.TransformLanesPerTile;
+        int lane = unit - tileInGroup * s.TransformLanesPerTile;
+        int g = Grid.IdxX * s.TransformTilesPerGroup + tileInGroup;
+        // only the first thread of each spread works, and only for a tile that exists; the others idle on tile 0's
+        // (valid) views
+        bool live = (unit * s.TransformSpread == groupThread) & (g < s.TransformTileCount);
+        if (g >= s.TransformTileCount) g = 0;
+        int tileCount = p.TileCols * p.TileRows;
+        int f = g / tileCount;
+        var tp = TileParams(p, g - f * tileCount);
+        // this lane's working area
+        tp.EdgeAboveOff = XfEdgeAbove;
+        tp.EdgeLeftOff = XfEdgeLeft;
+        tp.PredictOff = XfPredict;
 
         var fSrc = src.SubView((long)f * s.SrcStride, s.SrcStride);
         var fRecon = recon.SubView((long)f * s.ReconStride, s.ReconStride);
+        var tCoefs = coefs.SubView((long)g * s.CoefStride, s.CoefStride);
+        long thread = (long)g * s.TransformLanesPerTile + lane;
+        var tByte = xfByte.SubView(thread * XfByteLength, XfByteLength);
+        var tInt = xfInt.SubView(thread * XfIntLength, XfIntLength);
+        var tShort = xfShort.SubView(thread * XfShortLength, XfShortLength);
+
+        int qDc = (int)dcAcQuant[p.BaseQIndex];
+        int qAc = (int)dcAcQuant[256 + p.BaseQIndex];
+
+        // THIS tile in 16x16 positions and in superblocks
+        int cols16 = (tp.TileMiColEnd - tp.TileMiColStart + 3) >> 2;
+        int rows16 = (tp.TileMiRowEnd - tp.TileMiRowStart + 3) >> 2;
+        int sbCols = (tp.TileMiColEnd - tp.TileMiColStart + 15) >> 4;
+
+        for (int d = diagStart; d < diagEnd; d++)
+        {
+            int rMin = d - (cols16 - 1);
+            if (rMin < 0) rMin = 0;
+            int rMax = d < rows16 - 1 ? d : rows16 - 1;
+            int count = rMax - rMin + 1;   // positions of this tile on diagonal d (0 or less past its last diagonal)
+            for (int k = 0; k < s.TransformRounds; k++)
+            {
+                int pos = lane + k * s.TransformLanesPerTile;
+                if (live & (pos < count))
+                {
+                    int row = rMin + pos;
+                    TransformSlot(
+                        fSrc, fRecon, tCoefs,
+                        qDc, qAc,
+                        tByte, tInt, tShort,
+                        row, d - row, sbCols, tp);
+                }
+            }
+            Group.Barrier();
+        }
+    }
+
+    /// <summary>
+    /// Transform pass, one thread per tile (the CPU accelerators): working thread = one tile of one frame, which
+    /// walks the same diagonals as <see cref="Av1TransformWavefrontKernel"/>, every position of a diagonal itself
+    /// (any order that takes a position after the one above it and the one to its left gives the same result).
+    /// </summary>
+    private static void Av1TransformTileKernel(
+        Index1D idx,
+        ArrayView<byte> src, ArrayView<byte> recon,
+        ArrayView<int> coefs,
+        ArrayView<short> dcAcQuant,
+        ArrayView<byte> xfByte, ArrayView<int> xfInt, ArrayView<short> xfShort,
+        Av1FrameSeqEncodeParams p,
+        Av1FrameBatchStrides s,
+        int diagStart, int diagEnd)
+    {
+        int g = SerialThreadPlacement.WorkingThread(s.Placement, idx.X);
+        if (g < 0) return;
+        int tileCount = p.TileCols * p.TileRows;
+        int f = g / tileCount;
+        var tp = TileParams(p, g - f * tileCount);
+        tp.EdgeAboveOff = XfEdgeAbove;
+        tp.EdgeLeftOff = XfEdgeLeft;
+        tp.PredictOff = XfPredict;
+
+        var fSrc = src.SubView((long)f * s.SrcStride, s.SrcStride);
+        var fRecon = recon.SubView((long)f * s.ReconStride, s.ReconStride);
+        var tCoefs = coefs.SubView((long)g * s.CoefStride, s.CoefStride);
+        var tByte = xfByte.SubView((long)g * XfByteLength, XfByteLength);
+        var tInt = xfInt.SubView((long)g * XfIntLength, XfIntLength);
+        var tShort = xfShort.SubView((long)g * XfShortLength, XfShortLength);
+
+        int qDc = (int)dcAcQuant[p.BaseQIndex];
+        int qAc = (int)dcAcQuant[256 + p.BaseQIndex];
+        int cols16 = (tp.TileMiColEnd - tp.TileMiColStart + 3) >> 2;
+        int rows16 = (tp.TileMiRowEnd - tp.TileMiRowStart + 3) >> 2;
+        int sbCols = (tp.TileMiColEnd - tp.TileMiColStart + 15) >> 4;
+
+        for (int d = diagStart; d < diagEnd; d++)
+        {
+            int rMin = d - (cols16 - 1);
+            if (rMin < 0) rMin = 0;
+            int rMax = d < rows16 - 1 ? d : rows16 - 1;
+            for (int row = rMin; row <= rMax; row++)
+                TransformSlot(
+                    fSrc, fRecon, tCoefs,
+                    qDc, qAc,
+                    tByte, tInt, tShort,
+                    row, d - row, sbCols, tp);
+        }
+    }
+
+    /// <summary>
+    /// Entropy pass. Working thread = one tile of one frame (<c>g = frame * tileCount + tile</c>, tiles in raster
+    /// order). Resolves the tile's rectangle and its buffer slots, then runs the step.
+    /// </summary>
+    private static void Av1EncodeTileStepKernel(
+        Index1D idx,
+        ArrayView<byte> tileBytes, ArrayView<long> tileLen,
+        ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
+        ArrayView<int> coefs,
+        ArrayView<byte> scratchByte,
+        ArrayView<int> scratchInt,
+        Av1FrameSeqEncodeParams p,
+        Av1FrameBatchStrides s,
+        int leavesPerLaunch)
+    {
+        // Only the placement's working threads of the launch encode a tile; the others return at once.
+        int g = SerialThreadPlacement.WorkingThread(s.Placement, idx.X);
+        if (g < 0) return;
+        int tileCount = p.TileCols * p.TileRows;
+        int f = g / tileCount;
+        var tp = TileParams(p, g - f * tileCount);
+
         var tTile = tileBytes.SubView((long)g * s.TileStride, s.TileStride);
         var tTileLen = tileLen.SubView(g, 1);
+        var tCoefs = coefs.SubView((long)g * s.CoefStride, s.CoefStride);
         var tScratchByte = scratchByte.SubView((long)g * s.ScratchByteStride, s.ScratchByteStride);
         var tScratchInt = scratchInt.SubView((long)g * s.ScratchIntStride, s.ScratchIntStride);
-        var tScratchShort = scratchShort.SubView((long)g * s.ScratchShortStride, s.ScratchShortStride);
-        EncodeFrameStep(fSrc, fRecon, tTile, tTileLen,
-            constsByte, constsUshort, dcAcQuant,
-            tScratchByte, tScratchInt, tScratchShort, tp, leavesPerLaunch);
+        EncodeFrameStep(tTile, tTileLen,
+            constsByte, constsUshort, tCoefs,
+            tScratchByte, tScratchInt, tp, leavesPerLaunch);
     }
 
     /// <summary>
@@ -383,13 +740,11 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void EncodeFrameStep(
-        ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> tileBytes, ArrayView<long> tileLen,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
-        ArrayView<short> dcAcQuant,
+        ArrayView<int> coefs,
         ArrayView<byte> scratchByte,
         ArrayView<int> scratchInt,
-        ArrayView<short> scratchShort,
         Av1FrameSeqEncodeParams p,
         int leavesPerLaunch)
     {
@@ -410,9 +765,6 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         int frameMiRows = p.FrameMiRows;
         int sbMi = 16;
 
-        int qDc = (int)dcAcQuant[p.BaseQIndex];
-        int qAc = (int)dcAcQuant[256 + p.BaseQIndex];
-
         // superblocks of THIS tile
         int sbCols = (p.TileMiColEnd - p.TileMiColStart + sbMi - 1) / sbMi;
         int sbRows = (p.TileMiRowEnd - p.TileMiRowStart + sbMi - 1) / sbMi;
@@ -425,10 +777,8 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         {
             EncodeLeafSlot(
                 ref re, tileBytes,
-                src, recon,
-                constsByte, constsUshort,
-                qDc, qAc,
-                scratchByte, scratchInt, scratchShort,
+                constsByte, constsUshort, coefs,
+                scratchByte, scratchInt,
                 slot, sbCols,
                 frameMiRows, frameMiCols,
                 p);
@@ -447,7 +797,210 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
     }
 
     // ===========================================================================
-    // Partition walk (64x64 -> 32x32 -> 16x16 -> NONE), one 16x16 slot at a time
+    // Transform pass: one 16x16 position
+    // ===========================================================================
+
+    /// <summary>
+    /// The 16x16 position (<paramref name="row"/>, <paramref name="col"/>) of the tile (it starts inside the picture):
+    /// its 16x16 leaf, or, where it crosses the picture edge, the 8x8 leaves inside the picture in z-order (the
+    /// second predicts from the first, as in the serial walk). Coefficients go to the entropy pass's slot of this
+    /// position: superblock * 16 + the z-order index of the position inside its superblock.
+    /// </summary>
+    private static void TransformSlot(
+        ArrayView<byte> src, ArrayView<byte> recon,
+        ArrayView<int> coefs,
+        int qDc, int qAc,
+        ArrayView<byte> xfByte, ArrayView<int> xfInt, ArrayView<short> xfShort,
+        int row, int col, int sbCols,
+        Av1FrameSeqEncodeParams p)
+    {
+        int miRow16 = p.TileMiRowStart + row * 4;
+        int miCol16 = p.TileMiColStart + col * 4;
+        int sb = (row >> 2) * sbCols + (col >> 2);
+        int q32 = ((row >> 1) & 1) * 2 + ((col >> 1) & 1);
+        int q16 = (row & 1) * 2 + (col & 1);
+        int slotBase = (sb * 16 + q32 * 4 + q16) * CoefsPerSlot;
+
+        bool whole16 = (miRow16 + 2 < p.FrameMiRows) & (miCol16 + 2 < p.FrameMiCols);
+        // One loop and ONE TransformLeaf call site for both cases (a second call site would be a second copy of the
+        // whole leaf pipeline in the generated shader): 1 iteration for the 16x16 leaf, 4 for the 8x8 positions.
+        int leafCount = whole16 ? 1 : 4;
+        for (int k = 0; k < leafCount; k++)
+        {
+            int miRowLeaf = miRow16 + (k >> 1) * 2;
+            int miColLeaf = miCol16 + (k & 1) * 2;
+            bool inside = (miRowLeaf < p.FrameMiRows) & (miColLeaf < p.FrameMiCols);
+            if (inside)
+                TransformLeaf(src, recon, coefs, slotBase + (whole16 ? 0 : k * CoefsPerLeaf8),
+                    qDc, qAc, xfByte, xfInt, xfShort, miRowLeaf, miColLeaf, whole16, p);
+        }
+    }
+
+    /// <summary>
+    /// The three planes of one leaf. <paramref name="is16"/>: BLOCK_16X16 (Y TX_16X16, U / V TX_8X8); otherwise
+    /// BLOCK_8X8 at the picture edge (Y TX_8X8, U / V TX_4X4). Coefficients at <paramref name="coefBase"/>: Y, U, V.
+    /// <para>
+    /// Three <see cref="TransformPlane"/> call sites, one per transform size, each with the size a CONSTANT (the
+    /// body folds to that size; a run-time size keeps every size's code live and is slower on every backend). The
+    /// 8x8 site serves the chroma of a 16x16 leaf and the luma of an edge leaf, so the edge leaves add only the 4x4
+    /// site to the shader.
+    /// </para>
+    /// </summary>
+    private static void TransformLeaf(
+        ArrayView<byte> src, ArrayView<byte> recon,
+        ArrayView<int> coefs, int coefBase,
+        int qDc, int qAc,
+        ArrayView<byte> xfByte, ArrayView<int> xfInt, ArrayView<short> xfShort,
+        int miRow, int miCol, bool is16, Av1FrameSeqEncodeParams p)
+    {
+        int chromaX = (miCol * 4) >> 1, chromaY = (miRow * 4) >> 1;
+        int reconChromaW = p.ReconWidth >> 1;
+
+        // ---- TX_16X16: luma of a 16x16 leaf ----
+        if (is16)
+            TransformPlane(
+                src, p.YPlaneOff, p.Width, p.Width, p.Height,
+                recon, 0, p.ReconWidth,
+                coefs, coefBase,
+                qDc, qAc,
+                xfByte, xfInt, xfShort,
+                plane: 0,
+                xPx: miCol * 4, yPx: miRow * 4,
+                txW: 16, txH: 16, txSizeIdx: 2,
+                p);
+
+        // ---- TX_8X8: U then V of a 16x16 leaf; luma of an 8x8 leaf ----
+        int first8 = is16 ? 1 : 0;
+        int last8 = is16 ? 2 : 0;
+        for (int plane = first8; plane <= last8; plane++)
+        {
+            bool luma = plane == 0;
+            TransformPlane(
+                src, luma ? p.YPlaneOff : (plane == 1 ? p.UPlaneOff : p.VPlaneOff),
+                luma ? p.Width : p.ChromaWidth, luma ? p.Width : p.ChromaWidth, luma ? p.Height : p.ChromaHeight,
+                recon, luma ? 0 : (plane == 1 ? p.ReconUOff : p.ReconVOff), luma ? p.ReconWidth : reconChromaW,
+                coefs, luma ? coefBase : coefBase + 256 + (plane - 1) * 64,
+                qDc, qAc,
+                xfByte, xfInt, xfShort,
+                plane,
+                xPx: luma ? miCol * 4 : chromaX, yPx: luma ? miRow * 4 : chromaY,
+                txW: 8, txH: 8, txSizeIdx: 1,
+                p);
+        }
+
+        // ---- TX_4X4: U then V of an 8x8 leaf ----
+        if (!is16)
+        {
+            for (int plane = 1; plane <= 2; plane++)
+            {
+                TransformPlane(
+                    src, plane == 1 ? p.UPlaneOff : p.VPlaneOff, p.ChromaWidth, p.ChromaWidth, p.ChromaHeight,
+                    recon, plane == 1 ? p.ReconUOff : p.ReconVOff, reconChromaW,
+                    coefs, coefBase + 64 + (plane - 1) * 16,
+                    qDc, qAc,
+                    xfByte, xfInt, xfShort,
+                    plane,
+                    xPx: chromaX, yPx: chromaY,
+                    txW: 4, txH: 4, txSizeIdx: 0,
+                    p);
+            }
+        }
+    }
+
+    /// <summary>
+    /// One transform block: DC prediction from the reconstruction, residual, forward transform, quantization (the
+    /// quantized coefficients to <paramref name="coefs"/> at <paramref name="coefBase"/>, raster order), and the
+    /// reconstruction a decoder makes from them.
+    /// </summary>
+    private static void TransformPlane(
+        ArrayView<byte> srcBuf, int srcPlaneOff, int srcStride, int srcW, int srcH,
+        ArrayView<byte> reconBuf, int reconPlaneOff, int reconStride,
+        ArrayView<int> coefs, int coefBase,
+        int qDc, int qAc,
+        ArrayView<byte> xfByte, ArrayView<int> xfInt, ArrayView<short> xfShort,
+        int plane,
+        int xPx, int yPx,
+        int txW, int txH, int txSizeIdx,
+        Av1FrameSeqEncodeParams p)
+    {
+        // txW / txH / txSizeIdx are CONSTANTS at every call site (see TransformLeaf).
+        // txSizeIdx: 2 = TX_16X16, 1 = TX_8X8, 0 = TX_4X4 (chroma of an edge 8x8 block). srcW x srcH is the source
+        // plane; the block may extend past it at the picture's right / bottom edge (the coded size is rounded up to
+        // 8), where the last source column / row is repeated.
+        int n = txW * txH;
+
+        // Build edge buffers from the recon plane.
+        // Neighbours are available only inside the tile (AV1 availability): nothing above the tile's first row,
+        // nothing left of its first column, and the above-right / below-left extensions stop at the tile's right /
+        // bottom edge (another group is writing the pixels past it).
+        int pxPerMi = plane == 0 ? 4 : 2;
+        bool haveAbove = yPx > p.TileMiRowStart * pxPerMi;
+        bool haveLeft = xPx > p.TileMiColStart * pxPerMi;
+        BuildEdgeBuffer(reconBuf, reconPlaneOff, reconStride,
+            p.TileMiColEnd * pxPerMi, p.TileMiRowEnd * pxPerMi,
+            xPx, yPx, txW, txH, haveAbove, haveLeft, xfByte, p);
+
+        // DC predict into xfByte[PredictOff..+n).
+        Av1DcPredictorGpu.DcPred(
+            xfByte, p.PredictOff, txW,
+            xfByte, p.EdgeAboveOff,
+            xfByte, p.EdgeLeftOff,
+            txW, txH, haveAbove, haveLeft);
+
+        // Compute residual = src - predict into xfShort[0..+n).
+        for (int r = 0; r < txH; r++)
+        {
+            int sy = yPx + r;
+            if (sy >= srcH) sy = srcH - 1;
+            int sRow = srcPlaneOff + sy * srcStride;
+            int pOff = p.PredictOff + r * txW;
+            for (int c = 0; c < txW; c++)
+            {
+                int sx = xPx + c;
+                if (sx >= srcW) sx = srcW - 1;
+                short s = (short)srcBuf[sRow + sx];
+                short pp = (short)xfByte[pOff + c];
+                xfShort[r * txW + c] = (short)(s - pp);
+            }
+        }
+
+        // Forward 2D transform: residual (xfShort) -> coefs (xfInt[0..n)).
+        // Forward transform scratch goes at xfInt[n..2n).
+        if (txSizeIdx == 1)
+        {
+            Av1Forward2dTransformGpu.Forward8x8DctDct(
+                xfShort, 0, xfInt, 0, xfInt, n);
+        }
+        else if (txSizeIdx == 0)
+        {
+            Av1Forward2dTransformGpu.Forward4x4DctDct(
+                xfShort, 0, xfInt, 0, xfInt, n);
+        }
+        else
+        {
+            Av1Forward2dTransformGpu.Forward16x16DctDct(
+                xfShort, 0, xfInt, 0, xfInt, n);
+        }
+
+        // Quantize in place, then hand the block to the entropy pass. A block with a nonzero coefficient has eob > 0.
+        Av1ForwardQuantizerGpu.QuantizeBlock(xfInt, 0, n, qDc, qAc);
+        int any = 0;
+        for (int i = 0; i < n; i++)
+        {
+            int level = xfInt[i];
+            coefs[coefBase + i] = level;
+            any |= level;
+        }
+
+        // Reconstruct: dequant + inverse 2D transform + add to predict + clip.
+        ReconstructBlock(xfInt, txSizeIdx, txW, txH, n, qDc, qAc,
+            xfByte, p.PredictOff,
+            reconBuf, reconPlaneOff + yPx * reconStride + xPx, reconStride,
+            any != 0 ? 1 : 0);
+    }
+
+    // ===========================================================================
+    // Entropy pass: partition walk (64x64 -> 32x32 -> 16x16 -> NONE), one 16x16 slot at a time
     // ===========================================================================
 
     /// <summary>
@@ -455,14 +1008,14 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
     /// reset at the start of a superblock row, the partition syntax that precedes the block (64x64 SPLIT at the
     /// superblock's first slot, 32x32 SPLIT at a 32x32 block's first slot), then the 16x16 NONE leaf, or, where the
     /// 16x16 crosses the picture edge, its SPLIT and the 8x8 NONE leaves inside the picture. Out-of-frame blocks are
-    /// skipped exactly as the recursive walk skips them.
+    /// skipped exactly as the recursive walk skips them. The leaf's quantized coefficients are in
+    /// <paramref name="coefs"/> at <c>slot * CoefsPerSlot</c> (the transform pass).
     /// </summary>
     private static void EncodeLeafSlot(
         ref Av1RangeEncoderGpuState re, ArrayView<byte> outBuf,
-        ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
-        int qDc, int qAc,
-        ArrayView<byte> scratchByte, ArrayView<int> scratchInt, ArrayView<short> scratchShort,
+        ArrayView<int> coefs,
+        ArrayView<byte> scratchByte, ArrayView<int> scratchInt,
         int slot, int sbCols,
         int frameMiRows, int frameMiCols,
         Av1FrameSeqEncodeParams p)
@@ -518,7 +1071,8 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
             EmitSplit(ref re, outBuf, constsUshort, scratchByte, p, miRow16, miCol16, BsizeBlock16x16, 2);
 
         // One loop and ONE EncodeLeaf call site for both cases (a second call site would be a second copy of the
-        // whole leaf pipeline in the generated shader): 1 iteration for the 16x16 leaf, 4 for the 8x8 positions.
+        // whole leaf syntax in the generated shader): 1 iteration for the 16x16 leaf, 4 for the 8x8 positions.
+        int slotBase = slot * CoefsPerSlot;
         int leafCount = whole16 ? 1 : 4;
         int leafBsize = whole16 ? BsizeBlock16x16 : BsizeBlock8x8;
         for (int k = 0; k < leafCount; k++)
@@ -534,9 +1088,9 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
                         miRowLeaf, miColLeaf, BsizeBlock8x8, PartitionNone);
 
                 EncodeLeaf(ref re, outBuf,
-                    src, recon, constsByte, constsUshort,
-                    qDc, qAc,
-                    scratchByte, scratchInt, scratchShort,
+                    constsByte, constsUshort,
+                    coefs, slotBase + (whole16 ? 0 : k * CoefsPerLeaf8),
+                    scratchByte, scratchInt,
                     miRowLeaf, miColLeaf, whole16, p);
 
                 UpdatePartitionContext(scratchByte, p, miRowLeaf, miColLeaf, leafBsize);
@@ -579,13 +1133,14 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
     }
 
     // ===========================================================================
-    // Leaf block encode (one BLOCK_16X16, or one BLOCK_8X8 at the picture edge)
+    // Entropy pass: leaf block (one BLOCK_16X16, or one BLOCK_8X8 at the picture edge)
     // ===========================================================================
 
     /// <summary>
     /// One leaf: the mode info (the same for both sizes: CFL is allowed for an 8x8 block too, so the UV mode CDF row
-    /// is the same), then the three planes. <paramref name="is16"/>: BLOCK_16X16 (Y TX_16X16, U / V TX_8X8);
-    /// otherwise BLOCK_8X8 at the picture edge (Y TX_8X8, U / V TX_4X4).
+    /// is the same), then the coefficients of the three planes (at <paramref name="coefBase"/>: Y, U, V).
+    /// <paramref name="is16"/>: BLOCK_16X16 (Y TX_16X16, U / V TX_8X8); otherwise BLOCK_8X8 at the picture edge
+    /// (Y TX_8X8, U / V TX_4X4).
     /// <para>
     /// Three <see cref="EncodePlane"/> call sites, one per transform size, each with the size a CONSTANT (the body
     /// folds to that size; a run-time size keeps every size's code live and is slower on every backend). The 8x8
@@ -595,28 +1150,23 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
     /// </summary>
     private static void EncodeLeaf(
         ref Av1RangeEncoderGpuState re, ArrayView<byte> outBuf,
-        ArrayView<byte> src, ArrayView<byte> recon,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
-        int qDc, int qAc,
-        ArrayView<byte> scratchByte, ArrayView<int> scratchInt, ArrayView<short> scratchShort,
+        ArrayView<int> coefs, int coefBase,
+        ArrayView<byte> scratchByte, ArrayView<int> scratchInt,
         int miRow, int miCol, bool is16, Av1FrameSeqEncodeParams p)
     {
         EmitLeafModeInfo(ref re, outBuf, constsByte, constsUshort, scratchByte, miRow, miCol, p);
 
         int miSize = is16 ? 4 : 2;                 // leaf size in mi; every transform of the leaf spans it
-        int chromaX = (miCol * 4) >> 1, chromaY = (miRow * 4) >> 1;
-        int reconChromaW = p.ReconWidth >> 1;
 
         // ---- TX_16X16: luma of a 16x16 leaf ----
         if (is16)
             EncodePlane(ref re, outBuf,
-                src, p.YPlaneOff, p.Width, p.Width, p.Height,
-                recon, 0, p.ReconWidth,
-                constsByte, constsUshort, qDc, qAc,
-                scratchByte, scratchInt, scratchShort,
+                constsByte, constsUshort,
+                coefs, coefBase,
+                scratchByte, scratchInt,
                 miRow, miCol, plane: 0,
-                xPx: miCol * 4, yPx: miRow * 4,
-                txW: 16, txH: 16, txSizeIdx: 2,
+                txSizeIdx: 2,
                 txWMi: miSize, txHMi: miSize,
                 p);
 
@@ -625,16 +1175,12 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         int last8 = is16 ? 2 : 0;
         for (int plane = first8; plane <= last8; plane++)
         {
-            bool luma = plane == 0;
             EncodePlane(ref re, outBuf,
-                src, luma ? p.YPlaneOff : (plane == 1 ? p.UPlaneOff : p.VPlaneOff),
-                luma ? p.Width : p.ChromaWidth, luma ? p.Width : p.ChromaWidth, luma ? p.Height : p.ChromaHeight,
-                recon, luma ? 0 : (plane == 1 ? p.ReconUOff : p.ReconVOff), luma ? p.ReconWidth : reconChromaW,
-                constsByte, constsUshort, qDc, qAc,
-                scratchByte, scratchInt, scratchShort,
+                constsByte, constsUshort,
+                coefs, plane == 0 ? coefBase : coefBase + 256 + (plane - 1) * 64,
+                scratchByte, scratchInt,
                 miRow, miCol, plane,
-                xPx: luma ? miCol * 4 : chromaX, yPx: luma ? miRow * 4 : chromaY,
-                txW: 8, txH: 8, txSizeIdx: 1,
+                txSizeIdx: 1,
                 txWMi: miSize, txHMi: miSize,
                 p);
         }
@@ -645,13 +1191,11 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
             for (int plane = 1; plane <= 2; plane++)
             {
                 EncodePlane(ref re, outBuf,
-                    src, plane == 1 ? p.UPlaneOff : p.VPlaneOff, p.ChromaWidth, p.ChromaWidth, p.ChromaHeight,
-                    recon, plane == 1 ? p.ReconUOff : p.ReconVOff, reconChromaW,
-                    constsByte, constsUshort, qDc, qAc,
-                    scratchByte, scratchInt, scratchShort,
+                    constsByte, constsUshort,
+                    coefs, coefBase + 64 + (plane - 1) * 16,
+                    scratchByte, scratchInt,
                     miRow, miCol, plane,
-                    xPx: chromaX, yPx: chromaY,
-                    txW: 4, txH: 4, txSizeIdx: 0,
+                    txSizeIdx: 0,
                     txWMi: miSize, txHMi: miSize,
                     p);
             }
@@ -708,83 +1252,21 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
     }
 
     // ===========================================================================
-    // Per-plane encode (one TX block)
+    // Entropy pass: the coefficients of one transform block
     // ===========================================================================
 
     private static void EncodePlane(
         ref Av1RangeEncoderGpuState re, ArrayView<byte> outBuf,
-        ArrayView<byte> srcBuf, int srcPlaneOff, int srcStride, int srcW, int srcH,
-        ArrayView<byte> reconBuf, int reconPlaneOff, int reconStride,
         ArrayView<byte> constsByte, ArrayView<ushort> constsUshort,
-        int qDc, int qAc,
-        ArrayView<byte> scratchByte, ArrayView<int> scratchInt, ArrayView<short> scratchShort,
+        ArrayView<int> coefs, int coefBase,
+        ArrayView<byte> scratchByte, ArrayView<int> scratchInt,
         int miRow, int miCol, int plane,
-        int xPx, int yPx,
-        int txW, int txH, int txSizeIdx,
+        int txSizeIdx,
         int txWMi, int txHMi,
         Av1FrameSeqEncodeParams p)
     {
-        // txW / txH / txSizeIdx are CONSTANTS at every call site (see EncodeLeaf).
-        // txSizeIdx: 2 = TX_16X16, 1 = TX_8X8, 0 = TX_4X4 (chroma of an edge 8x8 block). srcW x srcH is the source
-        // plane; the block may extend past it at the picture's right / bottom edge (the coded size is rounded up to
-        // 8), where the last source column / row is repeated.
-        int n = txW * txH;
-
-        // Build edge buffers from the recon plane.
-        // Neighbours are available only inside the tile (AV1 availability): nothing above the tile's first row,
-        // nothing left of its first column, and the above-right / below-left extensions stop at the tile's right /
-        // bottom edge (another thread is writing the pixels past it).
-        int pxPerMi = plane == 0 ? 4 : 2;
-        bool haveAbove = yPx > p.TileMiRowStart * pxPerMi;
-        bool haveLeft = xPx > p.TileMiColStart * pxPerMi;
-        BuildEdgeBuffer(reconBuf, reconPlaneOff, reconStride,
-            p.TileMiColEnd * pxPerMi, p.TileMiRowEnd * pxPerMi,
-            xPx, yPx, txW, txH, haveAbove, haveLeft, scratchByte, p);
-
-        // DC predict into scratchByte[PredictOff..+n).
-        Av1DcPredictorGpu.DcPred(
-            scratchByte, p.PredictOff, txW,
-            scratchByte, p.EdgeAboveOff,
-            scratchByte, p.EdgeLeftOff,
-            txW, txH, haveAbove, haveLeft);
-
-        // Compute residual = src - predict into scratchShort[0..+n).
-        for (int r = 0; r < txH; r++)
-        {
-            int sy = yPx + r;
-            if (sy >= srcH) sy = srcH - 1;
-            int sRow = srcPlaneOff + sy * srcStride;
-            int pOff = p.PredictOff + r * txW;
-            for (int c = 0; c < txW; c++)
-            {
-                int sx = xPx + c;
-                if (sx >= srcW) sx = srcW - 1;
-                short s = (short)srcBuf[sRow + sx];
-                short pp = (short)scratchByte[pOff + c];
-                scratchShort[r * txW + c] = (short)(s - pp);
-            }
-        }
-
-        // Forward 2D transform: residual (scratchShort) -> coefs (scratchInt[0..n)).
-        // Forward transform scratch goes at scratchInt[n..2n).
-        if (txSizeIdx == 1)
-        {
-            Av1Forward2dTransformGpu.Forward8x8DctDct(
-                scratchShort, 0, scratchInt, 0, scratchInt, n);
-        }
-        else if (txSizeIdx == 0)
-        {
-            Av1Forward2dTransformGpu.Forward4x4DctDct(
-                scratchShort, 0, scratchInt, 0, scratchInt, n);
-        }
-        else
-        {
-            Av1Forward2dTransformGpu.Forward16x16DctDct(
-                scratchShort, 0, scratchInt, 0, scratchInt, n);
-        }
-
-        // Quantize in place.
-        Av1ForwardQuantizerGpu.QuantizeBlock(scratchInt, 0, n, qDc, qAc);
+        // txSizeIdx is a CONSTANT at every call site (see EncodeLeaf): 2 = TX_16X16, 1 = TX_8X8, 0 = TX_4X4 (chroma
+        // of an edge 8x8 block). The quantized coefficients are the transform pass's, raster order.
 
         // Compute entropy contexts.
         // Per CPU contract (Av1KeyframeEncoder.EncodePlane) chroma uses luma-mi indices for ctx lookup (a chroma
@@ -801,23 +1283,16 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         var culView = scratchInt.SubView(CulLevelSlot, 1);
         Av1CoefEncoderGpu.WriteCoeffsTxb(
             ref re, outBuf, constsByte, constsUshort,
-            scratchInt, 0,
+            coefs, coefBase,
             scratchByte, p.LevelsOff,
             txSizeIdx, plane, qctx: GetQctx(p.BaseQIndex),
             txbSkipCtx, dcSignCtx, qindex: p.BaseQIndex,
             eobView, culView, blockIdx: 0);
 
-        int eob = scratchInt[EobSlot];
         int culLevel = scratchInt[CulLevelSlot];
 
         // Update entropy context with culLevel (8 LSBs include sign in top 2 bits).
         UpdateEntropyContext(scratchByte, p, plane, miRow, miCol, txWMi, txHMi, culLevel);
-
-        // Reconstruct: dequant + inverse 2D transform + add to predict + clip.
-        ReconstructBlock(scratchInt, txSizeIdx, txW, txH, n, qDc, qAc,
-            scratchByte, p.PredictOff,
-            reconBuf, reconPlaneOff + yPx * reconStride + xPx, reconStride,
-            eob);
     }
 
     // ===========================================================================

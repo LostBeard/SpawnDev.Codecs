@@ -3,19 +3,22 @@
 // AV1 v1 keyframe encoder, GPU integration class. Symmetric to Vp8KeyframeEncoderGpu / Vp9KeyframeEncoderGpu. The
 // host is a pure coordinator: alloc + upload + dispatch + readback.
 //
-//   Av1FrameSequentialEncodeKernel : one GPU thread per TILE of every frame runs the tile pipeline (predict, transform,
-//                                    quantize, entropy code, reconstruct) bit-exact vs the CPU Av1KeyframeEncoder
-//                                    reference, in bounded resumable launches of LeavesPerLaunch 16x16 leaves per tile.
+//   Av1FrameSequentialEncodeKernel : the tile pipeline, bit-exact vs the CPU Av1KeyframeEncoder reference, in two
+//                                    passes over every tile of every frame: the transform pass (predict, transform,
+//                                    quantize, reconstruct; the 16x16 positions of a tile in wavefront order, a
+//                                    launch group per tile) and the entropy pass (one thread per tile, bounded
+//                                    resumable launches of LeavesPerLaunch 16x16 leaves per tile).
 //   Av1ObuAssembleKernel           : writes the Temporal Delimiter + Sequence Header OBUs, the Frame OBU header, the
 //                                    leb128 size, the uncompressed frame header and the tile group (size prefixes +
 //                                    tile bytes) into the caller's output. The only host-built bytes are a small fixed
 //                                    blob (TD + SH + frame header, under 128 bytes of metadata).
 //
 // Speed comes from tiles (TileSizeSuperblocks). An AV1 tile is independent (own range coder, own contexts, no
-// prediction across its edge), so all tiles of a frame are encoded by the same launches, one thread each. The
-// default, one 64x64 superblock per tile, makes a frame cost about what one superblock costs; larger tiles spend
-// fewer bits (contexts restart and prediction stops at every tile edge) and take proportionally longer. See
-// Av1TileLayout for the grid rules and the note on level limits.
+// prediction across its edge), so all tiles of a frame are encoded by the same launches. The default, one 64x64
+// superblock per tile, makes a frame cost about what one superblock costs; larger tiles spend fewer bits (contexts
+// restart and prediction stops at every tile edge) and take longer: their transforms run as a wavefront inside the
+// tile, their entropy coding is one thread per tile. See Av1TileLayout for the grid rules and Av1Level for the
+// level a grid needs.
 //
 // API shape (same as the VP8 / VP9 encoders): three overloads per entry point, all funnelling into the ArrayView1D one.
 //   - ArrayView1D : planes already on the accelerator, temporal unit assembled into a caller-owned view, returns the length.
@@ -79,7 +82,6 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
     private MemoryBuffer1D<int, global::ILGPU.Stride1D.Dense>? _dTileOff;
     private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dScratchByte;
     private MemoryBuffer1D<int, global::ILGPU.Stride1D.Dense>? _dScratchInt;
-    private MemoryBuffer1D<short, global::ILGPU.Stride1D.Dense>? _dScratchShort;
 
     // Grow-only staging for the managed and TypedArray overloads.
     private readonly StageBuffer<byte> _stageY;
@@ -262,7 +264,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
     /// <summary>The walker's parameters and per-tile scratch layout for a frame size and tile grid.</summary>
     private static Av1FrameSeqEncodeParams BuildParams(
         int width, int height, int baseQIndex, Av1TileLayout tiles,
-        out int scratchByteLen, out int scratchIntLen, out int scratchShortLen)
+        out int scratchByteLen, out int scratchIntLen)
     {
         int yLen = width * height;
         int uvLen = ChromaWidth(width) * ChromaHeight(height);
@@ -307,7 +309,6 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         p.LevelsOff = byteOff;       byteOff += 1384;
         scratchByteLen = byteOff;
         scratchIntLen = Av1FrameSequentialEncodeKernel.MinScratchIntLength;
-        scratchShortLen = 256;
         return p;
     }
 
@@ -400,9 +401,9 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         int yLen = width * height;
         int uvLen = ChromaWidth(width) * ChromaHeight(height);
         int srcLen = yLen + uvLen + uvLen;
-        var p = BuildParams(width, height, baseQIndex, tiles, out int scratchByteLen, out int scratchIntLen, out int scratchShortLen);
+        var p = BuildParams(width, height, baseQIndex, tiles, out int scratchByteLen, out int scratchIntLen);
         int tileStride = TileCapacity(tiles);
-        EnsureBuffers(width, height, srcLen, ReconLength(width, height), tiles.TileCount, tileStride, scratchByteLen, scratchIntLen, scratchShortLen);
+        EnsureBuffers(width, height, srcLen, ReconLength(width, height), tiles.TileCount, tileStride, scratchByteLen, scratchIntLen);
 
         // Planes -> the walker's contiguous Y|U|V source, device to device.
         _dSrc!.View.SubView(0, yLen).CopyFrom(yPlane.SubView(0, yLen));
@@ -414,7 +415,6 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         // the same tile, so recon needs no zero-fill.
         _dTile!.View.MemSetToZero();
         _dTileLen!.View.MemSetToZero();
-        _dScratchShort!.View.MemSetToZero();
 
         var strides = new Av1FrameBatchStrides
         {
@@ -423,14 +423,13 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
             TileStride = tileStride,
             ScratchByteStride = scratchByteLen,
             ScratchIntStride = scratchIntLen,
-            ScratchShortStride = scratchShortLen,
         };
         await _frameKernel.RunAsync(
             _dSrc.View, _dRecon!.View,
             _dTile.View, _dTileLen.View,
             _dByteConsts.View, _dUshortConsts.View,
             _dDcAcQuant.View,
-            _dScratchByte!.View, _dScratchInt!.View, _dScratchShort.View,
+            _dScratchByte!.View, _dScratchInt!.View,
             p, 1, strides);
         await _accelerator.SynchronizeAsync();
     }
@@ -473,7 +472,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         int tileCount = tiles.TileCount;
         int tileStride = TileCapacity(tiles);
         long slots = (long)frameCount * tileCount;
-        var p = BuildParams(width, height, baseQIndex, tiles, out int scratchByteLen, out int scratchIntLen, out int scratchShortLen);
+        var p = BuildParams(width, height, baseQIndex, tiles, out int scratchByteLen, out int scratchIntLen);
 
         // Per-frame source / recon, per-tile everything else.
         using var dAllSrc = _accelerator.Allocate1D<byte>((long)frameCount * srcLen);
@@ -484,11 +483,9 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         using var dAllTileOff = _accelerator.Allocate1D<int>((long)frameCount * offStride);
         using var dAllScratchByte = _accelerator.Allocate1D<byte>(slots * scratchByteLen);
         using var dAllScratchInt = _accelerator.Allocate1D<int>(slots * scratchIntLen);
-        using var dAllScratchShort = _accelerator.Allocate1D<short>(slots * scratchShortLen);
 
         dAllTile.View.MemSetToZero();
         dAllTileLen.View.MemSetToZero();
-        dAllScratchShort.View.MemSetToZero();
 
         // Planes -> per-frame Y|U|V slots, device to device.
         for (int f = 0; f < frameCount; f++)
@@ -506,7 +503,6 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
             TileStride = tileStride,
             ScratchByteStride = scratchByteLen,
             ScratchIntStride = scratchIntLen,
-            ScratchShortStride = scratchShortLen,
         };
 
         // Every tile of every frame advances LeavesPerLaunch leaves per launch.
@@ -514,7 +510,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
             dAllSrc.View, dAllRecon.View,
             dAllTile.View, dAllTileLen.View,
             _dByteConsts.View, _dUshortConsts.View, _dDcAcQuant.View,
-            dAllScratchByte.View, dAllScratchInt.View, dAllScratchShort.View,
+            dAllScratchByte.View, dAllScratchInt.View,
             p, frameCount, strides);
 
         // One shared framing blob; one assembly per frame straight into the caller's slot (paced).
@@ -782,7 +778,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
     /// changes.
     /// </summary>
     private void EnsureBuffers(int width, int height, int srcLen, int reconLen, int tileCount, int tileStride,
-        int scratchByteLen, int scratchIntLen, int scratchShortLen)
+        int scratchByteLen, int scratchIntLen)
     {
         if (_cachedWidth == width && _cachedHeight == height && _cachedTileCount == tileCount
             && _cachedTileStride == tileStride && _cachedScratchByte == scratchByteLen) return;
@@ -799,7 +795,6 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         _dTileOff = _accelerator.Allocate1D<int>(Av1ObuAssembleKernel.OffsetsLength(tileCount));
         _dScratchByte = _accelerator.Allocate1D<byte>((long)tileCount * scratchByteLen);
         _dScratchInt = _accelerator.Allocate1D<int>((long)tileCount * scratchIntLen);
-        _dScratchShort = _accelerator.Allocate1D<short>((long)tileCount * scratchShortLen);
     }
 
     private void DisposeFrameBuffers()
@@ -811,7 +806,6 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         _dTileOff?.Dispose(); _dTileOff = null;
         _dScratchByte?.Dispose(); _dScratchByte = null;
         _dScratchInt?.Dispose(); _dScratchInt = null;
-        _dScratchShort?.Dispose(); _dScratchShort = null;
         _cachedWidth = -1;
         _cachedHeight = -1;
         _cachedTileCount = -1;

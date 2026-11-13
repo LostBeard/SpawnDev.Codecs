@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### AV1 keyframe encoder: parallel inside a tile (2026-11-13)
+- The tile walk is two passes: a transform pass in which the 16x16 positions of a tile are taken in anti-diagonal
+  wavefront order by the lanes of a launch group (predict, transform, quantize, reconstruct; a barrier between
+  diagonals), and an entropy pass, one thread per tile, that codes the stored coefficients. Same bytes.
+- CUDA (RTX 4070, q40, ms per keyframe): 832x480 6.31 -> 4.90, 1920x1080 13.3 -> 10.2; with a level-limited tile
+  grid 832x480 level 3.0 41.4 -> 29.0, 1920x1080 level 4.0 120 -> 74; one tile at 832x480 570 -> 343. OpenCL
+  832x480 5.1 -> 3.98. WebGPU 22.7 -> 17.7 to 20.5, Wasm 114 -> 96. The CPU accelerator and Velocity are unchanged (they
+  walk a tile with one thread, as before). A batch of 16 frames on CUDA is 7% slower per frame (0.92 -> 0.99).
+- `av1-encode-bench`: `--passes 1` (time per pass), `--xf-lanes / --xf-spread / --xf-tiles` (the transform
+  launch shape).
+
 ### AV1: the sequence header signals the level the stream conforms to (2026-11-13)
 - Before, every AV1 keyframe stream said level 2.0 (`seq_level_idx` 0), whatever its size, frame rate and tile grid.
   Now it signals the lowest level and tier it conforms to under AV1 specification Annex A.3, and `seq_level_idx` 31

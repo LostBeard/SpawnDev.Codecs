@@ -134,11 +134,65 @@ contexts, no prediction across its edge), so tiles are the unit of parallelism:
   to code (q255: prediction, transforms, quantization, reconstruction: 0.23 ms per 16x16 leaf) and 6.2 ms at q40
   (0.15 ms of entropy coding per leaf on top). A call's own overhead is 0.18 ms (8x8 picture).
 - What the numbers say is left:
-  - A frame costs what ONE superblock costs on one GPU thread (6.2 ms CUDA, 4.8 ms OpenCL, about 14 ms WebGPU: 16
-    leaves in 4 launches). Faster than that needs parallelism inside a superblock: the 16x16 leaves depend on each
-    other through DC prediction (7 anti-diagonal waves of leaves instead of 16 steps) and the entropy contexts,
-    which with CDF updates disabled depend only on the neighbours' coefficients, so the transform stage could run
-    as a wavefront of leaf threads and the range coder as a separate serial pass. Not started.
+  - A frame cost what ONE superblock costs on one GPU thread (6.2 ms CUDA, 4.8 ms OpenCL, about 14 ms WebGPU: 16
+    leaves in 4 launches). Faster than that needs parallelism inside a tile. First half DONE the same day (next
+    item): the transform stage is a wavefront of leaf lanes, the entropy coding a separate serial pass.
+- **Parallel inside a tile, stage 1: transform wavefront + entropy pass (2026-11-13, afternoon).** The tile walk is
+  two passes now (`Av1FrameSequentialEncodeKernel`). Same bytes as before (the CPU reference did not change).
+  - Transform pass. A leaf predicts (DC) from the reconstruction above it and to its left, so the 16x16 positions
+    on an anti-diagonal of a tile are independent. A launch group is one tile; its lanes take the positions of a
+    diagonal (lane L: positions L, L + lanes, ...), with `Group.Barrier()` between diagonals,
+    `DiagonalsPerLaunch` (8) diagonals per launch. Each position: predict, forward transform, quantize,
+    reconstruct; its quantized coefficients go to a device buffer (`CoefsPerSlot` = 384 ints per 16x16 position,
+    indexed by the entropy pass's z-order slot). A lane's working area is device memory too, not LocalMemory.
+  - Entropy pass. One thread per tile as before (`SerialThreadPlacement`), now only the partition, mode and
+    coefficient syntax, reading the stored coefficients; `LeavesPerLaunch` 4 -> 16.
+  - The CPU accelerators (CPU, Velocity, Wasm) have a core per tile, not per lane, and a kernel with barriers runs
+    through their group machinery (Velocity: 112 ms for the transform pass of a 832x480 frame, against about 12).
+    They load another entry point for the same leaf code (`Av1TransformTileKernel`): one thread per tile walks the
+    diagonals alone, no barrier. An accelerator compiles one of the two.
+  - The launch shape matters (`GetTransformGroup`: lanes per tile, group threads per lane, tiles per group; CUDA,
+    832x480 q40, transform pass of one frame / ms per keyframe in a batch of 16). A leaf's transform code
+    branches on its data, so lanes that run in step pay for each other's branches:
+    one group per tile, its 4 lanes adjacent: 1.4 ms / 1.02 (the choice for few tiles); the same lanes a warp
+    apart: 1.4 / 1.24; the lanes of 8 tiles filling a warp: 2.2 / 1.15; one lane per tile, 2 per warp, 40 tiles
+    per group: 4.9 / 0.96 (the choice above 32 tiles per multiprocessor, where the device is full either way and
+    total work counts); one lane per tile, a group each: 2.6 / 1.15. Wavefront lanes win up to a batch of 8
+    (1.35 against 1.50 ms per frame) and tie from 16. Larger tiles get more lanes (1920x1080 in 32 tiles of
+    16 x 20 positions: 16 lanes 8.8 ms, 8 lanes 11.9, 4 lanes 18.9).
+  - Measured (RTX 4070, ILGPU 5.4.30, q40, ms per keyframe, before -> after):
+    | | CUDA | OpenCL |
+    |---|---|---|
+    | 832x480, 104 tiles (default) | 6.31 -> 4.90 | 5.1 -> 3.98 |
+    | 832x480, batch of 16, per frame | 0.92 -> 0.99 | 0.90 after |
+    | 832x480, level 5.1 grid (56 tiles) | 11.7 -> 8.9 | 7.1 after |
+    | 832x480, level 3.0 grid (16 tiles) | 41.4 -> 29.0 | 23.4 after |
+    | 832x480, one tile | 570 -> 343 | 281 after |
+    | 1920x1080, 255 tiles (default) | 13.3 -> 10.2 | 11.1 -> 8.8 |
+    | 1920x1080, level 6.0 grid (90 tiles) | 35.4 -> 23.8 | 19.6 after |
+    | 1920x1080, level 5.1 grid (48 tiles) | 70.4 -> 45.6 | 37.3 after |
+    | 1920x1080, level 4.0 grid (32 tiles) | 120 -> 74.2 | 61.0 after |
+    CPU accelerator 20.5 -> 21.4, Velocity 20.5 to 28.5 -> 22.0 (832x480, 104 tiles). WebGPU
+    (`Tiles_AreFasterThanOneTile`, two runs): 104 tiles 22.7 -> 17.7 and 20.5, batch of 8: 3.52 -> 3.16 and 3.27
+    per frame, one tile 1496 -> 923 and 913; Wasm: 104 tiles 114 -> 96 and 97, one tile 834 -> 320 and 302. No WebGPU device hang with the barrier kernel (the VP9
+    wavefront kernel needed a wait per launch; this one keeps its working areas in device memory).
+  - The batch of 16 on CUDA is 7% slower than the single-pass walker was (0.92 -> 0.99): two passes store and
+    reload the coefficients, and a wavefront lane idles at a barrier. Every shape tried is in the list above.
+  - Where the time goes now (`av1-encode-bench --passes 1`, CUDA): 832x480 default grid: transform 1.4 ms,
+    entropy 3.4 ms; 1920x1080 level 4.0 grid: transform 7.5 ms, entropy 65.6 ms (0.21 ms per leaf, 320 leaves per
+    tile in sequence). The serial entropy pass is what is left. Stage 2 (open): with CDF updates off, everything
+    in it except the range coder's own state is a function of a leaf's coefficients and its neighbours'
+    contexts, so each leaf can prepare its symbols in parallel and the tile thread only runs the range coder
+    over them.
+  - Tests: every encoder test runs through the split (bytes equal to the CPU reference, FFmpeg decodes to the
+    reconstruction). New: `Av1KeyframeEncoderGpu_Wavefront_EveryLaunchShapeGivesTheReferenceBytes` (forced
+    shapes: one lane, several rounds per diagonal, a lane count that is not a power of two, lanes a warp apart,
+    several tiles per group) and `..._ManyTilesBatchEqualsSingleFrameEncodes` (1500 one-tile frames: the
+    many-tiles shape; the choice itself asserted). 25 red-check mutations, all caught. Two findings from the
+    red-checks: lanes in ONE warp advance together, so a missing barrier only shows with lanes a warp apart; and
+    the encoder keeps its reconstruction buffer, so a position that reads a neighbour too early finds the right
+    pixels of the previous encode of the same picture unless another picture is encoded in between (the test
+    does that).
   - CUDA is 1.24x slower than OpenCL for the same kernel on the same GPU (3.7 vs 2.6 ms per superblock without
     coefficients), WebGPU 2.6x slower than CUDA: code generation questions for SpawnDev.ILGPU, open. Seen in the
     PTX so far: 51 signed divisions by a constant power of two left as `div.s32`, and the quantizer divides every
