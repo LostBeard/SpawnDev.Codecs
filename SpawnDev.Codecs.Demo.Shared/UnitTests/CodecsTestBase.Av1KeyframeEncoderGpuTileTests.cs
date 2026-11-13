@@ -199,6 +199,35 @@ public abstract partial class CodecsTestBase
                         for (int t = 0; t < n; t++)
                             if (seen[t] != 1) { failures.Add($"{tag}: working thread {t} is run by {seen[t]} launch threads"); break; }
                     }
+        // One working thread per group (the CPU accelerators): threads, groupSize, minExtentExclusive -> stride
+        var onePerGroup = new (int n, int g, int min, int stride)[]
+        {
+            (104, 4, 0, 4),        // Velocity: one tile per vector group
+            (104, 8, 256, 8),      // CPU accelerator: 104 * 8 = 832 threads, above its inline limit of 256
+            (32, 8, 256, 16),      // 32 * 8 = 256 is not above 256: two groups per working thread
+            (16, 8, 256, 24),
+            (2, 8, 256, 136),
+            (1, 8, 256, 1),        // a single working thread: packed
+            (104, 1, 0, 1),        // groups of one thread: packed
+        };
+        foreach (var (n, g, min, stride) in onePerGroup)
+        {
+            var p = SerialThreadPlacement.OnePerGroup(n, g, min);
+            string tag = $"one per group: threads {n} group {g} more than {min} threads";
+            if (p.GroupSize != stride || p.WarpsPerGroup != 1 || p.LanesPerWarp != 1 || p.ThreadCount != n)
+                failures.Add($"{tag}: stride {p.GroupSize}, {p.WarpsPerGroup} x {p.LanesPerWarp} per group, expected stride {stride}, 1 x 1");
+            if (stride > 1 && (p.Extent <= min || p.GroupSize % g != 0))
+                failures.Add($"{tag}: extent {p.Extent} / stride {p.GroupSize} break the rule (more than {min} threads, whole groups of {g})");
+            var seen = new int[n];
+            for (long i = 0; i < p.Extent; i++)
+            {
+                int t = SerialThreadPlacement.WorkingThread(p, (int)i);
+                if (t >= 0 && t < n) seen[t]++;
+                else if (t != -1) { failures.Add($"{tag}: launch thread {i} -> working thread {t}"); break; }
+            }
+            for (int t = 0; t < n; t++)
+                if (seen[t] != 1) { failures.Add($"{tag}: working thread {t} is run by {seen[t]} launch threads"); break; }
+        }
         var packed = SerialThreadPlacement.Packed(7);
         if (packed.Extent != 7 || SerialThreadPlacement.WorkingThread(packed, 6) != 6) failures.Add("Packed(7) is not the identity");
         bool threw = false;
@@ -409,8 +438,10 @@ public abstract partial class CodecsTestBase
     /// The reason tiles exist: on a GPU a keyframe coded as one-superblock tiles must take a fraction of the time of
     /// the same keyframe coded as one tile (one thread walking the whole frame was 1.3 frames per second at 832x480).
     /// Planes are on the device; an encode ends with the length readback. Asserted on the GPU backends (measured
-    /// 2026-11-13, RTX 4070: CUDA 91x, OpenCL 88x; the bound is 4x); the CPU accelerators only report. The
-    /// "[report]" line carries the times to the run log on every lane.
+    /// 2026-11-13, RTX 4070: CUDA 95x, OpenCL 89x, WebGPU 66x; the bound is 4x); the CPU accelerators only report
+    /// (measured about 3x on 6 cores: too close to what a loaded machine does to assert). The "[report]" lines
+    /// carry the times to the run log on every lane. Also checked, on every accelerator: the tile threads sit in
+    /// the launch where they were measured to be fastest (SerialThreadPlacement).
     /// </summary>
     [TestMethod(Timeout = 1800000, Category = "NotOnWebGL")]
     public async Task Av1KeyframeEncoderGpu_Tiles_AreFasterThanOneTile()
@@ -421,8 +452,32 @@ public abstract partial class CodecsTestBase
         {
             const int w = 832, h = 480, q = 40, batch = 8;
             bool gpu = acc.AcceleratorType is AcceleratorType.Cuda or AcceleratorType.OpenCL or AcceleratorType.WebGPU;
-            int runs = gpu ? 3 : 1;
+            // The CPU accelerators run .NET code that the runtime optimizes while it runs (the first encodes are
+            // several times slower than the steady state), so they get more runs; the fastest one is reported.
+            int runs = gpu ? 3 : 8;
             using var enc = new Av1KeyframeEncoderGpu(acc);
+
+            // The placement of the 104 tile threads on this accelerator is the one that was measured for it: a
+            // change that silently falls back to the packed launch costs 1.5x to 6x and no byte.
+            using (var walker = new Av1FrameSequentialEncodeKernel(acc))
+            {
+                var p = walker.GetPlacement(104);
+                string layout = $"group {p.GroupSize}, warp {p.WarpSize}, {p.WarpsPerGroup} warps x {p.LanesPerWarp} lanes";
+                bool nvidiaCl = acc.AcceleratorType == AcceleratorType.OpenCL
+                    && acc.Device is global::ILGPU.Runtime.OpenCL.CLDevice cl && cl.Vendor == global::ILGPU.Runtime.OpenCL.CLDeviceVendor.Nvidia;
+                if (acc.AcceleratorType == AcceleratorType.Cuda || nvidiaCl)
+                    True(p.GroupSize >= 64 && p.WarpSize == acc.WarpSize && p.LanesPerWarp == 1 && p.WarpsPerGroup <= 8,
+                        $"{acc.AcceleratorType}: 104 tile threads must sit one per warp, a few warps per group; got {layout}");
+                else if (acc.AcceleratorType == AcceleratorType.WebGPU)
+                    True(p.GroupSize == 64 && p.WarpsPerGroup == 2 && p.LanesPerWarp == 1, $"WebGPU: 2 tile threads per group of 64; got {layout}");
+                else if (acc.AcceleratorType == AcceleratorType.Velocity)
+                    True(p.GroupSize >= 2 && p.WarpsPerGroup * p.LanesPerWarp == 1, $"Velocity: one tile thread per vector group; got {layout}");
+                else if (acc.AcceleratorType == AcceleratorType.CPU && !OperatingSystem.IsBrowser())
+                    True(p.WarpsPerGroup * p.LanesPerWarp == 1 && p.Extent > global::ILGPU.Runtime.CPU.CPUAccelerator.LaneLoopInlineMaxWorkItems,
+                        $"CPU accelerator: one tile thread per group in a launch above the inline limit; got {layout}, extent {p.Extent}");
+                Console.WriteLine($"[report] {acc.AcceleratorType} placement of 104 tile threads: {layout}, launch of {p.Extent} threads");
+            }
+
             var (dY, dU, dV) = Av1SpeedTestFrames(acc, w, h, batch);
             int cap = Av1KeyframeEncoderGpu.GetMaxEncodedSize(w, h);
             using var dOut = acc.Allocate1D<byte>((long)batch * cap);

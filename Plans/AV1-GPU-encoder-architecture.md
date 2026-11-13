@@ -96,9 +96,19 @@ contexts, no prediction across its edge), so tiles are the unit of parallelism:
     coefficients), WebGPU 2.6x slower than CUDA: code generation questions for SpawnDev.ILGPU, open. Seen in the
     PTX so far: 51 signed divisions by a constant power of two left as `div.s32`, and the quantizer divides every
     coefficient by the quantizer step (384 divisions per leaf).
-  - The CPU accelerators: 832x480 takes 84-120 ms with or without tiles, and a 256x256 picture takes LONGER (CPU
-    accelerator 189 ms as one tile, 193 ms as 16 tiles; Velocity 224 / 221 ms; 64x64 14 ms, 128x128 55 ms, 512x512
-    57-90 ms). The time does not follow the tile count, so it is not the walker; not yet located. Open, next.
+  - The CPU accelerators (DONE the same day, `SerialThreadPlacement.OnePerGroup`): packed, the 104 tile threads did
+    not run in parallel. ILGPU's CPU accelerator runs a launch of up to 256 threads inline on the calling thread
+    (`CPUAccelerator.LaneLoopInlineMaxWorkItems`) and a group of 8 on one core; Velocity runs a group of 4 as the
+    lanes of one vector, in lock-step, which for four different tiles is slower than one after another. One
+    working thread per group (and, on the CPU accelerator, a launch above the inline limit), 832x480 q40, Ryzen 5
+    7500F (6 cores), steady state, ms per keyframe: CPU accelerator 66.6 -> 20.5 (one tile 68.4), Velocity 134 ->
+    20.5 to 28.5 (one tile 69.0); 256x256: CPU 7.9; 1920x1080: CPU 103, Velocity 133. Wasm is left packed (104
+    tiles 110 ms against 721 ms for one tile).
+    Small pictures on the CPU accelerators looked far slower in a short benchmark (256x256 as one tile: 209 ms):
+    that was the .NET runtime still optimizing the code. Measured on the CPU accelerator: 256x256 one tile 209 ms
+    after 1 warm-up frame, 11.2 ms after 20; 64x64 14 ms after 2, 11 ms after 20, 0.88 ms after 200. Use
+    `--warmup 20` or more on these two backends, and more for small pictures.
+    Left: 3.3x on 6 cores (12 threads), so the cores are not all busy; not investigated.
   - Single tile is 3-5% slower than before the change on CUDA (791 vs 753-766 ms): not investigated.
 - Oracles (`CodecsTestBase.Av1KeyframeEncoderGpuTileTests.cs`): FFmpeg (libdav1d) decodes the tiled temporal unit to
   the encoder's reconstruction byte for byte (130x66, 200x9, 320x200, 832x480, 1088x1024 at tile sizes 1 / 2 / 3 /

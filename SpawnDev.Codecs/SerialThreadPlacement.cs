@@ -24,11 +24,14 @@
 // Applied on CUDA and on OpenCL NVIDIA devices with the device's own multiprocessor count and warp size, and on
 // WebGPU, which reports neither, with WebGpuAssumedMultiprocessors groups and two halves per group. Measured on the
 // RTX 4070 only. On a device where the spread buys nothing its cost is the idle threads of the launch (each returns
-// at its first branch), and with enough working threads to fill the groups the placement is the packed one. Every
-// other accelerator gets the packed placement: the CPU accelerators run a thread per core whatever its index, WebGL
-// has no groups, and the OpenCL devices of other vendors are not measured yet.
+// at its first branch), and with enough working threads to fill the groups the placement is the packed one.
+//
+// The desktop CPU accelerators have the same problem in another form and get one working thread per group
+// (OnePerGroup: the measurements are there). Packed everywhere else: Wasm and the browser's CPU accelerator, WebGL
+// (no groups), and the OpenCL devices of other vendors (not measured yet).
 
 using ILGPU.Runtime;
+using ILGPU.Runtime.CPU;
 using ILGPU.Runtime.OpenCL;
 
 namespace SpawnDev.Codecs;
@@ -82,11 +85,43 @@ public struct SerialThreadPlacement
         ArgumentNullException.ThrowIfNull(accelerator);
         if (accelerator.AcceleratorType == AcceleratorType.WebGPU)
             return Create(threadCount, groupSize, groupSize / 2, WebGpuAssumedMultiprocessors);
+        // The desktop CPU accelerators (in a browser the CPU accelerator has one thread: nothing to spread).
+        if (accelerator.AcceleratorType == AcceleratorType.Velocity)
+            return OnePerGroup(threadCount, groupSize, 0);
+        if (accelerator.AcceleratorType == AcceleratorType.CPU && !OperatingSystem.IsBrowser())
+            return OnePerGroup(threadCount, groupSize, CPUAccelerator.LaneLoopInlineMaxWorkItems);
         bool spread = accelerator.AcceleratorType == AcceleratorType.Cuda
             || (accelerator.AcceleratorType == AcceleratorType.OpenCL && accelerator.Device is CLDevice cl && cl.Vendor == CLDeviceVendor.Nvidia);
         return spread
             ? Create(threadCount, groupSize, accelerator.WarpSize, accelerator.NumMultiprocessors)
             : Packed(threadCount);
+    }
+
+    /// <summary>
+    /// One working thread per launch group (the group's first thread), for the CPU accelerators, in a launch of
+    /// more than <paramref name="minExtentExclusive"/> threads: the groups are whole multiples of
+    /// <paramref name="groupSize"/>, as small as that allows. Packed for a single working thread.
+    /// </summary>
+    /// <remarks>
+    /// Velocity runs a group's threads as the lanes of one vector, in lock-step: four tiles in a group took longer
+    /// than the four one after another. ILGPU's CPU accelerator runs a group on one core and a launch of at most
+    /// <c>CPUAccelerator.LaneLoopInlineMaxWorkItems</c> threads inline on the calling thread, so 104 packed tile
+    /// threads ran on one core. Measured, 832x480, Ryzen 5 7500F (6 cores), ms per keyframe, packed -> one per group:
+    /// CPU accelerator 66.6 -> 20.3, Velocity 134 -> 23.3 (one tile: 68.7 / 68.9).
+    /// </remarks>
+    public static SerialThreadPlacement OnePerGroup(int threadCount, int groupSize, int minExtentExclusive)
+    {
+        if (threadCount < 1) throw new ArgumentOutOfRangeException(nameof(threadCount));
+        if (threadCount == 1 || groupSize < 1) return Packed(threadCount);
+        // the smallest multiple of groupSize with threadCount * stride > minExtentExclusive
+        long groups = Math.Max(1, ((long)minExtentExclusive / threadCount + groupSize) / groupSize);
+        long stride = groups * groupSize;
+        if (stride == 1) return Packed(threadCount);
+        if (stride * threadCount > int.MaxValue) return Packed(threadCount);
+        return new SerialThreadPlacement
+        {
+            ThreadCount = threadCount, GroupSize = (int)stride, WarpSize = (int)stride, WarpsPerGroup = 1, LanesPerWarp = 1,
+        };
     }
 
     /// <summary>
