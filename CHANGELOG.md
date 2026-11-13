@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### AV1: the sequence header signals the level the stream conforms to (2026-11-13)
+- Before, every AV1 keyframe stream said level 2.0 (`seq_level_idx` 0), whatever its size, frame rate and tile grid.
+  Now it signals the lowest level and tier it conforms to under AV1 specification Annex A.3, and `seq_level_idx` 31
+  ("maximum parameters") when it conforms to none. New `Video.Av1.Av1Level`: the level tables, `FirstViolation`
+  (the specification's constraints, one by one), `Select`, `MaxFrameObuBytes`, `TileLayout`.
+- What decides the level: picture size, frame rate (`Av1KeyframeEncoderGpu.SetFrameRate`, default 30), tile grid,
+  and the coded bytes (compression ratio limit; bit rate limit, applied as a peak: no temporal unit above
+  MaxBitrate / frame rate). The bytes are known only after coding, so the level is chosen on the accelerator: the
+  framing blob holds one sequence header per possible level and tier with the largest frame it allows, and
+  `Av1ObuAssembleKernel` writes the first one the frame fits. No extra launch, no readback.
+- `Av1SequenceHeaderWriter` writes `seq_tier` (levels from 4.0; `Av1SequenceHeaderConfig.SeqTier0`) and accepts
+  every `seq_level_idx` (it rejected levels above 3.3).
+- `Av1KeyframeEncoderGpu.LevelLimit` (and `VideoFileEncodeOptions.Av1LevelLimit`): keeps the tile grid inside a
+  level, for decoders that hold a stream to its level. The default stays the fastest grid (one superblock per
+  tile), which needs a high level: 832x480 is 104 tiles in 13 columns = level 6.0, 1920x1080 is 255 tiles = no
+  level (31). `Av1TileLayout.Compute` takes the two limits a level adds (tile columns, pixels left to the last
+  tile column / row).
+- Files: `VideoFileEncoderGpu` passes its frame rate to the AV1 encoder and gives every sample the sequence header
+  of the frame that signalled the highest level (`Av1Isobmff.UnifySequenceHeaders`), so the file has one sequence
+  header, av1C states its level and tier, and the file as a whole conforms to it.
+- The CPU reference `Av1KeyframeEncoder.EncodeKeyFrame` takes the frame rate and the level limit and picks the
+  level on the host; the GPU encoder's bytes equal its bytes. `Av1ObuAssembleKernel.Run` takes the blob's
+  uncompressed header offset instead of the prefix length (the prefix is now chosen by the kernel).
+
 ### VP9 inter frames in the encoder (2026-11-12; CPU accelerator verified, GPU lanes pending)
 - `Video.Vp9.Vp9EncoderGpu`: a key frame, then frames predicted from the frame before (`KeyFrameInterval`, default
   128). The encoder writes the decoder's own layouts and runs the decoder's prediction and residual kernels on them,

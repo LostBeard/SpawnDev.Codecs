@@ -23,15 +23,57 @@ contexts, no prediction across its edge), so tiles are the unit of parallelism:
   them, and 2040 tiles at 3840x2160. So when one superblock per tile gives more than `MaxTiles`, the layout is the
   one with the smallest tiles (in superblocks) that stays within it: 1920x1080 = 15 x 17 = 255 tiles of 2 x 1
   superblocks (not 30 x 17 = 510), 3840x2160 = 15 x 17 tiles of 4 x 2. Raise `MaxTiles` only for streams a software
-  decoder reads. AV1 LEVEL limits (8 to 128 tiles, 4 to 16 tile columns by level) are not applied: none of the
-  six decoders enforces them (832x480 in 13 tile columns decodes on all), and the sequence header signals
-  `seq_level_idx` 0 for every picture size, which was already inaccurate above 147,456 pixels before the tiles
-  (open: signal the level the picture size needs; the writer has no tier bit for levels above 3.3 yet).
-  Experiment 2026-11-13 (not committed: a level override plus the `seq_tier` bit for levels above 3.3): keyframes
-  of this encoder at 832x480 (levels 2.0, 3.0, 6.0, maximum), 1920x1080 (2.0, 4.0, maximum) and 3840x2160 (2.0, 5.1,
-  maximum) decode to the same picture on libdav1d, libaom, NVDEC, D3D11VA and D3D12VA (FFmpeg 8.1, RTX 4070)
-  whatever level is signalled, and ffprobe reports the level written. So an honest level does not break these
-  decoders. Not tested: browsers (the MP4 codec string carries the level), other vendors' hardware decoders.
+  decoder reads. AV1 LEVEL limits (8 to 128 tiles, 4 to 16 tile columns by level) are not applied by default:
+  none of the six decoders enforces them (832x480 in 13 tile columns decodes on all). `LevelLimit` applies them
+  (next item).
+- Level (`Av1Level`, AV1 spec Annex A.3; 2026-11-13). The sequence header signals the lowest level and tier the
+  stream conforms to, and `seq_level_idx` 31 ("maximum parameters") when it conforms to none. Before, every stream
+  said level 2.0, which was untrue above 147,456 pixels and for every grid of more than 8 tiles.
+  - What decides. Known before coding: the picture (MaxPicSize, MaxHSize, MaxVSize), the frame rate
+    (`SetFrameRate`, default 30: luma samples, frame headers and tiles per second), the tile grid (MaxTiles 8 to
+    128, MaxTileCols 4 to 16), and what every level demands (a frame of at least 16 x 16, at least 8 pixels of the
+    picture in the last tile column and row, largest tile times frame rate at most 588,251,136). Known only after
+    coding: the compression ratio limit on a Frame OBU, and the bit rate (MainMbps, or HighMbps in the High tier,
+    which exists from level 4.0). The bit rate is applied as a PEAK: no temporal unit larger than MaxBitrate /
+    frame rate, so every unit arrives within its own frame period. That is sufficient for the decoder model of
+    Annex E and, for keyframes of similar size, close to the average it needs.
+  - Where it is chosen. The host puts one sequence header per possible level and tier into the framing blob, in
+    order of preference (levels ascending, Main before High, 31 last), each with the largest Frame OBU it allows
+    (`Av1KeyframeFraming.BuildLevelCandidates`), and the offsets thread of `Av1ObuAssembleKernel`, which already
+    sums the tile lengths, picks the first one the frame fits. No extra launch and no readback. The CPU reference
+    picks from the same list on the host, and the tests check the result with the specification's inequalities on
+    the measured bytes (`Av1Level.FirstViolation`), not with the limits the kernel compared against.
+  - Files. A file is one coded video sequence with one sequence header (av1C carries it). Each frame signals the
+    level a stream of frames of ITS size conforms to, so `VideoFileEncoderGpu` passes its frame rate to the encoder
+    and then gives every sample the sequence header of the frame that signalled the highest level
+    (`Av1Isobmff.UnifySequenceHeaders`). The level grows with the frame size, so that is the lowest level the whole
+    file conforms to. Anything else that stores several frames as one sequence has to do the same.
+  - No rate control: a level limit bounds the tiles, not the bytes. A stream above the bit rate of a level signals
+    the next tier or level up (lower the quality to lower the level).
+  - `LevelLimit` (a `seq_level_idx`; `VideoFileEncodeOptions.Av1LevelLimit`) keeps the tile grid inside a level:
+    `Av1Level.TileLayout` applies that level's MaxTiles, MaxTileCols and tiles per second, or those of the lowest
+    level the picture size and frame rate need when that is higher, and keeps 8 pixels in the last tile column and
+    row. Default: no limit, one superblock per tile, the fastest. Measured on CUDA (RTX 4070, ILGPU 5.4.30,
+    av1-encode-bench picture, 30 fps, ms per keyframe, `--level`):
+    - 832x480, no limit: 13 x 8 = 104 tiles of 1 x 1 superblocks, 6.3 ms. The grid needs 6.0; signalled 6.0 High at
+      q40 (63.8 Mbit/s), 6.0 Main at q120 (33.4 Mbit/s).
+    - 832x480, limit 5.1: 7 x 8 = 56 tiles of 2 x 1, 11.7 ms, 5.0 High at q40.
+    - 832x480, limit 3.0: 2 x 8 = 16 tiles of 7 x 1, 41.4 ms. Signalled 5.0 High at q40, 4.1 High at q120, 3.1 Main
+      at q200 (8.8 Mbit/s), 3.0 Main at q255 (2.7 Mbit/s).
+    - 1920x1080, no limit: 15 x 17 = 255 tiles of 2 x 1, 13.3 ms, no level (31).
+    - 1920x1080, limit 6.0: 15 x 6 = 90 tiles of 2 x 3, 35.4 ms; limit 5.1: 8 x 6 = 48 tiles of 4 x 3, 70.4 ms;
+      limit 4.0: 8 x 4 = 32 tiles of 4 x 5, 120 ms. All three signal 6.1 High at q40 (330 Mbit/s); with the 4.0
+      grid: 5.2 High at q120 (172.5 Mbit/s), 4.1 High at q200 (45.2 Mbit/s), 4.0 High at q255 (13.5 Mbit/s).
+    What the numbers say: key frames only, at a fine quantizer, are far above the bit rate of the level their
+    picture size needs, so there the bit rate sets the level and a smaller grid buys nothing. The limit pays with a
+    coarse quantizer, and will pay once inter frames exist. A level-limited frame costs one tile's superblocks in
+    sequence (20 at 1920x1080 level 4.0): parallelism inside a tile (wavefront, open) is what would make these
+    grids fast.
+  - Decoders. Keyframes of this encoder at 832x480 (levels 2.0, 3.0, 6.0, maximum), 1920x1080 (2.0, 4.0, maximum)
+    and 3840x2160 (2.0, 5.1, maximum) decode to the same picture on libdav1d, libaom, NVDEC, D3D11VA and D3D12VA
+    (FFmpeg 8.1, RTX 4070) whatever level is signalled, and ffprobe reports the level written. So the honest level
+    does not break these decoders. Not tested: browsers and players that ask the device whether it supports the
+    level before they start (the MP4 codec string carries it), other vendors' hardware decoders.
 - Kernel (`Av1FrameSequentialEncodeKernel`, ONE kernel for single frames and batches, where there were two):
   working thread = `frame * tileCount + tile`. The thread takes its own copy of the parameters with the tile
   rectangle; the above-context arrays are per tile (`AboveStride` = tile width in mi) and their offsets are rebased
@@ -330,6 +372,20 @@ index. Reading `Av1CoefDecoder.GetQctx` revealed the threshold mismatch.
 - `ConstGray64x64_RoundTrip` - encode -> decode -> recon all-128.
 - `Random64x64_MatchesEncoderRecon` - encode -> decode -> decoder recon
   matches encoder's internal recon.
+
+`CodecsTestBase.Av1LevelTests` (2026-11-13; what each oracle can fail on is in the file's header):
+- `Av1Level_Select_MatchesTheSpecificationTables`, `Av1Level_FrameSizeLimits_MatchTheSpecificationRules`,
+  `Av1Level_TileLayout_StaysInsideTheLevel`, `Av1SequenceHeaderWriter_LevelAndTier_RoundTrip`,
+  `Av1Isobmff_UnifySequenceHeaders_TheHighestLevelForEveryUnit` - host arithmetic against values derived by hand
+  from Annex A.3.
+- `Av1ObuAssembleKernel_Level_PicksTheCandidateAtTheExactLimit` - the kernel's choice at a frame of exactly a
+  level's limit and one byte over.
+- `Av1KeyframeEncoderGpu_Level_SignalsTheLowestLevelTheStreamConformsTo` - real encodes equal the CPU reference
+  and conform to the level they signal and to none below it.
+- `Av1KeyframeEncoderGpu_Level_FfmpegReadsTheSignalledLevel` (desktop) - ffprobe reads the same level; libdav1d
+  decodes to the encoder's reconstruction.
+- `VideoFileEncoderGpu_Av1_OneLevelForTheFile` - one sequence header per file, av1C states its level.
+72 red-check mutations, all caught.
 
 Total: 18 test method invocations across 3 backends = 18 PMT pass
 counts. Plus 696/696 AV1 sweep PASS confirms zero regressions across

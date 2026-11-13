@@ -63,6 +63,12 @@ public static class Av1KeyframeEncoder
     /// tile, the GPU encoder's default; <see cref="int.MaxValue"/> = the fewest tiles the picture allows).</param>
     /// <param name="maxTiles">The most tiles of the frame (<see cref="Av1TileLayout.Compute"/>; the GPU encoder's
     /// <c>MaxTiles</c>).</param>
+    /// <param name="frameRateNum">Frames per second the stream is shown at, numerator (the GPU encoder's
+    /// <c>SetFrameRate</c>): with the picture size, the tile grid and the coded bytes it decides the level the
+    /// sequence header signals (<see cref="Av1Level"/>).</param>
+    /// <param name="frameRateDen">Frames per second, denominator.</param>
+    /// <param name="levelLimit">Keeps the tile grid inside an AV1 level (the GPU encoder's <c>LevelLimit</c>;
+    /// <see cref="Av1Level.TileLayout"/>). 31 = no limit.</param>
     public static byte[] EncodeKeyFrame(
         ReadOnlySpan<byte> ySrc, int ySrcStride,
         ReadOnlySpan<byte> uSrc, int uvSrcStride,
@@ -70,7 +76,10 @@ public static class Av1KeyframeEncoder
         int width, int height,
         int baseQIndex = 32,
         int tileSizeSuperblocks = 1,
-        int maxTiles = Av1TileLayout.HardwareDecoderMaxTiles)
+        int maxTiles = Av1TileLayout.HardwareDecoderMaxTiles,
+        int frameRateNum = 30,
+        int frameRateDen = 1,
+        int levelLimit = Av1Level.MaximumParameters)
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
@@ -78,23 +87,17 @@ public static class Av1KeyframeEncoder
             throw new ArgumentOutOfRangeException(nameof(baseQIndex),
                 "baseQIndex must be in [1, 255]; lossless not supported in v1.");
 
-        // ---- 1. Temporal Delimiter OBU ----
-        byte[] tdObu = Av1ObuWriter.EmitObu(
-            Av1ObuType.TemporalDelimiter, ReadOnlySpan<byte>.Empty, hasSizeField: true);
+        // ---- 1. The tile grid, and the levels a stream with it can signal (each with its TD + SH OBUs) ----
+        var tiles = Av1Level.TileLayout(width, height, tileSizeSuperblocks, maxTiles, frameRateNum, frameRateDen, levelLimit);
+        var candidates = Av1KeyframeFraming.BuildLevelCandidates(width, height, tiles, frameRateNum, frameRateDen);
+        // Reify a SH so downstream writers consume a parsed view without re-parsing (the level changes nothing below).
+        var sh = Av1KeyframeFraming.SynthesizeSequenceHeader(
+            Av1KeyframeFraming.BuildSequenceHeaderConfig(width, height, candidates[0].Signal));
 
-        // ---- 2. Sequence Header OBU ----
-        var shConfig = Av1KeyframeFraming.BuildSequenceHeaderConfig(width, height);
-        byte[] shPayload = Av1SequenceHeaderWriter.EmitPayload(shConfig);
-        byte[] shObu = Av1ObuWriter.EmitObu(
-            Av1ObuType.SequenceHeader, shPayload, hasSizeField: true);
-        // Reify the SH so downstream writers consume a parsed view without re-parsing.
-        var sh = Av1KeyframeFraming.SynthesizeSequenceHeader(shConfig);
-
-        // ---- 3. Build the Frame OBU payload (uncompressed_header + tile_group) ----
+        // ---- 2. Build the Frame OBU payload (uncompressed_header + tile_group) ----
 
         // The tiles' entropy streams first: the tile group needs every tile's byte length (a size prefix before
         // every tile but the last).
-        var tiles = Av1TileLayout.Compute(width, height, tileSizeSuperblocks, maxTiles);
         byte[][] tileBytes = EncodeTiles(
             ySrc, ySrcStride, uSrc, uvSrcStride, vSrc,
             width, height, baseQIndex, tiles);
@@ -105,11 +108,20 @@ public static class Av1KeyframeEncoder
         byte[] frameObu = Av1ObuWriter.EmitObu(
             Av1ObuType.Frame, frameOuter, hasSizeField: true);
 
-        // ---- 4. Concatenate all three OBUs ----
-        var output = new byte[tdObu.Length + shObu.Length + frameObu.Length];
-        Buffer.BlockCopy(tdObu, 0, output, 0, tdObu.Length);
-        Buffer.BlockCopy(shObu, 0, output, tdObu.Length, shObu.Length);
-        Buffer.BlockCopy(frameObu, 0, output, tdObu.Length + shObu.Length, frameObu.Length);
+        // ---- 3. The level this frame fits, then its TD + SH OBUs and the Frame OBU ----
+        return WithLevelPrefix(candidates, frameObu);
+    }
+
+    /// <summary>
+    /// The temporal unit of <paramref name="frameObu"/>: the Temporal Delimiter and Sequence Header OBUs of the first
+    /// of <paramref name="candidates"/> whose level a Frame OBU of this length conforms to, then the Frame OBU.
+    /// </summary>
+    private static byte[] WithLevelPrefix(List<Av1KeyframeFraming.LevelCandidate> candidates, byte[] frameObu)
+    {
+        byte[] prefix = Av1KeyframeFraming.SelectLevelCandidate(candidates, frameObu.Length).Prefix;
+        var output = new byte[prefix.Length + frameObu.Length];
+        Buffer.BlockCopy(prefix, 0, output, 0, prefix.Length);
+        Buffer.BlockCopy(frameObu, 0, output, prefix.Length, frameObu.Length);
         return output;
     }
 
@@ -158,30 +170,21 @@ public static class Av1KeyframeEncoder
         // and AV1 decoders reconstruct working dims internally as
         // alignUp(display_dim, 64), matching the encoder's tile bytes.
 
-        // ---- TD OBU ----
-        byte[] tdObu = Av1ObuWriter.EmitObu(
-            Av1ObuType.TemporalDelimiter, ReadOnlySpan<byte>.Empty, hasSizeField: true);
-
-        // ---- SH OBU ----
-        var shConfig = Av1KeyframeFraming.BuildSequenceHeaderConfig(width, height);
-        byte[] shPayload = Av1SequenceHeaderWriter.EmitPayload(shConfig);
-        byte[] shObu = Av1ObuWriter.EmitObu(
-            Av1ObuType.SequenceHeader, shPayload, hasSizeField: true);
-        var sh = Av1KeyframeFraming.SynthesizeSequenceHeader(shConfig);
+        // ---- The levels a single-tile stream at 30 frames per second can signal (TD + SH OBUs of each) ----
+        var tiles = Av1TileLayout.SingleTile(width, height);
+        var candidates = Av1KeyframeFraming.BuildLevelCandidates(width, height, tiles, 30, 1);
+        var sh = Av1KeyframeFraming.SynthesizeSequenceHeader(
+            Av1KeyframeFraming.BuildSequenceHeaderConfig(width, height, candidates[0].Signal));
 
         // ---- Frame OBU = uncompressed header + (GPU-produced) tile bytes ----
-        byte[] uncompressedHeader = Av1KeyframeFraming.BuildUncompressedHeader(sh, width, height, baseQIndex);
+        byte[] uncompressedHeader = Av1KeyframeFraming.BuildUncompressedHeader(sh, width, height, baseQIndex, tiles);
         var frameOuter = new byte[uncompressedHeader.Length + tileBytes.Length];
         Buffer.BlockCopy(uncompressedHeader, 0, frameOuter, 0, uncompressedHeader.Length);
         Buffer.BlockCopy(tileBytes, 0, frameOuter, uncompressedHeader.Length, tileBytes.Length);
         byte[] frameObu = Av1ObuWriter.EmitObu(
             Av1ObuType.Frame, frameOuter, hasSizeField: true);
 
-        var output = new byte[tdObu.Length + shObu.Length + frameObu.Length];
-        Buffer.BlockCopy(tdObu, 0, output, 0, tdObu.Length);
-        Buffer.BlockCopy(shObu, 0, output, tdObu.Length, shObu.Length);
-        Buffer.BlockCopy(frameObu, 0, output, tdObu.Length + shObu.Length, frameObu.Length);
-        return output;
+        return WithLevelPrefix(candidates, frameObu);
     }
 
     // ------------------------------------------------------------------

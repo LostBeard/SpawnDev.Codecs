@@ -53,6 +53,13 @@ public sealed record VideoFileEncodeOptions
     /// key frame. AV1 writes key frames only so far.
     /// </summary>
     public int? KeyFrameInterval { get; init; }
+    /// <summary>
+    /// AV1: keeps the tile grid inside an AV1 level (a seq_level_idx such as <see cref="Av1.Av1Level.Level5_1"/>;
+    /// <see cref="Av1.Av1KeyframeEncoderGpu.LevelLimit"/>): slower to encode, and a file every decoder of that level
+    /// must decode. Null: no limit, the fastest grid (one superblock per tile). Either way the file signals the level
+    /// it really conforms to, which without a limit is a high one, or "maximum parameters", for most picture sizes.
+    /// </summary>
+    public int? Av1LevelLimit { get; init; }
 
     /// <summary>
     /// The base quantizer index for a libvpx / libaom style quantizer (crf / cq-level, 0..63): their quantizer_to_qindex
@@ -161,7 +168,8 @@ public sealed class VideoFileEncoderGpu : IDisposable
         if (keyInterval < 1) throw new ArgumentOutOfRangeException(nameof(options), "KeyFrameInterval must be at least 1.");
 
         // video packets (AV1: every frame a key frame; VP9: key frames keyInterval apart, inter frames between)
-        var packets = await EncodeVideoAsync(frameCount, staged, frame, width, height, av1, q, keyInterval);
+        var packets = await EncodeVideoAsync(frameCount, staged, frame, width, height, fpsNum, fpsDen, av1, q, keyInterval,
+            options.Av1LevelLimit ?? Av1Level.MaximumParameters);
         // audio packets
         OpusPacketStream? opus = null;
         if (audio != null && audio.Samples.Length > 0)
@@ -175,15 +183,22 @@ public sealed class VideoFileEncoderGpu : IDisposable
     }
 
     private async Task<List<(byte[] Data, bool Key)>> EncodeVideoAsync(int frameCount, bool staged,
-        Func<int, ArrayView1D<float, Stride1D.Dense>, ArrayView1D<float, Stride1D.Dense>> frame, int width, int height, bool av1, int q,
-        int keyInterval)
+        Func<int, ArrayView1D<float, Stride1D.Dense>, ArrayView1D<float, Stride1D.Dense>> frame, int width, int height,
+        int fpsNum, int fpsDen, bool av1, int q, int keyInterval, int av1LevelLimit)
     {
         _toRgba ??= await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<byte>>(ToRgbaKernel);
         await _toYuv.EnsureKernelsAsync();
         int pixels = width * height;
         long chroma = WebPRgbaToYuvGpu.ChromaPlaneSize(width, height);
         int max = av1 ? Av1KeyframeEncoderGpu.GetMaxEncodedSize(width, height) : Vp9EncoderGpu.GetMaxEncodedSize(width, height);
-        if (!av1)
+        if (av1)
+        {
+            // the level each frame signals depends on the rate it is shown at and on the tile grid
+            _av1 ??= new Av1KeyframeEncoderGpu(_acc);
+            _av1.SetFrameRate(fpsNum, fpsDen);
+            _av1.LevelLimit = av1LevelLimit;
+        }
+        else
         {
             // one file = one sequence: it starts with a key frame
             _vp9 ??= new Vp9EncoderGpu(_acc);
@@ -207,7 +222,7 @@ public sealed class VideoFileEncoderGpu : IDisposable
             _toYuv.Convert(rgba.View, width, height, y.View, u.View, v.View, alpha.View);
             int n;
             bool key = true;
-            if (av1) n = await (_av1 ??= new Av1KeyframeEncoderGpu(_acc)).EncodeKeyFrameAsync(y.View, u.View, v.View, width, height, output.View, q);
+            if (av1) n = await _av1!.EncodeKeyFrameAsync(y.View, u.View, v.View, width, height, output.View, q);
             else
             {
                 var encoded = await _vp9!.EncodeFrameAsync(y.View, u.View, v.View, width, height, output.View, q);
@@ -216,6 +231,14 @@ public sealed class VideoFileEncoderGpu : IDisposable
             }
             var bytes = await output.View.SubView(0, n).CopyToHostAsync();
             packets.Add((av1 ? Av1Isobmff.ToSample(bytes) : bytes, key));
+        }
+        if (av1 && packets.Count > 0)
+        {
+            // one file = one sequence = one sequence header: each frame signalled the level a stream of frames of ITS
+            // size conforms to; the file takes the highest of them (the level of its largest frame)
+            var units = packets.Select(p => p.Data).ToList();
+            Av1Isobmff.UnifySequenceHeaders(units);
+            for (int k = 0; k < packets.Count; k++) packets[k] = (units[k], packets[k].Key);
         }
         return packets;
     }

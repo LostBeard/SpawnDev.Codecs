@@ -15,7 +15,8 @@
 //   initial_display_delay_present_flag = 0    f(1)
 //   operating_points_cnt_minus_1 = 0          f(5)
 //   operating_point_idc[0] = 0     f(12)
-//   seq_level_idx[0]               f(5)        (level <= 7, no tier bit)
+//   seq_level_idx[0]               f(5)
+//   [seq_tier[0] if seq_level_idx[0] > 7]     f(1)
 //   frame_width_bits_minus_1       f(4)
 //   frame_height_bits_minus_1      f(4)
 //   max_frame_width_minus_1        f(frame_width_bits)
@@ -56,8 +57,14 @@ public sealed record Av1SequenceHeaderConfig
     /// <summary>seq_profile (0 = Main 8/10-bit 4:2:0, 1 = High 4:4:4, 2 = Pro 4:2:2 / 12-bit).</summary>
     public required int SeqProfile { get; init; }
 
-    /// <summary>seq_level_idx[0]. Common values: 0 (level 2.0) up to 7 (level 3.3).</summary>
+    /// <summary>
+    /// seq_level_idx[0], 0..31: level X.Y with X = 2 + (idx &gt;&gt; 2), Y = idx &amp; 3; 31 = maximum parameters. The
+    /// level the stream conforms to (<see cref="Av1Level.Select"/>).
+    /// </summary>
     public int SeqLevelIdx0 { get; init; } = 0;
+
+    /// <summary>seq_tier[0]: 0 = Main, 1 = High. Coded only when seq_level_idx[0] &gt; 7, and must be 0 otherwise.</summary>
+    public int SeqTier0 { get; init; } = 0;
 
     /// <summary>Maximum frame width in pixels (1..2^16).</summary>
     public required int MaxFrameWidth { get; init; }
@@ -168,6 +175,7 @@ public sealed record Av1SequenceHeaderConfig
         {
             SeqProfile = sh.SeqProfile,
             SeqLevelIdx0 = sh.SeqLevelIdx0,
+            SeqTier0 = sh.SeqTier0,
             MaxFrameWidth = sh.MaxFrameWidth,
             MaxFrameHeight = sh.MaxFrameHeight,
             BitDepth = sh.BitDepth,
@@ -228,7 +236,7 @@ public static class Av1SequenceHeaderWriter
 
         bw.WriteBits(0, 12); // operating_point_idc[0]
         bw.WriteBits(cfg.SeqLevelIdx0, 5);
-        // No tier bit because seq_level_idx <= 7.
+        if (cfg.SeqLevelIdx0 > 7) bw.WriteBits(cfg.SeqTier0, 1); // seq_tier[0]; inferred 0 for the levels below 4.0
 
         int wBits = MinBitsForValue(cfg.MaxFrameWidth - 1);
         int hBits = MinBitsForValue(cfg.MaxFrameHeight - 1);
@@ -347,9 +355,12 @@ public static class Av1SequenceHeaderWriter
             throw new ArgumentOutOfRangeException(nameof(cfg.BitDepth));
         if (cfg.BitDepth == 12 && cfg.SeqProfile != 2)
             throw new ArgumentException("12-bit only valid with profile 2.", nameof(cfg));
-        if ((uint)cfg.SeqLevelIdx0 > 7)
-            throw new ArgumentOutOfRangeException(nameof(cfg.SeqLevelIdx0),
-                "Writer only supports seq_level_idx <= 7 (no tier bit emitted).");
+        if ((uint)cfg.SeqLevelIdx0 > 31)
+            throw new ArgumentOutOfRangeException(nameof(cfg.SeqLevelIdx0), "seq_level_idx is a 5-bit field (0..31).");
+        if ((uint)cfg.SeqTier0 > 1)
+            throw new ArgumentOutOfRangeException(nameof(cfg.SeqTier0), "seq_tier is 0 (Main) or 1 (High).");
+        if (cfg.SeqTier0 != 0 && cfg.SeqLevelIdx0 <= 7)
+            throw new ArgumentException("seq_tier 1 needs seq_level_idx above 7 (level 4.0): below it the tier bit is not coded.", nameof(cfg));
     }
 
     private static int MinBitsForValue(int value)

@@ -55,6 +55,11 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
     private readonly MemoryBuffer1D<ushort, global::ILGPU.Stride1D.Dense> _dUshortConsts;
     private readonly MemoryBuffer1D<short, global::ILGPU.Stride1D.Dense> _dDcAcQuant;
     private readonly MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense> _blob;
+    // What the framing blob on the accelerator was built for (width, height, q, tile grid, frame rate), and where its
+    // uncompressed header is.
+    private (int, int, int, int, int, int, int) _blobKey = (-1, 0, 0, 0, 0, 0, 0);
+    private int _blobBOffset;
+    private int _blobBLen;
     private readonly MemoryBuffer1D<int, global::ILGPU.Stride1D.Dense> _outLen;
 
     // Recon readback (diagnostic entry points): crops the coded-size recon planes to the picture, on the accelerator.
@@ -85,6 +90,9 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
 
     private int _tileSizeSuperblocks = 1;
     private int _maxTiles = Av1TileLayout.HardwareDecoderMaxTiles;
+    private int _frameRateNum = 30;
+    private int _frameRateDen = 1;
+    private int _levelLimit = Av1Level.MaximumParameters;
 
     /// <summary>Construct an encoder bound to <paramref name="accelerator"/>. Uploads the constant tables once.</summary>
     public Av1KeyframeEncoderGpu(Accelerator accelerator)
@@ -158,11 +166,56 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         }
     }
 
+    /// <summary>Frames per second the stream is shown at, numerator (default 30). See <see cref="SetFrameRate"/>.</summary>
+    public int FrameRateNumerator => _frameRateNum;
+
+    /// <summary>Frames per second the stream is shown at, denominator (default 1). See <see cref="SetFrameRate"/>.</summary>
+    public int FrameRateDenominator => _frameRateDen;
+
+    /// <summary>
+    /// The rate the encoded frames will be shown at: <paramref name="numerator"/> / <paramref name="denominator"/>
+    /// frames per second (default 30). It changes no coded picture; it decides the LEVEL the sequence header signals,
+    /// because an AV1 level limits luma samples, frame headers, tiles and bits per second (<see cref="Av1Level"/>).
+    /// Every frame signals the lowest level and tier a stream of frames like it, at this rate, conforms to
+    /// (seq_level_idx 31, "maximum parameters", when it conforms to none), so set the real rate before encoding.
+    /// A file takes ONE sequence header for all its frames: <see cref="Container.Mp4.Av1Isobmff.UnifySequenceHeaders"/>.
+    /// </summary>
+    public void SetFrameRate(int numerator, int denominator = 1)
+    {
+        if (numerator <= 0) throw new ArgumentOutOfRangeException(nameof(numerator), "The frame rate must be positive.");
+        if (denominator <= 0) throw new ArgumentOutOfRangeException(nameof(denominator), "The frame rate must be positive.");
+        _frameRateNum = numerator;
+        _frameRateDen = denominator;
+    }
+
+    /// <summary>
+    /// Keeps the tile grid inside an AV1 level: a seq_level_idx (<see cref="Av1Level.Level4_0"/>,
+    /// <see cref="Av1Level.Level5_1"/>, ...), or <see cref="Av1Level.MaximumParameters"/> (31, the default) for no
+    /// limit. This is the speed / decoder reach trade. Tiles are this encoder's parallelism, and a level allows few
+    /// of them (8 at level 2.0 up to 128 at level 6.x, in at most 4 to 16 columns), so the default grid of one
+    /// superblock per tile is the fastest and makes most pictures signal a high level, or 31 (a 1920x1080 frame of
+    /// 255 tiles fits no level). With a limit, the grid uses at most the tiles of that level, or of the lowest level
+    /// the picture size and frame rate need when that is higher (<see cref="Av1Level.TileLayout"/>): bigger tiles,
+    /// a slower encode, and a stream every decoder of that level must decode. The level signalled can still be
+    /// higher than the limit when the coded frames are too large for its bit rate (there is no rate control: lower
+    /// the quality to lower the level).
+    /// </summary>
+    public int LevelLimit
+    {
+        get => _levelLimit;
+        set
+        {
+            if (value != Av1Level.MaximumParameters && !Av1Level.TryGetLimits(value, out _))
+                throw new ArgumentOutOfRangeException(nameof(value), $"seq_level_idx {value} is not a defined AV1 level (or 31).");
+            _levelLimit = value;
+        }
+    }
+
     /// <summary>The tile grid this encoder uses for a <paramref name="width"/> x <paramref name="height"/> picture.</summary>
     public Av1TileLayout GetTileLayout(int width, int height)
     {
         RequireSupportedSize(width, height);
-        return Av1TileLayout.Compute(width, height, _tileSizeSuperblocks, _maxTiles);
+        return Av1Level.TileLayout(width, height, _tileSizeSuperblocks, _maxTiles, _frameRateNum, _frameRateDen, _levelLimit);
     }
 
     // ------------------------------------------------------------------
@@ -301,15 +354,15 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         if (output.Length < cap)
             throw new ArgumentException($"output must be at least GetMaxEncodedSize({width}, {height}) bytes.", nameof(output));
 
-        var tiles = Av1TileLayout.Compute(width, height, _tileSizeSuperblocks, _maxTiles);
+        var tiles = GetTileLayout(width, height);
         await RunTilesAsync(yPlane, uPlane, vPlane, width, height, baseQIndex, tiles);
-        Assemble(width, height, baseQIndex, tiles, _dTile!.View, _dTileLen!.View, _dTileOff!.View, output, _outLen.View, cap, uploadBlob: true);
+        Assemble(width, height, baseQIndex, tiles, _dTile!.View, _dTileLen!.View, _dTileOff!.View, output, _outLen.View, cap);
         await _accelerator.SynchronizeAsync();
         return (await _outLen.CopyToHostAsync())[0];
     }
 
     /// <summary>
-    /// Dispatches the OBU assembly for one frame (blob upload when <paramref name="uploadBlob"/>, then the kernels).
+    /// Dispatches the OBU assembly for one frame (the framing blob's upload when it changed, then the kernels).
     /// No synchronization. <paramref name="cap"/> = GetMaxEncodedSize: no temporal unit is longer.
     /// </summary>
     private void Assemble(
@@ -317,12 +370,20 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         ArrayView1D<byte, global::ILGPU.Stride1D.Dense> tileBytes, ArrayView1D<long, global::ILGPU.Stride1D.Dense> tileLen,
         ArrayView1D<int, global::ILGPU.Stride1D.Dense> tileOff,
         ArrayView1D<byte, global::ILGPU.Stride1D.Dense> output, ArrayView1D<int, global::ILGPU.Stride1D.Dense> outLen,
-        int cap, bool uploadBlob)
+        int cap)
     {
-        byte[] blob = Av1KeyframeFraming.BuildFramingBlob(width, height, baseQIndex, tiles, out int aLen, out int bLen);
-        if (blob.Length > BlobCapacity) throw new InvalidOperationException("AV1 framing blob exceeds its buffer (internal error).");
-        if (uploadBlob) DeviceTransfer.Upload(_blob.View, blob);
-        _obu.Run(_blob.View, tileBytes, tileLen, tileOff, output, outLen, aLen, bLen, tiles.TileCount, TileCapacity(tiles), cap);
+        // The blob depends only on these (uniform tile spacing: the two log2 values are the grid), so it is built and
+        // uploaded when one of them changes, not per frame.
+        var key = (width, height, baseQIndex, tiles.TileColsLog2, tiles.TileRowsLog2, _frameRateNum, _frameRateDen);
+        if (key != _blobKey)
+        {
+            byte[] blob = Av1KeyframeFraming.BuildFramingBlob(
+                width, height, baseQIndex, tiles, _frameRateNum, _frameRateDen, out _blobBOffset, out _blobBLen);
+            if (blob.Length > BlobCapacity) throw new InvalidOperationException("AV1 framing blob exceeds its buffer (internal error).");
+            DeviceTransfer.Upload(_blob.View, blob);
+            _blobKey = key;
+        }
+        _obu.Run(_blob.View, tileBytes, tileLen, tileOff, output, outLen, _blobBOffset, _blobBLen, tiles.TileCount, TileCapacity(tiles), cap);
     }
 
     /// <summary>
@@ -408,7 +469,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         int uvLen = ChromaWidth(width) * ChromaHeight(height);
         int srcLen = yLen + uvLen + uvLen;
         int reconLen = ReconLength(width, height);
-        var tiles = Av1TileLayout.Compute(width, height, _tileSizeSuperblocks, _maxTiles);
+        var tiles = GetTileLayout(width, height);
         int tileCount = tiles.TileCount;
         int tileStride = TileCapacity(tiles);
         long slots = (long)frameCount * tileCount;
@@ -419,7 +480,8 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         using var dAllRecon = _accelerator.Allocate1D<byte>((long)frameCount * reconLen);
         using var dAllTile = _accelerator.Allocate1D<byte>(slots * tileStride);
         using var dAllTileLen = _accelerator.Allocate1D<long>(slots);
-        using var dAllTileOff = _accelerator.Allocate1D<int>((long)frameCount * (tileCount + 1));
+        int offStride = Av1ObuAssembleKernel.OffsetsLength(tileCount);
+        using var dAllTileOff = _accelerator.Allocate1D<int>((long)frameCount * offStride);
         using var dAllScratchByte = _accelerator.Allocate1D<byte>(slots * scratchByteLen);
         using var dAllScratchInt = _accelerator.Allocate1D<int>(slots * scratchIntLen);
         using var dAllScratchShort = _accelerator.Allocate1D<short>(slots * scratchShortLen);
@@ -462,10 +524,10 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
             Assemble(width, height, baseQIndex, tiles,
                 dAllTile.View.SubView((long)f * tileCount * tileStride, (long)tileCount * tileStride),
                 dAllTileLen.View.SubView((long)f * tileCount, tileCount),
-                dAllTileOff.View.SubView((long)f * (tileCount + 1), tileCount + 1),
+                dAllTileOff.View.SubView((long)f * offStride, offStride),
                 outputs.SubView((long)f * cap, cap),
                 lengths.SubView(f, 1),
-                cap, uploadBlob: f == 0);
+                cap);
             await obuPacer.LaunchedAsync();
         }
 
@@ -734,7 +796,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         _dRecon = _accelerator.Allocate1D<byte>(reconLen);
         _dTile = _accelerator.Allocate1D<byte>((long)tileCount * tileStride);
         _dTileLen = _accelerator.Allocate1D<long>(tileCount);
-        _dTileOff = _accelerator.Allocate1D<int>(tileCount + 1);
+        _dTileOff = _accelerator.Allocate1D<int>(Av1ObuAssembleKernel.OffsetsLength(tileCount));
         _dScratchByte = _accelerator.Allocate1D<byte>((long)tileCount * scratchByteLen);
         _dScratchInt = _accelerator.Allocate1D<int>((long)tileCount * scratchIntLen);
         _dScratchShort = _accelerator.Allocate1D<short>((long)tileCount * scratchShortLen);

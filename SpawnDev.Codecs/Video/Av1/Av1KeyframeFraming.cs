@@ -6,6 +6,14 @@
 // 8-bit 4:2:0, 64x64 superblocks, uniform tile spacing (the grid is an Av1TileLayout), loop filter / CDEF / LR /
 // segmentation off.
 //
+// The level. The sequence header signals the level and tier the stream conforms to (Av1Level, AV1 spec Annex A.3).
+// Picture size, frame rate and tile grid decide which levels are possible at all; among those, the bytes of the coded
+// frame decide (frame size limit, bit rate limit), and those are known only after the tiles are coded. So the framing
+// holds one sequence header per possible level / tier (BuildLevelCandidates, in order of preference, each with the
+// largest Frame OBU it allows) and the frame gets the first one it fits: Av1ObuAssembleKernel picks it on the
+// accelerator, the CPU reference with SelectLevelCandidate. The sequence headers differ only in seq_level_idx and
+// seq_tier (and by one bit of length: the tier is coded from level 4.0 up).
+//
 using SpawnDev.Codecs.EntropyCoders;
 
 namespace SpawnDev.Codecs.Video.Av1;
@@ -14,48 +22,119 @@ namespace SpawnDev.Codecs.Video.Av1;
 internal static class Av1KeyframeFraming
 {
     /// <summary>
-    /// The fixed part of a keyframe temporal unit for a <paramref name="width"/> x <paramref name="height"/> picture:
-    /// the Temporal Delimiter OBU and Sequence Header OBU (<paramref name="aLen"/> bytes) followed by the
-    /// uncompressed frame header (<paramref name="bLen"/> bytes). Small, depends only on (width, height, q), and is
-    /// uploaded to the accelerator where <see cref="Av1ObuAssembleKernel"/> adds the data-dependent Frame OBU size
-    /// and the GPU-produced tile bytes.
+    /// The fixed part of a keyframe temporal unit for a <paramref name="width"/> x <paramref name="height"/> picture
+    /// coded with the tile grid <paramref name="tiles"/> and shown at <paramref name="frameRateNum"/> /
+    /// <paramref name="frameRateDen"/> frames per second: for every level the stream can signal, the Temporal
+    /// Delimiter and Sequence Header OBUs, and the uncompressed frame header (<paramref name="bLen"/> bytes at
+    /// <paramref name="bOffset"/>). Small, depends only on its arguments, and is uploaded to the accelerator where
+    /// <see cref="Av1ObuAssembleKernel"/> picks the level the coded frame fits and adds the data-dependent Frame OBU
+    /// size and the GPU-produced tile bytes.
     /// </summary>
-    internal static byte[] BuildFramingBlob(int width, int height, int baseQIndex, out int aLen, out int bLen) =>
-        BuildFramingBlob(width, height, baseQIndex, Av1TileLayout.SingleTile(width, height), out aLen, out bLen);
-
-    /// <summary>The framing blob for a frame coded with the tile grid <paramref name="tiles"/>.</summary>
-    internal static byte[] BuildFramingBlob(int width, int height, int baseQIndex, Av1TileLayout tiles, out int aLen, out int bLen)
+    /// <remarks>
+    /// Blob layout (<see cref="Av1ObuAssembleKernel"/> reads it): the level table, then the candidates' prefixes,
+    /// then the uncompressed header at <paramref name="bOffset"/>. The table is little-endian 32-bit integers: the
+    /// candidate count, then per candidate, in order of preference, the largest Frame OBU length it allows, the
+    /// offset of its prefix (temporal delimiter and sequence header OBUs) in the blob and the prefix's length. The
+    /// last candidate (maximum parameters) allows any length.
+    /// </remarks>
+    internal static byte[] BuildFramingBlob(
+        int width, int height, int baseQIndex, Av1TileLayout tiles, int frameRateNum, int frameRateDen, out int bOffset, out int bLen)
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
-        byte[] tdObu = Av1ObuWriter.EmitObu(
-            Av1ObuType.TemporalDelimiter, ReadOnlySpan<byte>.Empty, hasSizeField: true);
-        var shConfig = BuildSequenceHeaderConfig(width, height);
-        byte[] shPayload = Av1SequenceHeaderWriter.EmitPayload(shConfig);
-        byte[] shObu = Av1ObuWriter.EmitObu(
-            Av1ObuType.SequenceHeader, shPayload, hasSizeField: true);
-        var sh = SynthesizeSequenceHeader(shConfig);
+        var candidates = BuildLevelCandidates(width, height, tiles, frameRateNum, frameRateDen);
+        var sh = SynthesizeSequenceHeader(BuildSequenceHeaderConfig(width, height, candidates[0].Signal));
         byte[] uncompressedHeader = BuildUncompressedHeader(sh, width, height, baseQIndex, tiles);
 
-        aLen = tdObu.Length + shObu.Length;
+        int tableLen = LevelTableHeaderBytes + candidates.Count * LevelTableEntryBytes;
+        bOffset = tableLen + candidates.Sum(c => c.Prefix.Length);
         bLen = uncompressedHeader.Length;
-        var blob = new byte[aLen + bLen];
-        Buffer.BlockCopy(tdObu, 0, blob, 0, tdObu.Length);
-        Buffer.BlockCopy(shObu, 0, blob, tdObu.Length, shObu.Length);
-        Buffer.BlockCopy(uncompressedHeader, 0, blob, aLen, bLen);
+        var blob = new byte[bOffset + bLen];
+        WriteInt32(blob, 0, candidates.Count);
+        int at = tableLen;
+        for (int c = 0; c < candidates.Count; c++)
+        {
+            int entry = LevelTableHeaderBytes + c * LevelTableEntryBytes;
+            WriteInt32(blob, entry, (int)Math.Min(candidates[c].MaxFrameObuBytes, int.MaxValue));
+            WriteInt32(blob, entry + 4, at);
+            WriteInt32(blob, entry + 8, candidates[c].Prefix.Length);
+            Buffer.BlockCopy(candidates[c].Prefix, 0, blob, at, candidates[c].Prefix.Length);
+            at += candidates[c].Prefix.Length;
+        }
+        Buffer.BlockCopy(uncompressedHeader, 0, blob, bOffset, bLen);
         return blob;
+    }
+
+    /// <summary>Bytes of the candidate count at the start of the framing blob.</summary>
+    internal const int LevelTableHeaderBytes = 4;
+    /// <summary>Bytes of one candidate's entry in the framing blob's level table (limit, prefix offset, prefix length).</summary>
+    internal const int LevelTableEntryBytes = 12;
+
+    private static void WriteInt32(byte[] buffer, int at, int value)
+    {
+        buffer[at] = (byte)value;
+        buffer[at + 1] = (byte)(value >> 8);
+        buffer[at + 2] = (byte)(value >> 16);
+        buffer[at + 3] = (byte)(value >> 24);
+    }
+
+    // ------------------------------------------------------------------
+    // Level candidates
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// One level / tier a keyframe stream can signal: its temporal unit prefix (Temporal Delimiter OBU, then the
+    /// Sequence Header OBU signalling <paramref name="Signal"/>) and the largest Frame OBU, in bytes, with which the
+    /// stream still conforms to it.
+    /// </summary>
+    internal readonly record struct LevelCandidate(Av1LevelSignal Signal, byte[] Prefix, long MaxFrameObuBytes);
+
+    /// <summary>
+    /// The levels and tiers a stream of <paramref name="width"/> x <paramref name="height"/> keyframes with the tile
+    /// grid <paramref name="tiles"/>, shown at <paramref name="frameRateNum"/> / <paramref name="frameRateDen"/>
+    /// frames per second, can signal (<see cref="Av1Level.Signals"/>: in order of preference, the last one maximum
+    /// parameters), each with its prefix bytes and its frame size limit.
+    /// </summary>
+    internal static List<LevelCandidate> BuildLevelCandidates(int width, int height, Av1TileLayout tiles, int frameRateNum, int frameRateDen)
+    {
+        var stream = new Av1LevelStream
+        {
+            SeqProfile = 0, Width = width, Height = height, Tiles = tiles, FrameRateNum = frameRateNum, FrameRateDen = frameRateDen,
+        };
+        byte[] tdObu = Av1ObuWriter.EmitObu(
+            Av1ObuType.TemporalDelimiter, ReadOnlySpan<byte>.Empty, hasSizeField: true);
+        var list = new List<LevelCandidate>();
+        foreach (var signal in Av1Level.Signals(stream))
+        {
+            byte[] shPayload = Av1SequenceHeaderWriter.EmitPayload(BuildSequenceHeaderConfig(width, height, signal));
+            byte[] shObu = Av1ObuWriter.EmitObu(Av1ObuType.SequenceHeader, shPayload, hasSizeField: true);
+            var prefix = new byte[tdObu.Length + shObu.Length];
+            Buffer.BlockCopy(tdObu, 0, prefix, 0, tdObu.Length);
+            Buffer.BlockCopy(shObu, 0, prefix, tdObu.Length, shObu.Length);
+            list.Add(new LevelCandidate(signal, prefix, Av1Level.MaxFrameObuBytes(signal, stream, prefix.Length)));
+        }
+        return list;
+    }
+
+    /// <summary>The first of <paramref name="candidates"/> that allows a Frame OBU of <paramref name="frameObuBytes"/> bytes (the last allows any).</summary>
+    internal static LevelCandidate SelectLevelCandidate(List<LevelCandidate> candidates, long frameObuBytes)
+    {
+        foreach (var c in candidates)
+            if (c.MaxFrameObuBytes >= frameObuBytes) return c;
+        return candidates[^1];
     }
 
     // ------------------------------------------------------------------
     // Sequence header
     // ------------------------------------------------------------------
 
-    internal static Av1SequenceHeaderConfig BuildSequenceHeaderConfig(int width, int height)
+    internal static Av1SequenceHeaderConfig BuildSequenceHeaderConfig(int width, int height, Av1LevelSignal level)
     {
         return new Av1SequenceHeaderConfig
         {
             SeqProfile = 0,
-            SeqLevelIdx0 = 0,
+            SeqLevelIdx0 = level.SeqLevelIdx,
+            SeqTier0 = level.SeqTier,
             MaxFrameWidth = width,
             MaxFrameHeight = height,
             BitDepth = 8,
@@ -94,6 +173,7 @@ internal static class Av1KeyframeFraming
         {
             SeqProfile = cfg.SeqProfile,
             SeqLevelIdx0 = cfg.SeqLevelIdx0,
+            SeqTier0 = cfg.SeqTier0,
             MaxFrameWidth = cfg.MaxFrameWidth,
             MaxFrameHeight = cfg.MaxFrameHeight,
             BitDepth = cfg.BitDepth,
@@ -136,10 +216,6 @@ internal static class Av1KeyframeFraming
     // ------------------------------------------------------------------
     // Uncompressed header (mirrors Av1CompleteFrameHeaderParser bit-for-bit)
     // ------------------------------------------------------------------
-
-    internal static byte[] BuildUncompressedHeader(
-        Av1SequenceHeader sh, int width, int height, int baseQIndex) =>
-        BuildUncompressedHeader(sh, width, height, baseQIndex, Av1TileLayout.SingleTile(width, height));
 
     /// <summary>The uncompressed frame header for a frame coded with the tile grid <paramref name="tiles"/>.</summary>
     internal static byte[] BuildUncompressedHeader(

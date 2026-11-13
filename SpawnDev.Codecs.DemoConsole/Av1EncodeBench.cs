@@ -2,13 +2,15 @@
 // (the ArrayView overload: only the encoded length crosses to the host per frame). Prints the time per keyframe
 // (median, mean, min over the timed runs, after warm-up encodes that pay for kernel compilation) and the encoded size.
 // Usage: av1-encode-bench [--backend cpu|velocity|cuda|opencl] [--size 832x480] [--frames 12] [--warmup 2] [--q 40]
-//                         [--tile N|max] [--maxtiles N] [--batch N] [--out file.obu]
+//                         [--tile N|max] [--maxtiles N] [--batch N] [--out file.obu] [--fps N[/D]] [--level X.Y|none]
 //                         [--dump-kernel file]
 // --tile: largest tile size in 64x64 superblocks per side (Av1KeyframeEncoderGpu.TileSizeSuperblocks; default 1 =
 //         one GPU thread per superblock; max = the fewest tiles the picture allows, one thread per frame).
 // --maxtiles: the most tiles per frame (Av1KeyframeEncoderGpu.MaxTiles; default 256, what hardware decoders take).
 // --batch: frames per EncodeKeyFramesBatchAsync call (default 1 = EncodeKeyFrameAsync). A timed run is one call;
 //          the time per keyframe is the call's time divided by the batch size.
+// --fps: the rate the frames are shown at (Av1KeyframeEncoderGpu.SetFrameRate; default 30): it decides the level signalled.
+// --level: keep the tile grid inside an AV1 level (Av1KeyframeEncoderGpu.LevelLimit), e.g. 4.0 or 5.1; none = no limit.
 // --out: write the last encoded temporal unit to a file (an .obu file FFmpeg reads: ffmpeg -i file.obu ...).
 // --dump-kernel: write the tile kernel as the backend compiles it (PTX on CUDA, OpenCL C on OpenCL) and exit.
 // For an A/B of two builds: run the two executables alternately, several times each, with nothing else on the GPU.
@@ -36,6 +38,7 @@ internal static class Av1EncodeBench
         string backend = "velocity";
         string? outPath = null, dumpPath = null;
         int width = 832, height = 480, frames = 12, warmup = 2, q = 40, tile = 1, batch = 1, maxTiles = Av1TileLayout.HardwareDecoderMaxTiles;
+        int fpsNum = 30, fpsDen = 1, levelLimit = Av1Level.MaximumParameters;
         for (int i = 1; i < args.Length; i++)
         {
             string a = args[i];
@@ -56,6 +59,22 @@ internal static class Av1EncodeBench
             else if (a == "--batch") batch = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--maxtiles") maxTiles = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--out") outPath = v;
+            else if (a == "--fps")
+            {
+                var parts = v.Split('/');
+                fpsNum = int.Parse(parts[0], CultureInfo.InvariantCulture);
+                fpsDen = parts.Length > 1 ? int.Parse(parts[1], CultureInfo.InvariantCulture) : 1;
+            }
+            else if (a == "--level")
+            {
+                if (v == "none") levelLimit = Av1Level.MaximumParameters;
+                else
+                {
+                    var parts = v.Split('.');
+                    if (parts.Length != 2) { Console.WriteLine("--level takes X.Y (for example 5.1) or none"); return 2; }
+                    levelLimit = ((int.Parse(parts[0], CultureInfo.InvariantCulture) - 2) << 2) | int.Parse(parts[1], CultureInfo.InvariantCulture);
+                }
+            }
             else if (a == "--dump-kernel") dumpPath = v;
             else { Console.WriteLine($"unknown option {a}"); return 2; }
         }
@@ -111,7 +130,8 @@ internal static class Av1EncodeBench
                 v2[r * cw + c] = Texel(2 * c + 77, 2 * r + 409, 3);
             }
 
-        using var enc = new Av1KeyframeEncoderGpu(acc) { TileSizeSuperblocks = tile, MaxTiles = maxTiles };
+        using var enc = new Av1KeyframeEncoderGpu(acc) { TileSizeSuperblocks = tile, MaxTiles = maxTiles, LevelLimit = levelLimit };
+        enc.SetFrameRate(fpsNum, fpsDen);
         var layout = enc.GetTileLayout(width, height);
         int cap = Av1KeyframeEncoderGpu.GetMaxEncodedSize(width, height);
         // batch frames of the same picture, frame-major (the batch overload's layout)
@@ -159,18 +179,18 @@ internal static class Av1EncodeBench
         foreach (double m in ms) mean += m;
         mean /= frames;
         string build = typeof(Av1KeyframeEncoderGpu).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
-        if (outPath != null)
-        {
-            // a terminal file sink: the first frame's temporal unit
-            byte[] unit = await dOut.View.SubView(0, len).CopyToHostAsync();
-            await File.WriteAllBytesAsync(outPath, unit);
-        }
+        // the first frame's temporal unit: its sequence header (after the 2-byte temporal delimiter) for the level, and the file
+        byte[] unit = await dOut.View.SubView(0, len).CopyToHostAsync();
+        var sh = Av1SequenceHeaderParser.Parse(unit.AsSpan(4, unit[3]));
+        var level = new Av1LevelSignal(sh.SeqLevelIdx0, sh.SeqTier0);
+        double mbps = len * 8.0 * fpsNum / fpsDen / 1e6;
+        if (outPath != null) await File.WriteAllBytesAsync(outPath, unit);
         string tileText = tile == int.MaxValue ? "max" : tile.ToString(CultureInfo.InvariantCulture);
         Console.WriteLine($"av1-encode-bench {acc.AcceleratorType} {width}x{height} q{q} tile {tileText} " +
             $"({layout.TileCols} x {layout.TileRows} = {layout.TileCount} tiles of {layout.TileWidthSb} x {layout.TileHeightSb} superblocks) batch {batch}: " +
             $"median {F(median, "F2")} ms, mean {F(mean, "F2")} ms, " +
             $"min {F(sorted[0], "F2")} ms, max {F(sorted[frames - 1], "F2")} ms per keyframe over {frames} {(batch == 1 ? "frames" : "batches")} " +
-            $"({F(1000.0 / median, "F2")} fps); {len} bytes; warm-up {warmup} frames {F(compile.Elapsed.TotalMilliseconds, "F0")} ms; SpawnDev.Codecs {build}");
+            $"({F(1000.0 / median, "F2")} fps); {len} bytes = {F(mbps, "F1")} Mbit/s at {fpsNum}/{fpsDen} fps, level signalled: {level} (seq_level_idx {level.SeqLevelIdx}){(levelLimit == Av1Level.MaximumParameters ? "" : $", tile grid limited to seq_level_idx {levelLimit}")}; warm-up {warmup} frames {F(compile.Elapsed.TotalMilliseconds, "F0")} ms; SpawnDev.Codecs {build}");
         return 0;
     }
 

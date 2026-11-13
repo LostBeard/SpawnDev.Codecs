@@ -20,9 +20,10 @@
 // HardwareDecoderMaxTiles (256) unless the caller raises it: when the wanted tile size gives more, the tiles grow
 // (columns or rows are halved) to the layout with the smallest tiles that stays within the limit.
 //
-// AV1 level limits (MaxTiles 8 .. 128, MaxTileCols 4 .. 16 by level) are NOT applied: the decoders above do not
-// enforce them (104 tiles in 13 columns at 832x480 decode on all six), and the sequence header of this encoder
-// signals seq_level_idx 0 for every picture size (an inaccuracy older than the tiles, open).
+// AV1 level limits (MaxTiles 8 .. 128, MaxTileCols 4 .. 16 by level, cropped tiles of at least 8 pixels) are not
+// applied by Compute unless the caller passes them (maxTileCols, minEdgeTilePixels): the decoders above do not
+// enforce them (104 tiles in 13 columns at 832x480 decode on all six). Av1Level.TileLayout passes the limits of a
+// level; the sequence header signals the level the grid really needs (Av1Level.Select), 31 when it fits none.
 
 namespace SpawnDev.Codecs.Video.Av1;
 
@@ -69,13 +70,19 @@ public readonly struct Av1TileLayout
     /// tile columns and 64 tile rows), and the fewest tiles possible when it is large. When that gives more than
     /// <paramref name="maxTiles"/> tiles, the tiles grow to the layout with the smallest tiles (in superblocks) that
     /// has at most <paramref name="maxTiles"/>; a picture too large for that gets the fewest tiles its size allows.
+    /// The same holds for the two limits an AV1 level adds: at most <paramref name="maxTileCols"/> tile columns, and
+    /// a last tile column and row that keep at least <paramref name="minEdgeTilePixels"/> pixels of the picture
+    /// (a level needs 8; the defaults, 64 and 1, limit nothing).
     /// </summary>
-    public static Av1TileLayout Compute(int width, int height, int tileSizeSuperblocks, int maxTiles = HardwareDecoderMaxTiles)
+    public static Av1TileLayout Compute(int width, int height, int tileSizeSuperblocks, int maxTiles = HardwareDecoderMaxTiles,
+        int maxTileCols = 64, int minEdgeTilePixels = 1)
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
         if (tileSizeSuperblocks < 1) throw new ArgumentOutOfRangeException(nameof(tileSizeSuperblocks), "tileSizeSuperblocks must be at least 1.");
         if (maxTiles < 1) throw new ArgumentOutOfRangeException(nameof(maxTiles), "maxTiles must be at least 1.");
+        if (maxTileCols < 1) throw new ArgumentOutOfRangeException(nameof(maxTileCols), "maxTileCols must be at least 1.");
+        if (minEdgeTilePixels < 1) throw new ArgumentOutOfRangeException(nameof(minEdgeTilePixels), "minEdgeTilePixels must be at least 1.");
 
         int miCols = ((width + 7) >> 3) << 1, miRows = ((height + 7) >> 3) << 1;
         int sbCols = (miCols + 15) >> 4, sbRows = (miRows + 15) >> 4;
@@ -97,9 +104,14 @@ public readonly struct Av1TileLayout
         int tileHeightSb = (sbRows + (1 << rowsLog2) - 1) >> rowsLog2;
         int tileRows = (sbRows + tileHeightSb - 1) / tileHeightSb;
 
-        if ((long)tileCols * tileRows > maxTiles)
+        // Within the limits: tile count, tile columns, and the picture pixels left to the last tile column / row.
+        bool Fits(int w, int cols, int h, int rows) =>
+            (long)cols * rows <= maxTiles && cols <= maxTileCols
+            && width - (cols - 1) * (long)w * 64 >= minEdgeTilePixels && height - (rows - 1) * (long)h * 64 >= minEdgeTilePixels;
+
+        if (!Fits(tileWidthSb, tileCols, tileHeightSb, tileRows))
         {
-            // Too many tiles: among the layouts with tiles no smaller than the wanted ones, the one with the smallest
+            // Outside a limit: among the layouts with tiles no smaller than the wanted ones, the one with the smallest
             // tile (width x height in superblocks) that fits; equal sizes: the most tiles, then the most columns.
             // When none fits (a picture that needs more than maxTiles tiles of the largest size): the fewest tiles.
             int wantCols = colsLog2, wantRows = rowsLog2;
@@ -115,7 +127,7 @@ public readonly struct Av1TileLayout
                     int h = (sbRows + (1 << r) - 1) >> r;
                     int rows = (sbRows + h - 1) / h;
                     long count = (long)cols * rows, area = (long)w * h;
-                    if (count > maxTiles) continue;
+                    if (!Fits(w, cols, h, rows)) continue;
                     if (area < bestArea || (area == bestArea && count > bestCount))
                     {
                         bestArea = area; bestCount = count; colsLog2 = c; rowsLog2 = r;
