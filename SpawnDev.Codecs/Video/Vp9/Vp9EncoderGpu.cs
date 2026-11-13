@@ -500,7 +500,7 @@ public sealed class Vp9EncoderGpu : IDisposable
             var coder = _boolCoder!;
             coder.Prepare(slots, capacity);
             _symbols(slots, _levels.View, _mi.View, _entropyArgs.View, frameContext, _tables.View, _key.ByteConsts, _key.UshortConsts,
-                _state.View, _nearest!.View, _slotCounts!.View, _slotCounts.View, coder.Window, new Vp9InterSymbolParams());
+                _state.View, _nearest!.View, _slotCounts!.View, coder.Offsets, coder.Window, new Vp9InterSymbolParams());   // offsets unread here (a separate buffer: WebGPU bindings may not alias)
             coder.Begin(_slotCounts.View, slots, capacity);
             await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_acc, "inter: count + offsets");
             int waves = coder.WaveCount((long)slots * Vp9InterSymbols.MaxSymbolsPerSlot);

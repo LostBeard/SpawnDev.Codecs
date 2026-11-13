@@ -399,7 +399,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         int capacity = checked((int)_dTile!.Length);
         var y = _dYCoefs!.View; var u = _dUCoefs!.View; var v = _dVCoefs!.View;
         _boolCoder.Prepare(slots, capacity);
-        _symbolsKernel.Count(y, u, v, _dByteConsts.View, _dUshortConsts.View, _dSlotCounts!.View, _boolCoder.Window,
+        _symbolsKernel.Count(y, u, v, _dByteConsts.View, _dUshortConsts.View, _dSlotCounts!.View, _boolCoder.Offsets, _boolCoder.Window,
             mbCols, mbRows, frameMiCols, frameMiRows);
         _boolCoder.Begin(_dSlotCounts.View, slots, capacity);
         await TraceLaunchAsync(_accelerator, "entropy: count + offsets");

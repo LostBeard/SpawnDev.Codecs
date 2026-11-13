@@ -67,13 +67,16 @@ public sealed class Vp9KeyframeSymbolsKernel
     /// <summary>Slots of a frame: 16 per superblock.</summary>
     public static int SlotCount(int mbCols, int mbRows) => (mbCols >> 2) * (mbRows >> 2) * 16;
 
-    /// <summary>Each slot's symbol count into <paramref name="counts"/>. Queued.</summary>
+    /// <summary>
+    /// Each slot's symbol count into <paramref name="counts"/>. Queued. <paramref name="offsets"/> is not read here, but
+    /// must be a buffer other than <paramref name="counts"/> (WebGPU forbids one buffer in two read-write bindings).
+    /// </summary>
     public void Count(ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
-        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts, ArrayView<int> counts, ArrayView<ushort> window,
+        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts, ArrayView<int> counts, ArrayView<int> offsets, ArrayView<ushort> window,
         int mbCols, int mbRows, int frameMiCols, int frameMiRows)
     {
         var p = new Vp9KeySymbolParams { MbCols = mbCols, MbRows = mbRows, FrameMiCols = frameMiCols, FrameMiRows = frameMiRows };
-        _kernel(SlotCount(mbCols, mbRows), yCoefs, uCoefs, vCoefs, byteConsts, ushortConsts, counts, counts, window, p);
+        _kernel(SlotCount(mbCols, mbRows), yCoefs, uCoefs, vCoefs, byteConsts, ushortConsts, counts, offsets, window, p);
     }
 
     /// <summary>The symbols with a stream index in the coder's window of wave <paramref name="wave"/>. Queued.</summary>
@@ -108,7 +111,8 @@ public sealed class Vp9KeyframeSymbolsKernel
             sink.Hi = hi;
         }
         var tokenCache = LocalMemory.Allocate<byte>(256);
-        EmitSlot(ref sink, window, slot, yCoefs, uCoefs, vCoefs, byteConsts, ushortConsts, tokenCache, p);
+        var block = LocalMemory.Allocate<short>(256);
+        EmitSlot(ref sink, window, slot, yCoefs, uCoefs, vCoefs, byteConsts, ushortConsts, tokenCache, block, p);
         if (p.Write == 0) counts[slot] = sink.Next;
     }
 
@@ -170,7 +174,7 @@ public sealed class Vp9KeyframeSymbolsKernel
 
     private static void EmitSlot(ref Vp8BoolSymbolSink sink, ArrayView<ushort> window, int slot,
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
-        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts, ArrayView<byte> tokenCache, Vp9KeySymbolParams p)
+        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts, ArrayView<byte> tokenCache, ArrayView<short> block, Vp9KeySymbolParams p)
     {
         int frameMiCols = p.FrameMiCols;
         int frameMiRows = p.FrameMiRows;
@@ -289,8 +293,12 @@ public sealed class Vp9KeyframeSymbolsKernel
                 neighborsBase = Vp9KeyframeConstantsGpu.Neighbors16x16Offset;
                 coefProbsBase = Vp9KeyframeConstantsGpu.CoefProbs16x16Offset;
             }
-            var coefs = plane == 0 ? yCoefs.SubView(coefBase, coefCount) : plane == 1 ? uCoefs.SubView(coefBase, coefCount) : vCoefs.SubView(coefBase, coefCount);
-            int eob = EmitBlock(ref sink, window, coefs,
+            // the transform's coefficients, copied from their plane with one loop per plane (WebGPU cannot bind a buffer
+            // chosen at run time; the serial walker copies the same way)
+            if (plane == 0) { for (int i = 0; i < coefCount; i++) block[i] = yCoefs[coefBase + i]; }
+            else if (plane == 1) { for (int i = 0; i < coefCount; i++) block[i] = uCoefs[coefBase + i]; }
+            else { for (int i = 0; i < coefCount; i++) block[i] = vCoefs[coefBase + i]; }
+            int eob = EmitBlock(ref sink, window, block.SubView(0, coefCount),
                 ushortConsts.SubView(scanBase, coefCount), ushortConsts.SubView(neighborsBase, (long)coefCount * 2),
                 byteConsts.SubView(coefProbsBase, 432),
                 byteConsts.SubView(Vp9KeyframeConstantsGpu.CoefConstsOffset, Vp9KeyframeConstantsGpu.CoefConstsLength),
