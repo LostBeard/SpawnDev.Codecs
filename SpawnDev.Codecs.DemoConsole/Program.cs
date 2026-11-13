@@ -39,6 +39,11 @@ if (args.Length > 0 && args[0] == "vp9-encode-bench")
 if (args.Length > 0 && args[0] == "av1-encode-bench")
     return await Av1EncodeBench.Run(args);
 
+// `vp9-key-bench [--backend cpu|velocity|cuda|opencl] [--size 512x512] [--frames 12] [--q 40] [--stages 1]`:
+// Vp9KeyframeEncoderGpu on a synthetic picture already on the accelerator: time per key frame (and per stage).
+if (args.Length > 0 && args[0] == "vp9-key-bench")
+    return await Vp9KeyBench.Run(args);
+
 // `vp9-psnr <source.webm> <encoded1.webm> [...] [--backend ...] [--frames N] [--label text]`: video bytes and PSNR (RGB
 // and luma) of encoded WebM files against a source clip, e.g. libvpx's files of a clip beside this library's.
 if (args.Length > 0 && args[0] == "vp9-psnr")

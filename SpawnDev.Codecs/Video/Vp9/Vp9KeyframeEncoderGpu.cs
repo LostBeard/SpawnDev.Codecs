@@ -49,6 +49,7 @@
 //     default coef probs.
 //   - Skip flag hardcoded 0.
 
+using SpawnDev.Codecs.Video.Vp8;
 using System.Runtime.Versioning;
 using ILGPU;
 using ILGPU.Runtime;
@@ -74,6 +75,8 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
     private readonly Vp9FrameCompressedHeaderKernel _compressedHeaderKernel;
     private readonly Vp9FrameSequentialEncodeKernel _sequentialKernel;
     private readonly Vp9FrameEntropyKernel _entropyKernel;
+    private readonly Vp9KeyframeSymbolsKernel _symbolsKernel;
+    private readonly Vp8BoolEncoderParallelGpu _boolCoder;
     private readonly Vp9FrameUncompressedHeaderKernel _uncompressedHeaderKernel;
     private readonly Vp9FrameAssembleKernel _assembleKernel;
 
@@ -104,6 +107,13 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
     private MemoryBuffer1D<byte, global::ILGPU.Stride1D.Dense>? _dUncompressedHeader;
     private MemoryBuffer1D<long, global::ILGPU.Stride1D.Dense>? _dUncompressedHeaderLen;
     private MemoryBuffer1D<long, global::ILGPU.Stride1D.Dense>? _dOutFrameLen;
+    private MemoryBuffer1D<int, global::ILGPU.Stride1D.Dense>? _dSlotCounts;
+
+    /// <summary>
+    /// Tests only: code the tile with the serial walker (<see cref="Vp9FrameEntropyKernel"/>, one thread) instead of
+    /// the parallel symbol pass + bool coder. Both write the same bytes; the serial walker is the test's oracle.
+    /// </summary>
+    internal bool SerialEntropy { get; set; }
 
     // Grow-only staging for the managed and TypedArray overloads.
     private readonly StageBuffer<byte> _stageY;
@@ -127,6 +137,8 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         _compressedHeaderKernel = new Vp9FrameCompressedHeaderKernel(accelerator);
         _sequentialKernel = new Vp9FrameSequentialEncodeKernel(accelerator);
         _entropyKernel = new Vp9FrameEntropyKernel(accelerator);
+        _symbolsKernel = new Vp9KeyframeSymbolsKernel(accelerator);
+        _boolCoder = new Vp8BoolEncoderParallelGpu(accelerator);
         _uncompressedHeaderKernel = new Vp9FrameUncompressedHeaderKernel(accelerator);
         _assembleKernel = new Vp9FrameAssembleKernel(accelerator);
 
@@ -345,12 +357,16 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             frameMiRows: displayMiRows, frameMiCols: displayMiCols);
 
         // ---- 5. Entropy ----
-        await _entropyKernel.RunAsync(
-            _dYCoefs!.View, _dUCoefs!.View, _dVCoefs!.View,
-            _dTile!.View, _dTileLen!.View,
-            _dByteConsts.View, _dUshortConsts.View,
-            mbCols, mbRows,
-            displayMiCols, displayMiRows);
+        if (SerialEntropy)
+        {
+            await _entropyKernel.RunAsync(
+                _dYCoefs!.View, _dUCoefs!.View, _dVCoefs!.View,
+                _dTile!.View, _dTileLen!.View,
+                _dByteConsts.View, _dUshortConsts.View,
+                mbCols, mbRows,
+                displayMiCols, displayMiRows);
+        }
+        else await EncodeTileParallelAsync(mbCols, mbRows, displayMiCols, displayMiRows);
 
         // ---- 6. Uncompressed header (GPU-resident: reads compressedLen
         // directly from the buffer the compressedHeaderKernel wrote to;
@@ -371,6 +387,35 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
 
         // ---- 8. Single end-of-frame sync ----
         await _accelerator.SynchronizeAsync();
+    }
+
+    /// <summary>
+    /// The tile: every 16x16 leaf slot's symbols in parallel (counted, then written window by window), coded by the
+    /// parallel bool coder into <c>_dTile</c> / <c>_dTileLen</c>. The same bytes as the serial walker. Queued, no wait.
+    /// </summary>
+    private async Task EncodeTileParallelAsync(int mbCols, int mbRows, int frameMiCols, int frameMiRows)
+    {
+        int slots = Vp9KeyframeSymbolsKernel.SlotCount(mbCols, mbRows);
+        int capacity = checked((int)_dTile!.Length);
+        var y = _dYCoefs!.View; var u = _dUCoefs!.View; var v = _dVCoefs!.View;
+        _boolCoder.Prepare(slots, capacity);
+        _symbolsKernel.Count(y, u, v, _dByteConsts.View, _dUshortConsts.View, _dSlotCounts!.View, _boolCoder.Window,
+            mbCols, mbRows, frameMiCols, frameMiRows);
+        _boolCoder.Begin(_dSlotCounts.View, slots, capacity);
+        await TraceLaunchAsync(_accelerator, "entropy: count + offsets");
+        // enough windows for the most symbols a frame can have; the windows past the frame's end exit at once
+        int waves = _boolCoder.WaveCount((long)slots * Vp9KeyframeSymbolsKernel.MaxSymbolsPerSlot);
+        var pacer = new LaunchPacer(_accelerator);
+        for (int w = 0; w < waves; w++)
+        {
+            _symbolsKernel.Write(y, u, v, _dByteConsts.View, _dUshortConsts.View, _dSlotCounts.View, _boolCoder.Offsets,
+                _boolCoder.Window, _boolCoder.WindowSymbols, w, mbCols, mbRows, frameMiCols, frameMiRows);
+            _boolCoder.CodeWave(w);
+            await pacer.LaunchedAsync();
+            await TraceLaunchAsync(_accelerator, "entropy: symbols + range pass, wave");
+        }
+        _boolCoder.Finish(_dTile.View, _dTileLen!.View, vp9: true);
+        await TraceLaunchAsync(_accelerator, "entropy: carries + bytes");
     }
 
     /// <summary>
@@ -792,6 +837,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         _dUncompressedHeader = _accelerator.Allocate1D<byte>(32);
         _dUncompressedHeaderLen = _accelerator.Allocate1D<long>(1);
         _dOutFrameLen = _accelerator.Allocate1D<long>(1);
+        _dSlotCounts = _accelerator.Allocate1D<int>(Vp9KeyframeSymbolsKernel.SlotCount(width >> 4, height >> 4));
     }
 
     private void DisposeFrameBuffers()
@@ -813,6 +859,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         _dUncompressedHeader?.Dispose(); _dUncompressedHeader = null;
         _dUncompressedHeaderLen?.Dispose(); _dUncompressedHeaderLen = null;
         _dOutFrameLen?.Dispose(); _dOutFrameLen = null;
+        _dSlotCounts?.Dispose(); _dSlotCounts = null;
         _cachedWidth = -1;
         _cachedHeight = -1;
     }
@@ -825,6 +872,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         _compressedHeaderKernel.Dispose();
         _sequentialKernel.Dispose();
         _entropyKernel.Dispose();
+        _boolCoder.Dispose();
         _uncompressedHeaderKernel.Dispose();
         _assembleKernel.Dispose();
 

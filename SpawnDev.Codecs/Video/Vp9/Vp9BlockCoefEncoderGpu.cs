@@ -380,7 +380,7 @@ public static class Vp9BlockCoefEncoderGpu
     /// <paramref name="scanPos"/> from the two raster-neighbor energy
     /// classes. Mirrors <see cref="Vp9CoefContext.GetCoefContext"/>.
     /// </summary>
-    private static int GetCoefContext(
+    internal static int GetCoefContext(
         ArrayView<ushort> neighbors,
         ArrayView<byte> tokenCache,
         int scanPos)
@@ -398,7 +398,7 @@ public static class Vp9BlockCoefEncoderGpu
     /// Map a coefficient magnitude to its <see cref="Vp9CoefToken"/>
     /// value. Bit-exact mirror of the CPU encoder's MagnitudeToToken.
     /// </summary>
-    private static byte MagnitudeToToken(int magnitude, int isHighBitDepth)
+    internal static byte MagnitudeToToken(int magnitude, int isHighBitDepth)
     {
         // magnitude is guaranteed >= 2 by caller (the magnitude == 1
         // case is handled before this path).
