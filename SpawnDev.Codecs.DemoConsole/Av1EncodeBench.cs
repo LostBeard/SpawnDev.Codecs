@@ -12,6 +12,8 @@
 // --fps: the rate the frames are shown at (Av1KeyframeEncoderGpu.SetFrameRate; default 30): it decides the level signalled.
 // --level: keep the tile grid inside an AV1 level (Av1KeyframeEncoderGpu.LevelLimit), e.g. 4.0 or 5.1; none = no limit.
 // --passes 1: measurements: wait for the device after the transform pass and after the entropy pass and report each.
+// --sym-mb N --wave N: measurements: the symbol memory budget (MB) and the most 16x16 slots per wave of the symbol and
+//   range coder passes (Av1FrameSequentialEncodeKernel.SymbolBudgetBytes / MaxWaveSlots).
 // --xf-lanes N --xf-spread N: measurements: the transform pass's launch group (working lanes per tile, group threads
 //   per working lane) instead of the accelerator's own choice (Av1FrameSequentialEncodeKernel.GetTransformGroup).
 // --out: write the last encoded temporal unit to a file (an .obu file FFmpeg reads: ffmpeg -i file.obu ...).
@@ -74,6 +76,8 @@ internal static class Av1EncodeBench
             }
             else if (a == "--xf-lanes") Av1FrameSequentialEncodeKernel.TransformGroupOverride.Lanes = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--xf-spread") Av1FrameSequentialEncodeKernel.TransformGroupOverride.Spread = int.Parse(v, CultureInfo.InvariantCulture);
+            else if (a == "--sym-mb") Av1FrameSequentialEncodeKernel.WaveOverride.BudgetBytes = long.Parse(v, CultureInfo.InvariantCulture) << 20;
+            else if (a == "--wave") Av1FrameSequentialEncodeKernel.WaveOverride.MaxWaveSlots = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--xf-tiles") Av1FrameSequentialEncodeKernel.TransformGroupOverride.TilesPerGroup = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--fps")
             {
@@ -113,8 +117,8 @@ internal static class Av1EncodeBench
 
         if (dumpPath != null)
         {
-            var method = typeof(Av1FrameSequentialEncodeKernel).GetMethod("Av1EncodeTileStepKernel", BindingFlags.NonPublic | BindingFlags.Static)
-                ?? throw new InvalidOperationException("Av1EncodeTileStepKernel not found");
+            var method = typeof(Av1FrameSequentialEncodeKernel).GetMethod("Av1SymbolizeKernel", BindingFlags.NonPublic | BindingFlags.Static)
+                ?? throw new InvalidOperationException("Av1SymbolizeKernel not found");
             var compiled = acc.CompileKernel(global::ILGPU.Backends.EntryPoints.EntryPointDescription.FromImplicitlyGroupedKernel(method));
             string? text = compiled switch
             {

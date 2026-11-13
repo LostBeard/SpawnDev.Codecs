@@ -110,6 +110,34 @@ public static class Av1RangeEncoderGpu
     }
 
     /// <summary>
+    /// Encode a CDF symbol from what <see cref="EncodeCdfQ15"/> derives from the table: the inverse CDF value below
+    /// the symbol and the one at it, both already shifted right by EC_PROB_SHIFT (<paramref name="flShifted"/> =
+    /// 512 for the first symbol), and <paramref name="minProbUnits"/> = N - s, the multiple of EC_MIN_PROB added to
+    /// the upper bound (the lower bound gets one more). The same arithmetic as <see cref="EncodeCdfQ15"/>, and, for
+    /// the two-symbol CDF { 16384, 0 }, as <see cref="EncodeBoolQ15"/> at one half. See <see cref="Av1SymbolStreamGpu"/>.
+    /// </summary>
+    public static void EncodeShifted(
+        ref Av1RangeEncoderGpuState state,
+        ArrayView<byte> outBuf,
+        uint flShifted, uint fhShifted, uint minProbUnits)
+    {
+        ulong l = state.Low;
+        uint r = state.Rng;
+        uint v = (((r >> 8) * fhShifted) >> (7 - EcProbShift)) + (uint)EcMinProb * minProbUnits;
+        if (flShifted < (uint)(CdfProbTop >> EcProbShift))
+        {
+            uint u = (((r >> 8) * flShifted) >> (7 - EcProbShift)) + (uint)EcMinProb * (minProbUnits + 1);
+            l += r - u;
+            r = u - v;
+        }
+        else
+        {
+            r -= v;
+        }
+        Normalize(ref state, outBuf, l, r);
+    }
+
+    /// <summary>
     /// Encode <paramref name="ftb"/> raw bits at uniform probability
     /// (midpoint 16384 / 32768). Mirrors
     /// <see cref="Av1RangeEncoder.EncodeBits"/>.

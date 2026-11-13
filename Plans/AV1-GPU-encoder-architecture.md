@@ -180,10 +180,7 @@ contexts, no prediction across its edge), so tiles are the unit of parallelism:
     reload the coefficients, and a wavefront lane idles at a barrier. Every shape tried is in the list above.
   - Where the time goes now (`av1-encode-bench --passes 1`, CUDA): 832x480 default grid: transform 1.4 ms,
     entropy 3.4 ms; 1920x1080 level 4.0 grid: transform 7.5 ms, entropy 65.6 ms (0.21 ms per leaf, 320 leaves per
-    tile in sequence). The serial entropy pass is what is left. Stage 2 (open): with CDF updates off, everything
-    in it except the range coder's own state is a function of a leaf's coefficients and its neighbours'
-    contexts, so each leaf can prepare its symbols in parallel and the tile thread only runs the range coder
-    over them.
+    tile in sequence). The serial entropy pass was what was left: stage 2, next item.
   - Tests: every encoder test runs through the split (bytes equal to the CPU reference, FFmpeg decodes to the
     reconstruction). New: `Av1KeyframeEncoderGpu_Wavefront_EveryLaunchShapeGivesTheReferenceBytes` (forced
     shapes: one lane, several rounds per diagonal, a lane count that is not a power of two, lanes a warp apart,
@@ -193,6 +190,69 @@ contexts, no prediction across its edge), so tiles are the unit of parallelism:
     the encoder keeps its reconstruction buffer, so a position that reads a neighbour too early finds the right
     pixels of the previous encode of the same picture unless another picture is encoded in between (the test
     does that).
+- **Parallel inside a tile, stage 2: symbol pass + range coder pass (2026-11-13, later).** The entropy pass is
+  split in two; the tile thread now only runs the range coder. Same bytes.
+  - Why it is possible. The keyframe writes `disable_cdf_update = 1`, so a symbol's probabilities are a fixed table
+    row picked by a context, and no context depends on the range coder. The serial coder kept "above" and "left"
+    arrays and updated them leaf by leaf, but every value it reads was written by the leaf directly above or
+    directly to the left (zero at the tile's top row and left column). So: the coefficient contexts (txb_skip,
+    dc_sign) come from the neighbour blocks' contexts (cul_level + DC sign), a function of a block's coefficients
+    that the transform pass now stores next to them (12 ints per 16x16 slot, `Av1CoefEncoderGpu.ContextOf`); the
+    partition contexts come from the neighbour's leaf size, which is geometry (a leaf is 16x16 unless its
+    position crosses the picture edge); the skip and Y-mode contexts are constant (every leaf is DC and not
+    skipped).
+  - Symbol pass (`Av1SymbolizeKernel`): one thread per 16x16 position of every tile at once. The same walk as
+    before (`WriteCoeffsTxbSymbols` is `WriteCoeffsTxb` with another sink), writing one 32-bit entry per symbol
+    into the position's symbol slot (`Av1SymbolStreamGpu`: the two inverse CDF values shifted right by 6, which
+    is all the range coder uses of them, and the EC_MIN_PROB multiple; raw bits as runs of up to 24).
+  - Range coder pass (`Av1RangeCodeTileKernel`): one thread per tile feeds the entries of its slots, in order, to
+    its range coder (`Av1RangeEncoderGpu.EncodeShifted`).
+  - Waves. A slot is reserved at its worst case (3200 entries: at most 8 per coefficient), so the two passes
+    alternate over waves of slots: all of a tile's slots, at most 64 (`MaxWaveSlots`), and no more than fit 96 MB
+    for all tiles (`SymbolBudgetBytes`); the range coder is kept in device memory between waves. Measured (CUDA):
+    1920x1080 level 4.0 grid, slots per wave 4 / 16 / 64 / 320: 58.5 / 45.8 / 43.2 / 46.2 ms; 832x480, 1 / 4 / 16:
+    6.0 / 4.1 / 3.6 ms; batch of 16 with a budget of 24 / 96 / 400 MB: 1.14 / 1.02 / 1.07 ms per frame.
+  - Measured (RTX 4070, ILGPU 5.4.30, q40, ms per keyframe; this morning -> stage 1 -> stage 2):
+    | | CUDA | OpenCL |
+    |---|---|---|
+    | 832x480, 104 tiles (default) | 6.31 -> 4.90 -> 3.35 | 5.1 -> 3.98 -> 2.83 |
+    | 832x480, batch of 16, per frame | 0.92 -> 0.99 -> 1.02 | 0.90 -> 1.00 (stage 1 -> 2) |
+    | 832x480, level 5.1 grid (56 tiles) | 11.7 -> 8.9 -> 6.1 | 7.1 -> 4.9 |
+    | 832x480, level 3.0 grid (16 tiles) | 41.4 -> 29.0 -> 18.0 | 23.4 -> 14.4 |
+    | 832x480, one tile | 570 -> 343 -> 184 | 281 -> 152 |
+    | 1920x1080, 255 tiles (default) | 13.3 -> 10.2 -> 7.8 | 11.1 -> 8.8 -> 7.0 |
+    | 1920x1080, level 6.0 grid (90 tiles) | 35.4 -> 23.8 -> 15.1 | 19.6 -> 13.0 |
+    | 1920x1080, level 5.1 grid (48 tiles) | 70.4 -> 45.6 -> 27.2 | 37.3 -> 22.4 |
+    | 1920x1080, level 4.0 grid (32 tiles) | 120 -> 74.2 -> 42.2 | 61.0 -> 35.0 |
+    CPU accelerator 20.5 -> 21.4 -> 21.7, Velocity 20.5 to 28.5 -> 22.0 -> 24.0 (832x480, 104 tiles; they have
+    a core per tile, and for one core three passes are no less work than one).
+    WebGPU (`Tiles_AreFasterThanOneTile`, this morning -> stage 1 -> stage 2): 104 tiles 22.7 -> 17.7 to 20.5 ->
+    11.9; batch of 8: 3.52 -> 3.2 -> 3.2 per frame; one tile 1496 -> 913 -> 278. Per pass (104 tiles, a device
+    wait after each): transform 3.7, symbols 3.4, range coder 3.4 ms.
+  - Wasm is SLOWER on the default grid: 104 tiles 114 -> 96 -> 123 to 127 ms (one tile 834 -> 302 -> 180 to 189;
+    batch of 8: 108 -> 139 per frame). Per pass, 104 tiles: transform 31, symbols 87, range coder 52 ms. Against
+    the desktop CPU accelerator on the same machine (transform about 10, symbols 7, range coder 1.5) the
+    transform is 3x slower in Wasm, the symbol pass 13x and the range coder pass 35x: the two new passes hit
+    something the Wasm backend does badly. Both carry their state through nested calls by reference (`ref int n`,
+    `ref re`); the transform pass does not. Open, next: pass that state by value and measure.
+  - Batches. A batch of 16 on CUDA is 11% slower per frame than this morning (0.92 -> 1.02), batches of 2 / 4 / 8
+    are 2.38 / 1.58 / 1.24 ms per frame (stage 1: 3.21 / 1.85 / 1.35), 32: 0.88. Per pass for 16 frames:
+    transform 6.7 ms, symbols 3.5, range coder 2.9, where the single pass took about 11.7 for the same work:
+    three passes move the coefficients and the symbols through device memory. When the device is full, total
+    work is what counts.
+  - Where the time goes now (CUDA): 832x480 default grid: transform 1.5 ms, symbols 0.4, range coder 1.8;
+    1920x1080 level 4.0 grid: 8.6 / 1.7 / 32.7. What is left is the range coder itself: about 0.1 ms per 16x16
+    position at q40 on this picture, one coder per tile by the format. The lever that remains is the cost per
+    symbol: the coder keeps a 64-bit window (the reference's layout), which WGSL has to emulate; a 32-bit window
+    with a carry buffer is the form to try (open).
+  - Tests: the encoder tests (bytes equal to the CPU reference, FFmpeg decodes to the reconstruction, hardware
+    decoders) run through the three passes. New: `Av1KeyframeEncoderGpu_SymbolWaves_EveryWaveSizeGivesTheReferenceBytes`
+    (waves of 1, 3, 5, 16, 64 slots and a budget that forces one; the wave size asserted),
+    `Av1KeyframeEncoderGpu_FinestQuantizerNoise_MatchesCpuReference` (noise at q index 1 and 2: symbol slots near
+    their worst case, Golomb codes of a dozen bits; 686 bytes per 16x16 position) and
+    `Av1SymbolStreamGpu_Entries_CodeTheBytesOfTheDirectCalls` (900 CDF symbols and bit runs of 1 to 32 bits coded
+    directly and through entries: runs above 15 bits do not occur in 8-bit pictures). 39 red-check mutations: 38
+    caught, one equivalent (the fh field masked to 9 bits: fh >> 6 never has a tenth).
   - CUDA is 1.24x slower than OpenCL for the same kernel on the same GPU (3.7 vs 2.6 ms per superblock without
     coefficients), WebGPU 2.6x slower than CUDA: code generation questions for SpawnDev.ILGPU, open. Seen in the
     PTX so far: 51 signed divisions by a constant power of two left as `div.s32`, and the quantizer divides every

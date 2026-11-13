@@ -512,6 +512,19 @@ public abstract partial class CodecsTestBase
                 Console.WriteLine($"[report] {acc.AcceleratorType} AV1 keyframe {w}x{h} q{q}, ms per keyframe: one tile {F(oneTile.ms)} ({oneTile.len} B), " +
                     $"104 tiles {F(tiles.ms)} ({tiles.len} B), 104 tiles in a batch of {batch}: {F(batched.ms)}; {F(oneTile.ms / tiles.ms)}x");
 
+                // Where the time goes: one more encode of each kind with a device wait after every pass.
+                async Task<string> PassesAsync(int tileSize)
+                {
+                    var times = new Dictionary<string, double>();
+                    enc.TileSizeSuperblocks = tileSize;
+                    Av1FrameSequentialEncodeKernel.PassTimer = (name, ms) => times[name] = times.GetValueOrDefault(name) + ms;
+                    try { await enc.EncodeKeyFrameAsync(dY.View, dU.View, dV.View, w, h, dOut.View, q); }
+                    finally { Av1FrameSequentialEncodeKernel.PassTimer = null; }
+                    return string.Join(", ", times.Select(kv => $"{kv.Key} {F(kv.Value)}"));
+                }
+                Console.WriteLine($"[report] {acc.AcceleratorType} AV1 keyframe passes, ms (a device wait after each): " +
+                    $"104 tiles: {await PassesAsync(1)}; one tile: {await PassesAsync(int.MaxValue)}");
+
                 Equal(tiles.len, batched.len, "a frame of the batch has the length of the single-frame encode");
                 True(tiles.len > oneTile.len, $"104 tiles ({tiles.len} B) must cost more bytes than one tile ({oneTile.len} B): are the tiles coded?");
                 True(tiles.len <= oneTile.len * 1.02, $"104 tiles cost {tiles.len} B against {oneTile.len} B for one tile: more than 2%");

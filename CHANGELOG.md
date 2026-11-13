@@ -3,15 +3,24 @@
 ## Unreleased
 
 ### AV1 keyframe encoder: parallel inside a tile (2026-11-13)
-- The tile walk is two passes: a transform pass in which the 16x16 positions of a tile are taken in anti-diagonal
-  wavefront order by the lanes of a launch group (predict, transform, quantize, reconstruct; a barrier between
-  diagonals), and an entropy pass, one thread per tile, that codes the stored coefficients. Same bytes.
-- CUDA (RTX 4070, q40, ms per keyframe): 832x480 6.31 -> 4.90, 1920x1080 13.3 -> 10.2; with a level-limited tile
-  grid 832x480 level 3.0 41.4 -> 29.0, 1920x1080 level 4.0 120 -> 74; one tile at 832x480 570 -> 343. OpenCL
-  832x480 5.1 -> 3.98. WebGPU 22.7 -> 17.7 to 20.5, Wasm 114 -> 96. The CPU accelerator and Velocity are unchanged (they
-  walk a tile with one thread, as before). A batch of 16 frames on CUDA is 7% slower per frame (0.92 -> 0.99).
+- The tile walk is three passes: a transform pass in which the 16x16 positions of a tile are taken in
+  anti-diagonal wavefront order by the lanes of a launch group (predict, transform, quantize, reconstruct; a
+  barrier between diagonals); a symbol pass, one thread per 16x16 position, that works out the position's
+  partition, mode and coefficient symbols (CDF updates are off, so no context depends on the range coder: the
+  contexts come from the neighbours' coefficients and from where the picture ends); and a range coder pass, one
+  thread per tile, that only feeds those symbols to the tile's range coder. Same bytes.
+- CUDA (RTX 4070, q40, ms per keyframe): 832x480 6.31 -> 3.35, 1920x1080 13.3 -> 7.8; with a level-limited tile
+  grid 832x480 level 3.0 41.4 -> 18.0, 1920x1080 level 4.0 120 -> 42; one tile at 832x480 570 -> 184. OpenCL
+  832x480 5.1 -> 2.83, 1920x1080 11.1 -> 7.0. WebGPU 832x480 22.7 -> 11.9, one tile 1496 -> 278. The CPU
+  accelerator and Velocity are unchanged (a core per tile).
+- Slower: a batch of 16 frames on CUDA by 11% per frame (0.92 -> 1.02; batches up to 8 are faster), and Wasm on
+  the default grid (832x480: 114 -> 123 to 127 ms; one tile 834 -> 180): its symbol and range coder passes are
+  13x and 35x slower than the desktop CPU accelerator's. Open.
+- New: `Av1SymbolStreamGpu` (the symbol entries), `Av1RangeEncoderGpu.EncodeShifted`,
+  `Av1CoefEncoderGpu.WriteCoeffsTxbSymbols` / `ContextOf`. `Av1FrameSequentialEncodeKernel.RunAsync` no longer
+  takes a byte scratch (the context arrays are gone), and a tile's int scratch is the range coder state only.
 - `av1-encode-bench`: `--passes 1` (time per pass), `--xf-lanes / --xf-spread / --xf-tiles` (the transform
-  launch shape).
+  launch shape), `--sym-mb / --wave` (the symbol budget and wave size).
 
 ### AV1: the sequence header signals the level the stream conforms to (2026-11-13)
 - Before, every AV1 keyframe stream said level 2.0 (`seq_level_idx` 0), whatever its size, frame rate and tile grid.

@@ -276,6 +276,256 @@ public static class Av1CoefEncoderGpu
         culLevelOut[blockIdx] = culLevel;
     }
 
+    /// <summary>
+    /// <see cref="WriteCoeffsTxb"/> with the symbols as entries of a symbol slot instead of range-coded bytes
+    /// (<see cref="Av1SymbolStreamGpu"/>): the same walk, the same contexts and tables, in the same order, so a range
+    /// coder fed the entries in order writes the bytes <see cref="WriteCoeffsTxb"/> writes. Nothing here depends on
+    /// another block's symbols: every block of a frame can be done at once. The block's context for its neighbours
+    /// (cul_level and the DC sign) is <see cref="ContextOf"/>, a function of the coefficients alone.
+    /// </summary>
+    public static void WriteCoeffsTxbSymbols(
+        ArrayView<int> symbols, long slotBase, ref int n,
+        ArrayView<byte> constsByte,
+        ArrayView<ushort> constsUshort,
+        ArrayView<int> coefsRaster, long coefBase,
+        ArrayView<byte> levelsBuf, long levelsBase,
+        int txSize, int plane, int qctx,
+        int txbSkipCtx, int dcSignCtx, int qindex)
+    {
+        int planeType = plane == 0 ? 0 : 1;
+        // Tx4x4 (libaom txs_ctx 0) has its own tables in the constants buffer; Tx8x8 / Tx16x16 share tables with a
+        // local size index.
+        bool tx4 = txSize == 0;
+        int txsLocal = txSize == 2 ? 1 : 0; // Tx8x8 -> 0, Tx16x16 -> 1 (unused for Tx4x4).
+        int width = tx4 ? 4 : (txSize == 1 ? 8 : 16);
+        int height = width;
+        int bhl = tx4 ? 2 : (txSize == 1 ? 3 : 4);
+        int outW = width;
+        int outH = height;
+        int qPlane = qctx * Av1KeyframeConstantsGpu.PlaneTypes + planeType;                    // Tx4x4 table row
+        int qTxPlane = (qctx * 2 + txsLocal) * Av1KeyframeConstantsGpu.PlaneTypes + planeType; // Tx8x8 / Tx16x16 table row
+
+        // Scan offset in the packed buffer.
+        int scanOffset = tx4
+            ? Av1KeyframeConstantsGpu.Scan4x4Offset
+            : (txSize == 1 ? Av1KeyframeConstantsGpu.Scan8x8Offset : Av1KeyframeConstantsGpu.Scan16x16Offset);
+        int nCoefs = width * height;
+
+        // ---- Compute EOB by walking the scan in reverse. ----
+        int eob = ComputeEob(coefsRaster, coefBase, constsUshort, scanOffset,
+            nCoefs, bhl, outW, outH);
+
+        // ---- Step 1: txb_skip - one bin. ----
+        int allZero = eob == 0 ? 1 : 0;
+        long skipCdfBase = tx4
+            ? Av1KeyframeConstantsGpu.TxbSkipCdfTx4x4Offset
+                + ((long)(qctx * Av1KeyframeConstantsGpu.TxbSkipContexts + txbSkipCtx)) * 3
+            : Av1KeyframeConstantsGpu.TxbSkipCdfOffset
+                + ((long)((qctx * 2 + txsLocal) * Av1KeyframeConstantsGpu.TxbSkipContexts + txbSkipCtx)) * 3;
+        Av1SymbolStreamGpu.Cdf(symbols, slotBase, ref n, allZero, constsUshort, skipCdfBase, 2);
+
+        if (eob == 0) return;
+
+        // ---- Step 2: tx_type. Y plane only with qindex > 0; for v1 we
+        // always emit DCT_DCT under reducedTxSet=true. Both Tx8x8 and
+        // Tx16x16 use ext_tx_set 2 (DTT4_IDTX, 5 syms); DCT_DCT sym = 1
+        // per ExtTxInd[2, 0]. ----
+        if (plane == 0 && qindex > 0)
+        {
+            long extTxCdfBase = txSize == 1
+                ? Av1KeyframeConstantsGpu.IntraExtTxCdfTx8DcOffset
+                : Av1KeyframeConstantsGpu.IntraExtTxCdfTx16DcOffset;
+            Av1SymbolStreamGpu.Cdf(symbols, slotBase, ref n, 1, constsUshort, extTxCdfBase, 5);
+        }
+
+        // tx_class for DCT_DCT is 2D = 0.
+        int txClass = Av1TxbCommonGpu.TxClass2d;
+
+        // ---- Step 3: eob_pt classification. ----
+        int eobPt = GetEobPosToken(eob, constsByte, out int eobExtra);
+        int eobMultiSize = tx4 ? 0 : (txSize == 1 ? 2 : 4); // libaom TxSizeLog2Minus4 - 4x4=0, 8x8=2, 16x16=4.
+        int eobMultiCtx = (txClass == Av1TxbCommonGpu.TxClass2d) ? 0 : 1;
+        WriteEobMultiSymbols(symbols, slotBase, ref n, constsUshort, eobMultiSize, planeType, eobMultiCtx, eobPt, qctx);
+
+        // ---- Step 4: eob_extra - first bit via CDF, rest as raw bits. ----
+        int eobOffsetBits = ReadEobOffsetBits(constsByte, eobPt);
+        if (eobOffsetBits > 0)
+        {
+            int eobCtx = eobPt - 3;
+            long extraCdfBase = tx4
+                ? Av1KeyframeConstantsGpu.EobExtraCdfTx4x4Offset
+                    + ((long)(qPlane * Av1KeyframeConstantsGpu.EobCoefContexts + eobCtx)) * 3
+                : Av1KeyframeConstantsGpu.EobExtraCdfOffset
+                    + ((long)(qTxPlane * Av1KeyframeConstantsGpu.EobCoefContexts + eobCtx)) * 3;
+            int shift = eobOffsetBits - 1;
+            int firstBit = (eobExtra >> shift) & 1;
+            Av1SymbolStreamGpu.Cdf(symbols, slotBase, ref n, firstBit, constsUshort, extraCdfBase, 2);
+            // the rest of eob_extra as one run of raw bits
+            if (shift > 0)
+                Av1SymbolStreamGpu.Bits(symbols, slotBase, ref n, (uint)(eobExtra & ((1 << shift) - 1)), shift);
+        }
+
+        // ---- Build the libaom-layout levels[] padded buffer. ----
+        InitLevels(coefsRaster, coefBase, outW, outH, width, height, bhl,
+            levelsBuf, levelsBase);
+        int levelsOff = Av1TxbCommonGpu.SetLevelsOffset(height);
+
+        // NzMapCtxOffset table for this tx size (used by GetLowerLevelsCtx2d).
+        long nzMapCtxOffsetBase = tx4
+            ? Av1KeyframeConstantsGpu.NzMapCtxOffset4x4Offset
+            : (txSize == 1 ? Av1KeyframeConstantsGpu.NzMapCtxOffset8x8Offset : Av1KeyframeConstantsGpu.NzMapCtxOffset16x16Offset);
+
+        // ---- Step 5+6: write base CDFs in REVERSE scan order. ----
+        for (int c = eob - 1; c >= 0; c--)
+        {
+            int pos = constsUshort[scanOffset + c];
+            int padIdx = Av1TxbCommonGpu.GetPaddedIdx(pos, bhl);
+            int level = levelsBuf[levelsBase + levelsOff + padIdx];
+
+            int coefCtx;
+            if (c == eob - 1)
+            {
+                // EOB position: 3-sym CDF (coeff_base_eob).
+                coefCtx = Av1TxbCommonGpu.GetLowerLevelsCtxEob(bhl, width, c);
+                long baseEobCdfBase = tx4
+                    ? Av1KeyframeConstantsGpu.CoeffBaseEobMultiCdfTx4x4Offset
+                        + ((long)(qPlane * Av1KeyframeConstantsGpu.SigCoefContextsEob + coefCtx)) * 4
+                    : Av1KeyframeConstantsGpu.CoeffBaseEobMultiCdfOffset
+                        + ((long)(qTxPlane * Av1KeyframeConstantsGpu.SigCoefContextsEob + coefCtx)) * 4;
+                int sym = level - 1;
+                if (sym > 2) sym = 2;
+                Av1SymbolStreamGpu.Cdf(symbols, slotBase, ref n, sym, constsUshort, baseEobCdfBase, 3);
+            }
+            else
+            {
+                // Non-EOB: 4-sym CDF (coeff_base). 2D class always.
+                // GetLowerLevelsCtx2d adds TxPadTop*stride internally, so
+                // pass the raw block base (NOT levelsBase + levelsOff -
+                // that would double the pad-top skip).
+                coefCtx = (c == 0)
+                    ? Av1TxbCommonGpu.GetLowerLevelsCtxEob(bhl, width, 0)
+                    : Av1TxbCommonGpu.GetLowerLevelsCtx2d(levelsBuf, levelsBase,
+                        pos, bhl, constsByte, nzMapCtxOffsetBase);
+                long baseCdfBase = tx4
+                    ? Av1KeyframeConstantsGpu.CoeffBaseMultiCdfTx4x4Offset
+                        + ((long)(qPlane * Av1KeyframeConstantsGpu.SigCoefContexts + coefCtx)) * 5
+                    : Av1KeyframeConstantsGpu.CoeffBaseMultiCdfOffset
+                        + ((long)(qTxPlane * Av1KeyframeConstantsGpu.SigCoefContexts + coefCtx)) * 5;
+                int sym = level;
+                if (sym > 3) sym = 3;
+                Av1SymbolStreamGpu.Cdf(symbols, slotBase, ref n, sym, constsUshort, baseCdfBase, 4);
+            }
+
+            // ---- Step 7: coeff_lps for level > NumBaseLevels (= 2). ----
+            if (level > Av1TxbCommonGpu.NumBaseLevels)
+            {
+                int baseRange = level - 1 - Av1TxbCommonGpu.NumBaseLevels;
+                // GetBrCtx adds TxPadTop*stride internally; pass raw block base.
+                int brCtx = (c == eob - 1)
+                    ? Av1TxbCommonGpu.GetBrCtxEob(pos, bhl, txClass)
+                    : Av1TxbCommonGpu.GetBrCtx(levelsBuf, levelsBase, pos, bhl, txClass);
+                // Tx4x4, Tx8x8 and Tx16x16 are all below the libaom min(txsCtx, 3) cap.
+                long brCdfBase = tx4
+                    ? Av1KeyframeConstantsGpu.CoeffLpsMultiCdfTx4x4Offset
+                        + ((long)(qPlane * Av1KeyframeConstantsGpu.LevelContexts + brCtx)) * (Av1TxbCommonGpu.BrCdfSize + 1)
+                    : Av1KeyframeConstantsGpu.CoeffLpsMultiCdfOffset
+                        + ((long)(qTxPlane * Av1KeyframeConstantsGpu.LevelContexts + brCtx)) * (Av1TxbCommonGpu.BrCdfSize + 1);
+                for (int idx = 0; idx < Av1TxbCommonGpu.CoeffBaseRange; idx += Av1TxbCommonGpu.BrCdfSize - 1)
+                {
+                    int k = baseRange - idx;
+                    int kCap = Av1TxbCommonGpu.BrCdfSize - 1;
+                    if (k > kCap) k = kCap;
+                    Av1SymbolStreamGpu.Cdf(symbols, slotBase, ref n, k, constsUshort, brCdfBase, Av1TxbCommonGpu.BrCdfSize);
+                    if (k < kCap) break;
+                }
+            }
+        }
+
+        // ---- Step 8: signs + golomb tails. Walk scan FORWARD. ----
+        for (int c = 0; c < eob; c++)
+        {
+            int pos = constsUshort[scanOffset + c];
+            int padIdx = Av1TxbCommonGpu.GetPaddedIdx(pos, bhl);
+            int level = levelsBuf[levelsBase + levelsOff + padIdx];
+            if (level == 0) continue;
+
+            int signedVal = ReadCoeff(coefsRaster, coefBase, pos, bhl, outW, outH);
+            int sign = signedVal < 0 ? 1 : 0;
+
+            if (c == 0)
+            {
+                long dcSignCdfBase = Av1KeyframeConstantsGpu.DcSignCdfOffset
+                    + ((long)((qctx * Av1KeyframeConstantsGpu.PlaneTypes + planeType)
+                        * Av1KeyframeConstantsGpu.DcSignContexts + dcSignCtx)) * 3;
+                Av1SymbolStreamGpu.Cdf(symbols, slotBase, ref n, sign, constsUshort, dcSignCdfBase, 2);
+            }
+            else
+            {
+                Av1SymbolStreamGpu.Bits(symbols, slotBase, ref n, (uint)sign, 1);
+            }
+
+            int absLevel = signedVal < 0 ? -signedVal : signedVal;
+            if (absLevel > Av1TxbCommonGpu.CoeffBaseRange + Av1TxbCommonGpu.NumBaseLevels)
+            {
+                int golombVal = absLevel - Av1TxbCommonGpu.CoeffBaseRange - 1 - Av1TxbCommonGpu.NumBaseLevels;
+                GolombSymbols(symbols, slotBase, ref n, golombVal);
+            }
+        }
+    }
+
+
+    /// <summary>
+    /// The entropy context a transform block leaves for the blocks below and right of it: the sum of the absolute
+    /// levels (at most COEFF_CONTEXT_MASK = 63) with the DC sign in bits 6 and 7 (1 = negative, 2 = positive), 0 for
+    /// an all-zero block. What <see cref="WriteCoeffsTxb"/> returns as culLevel.
+    /// </summary>
+    public static int ContextOf(ArrayView<int> coefsRaster, long coefBase, int nCoefs)
+    {
+        int cul = 0;
+        for (int i = 0; i < nCoefs; i++)
+        {
+            int v = coefsRaster[coefBase + i];
+            cul += v < 0 ? -v : v;
+        }
+        if (cul > Av1TxbCommonGpu.CoeffContextMask) cul = Av1TxbCommonGpu.CoeffContextMask;
+        return Av1TxbCommonGpu.SetDcSign(cul, coefsRaster[coefBase]);
+    }
+
+    private static void WriteEobMultiSymbols(
+        ArrayView<int> sym, long slotBase, ref int n,
+        ArrayView<ushort> constsUshort,
+        int eobMultiSize, int planeType, int eobMultiCtx, int eobPt, int qctx)
+    {
+        int s = eobPt - 1;
+        if (eobMultiSize == 0)
+        {
+            long cdfBase = Av1KeyframeConstantsGpu.EobMulti16CdfOffset
+                + ((long)((qctx * Av1KeyframeConstantsGpu.PlaneTypes + planeType) * 2 + eobMultiCtx)) * 6;
+            Av1SymbolStreamGpu.Cdf(sym, slotBase, ref n, s, constsUshort, cdfBase, 5);
+        }
+        else if (eobMultiSize == 2)
+        {
+            long cdfBase = Av1KeyframeConstantsGpu.EobMulti64CdfOffset
+                + ((long)((qctx * Av1KeyframeConstantsGpu.PlaneTypes + planeType) * 2 + eobMultiCtx)) * 8;
+            Av1SymbolStreamGpu.Cdf(sym, slotBase, ref n, s, constsUshort, cdfBase, 7);
+        }
+        else if (eobMultiSize == 4)
+        {
+            long cdfBase = Av1KeyframeConstantsGpu.EobMulti256CdfOffset
+                + ((long)((qctx * Av1KeyframeConstantsGpu.PlaneTypes + planeType) * 2 + eobMultiCtx)) * 10;
+            Av1SymbolStreamGpu.Cdf(sym, slotBase, ref n, s, constsUshort, cdfBase, 9);
+        }
+    }
+
+    /// <summary>The Golomb code of <see cref="WriteGolomb"/> as raw bit runs: length - 1 zeros, then x in length bits.</summary>
+    private static void GolombSymbols(ArrayView<int> sym, long slotBase, ref int n, int level)
+    {
+        int x = level + 1;
+        int length = 32 - System.Numerics.BitOperations.LeadingZeroCount((uint)x);
+        if (length > 1) Av1SymbolStreamGpu.Bits(sym, slotBase, ref n, 0u, length - 1);
+        Av1SymbolStreamGpu.Bits(sym, slotBase, ref n, (uint)x, length);
+    }
+
     // ----------------------------------------------------------------
     // Helpers
     // ----------------------------------------------------------------
