@@ -3,12 +3,14 @@
 // (median, mean, min over the timed runs, after warm-up encodes that pay for kernel compilation) and the encoded size.
 // Usage: av1-encode-bench [--backend cpu|velocity|cuda|opencl] [--size 832x480] [--frames 12] [--warmup 2] [--q 40]
 //                         [--tile N|max] [--maxtiles N] [--batch N] [--out file.obu]
+//                         [--dump-kernel file]
 // --tile: largest tile size in 64x64 superblocks per side (Av1KeyframeEncoderGpu.TileSizeSuperblocks; default 1 =
 //         one GPU thread per superblock; max = the fewest tiles the picture allows, one thread per frame).
 // --maxtiles: the most tiles per frame (Av1KeyframeEncoderGpu.MaxTiles; default 256, what hardware decoders take).
 // --batch: frames per EncodeKeyFramesBatchAsync call (default 1 = EncodeKeyFrameAsync). A timed run is one call;
 //          the time per keyframe is the call's time divided by the batch size.
 // --out: write the last encoded temporal unit to a file (an .obu file FFmpeg reads: ffmpeg -i file.obu ...).
+// --dump-kernel: write the tile kernel as the backend compiles it (PTX on CUDA, OpenCL C on OpenCL) and exit.
 // For an A/B of two builds: run the two executables alternately, several times each, with nothing else on the GPU.
 
 using System.Diagnostics;
@@ -32,7 +34,7 @@ internal static class Av1EncodeBench
     public static async Task<int> Run(string[] args)
     {
         string backend = "velocity";
-        string? outPath = null;
+        string? outPath = null, dumpPath = null;
         int width = 832, height = 480, frames = 12, warmup = 2, q = 40, tile = 1, batch = 1, maxTiles = Av1TileLayout.HardwareDecoderMaxTiles;
         for (int i = 1; i < args.Length; i++)
         {
@@ -54,6 +56,7 @@ internal static class Av1EncodeBench
             else if (a == "--batch") batch = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--maxtiles") maxTiles = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--out") outPath = v;
+            else if (a == "--dump-kernel") dumpPath = v;
             else { Console.WriteLine($"unknown option {a}"); return 2; }
         }
         if (frames < 1 || warmup < 0 || tile < 1 || batch < 1 || maxTiles < 1) { Console.WriteLine("--frames, --tile, --maxtiles and --batch must be >= 1 and --warmup >= 0"); return 2; }
@@ -72,6 +75,30 @@ internal static class Av1EncodeBench
             "velocity" => ctx.CreateVelocityAccelerator(0),
             _ => ctx.CreateCPUAccelerator(0),
         };
+
+        if (dumpPath != null)
+        {
+            var method = typeof(Av1FrameSequentialEncodeKernel).GetMethod("Av1EncodeTileStepKernel", BindingFlags.NonPublic | BindingFlags.Static)
+                ?? throw new InvalidOperationException("Av1EncodeTileStepKernel not found");
+            var compiled = acc.CompileKernel(global::ILGPU.Backends.EntryPoints.EntryPointDescription.FromImplicitlyGroupedKernel(method));
+            string? text = compiled switch
+            {
+                global::ILGPU.Backends.PTX.PTXCompiledKernel ptx => ptx.PTXAssembly,
+                global::ILGPU.Backends.OpenCL.CLCompiledKernel cl => cl.Source,
+                _ => null,
+            };
+            if (text == null) { Console.WriteLine($"no source text for a {compiled.GetType().Name}"); return 2; }
+            await File.WriteAllTextAsync(dumpPath, text);
+            Console.WriteLine($"{acc.AcceleratorType} kernel: {text.Length} characters -> {dumpPath}");
+            // OpenCL: also the driver's program binary (what its compiler made of the source)
+            if (acc.LoadKernel(compiled) is global::ILGPU.Runtime.OpenCL.CLKernel clKernel)
+            {
+                byte[] binary = clKernel.LoadBinaryRepresentation();
+                await File.WriteAllBytesAsync(dumpPath + ".bin", binary);
+                Console.WriteLine($"OpenCL program binary: {binary.Length} bytes -> {dumpPath}.bin");
+            }
+            return 0;
+        }
 
         int cw = Av1KeyframeEncoderGpu.ChromaWidth(width), ch = Av1KeyframeEncoderGpu.ChromaHeight(height);
         var y = new byte[width * height]; var u = new byte[cw * ch]; var v2 = new byte[cw * ch];

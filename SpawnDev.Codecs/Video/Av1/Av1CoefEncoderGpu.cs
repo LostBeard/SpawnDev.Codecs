@@ -406,9 +406,9 @@ public static class Av1CoefEncoderGpu
         ref Av1RangeEncoderGpuState re, ArrayView<byte> outBuf, int level)
     {
         int x = level + 1;
-        int length = 0;
-        int i = x;
-        while (i != 0) { i >>= 1; length++; }
+        // bits of x (x >= 1): one count-leading-zeros instruction instead of a loop
+        int length = 32 - System.Numerics.BitOperations.LeadingZeroCount((uint)x);
+        int i;
 
         for (i = 0; i < length - 1; i++)
             Av1RangeEncoderGpu.EncodeBits(ref re, outBuf, 0u, 1);

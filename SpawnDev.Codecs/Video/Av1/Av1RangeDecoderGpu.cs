@@ -244,16 +244,7 @@ public static class Av1RangeDecoderGpu
 
     /// <summary>
     /// OD_ILOG_NZ(v) = position of the highest set bit of v + 1 (v != 0).
-    /// Manual loop for cross-backend portability.
+    /// One count-leading-zeros instruction on every backend (see Av1RangeEncoderGpu.IlogNz); 0 for v == 0.
     /// </summary>
-    private static int IlogNz(uint v)
-    {
-        int pos = 0;
-        while (v != 0)
-        {
-            pos++;
-            v >>= 1;
-        }
-        return pos;
-    }
+    private static int IlogNz(uint v) => 32 - System.Numerics.BitOperations.LeadingZeroCount(v);
 }

@@ -74,12 +74,28 @@ contexts, no prediction across its edge), so tiles are the unit of parallelism:
   per frame): packed 41.3 / 5.1, one thread per group 27.4 / 8.4, two per group in separate halves 26.5 / 5.7, four
   per group 25.1 / 3.9, 16 per group 28.7 / 3.9.
 - Wasm (same test): one tile 834 ms, 104 tiles 177 ms, batch of 8: 176 ms per frame.
+- **Count-leading-zeros in the range coder (later the same day).** `IlogNz` (the bit length of the range, once per
+  coded symbol) and the Golomb length were bit-by-bit loops, up to 16 iterations per symbol. NVIDIA's OpenCL
+  compiler replaced the loop by one `clz` (its PTX, read back with `av1-encode-bench --dump-kernel`, has 48 `clz`
+  and no such loop); ILGPU's PTX, WGSL and Wasm kept the loop. Now `BitOperations.LeadingZeroCount` (one
+  instruction on every backend). Same bytes. ms per keyframe, 832x480 q40, before -> after:
+  CUDA 8.73 -> 6.31 (batch of 16: 1.15 -> 0.97; one tile 791 -> 570; 1920x1080 19.3 -> 14.1), OpenCL 5.09 -> 5.09,
+  WebGPU 26.5 -> 22.7 (batch of 8: 3.99 -> 3.52; one tile 1828 -> 1496), Wasm 177 -> 114. The table above is the
+  state before this change. CUDA is now 1.24x slower than OpenCL (was 1.7x). The same kind of loop may sit in the
+  VP8 / VP9 coders (`Vp9InterEntropyKernel`, the bool coders' normalization): worth the same check.
+- Where a superblock's time goes on one CUDA thread (64x64 picture, after the change): 3.7 ms with no coefficients
+  to code (q255: prediction, transforms, quantization, reconstruction: 0.23 ms per 16x16 leaf) and 6.2 ms at q40
+  (0.15 ms of entropy coding per leaf on top). A call's own overhead is 0.18 ms (8x8 picture).
 - What the numbers say is left:
-  - A frame costs what ONE superblock costs on one GPU thread (8.6 ms CUDA, 5.0 ms OpenCL, about 18 ms WebGPU: 16
-    leaves in 4 launches). Faster than that needs parallelism inside a superblock (the 16x16 leaves depend on each
-    other only through DC prediction and the contexts) or a faster thread.
-  - CUDA is 1.7x slower than OpenCL for the same kernel on the same GPU, WebGPU 2.4x slower than CUDA: code
-    generation questions for SpawnDev.ILGPU, open.
+  - A frame costs what ONE superblock costs on one GPU thread (6.2 ms CUDA, 4.8 ms OpenCL, about 14 ms WebGPU: 16
+    leaves in 4 launches). Faster than that needs parallelism inside a superblock: the 16x16 leaves depend on each
+    other through DC prediction (7 anti-diagonal waves of leaves instead of 16 steps) and the entropy contexts,
+    which with CDF updates disabled depend only on the neighbours' coefficients, so the transform stage could run
+    as a wavefront of leaf threads and the range coder as a separate serial pass. Not started.
+  - CUDA is 1.24x slower than OpenCL for the same kernel on the same GPU (3.7 vs 2.6 ms per superblock without
+    coefficients), WebGPU 2.6x slower than CUDA: code generation questions for SpawnDev.ILGPU, open. Seen in the
+    PTX so far: 51 signed divisions by a constant power of two left as `div.s32`, and the quantizer divides every
+    coefficient by the quantizer step (384 divisions per leaf).
   - The CPU accelerators: 832x480 takes 84-120 ms with or without tiles, and a 256x256 picture takes LONGER (CPU
     accelerator 189 ms as one tile, 193 ms as 16 tiles; Velocity 224 / 221 ms; 64x64 14 ms, 128x128 55 ms, 512x512
     57-90 ms). The time does not follow the tile count, so it is not the walker; not yet located. Open, next.

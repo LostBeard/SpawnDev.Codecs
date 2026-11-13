@@ -278,17 +278,10 @@ public static class Av1RangeEncoderGpu
     /// OD_ILOG_NZ(v) = position of the highest set bit of v + 1 (v != 0).
     /// Returns 0 for v == 0 to match the CPU helper's degenerate
     /// behaviour (caller never invokes with rng == 0 in practice).
-    /// Manual loop instead of CLZ to lower cleanly on every backend
-    /// without intrinsic dependencies.
+    /// One count-leading-zeros instruction (ILGPU maps BitOperations.LeadingZeroCount to clz / countLeadingZeros /
+    /// i32.clz on every backend). It runs once per coded symbol: the bit-by-bit loop that stood here took up to 16
+    /// iterations per symbol on backends whose compiler does not recognise the loop (ILGPU's PTX; NVIDIA's OpenCL
+    /// compiler did, which was most of OpenCL's lead over CUDA in the entropy coder).
     /// </summary>
-    private static int IlogNz(uint v)
-    {
-        int pos = 0;
-        while (v != 0)
-        {
-            pos++;
-            v >>= 1;
-        }
-        return pos;
-    }
+    private static int IlogNz(uint v) => 32 - System.Numerics.BitOperations.LeadingZeroCount(v);
 }
