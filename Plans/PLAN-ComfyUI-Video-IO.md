@@ -54,6 +54,9 @@ ffmpeg / ffprobe tools as a black box is fine.
    past the picture; details in `Plans/AV1-GPU-encoder-architecture.md`.
    - [x] Kernel + CPU reference; FFmpeg (libdav1d) decodes the temporal unit to the encoder's reconstruction byte for
      byte at 12 sizes (832x480, 70x50, 200x9, 17x33, 1x1 ...); CPU accelerator 293 / 0, Velocity 17 / 0; red-checked.
-   - [ ] CUDA, OpenCL, WebGPU lanes of the `Av1KeyframeEncoderGpu_AnySize_*` tests.
+   - [x] CUDA 15 / 0, OpenCL 15 / 0 (both with the FFmpeg byte comparison), WebGPU 15 / 0 (`Av1Keyframe` tests,
+     c5884c96, 2026-11-12; no device loss, GPU process peak 0.78 GB).
+   - [ ] Cold compile of the two AV1 encode kernels on Chrome D3D12 rose from 7.7 s / 8.0 s to 9.7 s / 11.6 s with
+     this change (GPU process peak 0.96 -> 1.28 GB): recover it with 32-bit transform butterflies (Data, next).
    - [ ] `VideoFileEncoderGpu`: remove the AV1 size guard and add the file-level test (Geordi).
    - [ ] `Av1KeyframeDecoderGpu` still takes multiples of 64 only (not needed by the encoder path).

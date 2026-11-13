@@ -32,7 +32,10 @@ the leaves at the edge are 8x8, not rectangular). What it does at the bottom / r
   (`Av1KeyframeEncoderGpu_AnySize_FfmpegDecodesWhatTheEncoderReconstructs`, desktop lanes), the kernel's bytes
   equal the CPU reference's (`..._AnySize_MatchesCpuReference`, every lane that runs serial stream kernels), and
   the CPU reference itself decodes in FFmpeg (`Av1KeyframeEncoder_AnySize_FfmpegDecodesThePicture`).
-  Run so far (2026-11-12): CPU accelerator and Velocity green; CUDA, OpenCL and WebGPU not run yet.
+  Run on c5884c96 (2026-11-12): CPU accelerator, Velocity, CUDA, OpenCL and WebGPU green.
+- Cost, measured (Chrome 157 D3D12, RTX 4070, cold, 3 interleaved reps): the encode kernels compile in 9.7 s
+  (single) and 11.6 s (batch), up from 7.7 s and 8.0 s, GPU-process peak 1.28 GB (was 0.96). 18,159 of the 46,123
+  inlined lines are emulated 64-bit arithmetic, mostly the transform butterflies (`HalfBtf`).
 - NOT done: the GPU decoder (`Av1KeyframeDecoderGpu`) still takes multiples of 64 only.
 
 **Status 2026-05-04 (superseded by the above):** AV1 GPU encoder strictly requires width AND height
