@@ -35,7 +35,7 @@ On the device: `EncodeKeyFrameAsync(ArrayView1D y, ..., ArrayView1D output)` ret
 
 | Class | What it does |
 |-------|--------------|
-| `Av1KeyframeEncoderGpu` | Keyframes: temporal delimiter, sequence header and frame OBU (OBU framing and leb128 sizes written on the device), DC prediction, 16x16 blocks, forward transforms, quantization, the Daala range coder. Width and height must be multiples of 64. libdav1d decodes the output. |
+| `Av1KeyframeEncoderGpu` | Keyframes: temporal delimiter, sequence header and frame OBU (OBU framing and leb128 sizes written on the device), DC prediction, 16x16 blocks, forward transforms, quantization, the Daala range coder. Any picture size (edge superblocks coded with 8x8 leaves). libdav1d decodes the output. |
 | `Av1KeyframeDecoderGpu` | `DecodeSingleTileAsync` for single-tile frames, multiples of 64. Managed overload only so far. |
 
 ## Batches of frames
@@ -47,7 +47,7 @@ readback per batch instead of one per frame. The output of a batch is identical 
 ## Limits and open work
 
 - Keyframes only; no inter frames, no rate control beyond the fixed `baseQIndex`.
-- VP9 decode and AV1 encode / decode at multiples of 64 pixels; VP8 encode at one token partition.
+- AV1 decode (`Av1KeyframeDecoderGpu`) at multiples of 64 pixels; VP8 encode at one token partition.
 - In the browser, the VP8 / VP9 / AV1 frame kernels are currently too large for Chrome's shader compiler (the GPU process
   is lost, or a compile takes minutes); they are being split into smaller stage kernels
   ([Plans/PLAN-Oversized-Kernels.md](../Plans/PLAN-Oversized-Kernels.md)). On WebGPU the AV1 batch encode also differs from

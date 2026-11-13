@@ -323,8 +323,60 @@ public abstract partial class CodecsTestBase
             True(av1c != null, "no av1C");
             Equal(Convert.ToHexString(Av1Isobmff.BuildAv1C(samples[0])), Convert.ToHexString(av1c!));
             foreach (var s in samples) True(((s[0] >> 3) & 15) != 2, "a sample starts with a temporal delimiter");
-            await ThrowsAsync<NotSupportedException>(() => enc.EncodeAsync(TestFrames(70, 50, 1), 70, 50, 24, 1, null, new VideoFileEncodeOptions { Codec = VideoCodec.Av1 }));
+            // any picture size (Av1KeyframeEncoderGpu codes the edge superblocks): 70x50, neither a multiple of 8
+            var odd = await enc.EncodeAsync(TestFrames(70, 50, 2, smooth: true), 70, 50, 24, 1, null, new VideoFileEncodeOptions { Codec = VideoCodec.Av1 });
+            var oddSamples = Mp4Samples(odd, out var oddAv1c);
+            Equal(2, oddSamples.Count);
+            Equal(Convert.ToHexString(Av1Isobmff.BuildAv1C(oddSamples[0])), Convert.ToHexString(oddAv1c!));
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
+
+    /// <summary>
+    /// The files themselves against an independent decoder (FFmpeg as a black box) at a size that is not a multiple of
+    /// 8 in either axis: AV1 MP4 and VP9 MP4 (a key frame + inter frames) decode to the right number of pictures of
+    /// the right size, and their luma is the source's (BT.601 limited range of the frame as ComfyUI saves it).
+    /// </summary>
+    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL,DesktopOnly")]
+    public async Task VideoFileEncoderGpu_OddSize_FfmpegDecodesTheFiles()
+    {
+        FfmpegOracle.RequireAvailable();
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            const int w = 70, h = 50, n = 4;
+            var frames = TestFrames(w, h, n, smooth: true);
+            using var enc = new VideoFileEncoderGpu(acc);
+            var report = new List<string>();
+            foreach (var codec in new[] { VideoCodec.Av1, VideoCodec.Vp9 })
+            {
+                var file = await enc.EncodeAsync(frames, w, h, 24, 1, null, new VideoFileEncodeOptions { Codec = codec, Container = VideoContainer.Mp4 });
+                var decoded = FfmpegOracle.DecodeVideoI420(file, ".mp4", w, h);
+                Equal(n, decoded.Count);
+                double worst = double.MaxValue;
+                for (int k = 0; k < n; k++)
+                {
+                    double se = 0;
+                    for (int i = 0; i < w * h; i++)
+                    {
+                        // the frame as saved (x * 255, truncated), then BT.601 limited range luma
+                        int r = (int)(frames[k][i * 3] * 255f), g = (int)(frames[k][i * 3 + 1] * 255f), b = (int)(frames[k][i * 3 + 2] * 255f);
+                        double luma = 16 + (65.481 * r + 128.553 * g + 24.966 * b) / 255.0;
+                        double d = luma - decoded[k][i];
+                        se += d * d;
+                    }
+                    worst = Math.Min(worst, 10 * Math.Log10(65025 / Math.Max(se / (w * h), 1e-9)));
+                }
+                report.Add($"{codec} {file.Length} B worst luma {worst:F1} dB");
+                True(worst > OddSizeLumaFloorDb, $"{codec} {w}x{h}: FFmpeg's picture is {worst:F1} dB from the source's luma");
+            }
+            Console.WriteLine($"{acc.AcceleratorType}: {w}x{h} x {n} frames: " + string.Join(", ", report));
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    // Measured on the CPU accelerator (2026-11-12, q 32 / 30): AV1 51.6 dB, VP9 48.0 dB. A wrong plane size, stride or
+    // crop gives a picture under 20 dB.
+    private const double OddSizeLumaFloorDb = 44;
 }

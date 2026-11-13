@@ -23,6 +23,8 @@
   in every frame: 80x50 inter frames 955 -> 522 B, 200x9 1275 -> 289 B at q 30).
 - Measured on a real 512x512 clip (48 frames, CUDA): inter frames with round to nearest were 42 to 53% of key frames
   only at equal PSNR; with the dead zone at q 40 the video is 1.10 MB against 3.64 MB key frames only.
+- `VideoFileEncoderGpu` writes AV1 at any picture size too (Av1KeyframeEncoderGpu's edge superblocks, by Data,
+  c5884c9); FFmpeg decodes the 70x50 AV1 and VP9 MP4 files to the source's luma (51.6 and 48.0 dB).
 - `DemoConsole vp9-encode-bench <clip.webm>`: bytes, PSNR and speed per quantizer and key frame interval on a real clip.
 - SpawnDev.ILGPU 5.4.29 -> 5.4.30.
 

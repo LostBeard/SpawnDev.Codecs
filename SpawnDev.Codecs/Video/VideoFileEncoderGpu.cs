@@ -2,8 +2,8 @@
 //
 // One call from RGB frames (ComfyUI's IMAGE layout: float32 H x W x 3 per frame, values in [0, 1]) + frame rate +
 // optional audio to an MP4 or WebM file. Per frame on the accelerator: float RGB -> RGBA8 (ComfyUI's save: x * 255
-// clamped and truncated), RGBA8 -> YUV 4:2:0 (WebPRgbaToYuvGpu, BT.601 limited range), then the encoder (VP9: any
-// size; AV1: multiples of 64); the encoded packet is the one readback per frame. Audio: Opus packets (OggOpusEncoder's
+// clamped and truncated), RGBA8 -> YUV 4:2:0 (WebPRgbaToYuvGpu, BT.601 limited range), then the encoder (VP9 or
+// AV1, any picture size); the encoded packet is the one readback per frame. Audio: Opus packets (OggOpusEncoder's
 // encode; 8, 12, 16, 24 or 48 kHz input). Muxing: Mp4Writer or WebMWriter (host-side framing).
 //
 // VP9 (Vp9EncoderGpu): a key frame every VideoFileEncodeOptions.KeyFrameInterval frames, the frames between predicted
@@ -40,8 +40,8 @@ public sealed record VideoFileEncodeOptions
 {
     /// <summary>The file format.</summary>
     public VideoContainer Container { get; init; } = VideoContainer.Mp4;
-    /// <summary>The video codec: VP9 (any size) or AV1 (width and height multiples of 64, the AV1 encoder's current
-    /// limit). VP8 is not offered here.</summary>
+    /// <summary>The video codec: VP9 (key frames + inter frames) or AV1 (key frames only so far), any picture size.
+    /// VP8 is not offered here.</summary>
     public VideoCodec Codec { get; init; } = VideoCodec.Vp9;
     /// <summary>Base quantizer index (1..255; lower is better quality, bigger file). Null: 30 for VP9, 32 for AV1.</summary>
     public int? QIndex { get; init; }
@@ -156,8 +156,6 @@ public sealed class VideoFileEncoderGpu : IDisposable
         options ??= new VideoFileEncodeOptions();
         if (options.Codec is not (VideoCodec.Vp9 or VideoCodec.Av1)) throw new NotSupportedException($"{options.Codec}: VP9 or AV1.");
         bool av1 = options.Codec == VideoCodec.Av1;
-        if (av1 && (width % 64 != 0 || height % 64 != 0))
-            throw new NotSupportedException($"AV1 encodes sizes that are multiples of 64 so far ({width}x{height}); use VP9 for other sizes.");
         int q = options.QIndex ?? (av1 ? 32 : 30);
         int keyInterval = options.KeyFrameInterval ?? 128;
         if (keyInterval < 1) throw new ArgumentOutOfRangeException(nameof(options), "KeyFrameInterval must be at least 1.");
