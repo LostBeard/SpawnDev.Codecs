@@ -16,6 +16,13 @@
 - `VideoFileEncoderGpu.EncodeAsync` overloads: frames already on the accelerator (one `ArrayView1D<float>` holding
   N x H x W x 3, nothing of the picture crosses to the host) and, in the browser, `IReadOnlyList<Float32Array>`
   (JS -> GPU, returns a `Uint8Array`). All three funnel into one encode.
+- Inter frames quantize with a dead zone (coefficients under 100/128 of a step are dropped, the rest rounded with
+  48/128): on two real ComfyUI clips the same luma PSNR costs 33% and 39% fewer bytes than round to nearest (same
+  RGB PSNR: 23% and 28%). Key frames are unchanged.
+- Inter frames code nothing past the picture's edge (sizes that are not multiples of 8 paid for the padding strip
+  in every frame: 80x50 inter frames 955 -> 522 B, 200x9 1275 -> 289 B at q 30).
+- Measured on a real 512x512 clip (48 frames, CUDA): inter frames with round to nearest were 42 to 53% of key frames
+  only at equal PSNR; with the dead zone at q 40 the video is 1.10 MB against 3.64 MB key frames only.
 - `DemoConsole vp9-encode-bench <clip.webm>`: bytes, PSNR and speed per quantizer and key frame interval on a real clip.
 - SpawnDev.ILGPU 5.4.29 -> 5.4.30.
 

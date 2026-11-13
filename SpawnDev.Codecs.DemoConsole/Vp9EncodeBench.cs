@@ -1,6 +1,7 @@
 // vp9-encode-bench: decodes a WebM clip, re-encodes it with VideoFileEncoderGpu (VP9) for each q and key frame
 // interval, and prints video bytes, key/inter frame sizes, PSNR against the source frames and encode time.
 // Usage: vp9-encode-bench <clip.webm> [--backend cpu|velocity|cuda|opencl] [--frames N] [--q 20,40,60] [--intervals 1,128] [--out dir]
+//        [--zbin 64,84 --round 64,48]: inter frame quantizer settings to compare (pairs, 1/128 of a step; 64,64 = round to nearest)
 
 using System.Diagnostics;
 using System.Globalization;
@@ -49,6 +50,8 @@ internal static class Vp9EncodeBench
         var qs = new List<int> { 20, 40, 60 };
         var intervals = new List<int> { 1, 128 };
         string? outDir = null;
+        var zbins = new List<int> { 64 };
+        var rounds = new List<int> { 64 };
         for (int i = 2; i < args.Length; i++)
         {
             string a = args[i];
@@ -63,11 +66,18 @@ internal static class Vp9EncodeBench
             else if (a == "--q") qs = ParseList(v);
             else if (a == "--intervals") intervals = ParseList(v);
             else if (a == "--out") outDir = v;
+            else if (a == "--zbin") zbins = ParseList(v);
+            else if (a == "--round") rounds = ParseList(v);
             else
             {
                 Console.WriteLine($"unknown option {a}");
                 return 2;
             }
+        }
+        if (zbins.Count != rounds.Count)
+        {
+            Console.WriteLine("--zbin and --round need the same number of values");
+            return 2;
         }
         string clipName = Path.GetFileName(clipPath);
         string clipBase = Path.GetFileNameWithoutExtension(clipPath);
@@ -116,10 +126,13 @@ internal static class Vp9EncodeBench
         var results = new List<Result>();
         var psnrMeans = new Dictionary<string, double>();
         var videoBytesBy = new Dictionary<string, long>();
+        for (int cfg = 0; cfg < zbins.Count; cfg++)
         foreach (int q in qs)
         {
             foreach (int interval in intervals)
             {
+                int zbin = zbins[cfg], round = rounds[cfg];
+                enc.Vp9Setup = e => { e.InterZbinQ7 = zbin; e.InterRoundQ7 = round; };
                 var sw = Stopwatch.StartNew();
                 byte[] file = await enc.EncodeAsync(frames, width, height, fpsNum, fpsDen, null,
                     new VideoFileEncodeOptions { Container = VideoContainer.WebM, QIndex = q, KeyFrameInterval = interval });
@@ -146,6 +159,8 @@ internal static class Vp9EncodeBench
                 int count = Math.Min(n, decoded.Frames.Count);
                 double sum = 0;
                 double min = double.MaxValue;
+                double sumY = 0, minY = double.MaxValue, lastY = 0;
+                int lastCount = 0;
                 for (int i = 0; i < count; i++)
                 {
                     float[] s = frames[i];
@@ -156,17 +171,30 @@ internal static class Vp9EncodeBench
                         double diff = (s[k] - d[k]) * 255.0;
                         se += diff * diff;
                     }
+                    // luma (BT.601) of both pictures: the RGB PSNR is capped by the 4:2:0 round trip, this one is not
+                    double seY = 0;
+                    for (int k = 0; k < s.Length; k += 3)
+                    {
+                        double diff = (0.299 * (s[k] - d[k]) + 0.587 * (s[k + 1] - d[k + 1]) + 0.114 * (s[k + 2] - d[k + 2])) * 255.0;
+                        seY += diff * diff;
+                    }
+                    double mseY = seY / (s.Length / 3);
+                    double py = mseY <= 0 ? 99.0 : 10.0 * Math.Log10(255.0 * 255.0 / mseY);
+                    sumY += py;
+                    if (py < minY) minY = py;
+                    if (i >= count - 8) { lastY += py; lastCount++; }   // the clip's last 8 frames: decay shows here
                     double mse = se / s.Length;
                     double psnr = mse <= 0 ? 99.0 : 10.0 * Math.Log10(255.0 * 255.0 / mse);
                     sum += psnr;
                     if (psnr < min) min = psnr;
                 }
                 double psnrMean = count > 0 ? sum / count : 0;
+                double psnrY = count > 0 ? sumY / count : 0;
                 if (count == 0) min = 0;
 
-                Console.WriteLine($"BENCH vp9-encode clip={clipName} backend={backend} size={width}x{height} frames={n} q={q} interval={interval} " +
+                Console.WriteLine($"BENCH vp9-encode clip={clipName} backend={backend} size={width}x{height} frames={n} q={q} interval={interval} zbin={zbin} round={round} " +
                     $"video_bytes={videoBytes} key_frames={keyFrames} avg_key_bytes={F(avgKey, "F0")} avg_inter_bytes={F(avgInter, "F0")} " +
-                    $"psnr_mean={F(psnrMean, "F2")} psnr_min={F(min, "F2")} encode_s={F(encodeS, "F2")} fps={F(n / encodeS, "F2")}");
+                    $"psnr_mean={F(psnrMean, "F2")} psnr_min={F(min, "F2")} psnr_y={F(psnrY, "F3")} psnr_y_min={F(count > 0 ? minY : 0, "F2")} psnr_y_last8={F(lastCount > 0 ? lastY / lastCount : 0, "F2")} encode_s={F(encodeS, "F2")} fps={F(n / encodeS, "F2")}");
                 if (decoded.Frames.Count != n)
                     Console.WriteLine($"WARN decoded frame count {decoded.Frames.Count} != source {n} (q={q} interval={interval})");
 
@@ -174,8 +202,11 @@ internal static class Vp9EncodeBench
                     File.WriteAllBytes(Path.Combine(outDir, $"{clipBase}_q{q}_i{interval}.webm"), file);
 
                 results.Add(new Result { Q = q, Interval = interval, VideoBytes = videoBytes, KeyFrames = keyFrames });
-                psnrMeans[q + "/" + interval] = psnrMean;
-                videoBytesBy[q + "/" + interval] = videoBytes;
+                if (cfg == 0)
+                {
+                    psnrMeans[q + "/" + interval] = psnrMean;
+                    videoBytesBy[q + "/" + interval] = videoBytes;
+                }
             }
         }
 
@@ -185,7 +216,7 @@ internal static class Vp9EncodeBench
             double basePsnr = psnrMeans[q + "/1"];
             foreach (int interval in intervals)
             {
-                if (interval == 1) continue;
+                if (interval == 1 || !videoBytesBy.ContainsKey(q + "/" + interval)) continue;
                 long bytes = videoBytesBy[q + "/" + interval];
                 double delta = psnrMeans[q + "/" + interval] - basePsnr;
                 string sign = delta >= 0 ? "+" : "-";

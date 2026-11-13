@@ -110,6 +110,11 @@ public abstract partial class CodecsTestBase
                             if (p < floor) { failures.Add($"{tag} frame {n}: {p:F1} dB < {floor}"); break; }
                         }
                         report.Add($"{tag}: key {keyBytes} B, inter avg {interBytes / (frames - 1)} B, worst {worst:F1} dB");
+                        // A picture that is not a multiple of 8 has leaves reaching into padding. Nothing may be coded
+                        // there: measured inter / key bytes 36% (80x50), 33% (70x50), 23% (200x9); with the zero
+                        // padded source coded against the prediction 66%, 72% and 101% (every frame, the same step).
+                        if (field == 5 && q == 30 && (w % 8 != 0 || h % 8 != 0) && interBytes / (frames - 1) * 2 > keyBytes)
+                            failures.Add($"{tag}: inter frames average {interBytes / (frames - 1)} B, the key frame {keyBytes} B: more than half (is the padding coded?)");
                     }
             // all flat mid-gray: nothing but skipped blocks in the inter frames
             {
@@ -202,6 +207,66 @@ public abstract partial class CodecsTestBase
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
+
+    /// <summary>
+    /// The inter frames' dead zone (Vp9EncoderGpu.InterZbinQ7 / InterRoundQ7, default 100 / 48) against round to nearest
+    /// (64 / 64) at the same quantizer: a moving picture with fresh noise in every frame, which round to nearest
+    /// re-codes frame after frame. The default must be clearly smaller at nearly the same picture. (The setting itself
+    /// was chosen on real clips at equal PSNR: DemoConsole vp9-encode-bench.)
+    /// </summary>
+    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL,GiantShader")]
+    public async Task Vp9EncoderGpu_InterDeadZone_SmallerThanRoundToNearest()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, SerialStreamKernels);
+        try
+        {
+            const int w = 192, h = 128, frames = 5, q = 40;
+            int cw = (w + 1) / 2, ch = (h + 1) / 2;
+            var bytesPer = new int[2];
+            var worstPer = new double[2];
+            for (int pass = 0; pass < 2; pass++)
+            {
+                using var enc = new Vp9EncoderGpu(acc);
+                if (pass == 1) { enc.InterZbinQ7 = 64; enc.InterRoundQ7 = 64; }   // round to nearest
+                using var dec = new Vp9DecoderGpu(acc);
+                worstPer[pass] = double.MaxValue;
+                for (int n = 0; n < frames; n++)
+                {
+                    var y = new byte[w * h]; var u = new byte[cw * ch]; var v = new byte[cw * ch];
+                    var grain = new Random(2000 + n);
+                    for (int r = 0; r < h; r++)
+                        for (int c = 0; c < w; c++)
+                            y[r * w + c] = (byte)Math.Clamp(Math.Round(Vp9SmoothTexture(c - 3 * n, r - 2 * n, 1)) + grain.Next(-4, 5), 0, 255);
+                    for (int r = 0; r < ch; r++)
+                        for (int c = 0; c < cw; c++)
+                        {
+                            u[r * cw + c] = (byte)Math.Clamp(Math.Round(64 + Vp9SmoothTexture(2 * c - 3 * n, 2 * r - 2 * n, 11) / 2) + grain.Next(-2, 3), 0, 255);
+                            v[r * cw + c] = (byte)Math.Clamp(Math.Round(64 + Vp9SmoothTexture(2 * c - 3 * n, 2 * r - 2 * n, 21) / 2) + grain.Next(-2, 3), 0, 255);
+                        }
+                    var (bytes, isKey) = await enc.EncodeFrameAsync(y, u, v, w, h, q);
+                    var recon = await enc.ReadReconAsync();
+                    var shown = await dec.DecodePacketAsync(bytes);
+                    True(shown != null && shown.Planes.AsSpan().SequenceEqual(recon), $"pass {pass} frame {n}: decoder != encoder reconstruction");
+                    if (isKey) continue;
+                    bytesPer[pass] += bytes.Length;
+                    double se = 0;
+                    for (int i = 0; i < y.Length; i++) { double d = y[i] - recon[i]; se += d * d; }
+                    worstPer[pass] = Math.Min(worstPer[pass], 10 * Math.Log10(65025 / Math.Max(se / y.Length, 1e-9)));
+                }
+            }
+            Console.WriteLine($"{acc.AcceleratorType}: {w}x{h} q{q} inter bytes dead zone {bytesPer[0]}, round to nearest {bytesPer[1]} " +
+                $"({100.0 * bytesPer[0] / Math.Max(bytesPer[1], 1):F0}%), worst Y {worstPer[0]:F2} / {worstPer[1]:F2} dB");
+            True(bytesPer[0] * 100 <= bytesPer[1] * DeadZoneMaxPercent, $"dead zone {bytesPer[0]} B, round to nearest {bytesPer[1]} B: expected at most {DeadZoneMaxPercent}%");
+            True(worstPer[0] >= worstPer[1] - DeadZoneMaxLossDb, $"dead zone worst Y {worstPer[0]:F2} dB, round to nearest {worstPer[1]:F2} dB: more than {DeadZoneMaxLossDb} dB lower");
+        }
+        finally { ReleaseAccelerator(ctx, acc); }
+    }
+
+    // Measured on the CPU accelerator (2026-11-12): 18140 B against 29332 B (62%), worst Y 41.28 against 43.41 dB (the
+    // noise it declines to code counts as error here: the source is the noisy picture).
+    private const int DeadZoneMaxPercent = 75;
+    private const double DeadZoneMaxLossDb = 3.0;
 
     private static double Vp9Lattice(int x, int y, uint seed)
     {

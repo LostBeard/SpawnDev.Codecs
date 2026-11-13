@@ -76,6 +76,9 @@ public sealed class VideoFileEncoderGpu : IDisposable
     private Av1KeyframeEncoderGpu? _av1;
     private Action<Index1D, ArrayView<float>, ArrayView<byte>>? _toRgba;
 
+    /// <summary>Measurements (DemoConsole vp9-encode-bench): called with the VP9 encoder before each file's first frame.</summary>
+    internal Action<Vp9EncoderGpu>? Vp9Setup { get; set; }
+
     /// <summary>An encoder on <paramref name="accelerator"/>. Compiles nothing until the first encode.</summary>
     public VideoFileEncoderGpu(Accelerator accelerator)
     {
@@ -188,6 +191,7 @@ public sealed class VideoFileEncoderGpu : IDisposable
             _vp9 ??= new Vp9EncoderGpu(_acc);
             _vp9.Reset();
             _vp9.KeyFrameInterval = keyInterval;
+            Vp9Setup?.Invoke(_vp9);
         }
         // separate buffers: WebGPU rejects two read_write bindings of one buffer that share a 4-byte word
         // one frame of floats to upload into: only for sources that are not on the accelerator

@@ -33,7 +33,9 @@ internal static class Vp9IArg
     public const int SrcY = Vp9RArg.Count, SrcU = SrcY + 1, SrcV = SrcY + 2;
     /// <summary>Quantizer steps: Y DC, Y AC, UV DC, UV AC.</summary>
     public const int DqYDc = SrcY + 3, DqYAc = SrcY + 4, DqUvDc = SrcY + 5, DqUvAc = SrcY + 6;
-    public const int Count = SrcY + 7;
+    /// <summary>The quantizer's dead zone and rounding, in 1/128 of a step (64, 64 = round to nearest).</summary>
+    public const int ZbinQ7 = SrcY + 7, RoundQ7 = SrcY + 8;
+    public const int Count = SrcY + 9;
 }
 
 internal static class Vp9InterEncodeKernels
@@ -144,9 +146,15 @@ internal static class Vp9InterEncodeKernels
             int stride = a[Vp9RArg.Cur + plane * 4 + 1];
             int at = (((miRow * 8) >> s) + down * n) * stride + ((miCol * 8) >> s) + across * n;
             int predAt = a[Vp9RArg.Cur + plane * 4] + at, srcAt = a[Vp9IArg.SrcY + plane] + at;
+            // Pixels past the picture's edge (the leaf reaches into the padding up to the 8 pixel grid) get no
+            // residual: no decoder shows them and none predicts from them (inter prediction repeats the cropped
+            // picture's edge), so whatever is cheapest is right. The zero padded source against the prediction was
+            // a full-height step there, coded again in every frame.
+            int insideW = ((a[Vp9MArg.Width] + s) >> s) - (((miCol * 8) >> s) + across * n);
+            int insideH = ((a[Vp9MArg.Height] + s) >> s) - (((miRow * 8) >> s) + down * n);
             for (int r = 0; r < n; r++)
                 for (int c = 0; c < n; c++)
-                    residual[r * n + c] = (short)(src[srcAt + r * stride + c] - pool[predAt + r * stride + c]);
+                    residual[r * n + c] = r < insideH & c < insideW ? (short)(src[srcAt + r * stride + c] - pool[predAt + r * stride + c]) : (short)0;
             int scanAt;
             if (tx == 2)
             {
@@ -164,7 +172,7 @@ internal static class Vp9InterEncodeKernels
                 scanAt = Vp9KeyframeConstantsGpu.Scan4x4Offset;
             }
             int dcQ = a[plane == 0 ? Vp9IArg.DqYDc : Vp9IArg.DqUvDc], acQ = a[plane == 0 ? Vp9IArg.DqYAc : Vp9IArg.DqUvAc];
-            Vp9ForwardQuantizerGpu.QuantizeBlock(coefs, 0, count, dcQ, acQ);
+            Vp9ForwardQuantizerGpu.QuantizeBlockDeadZone(coefs, 0, count, dcQ, acQ, a[Vp9IArg.ZbinQ7], a[Vp9IArg.RoundQ7]);
             // the half-th transform of the plane: its coefficients follow the first one's (16 << 2 tx = count each)
             int dqAt = sbBuf[e + Vp9PLayout.BlkDqY + plane] + half * count;
             for (int i = 0; i < count; i++)

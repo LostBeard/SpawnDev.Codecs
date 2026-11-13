@@ -149,8 +149,9 @@ public abstract partial class CodecsTestBase
                 worst = Math.Min(worst, psnr);
                 perFrame.Add($"{psnr:F1}");
             }
-            // q 30 on a smooth clip: quantizer noise alone is about 39.8 dB in RGB (AC step 37 / 8 per pixel, uniform, through
-            // the BT.601 matrix); measured 39.6 to 40.5 dB (CPU accelerator, 2026-11-12)
+            // q 30 on a smooth clip: round-to-nearest quantizer noise alone is about 39.8 dB in RGB (AC step 37 / 8 per
+            // pixel, uniform, through the BT.601 matrix); measured 39.0 to 40.5 dB (CPU accelerator, 2026-11-12; the inter
+            // frames' dead zone puts them a little under that)
             True(worst > 38, $"worst frame PSNR {worst:F1} dB (frames: {string.Join(", ", perFrame)})");
             var audio = loaded.Audio ?? throw new Exception("no audio");
             Equal(channels, audio.Channels);
@@ -205,9 +206,10 @@ public abstract partial class CodecsTestBase
             True(Mp4SyncSamples(mp4Keys) == null, "interval 1 MP4 has an stss box");
             int interVideo = blocks.Sum(b => b.Length), keyVideo = keySamples.Sum(s => s.Length);
             True(interVideo < keyVideo, $"video with inter frames {interVideo} B, key frames only {keyVideo} B");
-            // An inter frame is as good a picture as the same frame coded as a key frame at the same quantizer, within
-            // 1.5 dB: a key frame of a smooth picture beats the quantizer's noise floor a little (coefficients it rounds
-            // to zero were nearly zero), an inter frame sits on it (measured: at most 1.0 dB below, not growing).
+            // An inter frame against the same frame coded as a key frame at the same quantizer: within 2.5 dB. Inter
+            // frames drop coefficients under 100/128 of a step (Vp9EncoderGpu.InterZbinQ7: a third fewer bytes at equal
+            // PSNR on real clips), so at the same quantizer they sit a little under a key frame: measured here at most
+            // 1.6 dB (frame 5: 39.0 vs 40.6 dB), with round to nearest 1.0 dB. The floor above (38 dB) is the tight guard.
             var loadedKeys = await new WebMVideoLoaderGpu(acc).LoadAsync(
                 await enc.EncodeAsync(frames, w, h, 24, 1, null, new VideoFileEncodeOptions { Container = VideoContainer.WebM, KeyFrameInterval = 1 }));
             Equal(n, loadedKeys.Frames.Count);
@@ -224,7 +226,7 @@ public abstract partial class CodecsTestBase
                 double psnr = 10 * Math.Log10(255.0 * 255 / Math.Max(se / frames[k].Length, 1e-9));
                 double psnrKey = 10 * Math.Log10(255.0 * 255 / Math.Max(seKey / frames[k].Length, 1e-9));
                 keyPsnr.Add($"{psnrKey:F1}");
-                True(psnr > psnrKey - 1.5, $"frame {k}: {psnr:F1} dB with inter frames, {psnrKey:F1} dB as a key frame");
+                True(psnr > psnrKey - 2.5, $"frame {k}: {psnr:F1} dB with inter frames, {psnrKey:F1} dB as a key frame");
             }
             await ThrowsAsync<ArgumentOutOfRangeException>(() => enc.EncodeAsync(frames, w, h, 24, 1, null, new VideoFileEncodeOptions { KeyFrameInterval = 0 }));
 

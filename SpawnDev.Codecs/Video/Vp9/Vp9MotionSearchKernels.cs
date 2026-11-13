@@ -188,6 +188,11 @@ internal static class Vp9MotionSearchKernels
                     if (mvsIn[nr * cols16 + nc] == center) centerFree = true;
             }
 
+        // score only the pixels inside the picture (an edge leaf reaches into the padding)
+        int insideW = a[Vp9MArg.Width] - c16 * 16, insideH = a[Vp9MArg.Height] - r16 * 16;
+        if (bw > insideW) bw = insideW;
+        if (bh > insideH) bh = insideH;
+
         int bestMv = center, best = int.MaxValue;
         for (int k = 0; k < 9; k++)
         {

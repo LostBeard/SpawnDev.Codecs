@@ -48,6 +48,7 @@
 		<!-- Test project sees internal types so SILK/CELT subsystems can be tested
 		     in isolation without polluting the public API. -->
 		<InternalsVisibleTo Include="SpawnDev.Codecs.Demo.Shared" />
+		<InternalsVisibleTo Include="SpawnDev.Codecs.DemoConsole" />
 		<!-- References project hosts the CPU reference encoders + decoders; they
 		     need internal types from main (SilkStereoState, SilkResamplerState,
 		     etc.) since CPU implementations and GPU primitives share the same

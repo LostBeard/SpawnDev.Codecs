@@ -42,7 +42,9 @@ segmentation off, loop filter level 0, one tile. Fixed quantizer (same q index a
    - [x] Code + test `Vp9EncoderGpu_InterFrames_DecoderMatchesEncoderReconstruction` (4affcf4): CPU accelerator,
      red-checked (7 mutations red).
    - [x] External decoder: ffmpeg 8.1 (black box) decodes the clips to the encoder's reconstruction (d9c74f4).
-   - [ ] CUDA, Velocity, WebGPU lanes (watchdog on the first WebGPU run, one test alone).
+   - [x] CUDA, Velocity, WebGPU lanes (2026-11-12, 418c5b6, ILGPU 5.4.30): VelocityCodecsTests 6/6,
+     CudaCodecsTests 6/6, WebGPUCodecsTests 6/6 on `Vp9EncoderGpu_` + `VideoFileEncoderGpu_` (WebGPU: probe of one
+     test alone first; no device loss, GPU process peak 1.25 GB). Not run: Wasm and OpenCL lanes (release sweep).
      - [x] Offline WGSL screen + compile-only probe by Data (2026-11-12, ILGPU 5.4.30, RTX 4070 D3D12): all kernels
        valid; the entropy step is 19,464 inlined lines (below three kernels the WebGPU lane already runs), compiles
        in 3.1 s, GPU process peak 342 MB. Nothing was dispatched: run-time behaviour is still unproven there.
@@ -52,8 +54,8 @@ segmentation off, loop filter level 0, one tile. Fixed quantizer (same q index a
      the same frame coded as a key frame. CPU accelerator, red-checked (5 mutations).
    - [x] `VideoFileEncoderGpu`: frames already on the accelerator (one ArrayView, N x H x W x 3): the managed
      overload's file byte for byte on the CPU accelerator and CUDA, red-checked.
-   - [ ] `VideoFileEncoderGpu` TypedArray overload (`IReadOnlyList<Float32Array>` -> `Uint8Array`): written, test
-     `VideoFileEncoderGpu_TypedArrayOverload_MatchesManaged` (BrowserOnly) has not run yet.
+   - [x] `VideoFileEncoderGpu` TypedArray overload (`IReadOnlyList<Float32Array>` -> `Uint8Array`): the managed
+     overload's file byte for byte on WebGPU (`VideoFileEncoderGpu_TypedArrayOverload_MatchesManaged`).
 2. [ ] **Motion search.** Pyramid full-pel search (+-38 pixels), half / quarter-pel refinement and a merge with the
    neighbours' MVs, scored with the decoder's own predictor (`Vp9MotionSearchKernels`, d9c74f4).
    - [x] Code + tests on the CPU accelerator: a moving picture's inter frames are 41-42% of zero motion's at q 40.
@@ -63,14 +65,25 @@ segmentation off, loop filter level 0, one tile. Fixed quantizer (same q index a
      at it: full-pel result dropped (also the shrink assertion), 1/4 size level off, full size level off, half-pel
      off, quarter-pel off, merge candidates off, NEWMV charge off. Not red-checked: the 1/2 size level (no case
      isolates it).
-   - [ ] CUDA, Velocity, WebGPU lanes.
-   - [ ] Measure on real clips (ComfyUI / Wan): file size and PSNR vs key frames only, and the search's cost
-     settings (`Vp9MArg.LengthCost`, `NewMvCost`). Tool: `DemoConsole vp9-encode-bench <clip.webm>`.
+   - [x] CUDA, Velocity, WebGPU lanes (with stage 1's, above).
+   - [x] Measured on real clips (`DemoConsole vp9-encode-bench <clip.webm>`, CUDA, 2026-11-12, 48 frames each,
+     round-to-nearest quantizer): comfyui_vp9_512x512_crf10 with inter frames is 53% / 50% / 47% / 42% of key frames
+     only at q 20 / 40 / 60 / 100 (RGB PSNR within 0.11 dB). Speed on the RTX 4070: 9.6 to 15 frames/s at 512x512
+     (key frames only: 5.9 to 10).
+     Parity gap, stated plainly: libvpx's own file of that clip (crf 10) is 695 KB; ours at q 40 was 1.82 MB with
+     round to nearest and is 1.10 MB with the dead zone below. Key frames are DC_PRED 16x16 only (2.3 bits/pixel
+     at q 40).
+   - [ ] The search's cost settings (`Vp9MArg.LengthCost`, `NewMvCost`) on real clips.
      Known: on a still picture with fresh noise in every frame (+-3) 3 of 120 leaves take a quarter-pel MV and the
      inter frames are 0.4% larger than zero motion's (2.5% without the NEWMV charge): the charge is a little low.
-   - [ ] Inter quantizer rounding: with round-to-nearest an inter frame re-codes the previous frame's quantization
-     noise (a perfectly predicted moving picture was only 2.4x smaller). Measure a dead zone for inter blocks as a
-     rate-distortion comparison (PSNR at equal bytes), then decide.
+   - [x] Inter quantizer dead zone (`Vp9ForwardQuantizerGpu.QuantizeBlockDeadZone`, `Vp9EncoderGpu.InterZbinQ7` /
+     `InterRoundQ7` = 100 / 48, in 1/128 of a step). Rate-distortion sweep on two real clips, q 20 to 130, seven
+     settings: at equal luma PSNR 100 / 48 needs 33% (512x512) and 39% (832x480) fewer bytes than round to
+     nearest, at equal RGB PSNR 23% and 28% fewer; best of the seven on both clips and both measures. 86 / 42
+     (libvpx-like): 30% / 35%. Wider dead zones (to 120) gain nothing in luma and lose in chroma. No decay over
+     the clip (last 8 frames within 0.1 dB of the worst frame). Guard test
+     `Vp9EncoderGpu_InterDeadZone_SmallerThanRoundToNearest` (red-checked, 3 mutations). Key frames still round
+     to nearest (their CPU reference mirrors it byte for byte): the same measurement is owed for them.
 3. [ ] **Large skipped partitions** (32x32 / 64x64 when all leaves under them are skipped with one MV).
 4. [ ] **Backward adaptation + previous-frame MV candidates** (`error_resilient_mode = 0`; counts written by the
    entropy pass; the decoder's `Vp9AdaptKernels`).
@@ -88,7 +101,11 @@ segmentation off, loop filter level 0, one tile. Fixed quantizer (same q index a
   (`tran_high_t` = int32 without high bit depth), so 32-bit math should be exact here: change it under the byte
   comparison tests of the key frame encoder (same helpers).
 - Source planes are zero padded to the 64 grid: at pictures that are not a multiple of 8 the padded strip inside
-  the last 8x8 costs bits on every frame. Repeat the edge instead (changes key frame bytes: CPU reference too).
+  the last 8x8 costs bits on every frame. INTER FRAMES FIXED 2026-11-12 (no residual past the picture's edge, the
+  motion search scores only pixels inside it): inter / key bytes went from 66% / 72% / 101% to 36% / 33% / 23% at
+  80x50 / 70x50 / 200x9; guard in `Vp9EncoderGpu_InterFrames_DecoderMatchesEncoderReconstruction`, red-checked.
+  KEY FRAMES still code the zero padding: repeat the edge (or drop the residual) there (changes key frame bytes:
+  CPU reference too).
 
 ## Tests (per stage)
 - Every frame: encoder's frame buffer == `Vp9DecoderGpu` output (no drift over a clip, sizes with every edge leaf

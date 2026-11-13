@@ -93,6 +93,18 @@ public sealed class Vp9EncoderGpu : IDisposable
     /// </summary>
     internal int[]? DebugMvs { get; set; }
 
+    /// <summary>
+    /// Inter frames' quantizer, in 1/128 of a step: a coefficient below <see cref="InterZbinQ7"/> is dropped, the rest
+    /// are rounded with <see cref="InterRoundQ7"/> (64, 64 = round to nearest; libvpx: 80 to 84, 48).
+    /// 100 / 48 is measured (DemoConsole vp9-encode-bench, 2026-11-12, two ComfyUI clips, 48 frames, q 20 to 130):
+    /// against round to nearest the same luma PSNR costs 33% (512x512) and 39% (832x480) fewer bytes, the same RGB
+    /// PSNR 23% and 28% fewer. Round to nearest spends bits re-coding the previous frame's quantization noise. Larger
+    /// dead zones (up to 120) gain nothing more in luma and lose in chroma; 86 / 42 gains 30% and 35%.
+    /// </summary>
+    internal int InterZbinQ7 { get; set; } = 100;
+    /// <summary>See <see cref="InterZbinQ7"/>.</summary>
+    internal int InterRoundQ7 { get; set; } = 48;
+
     /// <summary>An encoder on <paramref name="accelerator"/>.</summary>
     public Vp9EncoderGpu(Accelerator accelerator)
     {
@@ -323,6 +335,8 @@ public sealed class Vp9EncoderGpu : IDisposable
         a[Vp9IArg.DqYAc] = Vp9Dequantizer.AcQuant(baseQIndex, 0);
         a[Vp9IArg.DqUvDc] = Vp9Dequantizer.DcQuant(baseQIndex, 0);
         a[Vp9IArg.DqUvAc] = Vp9Dequantizer.AcQuant(baseQIndex, 0);
+        a[Vp9IArg.ZbinQ7] = InterZbinQ7;
+        a[Vp9IArg.RoundQ7] = InterRoundQ7;
         int hw = (width + 1) >> 1, hh = (height + 1) >> 1, qw = (hw + 1) >> 1, qh = (hh + 1) >> 1;
         a[Vp9MArg.Width] = width;
         a[Vp9MArg.Height] = height;

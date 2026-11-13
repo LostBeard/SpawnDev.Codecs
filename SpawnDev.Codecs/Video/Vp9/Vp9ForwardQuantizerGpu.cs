@@ -48,6 +48,27 @@ public static class Vp9ForwardQuantizerGpu
     }
 
     /// <summary>
+    /// Quantize with a dead zone (libvpx's vp9_quantize_b shape): a coefficient whose magnitude is below
+    /// <paramref name="zbinQ7"/> / 128 of its step becomes zero; the others are
+    /// (magnitude + step * <paramref name="roundQ7"/> / 128) / step, with the sign put back. zbinQ7 = roundQ7 = 64
+    /// is <see cref="QuantizeBlock"/> exactly (round to nearest). libvpx: zbin 80 to 84, round 48.
+    /// </summary>
+    public static void QuantizeBlockDeadZone(
+        ArrayView<int> coefs, long coefBase, int count,
+        int dcQ, int acQ, int zbinQ7, int roundQ7)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            int q = i == 0 ? dcQ : acQ;
+            int v = coefs[coefBase + i];
+            int mag = v < 0 ? -v : v;
+            int level = 0;
+            if (mag * 128 >= zbinQ7 * q) level = (mag + ((roundQ7 * q) >> 7)) / q;
+            coefs[coefBase + i] = v < 0 ? -level : level;
+        }
+    }
+
+    /// <summary>
     /// Round-half-up signed integer division. Mirrors C#
     /// <c>(value + divisor/2) / divisor</c> for positive values and
     /// <c>-(((-value) + divisor/2) / divisor)</c> for negatives.
