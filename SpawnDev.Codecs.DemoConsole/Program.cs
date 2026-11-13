@@ -34,6 +34,11 @@ if (args.Length > 0 && args[0] == "bcn-encode")
 if (args.Length > 0 && args[0] == "vp9-encode-bench")
     return await Vp9EncodeBench.Run(args);
 
+// `av1-encode-bench [--backend cpu|velocity|cuda|opencl] [--size 832x480] [--frames 12] [--warmup 2] [--q 40]`:
+// Av1KeyframeEncoderGpu on a synthetic picture already on the accelerator: time per keyframe and encoded size.
+if (args.Length > 0 && args[0] == "av1-encode-bench")
+    return await Av1EncodeBench.Run(args);
+
 // `dump-ptx|dump-glsl <Namespace.Type> <MethodName> <out>`: one kernel's PTX (for ptxas -v) or WebGL GLSL (+ its
 // transform-feedback output count).
 if (args.Length > 0 && (args[0] == "dump-ptx" || args[0] == "dump-glsl"))
