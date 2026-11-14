@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Lossless WebP: tokenisation in parallel (17x), transparent pixels take their prediction (2026-11-14)
+
+- `WebPLosslessEncoderGpu`: the LZ77 / colour-cache tokeniser was one GPU thread, run for every strategy and colour-cache
+  trial (~85% of an encode). `Vp8lTokenizeParallel` computes every position's hash-chain candidates, best copy and colour-
+  cache hit in parallel (all of them depend only on the pixels) and keeps only a one-load-per-token parse serial: the same
+  tokens and the same files. SpawnGen's 25-frame 512x352 Save Animated WEBP (Lore's report, q80) on an RTX 4070: 4.26 s ->
+  0.24 s per frame (6.0 s for the clip; libwebp 1.6.0 on the CPU: 5.9 s), byte-identical.
+- `Exact = false`: a transparent pixel takes its predicted colour (libwebp's GetResidual), so its RGB residual is 0 - it
+  was cleared to black, an expensive residual inside a picture. The animation path (blended frames full of transparent
+  pixels) on the same clip: 4.79 MB -> 3.77 MB (libwebp 3.24 MB), 3.7 -> 0.36 s per frame. RGB under alpha 0 is not
+  preserved with `Exact = false` (as in libwebp); the tests compare everything else.
+- DemoConsole `webp-anim-bench <frames folder> [--mode rect|anim|lossy] [--stages 1]`.
+
 ### VP9 encoder: entropy coding in parallel, tiles (2026-11-13)
 
 - The tile's bool-coded symbols are produced per 16x16 leaf in parallel and coded by a parallel bool coder

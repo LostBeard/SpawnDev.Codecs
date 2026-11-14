@@ -35,7 +35,8 @@ namespace SpawnDev.Codecs.Images.WebP;
 /// <summary>Loads and launches the WebP lossless encode kernels.</summary>
 public sealed class WebPEncodeKernels : IDisposable
 {
-    private Action<Index1D, ArrayView<byte>, ArrayView<uint>, int> _toArgb = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<uint>, ArrayView<int>, int> _toArgb = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, int> _transparentFill = null!;
     private Action<Index1D, ArrayView<int>, ArrayView<int>> _analyzeInit = null!, _analyzeFinish = null!;
     private Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _analyze = null!;
     private Action<Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _paletteIndex = null!;
@@ -47,6 +48,23 @@ public sealed class WebPEncodeKernels : IDisposable
     private Action<Index1D, ArrayView<int>, ArrayView<int>, int> _tokenizeInit = null!;
     private Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _tokenize = null!;
     private Action<Index1D, ArrayView<int>, ArrayView<int>> _buildCodes = null!;
+    // the parallel tokeniser (Vp8lTokenizeParallel)
+    private Action<Index1D, ArrayView<int>, int, int> _ptFill = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<int>, Vp8lTokenizeParallel.Args> _ptLinks = null!, _ptFixup = null!, _ptSearch = null!;
+    private Action<Index1D, ArrayView<int>, Vp8lTokenizeParallel.Args> _ptCarry = null!, _ptCount = null!, _ptScan = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args> _ptParse = null!, _ptFinish = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
+        Vp8lTokenizeParallel.Args> _ptEmit = null!;
+    private MemoryBuffer1D<int, Stride1D.Dense>? _ptScratch;
+
+    /// <summary>
+    /// Tests only: tokenise with the serial walk (Vp8lEncodeGpu.TokenizeStep, one thread) instead of the parallel tokeniser
+    /// (Vp8lTokenizeParallel). Both produce the same tokens, histograms and extra bits; the serial walk is the oracle.
+    /// </summary>
+    internal static bool SerialTokenize;
+
+    /// <summary>Tests only: off = transparent pixels stay black under Exact = false (the encoder before the fill), to measure it.</summary>
+    internal static bool FillTransparent = true;
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>> _emitHeader = null!, _emitTail = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int> _emitBits = null!;
     private Action<Index1D, ArrayView<int>, ArrayView<int>, int> _subImageBegin = null!, _subImageBuild = null!;
@@ -107,7 +125,8 @@ public sealed class WebPEncodeKernels : IDisposable
     private async Task LoadKernelsAsync()
     {
         var a = _accelerator;
-        _toArgb = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<uint>, int>(ToArgbKernel);
+        _toArgb = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<uint>, ArrayView<int>, int>(ToArgbKernel);
+        _transparentFill = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, int>(TransparentFillKernel);
         _analyzeInit = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(AnalyzeInitKernel);
         _analyze = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>>(AnalyzeKernel);
@@ -128,6 +147,17 @@ public sealed class WebPEncodeKernels : IDisposable
         _tokenize = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(TokenizeKernel);
         _buildCodes = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(BuildCodesKernel);
+        _ptFill = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, int, int>(Vp8lTokenizeParallel.FillKernel);
+        _ptLinks = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<uint>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.LinksKernel);
+        _ptFixup = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<uint>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.FixupKernel);
+        _ptSearch = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<uint>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.SearchKernel);
+        _ptCarry = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.CarryKernel);
+        _ptCount = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.CountKernel);
+        _ptScan = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.ScanKernel);
+        _ptParse = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.ParseKernel);
+        _ptFinish = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.FinishKernel);
+        _ptEmit = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
+            ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.EmitKernel);
         _emitHeader = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(EmitHeaderKernel);
         _emitBits = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(EmitBitsKernel);
         _subImageBegin = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(SubImageBeginKernel);
@@ -171,7 +201,24 @@ public sealed class WebPEncodeKernels : IDisposable
     // ------------------------------------------------------------------
 
     /// <summary>RGBA8 to ARGB over <paramref name="pixels"/> pixels; <paramref name="exact"/> 0 clears RGB where alpha is 0.</summary>
-    public void ToArgb(ArrayView<byte> rgba, ArrayView<uint> argb, int pixels, int exact) => _toArgb(pixels, rgba, argb, exact);
+    public void ToArgb(ArrayView<byte> rgba, ArrayView<uint> argb, ArrayView<int> meta, int pixels, int exact) => _toArgb(pixels, rgba, argb, meta, exact);
+
+    /// <summary>Pixels per launch of <see cref="TransparentFill"/> (one thread walks them in raster order).</summary>
+    public const int TransparentFillChunk = 1 << 16;
+
+    /// <summary>
+    /// libwebp's lossless GetResidual with exact = 0 (predictor_enc.c): every transparent pixel (alpha 0) of
+    /// <paramref name="argb"/> becomes its own prediction with alpha 0, in raster order (each replaced pixel feeds the next
+    /// predictions), so the residual kernel gives it an RGB residual of 0 where clearing to black cost a full residual
+    /// next to opaque pixels. Run after the predictor modes are chosen, before the residuals; nothing to do (a one-load
+    /// launch) when no pixel was cleared (<see cref="WebPEncMeta.Transparent"/>). Queued.
+    /// </summary>
+    public void TransparentFill(ArrayView<uint> argb, ArrayView<int> work, ArrayView<int> meta, int pixels)
+    {
+        if (!FillTransparent) return;
+        for (int start = 0; start < pixels; start += TransparentFillChunk)
+            _transparentFill(1, argb, work, meta, start);
+    }
 
     /// <summary>Colour analysis (alpha, palette) of <paramref name="pixels"/> pixels: set-up, bounded resumable scan launches, finish.</summary>
     public async ValueTask AnalyzeAsync(ArrayView<uint> argb, ArrayView<int> work, ArrayView<int> meta, long pixels)
@@ -212,14 +259,61 @@ public sealed class WebPEncodeKernels : IDisposable
     /// LZ77 + colour cache tokenisation of the main image of <paramref name="pixels"/> (packed) pixels: a parallel set-up, then
     /// bounded launches that each continue the serial walk where the previous one stopped.
     /// </summary>
-    public async ValueTask TokenizeAsync(ArrayView<uint> main, ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables, int cacheBits, long pixels)
+    public async ValueTask TokenizeAsync(ArrayView<uint> main, ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables,
+        int cacheBits, long pixels, int xsize, int chainDepth)
     {
-        _tokenizeInit(1 << Vp8lEncLayout.HashBits, work, meta, cacheBits);
-        for (int i = Vp8lEncLayout.Steps(pixels, Vp8lEncLayout.TokenizeChunk); i > 0; i--)
+        _tokenizeInit(1 << Vp8lEncLayout.HashBits, work, meta, cacheBits);   // histograms, and the serial walk's state
+        if (SerialTokenize)
         {
-            _tokenize(1, main, work, tok, meta, tables, cacheBits);
+            for (int i = Vp8lEncLayout.Steps(pixels, Vp8lEncLayout.TokenizeChunk); i > 0; i--)
+            {
+                _tokenize(1, main, work, tok, meta, tables, cacheBits);
+                await _pacer.LaunchedAsync();
+            }
+            return;
+        }
+        // the parallel tokeniser (Vp8lTokenizeParallel): the same tokens, histograms and extra bits
+        int n = checked((int)pixels);
+        if (n == 0)
+        {
+            _tokenize(1, main, work, tok, meta, tables, cacheBits);   // writes the empty stream's counts
+            return;
+        }
+        var l = new Vp8lTokenizeParallel.Layout(n);
+        if (_ptScratch == null || _ptScratch.Length < l.Total)
+        {
+            await _accelerator.SynchronizeAsync();   // queued work may still use the old buffer
+            _ptScratch?.Dispose();
+            _ptScratch = _accelerator.Allocate1D<int>(l.Total);
+        }
+        var s = _ptScratch.View;
+        var args = Vp8lTokenizeParallel.MakeArgs(l, xsize, cacheBits, chainDepth);
+        int tables0 = args.PairTable, tablesLen = checked((int)(l.BlockCount - l.PairTable));
+        _ptFill(tablesLen, s, tables0, -1);
+        _ptFill(n, s, args.Flag, 0);
+        _ptFill(Vp8lTokenizeParallel.StateInts, s, args.State, 0);
+        _ptLinks(l.Blocks, main, s, args);
+        _ptCarry(Vp8lTokenizeParallel.PairKeys + Vp8lTokenizeParallel.CacheKeys, s, args);
+        _ptFixup(n, main, s, args);
+        await _pacer.LaunchedAsync();
+        for (int b = 0; b < n; b += Vp8lTokenizeParallel.SearchChunk)
+        {
+            var sa = args;
+            sa.Base = b;
+            _ptSearch(Math.Min(Vp8lTokenizeParallel.SearchChunk, n - b), main, s, sa);
             await _pacer.LaunchedAsync();
         }
+        // the parse: at most n tokens, ParseChunk per launch
+        for (int i = (n + Vp8lTokenizeParallel.ParseChunk - 1) / Vp8lTokenizeParallel.ParseChunk; i > 0; i--)
+        {
+            _ptParse(1, s, tables, args);
+            await _pacer.LaunchedAsync();
+        }
+        _ptCount(l.EmitBlocks, s, args);
+        _ptScan(1, s, args);
+        _ptEmit(l.EmitBlocks, main, s, work, tok, meta, tables, args);
+        _ptFinish(1, s, meta, args);
+        await _pacer.LaunchedAsync();
     }
 
     /// <summary>Huffman codes of the five main prefix codes (one thread each).</summary>
@@ -371,7 +465,7 @@ public sealed class WebPEncodeKernels : IDisposable
     // 1. RGBA -> ARGB
     // ------------------------------------------------------------------
 
-    private static void ToArgbKernel(Index1D index, ArrayView<byte> rgba, ArrayView<uint> argb, int exact)
+    private static void ToArgbKernel(Index1D index, ArrayView<byte> rgba, ArrayView<uint> argb, ArrayView<int> meta, int exact)
     {
         int o = index.X * 4;
         uint r = rgba[o + 0];
@@ -384,6 +478,7 @@ public sealed class WebPEncodeKernels : IDisposable
             r = 0;
             g = 0;
             b = 0;
+            meta[WebPEncMeta.Transparent] = 1;   // every writer stores 1
         }
         argb[index.X] = (a << 24) | (r << 16) | (g << 8) | b;
     }
@@ -651,6 +746,40 @@ public sealed class WebPEncodeKernels : IDisposable
                 }
             }
             w[meta[WebPEncMeta.RegionPredictor] + t] = (int)(0xff000000u | ((uint)best << 8));
+        }
+    }
+
+    /// <summary>One thread: pixels [start, start + TransparentFillChunk) of the transparent fill, in raster order (see TransparentFill).</summary>
+    private static void TransparentFillKernel(Index1D _, ArrayView<uint> argb, ArrayView<int> w, ArrayView<int> meta, int start)
+    {
+        bool active = (meta[WebPEncMeta.UsePredictor] == 1) & (meta[WebPEncMeta.Transparent] == 1);
+        if (!active) return;
+        int width = meta[WebPEncMeta.PackedWidth];
+        int n = width * meta[WebPEncMeta.Height];
+        int bits = meta[WebPEncMeta.PredictorBits];
+        int tilesPerRow = (width + (1 << bits) - 1) >> bits;
+        int modes = meta[WebPEncMeta.RegionPredictor];
+        int end = start + WebPEncodeKernels.TransparentFillChunk;
+        if (end > n) end = n;
+        for (int i = start; i < end; i++)
+        {
+            uint p = argb[i];
+            if ((p >> 24) == 0u)
+            {
+                // the prediction PredictorResidualKernel makes for pixel i, from the (already filled) pixels before it
+                int y = i / width;
+                int x = i - y * width;
+                uint pred;
+                if (i == 0) pred = 0xff000000u;
+                else if (y == 0) pred = argb[i - 1];
+                else if (x == 0) pred = argb[i - width];
+                else
+                {
+                    int mode = (w[modes + (y >> bits) * tilesPerRow + (x >> bits)] >> 8) & 0xF;
+                    pred = WebPKernels.Predict(mode, argb[i - 1], argb[i - width], argb[i - width + 1], argb[i - width - 1]);
+                }
+                argb[i] = pred & 0x00ffffffu;
+            }
         }
     }
 
@@ -1518,5 +1647,5 @@ public sealed class WebPEncodeKernels : IDisposable
     }
 
     /// <summary>No-op (kernels are owned by the accelerator).</summary>
-    public void Dispose() { }
+    public void Dispose() { _ptScratch?.Dispose(); }
 }

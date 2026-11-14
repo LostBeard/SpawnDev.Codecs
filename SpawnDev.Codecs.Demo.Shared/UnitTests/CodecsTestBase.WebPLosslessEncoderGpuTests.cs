@@ -198,6 +198,10 @@ public abstract partial class CodecsTestBase
         True(report.Contains("SUMMARY"), "verification script did not finish");
     }
 
+    // Exact = false: the RGB under alpha 0 is not preserved (libwebp: cleared, then each transparent pixel takes its
+    // predicted colour, so its residual costs nothing); everything else is exact. The decoded picture must equal the source
+    // with the RGB under alpha 0 ignored, and the fill must make a picture with scattered transparent pixels smaller
+    // than clearing them to black did (WebPEncodeKernels.FillTransparent off = the old encoder).
     [TestMethod(Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_ExactFalse_ClearsRgbUnderTransparentAlpha_Only()
     {
@@ -218,8 +222,35 @@ public abstract partial class CodecsTestBase
             using var b = WebPRoundTripBuffers.For(acc, 64, 40, null);
             await WebPRoundTripOnDeviceAsync(acc, enc, dec, dSrc.View, 64, 40, new WebPEncodeOptions { Exact = true }, dSrc.View, b,
                 "Exact = true keeps every RGB value", failures);
-            await WebPRoundTripOnDeviceAsync(acc, enc, dec, dSrc.View, 64, 40, new WebPEncodeOptions { Exact = false }, dCleared.View, b,
-                "Exact = false clears RGB under alpha 0 and changes nothing else", failures);
+            foreach (int q in new[] { 0, 40, 75, 100 })
+            {
+                byte[] file = await enc.EncodeAsync(source, 64, 40, new WebPEncodeOptions { Quality = q, Exact = false });
+                var back = await dec.DecodeAsync(file);
+                var diff = ComparePixels(ZeroRgbUnderAlpha0(source), ZeroRgbUnderAlpha0(back.Pixels), 4, 64);
+                if (diff != null) failures.Add($"Exact = false q{q} changes something besides the RGB under alpha 0: {diff}");
+            }
+            // the fill pays: scattered transparent pixels in a texture (as a blended animation frame has them)
+            const int fw = 160, fh = 96;
+            var pic = new byte[fw * fh * 4];
+            for (int i = 0; i < fw * fh; i++)
+            {
+                int x = i % fw, y = i / fw;
+                pic[i * 4] = Vp9TestTexture(x, y); pic[i * 4 + 1] = Vp9TestTexture(x + 300, y); pic[i * 4 + 2] = Vp9TestTexture(x, y + 300);
+                pic[i * 4 + 3] = (byte)(((x * 7 + y * 13) % 5) == 0 ? 0 : 255);
+            }
+            try
+            {
+                WebPEncodeKernels.FillTransparent = false;
+                int cleared = (await enc.EncodeAsync(pic, fw, fh, new WebPEncodeOptions { Quality = 75, Exact = false })).Length;
+                WebPEncodeKernels.FillTransparent = true;
+                byte[] filledFile = await enc.EncodeAsync(pic, fw, fh, new WebPEncodeOptions { Quality = 75, Exact = false });
+                var back = await dec.DecodeAsync(filledFile);
+                var diff = ComparePixels(ZeroRgbUnderAlpha0(pic), ZeroRgbUnderAlpha0(back.Pixels), 4, fw);
+                if (diff != null) failures.Add($"scattered transparency: {diff}");
+                Console.WriteLine($"[report] Exact = false, 20% scattered transparent pixels {fw}x{fh} q75: cleared {cleared} B, filled {filledFile.Length} B");
+                if (filledFile.Length >= cleared) failures.Add($"the transparent fill did not pay: {filledFile.Length} B, cleared {cleared} B");
+            }
+            finally { WebPEncodeKernels.FillTransparent = true; }
             True(failures.Count == 0, string.Join("\n", failures));
         }
         finally { ReleaseAccelerator(ctx, acc); }

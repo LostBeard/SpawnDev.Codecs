@@ -48,6 +48,8 @@ public static class WebPEncMeta
     public const int IccDst = 15;
     /// <summary>Number of prefix-code groups (1 or 0 = a single group, no entropy image).</summary>
     public const int Groups = 16;
+    /// <summary>1 when the ARGB conversion cleared a transparent pixel (Exact = false): the transparent fill has work.</summary>
+    public const int Transparent = 18;
     /// <summary>The ALPH prediction filter in effect (0..3), written by the alpha filter pick kernel.</summary>
     public const int AlphaFilter = 17;
 
@@ -767,12 +769,12 @@ public static class Vp8lEncodeGpu
     // Tokenisation: LZ77 + colour cache + histograms
     // ------------------------------------------------------------------
 
-    private static uint CacheHash(uint argb, int shift) => (0x1e35a7bdu * argb) >> shift;
+    internal static uint CacheHash(uint argb, int shift) => (0x1e35a7bdu * argb) >> shift;
 
-    private static int PairHash(uint a, uint b)
+    internal static int PairHash(uint a, uint b)
         => (int)(((a * 0x1e35a7bdu) ^ (b * 0x9E3779B1u)) >> (32 - Vp8lEncLayout.HashBits));
 
-    private static int MatchLength(ArrayView<uint> pix, int src, int pos, int maxLen)
+    internal static int MatchLength(ArrayView<uint> pix, int src, int pos, int maxLen)
     {
         int l = 0;
         bool go = maxLen > 0;

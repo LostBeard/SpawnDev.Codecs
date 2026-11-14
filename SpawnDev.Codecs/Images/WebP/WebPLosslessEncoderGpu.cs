@@ -316,6 +316,8 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
                 if (s.Predictor)
                 {
                     _kernels.PredictorMode(a, work, meta, Vp8lEncLayout.Tiles(width, height, plan.PredictorBits));
+                    // Exact = false: transparent pixels take their prediction (zero RGB residual), as libwebp does
+                    _kernels.TransparentFill(a, work, meta, n);
                     _kernels.PredictorResidual(a, bb, work, meta, n);
                     cur = bb;
                 }
@@ -331,7 +333,8 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
         // Entropy-codes the main image with a colour cache size and returns the estimated size in bits.
         async Task<long> CostAsync(ArrayView<uint> main, int cacheBits, bool readBack)
         {
-            await _kernels.TokenizeAsync(main, work, tok, meta, _tables.View, cacheBits, (long)hostMeta[WebPEncMeta.PackedWidth] * height);
+            await _kernels.TokenizeAsync(main, work, tok, meta, _tables.View, cacheBits, (long)hostMeta[WebPEncMeta.PackedWidth] * height,
+                hostMeta[WebPEncMeta.PackedWidth], plan.ChainDepth);
             _kernels.BuildCodes(work, meta);
             if (!readBack) return 0;
             await _accelerator.SynchronizeAsync();
@@ -541,7 +544,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
         int n = (int)pixels;
         int exact = options.Exact ? 1 : 0;
         await EncodeStreamAsync(
-            new StreamJob(width, height, options.Quality, a => _kernels.ToArgb(rgba, a, n, exact), Plane: false),
+            new StreamJob(width, height, options.Quality, a => _kernels.ToArgb(rgba, a, _meta.View, n, exact), Plane: false),
             hostMeta, output);
 
         _kernels.FinalizeFile(output, _meta.View);

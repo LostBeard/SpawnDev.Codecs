@@ -135,7 +135,7 @@ public sealed partial class WebPLosslessEncoderGpu
             hostMeta[WebPEncMeta.FrameDuration] = f.DurationMs;
             hostMeta[WebPEncMeta.FrameFlags] = (f.Dispose == FrameDispose.Background ? 1 : 0) | (f.Blend == FrameBlend.Source ? 2 : 0);
             await EncodeStreamAsync(
-                new StreamJob(f.Width, f.Height, options.Quality, a => _kernels.ToArgb(pixels, a, n, exact), Plane: false),
+                new StreamJob(f.Width, f.Height, options.Quality, a => _kernels.ToArgb(pixels, a, _meta.View, n, exact), Plane: false),
                 hostMeta, output);
             _kernels.FinalizeFrame(output, meta);
             await _accelerator.SynchronizeAsync();

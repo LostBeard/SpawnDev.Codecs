@@ -116,7 +116,8 @@ public abstract partial class CodecsTestBase
         for (int k = 0; k < src.Frames.Length; k++)
         {
             var canvas = await dec.DecodeFrameAsync(file, k);
-            var diff = ComparePixels(expectedCanvases[k], canvas.Pixels, 4, src.CanvasW);
+            // Exact = false: the RGB under alpha 0 is not preserved (the encoder fills it with predictions, as libwebp does)
+            var diff = ComparePixels(expectedCanvases[k], options.Exact ? canvas.Pixels : ZeroRgbUnderAlpha0(canvas.Pixels), 4, src.CanvasW);
             if (diff != null) failures.Add($"{tag} [our decoder] canvas {k}: {diff}");
         }
         if (keepStem != null) await WriteAnimationForVerifyAsync(keepStem, file, src, options, expectedCanvases);

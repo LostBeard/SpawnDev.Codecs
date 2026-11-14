@@ -44,6 +44,11 @@ if (args.Length > 0 && args[0] == "av1-encode-bench")
 if (args.Length > 0 && args[0] == "vp9-key-bench")
     return await Vp9KeyBench.Run(args);
 
+// `webp-anim-bench <frames folder> [--backend ...] [--mode rect|anim|lossy] [--quality 80] [--stages 1]`: animated WebP
+// encode time + size of a folder of PNG frames (Lore's SpawnGen Save Animated WEBP report).
+if (args.Length > 0 && args[0] == "webp-anim-bench")
+    return await WebPAnimBench.Run(args);
+
 // `vp9-psnr <source.webm> <encoded1.webm> [...] [--backend ...] [--frames N] [--label text]`: video bytes and PSNR (RGB
 // and luma) of encoded WebM files against a source clip, e.g. libvpx's files of a clip beside this library's.
 if (args.Length > 0 && args[0] == "vp9-psnr")
