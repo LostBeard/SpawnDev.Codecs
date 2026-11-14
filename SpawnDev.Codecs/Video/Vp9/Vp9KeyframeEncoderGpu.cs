@@ -116,6 +116,21 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
     /// </summary>
     internal bool SerialEntropy { get; set; }
 
+    /// <summary>
+    /// Log2 of the tile columns (clamped to what the width allows: a tile column is 4 to 64 superblocks wide; -1 = the
+    /// most it allows) and of the tile rows (0..2). Each tile is coded by a bool coder of its own; decoders can decode
+    /// tile columns in parallel. See <see cref="Vp9TileGrid"/>. Default 0: one tile column. Tiles cost this encoder
+    /// bytes and time and buy only decoder-side parallelism: measured 2026-11-13 (CUDA, q40, the most tile columns vs
+    /// one): 1920x1080 key frame 43 -> 47 ms (+0.04% bytes), inter frame 22 -> 26.6 ms (+5% bytes); 512x512 inter
+    /// 15 -> 16.4 ms (+8.4% bytes): tile edges cut the entropy contexts and the MV candidates.
+    /// </summary>
+    internal int TileColumnsLog2 { get; set; }
+    /// <summary>See <see cref="TileColumnsLog2"/>.</summary>
+    internal int TileRowsLog2 { get; set; }
+
+    /// <summary>The most tiles a frame can have (64 columns x 4 rows).</summary>
+    internal const int MaxTiles = 256;
+
     // Grow-only staging for the managed and TypedArray overloads.
     private readonly StageBuffer<byte> _stageY;
     private readonly StageBuffer<byte> _stageU;
@@ -183,6 +198,18 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
 
     private static long WorstCaseTile(int mbCount) => mbCount * 1024L + 256L;
 
+    /// <summary>The slot stride for the tiles of <paramref name="grid"/>: the largest tile's worst case.</summary>
+    internal static int TileSlotStride(Vp9TileGrid grid)
+    {
+        int largest = 0;
+        for (int t = 0; t < grid.Count; t++)
+        {
+            var (c0, c1, r0, r1) = grid.Tile(t);
+            largest = Math.Max(largest, (c1 - c0) * (r1 - r0) * 16);   // 16 macroblocks per superblock
+        }
+        return checked((int)WorstCaseTile(largest));
+    }
+
     /// <summary>
     /// Size in bytes of the output buffer one encoded keyframe needs for a
     /// <paramref name="width"/> x <paramref name="height"/> picture. The ArrayView1D overloads
@@ -194,7 +221,8 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
         WorkingDims(width, height, out int workWidth, out int workHeight);
         int mbCount = (workWidth >> 4) * (workHeight >> 4);
-        return checked((int)(WorstCaseTile(mbCount) + 128L));
+        // every tile's worst case (each has its own 256-byte margin) and size prefix, the headers
+        return checked((int)(WorstCaseTile(mbCount) + (256L + 4L) * MaxTiles + 128L));
     }
 
     private static void ValidateArgs(int width, int height, int baseQIndex)
@@ -311,6 +339,9 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
 
         // ---- 1. Ensure per-frame GPU buffers (cached across same-resolution calls) ----
         EnsureBuffers(workWidth, workHeight, yLen, uvLen, mbCount);
+        // the tile grid and one output slot per tile (before the clears below: a new slot buffer must start at zero)
+        var grid = Vp9TileGrid.For(width, height, TileColumnsLog2, TileRowsLog2);
+        int tileStride = EnsureTileSlots(grid);
 
         // ---- Pre-zero the bool-encoder carry-back targets. Recon planes and coefs are fully
         // overwritten by the sequential kernel; the assembled output is written by assignment.
@@ -356,19 +387,18 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
             _dYCoefs!.View, _dUCoefs!.View, _dVCoefs!.View,
             _dDequant!.View,
             mbCols, mbRows,
-            frameMiRows: displayMiRows, frameMiCols: displayMiCols);
+            frameMiRows: displayMiRows, frameMiCols: displayMiCols, tileInfo: grid.Log2Cols | (grid.SbCols << 8));
 
-        // ---- 5. Entropy ----
+        // ---- 5. Entropy: every tile into its slot of _dTile (stride tileStride), its length in _dTileLen ----
         if (SerialEntropy)
         {
-            await _entropyKernel.RunAsync(
+            await _entropyKernel.RunTilesAsync(
                 _dYCoefs!.View, _dUCoefs!.View, _dVCoefs!.View,
-                _dTile!.View, _dTileLen!.View,
+                _dTile!.View, tileStride, _dTileLen!.View,
                 _dByteConsts.View, _dUshortConsts.View,
-                mbCols, mbRows,
-                displayMiCols, displayMiRows);
+                mbCols, mbRows, displayMiCols, displayMiRows, grid);
         }
-        else await EncodeTileParallelAsync(mbCols, mbRows, displayMiCols, displayMiRows);
+        else await EncodeTilesParallelAsync(mbCols, mbRows, displayMiCols, displayMiRows, grid, tileStride);
 
         // ---- 6. Uncompressed header (GPU-resident: reads compressedLen
         // directly from the buffer the compressedHeaderKernel wrote to;
@@ -378,46 +408,76 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         _uncompressedHeaderKernel.Run(
             _dUncompressedHeader!.View, _dUncompressedHeaderLen!.View,
             _dCompressedHeaderLen!.View,
-            width, height, baseQIndex);
+            width, height, baseQIndex, grid.HeaderArg);
 
         // ---- 7. Assemble (GPU-resident: reads all 3 lens from views,
         // no host sync between header emit and concat) straight into the caller's output ----
-        _assembleKernel.Run(
-            _dUncompressedHeader!.View, _dCompressedHeader!.View, _dTile!.View,
+        _assembleKernel.RunTiles(
+            _dUncompressedHeader!.View, _dCompressedHeader!.View,
+            _dTile!.View, tileStride, _dTileLen!.View, grid.Count,
             output, _dOutFrameLen!.View,
-            _dUncompressedHeaderLen!.View, _dCompressedHeaderLen!.View, _dTileLen!.View);
+            _dUncompressedHeaderLen!.View, _dCompressedHeaderLen!.View);
 
         // ---- 8. Single end-of-frame sync ----
         await _accelerator.SynchronizeAsync();
     }
 
     /// <summary>
-    /// The tile: every 16x16 leaf slot's symbols in parallel (counted, then written window by window), coded by the
-    /// parallel bool coder into <c>_dTile</c> / <c>_dTileLen</c>. The same bytes as the serial walker. Queued, no wait.
+    /// Room for every tile of <paramref name="grid"/> in <c>_dTile</c> (one slot per tile, the largest tile's worst case)
+    /// and their lengths in <c>_dTileLen</c>. Returns the slot stride. Called after the previous frame's final wait.
     /// </summary>
-    private async Task EncodeTileParallelAsync(int mbCols, int mbRows, int frameMiCols, int frameMiRows)
+    private int EnsureTileSlots(Vp9TileGrid grid)
     {
-        int slots = Vp9KeyframeSymbolsKernel.SlotCount(mbCols, mbRows);
-        int capacity = checked((int)_dTile!.Length);
-        var y = _dYCoefs!.View; var u = _dUCoefs!.View; var v = _dVCoefs!.View;
-        _boolCoder.Prepare(slots, capacity);
-        _symbolsKernel.Count(y, u, v, _dByteConsts.View, _dUshortConsts.View, _dSlotCounts!.View, _boolCoder.Offsets, _boolCoder.Window,
-            mbCols, mbRows, frameMiCols, frameMiRows);
-        _boolCoder.Begin(_dSlotCounts.View, slots, capacity);
-        await TraceLaunchAsync(_accelerator, "entropy: count + offsets");
-        // enough windows for the most symbols a frame can have; the windows past the frame's end exit at once
-        int waves = _boolCoder.WaveCount((long)slots * Vp9KeyframeSymbolsKernel.MaxSymbolsPerSlot);
-        var pacer = new LaunchPacer(_accelerator);
-        for (int w = 0; w < waves; w++)
+        int stride = TileSlotStride(grid);
+        long needed = (long)stride * grid.Count;
+        if (_dTile == null || _dTile.Length < needed)
         {
-            _symbolsKernel.Write(y, u, v, _dByteConsts.View, _dUshortConsts.View, _dSlotCounts.View, _boolCoder.Offsets,
-                _boolCoder.Window, _boolCoder.WindowSymbols, w, mbCols, mbRows, frameMiCols, frameMiRows);
-            _boolCoder.CodeWave(w);
-            await pacer.LaunchedAsync();
-            await TraceLaunchAsync(_accelerator, "entropy: symbols + range pass, wave");
+            _dTile?.Dispose();
+            _dTile = _accelerator.Allocate1D<byte>(needed);
         }
-        _boolCoder.Finish(_dTile.View, _dTileLen!.View, vp9: true);
-        await TraceLaunchAsync(_accelerator, "entropy: carries + bytes");
+        if (_dTileLen == null || _dTileLen.Length < MaxTiles)
+        {
+            _dTileLen?.Dispose();
+            _dTileLen = _accelerator.Allocate1D<long>(MaxTiles);
+        }
+        return stride;
+    }
+
+    /// <summary>
+    /// The tiles: each tile's 16x16 leaf slots' symbols in parallel (counted, then written window by window), coded by
+    /// the parallel bool coder into the tile's slot of <c>_dTile</c> / its entry of <c>_dTileLen</c>, tile after tile.
+    /// The same bytes as the serial walker. Queued, no wait.
+    /// </summary>
+    private async Task EncodeTilesParallelAsync(int mbCols, int mbRows, int frameMiCols, int frameMiRows, Vp9TileGrid grid, int tileStride)
+    {
+        var y = _dYCoefs!.View; var u = _dUCoefs!.View; var v = _dVCoefs!.View;
+        var pacer = new LaunchPacer(_accelerator);
+        // the coder's buffers for the largest tile, before any tile is queued (growing one later frees a buffer
+        // queued work of an earlier tile still uses)
+        int maxSlots = 0;
+        for (int t = 0; t < grid.Count; t++) maxSlots = Math.Max(maxSlots, Vp9KeyframeSymbolsKernel.SlotCount(grid, t));
+        _boolCoder.Prepare(maxSlots, tileStride);
+        for (int t = 0; t < grid.Count; t++)
+        {
+            int slots = Vp9KeyframeSymbolsKernel.SlotCount(grid, t);
+            _boolCoder.Prepare(slots, tileStride);
+            _symbolsKernel.Count(y, u, v, _dByteConsts.View, _dUshortConsts.View, _dSlotCounts!.View, _boolCoder.Offsets, _boolCoder.Window,
+                mbCols, mbRows, frameMiCols, frameMiRows, grid, t);
+            _boolCoder.Begin(_dSlotCounts.View, slots, tileStride);
+            await TraceLaunchAsync(_accelerator, "entropy: count + offsets");
+            // enough windows for the most symbols the tile can have; the windows past its end exit at once
+            int waves = _boolCoder.WaveCount((long)slots * Vp9KeyframeSymbolsKernel.MaxSymbolsPerSlot);
+            for (int w = 0; w < waves; w++)
+            {
+                _symbolsKernel.Write(y, u, v, _dByteConsts.View, _dUshortConsts.View, _dSlotCounts.View, _boolCoder.Offsets,
+                    _boolCoder.Window, _boolCoder.WindowSymbols, w, mbCols, mbRows, frameMiCols, frameMiRows, grid, t);
+                _boolCoder.CodeWave(w);
+                await pacer.LaunchedAsync();
+                await TraceLaunchAsync(_accelerator, "entropy: symbols + range pass, wave");
+            }
+            _boolCoder.Finish(_dTile!.View.SubView((long)t * tileStride, tileStride), _dTileLen!.View.SubView(t, 1), vp9: true);
+            await TraceLaunchAsync(_accelerator, "entropy: carries + bytes");
+        }
     }
 
     /// <summary>

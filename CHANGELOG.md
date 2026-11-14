@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### VP9 encoder: entropy coding in parallel, tiles (2026-11-13)
+
+- The tile's bool-coded symbols are produced per 16x16 leaf in parallel and coded by a parallel bool coder
+  (`Vp8BoolEncoderParallelGpu`: the coder's output is the big-integer sum of each split at its bit position; ranges by
+  128-way speculation per chunk; carries by lookahead): byte-identical to the serial walkers, which remain the path on
+  the CPU accelerators (measured faster there) and the tests' oracle. Inter frames: a mode pass per anti-diagonal,
+  backward-adaptation counts with atomics. CUDA, RTX 4070, q40: 1920x1080 key frame 1851 -> 43 ms, inter frame
+  836 -> 22 ms; 512x512 key 236 -> 13 ms, inter 112 -> 15 ms (with `SerialThreadPlacement` on the key frame
+  wavefront: 59.8 -> 43 ms).
+- Tiles (`TileColumnsLog2` / `TileRowsLog2`, internal for now; default one tile): each tile its own bool coder; key and
+  inter frames, both entropy paths. Not the default: in this encoder the most tile columns cost 1920x1080 inter frames
+  +5% bytes and 22 -> 26.6 ms (512x512: +8.4%), and only a multi-threaded decoder gains. Tile boundaries are libvpx get_tile_offset. Intra prediction takes no left neighbour at a tile
+  column's start. The header's tile bits and the frame layout (4-byte size before every tile but the last) follow
+  branch vp9-multi-tile-entropy; its tile-offset helper did not (off by one superblock: 1920 wide in 4 tiles, the
+  first boundary at superblock 8 instead of 7). Checked by Vp9DecoderGpu and FFmpeg on five grids up to 4 x 4 tiles.
+- SpawnDev.ILGPU 5.4.31.
+
 ### AV1 keyframe encoder: parallel inside a tile (2026-11-13)
 - The tile walk is three passes: a transform pass in which the 16x16 positions of a tile are taken in
   anti-diagonal wavefront order by the lanes of a launch group (predict, transform, quantize, reconstruct; a

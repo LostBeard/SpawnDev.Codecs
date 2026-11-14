@@ -47,7 +47,7 @@ internal static class Vp9InterHeaderKernels
     /// <paramref name="outLen"/>[0].
     /// </summary>
     public static void UncompressedHeaderKernel(Index1D index, ArrayView<byte> outBuf, ArrayView<long> outLen, ArrayView<long> firstPartitionSize,
-        int width, int baseQIndex, int errorResilient)
+        int width, int baseQIndex, int errorResilient, int tileLog2)
     {
         var bw = Vp9BitWriterGpu.Init();
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0b10u, 2);   // frame_marker
@@ -79,15 +79,8 @@ internal static class Vp9InterHeaderKernels
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, (uint)(baseQIndex & 0xFF), 8);
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 3);      // no y_dc / uv_dc / uv_ac delta
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 1);      // segmentation off
-        // tile_info: the fewest tile columns (one 0 bit when more are possible), one tile row
-        int sbCols = (((width + 7) >> 3) + 7) >> 3;
-        int minLog2 = 0;
-        while ((64 << minLog2) < sbCols) minLog2++;
-        int maxLog2 = 1;
-        while ((sbCols >> maxLog2) >= 4) maxLog2++;
-        maxLog2--;
-        if (maxLog2 > minLog2) Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 1);
-        Vp9BitWriterGpu.WriteBits(ref bw, outBuf, 0u, 1);
+        // tile_info (tileLog2 0: the fewest tile columns, one tile row)
+        Vp9TileHeaderGpu.Write(ref bw, outBuf, width, tileLog2);
         Vp9BitWriterGpu.WriteBits(ref bw, outBuf, (uint)((int)firstPartitionSize[0] & 0xFFFF), 16);
         Vp9BitWriterGpu.PadToByte(ref bw, outBuf);
         outLen[0] = bw.OutLen;

@@ -41,6 +41,8 @@ public struct Vp9KeySymbolParams
     public int Write;
     /// <summary>Stream index of the window's first symbol and the window's size.</summary>
     public int WindowBase, WindowSymbols;
+    /// <summary>The tile (superblocks): first column and row, width. The thread index is the slot inside the tile.</summary>
+    public int SbColStart, SbRowStart, TileSbCols;
 }
 
 /// <summary>VP9 key frame tile symbols in parallel (one thread per 16x16 leaf slot) for <see cref="Vp8BoolEncoderParallelGpu"/>.</summary>
@@ -67,30 +69,45 @@ public sealed class Vp9KeyframeSymbolsKernel
     /// <summary>Slots of a frame: 16 per superblock.</summary>
     public static int SlotCount(int mbCols, int mbRows) => (mbCols >> 2) * (mbRows >> 2) * 16;
 
+    /// <summary>Slots of tile <paramref name="t"/> of <paramref name="grid"/>.</summary>
+    public static int SlotCount(Vp9TileGrid grid, int t)
+    {
+        var (c0, c1, r0, r1) = grid.Tile(t);
+        return (c1 - c0) * (r1 - r0) * 16;
+    }
+
+    private static void SetTile(ref Vp9KeySymbolParams p, Vp9TileGrid grid, int t)
+    {
+        var (c0, c1, r0, _) = grid.Tile(t);
+        p.SbColStart = c0; p.SbRowStart = r0; p.TileSbCols = c1 - c0;
+    }
+
     /// <summary>
     /// Each slot's symbol count into <paramref name="counts"/>. Queued. <paramref name="offsets"/> is not read here, but
     /// must be a buffer other than <paramref name="counts"/> (WebGPU forbids one buffer in two read-write bindings).
     /// </summary>
     public void Count(ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts, ArrayView<int> counts, ArrayView<int> offsets, ArrayView<ushort> window,
-        int mbCols, int mbRows, int frameMiCols, int frameMiRows)
+        int mbCols, int mbRows, int frameMiCols, int frameMiRows, Vp9TileGrid grid, int tile)
     {
         var p = new Vp9KeySymbolParams { MbCols = mbCols, MbRows = mbRows, FrameMiCols = frameMiCols, FrameMiRows = frameMiRows };
-        _kernel(SlotCount(mbCols, mbRows), yCoefs, uCoefs, vCoefs, byteConsts, ushortConsts, counts, offsets, window, p);
+        SetTile(ref p, grid, tile);
+        _kernel(SlotCount(grid, tile), yCoefs, uCoefs, vCoefs, byteConsts, ushortConsts, counts, offsets, window, p);
     }
 
     /// <summary>The symbols with a stream index in the coder's window of wave <paramref name="wave"/>. Queued.</summary>
     public void Write(ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts, ArrayView<int> counts, ArrayView<int> offsets,
         ArrayView<ushort> window, int windowSymbols, int wave,
-        int mbCols, int mbRows, int frameMiCols, int frameMiRows)
+        int mbCols, int mbRows, int frameMiCols, int frameMiRows, Vp9TileGrid grid, int tile)
     {
         var p = new Vp9KeySymbolParams
         {
             MbCols = mbCols, MbRows = mbRows, FrameMiCols = frameMiCols, FrameMiRows = frameMiRows,
             Write = 1, WindowBase = checked(wave * windowSymbols), WindowSymbols = windowSymbols,
         };
-        _kernel(SlotCount(mbCols, mbRows), yCoefs, uCoefs, vCoefs, byteConsts, ushortConsts, counts, offsets, window, p);
+        SetTile(ref p, grid, tile);
+        _kernel(SlotCount(grid, tile), yCoefs, uCoefs, vCoefs, byteConsts, ushortConsts, counts, offsets, window, p);
     }
 
     private static void SymbolsKernel(Index1D slot,
@@ -127,7 +144,7 @@ public sealed class Vp9KeyframeSymbolsKernel
     }
 
     /// <summary>Partition context state (left bit * 2 + above bit) at mode-info (miRow, miCol), level <paramref name="bsl"/>.</summary>
-    private static int PartitionState(int miRow, int miCol, int bsl, int frameMiRows, int frameMiCols)
+    private static int PartitionState(int miRow, int miCol, int bsl, int frameMiRows, int frameMiCols, int tileMiCol)
     {
         int above = 0, left = 0;
         if (miRow > 0)
@@ -135,7 +152,7 @@ public sealed class Vp9KeyframeSymbolsKernel
             int s = Shape((miRow - 1) >> 1, miCol >> 1, frameMiRows, frameMiCols);
             above = s == 2 | s == 3 ? 14 : 12;
         }
-        if (miCol > 0)
+        if (miCol > tileMiCol)
         {
             int s = Shape(miRow >> 1, (miCol - 1) >> 1, frameMiRows, frameMiCols);
             left = s == 1 | s == 3 ? 14 : 12;
@@ -178,22 +195,24 @@ public sealed class Vp9KeyframeSymbolsKernel
     {
         int frameMiCols = p.FrameMiCols;
         int frameMiRows = p.FrameMiRows;
-        int sbCols = p.MbCols >> 2;
-        int sb = slot >> 4;
+        // slot = the superblock in the tile (raster inside the tile) * 16 + its z-order position
+        int sbLocal = slot >> 4;
         int q = slot & 15;
-        int sbRow = sb / sbCols;
-        int sbCol = sb - sbRow * sbCols;
+        int sbRowLocal = sbLocal / p.TileSbCols;
+        int sbRow = p.SbRowStart + sbRowLocal;
+        int sbCol = p.SbColStart + (sbLocal - sbRowLocal * p.TileSbCols);
         int miRow64 = sbRow * 8;
         int miCol64 = sbCol * 8;
+        int tileMiCol = p.SbColStart * 8;   // the left contexts restart here (libvpx decode_tiles)
 
-        // the VP9 marker bit, coded before the first slot
+        // the VP9 marker bit, coded before the first slot of the tile (each tile has a bool coder of its own)
         if (slot == 0) Vp8BoolSymbolSink.Put(ref sink, window, 0, 128);
 
         if (q == 0)
         {
             bool hasRows64 = (miRow64 + 4) < frameMiRows;
             bool hasCols64 = (miCol64 + 4) < frameMiCols;
-            EmitPartition(ref sink, window, byteConsts, 3, 3, miRow64, miCol64, hasRows64, hasCols64, frameMiRows, frameMiCols, 1);
+            EmitPartition(ref sink, window, byteConsts, 3, 3, miRow64, miCol64, hasRows64, hasCols64, frameMiRows, frameMiCols, tileMiCol);
         }
 
         int q32 = q >> 2;
@@ -207,7 +226,7 @@ public sealed class Vp9KeyframeSymbolsKernel
         {
             bool hasRows32 = (miRow32 + 2) < frameMiRows;
             bool hasCols32 = (miCol32 + 2) < frameMiCols;
-            EmitPartition(ref sink, window, byteConsts, 2, 2, miRow32, miCol32, hasRows32, hasCols32, frameMiRows, frameMiCols, 1);
+            EmitPartition(ref sink, window, byteConsts, 2, 2, miRow32, miCol32, hasRows32, hasCols32, frameMiRows, frameMiCols, tileMiCol);
         }
 
         int miRow16 = miRow32 + ((q16 & 2) >> 1) * 2;
@@ -222,7 +241,7 @@ public sealed class Vp9KeyframeSymbolsKernel
         int shape = hasRows & hasCols ? 0 : hasCols ? 1 : hasRows ? 2 : 3;
         int sizeIdx = shape == 3 ? 0 : 1;
         int bsl = shape == 3 ? 0 : 1;
-        int st = PartitionState(miRow16, miCol16, bsl, frameMiRows, frameMiCols);
+        int st = PartitionState(miRow16, miCol16, bsl, frameMiRows, frameMiCols, tileMiCol);
         long probsBase = Vp9KeyframeConstantsGpu.KfPartitionProbsOffset + ((long)sizeIdx * 4 + st) * 3;
         int probIdx = shape == 1 ? 1 : shape == 2 ? 2 : 0;
         Vp8BoolSymbolSink.Put(ref sink, window, 0, byteConsts[probsBase + probIdx]);
@@ -235,7 +254,8 @@ public sealed class Vp9KeyframeSymbolsKernel
         int mbR = miRow16 >> 1, mbC = miCol16 >> 1, mbCols = p.MbCols;
         long mbIdx = (long)mbR * mbCols + mbC;
         int shapeAbove = mbR > 0 ? Shape(mbR - 1, mbC, frameMiRows, frameMiCols) : 0;
-        int shapeLeft = mbC > 0 ? Shape(mbR, mbC - 1, frameMiRows, frameMiCols) : 0;
+        bool leftInTile = miCol16 > tileMiCol;
+        int shapeLeft = leftInTile ? Shape(mbR, mbC - 1, frameMiRows, frameMiCols) : 0;
         int two = shape == 1 | shape == 2 ? 1 : 0;
         int jobs = two != 0 ? 6 : 3;
         int firstNz = 0;   // the plane's first transform's (eob > 0), for its second
@@ -252,7 +272,7 @@ public sealed class Vp9KeyframeSymbolsKernel
             else aboveNz = Nonzero(yCoefs, uCoefs, vCoefs, plane, mbR - 1, mbC, mbCols, shapeAbove, shapeAbove == 2 ? 1 : 0);
             int leftNz;
             if (shape == 1 & half == 1) leftNz = firstNz;
-            else if (mbC == 0) leftNz = 0;
+            else if (!leftInTile) leftNz = 0;
             else leftNz = Nonzero(yCoefs, uCoefs, vCoefs, plane, mbR, mbC - 1, mbCols, shapeLeft, shapeLeft == 1 ? 1 : 0);
             int initialCtx = aboveNz + leftNz;
 
@@ -308,13 +328,13 @@ public sealed class Vp9KeyframeSymbolsKernel
     }
 
     /// <summary>
-    /// A partition symbol at a 64x64 / 32x32 level (<paramref name="split"/> = 1: SPLIT inside the frame = three 1 bits;
+    /// A partition symbol at a 64x64 / 32x32 level (SPLIT inside the frame = three 1 bits;
     /// at the bottom edge one 1 bit at probs[1], at the right edge one at probs[2], none at the corner).
     /// </summary>
     private static void EmitPartition(ref Vp8BoolSymbolSink sink, ArrayView<ushort> window, ArrayView<byte> byteConsts,
-        int sizeIdx, int bsl, int miRow, int miCol, bool hasRows, bool hasCols, int frameMiRows, int frameMiCols, int split)
+        int sizeIdx, int bsl, int miRow, int miCol, bool hasRows, bool hasCols, int frameMiRows, int frameMiCols, int tileMiCol)
     {
-        int st = PartitionState(miRow, miCol, bsl, frameMiRows, frameMiCols);
+        int st = PartitionState(miRow, miCol, bsl, frameMiRows, frameMiCols, tileMiCol);
         long probsBase = Vp9KeyframeConstantsGpu.KfPartitionProbsOffset + ((long)sizeIdx * 4 + st) * 3;
         if (hasRows & hasCols)
         {

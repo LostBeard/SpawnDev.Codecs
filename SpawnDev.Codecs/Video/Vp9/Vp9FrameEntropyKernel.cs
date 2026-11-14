@@ -74,6 +74,12 @@ public struct Vp9FrameEntropyBatchStrides
     public int FrameMiCols;
     /// <summary>Display-dim mi rows = (FrameHeight+7)>>3. Bottom-edge boundary.</summary>
     public int FrameMiRows;
+    /// <summary>
+    /// The tile this walk codes (superblocks): first column / row and its size. TileSbCols 0 = the whole frame.
+    /// The walk visits the tile's superblocks in raster order; the left contexts restart at the tile's first column
+    /// (libvpx decode_tiles), the above contexts carry over from the tile above.
+    /// </summary>
+    public int SbColStart, SbRowStart, TileSbCols, TileSbRows;
 }
 
 /// <summary>
@@ -245,21 +251,60 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         await RunStepsAsync(frameCount, yCoefs, uCoefs, vCoefs, outBuf, outLen, byteConsts, ushortConsts, strides);
     }
 
+    /// <summary>
+    /// Code the frame in the tiles of <paramref name="grid"/> (row-major), tile t into
+    /// <c>tileSlots[t * tileStride ..]</c> with its length in <paramref name="tileLens"/>[t]. One walk per tile, its own
+    /// bool coder; the contexts are cleared once for the frame. Queued (paced).
+    /// </summary>
+    public async Task RunTilesAsync(
+        ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
+        ArrayView<byte> tileSlots, int tileStride, ArrayView<long> tileLens,
+        ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
+        int mbCols, int mbRows, int frameMiCols, int frameMiRows, Vp9TileGrid grid)
+    {
+        if (mbCols * 2 > MaxMiColsAligned)
+            throw new ArgumentOutOfRangeException(nameof(mbCols), $"v1 entropy kernel caps mbCols at {MaxMiColsAligned / 2}; got {mbCols}.");
+        for (int t = 0; t < grid.Count; t++)
+        {
+            var (c0, c1, r0, r1) = grid.Tile(t);
+            var strides = new Vp9FrameEntropyBatchStrides
+            {
+                YCoefStride = checked((int)yCoefs.Length),
+                UvCoefStride = checked((int)uCoefs.Length),
+                OutBufStride = tileStride,
+                MbCols = mbCols,
+                MbRows = mbRows,
+                FrameMiCols = frameMiCols,
+                FrameMiRows = frameMiRows,
+                SbColStart = c0, SbRowStart = r0, TileSbCols = c1 - c0, TileSbRows = r1 - r0,
+            };
+            await RunStepsAsync(1, yCoefs, uCoefs, vCoefs, tileSlots.SubView((long)t * tileStride, tileStride), tileLens.SubView(t, 1),
+                byteConsts, ushortConsts, strides, clearContexts: t == 0);
+        }
+    }
+
     private async Task RunStepsAsync(
         int frameCount,
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<byte> outBuf, ArrayView<long> outLen,
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
-        Vp9FrameEntropyBatchStrides strides)
+        Vp9FrameEntropyBatchStrides strides, bool clearContexts = true)
     {
         long ctxLen = (long)frameCount * CtxBytes;
         long stateLen = (long)frameCount * StateInts;
+        // (EnsureDrainedAsync waits only when it must grow the buffer: the second tile of a frame reuses it in order)
         var ctx = (await _ctx.EnsureDrainedAsync(ctxLen)).SubView(0, ctxLen);
         var state = (await _state.EnsureDrainedAsync(stateLen)).SubView(0, stateLen);
-        // Every context starts at zero (mode DC_PRED = 0, no skip, no partition / coefficient context).
-        ctx.MemSetToZero();
+        // Every context starts at zero (mode DC_PRED = 0, no skip, no partition / coefficient context); the walk of a
+        // later tile keeps them (its above contexts are the tile above's), its own coder starts fresh.
+        if (clearContexts) ctx.MemSetToZero();
         state.MemSetToZero();
-        int slots = (strides.MbCols >> 2) * (strides.MbRows >> 2) * 16;
+        if (strides.TileSbCols == 0)
+        {
+            strides.SbColStart = 0; strides.SbRowStart = 0;
+            strides.TileSbCols = strides.MbCols >> 2; strides.TileSbRows = strides.MbRows >> 2;
+        }
+        int slots = strides.TileSbCols * strides.TileSbRows * 16;
         int steps = (slots + LeavesPerLaunch - 1) / LeavesPerLaunch;
         var pacer = new LaunchPacer(_accelerator);
         for (int s = 0; s < steps; s++)
@@ -293,7 +338,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         var fState = stepState.SubView((long)f * StateInts, StateInts);
         int frameMi = (s.FrameMiCols & 0xFFFF) | (s.FrameMiRows << 16);
         EncodeFrameStep(fY, fU, fV, fOut, fOutLen, byteConsts, ushortConsts, fCtx, fState,
-            s.MbCols, s.MbRows, frameMi, leavesPerLaunch);
+            s.MbCols, s.SbColStart | (s.SbRowStart << 16), s.TileSbCols | (s.TileSbRows << 16), frameMi, leavesPerLaunch);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -302,7 +347,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<byte> outBuf, ArrayView<long> outLen,
         ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
         ArrayView<byte> ctx, ArrayView<int> st,
-        int mbCols, int mbRows, int frameMi, int leavesPerLaunch)
+        int mbCols, int tileOrigin, int tileSize, int frameMi, int leavesPerLaunch)
     {
         if (st[StDone] != 0) return;
 
@@ -341,16 +386,19 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
             state = Vp8BoolEncoderGpu.Load(st, StEnc);
         }
 
-        // Walk SBs row-major, 16 leaf slots (z-order 16x16 positions) per SB. mbCols/mbRows are
-        // multiples of 4 by contract so SB grid is exact.
-        int sbCols = mbCols >> 2;
-        int slotCount = (mbRows >> 2) * sbCols * 16;
+        // Walk the tile's SBs row-major, 16 leaf slots (z-order 16x16 positions) per SB.
+        int tileSbCols = tileSize & 0xFFFF;
+        int slotCount = (tileSize >> 16) * tileSbCols * 16;
         int slot = st[StNextSlot];
         int slotEnd = slot + leavesPerLaunch;
         if (slotEnd > slotCount) slotEnd = slotCount;
         bool go = slot < slotEnd;
         while (go)
         {
+            // the tile's superblock of this slot, in frame superblocks
+            int sbLocal = slot >> 4;
+            int sbRowLocal = sbLocal / tileSbCols;
+            int sbColLocal = sbLocal - sbRowLocal * tileSbCols;
             EncodeLeafSlot(
                 ref state, outBuf,
                 yCoefs, uCoefs, vCoefs,
@@ -360,7 +408,8 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
                 leftYMode, leftSkip, leftPartCtx, leftTxSize,
                 leftYEntropyCtx, leftUEntropyCtx, leftVEntropyCtx,
                 tokenCache,
-                slot, sbCols, mbCols, frameMi);
+                (tileOrigin >> 16) + sbRowLocal, (tileOrigin & 0xFFFF) + sbColLocal, slot & 15, sbColLocal == 0 ? 1 : 0,
+                mbCols, frameMi);
             slot++;
             go = slot < slotEnd;
         }
@@ -392,22 +441,18 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
         ArrayView<byte> leftPartCtx, ArrayView<byte> leftTxSize,
         ArrayView<byte> leftYEntropyCtx, ArrayView<byte> leftUEntropyCtx, ArrayView<byte> leftVEntropyCtx,
         ArrayView<byte> tokenCache,
-        int slot, int sbCols, int mbCols, int frameMi)
+        int sbRow, int sbCol, int q, int tileFirstCol, int mbCols, int frameMi)
     {
         int frameMiCols = frameMi & 0xFFFF;
         int frameMiRows = frameMi >> 16;
-        int sb = slot >> 4;
-        int q = slot & 15;
-        int sbRow = sb / sbCols;
-        int sbCol = sb - sbRow * sbCols;
         int miRow64 = sbRow * 8;
         int miCol64 = sbCol * 8;
 
         if (q == 0)
         {
-            if (sbCol == 0)
+            if (tileFirstCol != 0)
             {
-                // Reset left arrays at the start of each SB row.
+                // Reset left arrays at the start of each SB row of the tile (libvpx decode_tiles: vp9_zero(left_context)).
                 for (int i = 0; i < 16; i++) { leftYMode[i] = 0; leftYEntropyCtx[i] = 0; }
                 for (int i = 0; i < 8; i++) { leftSkip[i] = 0; leftPartCtx[i] = 0; leftTxSize[i] = 0; leftUEntropyCtx[i] = 0; leftVEntropyCtx[i] = 0; }
             }

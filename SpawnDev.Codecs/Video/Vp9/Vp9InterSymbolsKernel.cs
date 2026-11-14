@@ -33,6 +33,8 @@ public struct Vp9InterSymbolParams
     public int Write;
     /// <summary>Stream index of the window's first symbol and the window's size.</summary>
     public int WindowBase, WindowSymbols;
+    /// <summary>The tile (superblocks): first column and row, width. The thread index is the slot inside the tile.</summary>
+    public int SbColStart, SbRowStart, TileSbCols;
 }
 
 internal static class Vp9InterSymbols
@@ -82,9 +84,10 @@ internal static class Vp9InterSymbols
         int wide = shape == 0 | shape == 1 ? 2 : 1, high = shape == 0 | shape == 2 ? 2 : 1;
         int rec = miRow * miCols + miCol, b = rec * Vp9Mi.Stride;
         int bsize = mi[b + Vp9Mi.SbType];
+        Vp9InterEntropy.TileColumns(a, miCol, out int tileMiCol, out int tileMiColEnd);
         var p = new Vp9ParseKernels.BlockPos
         {
-            MiRow = miRow, MiCol = miCol, MiColStart = 0, MiColEnd = miCols,
+            MiRow = miRow, MiCol = miCol, MiColStart = tileMiCol, MiColEnd = tileMiColEnd,
             ToTop = -(miRow * 8 * 8), ToBottom = (miRows - high - miRow) * 8 * 8,
             ToLeft = -(miCol * 8 * 8), ToRight = (miCols - wide - miCol) * 8 * 8,
         };
@@ -141,7 +144,7 @@ internal static class Vp9InterSymbols
     }
 
     /// <summary>Partition context state at (miRow, miCol) for level <paramref name="sizeIdx"/>: sizeIdx * 4 + left * 2 + above.</summary>
-    private static int PartitionCtx(int sizeIdx, int miRow, int miCol, int miRows, int miCols)
+    private static int PartitionCtx(int sizeIdx, int miRow, int miCol, int miRows, int miCols, int tileMiCol)
     {
         int above = 0, left = 0;
         if (miRow > 0)
@@ -149,7 +152,7 @@ internal static class Vp9InterSymbols
             int s = Vp9InterEncodeKernels.LeafShape((miRow - 1) & ~1, miCol & ~1, miRows, miCols);
             above = s == 2 | s == 3 ? 14 : 12;
         }
-        if (miCol > 0)
+        if (miCol > tileMiCol)
         {
             int s = Vp9InterEncodeKernels.LeafShape(miRow & ~1, (miCol - 1) & ~1, miRows, miCols);
             left = s == 1 | s == 3 ? 14 : 12;
@@ -158,11 +161,11 @@ internal static class Vp9InterSymbols
     }
 
     private static void PutSplit(ref Vp8BoolSymbolSink sink, ArrayView<ushort> window, ArrayView<int> ctx, int sizeIdx, int miRow, int miCol,
-        int miRows, int miCols, ArrayView<int> counts, int cnt)
+        int miRows, int miCols, ArrayView<int> counts, int cnt, int tileMiCol)
     {
         int half = 1 << sizeIdx >> 1;
         bool hasRows = miRow + half < miRows, hasCols = miCol + half < miCols;
-        int pctx = PartitionCtx(sizeIdx, miRow, miCol, miRows, miCols);
+        int pctx = PartitionCtx(sizeIdx, miRow, miCol, miRows, miCols, tileMiCol);
         int probs = Vp9Ctx.Partition + pctx * 3;
         Count(counts, cnt, Vp9Cnt.Partition + pctx * 4 + 3);   // PARTITION_SPLIT: counted when implied too (read_partition)
         if (hasRows & hasCols)
@@ -200,10 +203,15 @@ internal static class Vp9InterSymbols
         ArrayView<int> t, ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts, ArrayView<int> counts, ArrayView<int> nearestBuf,
         ArrayView<int> slotCounts, ArrayView<int> offsets, ArrayView<ushort> window, Vp9InterSymbolParams sp)
     {
-        int miRows = a[Vp9PArg.MiRows], miCols = a[Vp9PArg.MiCols], sbCols = a[Vp9PArg.SbCols];
-        int sb = slot >> 4, q = slot & 15;
-        int sbRow = sb / sbCols, sbCol = sb - sbRow * sbCols;
+        int miRows = a[Vp9PArg.MiRows], miCols = a[Vp9PArg.MiCols];
+        // slot = the superblock in the tile (raster inside the tile) * 16 + its z-order position
+        int sbLocal = slot >> 4, q = slot & 15;
+        int sbRowLocal = sbLocal / sp.TileSbCols;
+        int sbRow = sp.SbRowStart + sbRowLocal, sbCol = sp.SbColStart + sbLocal - sbRowLocal * sp.TileSbCols;
         SlotPosition(sbRow, sbCol, q, out int miRow, out int miCol);
+        int tileMiCol = sp.SbColStart * 8;
+        int tileMiColEnd = (sp.SbColStart + sp.TileSbCols) * 8;
+        if (tileMiColEnd > miCols) tileMiColEnd = miCols;
         bool inside = miRow < miRows & miCol < miCols;
         var tokenCache = LocalMemory.Allocate<byte>(256);
         var sink = new Vp8BoolSymbolSink();
@@ -220,28 +228,29 @@ internal static class Vp9InterSymbols
             sink.Hi = hi;
         }
         else if (a[Vp9PArg.CountsOn] != 0) cnt = Vp9InterEntropy.Counts;
-        if (slot == 0) Vp8BoolSymbolSink.Put(ref sink, window, 0, 128);   // the marker bit
+        if (slot == 0) Vp8BoolSymbolSink.Put(ref sink, window, 0, 128);   // the marker bit (each tile has a bool coder of its own)
         if (inside)
         {
             EmitLeafSlot(ref sink, window, levels, mi, a, ctx, t, byteConsts, ushortConsts, counts, cnt, nearestBuf, tokenCache,
-                q, miRow, miCol, miRows, miCols);
+                q, miRow, miCol, miRows, miCols, tileMiCol, tileMiColEnd);
         }
         if (sp.Write == 0) slotCounts[slot] = sink.Next;
     }
 
     private static void EmitLeafSlot(ref Vp8BoolSymbolSink sink, ArrayView<ushort> window, ArrayView<short> levels, ArrayView<int> mi,
         ArrayView<int> a, ArrayView<int> ctx, ArrayView<int> t, ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts,
-        ArrayView<int> counts, int cnt, ArrayView<int> nearestBuf, ArrayView<byte> tokenCache, int q, int miRow, int miCol, int miRows, int miCols)
+        ArrayView<int> counts, int cnt, ArrayView<int> nearestBuf, ArrayView<byte> tokenCache, int q, int miRow, int miCol, int miRows, int miCols,
+        int tileMiCol, int tileMiColEnd)
     {
         int q32 = q >> 2, q16 = q & 3;
         int miRow64 = miRow & ~7, miCol64 = miCol & ~7;
         int miRow32 = miRow & ~3, miCol32 = miCol & ~3;
-        if (q == 0) PutSplit(ref sink, window, ctx, 3, miRow64, miCol64, miRows, miCols, counts, cnt);
-        if (q16 == 0) PutSplit(ref sink, window, ctx, 2, miRow32, miCol32, miRows, miCols, counts, cnt);
+        if (q == 0) PutSplit(ref sink, window, ctx, 3, miRow64, miCol64, miRows, miCols, counts, cnt, tileMiCol);
+        if (q16 == 0) PutSplit(ref sink, window, ctx, 2, miRow32, miCol32, miRows, miCols, counts, cnt, tileMiCol);
 
         int shape = Vp9InterEncodeKernels.LeafShape(miRow, miCol, miRows, miCols);
-        if (shape == 3) Count(counts, cnt, Vp9Cnt.Partition + PartitionCtx(1, miRow, miCol, miRows, miCols) * 4 + 3);   // the implied SPLIT of the 16x16
-        int pctx16 = PartitionCtx(shape == 3 ? 0 : 1, miRow, miCol, miRows, miCols);
+        if (shape == 3) Count(counts, cnt, Vp9Cnt.Partition + PartitionCtx(1, miRow, miCol, miRows, miCols, tileMiCol) * 4 + 3);   // the implied SPLIT of the 16x16
+        int pctx16 = PartitionCtx(shape == 3 ? 0 : 1, miRow, miCol, miRows, miCols, tileMiCol);
         int partition = shape == 1 ? 1 : shape == 2 ? 2 : 0;
         Vp8BoolSymbolSink.Put(ref sink, window, 0, ctx[Vp9Ctx.Partition + pctx16 * 3 + partition]);
         Count(counts, cnt, Vp9Cnt.Partition + pctx16 * 4 + partition);
@@ -252,7 +261,7 @@ internal static class Vp9InterSymbols
         int rec = miRow * miCols + miCol, b = rec * Vp9Mi.Stride;
         int above = -1, left = -1;
         if (miRow != 0) above = mi[grid + (miRow - 1) * miCols + miCol];
-        if (miCol != 0) left = mi[grid + miRow * miCols + miCol - 1];
+        if (miCol > tileMiCol) left = mi[grid + miRow * miCols + miCol - 1];   // none at the tile's left edge
         int skip = mi[b + Vp9Mi.Skip];
         int skipCtx = Vp9ParseContexts.SkipContext(mi, above, left);
         int interCtx = Vp9ParseContexts.IntraInterContext(mi, above, left);
@@ -267,7 +276,7 @@ internal static class Vp9InterSymbols
         int bsize = mi[b + Vp9Mi.SbType];
         var p = new Vp9ParseKernels.BlockPos
         {
-            MiRow = miRow, MiCol = miCol, MiColStart = 0, MiColEnd = miCols,
+            MiRow = miRow, MiCol = miCol, MiColStart = tileMiCol, MiColEnd = tileMiColEnd,
             ToTop = -(miRow * 8 * 8), ToBottom = (miRows - high - miRow) * 8 * 8,
             ToLeft = -(miCol * 8 * 8), ToRight = (miCols - wide - miCol) * 8 * 8,
         };
@@ -308,7 +317,7 @@ internal static class Vp9InterSymbols
         // the coefficient tokens (none when skipped); contexts from the neighbours
         if (skip != 0) return;
         int shapeAbove = miRow > 0 ? Vp9InterEncodeKernels.LeafShape(miRow - 2, miCol, miRows, miCols) : 0;
-        int shapeLeft = miCol > 0 ? Vp9InterEncodeKernels.LeafShape(miRow, miCol - 2, miRows, miCols) : 0;
+        int shapeLeft = miCol > tileMiCol ? Vp9InterEncodeKernels.LeafShape(miRow, miCol - 2, miRows, miCols) : 0;
         int slot = SlotOf(miRow, miCol, a[Vp9PArg.SbCols]);
         int dqSb = (slot >> 4) * a[Vp9PArg.DqStride];
         bool two = shape == 1 | shape == 2;
@@ -326,7 +335,7 @@ internal static class Vp9InterSymbols
             else if (miRow == 0) aboveNz = 0;
             else aboveNz = LeafNonzero(levels, mi, a, miRow - 2, miCol, plane, shapeAbove, shapeAbove == 2 ? 1 : 0);
             if (shape == 1 & half == 1) leftNz = firstNz;
-            else if (miCol == 0) leftNz = 0;
+            else if (miCol <= tileMiCol) leftNz = 0;
             else leftNz = LeafNonzero(levels, mi, a, miRow, miCol - 2, plane, shapeLeft, shapeLeft == 1 ? 1 : 0);
             int scanAt, neighborsAt;
             if (tx == 2)

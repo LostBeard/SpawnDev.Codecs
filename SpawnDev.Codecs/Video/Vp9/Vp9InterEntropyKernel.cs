@@ -30,7 +30,9 @@ internal static class Vp9EArg
     /// built on the host from the decoder's tree (<see cref="BuildClassTokens"/>).
     /// </summary>
     public const int ClassTok = Vp9PArg.Count;
-    public const int Count = ClassTok + 22;
+    /// <summary>Log2 of the frame's tile columns (Vp9TileGrid): a leaf's left neighbour and MV candidates stay in its tile.</summary>
+    public const int TileLog2Cols = ClassTok + 22;
+    public const int Count = TileLog2Cols + 1;
 
     /// <summary>(bits, length) of every leaf of the tree at <paramref name="treeAt"/> in <see cref="Vp9T.Packed"/>.</summary>
     public static void BuildClassTokens(int[] a)
@@ -56,6 +58,25 @@ internal static class Vp9EArg
 
 internal static class Vp9InterEntropy
 {
+    /// <summary>
+    /// The mode-info columns [start, end) of the tile column holding <paramref name="miCol"/> (libvpx get_tile_offset:
+    /// superblock (c * sbCols) >> log2, the decoder's formula).
+    /// </summary>
+    public static void TileColumns(ArrayView<int> a, int miCol, out int start, out int end)
+    {
+        int log2 = a[Vp9EArg.TileLog2Cols], sbCols = a[Vp9PArg.SbCols], miCols = a[Vp9PArg.MiCols];
+        int sb = miCol >> 3, n = 1 << log2;
+        int s = 0, e = sbCols;
+        for (int c = 0; c < n; c++)
+        {
+            int cs = (c * sbCols) >> log2, ce = ((c + 1) * sbCols) >> log2;
+            bool here = sb >= cs & sb < ce;
+            if (here) { s = cs; e = ce; }
+        }
+        start = s * 8;
+        end = e * 8 < miCols ? e * 8 : miCols;
+    }
+
     /// <summary>The widest picture, in 8-pixel columns (the keyframe pass's limit).</summary>
     public const int MaxMiCols = Vp9FrameEntropyKernel.MaxMiColsAligned;
     /// <summary>Leaf slots (16 per superblock, z-order) one launch codes.</summary>
@@ -82,7 +103,7 @@ internal static class Vp9InterEntropy
 
     /// <summary>The partition symbol's context (libvpx partition_plane_context): its three probabilities are at
     /// <c>Vp9Ctx.Partition + context * 3</c>, its four counts at <c>Vp9Cnt.Partition + context * 4</c>.</summary>
-    private static int PartitionCtx(ArrayView<int> st, int sizeIdx, int miRow, int miCol)
+    internal static int PartitionCtx(ArrayView<int> st, int sizeIdx, int miRow, int miCol)
     {
         int leftBit = (st[LeftPart + (miRow & 7)] >> sizeIdx) & 1;
         int aboveBit = (st[AbovePart + miCol] >> sizeIdx) & 1;
@@ -154,14 +175,13 @@ internal static class Vp9InterEntropy
     /// </summary>
     private static void EncodeLeafSlot(ref Vp8BoolEncoderGpuState state, ArrayView<byte> outBuf, ArrayView<short> levels, ArrayView<int> mi,
         ArrayView<int> a, ArrayView<int> ctx, ArrayView<int> t, ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts, ArrayView<int> st,
-        ArrayView<int> maps, ArrayView<int> counts, ArrayView<int> queue, ArrayView<byte> tokenCache, int slot)
+        ArrayView<int> maps, ArrayView<int> counts, ArrayView<int> queue, ArrayView<byte> tokenCache, int sbRow, int sbCol, int q,
+        int tileMiCol, int tileMiColEnd)
     {
         int miCols = a[Vp9PArg.MiCols], miRows = a[Vp9PArg.MiRows];
         // the frame's symbol counts when the frame adapts (counts = the state buffer, at Counts)
         int cnt = a[Vp9PArg.CountsOn] != 0 ? Counts : -1;
-        int sbCols = a[Vp9PArg.SbCols];
-        int sb = slot >> 4, q = slot & 15;
-        int sbRow = sb / sbCols, sbCol = sb - sbRow * sbCols;
+        int sb = sbRow * a[Vp9PArg.SbCols] + sbCol;
         int miRow64 = sbRow * 8, miCol64 = sbCol * 8;
         int q32 = q >> 2, q16 = q & 3;
         int miRow32 = miRow64 + (q32 >> 1) * 4, miCol32 = miCol64 + (q32 & 1) * 4;
@@ -172,8 +192,8 @@ internal static class Vp9InterEntropy
         int n = 0;
         if (q == 0)
         {
-            if (sbCol == 0)
-                for (int k = 0; k < 56; k++) st[Left + k] = 0;   // left entropy + partition contexts: each superblock row
+            if (miCol64 == tileMiCol)
+                for (int k = 0; k < 56; k++) st[Left + k] = 0;   // left entropy + partition contexts: each superblock row of the tile
             PushSplit(queue, ref n, st, ctx, 3, miRow64, miCol64, miRows, miCols, counts, cnt);
         }
         if (q16 == 0) PushSplit(queue, ref n, st, ctx, 2, miRow32, miCol32, miRows, miCols, counts, cnt);
@@ -205,7 +225,7 @@ internal static class Vp9InterEntropy
         int rec = miRow * miCols + miCol, b = rec * Vp9Mi.Stride;
         int above = -1, left = -1;
         if (miRow != 0) above = mi[grid + (miRow - 1) * miCols + miCol];
-        if (miCol != 0) left = mi[grid + miRow * miCols + miCol - 1];
+        if (miCol > tileMiCol) left = mi[grid + miRow * miCols + miCol - 1];   // none at the tile's left edge (libvpx set_mi_row_col)
         int skip = mi[b + Vp9Mi.Skip];
         int skipCtx = Vp9ParseContexts.SkipContext(mi, above, left);
         int interCtx = Vp9ParseContexts.IntraInterContext(mi, above, left);
@@ -226,7 +246,7 @@ internal static class Vp9InterEntropy
         int bsize = mi[b + Vp9Mi.SbType];
         var p = new Vp9ParseKernels.BlockPos
         {
-            MiRow = miRow, MiCol = miCol, MiColStart = 0, MiColEnd = miCols,
+            MiRow = miRow, MiCol = miCol, MiColStart = tileMiCol, MiColEnd = tileMiColEnd,
             ToTop = -(miRow * 8 * 8), ToBottom = (miRows - high - miRow) * 8 * 8,
             ToLeft = -(miCol * 8 * 8), ToRight = (miCols - wide - miCol) * 8 * 8,
         };
@@ -369,10 +389,14 @@ internal static class Vp9InterEntropy
         }
     }
 
-    /// <summary>One bounded step of the walk: the next <paramref name="leaves"/> leaf slots. One thread.</summary>
+    /// <summary>
+    /// One bounded step of the walk of one tile: the next <paramref name="leaves"/> leaf slots. One thread.
+    /// <paramref name="tileOrigin"/> = first superblock column | first superblock row &lt;&lt; 16, <paramref name="tileSize"/>
+    /// = superblock columns | rows &lt;&lt; 16; the slots are the tile's superblocks in raster order, 16 each.
+    /// </summary>
     public static void StepKernel(Index1D index, ArrayView<byte> outBuf, ArrayView<long> outLen, ArrayView<short> levels, ArrayView<int> mi,
         ArrayView<int> a, ArrayView<int> ctx, ArrayView<int> t, ArrayView<byte> byteConsts, ArrayView<ushort> ushortConsts, ArrayView<int> st,
-        ArrayView<int> maps, int leaves)
+        ArrayView<int> maps, int leaves, int tileOrigin, int tileSize)
     {
         if (st[StDone] != 0) return;
         var queue = LocalMemory.Allocate<int>(QueueLength);
@@ -386,20 +410,25 @@ internal static class Vp9InterEntropy
         }
         else state = Vp8BoolEncoderGpu.Load(st, StEnc);
 
-        int sbRows = (a[Vp9PArg.MiRows] + 7) >> 3;
-        int slotCount = sbRows * a[Vp9PArg.SbCols] * 16;
+        int tileSbCols = tileSize & 0xFFFF;
+        int slotCount = (tileSize >> 16) * tileSbCols * 16;
         int slot = st[StNextSlot];
         int slotEnd = slot + leaves;
         if (slotEnd > slotCount) slotEnd = slotCount;
-        int miRows = a[Vp9PArg.MiRows], miCols = a[Vp9PArg.MiCols], sbCols = a[Vp9PArg.SbCols];
+        int miRows = a[Vp9PArg.MiRows], miCols = a[Vp9PArg.MiCols];
+        int tileMiCol = (tileOrigin & 0xFFFF) * 8;
+        int tileMiColEnd = ((tileOrigin & 0xFFFF) + tileSbCols) * 8;
+        if (tileMiColEnd > miCols) tileMiColEnd = miCols;
         for (; slot < slotEnd; slot++)
         {
             // the slot's 16x16 position; outside the picture nothing is coded
-            int sb = slot >> 4, q = slot & 15;
-            int sbRow = sb / sbCols;
-            int row = sbRow * 8 + ((q >> 3) & 1) * 4 + ((q >> 1) & 1) * 2, col = (sb - sbRow * sbCols) * 8 + ((q >> 2) & 1) * 4 + (q & 1) * 2;
+            int sbLocal = slot >> 4, q = slot & 15;
+            int sbRowLocal = sbLocal / tileSbCols;
+            int sbRow = (tileOrigin >> 16) + sbRowLocal, sbCol = (tileOrigin & 0xFFFF) + sbLocal - sbRowLocal * tileSbCols;
+            int row = sbRow * 8 + ((q >> 3) & 1) * 4 + ((q >> 1) & 1) * 2, col = sbCol * 8 + ((q >> 2) & 1) * 4 + (q & 1) * 2;
             if (row < miRows & col < miCols)
-                EncodeLeafSlot(ref state, outBuf, levels, mi, a, ctx, t, byteConsts, ushortConsts, st, maps, st, queue, tokenCache, slot);
+                EncodeLeafSlot(ref state, outBuf, levels, mi, a, ctx, t, byteConsts, ushortConsts, st, maps, st, queue, tokenCache,
+                    sbRow, sbCol, q, tileMiCol, tileMiColEnd);
         }
         if (slot >= slotCount)
         {

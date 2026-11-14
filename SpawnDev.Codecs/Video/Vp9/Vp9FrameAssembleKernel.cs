@@ -60,6 +60,13 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         ArrayView<long>, ArrayView<long>, ArrayView<long>,
         Vp9AssembleBatchStrides> _batchKernel;
 
+    private readonly Action<
+        Index1D,
+        ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+        ArrayView<long>,
+        ArrayView<long>, ArrayView<long>, ArrayView<long>,
+        int, int> _tilesKernel;
+
     /// <summary>Compile.</summary>
     public Vp9FrameAssembleKernel(Accelerator accelerator)
     {
@@ -76,6 +83,12 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
             ArrayView<long>,
             ArrayView<long>, ArrayView<long>, ArrayView<long>,
             Vp9AssembleBatchStrides>(Vp9AssembleBatchKernel);
+        _tilesKernel = accelerator.LoadAutoGroupedStreamKernel<
+            Index1D,
+            ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
+            ArrayView<long>,
+            ArrayView<long>, ArrayView<long>, ArrayView<long>,
+            int, int>(Vp9AssembleTilesKernel);
     }
 
     /// <summary>Batch assemble: one thread per (output byte, frame).</summary>
@@ -218,6 +231,78 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
         if (i < uncompressedLen) outBuf[i] = uncompressedHeader[i];
         else if (i < uncompressedLen + compressedLen) outBuf[i] = compressedHeader[i - uncompressedLen];
         else outBuf[i] = tileBytes[i - uncompressedLen - compressedLen];
+    }
+
+    /// <summary>
+    /// A frame of <paramref name="numTiles"/> tiles (VP9 spec section 6.4, libvpx vp9_bitstream.c encode_tiles): the
+    /// uncompressed header, the compressed header, then the tiles in order, every tile but the last prefixed by its
+    /// size as 4 big-endian bytes. Tile t's bytes are at <c>t * tileStride</c> in <paramref name="tileSlots"/>, its
+    /// length in <paramref name="tileLens"/>[t]. One thread per output byte (the layout of branch
+    /// vp9-multi-tile-entropy, whose assembler was one thread for the whole frame). The frame's length goes to
+    /// <paramref name="outLen"/>[0]; -1 (and nothing assembled) when a stream outgrew its buffer. Queued.
+    /// </summary>
+    public void RunTiles(
+        ArrayView<byte> uncompressedHeader, ArrayView<byte> compressedHeader,
+        ArrayView<byte> tileSlots, int tileStride, ArrayView<long> tileLens, int numTiles,
+        ArrayView<byte> outBuf, ArrayView<long> outLen,
+        ArrayView<long> uncompressedLenView, ArrayView<long> compressedLenView)
+    {
+        if (numTiles <= 0) throw new ArgumentOutOfRangeException(nameof(numTiles));
+        if (tileStride <= 0) throw new ArgumentOutOfRangeException(nameof(tileStride));
+        if (tileLens.Length < numTiles) throw new ArgumentException($"tileLens must hold {numTiles} entries.", nameof(tileLens));
+        if (tileSlots.Length < (long)numTiles * tileStride) throw new ArgumentException("tileSlots must hold numTiles * tileStride bytes.", nameof(tileSlots));
+        if (outLen.Length < 1) throw new ArgumentException("outLen must hold 1 entry.", nameof(outLen));
+        long maxBytes = Math.Min(outBuf.Length, uncompressedHeader.Length + compressedHeader.Length + (long)numTiles * (tileStride + 4L));
+        if (maxBytes < 1) maxBytes = 1;
+        _tilesKernel(checked((int)maxBytes), uncompressedHeader, compressedHeader, tileSlots, outBuf, outLen,
+            uncompressedLenView, compressedLenView, tileLens, numTiles, tileStride);
+    }
+
+    private static void Vp9AssembleTilesKernel(
+        Index1D index,
+        ArrayView<byte> uncompressedHeader, ArrayView<byte> compressedHeader, ArrayView<byte> tileSlots,
+        ArrayView<byte> outBuf, ArrayView<long> outLenOut,
+        ArrayView<long> uncompressedLenView, ArrayView<long> compressedLenView, ArrayView<long> tileLens,
+        int numTiles, int tileStride)
+    {
+        // 32-bit arithmetic (frames are far below 2 GB; 64-bit operations are emulated on WebGPU)
+        int i = index.X;
+        int u = (int)uncompressedLenView[0], c = (int)compressedLenView[0];
+        bool overflow = (u > uncompressedHeader.IntLength) | (c > compressedHeader.IntLength);
+        int total = u + c;
+        for (int t = 0; t < numTiles; t++)
+        {
+            int len = (int)tileLens[t];
+            overflow |= (len > tileStride) | (len < 0);
+            total += len + (t + 1 < numTiles ? 4 : 0);
+        }
+        if (overflow)
+        {
+            if (i == 0) outLenOut[0] = -1;
+            return;
+        }
+        if (i == 0) outLenOut[0] = total;
+        if (i >= total) return;
+        if (i < u) outBuf[i] = uncompressedHeader[i];
+        else if (i < u + c) outBuf[i] = compressedHeader[i - u];
+        else
+        {
+            int pos = i - u - c;
+            bool done = false;
+            for (int t = 0; t < numTiles; t++)
+            {
+                int len = (int)tileLens[t];
+                int prefix = t + 1 < numTiles ? 4 : 0;
+                bool here = !done & pos < prefix + len;
+                if (here)
+                {
+                    if (pos < prefix) outBuf[i] = (byte)((len >> (24 - 8 * pos)) & 0xFF);
+                    else outBuf[i] = tileSlots[t * tileStride + pos - prefix];
+                    done = true;
+                }
+                if (!done) pos -= prefix + len;
+            }
+        }
     }
 
     /// <summary>Release kernel resources.</summary>

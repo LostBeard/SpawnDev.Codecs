@@ -113,8 +113,12 @@ segmentation off, loop filter level 0, one tile. Fixed quantizer (same q index a
   `Vp8BoolEncoderParallelGpu.PaysOn`). Green on CPU, Velocity, CUDA, OpenCL, WebGPU, Wasm. CUDA q40, same bytes:
   1920x1080 key 1851 -> 43 ms, inter 836 -> 22 ms; 512x512 key 236 -> 13 ms, inter 112 -> 15 ms (with Data's
   `SerialThreadPlacement` on the per-diagonal wavefront).
-- [ ] **Tiles** (port of branch `vp9-multi-tile-entropy`, 2026-05-05, NOT merged: built on the May walker; keep the
-  branch until this is done). Reuse: the header's tile bits (tile_cols_log2 increments + terminator unless max,
+- [x] **Tiles** (2026-11-13: done, every lane; default ONE tile: tiles cost inter frames +5..8% bytes and 10-20% time
+  here; branch `vp9-multi-tile-entropy` kept on origin as history). Also found: `Vp8BoolEncoderParallelGpu.Prepare`
+  grew buffers under queued work of an earlier tile (Wasm RangeError; prepare once for the largest tile).
+  Port of branch `vp9-multi-tile-entropy` (2026-05-05, NOT merged: built on the May walker). Found on the way: the key
+  frame wavefront predicted from the left across a tile column's start; libvpx has no left neighbour there (fixed,
+  `Vp9FrameSequentialEncodeKernel.TileColStartMi`). Reuse: the header's tile bits (tile_cols_log2 increments + terminator unless max,
   tile_rows_log2 0 / 10 / 11) and the frame layout (every tile but the last prefixed by its 4-byte big-endian size).
   Do NOT reuse its `GetTileOffsetSb` / `GetTileColRange`: it rounds an mi offset up to a superblock, libvpx
   `get_tile_offset` is `((idx * sb_cols) >> log2) << 3` (min mis). 1920 wide, 4 tile columns: the branch gives

@@ -70,7 +70,7 @@ public sealed class Vp9EncoderGpu : IDisposable
         ArrayView<ushort>> _forward = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _residual = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
-        ArrayView<byte>, ArrayView<ushort>, ArrayView<int>, ArrayView<int>, int> _entropy = null!;
+        ArrayView<byte>, ArrayView<ushort>, ArrayView<int>, ArrayView<int>, int, int, int> _entropy = null!;
     // (the entropy step's symbol counts are in its state buffer: Vp9InterEntropy.Counts)
     private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _modes = null!;
     private Action<Index1D, ArrayView<short>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<ushort>,
@@ -82,7 +82,7 @@ public sealed class Vp9EncoderGpu : IDisposable
     private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
         ArrayView<int>, int> _refine = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<long>> _compressed = null!;
-    private Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int> _uncompressed = null!;
+    private Action<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int, int> _uncompressed = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long>? _pack;
     private Task? _kernelsLoad;
 
@@ -140,6 +140,22 @@ public sealed class Vp9EncoderGpu : IDisposable
         set => _key.SerialEntropy = value;
     }
 
+    /// <summary>
+    /// Log2 of the tile columns of every frame (clamped to what the width allows; -1 = the most it allows) and of the
+    /// tile rows (0..2); key and inter frames use the same grid. See <see cref="Vp9TileGrid"/>.
+    /// </summary>
+    internal int TileColumnsLog2
+    {
+        get => _key.TileColumnsLog2;
+        set => _key.TileColumnsLog2 = value;
+    }
+    /// <summary>See <see cref="TileColumnsLog2"/>.</summary>
+    internal int TileRowsLog2
+    {
+        get => _key.TileRowsLog2;
+        set => _key.TileRowsLog2 = value;
+    }
+
     /// <summary>An encoder on <paramref name="accelerator"/>.</summary>
     public Vp9EncoderGpu(Accelerator accelerator)
     {
@@ -158,7 +174,7 @@ public sealed class Vp9EncoderGpu : IDisposable
         _uncompressedHeader = _acc.Allocate1D<byte>(32);
         _compressedLen = _acc.Allocate1D<long>(1);
         _uncompressedLen = _acc.Allocate1D<long>(1);
-        _tileLen = _acc.Allocate1D<long>(1);
+        _tileLen = _acc.Allocate1D<long>(Vp9KeyframeEncoderGpu.MaxTiles);
         _frameLen = _acc.Allocate1D<long>(1);
         _stageY = new StageBuffer<byte>(_acc);
         _stageU = new StageBuffer<byte>(_acc);
@@ -189,7 +205,7 @@ public sealed class Vp9EncoderGpu : IDisposable
         _residual = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, ArrayView<int>>(Vp9ReconKernels.InterResidualKernel);
         _entropy = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<short>, ArrayView<int>, ArrayView<int>,
-            ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<ushort>, ArrayView<int>, ArrayView<int>, int>(Vp9InterEntropy.StepKernel);
+            ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<ushort>, ArrayView<int>, ArrayView<int>, int, int, int>(Vp9InterEntropy.StepKernel);
         _downsample = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int>(
             Vp9MotionSearchKernels.DownsampleKernel);
         _fullPel = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>,
@@ -204,7 +220,7 @@ public sealed class Vp9EncoderGpu : IDisposable
             Vp9InterSymbolParams>(Vp9InterSymbols.SymbolsKernel);
         _boolCoder ??= new Vp8BoolEncoderParallelGpu(_acc);
         await _contexts.LoadKernelsAsync();
-        _uncompressed = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int>(
+        _uncompressed = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<long>, ArrayView<long>, int, int, int, int>(
             Vp9InterHeaderKernels.UncompressedHeaderKernel);
     }
 
@@ -242,7 +258,7 @@ public sealed class Vp9EncoderGpu : IDisposable
         // the decoder kernels' scratch: per prediction unit, per inter transform block (Vp9RArg.ResidualScratchAt)
         long predUnits = PredUnits(sbCols, sbRows);
         _scratch = _acc.Allocate1D<int>(Math.Max(predUnits * Vp9InterPred.RegionScratchInts, ((long)sbCount * _dqStride >> 2) * 5));
-        _tile = _acc.Allocate1D<byte>(GetMaxEncodedSize(width, height));
+        // _tile: one slot per tile, allocated per frame for its grid (EncodeInterAsync)
         int leafCount = ((miCols + 1) >> 1) * ((miRows + 1) >> 1);
         _mvs = _acc.Allocate1D<int>(leafCount);
         _mvs.MemSetToZero();
@@ -333,10 +349,19 @@ public sealed class Vp9EncoderGpu : IDisposable
         long yBytes = (long)layout.YStride * layout.YRows, uvBytes = (long)layout.UvStride * layout.UvRows;
         var src = _src!.View;
 
+        // the tile grid (key and inter frames share it) and one output slot per tile
+        var grid = Vp9TileGrid.For(width, height, TileColumnsLog2, TileRowsLog2);
+        int tileStride = Vp9KeyframeEncoderGpu.TileSlotStride(grid);
+        if (_tile == null || _tile.Length < (long)tileStride * grid.Count)
+        {
+            _tile?.Dispose();   // every earlier encode ended with a wait: nothing pending reads it
+            _tile = _acc.Allocate1D<byte>((long)tileStride * grid.Count);
+        }
+
         // the bool encoders' carry reaches back into bytes already written: their targets start at zero
         _compressedHeader.View.MemSetToZero();
         _uncompressedHeader.View.MemSetToZero();
-        _tile!.View.MemSetToZero();
+        _tile.View.MemSetToZero();
         _compressedLen.View.MemSetToZero();
         _uncompressedLen.View.MemSetToZero();
         _tileLen.View.MemSetToZero();
@@ -469,18 +494,31 @@ public sealed class Vp9EncoderGpu : IDisposable
         e[Vp9PArg.UsePrevMvs] = adapt && _lastFrameType == 1 ? 1 : 0;
         e[Vp9PArg.CurMvOffset] = _mapCur * _miCount * Vp9PLayout.MvStride;
         e[Vp9PArg.PrevMvOffset] = (1 - _mapCur) * _miCount * Vp9PLayout.MvStride;
+        e[Vp9EArg.TileLog2Cols] = grid.Log2Cols;
         _entropyArgs.View.CopyFromCPU(e);   // frame metadata scalars
-        int slots = sbCols * sbRows * 16;
         var pacer = new LaunchPacer(_acc);
         if (SerialEntropy)
         {
-            int steps = (slots + Vp9InterEntropy.LeavesPerLaunch - 1) / Vp9InterEntropy.LeavesPerLaunch;
-            for (int s = 0; s < steps; s++)
+            for (int tile = 0; tile < grid.Count; tile++)
             {
-                _entropy(1, _tile.View, _tileLen.View, _levels.View, _mi.View, _entropyArgs.View, frameContext, _tables.View,
-                    _key.ByteConsts, _key.UshortConsts, _state.View, _maps!.View, Vp9InterEntropy.LeavesPerLaunch);
-                await pacer.LaunchedAsync();
-                await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_acc, "inter: entropy step");
+                var (c0, c1, r0, r1) = grid.Tile(tile);
+                if (tile > 0)
+                {
+                    // a fresh walk and bool coder per tile (and left contexts); the above contexts and the counts carry on
+                    _state.View.SubView(0, Vp9InterEntropy.Above).MemSetToZero();
+                    _state.View.SubView(Vp9InterEntropy.Left, Vp9InterEntropy.Counts - Vp9InterEntropy.Left).MemSetToZero();
+                }
+                int tileSlots = (c1 - c0) * (r1 - r0) * 16;
+                int steps = (tileSlots + Vp9InterEntropy.LeavesPerLaunch - 1) / Vp9InterEntropy.LeavesPerLaunch;
+                var tileOut = _tile.View.SubView((long)tile * tileStride, tileStride);
+                for (int s = 0; s < steps; s++)
+                {
+                    _entropy(1, tileOut, _tileLen.View.SubView(tile, 1), _levels.View, _mi.View, _entropyArgs.View, frameContext, _tables.View,
+                        _key.ByteConsts, _key.UshortConsts, _state.View, _maps!.View, Vp9InterEntropy.LeavesPerLaunch,
+                        c0 | (r0 << 16), (c1 - c0) | ((r1 - r0) << 16));
+                    await pacer.LaunchedAsync();
+                    await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_acc, "inter: entropy step");
+                }
             }
         }
         else
@@ -495,35 +533,53 @@ public sealed class Vp9EncoderGpu : IDisposable
                 await pacer.LaunchedAsync();
             }
             await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_acc, "inter: modes (diagonals)");
-            // 2. every slot's symbols (counted, with the frame's symbol counts), then written window by window and coded
-            int capacity = checked((int)_tile.Length);
+            // 2. per tile: every slot's symbols (counted, with the frame's symbol counts), then written window by window
+            // and coded by the tile's own coder stream into the tile's slot
             var coder = _boolCoder!;
-            coder.Prepare(slots, capacity);
-            _symbols(slots, _levels.View, _mi.View, _entropyArgs.View, frameContext, _tables.View, _key.ByteConsts, _key.UshortConsts,
-                _state.View, _nearest!.View, _slotCounts!.View, coder.Offsets, coder.Window, new Vp9InterSymbolParams());   // offsets unread here (a separate buffer: WebGPU bindings may not alias)
-            coder.Begin(_slotCounts.View, slots, capacity);
-            await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_acc, "inter: count + offsets");
-            int waves = coder.WaveCount((long)slots * Vp9InterSymbols.MaxSymbolsPerSlot);
-            for (int w = 0; w < waves; w++)
+            // the coder's buffers for the largest tile, before any tile is queued (growing one later frees a buffer
+            // queued work of an earlier tile still uses)
+            int maxSlots = 0;
+            for (int tile = 0; tile < grid.Count; tile++)
             {
-                var sp = new Vp9InterSymbolParams { Write = 1, WindowBase = checked(w * coder.WindowSymbols), WindowSymbols = coder.WindowSymbols };
-                _symbols(slots, _levels.View, _mi.View, _entropyArgs.View, frameContext, _tables.View, _key.ByteConsts, _key.UshortConsts,
-                    _state.View, _nearest.View, _slotCounts.View, coder.Offsets, coder.Window, sp);
-                coder.CodeWave(w);
-                await pacer.LaunchedAsync();
-                await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_acc, "inter: symbols + range pass, wave");
+                var (mc0, mc1, mr0, mr1) = grid.Tile(tile);
+                maxSlots = Math.Max(maxSlots, (mc1 - mc0) * (mr1 - mr0) * 16);
             }
-            coder.Finish(_tile.View, _tileLen.View, vp9: true);
-            await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_acc, "inter: carries + bytes");
+            coder.Prepare(maxSlots, tileStride);
+            for (int tile = 0; tile < grid.Count; tile++)
+            {
+                var (c0, c1, r0, r1) = grid.Tile(tile);
+                int tileSlots = (c1 - c0) * (r1 - r0) * 16;
+                var sp = new Vp9InterSymbolParams { SbColStart = c0, SbRowStart = r0, TileSbCols = c1 - c0 };
+                coder.Prepare(tileSlots, tileStride);
+                _symbols(tileSlots, _levels.View, _mi.View, _entropyArgs.View, frameContext, _tables.View, _key.ByteConsts, _key.UshortConsts,
+                    _state.View, _nearest!.View, _slotCounts!.View, coder.Offsets, coder.Window, sp);   // offsets unread here (a separate buffer: WebGPU bindings may not alias)
+                coder.Begin(_slotCounts.View, tileSlots, tileStride);
+                await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_acc, "inter: count + offsets");
+                int waves = coder.WaveCount((long)tileSlots * Vp9InterSymbols.MaxSymbolsPerSlot);
+                for (int w = 0; w < waves; w++)
+                {
+                    var wp = sp;
+                    wp.Write = 1;
+                    wp.WindowBase = checked(w * coder.WindowSymbols);
+                    wp.WindowSymbols = coder.WindowSymbols;
+                    _symbols(tileSlots, _levels.View, _mi.View, _entropyArgs.View, frameContext, _tables.View, _key.ByteConsts, _key.UshortConsts,
+                        _state.View, _nearest.View, _slotCounts.View, coder.Offsets, coder.Window, wp);
+                    coder.CodeWave(w);
+                    await pacer.LaunchedAsync();
+                    await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_acc, "inter: symbols + range pass, wave");
+                }
+                coder.Finish(_tile.View.SubView((long)tile * tileStride, tileStride), _tileLen.View.SubView(tile, 1), vp9: true);
+                await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_acc, "inter: carries + bytes");
+            }
         }
         // libvpx's backward adaptation from the frame's counts, then the save (both do nothing for an error resilient frame)
         _contexts.Adapt(info, _state.View.SubView(Vp9InterEntropy.Counts, Vp9Cnt.Size), 1);
         _contexts.EndFrame(info);
         _lastFrameType = 1;
         await Vp9KeyframeEncoderGpu.TraceLaunchAsync(_acc, "inter: adaptation + save");
-        _uncompressed(1, _uncompressedHeader.View, _uncompressedLen.View, _compressedLen.View, width, baseQIndex, adapt ? 0 : 1);
-        _assemble.Run(_uncompressedHeader.View, _compressedHeader.View, _tile.View, output, _frameLen.View,
-            _uncompressedLen.View, _compressedLen.View, _tileLen.View);
+        _uncompressed(1, _uncompressedHeader.View, _uncompressedLen.View, _compressedLen.View, width, baseQIndex, adapt ? 0 : 1, grid.HeaderArg);
+        _assemble.RunTiles(_uncompressedHeader.View, _compressedHeader.View, _tile.View, tileStride, _tileLen.View, grid.Count,
+            output, _frameLen.View, _uncompressedLen.View, _compressedLen.View);
         await _acc.SynchronizeAsync();
         long length = (await _frameLen.CopyToHostAsync())[0];
         if (length < 0) throw new InvalidOperationException("VP9 encode: the tile outgrew its buffer; the frame was not assembled.");

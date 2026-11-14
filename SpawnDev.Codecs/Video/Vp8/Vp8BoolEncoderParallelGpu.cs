@@ -145,8 +145,12 @@ public sealed class Vp8BoolEncoderParallelGpu : IDisposable
     public ArrayView<int> Offsets => _offsets!.View;
 
     /// <summary>
-    /// Allocate for a stream of <paramref name="segmentCount"/> segments and an output of <paramref name="outputCapacity"/>
-    /// bytes, so <see cref="Window"/> exists before the caller's first kernel (a count pass) binds it.
+    /// Allocate for streams of up to <paramref name="segmentCount"/> segments and outputs of up to
+    /// <paramref name="outputCapacity"/> bytes, so <see cref="Window"/> exists before the caller's first kernel (a count
+    /// pass) binds it. Growing REPLACES buffers: call it (and <see cref="Begin"/> with larger sizes) only when no queued
+    /// work still uses this coder. Several streams in a row (the tiles of a frame): prepare once for the largest first.
+    /// Found 2026-11-13: a frame's second, larger tile grew the offsets buffer while the first tile's launches were
+    /// queued; on Wasm the queued work wrote into the freed buffer (RangeError), elsewhere it was a silent use-after-free.
     /// </summary>
     public void Prepare(int segmentCount, int outputCapacity)
     {

@@ -87,6 +87,11 @@ public struct Vp9FrameSeqEncodeBatchParams
     /// a diagonal's few heavy MB threads, packed, share one multiprocessor (one launch group); spread, each gets its own.
     /// </summary>
     public SerialThreadPlacement Placement;
+    /// <summary>
+    /// The frame's tile columns: log2 tile columns | superblock columns &lt;&lt; 8 (0: one tile). Intra prediction takes
+    /// no left neighbour at a tile column's first column (libvpx set_mi_row_col: left_mi is NULL there).
+    /// </summary>
+    public int TileInfo;
 }
 
 /// <summary>
@@ -164,7 +169,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         ArrayView<short> yCoefs, ArrayView<short> uCoefs, ArrayView<short> vCoefs,
         ArrayView<int> dequant,
         int mbCols, int mbRows,
-        int frameMiRows = 0, int frameMiCols = 0)
+        int frameMiRows = 0, int frameMiCols = 0, int tileInfo = 0)
     {
         if (mbCols <= 0) throw new ArgumentOutOfRangeException(nameof(mbCols));
         if (mbRows <= 0) throw new ArgumentOutOfRangeException(nameof(mbRows));
@@ -187,7 +192,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             mbCols, mbRows, 1,
             mbCols * 16 * mbRows * 16, mbCols * 8 * mbRows * 8,
             (int)(mbCount * 256), (int)(mbCount * 64), 4,
-            frameMiRows, frameMiCols);
+            frameMiRows, frameMiCols, tileInfo);
     }
 
     /// <summary>
@@ -202,7 +207,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         int mbCols, int mbRows, int frameCount,
         int yStride, int uvStride,
         int yCoefStride, int uvCoefStride, int dequantStride,
-        int frameMiRows = 0, int frameMiCols = 0)
+        int frameMiRows = 0, int frameMiCols = 0, int tileInfo = 0)
     {
         if (frameCount <= 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
         // Default frameMiRows = mbRows*2, frameMiCols = mbCols*2 (no boundary).
@@ -230,6 +235,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
                 FrameMiRows = frameMiRows,
                 FrameMiCols = frameMiCols,
                 Placement = SerialThreadPlacement.Create(_accelerator, _batchGroupSize, frameCount * diagCount),
+                TileInfo = tileInfo,
             };
             _batchKernel(checked((int)p.Placement.Extent),
                 yPlane, uPlane, vPlane,
@@ -360,7 +366,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             {
                 int shape = BoundaryShape(mbRow, mbCol, p.FrameMiRows, p.FrameMiCols);
                 EncodeMacroblock(
-                    mbRow, mbCol, mbCols, yStride, uvStride,
+                    mbRow, mbCol, mbCols, p.TileInfo, yStride, uvStride,
                     fY, fU, fV,
                     fYR, fUR, fVR,
                     fYC, fUC, fVC,
@@ -444,7 +450,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
 
         int shape = BoundaryShape(mbRow, mbCol, p.FrameMiRows, p.FrameMiCols);
         EncodeMacroblock(
-            mbRow, mbCol, p.MbCols, yStride, uvStride,
+            mbRow, mbCol, p.MbCols, p.TileInfo, yStride, uvStride,
             fY, fU, fV,
             fYR, fUR, fVR,
             fYC, fUC, fVC,
@@ -469,7 +475,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         ArrayView<byte> aboveLuma, ArrayView<byte> leftLuma,
         ArrayView<byte> aboveChroma, ArrayView<byte> leftChroma)
     {
-        EncodeMacroblock(mbRow, mbCol, mbCols, yStride, uvStride,
+        EncodeMacroblock(mbRow, mbCol, mbCols, 0, yStride, uvStride,
             yPlane, uPlane, vPlane, yRecon, uRecon, vRecon,
             yCoefs, uCoefs, vCoefs, yDcQ, yAcQ, uvDcQ, uvAcQ,
             residual, coefsInt, coefsShort, fdctScratch, idctScratch,
@@ -484,7 +490,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void EncodeMacroblock(
-        int mbRow, int mbCol, int mbCols,
+        int mbRow, int mbCol, int mbCols, int tileInfo,
         int yStride, int uvStride,
         ArrayView<byte> yPlane, ArrayView<byte> uPlane, ArrayView<byte> vPlane,
         ArrayView<byte> yRecon, ArrayView<byte> uRecon, ArrayView<byte> vRecon,
@@ -501,7 +507,8 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         long uvBase = (long)mbRow * 8 * uvStride + mbCol * 8;
 
         int topAvail = mbRow > 0 ? 1 : 0;
-        int leftAvail = mbCol > 0 ? 1 : 0;
+        // left: inside the tile column only (libvpx: left_mi is NULL at the tile's first mode-info column)
+        int leftAvail = mbCol * 2 > TileColStartMi(mbCol * 2, tileInfo) ? 1 : 0;
         int variant = ComputeVariant(topAvail, leftAvail);
 
         if (shape == 0)
@@ -774,6 +781,23 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
     /// Map (topAvail, leftAvail) to the matching <see cref="Vp9DcVariant"/>
     /// integer. Returns: 0 = Both, 1 = TopOnly, 2 = LeftOnly, 3 = None.
     /// </summary>
+    /// <summary>
+    /// The first mode-info column of the tile column holding <paramref name="miCol"/> (libvpx get_tile_offset;
+    /// <paramref name="tileInfo"/> = log2 tile columns | superblock columns &lt;&lt; 8; 0 = one tile: 0).
+    /// </summary>
+    private static int TileColStartMi(int miCol, int tileInfo)
+    {
+        int log2 = tileInfo & 0xFF, sbCols = tileInfo >> 8;
+        int start = 0;
+        int tiles = 1 << log2;
+        for (int c = 1; c < tiles; c++)
+        {
+            int cs = ((c * sbCols) >> log2) << 3;
+            if (cs <= miCol) start = cs;
+        }
+        return start;
+    }
+
     private static int ComputeVariant(int topAvail, int leftAvail)
     {
         if (topAvail != 0 && leftAvail != 0) return (int)Vp9DcVariant.Both;
