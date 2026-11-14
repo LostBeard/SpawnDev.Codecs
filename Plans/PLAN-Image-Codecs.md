@@ -95,6 +95,34 @@ Task<byte[]> EncodeAsync(ReadOnlyMemory<byte> rgba, int width, int height, <Form
   CUDA/OpenCL/WebGPU/WebGL/Wasm lanes (PlaywrightMultiTest) are run by the coordinator, one at a time, when the
   shared GPU is free.
 
+## WebP lossless ENCODE: size parity with libwebp (2026-11-14)
+
+Measured on SpawnGen's 25 LTX frames (512x352, q80; Pillow 13 / libwebp 1.6.0, method 4 = ComfyUI's default):
+full-frame stills ours 3,124,892 B vs libwebp 2,957,198 (+5.7%); WebPAnimEncoder animation ours 3,540,954 vs 3,240,800
+(+9.3%, Codecs 5901c0f). Speed is no longer the gap (0.20 s / 0.32 s per frame on the RTX 4070 vs libwebp's 5.9 s
+clip). First target: the predictor-mode choice, which both paths share.
+
+libwebp 1.6.0 at method 4 (src/enc/predictor_enc.c, BSD): predictor bits = min(7 - method, 5) = 3 (8x8 tiles, then
+ClampBits), min_bits == max_bits (the multi-resolution search is method 5..6 only). Tiles in raster order; for each,
+all 14 modes are scored on the tile's residuals (exact = 0: transparent pixels take their prediction inside the tile;
+rows above / the left column / the top-right are the original picture) by
+PredictionCostSpatialHistogram = sum over the 4 channels of PredictionCostBias(tile, 1, 0.94) (favours residuals near
+0: -(c[0] + sum_{i=1..15} 0.94 * 0.6^(i-1) * (c[i] + c[256-i])) / 10 bits) + VP8LCombinedShannonEntropy(tile,
+accumulated) (the entropy of the tile and of tile + all earlier tiles' chosen histograms), minus 15 bits when the mode
+equals the left tile's and again for the above tile's. The chosen mode's histogram joins `accumulated`. Then
+VP8LOptimizeSampling coarsens the predictor image when its modes are uniform in 2^k blocks.
+
+GPU form (planned): the choice is serial over tiles (accumulated + neighbour bias), the work inside a tile is not.
+Every term that is the same for all modes drops out: sum_Y slog(Y), the tile's pixel count and the accumulated total,
+so a mode's relative cost is sum over the tile's NONZERO bins of slog(Y_i) - slog(X_i) - slog(X_i + Y_i) (at most 64
+per channel for an 8x8 tile) + the bias terms; float32 with the stable difference X log2(X+Y) + Y log2(1 + X/Y). One
+work-group walks the tiles (bounded launches, state in device memory): 14 threads walk the tile once per mode (the
+fill-aware residuals, as PredictorModeKernel does today), 56 (mode, channel) threads count their 64 values and sum
+the cost terms, one thread picks the first minimum and adds the chosen histogram to `accumulated`. Then the predictor
+image at the measured bits (and the uniform-block coarsening). Check: size on Lore's frames and every WebP fixture vs
+today; the existing decode / libwebp oracle tests keep the pixels exact. Next after it: cross-colour choice
+(PredictionCostCrossColor, the same accumulated scheme) and the entropy-image clustering.
+
 ## WebP lossy ENCODE (next; Lore/SpawnGen priority 2)
 
 State 2026-10-22: lossy DECODE is done (VP8 full decoder + libwebp-exact YUV->RGBA + ALPH, bit-exact with libwebp on 168
