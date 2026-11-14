@@ -77,6 +77,9 @@ internal static class Vp9KeyBench
             "velocity" => ctx.CreateVelocityAccelerator(0),
             _ => ctx.CreateCPUAccelerator(0),
         };
+        // CODECS_VELOCITY_HOST_COPY=0: Velocity host-path kernels as the original methods (SpawnDev.ILGPU 5.4.31's
+        // behaviour) instead of 5.4.32's optimized copies, for an A/B (as VelocityCodecsTests)
+        if (acc is VelocityAccelerator va && Environment.GetEnvironmentVariable("CODECS_VELOCITY_HOST_COPY") == "0") va.OptimizedHostKernels = false;
 
         int cw = (width + 1) / 2, ch = (height + 1) / 2;
         // picture f is the texture moved 3 pixels right and 1 down per frame (f = 0 for the key frame bench)

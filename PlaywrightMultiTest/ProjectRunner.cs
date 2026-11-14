@@ -317,7 +317,8 @@ namespace PlaywrightMultiTest
                             const rows = document.querySelectorAll('table.unit-test-view tbody tr');
                             return Array.from(rows).map(r => ({
                                 typeName: r.querySelector('.test-type-name')?.textContent ?? '',
-                                methodName: r.querySelector('.test-method-name')?.textContent ?? ''
+                                methodName: r.querySelector('.test-method-name')?.textContent ?? '',
+                                timeoutMs: parseInt(r.getAttribute('data-test-timeout') ?? '0', 10) || 0
                             }));
                         }").ConfigureAwait(false);
 
@@ -328,7 +329,10 @@ namespace PlaywrightMultiTest
                             var typeName = row.GetProperty("typeName").GetString() ?? "";
                             var methodName = row.GetProperty("methodName").GetString() ?? "";
 
-                            var rowTest = new ProjectTest(testableProject, typeName, methodName, testPageUrl);
+                            var rowTest = new ProjectTest(testableProject, typeName, methodName, testPageUrl)
+                            {
+                                TimeoutMs = row.TryGetProperty("timeoutMs", out var tm) && tm.ValueKind == JsonValueKind.Number ? tm.GetInt32() : 0,
+                            };
 
                             if (filter != null)
                             {

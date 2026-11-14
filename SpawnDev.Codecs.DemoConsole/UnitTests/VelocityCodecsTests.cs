@@ -26,6 +26,9 @@ public class VelocityCodecsTests : CodecsTestBase
             ? d : VelocityDeviceType.Vector128;
         var ctx = Context.Create(b => b.Velocity(device));
         var acc = ctx.CreateVelocityAccelerator(0);
+        // CODECS_VELOCITY_HOST_COPY=0 runs host-path kernels as the original methods (SpawnDev.ILGPU 5.4.31's behaviour)
+        // instead of 5.4.32's optimized copies, for comparing the two on the same tests.
+        if (Environment.GetEnvironmentVariable("CODECS_VELOCITY_HOST_COPY") == "0") acc.OptimizedHostKernels = false;
         return new ValueTask<(Context, Accelerator)>((ctx, acc));
     }
 }

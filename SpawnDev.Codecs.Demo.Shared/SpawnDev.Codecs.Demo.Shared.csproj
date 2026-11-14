@@ -8,7 +8,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="SpawnDev.UnitTesting.Browser" Version="2.7.2-local.3" />
+		<PackageReference Include="SpawnDev.UnitTesting.Browser" Version="2.7.2-local.4" />
 	</ItemGroup>
 
 	<!-- Acceptance tests of the components being rewritten clean-room (Plans/PLAN-CleanRoom-Rewrite.md): compiled again as

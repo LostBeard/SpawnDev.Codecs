@@ -14,6 +14,14 @@ public class ProjectTest
     public TestResult Result { get; set; }
     public string? ResultMessage { get; set; }
     public Func<IPage, Task> TestFunc { get; set; }
+    /// <summary>
+    /// The test's own time limit from its page row (data-test-timeout, SpawnDev.UnitTesting 2.5.8-local.4+; 0 = the
+    /// runner's default). The wait for the test to finish is at least this plus a minute, so the page reports its own
+    /// timeout before this driver calls the test hung.
+    /// </summary>
+    public int TimeoutMs { get; set; }
+    /// <summary>How long to wait for the test to finish: the generic 660 s, or the test's own limit + 60 s when longer.</summary>
+    private int FinishWaitMs => Math.Max(660_000, TimeoutMs > 0 ? TimeoutMs + 60_000 : 0);
     public ProjectTest(TestableProject testableProject, string name)
     {
         Project = testableProject;
@@ -194,7 +202,7 @@ public class ProjectTest
             await page.WaitForConditionAsync(async () =>
             {
                 return runtime.DeadReason != null || await runButton.IsEnabledAsync();
-            });
+            }, FinishWaitMs);
 
             // Stop capturing console
             page.Console -= OnConsole;

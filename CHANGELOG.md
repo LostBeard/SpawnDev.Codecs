@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### SpawnDev.ILGPU 5.4.32 (2026-11-14)
+
+- Built on SpawnDev.ILGPU 5.4.32 after the Codecs release gate on it: every desktop class in full (CUDA, OpenCL, Velocity,
+  CPU), the Pillow / libwebp / libFLAC oracle tests, the full WebGPU class and the Wasm encoder lane. Same bytes as on
+  5.4.31. Measured against 5.4.31 on the same commit: Velocity VP9 inter frame (512x512) ~785 -> ~252 ms, key frame
+  ~170 -> ~110 ms, VP9 decode parse ~20% faster on the CPU backends; CUDA unchanged; CPU-accelerator encode +4%.
+- Found on the way and fixed in ILGPU before its release: f32 division / square-root helpers written into every WGSL
+  shader (the VP9 WGSL size budget test), and a Velocity host-kernel copy that ran the VP9 sub-pel refine ~8.7x slower.
+- Test runner: PlaywrightMultiTest waits for a browser test as long as the test's own limit + 60 s (SpawnDev.UnitTesting
+  rows now carry data-test-timeout); it gave every test 660 s, which cut off the WebGPU VP9 every-frame decode (1 h limit).
+- CODECS_VELOCITY_HOST_COPY=0 runs Velocity host kernels as the original methods (VelocityCodecsTests, vp9-key-bench), for
+  comparing ILGPU's host paths.
+
 ### Lossless WebP: tokenisation in parallel (17x), transparent pixels take their prediction (2026-11-14)
 
 - `WebPLosslessEncoderGpu`: the LZ77 / colour-cache tokeniser was one GPU thread, run for every strategy and colour-cache

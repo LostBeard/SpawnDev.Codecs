@@ -120,6 +120,17 @@ loses to every generator, so the encoder is upgraded first. Parity target: libwe
 - [x] E2..E6 (opaque pictures, methods 3 / 4, one partition): `WebPLossyEncoderGpu` byte-identical with libwebp on CPU,
       CUDA, OpenCL (222 fixtures). Open: browser lanes; methods 0..2, 5..6 (trellis); 2/4/8 partitions;
       parallel candidate evaluation inside a macroblock (performance).
+- [ ] Speed (2026-11-14, Lore: SpawnGen would use lossy for quick previews if it were fast). Measured: 25 LTX frames 512x352
+      q80 on the RTX 4070, 2.15 s per frame (libwebp 40 ms, same bytes). The RD loop is 5 one-thread launches per macroblock
+      (3,520 per frame at 512x352). Two independent steps, both byte-identical by construction:
+      (1) candidates in parallel inside a macroblock, as (c) above; (2) a wavefront INSIDE each probability window: the level
+      costs change only at the refresh every max(mb_count >> 3, 96) macroblocks (raster order), so between two refreshes a
+      macroblock depends on earlier ones only through its left / top / top-right reconstruction, the nz and DC-error
+      contexts: (x, y) runs after (x - 1, y) and (x + 1, y - 1), the window's first macroblock after the previous window.
+      Tokens go to per-macroblock slots (compacted in raster order before the finish), statistics by atomics (sums).
+      Steps per window ~ mb_w + 2 * rows: 1080p 8160 macroblocks -> ~1100 steps. To check against Vp8LossyEncoderReference statement by
+      statement before building: no other cross-macroblock state (the I4 header-bit limit is per macroblock; the skip
+      probability is computed after the loop).
 - [x] ALPH (transparency, 2026-10-25): VP8X + ALPH + VP8, VP8 chunk byte-identical with libwebp, alpha exact (145 fixtures, CPU).
 - (superseded by the summary above; kept for the design notes) E2 intra mode decision: I16 (DC/V/H/TM), I4 (10 modes) and UV (4 modes) chosen by distortion + lambda * rate like
       libwebp method 4 (`VP8Decimate`: score = SSE * RD_DISTO_MULT + lambda * bits, with the spectral-distortion term
