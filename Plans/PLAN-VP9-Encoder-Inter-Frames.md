@@ -106,6 +106,37 @@ segmentation off, loop filter level 0, one tile. Fixed quantizer (same q index a
 5. [ ] **Loop filter** on the reconstruction (decoder's kernels; key frames too).
 6. [ ] Measure, then decide: intra blocks in inter frames, scene-cut key frames, high-precision MVs, golden / altref.
 
+## Entropy speed and tiles (2026-11-13, Geordi)
+
+- [x] Parallel entropy (c344843, ad5b64b, b1653c9): `Vp8BoolEncoderParallelGpu` + `Vp9KeyframeSymbolsKernel` +
+  `Vp9InterSymbols`, byte-identical to the serial walkers (kept as the oracle and as the CPU-accelerator path,
+  `Vp8BoolEncoderParallelGpu.PaysOn`). Green on CPU, Velocity, CUDA, OpenCL, WebGPU, Wasm. CUDA q40, same bytes:
+  1920x1080 key 1851 -> 43 ms, inter 836 -> 22 ms; 512x512 key 236 -> 13 ms, inter 112 -> 15 ms (with Data's
+  `SerialThreadPlacement` on the per-diagonal wavefront).
+- [ ] **Tiles** (port of branch `vp9-multi-tile-entropy`, 2026-05-05, NOT merged: built on the May walker; keep the
+  branch until this is done). Reuse: the header's tile bits (tile_cols_log2 increments + terminator unless max,
+  tile_rows_log2 0 / 10 / 11) and the frame layout (every tile but the last prefixed by its 4-byte big-endian size).
+  Do NOT reuse its `GetTileOffsetSb` / `GetTileColRange`: it rounds an mi offset up to a superblock, libvpx
+  `get_tile_offset` is `((idx * sb_cols) >> log2) << 3` (min mis). 1920 wide, 4 tile columns: the branch gives
+  [0,8) [8,15) [15,23) [23,30), libvpx [0,7) [7,15) [15,22) [22,30); its test asserts the wrong values. Use master's
+  formula (decoder `Vp9ParseKernels.Tiles.cs:341`, `Vp9ReconKernels.cs:234`, References `Vp9TileLayout`).
+  Steps, each green with tiles off by default:
+  1. Header kernels (key `Vp9FrameUncompressedHeaderKernel`, inter `Vp9InterHeaderKernels.UncompressedHeaderKernel`):
+     log2TileCols / log2TileRows arguments.
+  2. Assembler: multi-tile layout, one thread per output byte like the current one (the branch's is one thread).
+  3. Tile-major slot order (tile row, tile col, superblock raster inside the tile); one coder stream per tile.
+  4. Contexts at tile boundaries (libvpx decode_tiles): left contexts (entropy, partition) restart at every tile
+     column start per superblock row; above contexts are cleared once per frame (not per tile row); inter: the left
+     mode-info neighbour is unavailable at a tile column start, MV candidates stay inside the tile's columns
+     (`BlockPos.MiColStart / MiColEnd`). In both symbol kernels AND both serial walkers.
+  5. Default: the most tile columns the width allows (libvpx's default `--tile-columns 6`), tile rows 0. Tests: both
+     entropy paths byte-identical per tile layout, Vp9DecoderGpu (bit-exact libvpx) and ffmpeg decode every layout,
+     widths where sb_cols is not a multiple of the tile count (e.g. 1920 / 4 tiles, 1912).
+- [ ] VP9 key wavefront, Data's AV1 stage-1 shape (`Plans/AV1-GPU-encoder-architecture.md`, "Parallel inside a tile,
+  stage 1"): lanes per diagonal in one group + barrier, working areas in device memory (may retire the WebGPU
+  per-launch wait WORKAROUND), a barrier-free entry point for the CPU accelerators. 1080p wavefront is 31 of 43 ms.
+- [ ] Re-bench CPU / Velocity on ILGPU 5.4.32 (tier-0 fix) and measure Wasm parallel vs serial; revisit `PaysOn`.
+
 ## Found on the way (owned, not yet fixed)
 - Key frame compressed header (`Vp9FrameCompressedHeaderKernel` and its CPU reference): after tx_mode it writes 4
   zero bits at probability 128 where the syntax has 5 (the TX_MODE_SELECT bit + 4 coefficient update flags).
