@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Lossless WebP: the token stream and tile histograms in parallel; predictor modes see the transparent fill (2026-11-14)
+
+- The main image's tokens are written in parallel (`Vp8lEmitParallel`: bits per block, a 64-bit scan, each block OR-ing its
+  bits into a word scratch) and the per-tile histograms of the meta prefix groups are counted per block with atomics:
+  both were one GPU thread walking every token. The same bits. SpawnGen's 25 LTX frames (512x352, q80, RTX 4070), full
+  frames: 251 -> 199 ms per frame, identical file.
+- `Exact = false`: the predictor mode of each tile is chosen with the transparent pixels already taking their predictions
+  (libwebp's GetBestPredictorForTile with exact = 0), not on the cleared black pixels. The WebPAnimEncoder animation of the
+  same clip: 3,772,426 -> 3,540,954 bytes (libwebp 3,240,800), 371 -> 317 ms per frame. Not every picture gains: our tile
+  cost is the summed residual magnitude, libwebp's is entropy-based (next).
+
 ### SpawnDev.ILGPU 5.4.32 (2026-11-14)
 
 - Built on SpawnDev.ILGPU 5.4.32 after the Codecs release gate on it: every desktop class in full (CUDA, OpenCL, Velocity,

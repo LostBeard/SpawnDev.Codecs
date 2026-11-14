@@ -251,6 +251,32 @@ public abstract partial class CodecsTestBase
                 if (filledFile.Length >= cleared) failures.Add($"the transparent fill did not pay: {filledFile.Length} B, cleared {cleared} B");
             }
             finally { WebPEncodeKernels.FillTransparent = true; }
+            // the predictor modes are scored with the fill (libwebp's GetBestPredictorForTile, exact = 0): with transparent pixels
+            // spread through the tiles that must give a smaller file than scoring the cleared (black) pixels (measured 2026-11-14:
+            // 44,712 -> 42,234 B here; SpawnGen's 25 LTX frames as a WebPAnimEncoder animation 3.77 -> 3.54 MB). Not every
+            // picture gains: transparent stripes covering 2/3 of each tile grew 2.9%, because our tile cost is the summed
+            // residual magnitude where libwebp's is entropy-based (the next step).
+            const int bw = 192, bh = 128;
+            var blended = new byte[bw * bh * 4];
+            for (int i = 0; i < bw * bh; i++)
+            {
+                int x = i % bw, y = i / bw;
+                blended[i * 4] = Vp9TestTexture(x, y); blended[i * 4 + 1] = Vp9TestTexture(x + 300, y); blended[i * 4 + 2] = Vp9TestTexture(x, y + 300);
+                blended[i * 4 + 3] = (byte)(((x * 7 + y * 13) % 5) == 0 ? 0 : 255);
+            }
+            try
+            {
+                WebPEncodeKernels.PredictorModeSeesFill = false;
+                int blind = (await enc.EncodeAsync(blended, bw, bh, new WebPEncodeOptions { Quality = 75, Exact = false })).Length;
+                WebPEncodeKernels.PredictorModeSeesFill = true;
+                byte[] seeing = await enc.EncodeAsync(blended, bw, bh, new WebPEncodeOptions { Quality = 75, Exact = false });
+                var back = await dec.DecodeAsync(seeing);
+                var diff = ComparePixels(ZeroRgbUnderAlpha0(blended), ZeroRgbUnderAlpha0(back.Pixels), 4, bw);
+                if (diff != null) failures.Add($"scattered transparency (mode scoring): {diff}");
+                Console.WriteLine($"[report] Exact = false, scattered 20% transparent {bw}x{bh} q75: modes scored on cleared pixels {blind} B, with the fill {seeing.Length} B");
+                if (seeing.Length >= blind) failures.Add($"scoring the modes with the fill did not pay: {seeing.Length} B, scored on cleared pixels {blind} B");
+            }
+            finally { WebPEncodeKernels.PredictorModeSeesFill = true; }
             True(failures.Count == 0, string.Join("\n", failures));
         }
         finally { ReleaseAccelerator(ctx, acc); }

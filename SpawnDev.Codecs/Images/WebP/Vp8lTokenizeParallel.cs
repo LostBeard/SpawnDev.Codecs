@@ -41,17 +41,21 @@ public static class Vp8lTokenizeParallel
     /// <summary>Tokens per launch of the parse.</summary>
     public const int ParseChunk = 1 << 16;
 
+    /// <summary>Keys of the hash-chain table per block (the serial walk's hash).</summary>
     public const int PairKeys = 1 << Vp8lEncLayout.HashBits;
+    /// <summary>Keys of the colour-cache table per block (the largest cache, 10 bits).</summary>
     public const int CacheKeys = 1 << 10;
 
-    // state ints
+    /// <summary>Slots of the state ints: the parse position, the token total, the extra bits; their count.</summary>
     public const int SParsePos = 0, STotal = 1, SExtra = 2, StateInts = 4;
 
-    /// <summary>Offsets of the parallel tokeniser's ints for <paramref name="n"/> pixels (one buffer).</summary>
+    /// <summary>Offsets of the parallel tokeniser's ints for a picture of N pixels (one buffer).</summary>
     public readonly struct Layout
     {
         public readonly int N, Blocks, EmitBlocks;
         public readonly long KeyPrev, CachePrev, Len, Dist, Flag, PairTable, CacheTable, BlockCount, BlockExtra, State, Total;
+        /// <summary>Vp8lEmitParallel: bits, first word and first bit per emit block; its state.</summary>
+        public readonly long EBits, EWord, EShift, EState;
 
         public Layout(int n)
         {
@@ -69,6 +73,10 @@ public static class Vp8lTokenizeParallel
             BlockCount = p; p += EmitBlocks;
             BlockExtra = p; p += EmitBlocks;
             State = p; p += StateInts;
+            EBits = p; p += EmitBlocks;
+            EWord = p; p += EmitBlocks;
+            EShift = p; p += EmitBlocks;
+            EState = p; p += Vp8lEmitParallel.EStateInts;
             Total = p;
         }
     }
@@ -78,6 +86,7 @@ public static class Vp8lTokenizeParallel
     {
         public int N, XSize, CacheBits, ChainDepth, Blocks, EmitBlocks, Base;
         public int KeyPrev, CachePrev, Len, Dist, Flag, PairTable, CacheTable, BlockCount, BlockExtra, State;
+        public int EBits, EWord, EShift, EState;
     }
 
     public static Args MakeArgs(in Layout l, int xsize, int cacheBits, int chainDepth) => new Args
@@ -86,6 +95,7 @@ public static class Vp8lTokenizeParallel
         KeyPrev = checked((int)l.KeyPrev), CachePrev = checked((int)l.CachePrev), Len = checked((int)l.Len), Dist = checked((int)l.Dist),
         Flag = checked((int)l.Flag), PairTable = checked((int)l.PairTable), CacheTable = checked((int)l.CacheTable),
         BlockCount = checked((int)l.BlockCount), BlockExtra = checked((int)l.BlockExtra), State = checked((int)l.State),
+        EBits = checked((int)l.EBits), EWord = checked((int)l.EWord), EShift = checked((int)l.EShift), EState = checked((int)l.EState),
     };
 
     /// <summary>Thread i: s[start + i] = value (the link tables start at -1, the flags at 0).</summary>

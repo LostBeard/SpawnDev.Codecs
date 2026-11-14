@@ -304,7 +304,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
                 cur = bb;
                 if (s.Predictor)
                 {
-                    _kernels.PredictorMode(cur, work, meta, Vp8lEncLayout.Tiles(packed, height, plan.PredictorBits));
+                    _kernels.PredictorMode(cur, a, work, meta, Vp8lEncLayout.Tiles(packed, height, plan.PredictorBits));
                     _kernels.PredictorResidual(cur, a, work, meta, (int)packedPixels);
                     cur = a;
                 }
@@ -315,7 +315,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
                 if (s.SubtractGreen) _kernels.SubtractGreen(a, meta, n);
                 if (s.Predictor)
                 {
-                    _kernels.PredictorMode(a, work, meta, Vp8lEncLayout.Tiles(width, height, plan.PredictorBits));
+                    _kernels.PredictorMode(a, bb, work, meta, Vp8lEncLayout.Tiles(width, height, plan.PredictorBits));
                     // Exact = false: transparent pixels take their prediction (zero RGB residual), as libwebp does
                     _kernels.TransparentFill(a, work, meta, n);
                     _kernels.PredictorResidual(a, bb, work, meta, n);
