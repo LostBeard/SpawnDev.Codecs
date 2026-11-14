@@ -120,6 +120,21 @@ public sealed class Vp8BoolEncoderParallelGpu : IDisposable
         _apply = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, ArrayView<long>, int, int>(ApplyKernel);
     }
 
+    /// <summary>
+    /// Whether the parallel passes beat a serial coder on <paramref name="accelerator"/>: on the GPUs (CUDA, OpenCL,
+    /// WebGPU) yes; on the CPU accelerators (CPU, Velocity, Wasm) no: the 128-way range speculation, the count pass and
+    /// the idle windows are cheap on thousands of GPU threads and pure extra work on a few cores. Measured 2026-11-13,
+    /// VP9, 512x512 q40, ms per frame, parallel / serial: CUDA key 14.6 / 236, inter 15.0 / 112; CPU accelerator key
+    /// 320 / 204, inter 189 / 91; Velocity key 279 / 97, inter 858 / 780. Wasm not measured: the AV1 encoder's parallel
+    /// symbol pass made its Wasm frames slower (114 -> 123 ms), so it codes serially until measured.
+    /// </summary>
+    public static bool PaysOn(Accelerator accelerator)
+    {
+        ArgumentNullException.ThrowIfNull(accelerator);
+        var t = accelerator.AcceleratorType;
+        return t == AcceleratorType.Cuda || t == AcceleratorType.OpenCL || t == AcceleratorType.WebGPU;
+    }
+
     /// <summary>Symbols per wave window (the caller writes a window's symbols at index - wave * WindowSymbols).</summary>
     public int WindowSymbols => _windowSymbols;
 

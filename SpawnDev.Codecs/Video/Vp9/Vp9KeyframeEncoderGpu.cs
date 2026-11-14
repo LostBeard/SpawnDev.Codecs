@@ -110,8 +110,9 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
     private MemoryBuffer1D<int, global::ILGPU.Stride1D.Dense>? _dSlotCounts;
 
     /// <summary>
-    /// Tests only: code the tile with the serial walker (<see cref="Vp9FrameEntropyKernel"/>, one thread) instead of
-    /// the parallel symbol pass + bool coder. Both write the same bytes; the serial walker is the test's oracle.
+    /// Code the tile with the serial walker (<see cref="Vp9FrameEntropyKernel"/>, one thread) instead of the parallel
+    /// symbol pass + bool coder. Both write the same bytes. Default: serial where the parallel passes do not pay
+    /// (<see cref="Vp8BoolEncoderParallelGpu.PaysOn"/>: the CPU accelerators); tests set it to run either path anywhere.
     /// </summary>
     internal bool SerialEntropy { get; set; }
 
@@ -139,6 +140,7 @@ public sealed class Vp9KeyframeEncoderGpu : IDisposable
         _entropyKernel = new Vp9FrameEntropyKernel(accelerator);
         _symbolsKernel = new Vp9KeyframeSymbolsKernel(accelerator);
         _boolCoder = new Vp8BoolEncoderParallelGpu(accelerator);
+        SerialEntropy = !Vp8BoolEncoderParallelGpu.PaysOn(accelerator);
         _uncompressedHeaderKernel = new Vp9FrameUncompressedHeaderKernel(accelerator);
         _assembleKernel = new Vp9FrameAssembleKernel(accelerator);
 

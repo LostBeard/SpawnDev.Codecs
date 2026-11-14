@@ -39,7 +39,7 @@ public abstract partial class CodecsTestBase
                     for (int i = 0; i < mvs!.Length; i++) mvs[i] = field == 1 ? PackIntMv(-4, 6) : mix[(i * 5 + i / cols * 3) % mix.Length];
                 }
                 using var serial = new Vp9EncoderGpu(acc) { DebugMvs = mvs, SerialEntropy = true };
-                using var parallel = new Vp9EncoderGpu(acc) { DebugMvs = mvs };
+                using var parallel = new Vp9EncoderGpu(acc) { DebugMvs = mvs, SerialEntropy = false };
                 long total = 0;
                 for (int n = 0; n < frames; n++)
                 {

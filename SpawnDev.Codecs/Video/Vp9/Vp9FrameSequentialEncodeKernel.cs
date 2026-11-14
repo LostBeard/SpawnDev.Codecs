@@ -82,6 +82,11 @@ public struct Vp9FrameSeqEncodeBatchParams
     /// the MB is a right-edge (BLOCK_8X16) or corner (BLOCK_8X8) leaf.
     /// </summary>
     public int FrameMiCols;
+    /// <summary>
+    /// Where the working threads (frame, MB on the diagonal) sit in the launch (<see cref="SerialThreadPlacement"/>):
+    /// a diagonal's few heavy MB threads, packed, share one multiprocessor (one launch group); spread, each gets its own.
+    /// </summary>
+    public SerialThreadPlacement Placement;
 }
 
 /// <summary>
@@ -93,6 +98,8 @@ public struct Vp9FrameSeqEncodeBatchParams
 public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
 {
     private readonly Accelerator _accelerator;
+    /// <summary>Threads per launch group of the per-diagonal kernel (its working threads are placed by a SerialThreadPlacement).</summary>
+    private readonly int _batchGroupSize;
     private readonly Action<
         Index1D,
         ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
@@ -126,7 +133,8 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<int>,
-            Vp9FrameSeqEncodeBatchParams>(Vp9EncodeWavefrontBatchKernel);
+            Vp9FrameSeqEncodeBatchParams>(Vp9EncodeWavefrontBatchKernel, out var batchInfo);
+        _batchGroupSize = batchInfo?.MinGroupSize ?? 1;
         _singleDispatchBatchKernel = accelerator.LoadStreamKernel<
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
             ArrayView<byte>, ArrayView<byte>, ArrayView<byte>,
@@ -221,8 +229,9 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
                 DiagCount = diagCount,
                 FrameMiRows = frameMiRows,
                 FrameMiCols = frameMiCols,
+                Placement = SerialThreadPlacement.Create(_accelerator, _batchGroupSize, frameCount * diagCount),
             };
-            _batchKernel(frameCount * diagCount,
+            _batchKernel(checked((int)p.Placement.Extent),
                 yPlane, uPlane, vPlane,
                 yRecon, uRecon, vRecon,
                 yCoefs, uCoefs, vCoefs,
@@ -397,7 +406,8 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
         ArrayView<int> dequant,
         Vp9FrameSeqEncodeBatchParams p)
     {
-        int g = idx.X;
+        int g = SerialThreadPlacement.WorkingThread(p.Placement, idx.X);
+        if (g < 0) return;
         int frameIdx = g / p.DiagCount;
         int posOnDiag = g - frameIdx * p.DiagCount;
         int diagD = p.DiagAndRMin >> 16;

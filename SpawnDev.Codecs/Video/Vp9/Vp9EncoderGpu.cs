@@ -130,9 +130,9 @@ public sealed class Vp9EncoderGpu : IDisposable
     internal bool BackwardAdaptation { get; set; } = true;
 
     /// <summary>
-    /// Tests only: code every tile with the serial walkers (one thread: <see cref="Vp9InterEntropy"/>,
-    /// <see cref="Vp9FrameEntropyKernel"/>) instead of the parallel symbol passes + bool coder. Both write the same bytes
-    /// and the same symbol counts; the serial walkers are the tests' oracle.
+    /// Code every tile with the serial walkers (one thread: <see cref="Vp9InterEntropy"/>, <see cref="Vp9FrameEntropyKernel"/>)
+    /// instead of the parallel symbol passes + bool coder. Both write the same bytes and the same symbol counts. Default:
+    /// serial on the CPU accelerators (<see cref="Vp8BoolEncoderParallelGpu.PaysOn"/>); tests set it to run either path.
     /// </summary>
     internal bool SerialEntropy
     {

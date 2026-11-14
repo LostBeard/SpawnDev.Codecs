@@ -8,7 +8,7 @@
 // --stages 1: measurements: synchronize after every launch of the encode (Vp9KeyframeEncoderGpu.Trace) and report the
 //             time per stage, summed over a frame (the entropy steps are one stage). The waits add their own cost: the
 //             per-stage times add up to more than an untimed frame; run without --stages for the real per-frame time.
-// --serial 1: code the tiles with the serial walkers (one thread) instead of the parallel entropy passes (the A/B).
+// --serial 1|0: force the serial walkers (one thread) or the parallel entropy passes (the A/B); default: the encoder's choice.
 // --out: write the last encoded frame (a raw VP9 frame) to a file.
 // For an A/B of two builds: run the two executables alternately, several times each, with nothing else on the GPU.
 
@@ -38,7 +38,7 @@ internal static class Vp9KeyBench
         int width = 512, height = 512, frames = 12, warmup = 2, q = 40;
         bool stages = false;
         int inter = 0;
-        bool serial = false;
+        bool? serial = null;
         for (int i = 1; i < args.Length; i++)
         {
             string a = args[i];
@@ -97,8 +97,10 @@ internal static class Vp9KeyBench
                 }
         }
 
-        using var enc = new Vp9KeyframeEncoderGpu(acc) { SerialEntropy = serial };
-        using var seq = new Vp9EncoderGpu(acc) { KeyFrameInterval = 0, SerialEntropy = serial };
+        using var enc = new Vp9KeyframeEncoderGpu(acc);
+        using var seq = new Vp9EncoderGpu(acc) { KeyFrameInterval = 0 };
+        if (serial.HasValue) { enc.SerialEntropy = serial.Value; seq.SerialEntropy = serial.Value; }
+        bool serialUsed = enc.SerialEntropy;
         int cap = Vp9KeyframeEncoderGpu.GetMaxEncodedSize(width, height);
         using var dY = acc.Allocate1D(y);
         using var dU = acc.Allocate1D(u);
@@ -174,7 +176,7 @@ internal static class Vp9KeyBench
             Console.WriteLine($"stage {key}: {F(stageMs[key] / frames, "F2")} ms per frame");
         string build = typeof(Vp9KeyframeEncoderGpu).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
         string kind = inter > 0 ? "inter" : "key";
-        Console.WriteLine($"vp9-key-bench {acc.AcceleratorType} {width}x{height} q{q} {kind} frames, {(serial ? "SERIAL" : "parallel")} entropy{(stages ? " (stages timed: every launch waited for)" : "")}: " +
+        Console.WriteLine($"vp9-key-bench {acc.AcceleratorType} {width}x{height} q{q} {kind} frames, {(serialUsed ? "SERIAL" : "parallel")} entropy{(stages ? " (stages timed: every launch waited for)" : "")}: " +
             $"median {F(median, "F2")} ms, mean {F(mean, "F2")} ms, min {F(sorted[0], "F2")} ms, max {F(sorted[frames - 1], "F2")} ms " +
             $"per {kind} frame over {frames} frames ({F(1000.0 / median, "F2")} fps); {len} bytes; " +
             $"warm-up {warmup} frames {F(compile.Elapsed.TotalMilliseconds, "F0")} ms; SpawnDev.Codecs {build}");
