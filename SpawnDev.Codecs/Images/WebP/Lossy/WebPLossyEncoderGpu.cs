@@ -82,6 +82,17 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
     private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>> _analysis = null!;
     private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _setup = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>[] _stages = null!;
+
+    /// <summary>Names of <see cref="_stages"/>, in launch order (diagnostics: <see cref="Trace"/>).</summary>
+    // no digits: webp-anim-bench folds digits into '#' when it groups trace names
+    private static readonly string[] StageNames = { "rd prepare", "rd intra-whole-mb", "rd intra-subblocks", "rd uv", "rd record" };
+
+    /// <summary>
+    /// Diagnostics (webp-anim-bench --mode lossy --stages 1): when set, the encoder waits for the accelerator after every
+    /// launch of the RD loop and after the analysis / setup and the finish, and calls this with the step's name, so the
+    /// caller can attribute the time since its previous call. The waits add their own cost. Null in normal encoding.
+    /// </summary>
+    internal static Action<string>? Trace;
     private Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>>
         _finishProbas = null!, _finishTokens = null!, _finishHeader = null!, _finishModes = null!, _finishEnd = null!;
     private Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>> _assemble = null!;
@@ -369,13 +380,16 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
             _setup(1, _mbRecs.View, _meta.View, _tables.View, _qTable.View,
                 state.SubView(l.StCoeffs, WebPLossySetupKernel.ProbaCount), state.SubView(l.StStats, WebPLossySetupKernel.ProbaCount),
                 state.SubView(l.StLevelCost, WebPLossySetupKernel.LevelCostCount));
+            var trace = Trace;
+            if (trace != null) { await _accelerator.SynchronizeAsync(); trace("analysis + setup"); }
             var pacer = new LaunchPacer(_accelerator);
             for (int row = 0; row < l.MbH; row++)
                 for (int x = 0; x < l.MbW; x++)
-                    foreach (var stage in _stages)
+                    for (int s = 0; s < _stages.Length; s++)
                     {
-                        stage(1, yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
-                        await pacer.LaunchedAsync();
+                        _stages[s](1, yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
+                        if (trace != null) { await _accelerator.SynchronizeAsync(); trace(StageNames[s]); }
+                        else await pacer.LaunchedAsync();
                     }
             await _accelerator.SynchronizeAsync();
             var m = await _meta.View.CopyToHostAsync();
@@ -409,6 +423,7 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
             }
             _finishEnd(1, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, _scratch.View);
             await _accelerator.SynchronizeAsync();
+            trace?.Invoke("finish");
             var f = await _meta.View.SubView(0, M.Seg).CopyToHostAsync();
             var ferr = (WebPLossyEncError)f[M.Error];
             if (ferr != WebPLossyEncError.None) throw new InvalidOperationException($"lossy WebP encode failed: {ferr}");

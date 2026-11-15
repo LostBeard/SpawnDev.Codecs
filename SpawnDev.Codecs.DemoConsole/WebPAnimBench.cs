@@ -101,7 +101,7 @@ internal static class WebPAnimBench
         for (int r = 0; r < runs; r++)
         {
             bool timedStages = stages && r == runs - 1;
-            if (timedStages) { WebPLosslessEncoderGpu.Trace = Trace; WebPEncodeKernels.Trace = Trace; }
+            if (timedStages) { WebPLosslessEncoderGpu.Trace = Trace; WebPEncodeKernels.Trace = Trace; WebPLossyEncoderGpu.Trace = Trace; }
             mark.Restart();
             var sw = Stopwatch.StartNew();
             try
@@ -117,7 +117,7 @@ internal static class WebPAnimBench
                 else
                     file = await lossy.EncodeAnimationAsync(frames, w, h, durations, new WebPLossyEncodeOptions { Quality = quality });
             }
-            finally { WebPLosslessEncoderGpu.Trace = null; WebPEncodeKernels.Trace = null; }
+            finally { WebPLosslessEncoderGpu.Trace = null; WebPEncodeKernels.Trace = null; WebPLossyEncoderGpu.Trace = null; }
             sw.Stop();
             Console.WriteLine($"run {r + 1}: {F(sw.Elapsed.TotalSeconds, "F2")} s ({F(sw.Elapsed.TotalMilliseconds / frames.Count, "F0")} ms per frame), {file.Length} bytes");
         }
