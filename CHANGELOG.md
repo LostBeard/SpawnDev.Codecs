@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### VP9 decoder: the loop filter's masks in a parallel pass (2026-11-15)
+
+- Every superblock's loop-filter masks are built at once by a separate pass (`Vp9LoopFilterKernels.MaskKernel`) before
+  the filtering wavefront, instead of by one lane of each superblock's thread group while the other 63 waited. 1080p,
+  ms per frame: CUDA 4.27 -> 2.78, Velocity Vector128 735 -> 530, CPU accelerator 1307 -> 1150. Same pictures
+  (libvpx-exact). Velocity's loop filter is still slow in absolute terms (~0.3-0.6 s per 1080p frame); next on the list.
+- `vp9-lf-bench` (DemoConsole) times a decoded file's loop filter on any backend.
+
 ### Lossless WebP: libwebp's entropy-based predictor-mode choice for pictures with transparency (2026-11-15)
 
 - `Exact = false` pictures with transparent pixels now choose each tile's predictor mode as libwebp 1.6.0 does at
