@@ -82,6 +82,8 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
     private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>> _analysis = null!;
     private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _setup = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>[] _stages = null!;
+    // the Intra4 stage: one explicit group, a lane per mode (WebPLossyEncodeRowKernel.I4Lanes)
+    private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _intra4 = null!;
 
     /// <summary>Names of <see cref="_stages"/>, in launch order (diagnostics: <see cref="Trace"/>).</summary>
     // no digits: webp-anim-bench folds digits into '#' when it groups trace names
@@ -148,10 +150,12 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
         {
             await LoadStage(a, WebPLossyEncodeRowKernel.PrepareStage),
             await LoadStage(a, WebPLossyEncodeRowKernel.Intra16Stage),
-            await LoadStage(a, WebPLossyEncodeRowKernel.Intra4Stage),
+            null!,   // Intra4Stage: grouped, _intra4
             await LoadStage(a, WebPLossyEncodeRowKernel.UVStage),
             await LoadStage(a, WebPLossyEncodeRowKernel.RecordStage),
         };
+        _intra4 = await a.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>,
+            ArrayView<int>, ArrayView<int>, int, int>(WebPLossyEncodeRowKernel.Intra4Stage);
         _finishProbas = await LoadFinish(a, WebPLossyFinishKernel.FinishProbasKernel);
         _finishTokens = await LoadFinish(a, WebPLossyFinishKernel.FinishTokensKernel);
         _finishHeader = await LoadFinish(a, WebPLossyFinishKernel.FinishHeaderKernel);
@@ -387,7 +391,8 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
                 for (int x = 0; x < l.MbW; x++)
                     for (int s = 0; s < _stages.Length; s++)
                     {
-                        _stages[s](1, yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
+                        if (s == 2) _intra4(new KernelConfig(1, WebPLossyEncodeRowKernel.I4Lanes), yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
+                        else _stages[s](1, yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
                         if (trace != null) { await _accelerator.SynchronizeAsync(); trace(StageNames[s]); }
                         else await pacer.LaunchedAsync();
                     }

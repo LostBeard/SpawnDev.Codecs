@@ -170,12 +170,15 @@ internal static partial class WebPLossyEncodeRowKernel
         SaveOut(meta, ref c);
     }
 
-    /// <summary>Stage 3: PickBestIntra4.</summary>
+    /// <summary>Stage 3: PickBestIntra4, explicitly grouped: one group of <see cref="I4Lanes"/> lanes (a lane per mode).</summary>
     public static void Intra4Stage(
-        Index1D _, ArrayView<byte> yuv, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state,
+        ArrayView<byte> yuv, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state,
         ArrayView<int> meta, ArrayView<int> t, ArrayView<int> tokens, int row, int x)
     {
-        if (meta[M.Error] != 0) return;
+        // an early return before the barriers in PickBestIntra4 must be uniform for WGSL's validator: a value read from
+        // a storage buffer is not, the group-wide OR of it is
+        if (Group.BarrierOr(meta[M.Error] != 0)) return;
+        int lane = Group.IdxX;
         int mbW = meta[M.MbW], mbH = meta[M.MbH];
         var preds = work.SubView(0, (4 * mbW + 1) * (4 * mbH + 1));
         var yTop = work.SubView(meta[M.WorkYTopOff], 2 * mbW * 16);
@@ -186,9 +189,12 @@ internal static partial class WebPLossyEncodeRowKernel
         var si = state.SubView(meta[M.StScratchOff], IntScratchSize);
         var c = MakeCtx(meta, mbRecs, row, x);
         var rd = LoadScore(si);
-        PickBestIntra4(sb, si, meta, t, coeffs, lc, nzRow, preds, yTop, mbRecs, ref c, ref rd);
-        SaveScore(si, ref rd);
-        SaveOut(meta, ref c);
+        PickBestIntra4(lane, sb, si, meta, t, coeffs, lc, nzRow, preds, yTop, mbRecs, ref c, ref rd);
+        if (lane == 0)
+        {
+            SaveScore(si, ref rd);
+            SaveOut(meta, ref c);
+        }
     }
 
     /// <summary>Stage 4: PickBestUV.</summary>

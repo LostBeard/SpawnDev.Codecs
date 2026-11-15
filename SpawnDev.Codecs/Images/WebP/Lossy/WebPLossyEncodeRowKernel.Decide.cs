@@ -127,7 +127,39 @@ internal static partial class WebPLossyEncodeRowKernel
         }
     }
 
-    private static bool PickBestIntra4(ArrayView<byte> sb, ArrayView<int> si, ArrayView<int> meta, ArrayView<int> t,
+    /// <summary>Lanes of the Intra4 stage's thread group: one per mode (10), padded to a power of two.</summary>
+    public const int I4Lanes = 16;
+
+    private static int I4LaneBlock(int mode) => BI4Lanes + (mode >> 3) * 4 * BPS + (mode & 7) * 4;
+
+    private static void StoreLaneScore(ArrayView<int> si, int o, ref WebPModeScore r)
+    {
+        si[o + 0] = (int)r.D; si[o + 1] = (int)(r.D >> 32);
+        si[o + 2] = (int)r.SD; si[o + 3] = (int)(r.SD >> 32);
+        si[o + 4] = (int)r.H; si[o + 5] = (int)(r.H >> 32);
+        si[o + 6] = (int)r.R; si[o + 7] = (int)(r.R >> 32);
+        si[o + 8] = (int)r.Score; si[o + 9] = (int)(r.Score >> 32);
+        si[o + 10] = (int)r.Nz;
+    }
+
+    private static WebPModeScore LoadLaneScore(ArrayView<int> si, int o)
+    {
+        var r = new WebPModeScore();
+        r.D = Long(si, o + 0); r.SD = Long(si, o + 2); r.H = Long(si, o + 4); r.R = Long(si, o + 6); r.Score = Long(si, o + 8);
+        r.Nz = (uint)si[o + 10];
+        return r;
+    }
+
+    /// <summary>
+    /// PickBestIntra4 by a thread group of <see cref="I4Lanes"/> lanes (every lane calls it; barriers inside): per 4x4
+    /// block, lane m (m &lt; 10) reconstructs and scores mode m into its own scratch (levels, tmps, the reconstruction at
+    /// <see cref="I4LaneBlock"/>), and lane 0 keeps libwebp's choice and bookkeeping. libwebp walks the modes in order,
+    /// skips the residual cost of a mode whose score without it already reaches the best (adding the cost only raises
+    /// the score) and keeps a mode only when strictly better: the first minimum of the FULL scores - so the lanes score
+    /// every mode in full and lane 0 takes the first minimum. Same choices, same bits. Only lane 0's
+    /// <paramref name="rd"/> and <paramref name="c"/> count. Barriers stay outside every branch (WGSL's uniformity rule).
+    /// </summary>
+    private static bool PickBestIntra4(int lane, ArrayView<byte> sb, ArrayView<int> si, ArrayView<int> meta, ArrayView<int> t,
         ArrayView<int> coeffs, ArrayView<int> lc, ArrayView<int> nzRow, ArrayView<byte> preds, ArrayView<byte> yTop,
         ArrayView<int> mbRecs, ref RowCtx c, ref WebPModeScore rd)
     {
@@ -136,85 +168,87 @@ internal static partial class WebPLossyEncodeRowKernel
         int tlambda = meta[segBase + M.STLambda];
         int lambdaMode = meta[segBase + M.SLambdaMode];
         int maxI4HeaderBits = meta[M.PassMaxI4HeaderBits];
-        var tmpV = si.SubView(IT16, 16);
-        if (maxI4HeaderBits == 0) return false;
 
         int bestBlocks = c.Out2Buf;
-        int totalHeaderBits = 0;
-        var rdBest = new WebPModeScore();
+        int totalHeaderBits = 0;   // lane 0's
+        var rdBest = new WebPModeScore();   // lane 0's
         rdBest.Init();
         rdBest.H = 211;
         rdBest.SetRD(lambdaMode);
-        StartI4(sb, yTop, ref c, nzRow, si);
-        bool ok = true;
+        if (lane == 0)
+        {
+            if (maxI4HeaderBits != 0) StartI4(sb, yTop, ref c, nzRow, si);
+            si[II4Ok] = maxI4HeaderBits != 0 ? 1 : 0;
+        }
         for (int i4 = 0; i4 < 16; ++i4)
         {
-            if (ok)
+            Group.Barrier();   // the previous block's bookkeeping (modes, nz, the rotated boundary) is visible
+            bool ok = si[II4Ok] != 0;
+            int bx = i4 & 3, by = i4 >> 2;
+            if (ok & (lane == 0)) Intra4Preds(sb, BI4 + TopLeftI4(i4));
+            Group.Barrier();   // the 10 predictions are visible
+            if (ok & (lane < 10))
             {
-                int bx = i4 & 3, by = i4 >> 2;
+                int mode = lane;
                 int src = BIn + ScanY(i4);
                 int left = bx == 0 ? preds[c.PredsIdx + by * c.PredsW - 1] : si[IModesI4 + i4 - 1];
                 int top = by == 0 ? preds[c.PredsIdx - c.PredsW + bx] : si[IModesI4 + i4 - 4];
-                int modeCosts = T.FixedCostsI4 + (top * 10 + left) * 10;
-                int bestBlock = bestBlocks + ScanY(i4);
-                int tmpDst = BPred + I4TMP;
-                int bestMode = -1;
-                var rdI4 = new WebPModeScore();
-                rdI4.Init();
-                Intra4Preds(sb, BI4 + TopLeftI4(i4));
-                for (int mode = 0; mode < 10; ++mode)
+                int lo = II4Lanes + lane * I4LaneStride;
+                int dst = I4LaneBlock(mode);
+                var r = new WebPModeScore();
+                r.Nz = (uint)ReconstructIntra4(sb, si, meta, t, c.Seg, lo + I4LLevels, src, dst, mode, lo + I4LTmpA, lo + I4LTmpB) << i4;
+                r.D = SSE(sb, src, sb, dst, 4, 4);
+                r.SD = tlambda != 0 ? (tlambda * Disto4x4(sb, src, sb, dst, t, si.SubView(lo + I4LTmpA, 16)) + 128) >> 8 : 0;
+                r.H = t[T.FixedCostsI4 + (top * 10 + left) * 10 + mode];
+                r.R = (mode > 0) & IsFlat(si, lo + I4LLevels, 1, 3) ? 140 : 0;
+                r.R += GetResidualCost(t, coeffs, lc, si[ITopNz + bx] + si[ILeftNz + by], 3, 0, si, lo + I4LLevels);
+                r.SetRD(lambda);
+                StoreLaneScore(si, lo + I4LScore, ref r);
+            }
+            Group.Barrier();   // every mode is scored
+            if (ok & (lane == 0))
+            {
+                int bestMode = 0;
+                var rdI4 = LoadLaneScore(si, II4Lanes + I4LScore);
+                for (int mode = 1; mode < 10; ++mode)
                 {
-                    var rdTmp = new WebPModeScore();
-                    rdTmp.Nz = (uint)ReconstructIntra4(sb, si, meta, t, c.Seg, ITmpLv, src, tmpDst, mode) << i4;
-                    rdTmp.D = SSE(sb, src, sb, tmpDst, 4, 4);
-                    rdTmp.SD = tlambda != 0 ? (tlambda * Disto4x4(sb, src, sb, tmpDst, t, tmpV) + 128) >> 8 : 0;
-                    rdTmp.H = t[modeCosts + mode];
-                    bool flatPenalty = (mode > 0) & IsFlat(si, ITmpLv, 1, 3);
-                    rdTmp.R = flatPenalty ? 140 : 0;
-                    rdTmp.SetRD(lambda);
-                    bool skipMode = (bestMode >= 0) & (rdTmp.Score >= rdI4.Score);
-                    if (!skipMode)
-                    {
-                        rdTmp.R += GetResidualCost(t, coeffs, lc, si[ITopNz + bx] + si[ILeftNz + by], 3, 0, si, ITmpLv);
-                        rdTmp.SetRD(lambda);
-                        bool better = (bestMode < 0) | (rdTmp.Score < rdI4.Score);
-                        if (better)
-                        {
-                            rdI4 = rdTmp;
-                            bestMode = mode;
-                            int sw = tmpDst; tmpDst = bestBlock; bestBlock = sw;
-                            for (int k = 0; k < 16; ++k) si[II4Best + i4 * 16 + k] = si[ITmpLv + k];
-                        }
-                    }
+                    var r = LoadLaneScore(si, II4Lanes + mode * I4LaneStride + I4LScore);
+                    if (r.Score < rdI4.Score) { rdI4 = r; bestMode = mode; }
                 }
+                int blo = II4Lanes + bestMode * I4LaneStride + I4LLevels;
+                for (int k = 0; k < 16; ++k) si[II4Best + i4 * 16 + k] = si[blo + k];
                 rdI4.SetRD(lambdaMode);
                 rdBest.D += rdI4.D; rdBest.SD += rdI4.SD; rdBest.R += rdI4.R; rdBest.H += rdI4.H;
                 rdBest.Nz |= rdI4.Nz; rdBest.Score += rdI4.Score;
-                if (rdBest.Score >= rd.Score) ok = false;
-                if (ok)
+                bool still = rdBest.Score < rd.Score;
+                if (still)
                 {
                     totalHeaderBits += (int)rdI4.H;
-                    if (totalHeaderBits > maxI4HeaderBits) ok = false;
+                    if (totalHeaderBits > maxI4HeaderBits) still = false;
                 }
-                if (ok)
+                if (still)
                 {
-                    int home = bestBlocks + ScanY(i4);
-                    if (bestBlock != home) CopyBlock(sb, bestBlock, home, 4, 4);
+                    CopyBlock(sb, I4LaneBlock(bestMode), bestBlocks + ScanY(i4), 4, 4);
                     si[IModesI4 + i4] = bestMode;
                     int nzb = rdI4.Nz != 0 ? 1 : 0;
                     si[ITopNz + bx] = nzb;
                     si[ILeftNz + by] = nzb;
                     if (i4 < 15) RotateI4(sb, i4, bestBlocks);
                 }
+                si[II4Ok] = still ? 1 : 0;
             }
         }
-        if (!ok) return false;
-        rd.D = rdBest.D; rd.SD = rdBest.SD; rd.R = rdBest.R; rd.H = rdBest.H; rd.Nz = rdBest.Nz; rd.Score = rdBest.Score;
-        for (int y = 0; y < 4; ++y)
-            for (int k = 0; k < 4; ++k) preds[c.PredsIdx + y * c.PredsW + k] = (byte)si[IModesI4 + y * 4 + k];
-        mbRecs[(c.Y * c.MbW + c.X) * M.MbStride + M.MbType] = 0;
+        Group.Barrier();   // lane 0's last decision is visible
+        if (si[II4Ok] == 0) return false;
+        if (lane == 0)
+        {
+            rd.D = rdBest.D; rd.SD = rdBest.SD; rd.R = rdBest.R; rd.H = rdBest.H; rd.Nz = rdBest.Nz; rd.Score = rdBest.Score;
+            for (int y = 0; y < 4; ++y)
+                for (int k = 0; k < 4; ++k) preds[c.PredsIdx + y * c.PredsW + k] = (byte)si[IModesI4 + y * 4 + k];
+            mbRecs[(c.Y * c.MbW + c.X) * M.MbStride + M.MbType] = 0;
+            for (int i = 0; i < 256; ++i) si[IRdA + LAc + i] = si[II4Best + i];
+        }
         SwapOut(ref c);
-        for (int i = 0; i < 256; ++i) si[IRdA + LAc + i] = si[II4Best + i];
         return true;
     }
 

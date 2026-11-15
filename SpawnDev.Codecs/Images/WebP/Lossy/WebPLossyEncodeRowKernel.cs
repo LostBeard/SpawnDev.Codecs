@@ -26,7 +26,9 @@ internal static partial class WebPLossyEncodeRowKernel
     public const int BPS = 32;
     // byte scratch
     public const int BIn = 0, BOutA = 512, BOutB = 1024, BPred = 1536, BLeft = 3328, BI4 = 3400;
-    public const int ByteScratchSize = 3456;
+    // BI4Lanes: the 4x4 reconstruction of each Intra4 mode lane (PickBestIntra4: 10 blocks, 8 per block row of BPS)
+    public const int BI4Lanes = 3456;
+    public const int ByteScratchSize = BI4Lanes + 2 * 4 * BPS;
     // prediction cache layout inside BPred (vp8i_enc.h)
     private const int I16DC16 = 0, I16TM16 = 16, I16VE16 = 16 * BPS, I16HE16 = 16 * BPS + 16;
     private const int C8DC8 = 2 * 16 * BPS, C8TM8 = C8DC8 + 16, C8VE8 = 2 * 16 * BPS + 8 * BPS, C8HE8 = C8VE8 + 16;
@@ -37,7 +39,7 @@ internal static partial class WebPLossyEncodeRowKernel
     public const int IRdA = 0;          // levels of ModeScore A: ydc 16 | yac 256 | uv 128  (400)
     public const int IRdB = 400;        // ModeScore B (I16 rd_tmp)
     public const int II4Best = 800;     // PickBestIntra4 rd_best.y_ac_levels (256)
-    public const int ITmpLv = 1056;     // tmp_levels (16)
+    public const int ITmpLv = 1056;     // tmp_levels (16): unused since PickBestIntra4 went parallel (per-lane levels at II4Lanes)
     public const int IUvLv = 1072;      // PickBestUV rd_uv.uv_levels (128)
     public const int ITmp = 1200;       // transform tmp (256)
     public const int IDcTmp = 1456;     // dc_tmp (16)
@@ -49,7 +51,12 @@ internal static partial class WebPLossyEncodeRowKernel
     public const int IDerrA = 1654, IDerrB = 1660, IDerrUv = 1666;   // 6 each
     public const int IModesI4 = 1672;   // rd->modes_i4 (16)
     public const int IRdScalars = 1688; // the ModeScore scalars between stage kernels (D, SD, H, R, Score as lo/hi, Nz: 11)
-    public const int IntScratchSize = 1700;
+    public const int II4Ok = 1699;      // PickBestIntra4: the walk is still on (written by lane 0, read by every lane)
+    // PickBestIntra4's mode lanes, I4LaneStride ints each: levels (16), two transform tmps (16 each), the ModeScore
+    // (D, SD, H, R, Score as lo/hi, Nz)
+    public const int II4Lanes = 1700;
+    public const int I4LaneStride = 64, I4LLevels = 0, I4LTmpA = 16, I4LTmpB = 32, I4LScore = 48;
+    public const int IntScratchSize = II4Lanes + 10 * I4LaneStride;
     // level-array offsets inside a ModeScore slot
     private const int LDc = 0, LAc = 16, LUv = 272;
 

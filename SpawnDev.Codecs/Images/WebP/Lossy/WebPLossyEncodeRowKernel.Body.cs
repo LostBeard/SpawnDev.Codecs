@@ -167,14 +167,15 @@ internal static partial class WebPLossyEncodeRowKernel
         return nz;
     }
 
+    // tmpA / tmpB: 16 ints each of si (one pair per mode lane: the lanes reconstruct in parallel)
     private static int ReconstructIntra4(ArrayView<byte> sb, ArrayView<int> si, ArrayView<int> meta, ArrayView<int> t,
-        int seg, int levels, int src, int dst, int mode)
+        int seg, int levels, int src, int dst, int mode, int tmpA, int tmpB)
     {
         int refO = BPred + I4Off(mode);
-        var tmpV = si.SubView(IT16b, 16);
-        FTransform(sb, src, sb, refO, si, IT16, tmpV);
-        int nz = QuantizeBlock(si, IT16, si, levels, meta, seg, 0, t);
-        ITransformOne(sb, refO, si, IT16, sb, dst, tmpV);
+        var tmpV = si.SubView(tmpB, 16);
+        FTransform(sb, src, sb, refO, si, tmpA, tmpV);
+        int nz = QuantizeBlock(si, tmpA, si, levels, meta, seg, 0, t);
+        ITransformOne(sb, refO, si, tmpA, sb, dst, tmpV);
         return nz;
     }
 
