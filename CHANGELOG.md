@@ -13,6 +13,14 @@
   same clip: 3,772,426 -> 3,540,954 bytes (libwebp 3,240,800), 371 -> 317 ms per frame. Not every picture gains: our tile
   cost is the summed residual magnitude, libwebp's is entropy-based (next).
 
+### SpawnDev.ILGPU 5.4.33 (2026-11-15)
+
+- Built on SpawnDev.ILGPU 5.4.33 after the Codecs release gate on 5.4.33-local.1 (the same code): the WGSL size budget test,
+  CUDA and OpenCL VP9 / AV1 / WebP / VP8 / video suites (567 / 0 each), Velocity and the CPU accelerator (only the known
+  Vp9Decode_EveryFrame timeout when run beside the GPU lanes), the full WebGPU class (1218 / 0, wall time -1.6% vs
+  5.4.32-local.1) and the Wasm encoder lane (58 / 0, +0.6%). Codecs uses no Half / BF16 / FP8 / FP4, which is what 5.4.33
+  changes; the VP9 shaders are the 5.4.32 sizes.
+
 ### SpawnDev.ILGPU 5.4.32 (2026-11-14)
 
 - Built on SpawnDev.ILGPU 5.4.32 after the Codecs release gate on it: every desktop class in full (CUDA, OpenCL, Velocity,
