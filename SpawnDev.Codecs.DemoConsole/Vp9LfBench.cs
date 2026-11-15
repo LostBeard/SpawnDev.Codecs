@@ -1,9 +1,13 @@
 // vp9-lf-bench: where the VP9 loop filter's time goes on a backend. Decodes a VP9 file (Vp9DecodePipeline, the path of
 // Vp9Decode_EveryFrame_MatchesLibvpx) and, after every decoded frame with a loop filter level above 0, runs the frame's
 // loop filter again --reps times as it is (all superblocks filtered) and --reps times with every group inactive (the
-// same launches, thread groups and barriers, no superblock filtered), each timed to a synchronize. The difference is
-// the filtering itself; the inactive time is what the wavefront's launches and barriers cost. The first frame's loop
-// filter inside the decode is reported apart (first launch of the kernel: compilation, JIT tiering).
+// same launches, thread groups and barriers, no superblock filtered), each timed to a synchronize. The inactive time is
+// the floor of the wavefront's launches and barriers. The DIFFERENCE is NOT the cost of the filtering on backends where a
+// group's threads are real threads (the CPU accelerator): there the filtering overlaps the barrier waits, so active minus
+// inactive understates it (2026-11-15: CPU accelerator 985 vs 973 ms/frame read as "12 ms of filtering" and "Velocity's
+// filtering 53x slower"; wrong: end to end Velocity V256 379 ms/frame vs CPU accelerator 1287, and a sampling profile put
+// ~60% of Velocity's loop filter in group-barrier waits behind lane 0's serial mask build). Compare ACTIVE times across
+// backends; profile to attribute. The first frame's loop filter inside the decode is reported apart (first launch).
 // Usage: vp9-lf-bench <file.webm|.ivf> [--backend cpu|velocity|velocity256|cuda|opencl] [--frames 20] [--reps 3]
 // (velocity = Vector128, the VelocityCodecsTests lane's default; velocity256 = Vector256)
 
