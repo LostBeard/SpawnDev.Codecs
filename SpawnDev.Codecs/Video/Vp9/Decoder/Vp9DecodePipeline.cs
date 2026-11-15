@@ -65,7 +65,15 @@ internal sealed class Vp9DecodePipeline : IDisposable
     }
 
     /// <summary>libvpx vp9_loop_filter_frame (after the tiles): filter level table, then the superblock wavefront.</summary>
-    private void LoopFilter(Vp9FrameInfo h)
+    /// <summary>
+    /// Diagnostics (vp9-lf-bench): runs the loop filter of the last decoded frame <paramref name="h"/> again, on its already
+    /// filtered picture. <paramref name="inactive"/>: every launch, group and barrier as usual, but no group's superblock is
+    /// inside the frame, so only the launches, the mask-build skip and the barriers are paid. Queued.
+    /// </summary>
+    internal void RunLoopFilterForBench(Vp9FrameInfo h, bool inactive) => LoopFilter(h, inactive ? 1 << 20 : 0);
+
+    // stepBias (diagnostics only, see RunLoopFilterForBench): added to the wavefront step passed to the kernel
+    private void LoopFilter(Vp9FrameInfo h, int stepBias = 0)
     {
         if (h.LoopFilter.Level == 0) return;   // libvpx: cm->lf.filter_level == 0 -> no filtering
         var hdr = new int[Vp9LfHdr.Ints];
@@ -91,7 +99,7 @@ internal sealed class Vp9DecodePipeline : IDisposable
         {
             int rMax = Math.Min(sbRows - 1, k / 2);
             // one thread group per superblock row of the step
-            _lfWave(new KernelConfig(rMax + 1, Vp9Lpf.GroupLanes), _frames.Pool, _lfArgs.View, _parser.ModeInfo, _lfTable.View, k);
+            _lfWave(new KernelConfig(rMax + 1, Vp9Lpf.GroupLanes), _frames.Pool, _lfArgs.View, _parser.ModeInfo, _lfTable.View, k + stepBias);
         }
     }
 

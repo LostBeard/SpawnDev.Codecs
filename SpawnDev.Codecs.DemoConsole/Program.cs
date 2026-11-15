@@ -44,6 +44,11 @@ if (args.Length > 0 && args[0] == "av1-encode-bench")
 if (args.Length > 0 && args[0] == "vp9-key-bench")
     return await Vp9KeyBench.Run(args);
 
+// `vp9-lf-bench <file> [--backend ...] [--frames 20] [--reps 3]`: the VP9 loop filter's time per frame on a backend, as it
+// is and with every thread group inactive (launch + barrier cost only).
+if (args.Length > 0 && args[0] == "vp9-lf-bench")
+    return await Vp9LfBench.Run(args);
+
 // `webp-anim-bench <frames folder> [--backend ...] [--mode rect|anim|lossy] [--quality 80] [--stages 1]`: animated WebP
 // encode time + size of a folder of PNG frames (Lore's SpawnGen Save Animated WEBP report).
 if (args.Length > 0 && args[0] == "webp-anim-bench")
