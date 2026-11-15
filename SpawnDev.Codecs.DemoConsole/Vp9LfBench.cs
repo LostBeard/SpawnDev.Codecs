@@ -4,7 +4,8 @@
 // same launches, thread groups and barriers, no superblock filtered), each timed to a synchronize. The difference is
 // the filtering itself; the inactive time is what the wavefront's launches and barriers cost. The first frame's loop
 // filter inside the decode is reported apart (first launch of the kernel: compilation, JIT tiering).
-// Usage: vp9-lf-bench <file.webm|.ivf> [--backend cpu|velocity|cuda|opencl] [--frames 20] [--reps 3]
+// Usage: vp9-lf-bench <file.webm|.ivf> [--backend cpu|velocity|velocity256|cuda|opencl] [--frames 20] [--reps 3]
+// (velocity = Vector128, the VelocityCodecsTests lane's default; velocity256 = Vector256)
 
 using System.Diagnostics;
 using System.Globalization;
@@ -45,13 +46,14 @@ internal static class Vp9LfBench
             "cuda" => Context.Create(b => b.Cuda()),
             "opencl" => Context.Create(b => b.OpenCL()),
             "velocity" => Context.Create(b => b.Velocity(VelocityDeviceType.Vector128)),
+            "velocity256" => Context.Create(b => b.Velocity(VelocityDeviceType.Vector256)),
             _ => Context.Create(b => b.CPU()),
         };
         using Accelerator acc = backend switch
         {
             "cuda" => ctx.CreateCudaAccelerator(0),
             "opencl" => ctx.CreateCLAccelerator(0),
-            "velocity" => ctx.CreateVelocityAccelerator(0),
+            "velocity" or "velocity256" => ctx.CreateVelocityAccelerator(0),
             _ => ctx.CreateCPUAccelerator(0),
         };
         Console.WriteLine($"{acc.AcceleratorType} {acc.Name}: {Path.GetFileName(file)}, up to {maxFrames} filtered frames, {reps} reps each");
