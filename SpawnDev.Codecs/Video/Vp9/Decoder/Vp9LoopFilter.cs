@@ -24,6 +24,7 @@
 // (r, c) must run after (r, c - 1), after (r - 1, c) and after (r - 1, c + 1) (whose left edge filter writes the last
 // columns of (r - 1, c), which (r, c)'s top edge filter reads), and before (r, c + 1) and (r + 1, c).
 //
+// Masks first: every superblock's in parallel (BuildMasksInto, one thread each), before any filtering.
 // Inside a superblock (FilterSuperblockGroup): one thread group, one lane per pixel row for the vertical edges, a
 // group barrier, one lane per pixel column for the horizontal edges. Each lane replays libvpx's walk over the edges and
 // filters only its own pixel of each edge, so every row and column sees libvpx's operations in libvpx's order (see
@@ -885,12 +886,11 @@ public static class Vp9Lpf
     /// <summary>Lanes of the thread group that filters one superblock: one per pixel row, then one per pixel column.</summary>
     public const int GroupLanes = 64;
 
-    // The group's shared memory (uint words; a ulong is two words, low first): the superblock's Vp9LfMask, then its
-    // Vp9LfNon420Mask.
+    // A superblock's stored masks (uint words; a ulong is two words, low first): its Vp9LfMask, then its Vp9LfNon420Mask.
     private const int ShLeftY = 0, ShAboveY = 8, ShInt4x4Y = 16, ShLfl = 18, ShLeftUv = 34, ShAboveUv = 38, ShInt4x4Uv = 42,
         ShNon420 = 43, ShNon420Lfl = 57;
 
-    /// <summary>The shared memory (uint words) <see cref="FilterSuperblockGroup"/> needs.</summary>
+    /// <summary>The uint words one superblock's masks take (<see cref="BuildMasksInto"/>, <see cref="FilterSuperblockGroup"/>).</summary>
     public const int GroupSharedWords = 73;
 
     private static void Put(ArrayView<uint> s, int i, ulong v)
@@ -901,46 +901,46 @@ public static class Vp9Lpf
 
     private static ulong Get(ArrayView<uint> s, int i) => s[i] | ((ulong)s[i + 1] << 32);
 
-    private static void StoreMasks(ArrayView<uint> s, ref Vp9LfMask m, ref Vp9LfNon420Mask n)
+    private static void StoreMasks(ArrayView<uint> s, int o, ref Vp9LfMask m, ref Vp9LfNon420Mask n)
     {
         for (int t = 0; t < 4; t++)
         {
-            Put(s, ShLeftY + 2 * t, Vp9LfMask.LeftY(ref m, t));
-            Put(s, ShAboveY + 2 * t, Vp9LfMask.AboveY(ref m, t));
-            s[ShLeftUv + t] = Vp9LfMask.LeftUv(ref m, t);
-            s[ShAboveUv + t] = Vp9LfMask.AboveUv(ref m, t);
+            Put(s, o + ShLeftY + 2 * t, Vp9LfMask.LeftY(ref m, t));
+            Put(s, o + ShAboveY + 2 * t, Vp9LfMask.AboveY(ref m, t));
+            s[o + ShLeftUv + t] = Vp9LfMask.LeftUv(ref m, t);
+            s[o + ShAboveUv + t] = Vp9LfMask.AboveUv(ref m, t);
         }
-        Put(s, ShInt4x4Y, m.Int4x4Y);
-        s[ShInt4x4Uv] = m.Int4x4Uv;
+        Put(s, o + ShInt4x4Y, m.Int4x4Y);
+        s[o + ShInt4x4Uv] = m.Int4x4Uv;
         for (int r = 0; r < 8; r++)
         {
-            Put(s, ShLfl + 2 * r, Vp9LfMask.Lfl(ref m, r));
-            Put(s, ShNon420Lfl + 2 * r, Vp9LfNon420Mask.Lfl(ref n, r));
+            Put(s, o + ShLfl + 2 * r, Vp9LfMask.Lfl(ref m, r));
+            Put(s, o + ShNon420Lfl + 2 * r, Vp9LfNon420Mask.Lfl(ref n, r));
         }
-        Put(s, ShNon420, n.Vert16);
-        Put(s, ShNon420 + 2, n.Vert8);
-        Put(s, ShNon420 + 4, n.Vert4);
-        Put(s, ShNon420 + 6, n.Horz16);
-        Put(s, ShNon420 + 8, n.Horz8);
-        Put(s, ShNon420 + 10, n.Horz4);
-        Put(s, ShNon420 + 12, n.Int4);
+        Put(s, o + ShNon420, n.Vert16);
+        Put(s, o + ShNon420 + 2, n.Vert8);
+        Put(s, o + ShNon420 + 4, n.Vert4);
+        Put(s, o + ShNon420 + 6, n.Horz16);
+        Put(s, o + ShNon420 + 8, n.Horz8);
+        Put(s, o + ShNon420 + 10, n.Horz4);
+        Put(s, o + ShNon420 + 12, n.Int4);
     }
 
-    private static void LoadMasks(ArrayView<uint> s, ref Vp9LfMask m, ref Vp9LfNon420Mask n)
+    private static void LoadMasks(ArrayView<uint> s, int o, ref Vp9LfMask m, ref Vp9LfNon420Mask n)
     {
-        m.LeftY0 = Get(s, ShLeftY); m.LeftY1 = Get(s, ShLeftY + 2); m.LeftY2 = Get(s, ShLeftY + 4); m.LeftY3 = Get(s, ShLeftY + 6);
-        m.AboveY0 = Get(s, ShAboveY); m.AboveY1 = Get(s, ShAboveY + 2); m.AboveY2 = Get(s, ShAboveY + 4); m.AboveY3 = Get(s, ShAboveY + 6);
-        m.Int4x4Y = Get(s, ShInt4x4Y);
-        m.LeftUv0 = s[ShLeftUv]; m.LeftUv1 = s[ShLeftUv + 1]; m.LeftUv2 = s[ShLeftUv + 2]; m.LeftUv3 = s[ShLeftUv + 3];
-        m.AboveUv0 = s[ShAboveUv]; m.AboveUv1 = s[ShAboveUv + 1]; m.AboveUv2 = s[ShAboveUv + 2]; m.AboveUv3 = s[ShAboveUv + 3];
-        m.Int4x4Uv = s[ShInt4x4Uv];
-        m.Lfl0 = Get(s, ShLfl); m.Lfl1 = Get(s, ShLfl + 2); m.Lfl2 = Get(s, ShLfl + 4); m.Lfl3 = Get(s, ShLfl + 6);
-        m.Lfl4 = Get(s, ShLfl + 8); m.Lfl5 = Get(s, ShLfl + 10); m.Lfl6 = Get(s, ShLfl + 12); m.Lfl7 = Get(s, ShLfl + 14);
-        n.Vert16 = Get(s, ShNon420); n.Vert8 = Get(s, ShNon420 + 2); n.Vert4 = Get(s, ShNon420 + 4);
-        n.Horz16 = Get(s, ShNon420 + 6); n.Horz8 = Get(s, ShNon420 + 8); n.Horz4 = Get(s, ShNon420 + 10);
-        n.Int4 = Get(s, ShNon420 + 12);
-        n.Lfl0 = Get(s, ShNon420Lfl); n.Lfl1 = Get(s, ShNon420Lfl + 2); n.Lfl2 = Get(s, ShNon420Lfl + 4); n.Lfl3 = Get(s, ShNon420Lfl + 6);
-        n.Lfl4 = Get(s, ShNon420Lfl + 8); n.Lfl5 = Get(s, ShNon420Lfl + 10); n.Lfl6 = Get(s, ShNon420Lfl + 12); n.Lfl7 = Get(s, ShNon420Lfl + 14);
+        m.LeftY0 = Get(s, o + ShLeftY); m.LeftY1 = Get(s, o + ShLeftY + 2); m.LeftY2 = Get(s, o + ShLeftY + 4); m.LeftY3 = Get(s, o + ShLeftY + 6);
+        m.AboveY0 = Get(s, o + ShAboveY); m.AboveY1 = Get(s, o + ShAboveY + 2); m.AboveY2 = Get(s, o + ShAboveY + 4); m.AboveY3 = Get(s, o + ShAboveY + 6);
+        m.Int4x4Y = Get(s, o + ShInt4x4Y);
+        m.LeftUv0 = s[o + ShLeftUv]; m.LeftUv1 = s[o + ShLeftUv + 1]; m.LeftUv2 = s[o + ShLeftUv + 2]; m.LeftUv3 = s[o + ShLeftUv + 3];
+        m.AboveUv0 = s[o + ShAboveUv]; m.AboveUv1 = s[o + ShAboveUv + 1]; m.AboveUv2 = s[o + ShAboveUv + 2]; m.AboveUv3 = s[o + ShAboveUv + 3];
+        m.Int4x4Uv = s[o + ShInt4x4Uv];
+        m.Lfl0 = Get(s, o + ShLfl); m.Lfl1 = Get(s, o + ShLfl + 2); m.Lfl2 = Get(s, o + ShLfl + 4); m.Lfl3 = Get(s, o + ShLfl + 6);
+        m.Lfl4 = Get(s, o + ShLfl + 8); m.Lfl5 = Get(s, o + ShLfl + 10); m.Lfl6 = Get(s, o + ShLfl + 12); m.Lfl7 = Get(s, o + ShLfl + 14);
+        n.Vert16 = Get(s, o + ShNon420); n.Vert8 = Get(s, o + ShNon420 + 2); n.Vert4 = Get(s, o + ShNon420 + 4);
+        n.Horz16 = Get(s, o + ShNon420 + 6); n.Horz8 = Get(s, o + ShNon420 + 8); n.Horz4 = Get(s, o + ShNon420 + 10);
+        n.Int4 = Get(s, o + ShNon420 + 12);
+        n.Lfl0 = Get(s, o + ShNon420Lfl); n.Lfl1 = Get(s, o + ShNon420Lfl + 2); n.Lfl2 = Get(s, o + ShNon420Lfl + 4); n.Lfl3 = Get(s, o + ShNon420Lfl + 6);
+        n.Lfl4 = Get(s, o + ShNon420Lfl + 8); n.Lfl5 = Get(s, o + ShNon420Lfl + 10); n.Lfl6 = Get(s, o + ShNon420Lfl + 12); n.Lfl7 = Get(s, o + ShNon420Lfl + 14);
     }
 
     /// <summary>
@@ -1069,44 +1069,52 @@ public static class Vp9Lpf
     }
 
     /// <summary>
+    /// The masks of the superblock at mi (<paramref name="miRow"/>, <paramref name="miCol"/>) - vp9_build_mask per block,
+    /// vp9_adjust_mask, and the non420 masks for 4:2:2 / 4:4:0 - stored as <see cref="GroupSharedWords"/> words at
+    /// <paramref name="dst"/>[<paramref name="at"/>..]. They depend only on the frame's mode info, never on pixels, so every
+    /// superblock's are built before the filtering, all in parallel (Vp9LoopFilterKernels.MaskKernel, one thread each).
+    /// </summary>
+    public static void BuildMasksInto(ArrayView<uint> dst, int at, ArrayView<int> mi, int gridOffset, int ssX, int ssY,
+        int miRows, int miCols, int miRow, int miCol, ArrayView<int> lf, int lfOffset)
+    {
+        var built = default(Vp9LfMask);
+        BuildSuperblockMask(ref built, mi, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
+        var builtNon420 = default(Vp9LfNon420Mask);
+        if (ssX != ssY) BuildNon420Mask(ref builtNon420, ssX, ssY, mi, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
+        StoreMasks(dst, at, ref built, ref builtNon420);
+    }
+
+    /// <summary>
     /// One iteration of libvpx loop_filter_rows' inner loop, the superblock at mi (<paramref name="miRow"/>,
     /// <paramref name="miCol"/>), all planes, by a thread group of <see cref="GroupLanes"/> lanes: every lane of the group
-    /// calls this (barriers inside), with <paramref name="shared"/> = <see cref="GroupSharedWords"/> words of group shared
-    /// memory. <paramref name="yAt"/> is the index in <paramref name="p"/> of the superblock's top-left luma pixel,
-    /// <paramref name="uAt"/> / <paramref name="vAt"/> of its top-left chroma pixels (row (miRow * 8) &gt;&gt; ssY, column
-    /// (miCol * 8) &gt;&gt; ssX of the plane). <paramref name="active"/> false (the same for the whole group): the group
-    /// filters nothing but still meets the barriers. Does nothing when the frame's filter level is 0 (libvpx skips the
-    /// whole frame). Superblocks run in raster order or on the wavefront (see the file header).
+    /// calls this (a barrier inside), with its masks at <paramref name="masks"/>[<paramref name="maskAt"/>..] (built
+    /// before, <see cref="BuildMasksInto"/>). <paramref name="yAt"/> is the index in <paramref name="p"/> of the
+    /// superblock's top-left luma pixel, <paramref name="uAt"/> / <paramref name="vAt"/> of its top-left chroma pixels
+    /// (row (miRow * 8) &gt;&gt; ssY, column (miCol * 8) &gt;&gt; ssX of the plane). <paramref name="active"/> false (the
+    /// same for the whole group): the group filters nothing (and reads no masks) but still meets the barrier. Does
+    /// nothing when the frame's filter level is 0 (libvpx skips the whole frame). Superblocks run in raster order or on
+    /// the wavefront (see the file header).
     /// <list type="number">
-    /// <item>Lane 0 builds the superblock's masks (vp9_build_mask per block, vp9_adjust_mask; the non420 masks for
-    /// 4:2:2 / 4:4:0) into shared memory. Barrier.</item>
     /// <item>Vertical edges: each lane its pixel rows of every plane. Barrier.</item>
     /// <item>Horizontal edges: each lane its pixel columns of every plane.</item>
     /// </list>
     /// The planes never touch each other's pixels, so running U's and V's passes next to Y's changes nothing.
+    /// (Until 2026-11-15 lane 0 built the masks here while the other lanes waited at a barrier: ~60% of Velocity's loop
+    /// filter time was that wait, a dotnet-trace sample of vp9-lf-bench showed.)
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void FilterSuperblockGroup(ArrayView<uint> shared, bool active, ArrayView<byte> p, int yAt, int yStride,
-        int uAt, int vAt, int uvStride, int ssX, int ssY, ArrayView<int> mi, int gridOffset, int miRows, int miCols,
-        int miRow, int miCol, ArrayView<int> lf, int lfOffset)
+    public static void FilterSuperblockGroup(ArrayView<uint> masks, int maskAt, bool active, ArrayView<byte> p, int yAt,
+        int yStride, int uAt, int vAt, int uvStride, int ssX, int ssY, int miRows, int miRow, int miCol, ArrayView<int> lf,
+        int lfOffset)
     {
         int lane = Group.IdxX;
         bool on = active && lf[lfOffset + Vp9LfTable.FrameLevel] != 0;
-        // barriers stay outside every branch: the whole group meets each one
-        if (on && lane == 0)
-        {
-            var built = default(Vp9LfMask);
-            BuildSuperblockMask(ref built, mi, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
-            var builtNon420 = default(Vp9LfNon420Mask);
-            if (ssX != ssY) BuildNon420Mask(ref builtNon420, ssX, ssY, mi, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
-            StoreMasks(shared, ref built, ref builtNon420);
-        }
-        Group.Barrier();
+        // the barrier stays outside every branch: the whole group meets it
         var m = default(Vp9LfMask);
         var n = default(Vp9LfNon420Mask);
         if (on)
         {
-            LoadMasks(shared, ref m, ref n);
+            LoadMasks(masks, maskAt, ref m, ref n);
             SuperblockRowsLane(lane, p, yAt, yStride, uAt, vAt, uvStride, ssX, ssY, miRows, miRow, miCol, m, n, lf, lfOffset);
         }
         Group.Barrier();

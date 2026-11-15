@@ -23,13 +23,27 @@ internal static class Vp9LoopFilterKernels
     public static void FrameInitKernel(Index1D i, ArrayView<int> hdr, ArrayView<int> lf) => Vp9Lpf.FrameInit(hdr, 0, lf, 0);
 
     /// <summary>
-    /// Explicitly grouped, <see cref="Vp9Lpf.GroupLanes"/> lanes per group: group r filters superblock (r, k - 2r) of
-    /// wavefront step <paramref name="k"/> (= 2 * row + col). Launch rows 0 .. min(sbRows - 1, k / 2); groups whose
-    /// column falls outside the frame filter nothing.
+    /// Thread s: the masks of superblock s (raster order) into <paramref name="masks"/>[s * Vp9Lpf.GroupSharedWords..]
+    /// (<see cref="Vp9Lpf.BuildMasksInto"/>), for every superblock of the frame at once, before the wavefront. Nothing when
+    /// the frame's filter level is 0.
     /// </summary>
-    public static void WavefrontKernel(ArrayView<byte> pool, ArrayView<int> a, ArrayView<int> mi, ArrayView<int> lf, int k)
+    public static void MaskKernel(Index1D s, ArrayView<int> a, ArrayView<int> mi, ArrayView<int> lf, ArrayView<uint> masks)
     {
-        var shared = SharedMemory.Allocate<uint>(Vp9Lpf.GroupSharedWords);
+        int miRows = a[Vp9LArg.MiRows], miCols = a[Vp9LArg.MiCols];
+        int sbCols = (miCols + 7) >> 3, sbRows = (miRows + 7) >> 3;
+        if ((s >= sbRows * sbCols) | (lf[Vp9LfTable.FrameLevel] == 0)) return;
+        int r = s / sbCols, c = s - r * sbCols;
+        Vp9Lpf.BuildMasksInto(masks, s * Vp9Lpf.GroupSharedWords, mi, a[Vp9LArg.GridOffset], a[Vp9LArg.SsX], a[Vp9LArg.SsY],
+            miRows, miCols, r * 8, c * 8, lf, 0);
+    }
+
+    /// <summary>
+    /// Explicitly grouped, <see cref="Vp9Lpf.GroupLanes"/> lanes per group: group r filters superblock (r, k - 2r) of
+    /// wavefront step <paramref name="k"/> (= 2 * row + col), with the masks <see cref="MaskKernel"/> stored. Launch rows
+    /// 0 .. min(sbRows - 1, k / 2); groups whose column falls outside the frame filter nothing.
+    /// </summary>
+    public static void WavefrontKernel(ArrayView<byte> pool, ArrayView<int> a, ArrayView<uint> masks, ArrayView<int> lf, int k)
+    {
         int r = Grid.IdxX, c = k - 2 * r;
         int miRows = a[Vp9LArg.MiRows], miCols = a[Vp9LArg.MiCols];
         int sbCols = (miCols + 7) >> 3;
@@ -39,7 +53,9 @@ internal static class Vp9LoopFilterKernels
         int yStride = a[Vp9LArg.YStride], uvStride = a[Vp9LArg.UvStride];
         int yAt = a[Vp9LArg.Y] + miRow * 8 * yStride + miCol * 8;
         int uvRow = ((miRow * 8) >> ssY) * uvStride + ((miCol * 8) >> ssX);
-        Vp9Lpf.FilterSuperblockGroup(shared, active, pool, yAt, yStride, a[Vp9LArg.U] + uvRow, a[Vp9LArg.V] + uvRow, uvStride,
-            ssX, ssY, mi, a[Vp9LArg.GridOffset], miRows, miCols, miRow, miCol, lf, 0);
+        // inactive groups read no masks (the index would be outside this frame's)
+        int maskAt = active ? (r * sbCols + c) * Vp9Lpf.GroupSharedWords : 0;
+        Vp9Lpf.FilterSuperblockGroup(masks, maskAt, active, pool, yAt, yStride, a[Vp9LArg.U] + uvRow, a[Vp9LArg.V] + uvRow, uvStride,
+            ssX, ssY, miRows, miRow, miCol, lf, 0);
     }
 }

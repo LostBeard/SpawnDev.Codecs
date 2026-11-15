@@ -20,7 +20,8 @@ internal sealed class Vp9DecodePipeline : IDisposable
     private readonly Vp9FrameBuffersGpu _frames;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _tables, _reconArgs, _lfHdr, _lfTable, _lfArgs;
     private Action<Index1D, ArrayView<int>, ArrayView<int>> _lfInit = null!;
-    private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _lfWave = null!;
+    private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, int> _lfWave = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<uint>> _lfMask = null!;
     private MemoryBuffer1D<int, Stride1D.Dense>? _scratch;
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _interPredict = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _interResidual = null!;
@@ -60,8 +61,10 @@ internal sealed class Vp9DecodePipeline : IDisposable
         _reconIntra = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, ArrayView<int>, int>(Vp9ReconKernels.IntraWaveKernel);
         _lfInit = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(Vp9LoopFilterKernels.FrameInitKernel);
-        _lfWave = await _acc.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int>(
+        _lfWave = await _acc.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<int>, int>(
             Vp9LoopFilterKernels.WavefrontKernel);
+        _lfMask = await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<uint>>(
+            Vp9LoopFilterKernels.MaskKernel);
     }
 
     /// <summary>libvpx vp9_loop_filter_frame (after the tiles): filter level table, then the superblock wavefront.</summary>
@@ -95,11 +98,17 @@ internal sealed class Vp9DecodePipeline : IDisposable
         a[Vp9LArg.UvStride] = l.UvStride;
         _lfArgs.View.CopyFromCPU(a);
         int sbRows = (h.MiRows + 7) >> 3, sbCols = (h.MiCols + 7) >> 3;
+        // every superblock's masks first, in parallel, into the reconstruction scratch (the reconstruction launches are
+        // done with it: they run before these in stream order; it holds Vp9RArg.Scratch >= GroupSharedWords ints per
+        // superblock, see Reconstruct)
+        var masks = _scratch?.View.AsContiguous().SubView(0, (long)sbRows * sbCols * Vp9Lpf.GroupSharedWords).Cast<uint>()
+            ?? throw new InvalidOperationException("the loop filter runs after the frame's reconstruction");
+        _lfMask(sbRows * sbCols, _lfArgs.View, _parser.ModeInfo, _lfTable.View, masks);
         for (int k = 0; k < 2 * (sbRows - 1) + sbCols; k++)
         {
             int rMax = Math.Min(sbRows - 1, k / 2);
             // one thread group per superblock row of the step
-            _lfWave(new KernelConfig(rMax + 1, Vp9Lpf.GroupLanes), _frames.Pool, _lfArgs.View, _parser.ModeInfo, _lfTable.View, k + stepBias);
+            _lfWave(new KernelConfig(rMax + 1, Vp9Lpf.GroupLanes), _frames.Pool, _lfArgs.View, masks, _lfTable.View, k + stepBias);
         }
     }
 

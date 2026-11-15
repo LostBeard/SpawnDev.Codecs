@@ -222,10 +222,14 @@ public abstract partial class CodecsTestBase
             masks[o + 18] = m.Lfl0; masks[o + 19] = m.Lfl1; masks[o + 20] = m.Lfl2; masks[o + 21] = m.Lfl3;
             masks[o + 22] = m.Lfl4; masks[o + 23] = m.Lfl5; masks[o + 24] = m.Lfl6; masks[o + 25] = m.Lfl7;
         }
+        // the masks as the decoder's MaskKernel stores them (here into shared memory, by lane 0), then the filtering
+        if (Group.IdxX == 0 && lf[lfOffset + Vp9LfTable.FrameLevel] != 0)
+            Vp9Lpf.BuildMasksInto(shared, 0, miv, gridOffset, ssX, ssY, miRows, miCols, miRow, miCol, lf, lfOffset);
+        Group.Barrier();
         // the superblock's top-left pixel sits 8 rows / columns into each window
         int pitchY = meta[k + 11], pitchUv = meta[k + 12];
-        Vp9Lpf.FilterSuperblockGroup(shared, true, pix, meta[k + 8] + 8 * pitchY + 8, pitchY, meta[k + 9] + 8 * pitchUv + 8,
-            meta[k + 10] + 8 * pitchUv + 8, pitchUv, ssX, ssY, miv, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
+        Vp9Lpf.FilterSuperblockGroup(shared, 0, true, pix, meta[k + 8] + 8 * pitchY + 8, pitchY, meta[k + 9] + 8 * pitchUv + 8,
+            meta[k + 10] + 8 * pitchUv + 8, pitchUv, ssX, ssY, miRows, miRow, miCol, lf, lfOffset);
     }
 
     private static readonly string[] LpfMaskNames =
