@@ -30,9 +30,8 @@ internal static class FlacOracle
     {
         if (OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("The libFLAC oracle needs a desktop process.");
-        string? python = Environment.GetEnvironmentVariable("SPAWNDEV_IMG_PYTHON");
-        if (string.IsNullOrEmpty(python) || !File.Exists(python))
-            throw new UnsupportedTestException("Set SPAWNDEV_IMG_PYTHON to a Python with numpy + soundfile to run the libFLAC oracle tests.");
+        if (OraclePython.Find() == null)
+            throw new UnsupportedTestException($"Set {OraclePython.Variables} to a Python with numpy + soundfile to run the libFLAC oracle tests.");
     }
 
     /// <summary>libFLAC's decode of <paramref name="file"/>: interleaved samples (in the file's bit depth), channels, rate.</summary>
@@ -40,7 +39,7 @@ internal static class FlacOracle
     public static (int[] Samples, int Channels, int Rate) Decode(byte[] file)
     {
         RequireAvailable();
-        string python = Environment.GetEnvironmentVariable("SPAWNDEV_IMG_PYTHON")!;
+        string python = OraclePython.Find()!;
         string work = Path.Combine(Path.GetTempPath(), "spawndev-flac-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(work);
         try

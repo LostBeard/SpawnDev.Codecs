@@ -275,6 +275,24 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
         Trace?.Invoke("analyze");
         int paletteColors = analysis[WebPEncMeta.PaletteAvailable];
 
+        // The predictor mode of each tile: by summed residual magnitude (PredictorModeKernel, parallel per tile); at the full
+        // mode set (quality >= 75) and with Exact = false transparent pixels, libwebp's entropy-based choice
+        // (Vp8lPredictorChoose: the tiles in order) replaces it. The modes are chosen once per predictor input: every
+        // strategy trial with the same palette / subtract-green setting sees the same pixels (ToArgb, palette indices,
+        // subtract green are deterministic), and the predictor region of the work buffer is written by nothing else.
+        int modesFor = -1;
+        void ChoosePredictorModes(ArrayView<uint> img, ArrayView<uint> scratch, ArrayView<int> wk, ArrayView<int> mt, int tiles, Strategy st)
+        {
+            int key = (st.Palette ? 2 : 0) | (st.SubtractGreen ? 1 : 0);
+            if (key == modesFor) return;   // this predictor input's modes are in the work buffer already
+            _kernels.PredictorMode(img, scratch, wk, mt, tiles);
+            // libwebp's entropy-based choice replaces them when the picture's transparent pixels take their predictions
+            // (decided on the device: the kernel returns at once otherwise)
+            if (plan.ModeSet == 1 && WebPEncodeKernels.EntropyPredictorChoice && plan.PredictorBits <= Vp8lPredictorChoose.MaxTileBits)
+                _kernels.PredictorChoose(img, wk, mt, tiles);
+            modesFor = key;
+        }
+
         // Applies a strategy: writes the host-side choices and runs the (parallel) transform kernels; returns the main image.
         ArrayView<uint> Apply(Strategy s)
         {
@@ -304,7 +322,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
                 cur = bb;
                 if (s.Predictor)
                 {
-                    _kernels.PredictorMode(cur, a, work, meta, Vp8lEncLayout.Tiles(packed, height, plan.PredictorBits));
+                    ChoosePredictorModes(cur, a, work, meta, Vp8lEncLayout.Tiles(packed, height, plan.PredictorBits), s);
                     _kernels.PredictorResidual(cur, a, work, meta, (int)packedPixels);
                     cur = a;
                 }
@@ -315,7 +333,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
                 if (s.SubtractGreen) _kernels.SubtractGreen(a, meta, n);
                 if (s.Predictor)
                 {
-                    _kernels.PredictorMode(a, bb, work, meta, Vp8lEncLayout.Tiles(width, height, plan.PredictorBits));
+                    ChoosePredictorModes(a, bb, work, meta, Vp8lEncLayout.Tiles(width, height, plan.PredictorBits), s);
                     // Exact = false: transparent pixels take their prediction (zero RGB residual), as libwebp does
                     _kernels.TransparentFill(a, work, meta, n);
                     _kernels.PredictorResidual(a, bb, work, meta, n);

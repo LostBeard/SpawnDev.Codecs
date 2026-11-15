@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Lossless WebP: libwebp's entropy-based predictor-mode choice for pictures with transparency (2026-11-15)
+
+- `Exact = false` pictures with transparent pixels now choose each tile's predictor mode as libwebp 1.6.0 does at
+  method 4 (`Vp8lPredictorChoose`: all 14 modes scored on the tile's residual histograms against the histograms of the
+  tiles before it, the near-zero bias, -15 bits per neighbour with the same mode; the transparent pixels take their
+  predictions, walked as a wavefront). SpawnGen's 25 LTX frames (512x352, q80, RTX 4070) as a WebPAnimEncoder animation:
+  3,540,954 -> 3,415,440 bytes (-3.5%; libwebp 3,240,800) at 313 -> 340 ms per frame. Opaque pictures and the
+  full-frame stills are unchanged (same bytes, same time).
+- Checked against a managed oracle of libwebp's cost (exact ties, both neighbour biases, the accumulated histograms,
+  the first minimum: each red-checked) on CUDA, Velocity and the CPU accelerator; the whole WebP suite on those three
+  with the libwebp / Pillow oracles, and on WebGPU and Wasm (122 / 0). Not pinned by a test: the near-zero bias weight
+  and the barrier between wavefront steps (removing either changes no test result; see the code comments).
+- Tests: the oracle tests' Python is found under either `SPAWNDEV_IMG_PYTHON` or `CODECS_PILLOW_PYTHON` (one name
+  used to skip half of them). `scripts/dev/redcheck.py` matches multi-line mutations in CRLF files.
+
 ### Lossless WebP: the token stream and tile histograms in parallel; predictor modes see the transparent fill (2026-11-14)
 
 - The main image's tokens are written in parallel (`Vp8lEmitParallel`: bits per block, a 64-bit scan, each block OR-ing its

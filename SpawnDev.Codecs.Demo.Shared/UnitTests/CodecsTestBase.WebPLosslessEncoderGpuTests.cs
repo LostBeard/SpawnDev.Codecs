@@ -152,13 +152,13 @@ public abstract partial class CodecsTestBase
         if (OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("Pillow verification needs a desktop process.");
         if (!PillowAvailable())
-            throw new UnsupportedTestException("Set CODECS_PILLOW_PYTHON to the python.exe of a venv with pillow + numpy.");
+            throw new UnsupportedTestException($"Set {OraclePython.Variables} to the python.exe of a venv with pillow + numpy.");
     }
 
     private static async Task<string> RunPillowVerifyAsync(string dir)
     {
         RequirePillowVerify();
-        var python = Environment.GetEnvironmentVariable("CODECS_PILLOW_PYTHON")!;
+        var python = OraclePython.Find()!;
         var script = FindRepoFile(Path.Combine("scripts", "images", "verify_webp_files.py"))
                      ?? throw new InvalidOperationException("scripts/images/verify_webp_files.py not found above " + AppContext.BaseDirectory);
         var psi = new ProcessStartInfo(python)
@@ -277,6 +277,34 @@ public abstract partial class CodecsTestBase
                 if (seeing.Length >= blind) failures.Add($"scoring the modes with the fill did not pay: {seeing.Length} B, scored on cleared pixels {blind} B");
             }
             finally { WebPEncodeKernels.PredictorModeSeesFill = true; }
+            // libwebp's entropy-based mode choice (Vp8lPredictorChoose, used with transparent pixels under Exact = false) must
+            // beat the summed residual magnitude on the same picture (both seeing the fill) and keep the pixels exact
+            try
+            {
+                WebPEncodeKernels.EntropyPredictorChoice = false;
+                int magnitude = (await enc.EncodeAsync(blended, bw, bh, new WebPEncodeOptions { Quality = 80, Exact = false })).Length;
+                WebPEncodeKernels.EntropyPredictorChoice = true;
+                byte[] entropyFile = await enc.EncodeAsync(blended, bw, bh, new WebPEncodeOptions { Quality = 80, Exact = false });
+                var back = await dec.DecodeAsync(entropyFile);
+                var diff = ComparePixels(ZeroRgbUnderAlpha0(blended), ZeroRgbUnderAlpha0(back.Pixels), 4, bw);
+                if (diff != null) failures.Add($"entropy mode choice: {diff}");
+                Console.WriteLine($"[report] Exact = false, scattered 20% transparent {bw}x{bh} q80: modes by residual magnitude {magnitude} B, by entropy {entropyFile.Length} B");
+                if (entropyFile.Length >= magnitude) failures.Add($"the entropy mode choice did not pay: {entropyFile.Length} B, by residual magnitude {magnitude} B");
+            }
+            finally { WebPEncodeKernels.EntropyPredictorChoice = true; }
+            // the wavefront over a tile's transparent pixels gives the same residuals as walking them in raster order
+            try
+            {
+                foreach (var (pic2, pw, ph, label) in new[] { (blended, bw, bh, "scattered"), (pic, fw, fh, "20% texture") })
+                {
+                    WebPEncodeKernels.SerialFillWalk = true;
+                    byte[] walked = await enc.EncodeAsync(pic2, pw, ph, new WebPEncodeOptions { Quality = 80, Exact = false });
+                    WebPEncodeKernels.SerialFillWalk = false;
+                    byte[] wave = await enc.EncodeAsync(pic2, pw, ph, new WebPEncodeOptions { Quality = 80, Exact = false });
+                    if (!walked.AsSpan().SequenceEqual(wave)) failures.Add($"{label}: the wavefront fill gave {wave.Length} B, the raster walk {walked.Length} B (must be the same file)");
+                }
+            }
+            finally { WebPEncodeKernels.SerialFillWalk = false; }
             True(failures.Count == 0, string.Join("\n", failures));
         }
         finally { ReleaseAccelerator(ctx, acc); }

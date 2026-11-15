@@ -38,9 +38,8 @@ internal static class PillowOracle
     {
         if (OperatingSystem.IsBrowser())
             throw new UnsupportedTestException("The Pillow oracle needs a desktop process.");
-        string? python = Environment.GetEnvironmentVariable("SPAWNDEV_IMG_PYTHON");
-        if (string.IsNullOrEmpty(python) || !File.Exists(python))
-            throw new UnsupportedTestException("Set SPAWNDEV_IMG_PYTHON to a Python with Pillow and numpy to run the Pillow oracle tests.");
+        if (OraclePython.Find() == null)
+            throw new UnsupportedTestException($"Set {OraclePython.Variables} to a Python with Pillow and numpy to run the Pillow oracle tests.");
     }
 
     /// <summary>Open <paramref name="file"/> with Pillow and return what it sees (every frame as RGBA).</summary>
@@ -48,7 +47,7 @@ internal static class PillowOracle
     public static PillowResult Decode(byte[] file, string extension)
     {
         RequireAvailable();
-        string? python = Environment.GetEnvironmentVariable("SPAWNDEV_IMG_PYTHON");
+        string? python = OraclePython.Find();
         string script = FindScript();
 
         string work = Path.Combine(Path.GetTempPath(), "spawndev-pillow-" + Guid.NewGuid().ToString("N"));

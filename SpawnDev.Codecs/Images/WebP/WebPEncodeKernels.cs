@@ -63,6 +63,20 @@ public sealed class WebPEncodeKernels : IDisposable
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args> _peCopy = null!;
     private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args> _peFinish = null!;
     private MemoryBuffer1D<int, Stride1D.Dense>? _peWords;
+    // libwebp's predictor-mode choice (Vp8lPredictorChoose)
+    private Action<KernelConfig, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _pcChoose = null!;
+    private Action<Index1D, ArrayView<int>> _pcClear = null!;
+    private MemoryBuffer1D<int, Stride1D.Dense>? _pcScratch;
+
+    /// <summary>
+    /// Tests only: off = the predictor modes are chosen per tile by summed residual magnitude (PredictorModeKernel, the
+    /// encoder before 2026-11-14) instead of libwebp's entropy-based choice (Vp8lPredictorChoose), to measure it.
+    /// </summary>
+    internal static bool EntropyPredictorChoice = true;
+
+    /// <summary>Tests only: the entropy choice walks a tile's transparent pixels in raster order (one thread per mode)
+    /// instead of the wavefront; both must give the same residuals, so the same file.</summary>
+    internal static bool SerialFillWalk;
     private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args> _peTileHist = null!;
     private Vp8lTokenizeParallel.Args _ptArgs;
     private bool _ptTokens;
@@ -186,6 +200,8 @@ public sealed class WebPEncodeKernels : IDisposable
             Vp8lTokenizeParallel.Args>(Vp8lEmitParallel.FinishKernel);
         _peTileHist = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lEmitParallel.TileHistKernel);
+        _pcChoose = await a.LoadStreamKernelAsync<ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Vp8lPredictorChoose.ChooseKernel);
+        _pcClear = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(Vp8lPredictorChoose.ClearKernel);
         _emitHeader = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(EmitHeaderKernel);
         _emitBits = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(EmitBitsKernel);
         _subImageBegin = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(SubImageBeginKernel);
@@ -274,6 +290,22 @@ public sealed class WebPEncodeKernels : IDisposable
     /// </summary>
     public void PredictorMode(ArrayView<uint> argb, ArrayView<uint> scratch, ArrayView<int> work, ArrayView<int> meta, int tiles)
         => _predictorMode(tiles, argb, scratch, work, meta, FillTransparent && PredictorModeSeesFill ? 1 : 0);
+
+    /// <summary>
+    /// Predictor mode per tile as libwebp 1.6.0 chooses it (Vp8lPredictorChoose: all 14 modes, entropy against the
+    /// histograms of the tiles before, neighbour bias), tiles in raster order, <see cref="Vp8lPredictorChoose.TilesPerLaunch"/>
+    /// per launch. Queued. Needs PredictorBits &lt;= <see cref="Vp8lPredictorChoose.MaxTileBits"/>.
+    /// </summary>
+    public void PredictorChoose(ArrayView<uint> argb, ArrayView<int> work, ArrayView<int> meta, int tiles)
+    {
+        _pcScratch ??= _accelerator.Allocate1D<int>(Vp8lPredictorChoose.Total);
+        var pc = _pcScratch.View;
+        _pcClear(Vp8lPredictorChoose.Res, pc);
+        int fillOn = (FillTransparent && PredictorModeSeesFill ? 1 : 0) | (SerialFillWalk ? 2 : 0);
+        var group = new KernelConfig(1, Vp8lPredictorChoose.GroupSizeFor(_accelerator));
+        for (int first = 0; first < tiles; first += Vp8lPredictorChoose.TilesPerLaunch)
+            _pcChoose(group, argb, work, meta, pc, fillOn, first);
+    }
 
     /// <summary>Predictor residuals of <paramref name="src"/> into <paramref name="dst"/>.</summary>
     public void PredictorResidual(ArrayView<uint> src, ArrayView<uint> dst, ArrayView<int> work, ArrayView<int> meta, int pixels)
@@ -1793,5 +1825,6 @@ public sealed class WebPEncodeKernels : IDisposable
     {
         _ptScratch?.Dispose();
         _peWords?.Dispose();
+        _pcScratch?.Dispose();
     }
 }

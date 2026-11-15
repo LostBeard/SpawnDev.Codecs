@@ -45,9 +45,7 @@ public abstract partial class CodecsTestBase
     /// <summary>True when the Pillow / libwebp check of written files can run (desktop + CODECS_PILLOW_PYTHON).</summary>
     private static bool PillowAvailable()
     {
-        if (OperatingSystem.IsBrowser()) return false;
-        var python = Environment.GetEnvironmentVariable("CODECS_PILLOW_PYTHON");
-        return !string.IsNullOrEmpty(python) && File.Exists(python);
+        return OraclePython.Find() != null;
     }
 
     /// <summary>

@@ -32,8 +32,12 @@ try:
         if path not in originals:
             originals[path] = open(path, "rb").read()
         text = originals[path].decode("utf-8")
-        assert text.count(m["old"]) == 1, f"mutation '{m['name']}': old text occurs {text.count(m['old'])} times"
-        open(path, "wb").write(text.replace(m["old"], m["new"]).encode("utf-8"))
+        old, new = m["old"], m["new"]
+        # multi-line mutations are written with "\n": match the file's own line endings (CRLF files)
+        if "\r\n" in text and "\n" in old and "\r\n" not in old:
+            old, new = old.replace("\n", "\r\n"), new.replace("\n", "\r\n")
+        assert text.count(old) == 1, f"mutation '{m['name']}': old text occurs {text.count(old)} times"
+        open(path, "wb").write(text.replace(old, new).encode("utf-8"))
         result, err = run()
         failed = result not in ("Success",) and result != "BUILD-FAILED"
         ok &= failed
