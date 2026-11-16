@@ -101,9 +101,9 @@ internal sealed class Vp9DecodePipeline : IDisposable
         _lfArgs.View.CopyFromCPU(a);
         int sbRows = (h.MiRows + 7) >> 3, sbCols = (h.MiCols + 7) >> 3;
         // every superblock's masks first, in parallel, into the reconstruction scratch (the reconstruction launches are
-        // done with it: they run before these in stream order; it holds Vp9RArg.Scratch >= GroupSharedWords ints per
+        // done with it: they run before these in stream order; it holds Vp9RArg.Scratch >= Vp9Lpf.SuperblockWords ints per
         // superblock, see Reconstruct)
-        var masks = _scratch?.View.AsContiguous().SubView(0, (long)sbRows * sbCols * Vp9Lpf.GroupSharedWords).Cast<uint>()
+        var masks = _scratch?.View.AsContiguous().SubView(0, (long)sbRows * sbCols * Vp9Lpf.SuperblockWords).Cast<uint>()
             ?? throw new InvalidOperationException("the loop filter runs after the frame's reconstruction");
         _lfMask(sbRows * sbCols, _lfArgs.View, _parser.ModeInfo, _lfTable.View, masks);
         for (int k = 0; k < 2 * (sbRows - 1) + sbCols; k++)

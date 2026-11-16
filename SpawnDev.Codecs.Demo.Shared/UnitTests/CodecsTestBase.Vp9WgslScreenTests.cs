@@ -38,8 +38,8 @@ public abstract partial class CodecsTestBase
         (typeof(Vp9ReconKernels), "InterResidualKernel", 563233),
         (typeof(Vp9ReconKernels), "IntraWaveKernel", 794108),
         (typeof(Vp9LoopFilterKernels), "FrameInitKernel", 24780),
-        (typeof(Vp9LoopFilterKernels), "WavefrontKernel", 616910),
-        (typeof(Vp9LoopFilterKernels), "MaskKernel", 177067),   // 2026-11-15: the masks moved out of WavefrontKernel (754k -> 561k)
+        (typeof(Vp9LoopFilterKernels), "WavefrontKernel", 602837),
+        (typeof(Vp9LoopFilterKernels), "MaskKernel", 214012),   // 2026-11-15: the masks moved out of WavefrontKernel (754k -> 561k); 11-16: + the horizontal-edge plan (161k -> 195k, Wavefront 561k -> 548k)
         (typeof(Vp9AdaptKernels), "SumCountsKernel", 3579),
         (typeof(Vp9AdaptKernels), "AdaptKernel", 354152),
         (typeof(Vp9OutputKernels), "PackPlanesKernel", 19703),

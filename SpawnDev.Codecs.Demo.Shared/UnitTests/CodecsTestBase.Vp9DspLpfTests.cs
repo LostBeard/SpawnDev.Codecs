@@ -201,7 +201,7 @@ public abstract partial class CodecsTestBase
     private static void LpfSbKernel(ArrayView<byte> pix, ArrayView<int> mi, ArrayView<int> lf, ArrayView<int> meta,
         ArrayView<ulong> masks)
     {
-        var shared = SharedMemory.Allocate<uint>(Vp9Lpf.GroupSharedWords);
+        var shared = SharedMemory.Allocate<uint>(Vp9Lpf.SuperblockWords);
         int i = Grid.IdxX;
         int k = i * LpfSbMeta;
         int ssX = meta[k], ssY = meta[k + 1], miRows = meta[k + 2], miCols = meta[k + 3], miRow = meta[k + 4], miCol = meta[k + 5];

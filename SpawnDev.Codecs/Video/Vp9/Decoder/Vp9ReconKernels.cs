@@ -34,7 +34,7 @@ internal static class Vp9RArg
     public const int Scale = 72;         // + ref * 4
     public const int Count = 88;
     /// <summary>Scratch ints per thread of the intra pass (the largest DSP need: Vp9Itx). The loop filter reuses the same
-    /// scratch for every superblock's masks (Vp9Lpf.GroupSharedWords = 73 per superblock): keep this at least that.</summary>
+    /// scratch for every superblock's masks and horizontal-edge plan (Vp9Lpf.SuperblockWords = 201 per superblock): keep this at least that.</summary>
     public const int Scratch = 1056;
     /// <summary>
     /// Inter residual scratch: the transform block whose coefficients start at dq offset c (a multiple of 16: every

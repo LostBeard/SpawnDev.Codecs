@@ -712,12 +712,18 @@ public static class Vp9Lpf
     }
 
     /// <summary>
-    /// filter_selectively_horiz (one row of 8x8 blocks from pixel s; lfl is the row's levels) for the lane's pixel column
-    /// <paramref name="col"/> of it.
+    /// The horizontal-edge plan of one block row: filter_selectively_horiz's walk over the row's 8x8 blocks (run once per
+    /// superblock by the mask pass, not by every lane): <paramref name="dst"/>[<paramref name="at"/> + k] for block column
+    /// k = the calls that cover that block's pixel columns - bits 0-1 the outer filter (0 none, 1 the 4-tap, 2 the 8-tap,
+    /// 3 the 16-tap), bit 2 the inner 4 edge (4 rows down), bits 8-15 the outer filter's level (libvpx's 16-tap dual call
+    /// filters the next block with THIS block's level; the 8 / 4 _dual calls give each block its own), bits 16-23 the
+    /// inner edge's level (the block's own). A horizontal edge filter changes only the pixels of its own column, so a lane
+    /// (one pixel column) needs only its block's calls, outer before inner, as libvpx makes them.
     /// </summary>
-    private static void FilterSelectivelyHorizLane(ArrayView<byte> p, int s, int pitch, int col, uint mask16x16, uint mask8x8,
-        uint mask4x4, uint mask4x4Int, ArrayView<int> lf, int thr, ulong lfl)
+    private static void BuildHorizPlanRow(ArrayView<uint> dst, int at, uint mask16x16, uint mask8x8, uint mask4x4,
+        uint mask4x4Int, ulong lfl)
     {
+        for (int b = 0; b < 8; b++) dst[at + b] = 0;
         int k = 0;
         int count;
         for (uint mask = mask16x16 | mask8x8 | mask4x4 | mask4x4Int; mask != 0; mask >>= count)
@@ -725,31 +731,24 @@ public static class Vp9Lpf
             count = 1;
             if ((mask & 1) != 0)
             {
-                int i0 = col - 8 * k, i1 = i0 - 8;   // the lane's column in this block / in the next one
-                // the block's filter (16, 8, 4; 0: only its inner 4 edge) and whether libvpx's call covers the next block
-                // too (16: one horizontal_16_dual call, 16 pixels, this block's levels; 8 and 4: _dual, each block its own)
                 int kind = (mask16x16 & 1) != 0 ? 16 : (mask8x8 & 1) != 0 ? 8 : (mask4x4 & 1) != 0 ? 4 : 0;
                 uint mk = kind == 16 ? mask16x16 : kind == 8 ? mask8x8 : mask4x4;
                 bool dual = (kind != 0) & ((mk & 3) == 3);
                 if (dual) count = 2;
-                int l = LflByte(lfl, k), ln = dual ? LflByte(lfl, k + 1) : l;
-                // libvpx's calls, in order: the filter on this block (16 dual: on both), on the next block, then the inner
-                // 4 edges (4 rows down) of this block and of the next one (the 16 filter has none)
-                // (bit j of calls: j & 1 = the next block, j >= 2 = the inner edges; only the set bits, in that order)
-                bool small = (kind == 8) | (kind == 4);
-                uint calls = (kind != 0 ? 1u : 0u) | (small & dual ? 2u : 0u) |
-                             ((kind != 16) & ((mask4x4Int & 1) != 0) ? 4u : 0u) |
-                             ((kind != 16) & dual & ((mask4x4Int & 2) != 0) ? 8u : 0u);
-                for (; calls != 0; calls &= calls - 1)
+                uint code = kind == 16 ? 3u : kind == 8 ? 2u : kind == 4 ? 1u : 0u;
+                uint l = (uint)LflByte(lfl, k);
+                uint inner0 = (kind != 16) & ((mask4x4Int & 1) != 0) ? 4u : 0u;
+                dst[at + k] = code | inner0 | (l << 8) | (l << 16);
+                if (dual)
                 {
-                    int j = 31 - BitOperations.LeadingZeroCount(calls & (0u - calls));
-                    bool next = (j & 1) != 0, inner = j >= 2;
-                    int n = (!inner) & (kind == 16) & dual ? 16 : 8;
-                    int start = s + (next ? 8 : 0) + (inner ? 4 * pitch : 0);
-                    LaneEdge(p, inner ? 4 : kind, start, 1, pitch, n, next ? i1 : i0, lf, thr, next ? ln : l);
+                    uint ln = (uint)LflByte(lfl, k + 1);
+                    uint inner1 = (kind != 16) & ((mask4x4Int & 2) != 0) ? 4u : 0u;
+                    // a 16-tap dual call filters the next block with THIS block's level (libvpx: one lpf_horizontal_16_dual
+                    // call). NOT pinned by a test (2026-11-16): giving the partner its own level passes Vp9Lpf_Superblocks
+                    // and every VP9 vector (no 16-tap pair across two levels in them) - keep it as libvpx has it.
+                    dst[at + k + 1] = code | inner1 | ((kind == 16 ? l : ln) << 8) | (ln << 16);
                 }
             }
-            s += 8 * count;
             k += count;
             mask16x16 >>= count;
             mask8x8 >>= count;
@@ -999,28 +998,29 @@ public static class Vp9Lpf
         }
     }
 
+    /// <summary>Uint words of a superblock's horizontal-edge plan (<see cref="BuildHorizontalPlan"/>): 2 planes x 8 rows x 8 blocks.</summary>
+    public const int PlanWords = 128;
+
+    /// <summary>Uint words of one superblock's stored masks plus its horizontal-edge plan (<see cref="BuildMasksInto"/>).</summary>
+    public const int SuperblockWords = GroupSharedWords + PlanWords;
+
     /// <summary>
-    /// The horizontal pass of every plane of the superblock for lane <paramref name="lane"/>: luma pixel column lane, then
-    /// the chroma pixel columns lane, lane + 64, ... of U's columns followed by V's.
+    /// The superblock's horizontal-edge plan into <paramref name="dst"/>[<paramref name="at"/> ..+ <see cref="PlanWords"/>):
+    /// [plane * 64 + r * 8 + k] (plane 0 luma, 1 chroma; r the mi row of the block row; k the block column) =
+    /// <see cref="BuildHorizPlanRow"/>'s entry; rows the pass does not visit stay 0. The block row's masks and levels as
+    /// filter_selectively_horiz receives them (vp9_filter_block_plane_ss00 / _ss11 / _non420): no filtering on the top
+    /// edge of the image, no inner 4 edge of the last uv block row.
     /// </summary>
-    // One filter_selectively_horiz call site for every plane layout: the layouts differ only in the masks and levels of
-    // a block row and in its pixel row.
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    public static void SuperblockColumnsLane(int lane, ArrayView<byte> p, int yAt, int yStride, int uAt, int vAt, int uvStride,
-        int ssX, int ssY, int miRows, int miRow, Vp9LfMask m, Vp9LfNon420Mask n, ArrayView<int> lf, int lfOffset)
+    private static void BuildHorizontalPlan(ArrayView<uint> dst, int at, ref Vp9LfMask m, ref Vp9LfNon420Mask n, int ssX,
+        int ssY, int miRows, int miRow)
     {
-        int thr = lfOffset + Vp9LfTable.Thr;
-        int cols = 64 >> ssX;
-        // job t < 0: the luma pixel column lane; t = 0 .. 2 * cols - 1: U's chroma pixel columns, then V's
-        for (int t = lane - GroupLanes; t < 2 * cols; t += GroupLanes)
+        for (int i = 0; i < PlanWords; i++) dst[at + i] = 0;
+        for (int plane = 0; plane < 2; plane++)
         {
-            bool isY = t < 0, isU = t < cols;
-            int at = isY ? yAt : isU ? uAt : vAt;
-            int stride = isY ? yStride : uvStride;
-            int x = isY ? lane : isU ? t : t - cols;
+            bool isY = plane == 0;
             int layout = isY | ((ssX == 0) & (ssY == 0)) ? 0 : (ssX == 1) & (ssY == 1) ? 1 : 2;
             // the block rows: mi row offset r stepping 1 (_ss00), 2 (_ss11: one uv block row per two mi rows) or
-            // row_step (_non420); the block row's pixel row is (8 * r) >> rowShift
+            // row_step (_non420)
             int rowShift = layout == 0 ? 0 : layout == 1 ? 1 : ssY;
             for (int r = 0; (r < 8) & (miRow + r < miRows); r += 1 << rowShift)
             {
@@ -1039,8 +1039,7 @@ public static class Vp9Lpf
                 }
                 else if (layout == 1)
                 {
-                    // masks shifted 4 bits per uv block row (2 * r); levels lfl_uv row r / 2 (the vertical pass filled
-                    // it: UvLflRow of lfl_y row r)
+                    // masks shifted 4 bits per uv block row (2 * r); levels lfl_uv row r / 2 = UvLflRow of lfl_y row r
                     int sh = 2 * r;
                     m16 = (m.AboveUv2 >> sh) & 0xf;
                     m8 = (m.AboveUv1 >> sh) & 0xf;
@@ -1063,7 +1062,45 @@ public static class Vp9Lpf
                     m8 = 0;
                     m4 = 0;
                 }
-                FilterSelectivelyHorizLane(p, at + ((8 * r) >> rowShift) * stride, stride, x, m16, m8, m4, m4i, lf, thr, lfl);
+                BuildHorizPlanRow(dst, at + plane * 64 + r * 8, m16, m8, m4, m4i, lfl);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The horizontal pass of every plane of the superblock for lane <paramref name="lane"/>: luma pixel column lane, then
+    /// the chroma pixel columns lane, lane + 64, ... of U's columns followed by V's - per block row, the calls of the
+    /// lane's block from the plan at <paramref name="plan"/>[<paramref name="planAt"/>..] (<see cref="BuildHorizontalPlan"/>).
+    /// (Until 2026-11-16 every lane walked libvpx's whole block row - filter_selectively_horiz's mask walk - once per block
+    /// row: 1.9x the vertical pass's work on Velocity.)
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static void SuperblockColumnsLane(int lane, ArrayView<byte> p, int yAt, int yStride, int uAt, int vAt, int uvStride,
+        int ssX, int ssY, int miRows, int miRow, ArrayView<uint> plan, int planAt, ArrayView<int> lf, int lfOffset)
+    {
+        int thr = lfOffset + Vp9LfTable.Thr;
+        int cols = 64 >> ssX;
+        // job t < 0: the luma pixel column lane; t = 0 .. 2 * cols - 1: U's chroma pixel columns, then V's
+        for (int t = lane - GroupLanes; t < 2 * cols; t += GroupLanes)
+        {
+            bool isY = t < 0, isU = t < cols;
+            int at = isY ? yAt : isU ? uAt : vAt;
+            int stride = isY ? yStride : uvStride;
+            int x = isY ? lane : isU ? t : t - cols;
+            int layout = isY | ((ssX == 0) & (ssY == 0)) ? 0 : (ssX == 1) & (ssY == 1) ? 1 : 2;
+            int rowShift = layout == 0 ? 0 : layout == 1 ? 1 : ssY;
+            int pa = planAt + (isY ? 0 : 64) + (x >> 3);
+            int blockAt = at + (x & ~7);   // the lane's block column's first pixel
+            int i = x & 7;
+            for (int r = 0; (r < 8) & (miRow + r < miRows); r += 1 << rowShift)
+            {
+                uint e = plan[pa + r * 8];
+                int rowAt = blockAt + ((8 * r) >> rowShift) * stride;
+                uint code = e & 3;
+                if (code != 0)
+                    LaneEdge(p, code == 3 ? 16 : code == 2 ? 8 : 4, rowAt, 1, stride, 8, i, lf, thr, (int)((e >> 8) & 0xff));
+                if ((e & 4) != 0)
+                    LaneEdge(p, 4, rowAt + 4 * stride, 1, stride, 8, i, lf, thr, (int)((e >> 16) & 0xff));
             }
         }
     }
@@ -1082,6 +1119,7 @@ public static class Vp9Lpf
         var builtNon420 = default(Vp9LfNon420Mask);
         if (ssX != ssY) BuildNon420Mask(ref builtNon420, ssX, ssY, mi, gridOffset, miRows, miCols, miRow, miCol, lf, lfOffset);
         StoreMasks(dst, at, ref built, ref builtNon420);
+        BuildHorizontalPlan(dst, at + GroupSharedWords, ref built, ref builtNon420, ssX, ssY, miRows, miRow);
     }
 
     /// <summary>
@@ -1118,6 +1156,6 @@ public static class Vp9Lpf
             SuperblockRowsLane(lane, p, yAt, yStride, uAt, vAt, uvStride, ssX, ssY, miRows, miRow, miCol, m, n, lf, lfOffset);
         Group.Barrier();
         if (on & ((skipPasses & 2) == 0))
-            SuperblockColumnsLane(lane, p, yAt, yStride, uAt, vAt, uvStride, ssX, ssY, miRows, miRow, m, n, lf, lfOffset);
+            SuperblockColumnsLane(lane, p, yAt, yStride, uAt, vAt, uvStride, ssX, ssY, miRows, miRow, masks, maskAt + GroupSharedWords, lf, lfOffset);
     }
 }
