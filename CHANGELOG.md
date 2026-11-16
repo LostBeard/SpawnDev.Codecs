@@ -46,6 +46,13 @@
   same clip: 3,772,426 -> 3,540,954 bytes (libwebp 3,240,800), 371 -> 317 ms per frame. Not every picture gains: our tile
   cost is the summed residual magnitude, libwebp's is entropy-based (next).
 
+### SpawnDev.ILGPU 5.4.34 (2026-11-16)
+
+- Built on SpawnDev.ILGPU 5.4.34 after the Codecs gate on 5.4.34-local.2 (the same code): CUDA / OpenCL / Velocity
+  (VP9, AV1, WebP, VP8, video, MDCT / IMDCT, CELT, Vorbis, MP3) 767 / 0 each, the CPU accelerator's FULL class 3396 / 0,
+  the full WebGPU class with the Wasm encoder set and the WebGL audio transforms 1344 / 0. 5.4.34's CPU-accelerator launch
+  fix makes the VP9 loop filter on that backend 4.6x faster (1080p: 891 -> 190 ms per frame); Velocity and CUDA unchanged.
+
 ### SpawnDev.ILGPU 5.4.33 (2026-11-15)
 
 - Built on SpawnDev.ILGPU 5.4.33 after the Codecs release gate on 5.4.33-local.1 (the same code): the WGSL size budget test,
