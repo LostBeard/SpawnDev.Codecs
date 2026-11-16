@@ -159,6 +159,15 @@ loses to every generator, so the encoder is upgraded first. Parity target: libwe
       Steps per window ~ mb_w + 2 * rows: 1080p 8160 macroblocks -> ~1100 steps. To check against Vp8LossyEncoderReference statement by
       statement before building: no other cross-macroblock state (the I4 header-bit limit is per macroblock; the skip
       probability is computed after the loop).
+- [ ] Speed, measured 2026-11-16 after the parallel mode decisions (Intra4 b15ccc0, Intra16 b2fd417, UV a112805; same bytes):
+      Lore's LTX frames (512x352 q80, CUDA, traced, ms per frame): RD prepare 174 (the probability refresh + import + the
+      I16/UV predictions, one thread), I16 89, I4 83, UV 41, record 24; analysis + setup ~220 (includes the first frame's
+      compile); the ALPH plane ~516 (the frames have transparency): `EncodeAlphaAsync` with `Filter = Auto` at quality >= 50
+      (the lossy default: quality 75) encodes the plane with EACH of the 4 filters to measure them, then once more - five
+      full lossless encodes. libwebp's default (`alpha_filtering = 1`, fast) picks the filter from an estimate and encodes
+      once. Next: measure the ALPH size of the estimate vs the exact trial on Lore's frames and the fixtures; if the exact
+      trial is smaller, keep it but make it cheaper (the 4 measuring passes share the analysis; run them as one pass with
+      4 outputs); never ship a bigger default without that measurement (speed is never bought with size).
 - [x] ALPH (transparency, 2026-10-25): VP8X + ALPH + VP8, VP8 chunk byte-identical with libwebp, alpha exact (145 fixtures, CPU).
 - (superseded by the summary above; kept for the design notes) E2 intra mode decision: I16 (DC/V/H/TM), I4 (10 modes) and UV (4 modes) chosen by distortion + lambda * rate like
       libwebp method 4 (`VP8Decimate`: score = SSE * RD_DISTO_MULT + lambda * bits, with the spectral-distortion term
