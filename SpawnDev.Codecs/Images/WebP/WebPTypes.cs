@@ -105,6 +105,13 @@ public sealed class WebPAlphaEncodeOptions
     public WebPAlphaFilter Filter { get; set; } = WebPAlphaFilter.Auto;
 
     /// <summary>
+    /// With <see cref="WebPAlphaFilter.Auto"/> at effort 50 and above: true (default) encodes the plane with each of the four
+    /// filters and keeps the smallest stream (five lossless encodes in all); false picks the filter from the fast residual
+    /// estimate at any effort and encodes once, as libwebp's default (alpha_filtering = 1) does.
+    /// </summary>
+    public bool ExactFilterChoice { get; set; } = true;
+
+    /// <summary>
     /// Compress the filtered plane with the lossless coder (default true; the plane is stored raw instead when that is not
     /// larger). False always stores it raw (compression method 0).
     /// </summary>

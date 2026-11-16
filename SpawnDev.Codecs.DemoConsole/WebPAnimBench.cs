@@ -37,6 +37,7 @@ internal static class WebPAnimBench
         string backend = "cuda", mode = "anim";
         string? outPath = null;
         int maxFrames = int.MaxValue, quality = 80, runs = 2;
+        bool alphaFast = false;   // --alpha-fast 1: lossy mode, the ALPH filter from the fast estimate (WebPAlphaEncodeOptions.ExactFilterChoice = false)
         bool stages = false;
         for (int i = 2; i < args.Length; i++)
         {
@@ -46,6 +47,7 @@ internal static class WebPAnimBench
             if (a == "--backend") backend = v;
             else if (a == "--frames") maxFrames = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--quality") quality = int.Parse(v, CultureInfo.InvariantCulture);
+            else if (a == "--alpha-fast") alphaFast = v == "1";
             else if (a == "--mode") mode = v;
             else if (a == "--runs") runs = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--stages") stages = v == "1";
@@ -115,7 +117,7 @@ internal static class WebPAnimBench
                 else if (mode == "anim")
                     file = await lossless.EncodeAnimationAsync(frames, w, h, durations, new WebPEncodeOptions { Quality = quality, Exact = false });
                 else
-                    file = await lossy.EncodeAnimationAsync(frames, w, h, durations, new WebPLossyEncodeOptions { Quality = quality });
+                    file = await lossy.EncodeAnimationAsync(frames, w, h, durations, new WebPLossyEncodeOptions { Quality = quality, Alpha = alphaFast ? new WebPAlphaEncodeOptions { ExactFilterChoice = false } : null });
             }
             finally { WebPLosslessEncoderGpu.Trace = null; WebPEncodeKernels.Trace = null; WebPLossyEncoderGpu.Trace = null; }
             sw.Stop();

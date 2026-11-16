@@ -85,7 +85,7 @@ public sealed partial class WebPLosslessEncoderGpu
         {
             var job = new StreamJob(width, height, options.Quality, a => _kernels.AlphaToArgb(plane, a, meta, n), Plane: true,
                 AfterMeta: () => _kernels.AlphaPickFilter(plane, rowCost, meta, height));
-            if (options.Filter == WebPAlphaFilter.Auto && options.Quality >= AlphaExactFilterTrialQuality)
+            if (options.Filter == WebPAlphaFilter.Auto && options.ExactFilterChoice && options.Quality >= AlphaExactFilterTrialQuality)
             {
                 // Exact choice: measure the stream each filter produces and keep the filter with the smallest one. The estimate
                 // the filter pick kernel makes (used below this effort) cannot see LZ77 runs, which decide masks and flat areas.

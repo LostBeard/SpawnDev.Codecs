@@ -205,6 +205,22 @@ public abstract partial class CodecsTestBase
                     int auto = sizes[(WebPAlphaFilter.Auto, quality)];
                     report.Add($"{name}\tq{quality} auto {auto}\tbest {best}");
                     if (auto != best) failures.Add($"{name} q{quality}: Auto gave {auto} bytes, the best explicit filter {best}");
+                    // ExactFilterChoice = false: libwebp's fast estimate picks, one encode; the plane stays exact, and it can never
+                    // beat the exact trial (which is the best explicit filter)
+                    string ftag = $"{name}_autofast_q{quality}";
+                    try
+                    {
+                        var (flen, fheader) = await rt.EncodeAsync(new WebPAlphaEncodeOptions { Quality = quality, Filter = WebPAlphaFilter.Auto, ExactFilterChoice = false });
+                        report.Add($"{name}\tq{quality} auto-fast {flen} (filter {(fheader >> 2) & 3})");
+                        if (flen < best) failures.Add($"{ftag}: the fast estimate gave {flen} bytes, below the best explicit filter {best}");
+                        var fdiff = await rt.DecodeAndCompareAsync(flen);
+                        if (fdiff != null) failures.Add($"{ftag} [our decoder]: {fdiff}");
+                        await KeepForPillowAsync(ftag, flen);
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Add($"{ftag}: {ex.GetType().Name}: {ex.Message}");
+                    }
                 }
 
                 // Compress = false: always method 0, exactly 1 + w*h bytes
