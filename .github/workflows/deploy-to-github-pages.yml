@@ -19,9 +19,17 @@ jobs:
       with:
         dotnet-version: '10'
 
+    # Pin the SDK to .NET 10 for this job: ubuntu-latest also ships SDK 11.0.100, and without a global.json the workload
+    # install below picks the net11 wasm-tools, so the net10 publish fails with NETSDK1147 (wasm-tools-net10 missing).
+    # CI-only file (the repo has no global.json); same fix as SpawnDev.ILGPU.ML's deploy (2026-11-16).
+    - name: Pin the .NET 10 SDK
+      run: |
+        echo '{"sdk":{"version":"10.0.100","rollForward":"latestFeature"}}' > global.json
+        dotnet --version
+
     # Install dotnet wasm buildtools workload
     - name: Install .NET WASM Build Tools
-      run: dotnet workload install wasm-tools        
+      run: dotnet workload install wasm-tools
 
     # publishes Blazor project to the publish-folder
     - name: Publish .NET Core Project
