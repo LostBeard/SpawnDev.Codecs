@@ -131,7 +131,7 @@ public abstract partial class CodecsTestBase
     {
         CpuOnlyTest();
         // Build a minimal Opus-in-Ogg stream via the writer and ensure OpusOggDecoder accepts it.
-        // Not all test signals will be SILK; guard with UnsupportedTestException.
+        // SILK packets: the mode is forced (left to Concentus, a sine is often coded as hybrid and the test skipped).
         int frameLen = 960;
         var pcm = ReferenceOracle.GenerateSineWave(440, 48000, 1, frameLen * 2);
         var frame = new float[frameLen];
@@ -140,10 +140,10 @@ public abstract partial class CodecsTestBase
         {
             Array.Copy(pcm, f * frameLen, frame, 0, frameLen);
             byte[] enc = ReferenceOracle.EncodeFrame(frame, 48000, 1, frameLen,
-                Concentus.Enums.OpusApplication.OPUS_APPLICATION_VOIP);
+                Concentus.Enums.OpusApplication.OPUS_APPLICATION_VOIP, forceMode: Concentus.Enums.OpusMode.MODE_SILK_ONLY);
             var toc = new OpusTocByte(enc[0]);
             if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Silk)
-                throw new UnsupportedTestException($"Concentus chose {toc.Mode}, need SILK.");
+                throw new InvalidOperationException($"Concentus ignored the forced mode and chose {toc.Mode}, need SILK.");
             opusPackets.Add(enc);
         }
 

@@ -43,11 +43,11 @@ public abstract partial class CodecsTestBase
         byte[] packet = ReferenceOracle.EncodeFrame(
             src, sampleRateHz: 48000, channelCount: 1, frameSizeSamples: 960,
             application: OpusApplication.OPUS_APPLICATION_RESTRICTED_LOWDELAY,
-            bitrateBitsPerSecond: 96000);
+            bitrateBitsPerSecond: 96000, forceMode: Concentus.Enums.OpusMode.MODE_CELT_ONLY);
 
         var toc = new OpusTocByte(packet[0]);
         if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Celt)
-            throw new UnsupportedTestException($"Concentus chose {toc.Mode}, need CELT");
+            throw new InvalidOperationException($"Concentus ignored the forced mode and chose {toc.Mode}, need CELT");
 
         // Oracle decode.
         float[] oraclePcm = ReferenceOracle.DecodePacket(packet, 48000, 1);
@@ -76,11 +76,11 @@ public abstract partial class CodecsTestBase
         byte[] packet = ReferenceOracle.EncodeFrame(
             src, sampleRateHz: 48000, channelCount: 2, frameSizeSamples: 960,
             application: OpusApplication.OPUS_APPLICATION_RESTRICTED_LOWDELAY,
-            bitrateBitsPerSecond: 128000);
+            bitrateBitsPerSecond: 128000, forceMode: Concentus.Enums.OpusMode.MODE_CELT_ONLY);
 
         var toc = new OpusTocByte(packet[0]);
         if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Celt)
-            throw new UnsupportedTestException($"Concentus chose {toc.Mode}, need CELT");
+            throw new InvalidOperationException($"Concentus ignored the forced mode and chose {toc.Mode}, need CELT");
 
         float[] oraclePcm = ReferenceOracle.DecodePacket(packet, 48000, 2);
 
@@ -104,11 +104,11 @@ public abstract partial class CodecsTestBase
         byte[] packet = ReferenceOracle.EncodeFrame(
             src, sampleRateHz: 48000, channelCount: 1, frameSizeSamples: 120,
             application: OpusApplication.OPUS_APPLICATION_RESTRICTED_LOWDELAY,
-            bitrateBitsPerSecond: 128000);
+            bitrateBitsPerSecond: 128000, forceMode: Concentus.Enums.OpusMode.MODE_CELT_ONLY);
 
         var toc = new OpusTocByte(packet[0]);
         if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Celt)
-            throw new UnsupportedTestException($"Concentus chose {toc.Mode}, need CELT");
+            throw new InvalidOperationException($"Concentus ignored the forced mode and chose {toc.Mode}, need CELT");
 
         float[] oraclePcm = ReferenceOracle.DecodePacket(packet, 48000, 1);
 
@@ -133,11 +133,11 @@ public abstract partial class CodecsTestBase
         byte[] packet = ReferenceOracle.EncodeFrame(
             src, sampleRateHz: 48000, channelCount: 1, frameSizeSamples: 960,
             application: OpusApplication.OPUS_APPLICATION_AUDIO,
-            bitrateBitsPerSecond: 32000);
+            bitrateBitsPerSecond: 32000, forceMode: Concentus.Enums.OpusMode.MODE_HYBRID);
 
         var toc = new OpusTocByte(packet[0]);
         if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Hybrid)
-            throw new UnsupportedTestException($"Concentus chose {toc.Mode}, need Hybrid");
+            throw new InvalidOperationException($"Concentus ignored the forced mode and chose {toc.Mode}, need Hybrid");
 
         float[] oraclePcm = ReferenceOracle.DecodePacket(packet, 48000, 1);
 

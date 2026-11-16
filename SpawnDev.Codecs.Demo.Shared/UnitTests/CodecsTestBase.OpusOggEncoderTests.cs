@@ -24,10 +24,10 @@ public abstract partial class CodecsTestBase
         for (int f = 0; f < 3; f++)
         {
             Array.Copy(pcm, f * frameLen, buf, 0, frameLen);
-            byte[] enc = ReferenceOracle.EncodeFrame(buf, 48000, 1, frameLen, OpusApplication.OPUS_APPLICATION_VOIP);
+            byte[] enc = ReferenceOracle.EncodeFrame(buf, 48000, 1, frameLen, OpusApplication.OPUS_APPLICATION_VOIP, forceMode: Concentus.Enums.OpusMode.MODE_SILK_ONLY);
             var toc = new OpusTocByte(enc[0]);
             if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Silk)
-                throw new UnsupportedTestException($"Concentus chose {toc.Mode}, need SILK.");
+                throw new InvalidOperationException($"Concentus ignored the forced mode and chose {toc.Mode}, need SILK.");
             opusPackets.Add(enc);
         }
 
@@ -63,10 +63,10 @@ public abstract partial class CodecsTestBase
     {
         CpuOnlyTest();
         var pcm = ReferenceOracle.GenerateSineWave(440, 48000, 1, 960);
-        byte[] enc = ReferenceOracle.EncodeFrame(pcm, 48000, 1, 960, OpusApplication.OPUS_APPLICATION_VOIP);
+        byte[] enc = ReferenceOracle.EncodeFrame(pcm, 48000, 1, 960, OpusApplication.OPUS_APPLICATION_VOIP, forceMode: Concentus.Enums.OpusMode.MODE_SILK_ONLY);
         var toc = new OpusTocByte(enc[0]);
         if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Silk)
-            throw new UnsupportedTestException($"Concentus chose {toc.Mode}, need SILK.");
+            throw new InvalidOperationException($"Concentus ignored the forced mode and chose {toc.Mode}, need SILK.");
         var opts = new OpusOggEncoderOptions
         {
             OutputChannels = 1,

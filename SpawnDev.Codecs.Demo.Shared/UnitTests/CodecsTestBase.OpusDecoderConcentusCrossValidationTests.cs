@@ -35,15 +35,15 @@ public abstract partial class CodecsTestBase
         // Encode 20 ms of a 440 Hz sine at 8 kHz through Concentus with VOIP application.
         // This normally produces a SILK-mode Opus packet.
         var pcm = ReferenceOracle.GenerateSineWave(440, 8000, 1, 160);
-        byte[] packet = ReferenceOracle.EncodeFrame(pcm, 8000, 1, 160, OpusApplication.OPUS_APPLICATION_VOIP);
+        byte[] packet = ReferenceOracle.EncodeFrame(pcm, 8000, 1, 160, OpusApplication.OPUS_APPLICATION_VOIP, forceMode: Concentus.Enums.OpusMode.MODE_SILK_ONLY);
 
         // Parse the packet's TOC - if Concentus picked CELT or Hybrid mode, skip the test.
         var toc = new OpusTocByte(packet[0]);
         if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Silk)
         {
             // Unexpected but not a failure of our decoder; document the skip.
-            throw new UnsupportedTestException(
-                $"Concentus chose {toc.Mode} for VOIP/NB/sine - SILK cross-val needs a SILK packet.");
+            throw new InvalidOperationException(
+                $"Concentus ignored the forced mode and chose {toc.Mode} for VOIP/NB/sine - SILK cross-val needs a SILK packet.");
         }
 
         var config = new OpusDecoderConfig { SampleRateHz = 8000, ChannelCount = 1 };
@@ -114,13 +114,13 @@ public abstract partial class CodecsTestBase
         CpuOnlyTest();
         // WB (16 kHz internal) 20 ms. Concentus VOIP should emit SILK-WB for 16 kHz audio.
         var pcm = ReferenceOracle.GenerateSineWave(440, 16000, 1, 320);
-        byte[] packet = ReferenceOracle.EncodeFrame(pcm, 16000, 1, 320, OpusApplication.OPUS_APPLICATION_VOIP);
+        byte[] packet = ReferenceOracle.EncodeFrame(pcm, 16000, 1, 320, OpusApplication.OPUS_APPLICATION_VOIP, forceMode: Concentus.Enums.OpusMode.MODE_SILK_ONLY);
 
         var toc = new OpusTocByte(packet[0]);
         if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Silk)
         {
-            throw new UnsupportedTestException(
-                $"Concentus chose {toc.Mode} for WB VOIP; test needs SILK.");
+            throw new InvalidOperationException(
+                $"Concentus ignored the forced mode and chose {toc.Mode} for WB VOIP; test needs SILK.");
         }
 
         var config = new OpusDecoderConfig { SampleRateHz = 16000, ChannelCount = 1 };
@@ -147,12 +147,12 @@ public abstract partial class CodecsTestBase
         CpuOnlyTest();
         // 10 ms NB frame.
         var pcm = ReferenceOracle.GenerateSineWave(440, 8000, 1, 80);
-        byte[] packet = ReferenceOracle.EncodeFrame(pcm, 8000, 1, 80, OpusApplication.OPUS_APPLICATION_VOIP);
+        byte[] packet = ReferenceOracle.EncodeFrame(pcm, 8000, 1, 80, OpusApplication.OPUS_APPLICATION_VOIP, forceMode: Concentus.Enums.OpusMode.MODE_SILK_ONLY);
 
         var toc = new OpusTocByte(packet[0]);
         if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Silk)
         {
-            throw new UnsupportedTestException($"Concentus chose {toc.Mode}, need SILK.");
+            throw new InvalidOperationException($"Concentus ignored the forced mode and chose {toc.Mode}, need SILK.");
         }
 
         var config = new OpusDecoderConfig { SampleRateHz = 8000, ChannelCount = 1 };
@@ -179,12 +179,12 @@ public abstract partial class CodecsTestBase
         CpuOnlyTest();
         // Silent input -> SILK produces near-silent output. Our decoder should match.
         var pcm = new float[160]; // all zero
-        byte[] packet = ReferenceOracle.EncodeFrame(pcm, 8000, 1, 160, OpusApplication.OPUS_APPLICATION_VOIP);
+        byte[] packet = ReferenceOracle.EncodeFrame(pcm, 8000, 1, 160, OpusApplication.OPUS_APPLICATION_VOIP, forceMode: Concentus.Enums.OpusMode.MODE_SILK_ONLY);
 
         var toc = new OpusTocByte(packet[0]);
         if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Silk)
         {
-            throw new UnsupportedTestException($"Concentus chose {toc.Mode}, need SILK.");
+            throw new InvalidOperationException($"Concentus ignored the forced mode and chose {toc.Mode}, need SILK.");
         }
 
         var config = new OpusDecoderConfig { SampleRateHz = 8000, ChannelCount = 1 };

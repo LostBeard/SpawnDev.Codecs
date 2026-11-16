@@ -97,14 +97,14 @@ public abstract partial class CodecsTestBase
             channelCount: 1,
             frameSizeSamples: 960,
             application: Concentus.Enums.OpusApplication.OPUS_APPLICATION_RESTRICTED_LOWDELAY,
-            bitrateBitsPerSecond: 64000);
+            bitrateBitsPerSecond: 64000, forceMode: Concentus.Enums.OpusMode.MODE_CELT_ONLY);
 
         var toc = new OpusTocByte(packet[0]);
         // RESTRICTED_LOWDELAY forces CELT mode.
         if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Celt)
         {
-            throw new UnsupportedTestException(
-                $"Concentus chose {toc.Mode} for RESTRICTED_LOWDELAY; CELT-routing test needs CELT mode.");
+            throw new InvalidOperationException(
+                $"Concentus ignored the forced mode and chose {toc.Mode} for RESTRICTED_LOWDELAY; CELT-routing test needs CELT mode.");
         }
 
         var config = new OpusDecoderConfig { SampleRateHz = 48000, ChannelCount = 1 };

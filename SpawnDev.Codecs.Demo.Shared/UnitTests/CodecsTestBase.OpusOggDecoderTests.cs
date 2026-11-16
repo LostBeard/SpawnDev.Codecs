@@ -224,10 +224,10 @@ public abstract partial class CodecsTestBase
         for (int f = 0; f < 4; f++)
         {
             Array.Copy(pcm, f * frameLen, frame, 0, frameLen);
-            byte[] encoded = ReferenceOracle.EncodeFrame(frame, 48000, 1, frameLen, OpusApplication.OPUS_APPLICATION_VOIP);
+            byte[] encoded = ReferenceOracle.EncodeFrame(frame, 48000, 1, frameLen, OpusApplication.OPUS_APPLICATION_VOIP, forceMode: Concentus.Enums.OpusMode.MODE_SILK_ONLY);
             var toc = new OpusTocByte(encoded[0]);
             if (toc.Mode != SpawnDev.Codecs.Audio.Opus.OpusMode.Silk)
-                throw new UnsupportedTestException($"Concentus chose {toc.Mode}, need SILK for this test.");
+                throw new InvalidOperationException($"Concentus ignored the forced mode and chose {toc.Mode}, need SILK for this test.");
             packets.Add(encoded);
         }
 

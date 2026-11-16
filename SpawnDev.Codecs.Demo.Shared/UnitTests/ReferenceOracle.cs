@@ -43,17 +43,26 @@ internal static class ReferenceOracle
     /// <param name="frameSizeSamples">Opus-legal frame size in samples per channel (2.5/5/10/20/40/60 ms at the given rate).</param>
     /// <param name="application">Opus application hint.</param>
     /// <param name="bitrateBitsPerSecond">Target bitrate. 0 = auto.</param>
+    /// <param name="forceMode">The coding mode to force (SILK, hybrid or CELT); null = Concentus decides. A test that needs
+    /// one mode forces it: left to Concentus's choice, those tests skipped whenever it chose another (2026-11-16: 5 never ran).</param>
     public static byte[] EncodeFrame(
         ReadOnlySpan<float> pcm,
         int sampleRateHz,
         int channelCount,
         int frameSizeSamples,
         OpusApplication application = OpusApplication.OPUS_APPLICATION_AUDIO,
-        int bitrateBitsPerSecond = 0)
+        int bitrateBitsPerSecond = 0,
+        OpusMode? forceMode = null)
     {
         EnsureInitialized();
         using var encoder = OpusCodecFactory.CreateEncoder(sampleRateHz, channelCount, application);
         if (bitrateBitsPerSecond > 0) encoder.Bitrate = bitrateBitsPerSecond;
+        if (forceMode.HasValue)
+        {
+            encoder.ForceMode = forceMode.Value;
+            // SILK codes up to wideband: above it the encoder turns a forced SILK into hybrid (48 kHz input), so cap it
+            if (forceMode.Value == OpusMode.MODE_SILK_ONLY) encoder.MaxBandwidth = OpusBandwidth.OPUS_BANDWIDTH_WIDEBAND;
+        }
 
         Span<byte> scratch = stackalloc byte[1275]; // max Opus packet size
         int bytes = encoder.Encode(pcm, frameSizeSamples, scratch, scratch.Length);
