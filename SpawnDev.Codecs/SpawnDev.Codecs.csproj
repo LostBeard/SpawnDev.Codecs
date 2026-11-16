@@ -15,6 +15,7 @@
 		<PackageProjectUrl>https://github.com/LostBeard/SpawnDev.Codecs</PackageProjectUrl>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+		<PackageIcon>icon-128.png</PackageIcon>
 		<RepositoryUrl>https://github.com/LostBeard/SpawnDev.Codecs.git</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageTags>Codec;Audio;Video;Image;Opus;VP8;VP9;AV1;FLAC;Vorbis;PNG;JPEG;WebP;GIF;Blazor;BlazorWebAssembly;WebGPU;ILGPU;GPU;CrossPlatform</PackageTags>
@@ -27,6 +28,7 @@
 
 	<ItemGroup>
 		<None Include="..\LICENSE.txt" Pack="true" PackagePath="\" />
+		<None Include="Assets\icon-128.png" Pack="true" PackagePath="\" />
 		<!-- Third-party notices travel with the package (BSD-3-Clause clause 2: binary redistributions reproduce the notice). -->
 		<None Include="..\NOTICE.md" Pack="true" PackagePath="\" />
 		<None Include="..\ThirdPartyLicenses\*.txt" Pack="true" PackagePath="ThirdPartyLicenses\" />
