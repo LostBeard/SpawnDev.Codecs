@@ -9,6 +9,7 @@
 // ~60% of Velocity's loop filter in group-barrier waits behind lane 0's serial mask build). Compare ACTIVE times across
 // backends; profile to attribute. The first frame's loop filter inside the decode is reported apart (first launch).
 // Usage: vp9-lf-bench <file.webm|.ivf> [--backend cpu|velocity|velocity256|cuda|opencl] [--frames 20] [--reps 3]
+//        [--skip-pass 0|1|2] (1: no vertical-edge pass, 2: no horizontal one - where the time goes; the picture is wrong)
 // (velocity = Vector128, the VelocityCodecsTests lane's default; velocity256 = Vector256)
 
 using System.Diagnostics;
@@ -32,7 +33,7 @@ internal static class Vp9LfBench
         if (args.Length < 2) { Console.WriteLine("usage: vp9-lf-bench <file> [--backend ...] [--frames 20] [--reps 3]"); return 2; }
         string file = args[1];
         string backend = "velocity";
-        int maxFrames = 20, reps = 3;
+        int maxFrames = 20, reps = 3, skipPasses = 0;
         for (int i = 2; i < args.Length; i++)
         {
             string a = args[i];
@@ -41,6 +42,7 @@ internal static class Vp9LfBench
             if (a == "--backend") backend = v;
             else if (a == "--frames") maxFrames = int.Parse(v, CultureInfo.InvariantCulture);
             else if (a == "--reps") reps = int.Parse(v, CultureInfo.InvariantCulture);
+            else if (a == "--skip-pass") skipPasses = int.Parse(v, CultureInfo.InvariantCulture);
             else { Console.WriteLine($"unknown option {a}"); return 2; }
         }
         if (maxFrames < 1 || reps < 1) { Console.WriteLine("--frames and --reps must be >= 1"); return 2; }
@@ -88,7 +90,7 @@ internal static class Vp9LfBench
                     for (int r = 0; r < reps; r++)
                     {
                         sw.Restart();
-                        pipe.RunLoopFilterForBench(h, off);
+                        pipe.RunLoopFilterForBench(h, off, skipPasses);
                         await acc.SynchronizeAsync();
                         double ms = sw.Elapsed.TotalMilliseconds;
                         if (off) { inactive += ms; inactiveMax = Math.Max(inactiveMax, ms); }

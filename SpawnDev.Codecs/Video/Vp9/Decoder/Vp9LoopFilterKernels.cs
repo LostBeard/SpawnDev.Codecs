@@ -14,7 +14,9 @@ namespace SpawnDev.Codecs.Video.Vp9.Decoder;
 internal static class Vp9LArg
 {
     public const int MiRows = 0, MiCols = 1, SsX = 2, SsY = 3, GridOffset = 4, Y = 5, U = 6, V = 7, YStride = 8, UvStride = 9;
-    public const int Count = 10;
+    /// <summary>Diagnostics only (vp9-lf-bench): bit 0 skips the vertical-edge pass, bit 1 the horizontal one. 0 when decoding.</summary>
+    public const int SkipPasses = 10;
+    public const int Count = 11;
 }
 
 internal static class Vp9LoopFilterKernels
@@ -56,6 +58,6 @@ internal static class Vp9LoopFilterKernels
         // inactive groups read no masks (the index would be outside this frame's)
         int maskAt = active ? (r * sbCols + c) * Vp9Lpf.GroupSharedWords : 0;
         Vp9Lpf.FilterSuperblockGroup(masks, maskAt, active, pool, yAt, yStride, a[Vp9LArg.U] + uvRow, a[Vp9LArg.V] + uvRow, uvStride,
-            ssX, ssY, miRows, miRow, miCol, lf, 0);
+            ssX, ssY, miRows, miRow, miCol, lf, 0, a[Vp9LArg.SkipPasses]);
     }
 }

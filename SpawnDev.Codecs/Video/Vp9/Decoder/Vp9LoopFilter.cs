@@ -1105,19 +1105,19 @@ public static class Vp9Lpf
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void FilterSuperblockGroup(ArrayView<uint> masks, int maskAt, bool active, ArrayView<byte> p, int yAt,
         int yStride, int uAt, int vAt, int uvStride, int ssX, int ssY, int miRows, int miRow, int miCol, ArrayView<int> lf,
-        int lfOffset)
+        int lfOffset, int skipPasses = 0)
     {
         int lane = Group.IdxX;
         bool on = active && lf[lfOffset + Vp9LfTable.FrameLevel] != 0;
         // the barrier stays outside every branch: the whole group meets it
         var m = default(Vp9LfMask);
         var n = default(Vp9LfNon420Mask);
-        if (on)
-        {
-            LoadMasks(masks, maskAt, ref m, ref n);
+        if (on) LoadMasks(masks, maskAt, ref m, ref n);
+        // skipPasses (diagnostics, vp9-lf-bench; 0 when decoding): bit 0 skips the vertical pass, bit 1 the horizontal one
+        if (on & ((skipPasses & 1) == 0))
             SuperblockRowsLane(lane, p, yAt, yStride, uAt, vAt, uvStride, ssX, ssY, miRows, miRow, miCol, m, n, lf, lfOffset);
-        }
         Group.Barrier();
-        if (on) SuperblockColumnsLane(lane, p, yAt, yStride, uAt, vAt, uvStride, ssX, ssY, miRows, miRow, m, n, lf, lfOffset);
+        if (on & ((skipPasses & 2) == 0))
+            SuperblockColumnsLane(lane, p, yAt, yStride, uAt, vAt, uvStride, ssX, ssY, miRows, miRow, m, n, lf, lfOffset);
     }
 }

@@ -73,10 +73,11 @@ internal sealed class Vp9DecodePipeline : IDisposable
     /// filtered picture. <paramref name="inactive"/>: every launch, group and barrier as usual, but no group's superblock is
     /// inside the frame, so only the launches, the mask-build skip and the barriers are paid. Queued.
     /// </summary>
-    internal void RunLoopFilterForBench(Vp9FrameInfo h, bool inactive) => LoopFilter(h, inactive ? 1 << 20 : 0);
+    internal void RunLoopFilterForBench(Vp9FrameInfo h, bool inactive, int skipPasses = 0) => LoopFilter(h, inactive ? 1 << 20 : 0, skipPasses);
 
     // stepBias (diagnostics only, see RunLoopFilterForBench): added to the wavefront step passed to the kernel
-    private void LoopFilter(Vp9FrameInfo h, int stepBias = 0)
+    // skipPasses (diagnostics only, see Vp9LArg.SkipPasses)
+    private void LoopFilter(Vp9FrameInfo h, int stepBias = 0, int skipPasses = 0)
     {
         if (h.LoopFilter.Level == 0) return;   // libvpx: cm->lf.filter_level == 0 -> no filtering
         var hdr = new int[Vp9LfHdr.Ints];
@@ -96,6 +97,7 @@ internal sealed class Vp9DecodePipeline : IDisposable
         a[Vp9LArg.V] = checked((int)(b + l.VOffset));
         a[Vp9LArg.YStride] = l.YStride;
         a[Vp9LArg.UvStride] = l.UvStride;
+        a[Vp9LArg.SkipPasses] = skipPasses;
         _lfArgs.View.CopyFromCPU(a);
         int sbRows = (h.MiRows + 7) >> 3, sbCols = (h.MiCols + 7) >> 3;
         // every superblock's masks first, in parallel, into the reconstruction scratch (the reconstruction launches are
