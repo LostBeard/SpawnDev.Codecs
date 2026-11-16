@@ -11,14 +11,14 @@
 		<DebugType>Embedded</DebugType>
 		<Title>SpawnDev.Codecs</Title>
 		<Authors>LostBeard</Authors>
-		<Description>GPU-accelerated, patent-clean codecs for .NET where the codec work runs on the accelerator: images (PNG, JPEG, WebP, GIF, BMP), video (VP8, VP9, AV1 keyframes), audio (Opus encode and decode byte-identical with libopus 1.5.2, Vorbis, FLAC) and compression. One library on every ILGPU backend: WebGPU, WebGL and Wasm in Blazor WebAssembly; CUDA, OpenCL and CPU on the desktop.</Description>
+		<Description>GPU-accelerated, patent-clean codecs for .NET where the codec work runs on the accelerator: images (PNG, JPEG, WebP, GIF, BMP) and BCn textures, video (VP9 encode with inter frames, a full VP9 decoder, VP8 and AV1 keyframes, MP4 and WebM muxing), audio (Opus encode and decode byte-identical with libopus 1.5.2, Vorbis, FLAC, MP3) and compression (zlib, LZ4, Snappy, GDeflate). One library on every ILGPU backend: WebGPU, WebGL and Wasm in Blazor WebAssembly; CUDA, OpenCL and CPU on the desktop.</Description>
 		<PackageProjectUrl>https://github.com/LostBeard/SpawnDev.Codecs</PackageProjectUrl>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
 		<PackageIcon>icon-128.png</PackageIcon>
 		<RepositoryUrl>https://github.com/LostBeard/SpawnDev.Codecs.git</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
-		<PackageTags>Codec;Audio;Video;Image;Opus;VP8;VP9;AV1;FLAC;Vorbis;PNG;JPEG;WebP;GIF;Blazor;BlazorWebAssembly;WebGPU;ILGPU;GPU;CrossPlatform</PackageTags>
+		<PackageTags>Codec;Audio;Video;Image;Opus;VP8;VP9;AV1;FLAC;Vorbis;MP3;PNG;JPEG;WebP;GIF;BCn;LZ4;Snappy;WebM;MP4;Blazor;BlazorWebAssembly;WebGPU;ILGPU;GPU;CrossPlatform</PackageTags>
 		<NoPackageAnalysis>true</NoPackageAnalysis>
 		<EnableDefaultCompileItems>true</EnableDefaultCompileItems>
 		<IsPackable>true</IsPackable>

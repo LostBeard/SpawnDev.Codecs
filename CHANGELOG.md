@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Package icon (2026-11-16)
+- The NuGet package carries the SpawnDev icon (`icon-128.png`, as SpawnDev.ILGPU.ML's).
+
+### VP9 decoder: the loop filter's horizontal edges from a precomputed plan (2026-11-16)
+- The mask pass also writes, per superblock, a plan of its horizontal-edge filtering (per plane, block row and block
+  column: the filter size, its level, the inner 4 edge), so each pixel-column lane reads one entry per block row instead
+  of walking libvpx's mask logic for the whole row. 1080p, ms per frame: Velocity Vector128 485 -> 325, Vector256 278 ->
+  205, CUDA 2.77 -> 2.01. Same pictures (libvpx-exact). `vp9-lf-bench --skip-pass 1|2` times the two edge passes apart,
+  and the bench warms up before timing.
+
+### Lossless WebP: `WebPAlphaEncodeOptions.ExactFilterChoice` (2026-11-16)
+- With `Filter = Auto` at effort 50 and above, the ALPH plane is encoded with each of the four filters to keep the
+  smallest (five lossless encodes). `ExactFilterChoice = false` picks the filter from the fast estimate and encodes once,
+  as libwebp's default does. The default stays `true`: the estimate costs size (SpawnGen's 25 LTX frames as a lossy
+  animation 196,196 -> 200,170 bytes, +2.0%, at 972 -> 621 ms per frame; small test planes up to +41%).
+  `webp-anim-bench --alpha-fast 1` measures it.
+
 ### Lossy WebP: the Intra4, Intra16 and UV mode decisions in parallel (2026-11-15 / 16)
 
 - `PickBestIntra4` runs as one thread group per macroblock with a lane per mode: for each 4x4 block the 10 modes are
@@ -706,6 +723,16 @@ Everything below down to local.9:
   through local.7 contain the ported code and must not be redistributed.
 - The FLAC decoder's MD5 kernels (own code, RFC 1321) moved to `FlacMd5Kernels`.
 
+### Ogg Opus writer + encoder rewritten clean-room (2026-11-08)
+- **`SpawnDev.Codecs.Container.Ogg.OggOpusWriter`** and **`SpawnDev.Codecs.Audio.Opus.OggOpusEncoder`** (MIT, written
+  from RFC 3533 / RFC 7845 / RFC 6716 and from running the ffmpeg binary as a black box; no FFmpeg source read):
+  OpusHead / OpusTags pages, then the audio packets packed into pages by the page rules measured on ffmpeg's output
+  (65025-byte page bodies, `PageDurationUs`, granule positions, EOS). `OggOpusEncoder.EncodeAsync` (int16 and float;
+  managed, JS typed array and `ArrayView1D` inputs; byte[] or Stream output) runs `OpusEncoderGpu` at application Audio,
+  unconstrained VBR, 20 ms packets, pre-skip = `Lookahead`; `WarmUpAsync`. `PcmConvertKernels.FloatToS16Kernel` converts
+  float input as ffmpeg does (x * 32768, half to even, clipped). Tests: the parked Ogg Opus test is back, plus page-layout
+  edge cases (13 ffmpeg-remuxed fixtures) and the tail packets / final granule at 16 input lengths, each guard red-checked.
+
 ### WebM writer rewritten clean-room (2026-11-08)
 - **`SpawnDev.Codecs.Container.Matroska.WebMWriter`** (MIT, written from RFC 8794 / RFC 9559 / the WebM guidelines and
   black-box observation of ffmpeg's output): `AddVideoTrack(WebMVideoTrack)`, `AddAudioTrack(WebMAudioTrack)`,
@@ -1082,15 +1109,15 @@ since 0.3.0-rc.7.
 - VP8 GPU encode/decode APIs made async (`EncodeKeyFrameAsync` / `DecodeKeyFrameAsync` / `EncodeKeyFramesBatchAsync`) so browser backends use `SynchronizeAsync` + `CopyToHostAsync` instead of desktop-only sync Synchronize/GetAsArray1D.
 - VP9 assemble/uncompressed-header convenience overloads: `Run` → `RunAsync` (same reason).
 
-## Unreleased — master after rc.7 (2026-05-06)
+## Unreleased - master after rc.7 (2026-05-06)
 
 ### Wasm cold-compile diagnosis + Lever B (2026-05-06)
-- **Root cause identified**: VP9 + VP8 entropy walker kernels emit one Wasm function with **52,012 locals + 750KB instructions + 5,127 inlined call sites**. V8's `kV8MaxWasmFunctionLocals=50,000` cap rejects the kernel with `WebAssembly.compile(): Compiling function #N failed: local count too large`; wabt's parser rejects identically. Same root cause as Geordi's WGSL walker `L44455` chain — ILGPU IR optimizer inlines the entire call graph (EncodeSb64 → EncodeBlock32x32 → EncodeBlock16x16 → EncodeLeafBlock → EncodePlaneCoefs) into the single `[NoInlining]` body method instead of emitting them as separate fn-defs. The Playwright 30s timeout on Codecs Wasm tests was a downstream symptom of the kernel never compiling. Diagnosis tools added at `_codecsdump/wasm-analyze.cs` (per-function local count + body size decoder) and DevComms `tuvok-to-geordi-codecs-wasm-monolithic-inlining-2026-05-06.md`.
+- **Root cause identified**: VP9 + VP8 entropy walker kernels emit one Wasm function with **52,012 locals + 750KB instructions + 5,127 inlined call sites**. V8's `kV8MaxWasmFunctionLocals=50,000` cap rejects the kernel with `WebAssembly.compile(): Compiling function #N failed: local count too large`; wabt's parser rejects identically. Same root cause as Geordi's WGSL walker `L44455` chain - ILGPU IR optimizer inlines the entire call graph (EncodeSb64 → EncodeBlock32x32 → EncodeBlock16x16 → EncodeLeafBlock → EncodePlaneCoefs) into the single `[NoInlining]` body method instead of emitting them as separate fn-defs. The Playwright 30s timeout on Codecs Wasm tests was a downstream symptom of the kernel never compiling. Diagnosis tools added at `_codecsdump/wasm-analyze.cs` (per-function local count + body size decoder) and DevComms `tuvok-to-geordi-codecs-wasm-monolithic-inlining-2026-05-06.md`.
 - **VP9 + VP8 entropy: collapse single-frame + batch kernels into one** (`Vp9FrameEntropyKernel`, `Vp8FrameEntropyKernel`). Single-frame `Run` now dispatches the batch kernel with extent=1 + full-buffer strides; the inner `SubView(0, fullLen)` is a pointer-arithmetic no-op. Saves one full ~761KB Wasm module's compile pass per backend at zero runtime cost, plus the same gain on every other backend (CUDA / OpenCL / WGSL / GLSL pay the same per-kernel compile cost). Doesn't single-handedly close the V8 50K-local cap (the surviving module still has 52K locals) but halves the number of times that cost is paid.
 - **PMT actionability timeout bumped to 5 min** (`PlaywrightMultiTest/ProjectTest.cs`). Codec kernel cold compile on V8 currently exceeds Playwright's 30s default; bumping the per-page default lets tests survive cold compile while ILGPU's fn-def codegen path matures. Cheap on hot tests (timeout doesn't fire when responsive).
-- CPU sweep: 91 of 97 PASS post-collapse (6 unrelated VP8 failures pre-existing on master HEAD `5977809` — `Vp8KeyframeWalker_RejectsMultiPartition`, `Vp8Quantizer_*`, `Vp8FrameTag_KeyFrame320x240_ParsesAllFields`, `Vp8InverseTransform_ShortInvWalsh4x4_*`; tracked separately).
+- CPU sweep: 91 of 97 PASS post-collapse (6 unrelated VP8 failures pre-existing on master HEAD `5977809` - `Vp8KeyframeWalker_RejectsMultiPartition`, `Vp8Quantizer_*`, `Vp8FrameTag_KeyFrame320x240_ParsesAllFields`, `Vp8InverseTransform_ShortInvWalsh4x4_*`; tracked separately).
 
-## Unreleased — master after rc.7 (2026-05-05)
+## Unreleased - master after rc.7 (2026-05-05)
 
 **Headline: AV1 Tx4x4 transform infrastructure (forward + inverse + constants) lands on master + Vorbis encoder gets per-packet host-SubView batch dispatch (no host syncs between packets).**
 

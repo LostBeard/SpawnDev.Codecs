@@ -37,8 +37,10 @@ back to the host between stages, and only scalars (a length, an error code, a fe
 ## Lifetimes and threading
 
 - The **accelerator belongs to the application.** Codec classes never dispose it.
-- A codec instance compiles its kernels once and keeps its working buffers between calls (they only grow). Dispose the
-  instance to free them.
+- A codec instance compiles nothing in its constructor. It loads its kernels once, on its first async call or when you
+  call `WarmUpAsync` (so a page can start the compile early), and keeps its working buffers between calls (they only
+  grow). Dispose the instance to free them. Code that uses a kernel holder class directly (for example `JpegScanEncoderKernels`
+  or `WebPRgbaToYuvGpu.Convert`) awaits its `EnsureKernelsAsync()` first.
 - **One call at a time per instance**: the working buffers are shared across calls. Use one instance per concurrent
   stream.
 - Every call ends with the result on the device or in your hands: the methods await the accelerator before returning,

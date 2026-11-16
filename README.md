@@ -28,16 +28,21 @@ and reads back the finished file or picture. The same library and the same kerne
 
 ## Highlights
 
-- **Image codecs, checked against the reference libraries.** PNG (with APNG frames, Adam7, 16-bit, text chunks), JPEG
-  (baseline and progressive), WebP (lossless, lossy, alpha, animation), GIF and BMP, encode and decode, plus one
-  `ImageDecoderGpu` that recognizes the format.
+- **Image codecs, checked against the reference libraries.** PNG (APNG files decode their default image, Adam7, 16-bit,
+  text chunks), JPEG (baseline and progressive), WebP (lossless, lossy, alpha, animation), GIF and BMP, encode and
+  decode, plus one `ImageDecoderGpu` that recognizes the format. BC1, BC3, BC4, BC5 and BC7 texture blocks and the byte compressors
+  (zlib / deflate, LZ4, Snappy, GDeflate, shuffle filters) run on the accelerator too.
 - **Byte-identical with the reference encoders where the format allows it:** WebP lossy encode matches libwebp 1.6.0
   (methods 3 and 4, 222 opaque and 145 transparent test pictures) and JPEG encode matches libjpeg-turbo file for file;
   WebP and JPEG decode match libwebp and libjpeg-turbo pixel for pixel.
-- **Video:** VP8, VP9 and AV1 keyframe encoders and decoders, including a full-syntax VP8 keyframe decoder that matches
-  ffmpeg pixel for pixel on 182 real files.
+- **Video:** VP8, VP9 and AV1 encoders and decoders. The VP9 encoder writes inter frames (motion search, parallel entropy
+  coding, tiles) and the VP9 decoder is a full profile-0 decoder that matches libvpx bit for bit on its 303 conformance
+  vectors; the VP8 and AV1 coders are keyframe-only. A full-syntax VP8 keyframe decoder matches ffmpeg pixel for pixel
+  on 182 real files. `VideoFileEncoderGpu` turns frames and audio into an MP4, WebM or MKV file in one call and
+  `WebMVideoLoaderGpu` loads a VP9 WebM back as RGB frames.
 - **Audio:** an Opus decoder (SILK, CELT, hybrid, loss concealment) and a CELT-only Opus encoder that are byte-identical
-  with libopus 1.5.2 on every packet of real streams, Vorbis decoders that match libvorbis, and FLAC.
+  with libopus 1.5.2 on every packet of real streams, Vorbis decoders that match libvorbis, a FLAC encoder and decoder,
+  and an MP3 encoder and decoder.
 - **One API shape everywhere.** Every entry point has three overloads: data already on the accelerator (`ArrayView1D`),
   a JS typed array in the browser (`TypedArray`, never touching the .NET heap) and managed memory (`byte[]`).
 - **Bounded launches.** Serial stages (bit writers, entropy coders) are resumable chains of short launches, so no kernel
@@ -45,10 +50,12 @@ and reads back the finished file or picture. The same library and the same kerne
 
 ## Status
 
-Every test lane is green (2026-10-29): CPU 3281 / 0, CUDA, OpenCL and Velocity 1131 / 0 each on the desktop; WebGPU and
-Wasm 1150 / 0 each and WebGL 399 / 0 in Chrome. WebGL has no scatter stores, so the serial frame coders (the video frame
-coders, the Opus coders) are not offered there; their building blocks are. [**Docs/status.md**](Docs/status.md) lists
-every codec by backend with the evidence; where it disagrees with this page, that file wins.
+The latest gate (2026-11-16, on SpawnDev.ILGPU 5.4.34) was scoped, not a run of every test on every lane: CUDA, OpenCL
+and Velocity 767 / 0 each on the VP9, AV1, WebP, VP8, video, MDCT / IMDCT, CELT, Vorbis and MP3 tests; the CPU
+accelerator's full class 3396 / 0 (9 skipped); in Chrome the full WebGPU class, the Wasm encoder set and the WebGL audio
+transforms 1344 / 0. WebGL has no scatter stores, so the serial frame coders (the video frame coders, the Opus coders)
+are not offered there; their building blocks are. [**Docs/status.md**](Docs/status.md) lists every codec by backend
+with the evidence and the open items; where it disagrees with this page, that file wins.
 
 ## Install
 
@@ -56,8 +63,8 @@ every codec by backend with the evidence; where it disagrees with this page, tha
 dotnet add package SpawnDev.Codecs
 ```
 
-Requires **.NET 10**. Depends on [SpawnDev.ILGPU](https://github.com/LostBeard/SpawnDev.ILGPU),
-[SpawnDev.SpawnJS](https://github.com/LostBeard/SpawnDev.SpawnJS) and [SpawnDev.EBML](https://github.com/LostBeard/SpawnDev.EBML).
+Requires **.NET 10**. Depends on [SpawnDev.ILGPU](https://github.com/LostBeard/SpawnDev.ILGPU) 5.4.34 (which brings
+[SpawnDev.SpawnJS](https://github.com/LostBeard/SpawnDev.SpawnJS)) and [SpawnDev.EBML](https://github.com/LostBeard/SpawnDev.EBML).
 The CPU reference implementations (for verification, with Concentus for Opus) are a separate project,
 `SpawnDev.Codecs.References`, so the main library has no third-party codec dependency.
 
@@ -158,23 +165,27 @@ float[] opusPcm = await opusDecoder.DecodePacketAsync(opusPacket);
 
 | Area | Encode | Decode |
 |------|--------|--------|
-| **PNG** | `PngEncoderGpu`: deflate on the accelerator (independent blocks), adaptive filters, RGBA / RGB / grey / grey + alpha, 8 and 16-bit, tEXt / iTXt | `PngDecoderGpu`: all colour types and depths, Adam7, tRNS, CRC and Adler-32 checks, APNG frames, `ReadTextAsync` |
+| **PNG** | `PngEncoderGpu`: deflate on the accelerator (independent blocks), adaptive filters, RGBA / RGB / grey / grey + alpha, 8 and 16-bit, tEXt / iTXt | `PngDecoderGpu`: all colour types and depths, Adam7, tRNS, CRC and Adler-32 checks, APNG files (default image), `ReadTextAsync` |
 | **JPEG** | `JpegEncoderGpu`: baseline and progressive, 4:4:4 / 4:2:2 / 4:2:0, optimized Huffman tables, restart markers, EXIF orientation; byte-identical with libjpeg-turbo | `JpegDecoderGpu`: baseline, extended and progressive, grey / YCbCr (all common subsamplings) / CMYK / YCCK, restart markers, EXIF orientation; bit-exact with libjpeg-turbo |
-| **WebP** | `WebPLosslessEncoderGpu` (VP8L, alpha planes, metadata, animation); `WebPLossyEncoderGpu` (VP8, byte-identical with libwebp, alpha via ALPH) | `WebPDecoderGpu`: lossless, lossy, ALPH, animations (lossy, lossless and mixed), ICC / EXIF / XMP |
+| **WebP** | `WebPLosslessEncoderGpu` (VP8L, alpha planes, metadata, animation); `WebPLossyEncoderGpu` (VP8, byte-identical with libwebp, alpha via ALPH, ICC / EXIF / XMP, animation the WebPAnimEncoder way) | `WebPDecoderGpu`: lossless, lossy, ALPH, animations (lossy, lossless and mixed), ICC / EXIF / XMP |
 | **GIF** | `GifEncoderGpu`: quantization, LZW, animations | `GifDecoderGpu`: LZW, interlace, transparency, disposal, animations |
 | **BMP** | `BmpEncoderGpu` | `BmpDecoderGpu` |
 | **Any image** | n/a | `ImageDecoderGpu` recognizes PNG, JPEG, WebP, GIF and BMP on the device and dispatches |
 | **VP8** | `Vp8KeyframeEncoderGpu` (keyframes, one token partition, batches of frames) | `Vp8FullKeyframeDecoderGpu` (full keyframe syntax, loop filter, segments, B_PRED) |
-| **VP9** | `Vp9KeyframeEncoderGpu` (keyframes, batches) | `Vp9KeyframeDecoderGpu` (keyframes) |
-| **AV1** | `Av1KeyframeEncoderGpu` (keyframes: DC prediction, 16x16 blocks, OBU framing on the device) | `Av1KeyframeDecoderGpu` (single tile) |
+| **VP9** | `Vp9EncoderGpu` (key frames, then inter frames with motion search; parallel entropy coding; fixed quantizer) and `Vp9KeyframeEncoderGpu` (keyframes, batches) | `Vp9DecoderGpu` (profile 0, every libvpx profile-0 feature, WebM alpha); `Vp9KeyframeDecoderGpu` is obsolete |
+| **AV1** | `Av1KeyframeEncoderGpu` (keyframes: DC prediction, 16x16 blocks, any picture size, parallel tiles, the stream's AV1 level signalled, OBU framing on the device) | `Av1KeyframeDecoderGpu` (single tile) |
 | **Vorbis** | `VorbisAudioEncoderGpu` (first version: mono, fixed block size) | `VorbisAudioDecoderGpu` (any channel count, block switching, libvorbis parity) |
 | **FLAC** | `FlacEncoderGpu` (levels 0..8: fixed and LPC prediction, Rice coding, stereo decorrelation, MD5; any rate, 1..8 channels, 4..24 bits) | `FlacDecoderGpu` (any conforming stream, 4..32 bits, MD5 check) |
-| **Opus** | `OpusEncoderGpu` (CELT-only: 2.5 .. 120 ms, CBR / VBR / constrained VBR, complexity 0..9, 8 .. 48 kHz; byte-identical with libopus 1.5.2) | `OpusDecoderGpu` (SILK, CELT, hybrid, mode switches, redundancy, loss concealment, DTX; equal to libopus 1.5.2) |
-| **Compression** | `ZlibCompressorGpu`, `DeflateGpu` | `InflateGpu` |
-| **Containers** | Ogg, IVF, RIFF/WAVE, AIFF; WebM / Matroska through SpawnDev.EBML | the same, plus an MP4 box reader |
+| **MP3** | `Mp3EncoderGpu` (MPEG-1 / 2 / 2.5 Layer III, CBR or VBR, short blocks, bit reservoir, mid / side, Info frame; written from ISO 11172-3 / 13818-3) | `Mp3DecoderGpu` (MPEG-1 / 2 / 2.5 Layer III, free format, intensity and mid / side stereo, gapless; bit-exact with minimp3) |
+| **Opus** | `OpusEncoderGpu` (CELT-only: 2.5 .. 120 ms, CBR / VBR / constrained VBR, complexity 0..9, 8 .. 48 kHz; byte-identical with libopus 1.5.2); `OggOpusEncoder` (a whole `.opus` file) | `OpusDecoderGpu` (SILK, CELT, hybrid, mode switches, redundancy, loss concealment, DTX; equal to libopus 1.5.2) |
+| **Textures** | `BcnEncoderGpu` (BC1, BC3, BC4, BC5), `Bc7EncoderGpu` | `BcnDecoderGpu` (BC1, BC3, BC4, BC5, BC7) |
+| **Compression** | `ZlibCompressorGpu`, `DeflateGpu`, `Lz4FrameCompressorGpu`, `SnappyCompressorGpu`, `GDeflateCompressorGpu`; `ShuffleFilterGpu` and `WeightPackGpu` (lossless tensor packing) | `InflateGpu`, `Lz4FrameDecompressorGpu`, `SnappyDecompressorGpu`, `GDeflateDecompressorGpu` |
+| **Files** | `VideoFileEncoderGpu` (RGB frames + optional audio to MP4, WebM or MKV with VP9 or AV1 video and Opus audio) | `WebMVideoLoaderGpu` (VP9 WebM to RGB frames, frame rate and Opus audio) |
+| **Containers** | Ogg (`OggOpusWriter`), IVF, `WebMWriter` (WebM and MKV), `Mp4Writer` (AV1 or VP9 video, Opus audio) | Ogg, IVF, Matroska / WebM, an MP4 box reader |
 
-Video is keyframe-only today. Limits that remain (for example the VP9 decoder and AV1 at 64-pixel multiples) are listed
-per codec in [Docs/video.md](Docs/video.md) and [Docs/status.md](Docs/status.md).
+RIFF / WAVE and AIFF readers and writers are in `SpawnDev.Codecs.References`. The VP8 and AV1 coders are keyframe-only;
+the VP9 encoder and decoder do inter frames. Limits that remain (for example `Av1KeyframeDecoderGpu` at 64-pixel
+multiples) are listed per codec in [Docs/video.md](Docs/video.md) and [Docs/status.md](Docs/status.md).
 
 ## Backends
 
@@ -220,9 +231,13 @@ Correctness is checked against the reference implementations, never against this
 | WebP lossless encode, PNG, GIF, BMP encode | libwebp / Pillow and our decoders | exact round trip; Pillow decodes our files to the same pixels |
 | JPEG encode / decode | libjpeg-turbo (through Pillow) | byte-identical files / identical pixels |
 | VP8 keyframe decode | ffmpeg | identical planes on 182 files |
+| VP9 decode | libvpx v1.17.0 (built from source) | bit-exact on every frame of 303 conformance vectors and 6 ComfyUI files |
 | Vorbis decode | libvorbis (through libsndfile) | within 1e-4 per sample (observed 7.5e-7) |
 | Opus decode | libopus 1.5.2 (fixed point, built from source) | equal PCM and final range on every packet of 21 streams |
 | Opus encode (CELT-only) | libopus 1.5.2 (fixed point, built from source) | byte-identical packets and equal final range on 49 streams |
+| MP3 decode | minimp3 | bit-exact on 21 fixtures |
+| FLAC encode / decode | libFLAC, ffmpeg | our files decode to the source samples in libFLAC and in our decoder; the decoder reads 30 fixtures exactly |
+| MP4 / WebM muxing | `ffmpeg -c copy -fflags +bitexact` | byte-identical files on 10 MP4 and 21 WebM fixtures |
 
 Fixtures are made by scripts in [`scripts/`](scripts/) (the truth comes from the reference library), and every guard is
 red-checked: the fix is disabled and the test must fail by name.
@@ -273,7 +288,7 @@ Details, environment switches and the per-test desktop script are in [Docs/testi
 ## Patent policy
 
 Only formats with no patent exposure: PNG, JPEG (baseline and progressive), WebP, GIF, BMP, VP8 / VP9 / AV1 (AOMedia
-patent pledge), Opus (RFC 6716), FLAC and Vorbis. H.264, H.265 / HEIC and AAC are out of scope; for those, use platform
+patent pledge), Opus (RFC 6716), FLAC, Vorbis and MP3 (its patents expired in 2017). H.264, H.265 / HEIC and AAC are out of scope; for those, use platform
 encoders through [SpawnDev.MultiMedia](https://github.com/LostBeard/SpawnDev.MultiMedia).
 
 ## Contributing
@@ -293,8 +308,12 @@ backends. Stars, issues and sharing what you build with it help just as much.
 - [**ILGPU**](https://github.com/m4rs-mt/ILGPU) by Marcel Koester and contributors, the compiler that makes C# GPU kernels possible.
 - [**SpawnDev.ILGPU**](https://github.com/LostBeard/SpawnDev.ILGPU), which adds the WebGPU, WebGL and Wasm backends and the Velocity CPU backend.
 - [**SpawnDev.SpawnJS**](https://github.com/LostBeard/SpawnDev.SpawnJS), typed C# access to the browser's APIs.
-- The reference implementations this library is checked against and ported from: libwebp, libjpeg, libpng / zlib,
-  libvpx, libaom / dav1d, libvorbis, libopus and Concentus, ffmpeg, libjpeg-turbo and Pillow. Attribution is in [NOTICE.md](NOTICE.md).
+- **Ported from** (permissive licences, attribution in [NOTICE.md](NOTICE.md)): libwebp, libvpx (the VP9 decoder), libopus
+  and Concentus, minimp3 and PDMP3 (MP3 tables), etcpak and bc7enc (BCn).
+- **Checked against** (run as black-box oracles, no code taken): libjpeg-turbo, libwebp, libvpx, libaom / dav1d,
+  libvorbis, libopus, libFLAC, ffmpeg and Pillow. The code that had been ported from FFmpeg (LGPL) was removed on
+  2026-11-08; the Ogg Opus writer and encoder, the WebM writer and the FLAC encoder were rewritten clean-room from the
+  specifications, and the MP3 encoder is written from ISO 11172-3 / 13818-3 with no LAME code.
 
 Created by Todd Tanner ([@LostBeard](https://github.com/LostBeard)) together with a crew of Claude AI agents: Riker,
 Data, Tuvok and Geordi. Live long and prosper. 🖖

@@ -1,7 +1,7 @@
 # PLAN - OpusEncoderGpu + OpusDecoderGpu (the 6th GPU pair)
 
 **Owner:** Tuvok
-**Status:** Design (2026-05-03). Largest remaining 1.0.0 piece. OpusEncoderGpu + OpusDecoderGpu top-level integration classes + SILK integration kernel + CELT GPU primitives all need to land before Opus joins the 5 other 100%-ILGPU encoder/decoder pairs.
+**Status:** Shipped. `OpusEncoderGpu` (CELT-only, byte-identical with libopus 1.5.2) and `OpusDecoderGpu` (SILK, CELT, hybrid; equal to libopus 1.5.2) landed on 2026-10-29 (1.0.0). The text below is the original design (2026-05-03).
 
 ## Architectural pattern (validated by Vorbis v2)
 

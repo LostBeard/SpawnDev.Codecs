@@ -2,10 +2,17 @@
 
 What is verified, on which backend, and how. "Verified" means a test that compares against a reference
 implementation (never against this library's own output) passed on that backend, with its guard red-checked. Dates are
-the last run of the named lane. Updated 2026-10-29 (WebGPU video on ILGPU 5.4.11; browser Images and Audio refreshed on ILGPU 5.4.9-local.4; counts are
+the last run of the named lane. Updated 2026-11-16 (the 5.4.34 gate below; a cell keeps the date of the run behind it; counts are
 passed / failed, skips are gated or CPU-only tests).
 
-**2026-10-30, 1.0.1 on SpawnDev.ILGPU 5.4.13:** every lane re-run in full with the same counts and nothing failing:
+**2026-11-16, SpawnDev.ILGPU 5.4.34 (commit b15ccc0 + 5.4.34-local.2): a scoped gate, not every test on every lane.** CUDA,
+OpenCL and Velocity 767 / 0 each, on the VP9, AV1, WebP, VP8, video, MDCT / IMDCT, CELT, Vorbis and MP3 tests; the CPU
+accelerator's full class 3396 / 0 (9 skipped); in Chrome the full WebGPU class, the Wasm encoder set and the WebGL audio
+transforms 1344 / 0. The MP3 decoder is green on CUDA. Open in that gate: `Vp9Decode_EveryFrame` on Wasm exceeds its 1 h
+test limit, and 5 Opus tests skip when Concentus picks another mode. A cell below dated before 11-16 was not re-run in
+that gate.
+
+**Earlier, 2026-10-30, 1.0.1 on SpawnDev.ILGPU 5.4.13:** every lane re-run in full with the same counts and nothing failing:
 CUDA, OpenCL and Velocity 1131 / 0, CPU 3281 / 0, WebGPU and Wasm 1150 / 0, WebGL 399 / 0. Every green cell below still
 holds on 5.4.13.
 
@@ -55,6 +62,7 @@ lanes (VP9 batch encode at unaligned sizes).
 | WebP lossy decode | green | green | green | green (10-28; TinyPool and metadata now inside the 30 s default) | n/a (scatter stores) | see WebP lossless decode (same decoder family) | 168 fixtures bit-exact with libwebp |
 | WebP lossy encode | green | green | green | green (10-28, ILGPU 5.4.9-local.4) | n/a (scatter stores) | green (10-28) | byte-identical with libwebp, 222 fixtures (methods 3 / 4); the RD loop was split into stage kernels for browser shader compilers (10-25) |
 | WebP lossy encode with alpha | green | green | green (10-27) | green (10-28) | n/a (scatter stores) | green (10-28) | VP8 chunk byte-identical with libwebp, alpha exact (libwebp and our decoder), 145 fixtures |
+| WebP lossy animation encode, ICC / EXIF / XMP on stills | green (11-08) | green (11-08, 10 / 0) | green (11-08, 10 / 0) | green (11-08, 8 / 0) | n/a (scatter stores) | green (11-08, 8 / 0) | 26 fixtures against Pillow 13 / libwebp 1.6.0: 19 byte-identical, 7 identical except the ALPH chunks; Intra4, Intra16 and UV mode decisions parallel since 11-15 / 16 (same bytes) |
 | GIF decode / encode | green | green | green | green (10-28, 21 / 0; the slow fixture tests now inside the default) | n/a (scatter stores) | green (10-28, ILGPU 5.4.9-local.6: the next frame's histogram was zeroed under the previous frame's kernels, so a count read 0 and Wasm trapped on the division) | Pillow decodes our files to the same pixels; quantizer PSNR vs Pillow |
 | BMP decode / encode | green | green | green | green (10-28, 19 / 0) | green (10-28, 12 / 0; header and alpha scans as gathers); RLE refused (scatter stores) | green (10-28, 19 / 0) | Pillow |
 
@@ -73,7 +81,11 @@ lanes (VP9 batch encode at unaligned sizes).
 | VP8 keyframe encode | green | green (10-23) | green | green (10-29, ILGPU 5.4.11; the entropy step was split 10-26) | n/a for the frame-level coders (serial stream coders: 416 / 159 / 184 transform-feedback outputs, WebGL captures 120); the building blocks (transforms, predictors, bool and coefficient coders) green (10-28, ILGPU 5.4.11-local.2) | green (10-28, ILGPU 5.4.11-local.1: a view's Length was 0 inside non-inlined helpers on Wasm) | ffmpeg decodes our frames; bit-exact with the CPU reference encoder |
 | VP8 full keyframe decode | green | green (10-25) | green | green (10-28) | n/a (serial decoder: the full and the older decoder step kernels need scatter stores; the older one is refused at 159 transform-feedback outputs, WebGL captures 120) | green (10-28, ILGPU 5.4.11-local.4: the older decoder path read stream bytes sign-extended inside helpers on Wasm) | 182 files, identical planes to ffmpeg; one CUDA failure in 24 runs on 10-25 traced to an unpinned host copy, fixed in ILGPU 5.4.5 |
 | VP9 keyframe encode / decode | green | green (10-23) | green | green (10-29, ILGPU 5.4.11, 267 / 0; video lane 468 / 0) with one **workaround**: a drain after each wavefront group-kernel slice (see Notes, VP9 WebGPU device hang) | n/a for the frame encoder and decoder (serial coders; batch wavefront 561 transform-feedback outputs, WebGL captures 120); the building blocks (transforms, predictors, coefficient coders) green (10-28) | green (10-28, ILGPU 5.4.11-local.1) | ffmpeg / CPU reference |
-| AV1 keyframe encode / decode | green | green (10-23) | green | green (10-28, all 144 AV1 tests) | n/a for the frame step kernels (972 transform-feedback outputs, WebGL captures 120; restructure planned, PLAN-Oversized-Kernels.md); transforms and the rest green (10-28, 93 / 0, ILGPU 5.4.11-local.2) | green (10-28, all 144 AV1 tests) | libdav1d decodes our frames; CPU reference |
+| AV1 keyframe encode / decode | green | green (10-23) | green | green (10-28, all 144 AV1 tests) | n/a for the frame step kernels (972 transform-feedback outputs, WebGL captures 120; restructure planned, PLAN-Oversized-Kernels.md); transforms and the rest green (10-28, 93 / 0, ILGPU 5.4.11-local.2) | green (10-28, all 144 AV1 tests) | libdav1d decodes our frames; CPU reference. Since 11-13: any picture size, tiles coded in parallel (CUDA 1080p 13.3 -> 7.8 ms per keyframe), the sequence header signals the AV1 level and tier the stream conforms to; in the 11-16 gate on CUDA, OpenCL, Velocity and the full WebGPU class |
+| VP9 inter-frame encode (`Vp9EncoderGpu`) | green (CPU accelerator, 11-12) | green (11-13: 1080p q40 key frame 43 ms, inter frame 22 ms; 11-16 gate) | green (11-16 gate) | green (11-16, full class) | n/a (serial coders) | not recorded | every frame of the test clips decodes (Vp9DecoderGpu and ffmpeg 8.1) to the encoder's reconstruction byte for byte; the parallel entropy path is byte-identical with the serial walkers; tiles checked by Vp9DecoderGpu and FFmpeg on five grids up to 4 x 4 |
+| VP9 full decode (`Vp9DecoderGpu`) | green (11-08: 303 libvpx conformance vectors and 6 ComfyUI files bit for bit, 5112 frames before and after the loop filter) | green (11-09: `Vp9Decode_EveryFrame` 311 files == libvpx) | green (11-09: 332 public-API pictures) | green (11-11: EveryFrame 311 files bit-exact; full class 1344 / 0 on 11-16) | n/a (the full-decoder tests are fenced on WebGL) | open: `Vp9Decode_EveryFrame` exceeds its 1 h test limit | libvpx v1.17.0 built from source with stage hooks. Loop filter, 1080p ms per frame, after the parallel mask pass and the horizontal-edge plan: CUDA 4.27 -> 2.0, Velocity Vector128 735 -> ~325, Vector256 ~205; CPU accelerator 891 -> 190 with 5.4.34 |
+| ComfyUI video I/O (`Yuv420ToRgb16Gpu`, `WebMVideoLoaderGpu`, `VideoFileEncoderGpu`) | green (11-12) | green (11-12) | not recorded | green (11-12) | n/a | not recorded | all 108 frames of three ComfyUI-written VP9 files bit-exact with ComfyUI's own tensors; encode to load round trip; Mp4Writer / WebMWriter output checked below |
+| MP4 / WebM writers (`Mp4Writer`, `WebMWriter`) | green (CPU-only tests, 11-08 / 11-12) | n/a (host code) | n/a (host code) | n/a (host code) | n/a (host code) | n/a (host code) | byte-identical with `ffmpeg -c copy -fflags +bitexact`: 10 MP4 fixtures (AV1, VP9, Opus) and 21 WebM fixtures |
 
 ## Audio
 
@@ -81,7 +93,9 @@ lanes (VP9 batch encode at unaligned sizes).
 |-------|-----|------|--------|--------|-------|------|----------|
 | Vorbis decode | green | green (10-25) | green | green (10-28; Vorbis family 59 / 0, the rest gated or CPU-only) | green (10-28, Vorbis family 186 / 0) | green (10-28, Vorbis family 188 / 0) | six real libvorbis streams within 1e-4 of libvorbis (observed 7.5e-7) |
 | Vorbis encode (first version) | green | green | green | green (10-28, 12 / 0) | green (10-28, 17 / 0) | green (10-28, 17 / 0) | round trip through our decoders and ffmpeg |
-| FLAC (first version) | green | green | green | green (10-28, 63 / 0) | green (10-28, 11 / 0; the serial coders gated) | green (10-28, 245 / 0) | round trip; ffmpeg reads our files |
+| FLAC v1 (`EncodeStreamAsync` verbatim streams) | green | green | green | green (10-28, 63 / 0) | green (10-28, 11 / 0; the serial coders gated) | green (10-28, 245 / 0) | round trip; ffmpeg reads our files |
+| FLAC encode (clean-room, levels 0..8) and full decode | green (11-08: encoder 65 FFmpeg fixtures lossless, metadata equal, frames 0.80 to 1.00 x FFmpeg's; decoder 30 fixtures) | green (11-09: the encoder writes the same file as the CPU) | green (11-09: same) | green (11-16, full class) | not recorded | not recorded | libFLAC decodes our files to the source samples; the decoder equals the source on every fixture and checks the MD5 (decoder: CPU accelerator, 11-08) |
+| MP3 encode / decode | green (11-08: decoder bit-exact with minimp3 on 21 fixtures; encoder + decoder tests 13 / 13) | green (11-16 gate) | green (11-16 gate) | green (11-16, full class) | not recorded | not recorded | FFmpeg decodes every encoder file without errors and gaplessly (exact input length), SNR 37 to 64 dB on test tones (CBR); decoder 114 to 125 dB SNR against FFmpeg 8.1 |
 | Opus decode on the accelerator (OpusDecoderGpu) | green (10-29; also Velocity) | green (10-29, ILGPU 5.4.12-local.8) | green (10-29, ILGPU 5.4.12-local.8) | green (10-29, ILGPU 5.4.12-local.9, full lane 1150 / 0) | n/a (serial stream coders) | green (10-29, full lane 1150 / 0) | **libopus 1.5.2** (fixed point, built from source; TestData/Opus, scripts/audio/make_opus_fixtures.py): all 21 streams equal libopus on every packet, PCM and final range: SILK (losses / PLC, comfort noise, DTX, FEC, stereo / mono and bandwidth switches, 10..60 ms), CELT-only (2.5 / 5 / 10 / 20 ms, mono / stereo, 12..128 kb/s, transients, losses), hybrid (SWB / FB, 10 / 20 ms, losses) and a SILK / hybrid / CELT switching stream (redundancy frames, transitions). CELT decoder: Data |
 | Opus encode on the accelerator (OpusEncoderGpu, CELT-only) | green (10-29, 98 / 0; also Velocity 98 / 0) | green (10-29, ILGPU 5.4.12-local.8) | green (10-29, ILGPU 5.4.12-local.8) | green (10-29, ILGPU 5.4.12-local.9: the 4 CELT stage kernels compile in Chrome, the 49 libopus streams 59 s) | n/a (serial stream coders) | green (10-29, full lane 1150 / 0) | **libopus 1.5.2** (fixed point; TestData/OpusEnc, scripts/audio/make_opus_encoder_fixtures.py): 49 streams, every packet byte and final range equal (2.5..120 ms, CBR / VBR / CVBR, complexity 0..9, 8..48 kHz, VOIP / low delay, forced mono, too-small packets); plus the Opus layer alone against the recorded input and CTLs of every libopus CELT call. CELT encoder: Data |
 | Opus CELT / range coder GPU parts | green | green | green | green (10-28, Opus 7 / 0, CELT 10 / 0) | green (10-28, Opus 75 / 0, CELT 10 / 0) | green (10-28, Opus 77 / 0, CELT 17 / 0) | Concentus |
@@ -89,7 +103,9 @@ lanes (VP9 batch encode at unaligned sizes).
 
 ## Notes
 
-- **VP9 WebGPU device hang (open, workaround in place, TJ-approved 2026-10-29).** In Chrome WebGPU (D3D12, NVIDIA RTX
+- **Open (2026-11-16 gate):** `Vp9Decode_EveryFrame` on Wasm exceeds its 1 h test limit; 5 Opus tests skip when Concentus
+  picks another mode.
+- **VP9 WebGPU device hang (the decoder trigger is fixed; the encoder's drain workaround stays, TJ-approved 2026-10-29).** In Chrome WebGPU (D3D12, NVIDIA RTX
   4070), a `Vp9EntropyStepKernel` queued while `Vp9EncodeWavefrontGroupKernel` (the single-dispatch barrier kernel of the
   batch encode) still runs leaves the device in a state where a LATER launch (the next encoder's first
   `Vp9EncodeWavefrontBatchKernel`) dies with DXGI_ERROR_DEVICE_HUNG. Found with Data by 9 pair-run probes (2026-10-28):
@@ -148,10 +164,10 @@ lanes (VP9 batch encode at unaligned sizes).
 - **ILGPU 5.4.6-local.2** (2026-10-26): integer divisions no longer hoisted out of their guards (Wasm traps), WebGL sends a
   program's GLSL once (not per dispatch) and refuses kernels over the device's Transform Feedback varying limit at load,
   SpawnJS 3.0.5-local.1 (geometric message growth: the WebGL out-of-memory).
-- **ILGPU 5.4.5** (released 2026-10-25; this repo is on 5.4.5-local.2) carries the fixes the browser lanes needed: WGSL loop back-edge moves
+- **ILGPU 5.4.5** (released 2026-10-25; this repo is on 5.4.34 now) carries the fixes the browser lanes needed: WGSL loop back-edge moves
   (the lossless WebP encode hang), sub-view `.Length` (VP8 / VP9 kernels failed WGSL validation; WebGL silently used the
   whole buffer's length), WebGL inner-loop exits, struct-parameter bindings, pinned host copies, and an O(N^2) memory
-  peak in the WGSL generator. The WebGL and Wasm lanes have not been rerun on it yet.
+  peak in the WGSL generator.
 - **Oversized kernels** are tracked in [Plans/PLAN-Oversized-Kernels.md](../Plans/PLAN-Oversized-Kernels.md): nine kernels
   over the browser compile budget, the split strategy, and the finding that the cost comes from unrolled loop nests.
 - Before 2026-10-25 the **PlaywrightMultiTest** browser runner reported fake passes for every test after a page's .NET

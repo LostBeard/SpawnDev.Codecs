@@ -13,6 +13,9 @@ overloads). It does no codec math, no per-pixel or per-sample loops, no entropy 
 | Container | RIFF, PNG chunks and CRCs, JFIF segments, OBUs, Ogg pages | kernels, usually one thread per output byte |
 | Coordination | buffers, launch order, the final readback | host |
 
+Container writers that only frame bytes that are already encoded into a caller's `Stream` (`IvfWriter`, `OggOpusWriter`,
+`WebMWriter`, `Mp4Writer`) run on the host; they never read or change a sample.
+
 Why: in Blazor WebAssembly the .NET runtime shares the page's thread, so CPU work freezes the page; every host / device
 round trip costs latency on every backend; and one implementation on the device runs unchanged on all six backends.
 
@@ -24,6 +27,16 @@ stage whose work grows with the input is **resumable**: it processes a bounded c
 few thousand tokens, one deflate block) and keeps its state (bit-writer position, coder state, cursors) in device
 buffers between launches. The host knows the number of launches in advance or reads one done flag per batch; launch
 loops go through `LaunchPacer`, which flushes and awaits at intervals so the browser's command queue stays short.
+A few heavy serial threads that the GPU packs into one thread group run on one multiprocessor; `SerialThreadPlacement`
+spreads such threads over groups (the VP9 key frame wavefront went from 59.8 to 43 ms on CUDA).
+
+## Kernel loading
+
+Codec constructors compile nothing. Each codec loads its kernels once, lazily, from its first async entry point, through
+awaited loads that yield to the browser's event loop first (on WebGPU the pipelines are built with
+`createComputePipelineAsync`), so a page does not freeze while a shader compiles. `WarmUpAsync` loads a codec's kernels
+ahead of the first real call; a test (`Codecs_ConstructorsCompileNothing_WarmUpCompilesWhatTheyUse`) fails when a
+constructor compiles again.
 
 ## The browser shader-compile budget
 
@@ -43,7 +56,7 @@ The kernels over budget and the plan for each are in [Plans/PLAN-Oversized-Kerne
 ## Library rules this code follows
 
 - **Fix the library, not the consumer.** A bug found here in SpawnDev.ILGPU (the WGSL / GLSL code generators, copies,
-  bindings) is fixed there, with a test, and this repo moves to the fixed version. Several ILGPU fixes of 2026-10 came
+  bindings) is fixed there, with a test, and this repo moves to the fixed version. Many ILGPU fixes since 2026-10 came
   from these codecs.
 - **No CPU fallback branches.** The same kernels run on every backend; a backend that cannot run a codec (WebGL without
   atomics or scatter stores) skips it explicitly in the tests rather than taking a different path.

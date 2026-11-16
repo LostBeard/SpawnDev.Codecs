@@ -6,7 +6,7 @@ This project incorporates, consults, or is structurally inspired by the followin
 
 ---
 
-## Opus reference implementation - libopus (planned for Phase 1)
+## Opus reference implementation - libopus
 
 **Copyright:** © 2001-2011 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin, Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo
 **License:** BSD 3-Clause (Xiph.Org license)
@@ -54,29 +54,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Concentus is a BSD-3-Clause pure-C# port of libopus 1.1.2.
 
-**Status as of CELT decoder + Opus encoder slices:** SpawnDev.Codecs depends
-on Concentus at runtime through
-`<PackageReference Include="Concentus" Version="2.2.2" />` in
-`SpawnDev.Codecs.csproj`. The CELT decode path in
-`Audio/Opus/Celt/CeltDecoder.cs` and the top-level
-`Audio/Opus/OpusEncoder.cs` both delegate the heavy lifting to the Concentus
-implementation:
-
-* **CELT decode:** range coding, bit allocation, energy decode, PVQ shape
-  decode, IMDCT, comb-filter, de-emphasis.
-* **Opus encode:** SILK / CELT / Hybrid mode selection, rate control, full
-  per-frame analysis + entropy coding, packet framing.
-
-This delivers bit-exact-vs-libopus CELT decode and a fully working RFC 6716
-Opus encoder today, and gives a verifiable oracle to compare future
-hand-ports against.
-
-The local files in `Audio/Opus/Celt/` (`CeltConstants`, `CeltMode`,
-`CeltDecoderState`) and `Audio/Opus/Silk/` scaffold the eventual hand-ports:
-when the per-module hand-ports replace the Concentus delegation inside
-`CeltDecoder` and `OpusEncoder`, the public API surface and the
-`OpusDecoder` / `OpusEncoder` integration do not change. BSD-3 terms
-propagate to all consuming distributions of SpawnDev.Codecs.
+**Status:** Concentus is a dependency of `SpawnDev.Codecs.References` only (`<PackageReference Include="Concentus" Version="2.2.2" />`),
+not of the `SpawnDev.Codecs` package. The CPU Opus reference decoder and encoder in `SpawnDev.Codecs.References/Audio/Opus` use it
+(CELT decode; Opus encode with SILK / CELT / hybrid mode selection, rate control and packet framing). They are the
+oracle that the GPU classes `OpusDecoderGpu` and `OpusEncoderGpu` are checked against. BSD-3 terms apply to consumers of
+`SpawnDev.Codecs.References`.
 
 ```
 Redistribution and use in source and binary forms, with or without
@@ -116,7 +98,7 @@ SpawnDev.Codecs.Opus is an independent implementation of the Opus codec as defin
 
 ---
 
-## RFC 6386 (VP8 codec specification) - planned for Phase 2
+## RFC 6386 (VP8 codec specification)
 
 **Authors:** Jim Bankoski, Paul Wilkins, Yaowu Xu
 **Publisher:** IETF
@@ -223,7 +205,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---
 
-## libaom - reference AV1 implementation (planned for later phase)
+## libaom - reference AV1 implementation
 
 **Copyright:** © 2018-present, Alliance for Open Media
 **License:** BSD 2-Clause + patent grant
@@ -233,7 +215,7 @@ AV1 is released under the AOMedia patent license - patent-clean for royalty-free
 
 ---
 
-## libFLAC / libvorbis - reference FLAC and Vorbis implementations (planned for later phase)
+## libFLAC / libvorbis - reference FLAC and Vorbis implementations
 
 **Copyright:** © Xiph.Org Foundation
 **License:** BSD 3-Clause
@@ -335,3 +317,8 @@ expired in 2017). Patent-encumbered codecs (H.264, H.265, AAC) are out of scope 
 platform encoders via SpawnDev.MultiMedia.
 
 For license questions or corrections, open an issue at https://github.com/LostBeard/SpawnDev.Codecs/issues.
+
+No FFmpeg or LAME code is included. ffmpeg is used only as a black-box oracle (its output is observed, never its source).
+Code that had been ported from FFmpeg 8.1 (LGPL) was removed on 2026-11-08; the Ogg Opus writer and encoder, the WebM
+writer and the FLAC encoder were rewritten clean-room from the public specifications, and the MP3 encoder is written from
+ISO/IEC 11172-3 and 13818-3.

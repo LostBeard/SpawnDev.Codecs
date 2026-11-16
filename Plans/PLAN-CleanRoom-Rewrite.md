@@ -52,6 +52,8 @@ Observable behaviour to match (from the fixtures in TestData/OggOpus, made by `s
   `Lookahead` as the pre-skip (at 48 kHz), and produces the same page layout (page count, granules, flags), OpusHead and
   OpusTags as each fixture for the same input; its packets need not equal the fixture's (different Opus encoder).
 Acceptance tests: `CleanRoomPending/CodecsTestBase.OggOpusTests.cs` (move it back to UnitTests/).
+Status (2026-11-08): done (commit 7c0706b). `Container/Ogg/OggOpusWriter.cs`, `Audio/Opus/OggOpusEncoder.cs`,
+`PcmConvertKernels`; the parked test is back in `UnitTests/` with two new ones (page-layout edge cases, tail packets).
 
 ## Component B: WebM writer
 Specs: the Matroska specification (RFC 9559, EBML RFC 8794) and the WebM container guidelines (webmproject.org).
