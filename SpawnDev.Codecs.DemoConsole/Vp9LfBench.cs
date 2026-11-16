@@ -84,6 +84,15 @@ internal static class Vp9LfBench
                 if (first && pipe.StageTimes!.TryGetValue("loop filter", out var lf0)) firstInDecode = lf0.MaxMs;
                 pipe.StageTimes = null;
                 if (h.ShowExistingFrame || h.LoopFilter.Level == 0) continue;
+                if (timed == 0)
+                {
+                    // untimed warm-up of both variants: the first launches carry one-time costs (Velocity's adaptive team
+                    // count measures every wavefront grid size and starts its worker teams; Data, 2026-11-16: the worst
+                    // frame was always frame 0 rep 0), so "worst" below is steady state
+                    pipe.RunLoopFilterForBench(h, false, skipPasses);
+                    pipe.RunLoopFilterForBench(h, true, skipPasses);
+                    await acc.SynchronizeAsync();
+                }
                 for (int pass = 0; pass < 2; pass++)
                 {
                     bool off = pass == 1;
