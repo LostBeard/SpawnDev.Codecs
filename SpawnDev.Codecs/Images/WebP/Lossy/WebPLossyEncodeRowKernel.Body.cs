@@ -119,21 +119,22 @@ internal static partial class WebPLossyEncodeRowKernel
         return R;
     }
 
+    // top / left: the nz context arrays (9 ints each) this call may overwrite (entries 4..7, all rebuilt by NzToBytes)
     private static int GetCostUV(ArrayView<int> t, ArrayView<int> coeffs, ArrayView<int> lc, ArrayView<int> nzRow, int x,
-        ArrayView<int> si, int uvLevels)
+        ArrayView<int> si, int uvLevels, int top, int left)
     {
-        NzToBytes(nzRow, x, si);
+        NzToBytes(nzRow, x, si, top, left);
         int R = 0;
         for (int ch = 0; ch <= 2; ch += 2)
             for (int y = 0; y < 2; ++y)
                 for (int xx = 0; xx < 2; ++xx)
                 {
-                    int ctx = si[ITopNz + 4 + ch + xx] + si[ILeftNz + 4 + ch + y];
+                    int ctx = si[top + 4 + ch + xx] + si[left + 4 + ch + y];
                     int o = uvLevels + (ch * 2 + xx + y * 2) * 16;
                     R += GetResidualCost(t, coeffs, lc, ctx, 2, 0, si, o);
                     int nzb = LastNonZero(si, o) >= 0 ? 1 : 0;
-                    si[ITopNz + 4 + ch + xx] = nzb;
-                    si[ILeftNz + 4 + ch + y] = nzb;
+                    si[top + 4 + ch + xx] = nzb;
+                    si[left + 4 + ch + y] = nzb;
                 }
         return R;
     }
@@ -201,13 +202,14 @@ internal static partial class WebPLossyEncodeRowKernel
         return (sign ? -V : V) >> 1;
     }
 
-    private static void CorrectDCValues(ArrayView<int> si, ArrayView<int> topDerr, int x, ArrayView<int> meta, int seg, int derrOut)
+    // uvTmp: the transformed coefficients (128 ints of si, one set per UV mode lane); ILeftDerr / topDerr: read only
+    private static void CorrectDCValues(ArrayView<int> si, ArrayView<int> topDerr, int x, ArrayView<int> meta, int seg, int derrOut, int uvTmp)
     {
         for (int ch = 0; ch <= 1; ++ch)
         {
             int topO = x * 4 + ch * 2;
             int leftO = ILeftDerr + ch * 2;
-            int c = IUvTmp + ch * 4 * 16;
+            int c = uvTmp + ch * 4 * 16;
             si[c + 0] = (short)(si[c + 0] + ((7 * topDerr[topO + 0] + 8 * si[leftO + 0]) >> 3));
             int err0 = QuantizeSingle(si, c + 0, meta, seg);
             si[c + 16] = (short)(si[c + 16] + ((7 * topDerr[topO + 1] + 8 * err0) >> 3));
@@ -222,28 +224,29 @@ internal static partial class WebPLossyEncodeRowKernel
         }
     }
 
+    // uvTmp (128) / t16 (16): ints of si (one set per UV mode lane)
     private static uint ReconstructUV(ArrayView<byte> sb, ArrayView<int> si, ArrayView<int> meta, ArrayView<int> t,
-        ArrayView<int> topDerr, int x, bool errDiff, int seg, int uvLevels, int derrOut, int dst, int mode)
+        ArrayView<int> topDerr, int x, bool errDiff, int seg, int uvLevels, int derrOut, int dst, int mode, int uvTmp, int t16)
     {
         int refO = BPred + UVOff(mode);
-        var tmpV = si.SubView(IT16, 16);
+        var tmpV = si.SubView(t16, 16);
         uint nz = 0;
         for (int n = 0; n < 8; n += 2)
         {
-            FTransform(sb, BIn + 16 + ScanUV(n), sb, refO + ScanUV(n), si, IUvTmp + n * 16, tmpV);
-            FTransform(sb, BIn + 16 + ScanUV(n) + 4, sb, refO + ScanUV(n) + 4, si, IUvTmp + (n + 1) * 16, tmpV);
+            FTransform(sb, BIn + 16 + ScanUV(n), sb, refO + ScanUV(n), si, uvTmp + n * 16, tmpV);
+            FTransform(sb, BIn + 16 + ScanUV(n) + 4, sb, refO + ScanUV(n) + 4, si, uvTmp + (n + 1) * 16, tmpV);
         }
-        if (errDiff) CorrectDCValues(si, topDerr, x, meta, seg, derrOut);
+        if (errDiff) CorrectDCValues(si, topDerr, x, meta, seg, derrOut, uvTmp);
         for (int n = 0; n < 8; n += 2)
         {
-            uint q2 = (uint)QuantizeBlock(si, IUvTmp + n * 16, si, uvLevels + n * 16, meta, seg, 2, t)
-                    | ((uint)QuantizeBlock(si, IUvTmp + (n + 1) * 16, si, uvLevels + (n + 1) * 16, meta, seg, 2, t) << 1);
+            uint q2 = (uint)QuantizeBlock(si, uvTmp + n * 16, si, uvLevels + n * 16, meta, seg, 2, t)
+                    | ((uint)QuantizeBlock(si, uvTmp + (n + 1) * 16, si, uvLevels + (n + 1) * 16, meta, seg, 2, t) << 1);
             nz |= q2 << n;
         }
         for (int n = 0; n < 8; n += 2)
         {
-            ITransformOne(sb, refO + ScanUV(n), si, IUvTmp + n * 16, sb, dst + 16 + ScanUV(n), tmpV);
-            ITransformOne(sb, refO + ScanUV(n) + 4, si, IUvTmp + (n + 1) * 16, sb, dst + 16 + ScanUV(n) + 4, tmpV);
+            ITransformOne(sb, refO + ScanUV(n), si, uvTmp + n * 16, sb, dst + 16 + ScanUV(n), tmpV);
+            ITransformOne(sb, refO + ScanUV(n) + 4, si, uvTmp + (n + 1) * 16, sb, dst + 16 + ScanUV(n) + 4, tmpV);
         }
         return nz << 16;
     }

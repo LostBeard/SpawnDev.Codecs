@@ -267,42 +267,57 @@ internal static partial class WebPLossyEncodeRowKernel
 
     // ------------------------------------------------------------------ PickBestUV
 
-    private static void PickBestUV(ArrayView<byte> sb, ArrayView<int> si, ArrayView<int> meta, ArrayView<int> t,
+    /// <summary>Lanes of the UV stage's thread group: one per mode.</summary>
+    public const int UVLanes = 4;
+
+    // a lane's chroma reconstruction buffer: 8 rows of BPS, chroma at columns 16..31 (the BOutA layout)
+    private static int UVLaneRecon(int mode) => BUVLanes + mode * 8 * BPS - 16;
+
+    /// <summary>
+    /// PickBestUV by a thread group of <see cref="UVLanes"/> lanes (every lane calls it; one barrier inside): lane m
+    /// reconstructs and scores mode m into its own scratch (uv levels, tmps, error-diffusion output, nz contexts, the
+    /// chroma reconstruction at <see cref="UVLaneRecon"/>); lane 0 keeps the first minimum (libwebp's walk: a mode is kept
+    /// only when strictly better), copies its levels, error-diffusion values and reconstruction where libwebp's walk
+    /// leaves them, and updates the error-diffusion state. Only lane 0's <paramref name="rd"/> counts.
+    /// </summary>
+    private static void PickBestUV(int lane, ArrayView<byte> sb, ArrayView<int> si, ArrayView<int> meta, ArrayView<int> t,
         ArrayView<int> coeffs, ArrayView<int> lc, ArrayView<int> nzRow, ArrayView<int> topDerr, ArrayView<int> mbRecs,
         ref RowCtx c, ref WebPModeScore rd)
     {
         int segBase = M.Seg + c.Seg * M.SegStride;
         int lambda = meta[segBase + M.SLambdaUV];
-        int tmpDst = c.Out2Buf;
-        int dst0 = c.OutBuf;
-        int dst = dst0;
-        var rdBest = new WebPModeScore();
-        rdBest.Init();
-        int modeUv = -1;
-        for (int mode = 0; mode < 4; ++mode)
+        if (lane < 4)
         {
+            int mode = lane;
+            int lo = IUVLanes + lane * UVLaneStride;
+            int dst = UVLaneRecon(mode);
             var rdUv = new WebPModeScore();
-            rdUv.Nz = ReconstructUV(sb, si, meta, t, topDerr, c.X, c.ErrDiff, c.Seg, IUvLv, IDerrUv, tmpDst, mode);
-            rdUv.D = SSE(sb, BIn + 16, sb, tmpDst + 16, 16, 8);
+            rdUv.Nz = ReconstructUV(sb, si, meta, t, topDerr, c.X, c.ErrDiff, c.Seg, lo + UVLLevels, lo + UVLDerr, dst, mode,
+                lo + UVLTmp, lo + UVLT16);
+            rdUv.D = SSE(sb, BIn + 16, sb, dst + 16, 16, 8);
             rdUv.SD = 0;
             rdUv.H = t[T.FixedCostsUV + mode];
-            rdUv.R = GetCostUV(t, coeffs, lc, nzRow, c.X, si, IUvLv);
-            bool flatPenalty = (mode > 0) & IsFlat(si, IUvLv, 8, 2);
+            rdUv.R = GetCostUV(t, coeffs, lc, nzRow, c.X, si, lo + UVLLevels, lo + UVLTopNz, lo + UVLLeftNz);
+            bool flatPenalty = (mode > 0) & IsFlat(si, lo + UVLLevels, 8, 2);
             if (flatPenalty) rdUv.R += 140 * 8;
             rdUv.SetRD(lambda);
-            bool better = (mode == 0) | (rdUv.Score < rdBest.Score);
-            if (better)
-            {
-                rdBest = rdUv;
-                modeUv = mode;
-                for (int i = 0; i < 128; ++i) si[IRdA + LUv + i] = si[IUvLv + i];
-                if (c.ErrDiff) for (int i = 0; i < 6; ++i) si[IDerrA + i] = si[IDerrUv + i];
-                int sw = dst; dst = tmpDst; tmpDst = sw;
-            }
+            StoreLaneScore(si, lo + UVLScore, ref rdUv);
         }
+        Group.Barrier();   // the 4 modes are scored (the error-diffusion state they read is updated only below)
+        if (lane != 0) return;
+        int modeUv = 0;
+        var rdBest = LoadLaneScore(si, IUVLanes + UVLScore);
+        for (int mode = 1; mode < 4; ++mode)
+        {
+            var r = LoadLaneScore(si, IUVLanes + mode * UVLaneStride + UVLScore);
+            if (r.Score < rdBest.Score) { rdBest = r; modeUv = mode; }
+        }
+        int blo = IUVLanes + modeUv * UVLaneStride;
+        for (int i = 0; i < 128; ++i) si[IRdA + LUv + i] = si[blo + UVLLevels + i];
+        if (c.ErrDiff) for (int i = 0; i < 6; ++i) si[IDerrA + i] = si[blo + UVLDerr + i];
         mbRecs[(c.Y * c.MbW + c.X) * M.MbStride + M.MbUVMode] = modeUv;
         rd.D += rdBest.D; rd.SD += rdBest.SD; rd.R += rdBest.R; rd.H += rdBest.H; rd.Nz |= rdBest.Nz; rd.Score += rdBest.Score;
-        if (dst != dst0) CopyBlock(sb, dst + 16, dst0 + 16, 16, 8);
+        CopyBlock(sb, UVLaneRecon(modeUv) + 16, c.OutBuf + 16, 16, 8);
         if (c.ErrDiff)
         {
             for (int ch = 0; ch <= 1; ++ch)

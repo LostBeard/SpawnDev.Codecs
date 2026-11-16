@@ -86,6 +86,8 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
     private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _intra4 = null!;
     // the Intra16 stage: one explicit group, a lane per mode (WebPLossyEncodeRowKernel.I16Lanes)
     private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _intra16 = null!;
+    // the UV stage: one explicit group, a lane per mode (WebPLossyEncodeRowKernel.UVLanes)
+    private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _uv = null!;
 
     /// <summary>Names of <see cref="_stages"/>, in launch order (diagnostics: <see cref="Trace"/>).</summary>
     // no digits: webp-anim-bench folds digits into '#' when it groups trace names
@@ -153,9 +155,11 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
             await LoadStage(a, WebPLossyEncodeRowKernel.PrepareStage),
             null!,   // Intra16Stage: grouped, _intra16
             null!,   // Intra4Stage: grouped, _intra4
-            await LoadStage(a, WebPLossyEncodeRowKernel.UVStage),
+            null!,   // UVStage: grouped, _uv
             await LoadStage(a, WebPLossyEncodeRowKernel.RecordStage),
         };
+        _uv = await a.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>,
+            ArrayView<int>, ArrayView<int>, int, int>(WebPLossyEncodeRowKernel.UVStage);
         _intra16 = await a.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, ArrayView<int>, int, int>(WebPLossyEncodeRowKernel.Intra16Stage);
         _intra4 = await a.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>,
@@ -396,6 +400,7 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
                     for (int s = 0; s < _stages.Length; s++)
                     {
                         if (s == 1) _intra16(new KernelConfig(1, WebPLossyEncodeRowKernel.I16Lanes), yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
+                        else if (s == 3) _uv(new KernelConfig(1, WebPLossyEncodeRowKernel.UVLanes), yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
                         else if (s == 2) _intra4(new KernelConfig(1, WebPLossyEncodeRowKernel.I4Lanes), yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
                         else _stages[s](1, yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
                         if (trace != null) { await _accelerator.SynchronizeAsync(); trace(StageNames[s]); }

@@ -203,12 +203,14 @@ internal static partial class WebPLossyEncodeRowKernel
         }
     }
 
-    /// <summary>Stage 4: PickBestUV.</summary>
+    /// <summary>Stage 4: PickBestUV, explicitly grouped: one group of <see cref="UVLanes"/> lanes (a lane per mode).</summary>
     public static void UVStage(
-        Index1D _, ArrayView<byte> yuv, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state,
+        ArrayView<byte> yuv, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state,
         ArrayView<int> meta, ArrayView<int> t, ArrayView<int> tokens, int row, int x)
     {
-        if (meta[M.Error] != 0) return;
+        // the error check before the barrier in PickBestUV is made uniform with a group-wide OR (WGSL)
+        if (Group.BarrierOr(meta[M.Error] != 0)) return;
+        int lane = Group.IdxX;
         int mbW = meta[M.MbW];
         var sb = work.SubView(meta[M.WorkScratchOff], ByteScratchSize);
         var nzRow = state.SubView(meta[M.StNzOff], mbW + 1);
@@ -218,9 +220,12 @@ internal static partial class WebPLossyEncodeRowKernel
         var si = state.SubView(meta[M.StScratchOff], IntScratchSize);
         var c = MakeCtx(meta, mbRecs, row, x);
         var rd = LoadScore(si);
-        PickBestUV(sb, si, meta, t, coeffs, lc, nzRow, topDerr, mbRecs, ref c, ref rd);
-        SaveScore(si, ref rd);
-        SaveOut(meta, ref c);
+        PickBestUV(lane, sb, si, meta, t, coeffs, lc, nzRow, topDerr, mbRecs, ref c, ref rd);
+        if (lane == 0)
+        {
+            SaveScore(si, ref rd);
+            SaveOut(meta, ref c);
+        }
     }
 
     /// <summary>Stage 5: skip flag, RecordTokens, the partition-0 size, VP8IteratorSaveBoundary.</summary>

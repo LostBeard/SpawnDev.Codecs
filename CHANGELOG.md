@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### Lossy WebP: the Intra4 and Intra16 mode decisions in parallel (2026-11-15)
+### Lossy WebP: the Intra4, Intra16 and UV mode decisions in parallel (2026-11-15 / 16)
 
 - `PickBestIntra4` runs as one thread group per macroblock with a lane per mode: for each 4x4 block the 10 modes are
   reconstructed and scored at once (each lane in its own scratch), and one lane keeps libwebp's choice - the first
@@ -10,7 +10,9 @@
   as libwebp (every lossy test on the CPU accelerator, Velocity, CUDA, OpenCL, WebGPU, Wasm). SpawnGen's LTX frames
   (512x352, q80, RTX 4070): the Intra4 stage 3.8x faster (334 -> 87 ms per frame). `PickBestIntra16` likewise, a lane
   per mode (4); lane 0 replays libwebp's walk over the results (the flatness that doubles D / SD is a prefix over the
-  modes): 238 -> 89 ms per frame. Same bytes on every backend. UV, the probability refresh and the ALPH plane are next.
+  modes): 238 -> 89 ms per frame. `PickBestUV` likewise (4 lanes; the error-diffusion state is read by the lanes and
+  updated by lane 0 after the choice): 103 -> 41 ms per frame. Same bytes on every backend. The macroblock prepare stage
+  (the probability refresh) and the ALPH plane are next.
 
 ### VP9 decoder: the loop filter's masks in a parallel pass (2026-11-15)
 

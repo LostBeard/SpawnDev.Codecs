@@ -30,7 +30,9 @@ internal static partial class WebPLossyEncodeRowKernel
     public const int BI4Lanes = 3456;
     // BI16Lanes: the 16x16 reconstruction of each Intra16 mode lane (PickBestIntra16: 4 blocks, 2 per 16-row band)
     public const int BI16Lanes = BI4Lanes + 2 * 4 * BPS;
-    public const int ByteScratchSize = BI16Lanes + 2 * 16 * BPS;
+    // BUVLanes: each UV mode lane's chroma reconstruction (PickBestUV: 8 rows each, chroma at columns 16..31 as in BOutA)
+    public const int BUVLanes = BI16Lanes + 2 * 16 * BPS;
+    public const int ByteScratchSize = BUVLanes + 4 * 8 * BPS;
     // prediction cache layout inside BPred (vp8i_enc.h)
     private const int I16DC16 = 0, I16TM16 = 16, I16VE16 = 16 * BPS, I16HE16 = 16 * BPS + 16;
     private const int C8DC8 = 2 * 16 * BPS, C8TM8 = C8DC8 + 16, C8VE8 = 2 * 16 * BPS + 8 * BPS, C8HE8 = C8VE8 + 16;
@@ -64,7 +66,13 @@ internal static partial class WebPLossyEncodeRowKernel
     public const int II16Lanes = II4Lanes + 10 * I4LaneStride;
     public const int I16LaneStride = 768, I16LSlot = 0, I16LTmp = 400, I16LDc = 656, I16LT16 = 672, I16LDisto = 688,
         I16LTopNz = 704, I16LLeftNz = 713, I16LScore = 722, I16LFlat = 733;
-    public const int IntScratchSize = II16Lanes + 4 * I16LaneStride;
+    // PickBestUV's mode lanes, UVLaneStride ints each: uv levels (128), the transform tmp (128), the reconstruction tmp
+    // (16), the error-diffusion output (6), top / left nz contexts (9 each), the ModeScore. Read-only state they use:
+    // ILeftDerr, topDerr, nzRow (lane 0 updates them after the choice, past the barrier).
+    public const int IUVLanes = II16Lanes + 4 * I16LaneStride;
+    public const int UVLaneStride = 320, UVLLevels = 0, UVLTmp = 128, UVLT16 = 256, UVLDerr = 272, UVLTopNz = 278,
+        UVLLeftNz = 287, UVLScore = 296;
+    public const int IntScratchSize = IUVLanes + 4 * UVLaneStride;
     // level-array offsets inside a ModeScore slot
     private const int LDc = 0, LAc = 16, LUv = 272;
 
