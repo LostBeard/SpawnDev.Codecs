@@ -36,56 +36,69 @@ internal static partial class WebPLossyEncodeRowKernel
 
     // ------------------------------------------------------------------ PickBestIntra16
 
-    private static void PickBestIntra16(ArrayView<byte> sb, ArrayView<int> si, ArrayView<int> meta, ArrayView<int> t,
+    /// <summary>Lanes of the Intra16 stage's thread group: one per mode.</summary>
+    public const int I16Lanes = 4;
+
+    private static int I16LaneRecon(int mode) => BI16Lanes + (mode >> 1) * 16 * BPS + (mode & 1) * 16;
+
+    /// <summary>
+    /// PickBestIntra16 by a thread group of <see cref="I16Lanes"/> lanes (every lane calls it; one barrier inside): lane m
+    /// reconstructs and scores mode m into its own scratch (a level slot, tmps, nz contexts, the 16x16 reconstruction at
+    /// <see cref="I16LaneRecon"/>); then lane 0 replays libwebp's walk over the 4 results in order - the flatness that
+    /// doubles D / SD holds while every mode so far was flat (a prefix AND), the first minimum wins - copies the winner's
+    /// levels into slot A and its reconstruction into the output buffer (libwebp swaps the two output buffers instead:
+    /// the contents later stages read are the same). Only lane 0's <paramref name="rd"/> / mode count.
+    /// </summary>
+    private static void PickBestIntra16(int lane, ArrayView<byte> sb, ArrayView<int> si, ArrayView<int> meta, ArrayView<int> t,
         ArrayView<int> coeffs, ArrayView<int> lc, ArrayView<int> nzRow, ArrayView<byte> preds, ArrayView<int> mbRecs,
         ref RowCtx c, ref WebPModeScore rd, ref int rdModeI16)
     {
         int segBase = M.Seg + c.Seg * M.SegStride;
         int lambda = meta[segBase + M.SLambdaI16];
         int tlambda = meta[segBase + M.STLambda];
-        var tmpV = si.SubView(IT16b, 16);
+        if (lane < 4)
+        {
+            int mode = lane;
+            int lo = II16Lanes + lane * I16LaneStride;
+            int dst = I16LaneRecon(mode);
+            var cur = new WebPModeScore();
+            cur.Nz = ReconstructIntra16(sb, si, meta, t, c.Seg, lo + I16LSlot, dst, mode, lo + I16LTmp, lo + I16LDc, lo + I16LT16);
+            cur.D = SSE(sb, BIn, sb, dst, 16, 16);
+            cur.SD = tlambda != 0 ? (tlambda * Disto16x16(sb, BIn, sb, dst, t, si.SubView(lo + I16LDisto, 16)) + 128) >> 8 : 0;
+            cur.H = t[T.FixedCostsI16 + mode];
+            // left[8] (the left DC block's nz) is NOT rebuilt by NzToBytes: it is state across macroblocks (zeroed at a
+            // row start, set by RecordTokens) - give the lane's copy the shared value (it read garbage until 2026-11-15)
+            si[lo + I16LLeftNz + 8] = si[ILeftNz + 8];
+            cur.R = GetCostLuma16(t, coeffs, lc, nzRow, c.X, si, lo + I16LSlot, lo + I16LTopNz, lo + I16LLeftNz);
+            StoreLaneScore(si, lo + I16LScore, ref cur);
+            si[lo + I16LFlat] = IsFlat(si, lo + I16LSlot + LAc, 16, 0) ? 1 : 0;
+        }
+        Group.Barrier();   // the 4 modes are scored
+        if (lane != 0) return;
         bool isFlat = IsFlatSource16(sb);
-        // rd (slot A) and rd_tmp (slot B); `bestIsA` tracks libwebp's rd_best pointer, the other slot is rd_cur.
-        var sA = rd;   // rd as initialised by VP8Decimate (score = MAX_COST)
-        var sB = new WebPModeScore();
-        sB.Init();
-        int modeA = -1, modeB = -1;
-        bool bestIsA = true;
+        int best = 0;
+        var rdBest = new WebPModeScore();
         for (int mode = 0; mode < 4; ++mode)
         {
-            int curSlot = bestIsA ? IRdB : IRdA;
-            var cur = new WebPModeScore();
-            int tmpDst = c.Out2Buf;
-            cur.Nz = ReconstructIntra16(sb, si, meta, t, c.Seg, curSlot, tmpDst, mode);
-            cur.D = SSE(sb, BIn, sb, tmpDst, 16, 16);
-            cur.SD = tlambda != 0 ? (tlambda * Disto16x16(sb, BIn, sb, tmpDst, t, tmpV) + 128) >> 8 : 0;
-            cur.H = t[T.FixedCostsI16 + mode];
-            cur.R = GetCostLuma16(t, coeffs, lc, nzRow, c.X, si, curSlot);
+            int lo = II16Lanes + mode * I16LaneStride;
+            var cur = LoadLaneScore(si, lo + I16LScore);
             if (isFlat)
             {
-                isFlat = IsFlat(si, curSlot + LAc, 16, 0);
+                isFlat = si[lo + I16LFlat] != 0;
                 if (isFlat) { cur.D *= 2; cur.SD *= 2; }
             }
             cur.SetRD(lambda);
-            long bestScore = bestIsA ? sA.Score : sB.Score;
-            bool better = (mode == 0) | (cur.Score < bestScore);
-            // store cur into its slot's scalars
-            if (bestIsA) { sB = cur; modeB = mode; } else { sA = cur; modeA = mode; }
-            if (better)
+            if ((mode == 0) | (cur.Score < rdBest.Score))
             {
-                bestIsA = !bestIsA;
-                SwapOut(ref c);
+                rdBest = cur;
+                best = mode;
             }
         }
-        if (!bestIsA)
-        {
-            // memcpy(rd, rd_best): the levels and the scalars of slot B become rd's
-            for (int i = 0; i < 400; ++i) si[IRdA + i] = si[IRdB + i];
-            sA = sB;
-            modeA = modeB;
-        }
-        rd = sA;
-        rdModeI16 = modeA;
+        int blo = II16Lanes + best * I16LaneStride + I16LSlot;
+        for (int i = 0; i < 400; ++i) si[IRdA + i] = si[blo + i];
+        CopyBlock(sb, I16LaneRecon(best), c.OutBuf, 16, 16);
+        rd = rdBest;
+        rdModeI16 = best;
         rd.SetRD(meta[segBase + M.SLambdaMode]);
         SetIntra16Mode(preds, ref c, rdModeI16);
         mbRecs[(c.Y * c.MbW + c.X) * M.MbStride + M.MbType] = 1;

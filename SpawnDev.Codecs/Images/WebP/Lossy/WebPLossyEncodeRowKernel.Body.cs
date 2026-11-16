@@ -72,16 +72,18 @@ internal static partial class WebPLossyEncodeRowKernel
 
     private static int Bit(int nz, int n) => (nz >> n) & 1;
 
-    private static void NzToBytes(ArrayView<int> nzRow, int x, ArrayView<int> si)
+    private static void NzToBytes(ArrayView<int> nzRow, int x, ArrayView<int> si) => NzToBytes(nzRow, x, si, ITopNz, ILeftNz);
+
+    private static void NzToBytes(ArrayView<int> nzRow, int x, ArrayView<int> si, int top, int left)
     {
         int tnz = nzRow[1 + x], lnz = nzRow[x];
-        si[ITopNz + 0] = Bit(tnz, 12); si[ITopNz + 1] = Bit(tnz, 13); si[ITopNz + 2] = Bit(tnz, 14); si[ITopNz + 3] = Bit(tnz, 15);
-        si[ITopNz + 4] = Bit(tnz, 18); si[ITopNz + 5] = Bit(tnz, 19);
-        si[ITopNz + 6] = Bit(tnz, 22); si[ITopNz + 7] = Bit(tnz, 23);
-        si[ITopNz + 8] = Bit(tnz, 24);
-        si[ILeftNz + 0] = Bit(lnz, 3); si[ILeftNz + 1] = Bit(lnz, 7); si[ILeftNz + 2] = Bit(lnz, 11); si[ILeftNz + 3] = Bit(lnz, 15);
-        si[ILeftNz + 4] = Bit(lnz, 17); si[ILeftNz + 5] = Bit(lnz, 19);
-        si[ILeftNz + 6] = Bit(lnz, 21); si[ILeftNz + 7] = Bit(lnz, 23);
+        si[top + 0] = Bit(tnz, 12); si[top + 1] = Bit(tnz, 13); si[top + 2] = Bit(tnz, 14); si[top + 3] = Bit(tnz, 15);
+        si[top + 4] = Bit(tnz, 18); si[top + 5] = Bit(tnz, 19);
+        si[top + 6] = Bit(tnz, 22); si[top + 7] = Bit(tnz, 23);
+        si[top + 8] = Bit(tnz, 24);
+        si[left + 0] = Bit(lnz, 3); si[left + 1] = Bit(lnz, 7); si[left + 2] = Bit(lnz, 11); si[left + 3] = Bit(lnz, 15);
+        si[left + 4] = Bit(lnz, 17); si[left + 5] = Bit(lnz, 19);
+        si[left + 6] = Bit(lnz, 21); si[left + 7] = Bit(lnz, 23);
     }
 
     private static void BytesToNz(ArrayView<int> nzRow, int x, ArrayView<int> si)
@@ -98,20 +100,21 @@ internal static partial class WebPLossyEncodeRowKernel
         nzRow[1 + x] = nz;
     }
 
+    // top / left: the nz context arrays (9 ints each) this call may overwrite (one pair per Intra16 mode lane)
     private static int GetCostLuma16(ArrayView<int> t, ArrayView<int> coeffs, ArrayView<int> lc, ArrayView<int> nzRow, int x,
-        ArrayView<int> si, int slot)
+        ArrayView<int> si, int slot, int top, int left)
     {
-        NzToBytes(nzRow, x, si);
-        int R = GetResidualCost(t, coeffs, lc, si[ITopNz + 8] + si[ILeftNz + 8], 1, 0, si, slot + LDc);
+        NzToBytes(nzRow, x, si, top, left);
+        int R = GetResidualCost(t, coeffs, lc, si[top + 8] + si[left + 8], 1, 0, si, slot + LDc);
         for (int y = 0; y < 4; ++y)
             for (int xx = 0; xx < 4; ++xx)
             {
-                int ctx = si[ITopNz + xx] + si[ILeftNz + y];
+                int ctx = si[top + xx] + si[left + y];
                 int o = slot + LAc + (xx + y * 4) * 16;
                 R += GetResidualCost(t, coeffs, lc, ctx, 0, 1, si, o);
                 int nzb = LastNonZero(si, o) >= 0 ? 1 : 0;
-                si[ITopNz + xx] = nzb;
-                si[ILeftNz + y] = nzb;
+                si[top + xx] = nzb;
+                si[left + y] = nzb;
             }
         return R;
     }
@@ -137,32 +140,33 @@ internal static partial class WebPLossyEncodeRowKernel
 
     // ================================================================== reconstruction (quant_enc.c)
 
+    // tmp (256) / dcTmp (16) / t16 (16): ints of si (one set per Intra16 mode lane)
     private static uint ReconstructIntra16(ArrayView<byte> sb, ArrayView<int> si, ArrayView<int> meta, ArrayView<int> t,
-        int seg, int slot, int dst, int mode)
+        int seg, int slot, int dst, int mode, int tmp, int dcTmp, int t16)
     {
         int refO = BPred + I16Off(mode);
-        var tmpV = si.SubView(IT16, 16);
+        var tmpV = si.SubView(t16, 16);
         uint nz = 0;
         for (int n = 0; n < 16; n += 2)
         {
-            FTransform(sb, BIn + ScanY(n), sb, refO + ScanY(n), si, ITmp + n * 16, tmpV);
-            FTransform(sb, BIn + ScanY(n) + 4, sb, refO + ScanY(n) + 4, si, ITmp + (n + 1) * 16, tmpV);
+            FTransform(sb, BIn + ScanY(n), sb, refO + ScanY(n), si, tmp + n * 16, tmpV);
+            FTransform(sb, BIn + ScanY(n) + 4, sb, refO + ScanY(n) + 4, si, tmp + (n + 1) * 16, tmpV);
         }
-        FTransformWHT(si, ITmp, si, IDcTmp, tmpV);
-        nz |= (uint)QuantizeBlock(si, IDcTmp, si, slot + LDc, meta, seg, 1, t) << 24;
+        FTransformWHT(si, tmp, si, dcTmp, tmpV);
+        nz |= (uint)QuantizeBlock(si, dcTmp, si, slot + LDc, meta, seg, 1, t) << 24;
         for (int n = 0; n < 16; n += 2)
         {
-            si[ITmp + n * 16] = 0;
-            si[ITmp + (n + 1) * 16] = 0;
-            uint q2 = (uint)QuantizeBlock(si, ITmp + n * 16, si, slot + LAc + n * 16, meta, seg, 0, t)
-                    | ((uint)QuantizeBlock(si, ITmp + (n + 1) * 16, si, slot + LAc + (n + 1) * 16, meta, seg, 0, t) << 1);
+            si[tmp + n * 16] = 0;
+            si[tmp + (n + 1) * 16] = 0;
+            uint q2 = (uint)QuantizeBlock(si, tmp + n * 16, si, slot + LAc + n * 16, meta, seg, 0, t)
+                    | ((uint)QuantizeBlock(si, tmp + (n + 1) * 16, si, slot + LAc + (n + 1) * 16, meta, seg, 0, t) << 1);
             nz |= q2 << n;
         }
-        TransformWHT(si, IDcTmp, si, ITmp, tmpV);
+        TransformWHT(si, dcTmp, si, tmp, tmpV);
         for (int n = 0; n < 16; n += 2)
         {
-            ITransformOne(sb, refO + ScanY(n), si, ITmp + n * 16, sb, dst + ScanY(n), tmpV);
-            ITransformOne(sb, refO + ScanY(n) + 4, si, ITmp + (n + 1) * 16, sb, dst + ScanY(n) + 4, tmpV);
+            ITransformOne(sb, refO + ScanY(n), si, tmp + n * 16, sb, dst + ScanY(n), tmpV);
+            ITransformOne(sb, refO + ScanY(n) + 4, si, tmp + (n + 1) * 16, sb, dst + ScanY(n) + 4, tmpV);
         }
         return nz;
     }

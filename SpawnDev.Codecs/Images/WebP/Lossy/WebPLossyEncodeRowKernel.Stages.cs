@@ -149,12 +149,15 @@ internal static partial class WebPLossyEncodeRowKernel
         SaveScore(si, ref rd);
     }
 
-    /// <summary>Stage 2: PickBestIntra16.</summary>
+    /// <summary>Stage 2: PickBestIntra16, explicitly grouped: one group of <see cref="I16Lanes"/> lanes (a lane per mode).</summary>
     public static void Intra16Stage(
-        Index1D _, ArrayView<byte> yuv, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state,
+        ArrayView<byte> yuv, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state,
         ArrayView<int> meta, ArrayView<int> t, ArrayView<int> tokens, int row, int x)
     {
-        if (meta[M.Error] != 0) return;
+        // explicitly grouped: one group of I16Lanes lanes (a lane per mode); the error check before the barrier in
+        // PickBestIntra16 is made uniform with a group-wide OR (WGSL)
+        if (Group.BarrierOr(meta[M.Error] != 0)) return;
+        int lane = Group.IdxX;
         int mbW = meta[M.MbW], mbH = meta[M.MbH];
         var preds = work.SubView(0, (4 * mbW + 1) * (4 * mbH + 1));
         var sb = work.SubView(meta[M.WorkScratchOff], ByteScratchSize);
@@ -165,9 +168,12 @@ internal static partial class WebPLossyEncodeRowKernel
         var c = MakeCtx(meta, mbRecs, row, x);
         var rd = LoadScore(si);
         int modeI16 = -1;
-        PickBestIntra16(sb, si, meta, t, coeffs, lc, nzRow, preds, mbRecs, ref c, ref rd, ref modeI16);
-        SaveScore(si, ref rd);
-        SaveOut(meta, ref c);
+        PickBestIntra16(lane, sb, si, meta, t, coeffs, lc, nzRow, preds, mbRecs, ref c, ref rd, ref modeI16);
+        if (lane == 0)
+        {
+            SaveScore(si, ref rd);
+            SaveOut(meta, ref c);
+        }
     }
 
     /// <summary>Stage 3: PickBestIntra4, explicitly grouped: one group of <see cref="I4Lanes"/> lanes (a lane per mode).</summary>
