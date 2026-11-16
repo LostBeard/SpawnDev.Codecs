@@ -9,8 +9,8 @@ passed / failed, skips are gated or CPU-only tests).
 OpenCL and Velocity 767 / 0 each, on the VP9, AV1, WebP, VP8, video, MDCT / IMDCT, CELT, Vorbis and MP3 tests; the CPU
 accelerator's full class 3396 / 0 (9 skipped); in Chrome the full WebGPU class, the Wasm encoder set and the WebGL audio
 transforms 1344 / 0. The MP3 decoder is green on CUDA. Open in that gate: `Vp9Decode_EveryFrame` on Wasm exceeds its 1 h
-test limit, and 5 Opus tests skip when Concentus picks another mode. A cell below dated before 11-16 was not re-run in
-that gate.
+test limit, and 5 Opus tests skipped when Concentus picked another mode (fixed the same day: the tests force the mode,
+241 / 0 / 0 skipped). A cell below dated before 11-16 was not re-run in that gate.
 
 **Earlier, 2026-10-30, 1.0.1 on SpawnDev.ILGPU 5.4.13:** every lane re-run in full with the same counts and nothing failing:
 CUDA, OpenCL and Velocity 1131 / 0, CPU 3281 / 0, WebGPU and Wasm 1150 / 0, WebGL 399 / 0. Every green cell below still
@@ -103,8 +103,8 @@ lanes (VP9 batch encode at unaligned sizes).
 
 ## Notes
 
-- **Open (2026-11-16 gate):** `Vp9Decode_EveryFrame` on Wasm exceeds its 1 h test limit; 5 Opus tests skip when Concentus
-  picks another mode.
+- **Open (2026-11-16 gate):** `Vp9Decode_EveryFrame` on Wasm exceeds its 1 h test limit. (The 5 Opus tests that skipped
+  when Concentus picked another mode now force the mode they need and run.)
 - **VP9 WebGPU device hang (the decoder trigger is fixed; the encoder's drain workaround stays, TJ-approved 2026-10-29).** In Chrome WebGPU (D3D12, NVIDIA RTX
   4070), a `Vp9EntropyStepKernel` queued while `Vp9EncodeWavefrontGroupKernel` (the single-dispatch barrier kernel of the
   batch encode) still runs leaves the device in a state where a LATER launch (the next encoder's first

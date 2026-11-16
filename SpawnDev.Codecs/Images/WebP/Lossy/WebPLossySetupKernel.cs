@@ -340,11 +340,15 @@ internal static class WebPLossySetupKernel
 
     /// <summary>VP8CalculateLevelCosts (always recomputes; the caller tracks `dirty`).</summary>
     public static void CalculateLevelCosts(ArrayView<int> coeffs, ArrayView<int> levelCost, ArrayView<int> t)
+        => CalculateLevelCostsLanes(0, 1, coeffs, levelCost, t);
+
+    /// <summary>The (type, band, context) tables of <see cref="CalculateLevelCosts"/>, independent: lane l of n computes
+    /// tables l, l + n, ... (one lane: all of them, in libwebp's order).</summary>
+    public static void CalculateLevelCostsLanes(int lane, int lanes, ArrayView<int> coeffs, ArrayView<int> levelCost, ArrayView<int> t)
     {
-        for (int ctype = 0; ctype < NumTypes; ++ctype)
-            for (int band = 0; band < NumBands; ++band)
-                for (int ctx = 0; ctx < NumCtx; ++ctx)
+        for (int task = lane; task < NumTypes * NumBands * NumCtx; task += lanes)
                 {
+                    int ctx = task % NumCtx, band = (task / NumCtx) % NumBands, ctype = task / (NumCtx * NumBands);
                     int p = NumProbas * (ctx + NumCtx * (band + NumBands * ctype));
                     int table = LevelCostStride * (ctx + NumCtx * (band + NumBands * ctype));
                     int cost0 = ctx > 0 ? BitCost(t, 1, coeffs[p + 0]) : 0;

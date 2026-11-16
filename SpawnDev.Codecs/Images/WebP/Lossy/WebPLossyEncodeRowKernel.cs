@@ -323,7 +323,9 @@ internal static partial class WebPLossyEncodeRowKernel
     /// of FXC compile time alone (the WGSL of the whole stage 134 s); this form compiles in well under a second.
     /// Offsets: -1 = side absent; the left samples are in `b`, the top samples in `top`.
     /// </summary>
-    private static void PredictAll(ArrayView<byte> b, ArrayView<byte> top,
+    // lane / lanes: the prediction pixels are independent; lane l of n writes pixels l, l + n, ... (the DC sums are
+    // computed by every lane)
+    private static void PredictAll(int lane, int lanes, ArrayView<byte> b, ArrayView<byte> top,
         int yLeft, int yTop, int uLeft, int uTop, int vLeft, int vTop)
     {
         bool yHasL = yLeft >= 0, yHasT = yTop >= 0, uHasL = uLeft >= 0, uHasT = uTop >= 0, vHasL = vLeft >= 0, vHasT = vTop >= 0;
@@ -341,7 +343,7 @@ internal static partial class WebPLossyEncodeRowKernel
         int yDc = PredDc(yTs, yLs, yHasT, yHasL, 16, 5);
         int uDc = PredDc(uTs, uLs, uHasT, uHasL, 8, 4);
         int vDc = PredDc(vTs, vLs, vHasT, vHasL, 8, 4);
-        for (int k = 0; k < 4 * 256 + 4 * 2 * 64; ++k)
+        for (int k = lane; k < 4 * 256 + 4 * 2 * 64; k += lanes)
         {
             int mode, x, y, o, leftOff, topOff, dc;
             bool hasL, hasT;

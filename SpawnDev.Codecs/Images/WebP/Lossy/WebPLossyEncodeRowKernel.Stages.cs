@@ -71,12 +71,22 @@ internal static partial class WebPLossyEncodeRowKernel
         meta[M.RowOut2Buf] = c.Out2Buf;
     }
 
-    /// <summary>Stage 1 of macroblock (<paramref name="x"/>, <paramref name="row"/>): row start, import, probability refresh, I16 / UV predictions.</summary>
+    /// <summary>Lanes of the prepare stage's thread group.</summary>
+    public const int PrepareLanes = 64;
+
+    /// <summary>
+    /// Stage 1 of macroblock (<paramref name="x"/>, <paramref name="row"/>): row start, import, probability refresh, I16 / UV
+    /// predictions - explicitly grouped, one group of <see cref="PrepareLanes"/> lanes: lane 0 does the row start and the
+    /// bookkeeping; the import, the probability update, the level-cost tables and the prediction pixels are independent
+    /// items shared out over the lanes (barriers between the steps that read each other's results).
+    /// </summary>
     public static void PrepareStage(
-        Index1D _, ArrayView<byte> yuv, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state,
+        ArrayView<byte> yuv, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state,
         ArrayView<int> meta, ArrayView<int> t, ArrayView<int> tokens, int row, int x)
     {
-        if (meta[M.Error] != 0) return;
+        // an early return before barriers must be uniform for WGSL: the group-wide OR of the flag is
+        if (Group.BarrierOr(meta[M.Error] != 0)) return;
+        int lane = Group.IdxX;
         int mbW = meta[M.MbW];
         int width = meta[M.Width], height = meta[M.Height];
         int cw = (width + 1) >> 1;
@@ -90,7 +100,7 @@ internal static partial class WebPLossyEncodeRowKernel
         var si = state.SubView(meta[M.StScratchOff], IntScratchSize);
         int uOff = meta[M.YuvUOff], vOff = meta[M.YuvVOff];
 
-        if (x == 0)
+        if ((x == 0) & (lane == 0))
         {
             if (row == 0)
             {
@@ -109,44 +119,55 @@ internal static partial class WebPLossyEncodeRowKernel
             meta[M.RowOutBuf] = BOutA;
             meta[M.RowOut2Buf] = BOutB;
         }
+        // every lane reads the countdown before lane 0 rewrites it (after the next barrier)
+        int cnt = meta[M.MbCountDown] - 1;
+        Group.Barrier();   // the row start (left / top samples, the output buffers) is visible
         var c = MakeCtx(meta, mbRecs, row, x);
 
-        // ---- VP8IteratorImport (no boundary)
+        // ---- VP8IteratorImport (no boundary): the 16x16 luma and two 8x8 chroma samples, one item each
         int w = Min(width - x * 16, 16), h = Min(height - row * 16, 16);
         int uvW = (w + 1) >> 1, uvH = (h + 1) >> 1;
-        for (int py = 0; py < 16; ++py)
-            for (int px = 0; px < 16; ++px)
-                sb[BIn + py * BPS + px] = yuv[(row * 16 + Min(py, h - 1)) * width + x * 16 + Min(px, w - 1)];
-        for (int py = 0; py < 8; ++py)
-            for (int px = 0; px < 8; ++px)
+        for (int k = lane; k < 256 + 64; k += PrepareLanes)
+        {
+            if (k < 256)
             {
+                int py = k >> 4, px = k & 15;
+                sb[BIn + py * BPS + px] = yuv[(row * 16 + Min(py, h - 1)) * width + x * 16 + Min(px, w - 1)];
+            }
+            else
+            {
+                int py = (k - 256) >> 3, px = (k - 256) & 7;
                 int s = (row * 8 + Min(py, uvH - 1)) * cw + x * 8 + Min(px, uvW - 1);
                 sb[BIn + 16 + py * BPS + px] = yuv[uOff + s];
                 sb[BIn + 24 + py * BPS + px] = yuv[vOff + s];
             }
-
-        // ---- probability refresh (`if (--cnt < 0)`)
-        int cnt = meta[M.MbCountDown] - 1;
-        if (cnt < 0)
-        {
-            FinalizeTokenProbas(coeffs, stats, t, meta);
-            if (meta[M.ProbaDirty] != 0)
-            {
-                WebPLossySetupKernel.CalculateLevelCosts(coeffs, lc, t);
-                meta[M.ProbaDirty] = 0;
-            }
-            cnt = meta[M.MaxCount];
         }
-        meta[M.MbCountDown] = cnt;
+
+        // ---- probability refresh (`if (--cnt < 0)`): the probabilities, then (when one changed) the level-cost tables
+        if (Group.BarrierOr(cnt < 0))
+        {
+            bool changed = Group.BarrierOr(FinalizeTokenProbasLanes(lane, PrepareLanes, coeffs, stats, t));
+            // (BarrierOr is a barrier: every lane's coefficients are written)
+            if (changed) WebPLossySetupKernel.CalculateLevelCostsLanes(lane, PrepareLanes, coeffs, lc, t);
+            if (lane == 0)
+            {
+                meta[M.ProbaDirty] = 0;   // FinalizeTokenProbas sets it, the level costs consume it
+                cnt = meta[M.MaxCount];
+            }
+        }
+        if (lane == 0) meta[M.MbCountDown] = cnt;
 
         // ---- VP8Decimate (RD_OPT_BASIC): the I16 / UV predictions (VP8MakeLuma16Preds + VP8MakeChroma8Preds) + rd init
-        PredictAll(sb, yTop,
+        PredictAll(lane, PrepareLanes, sb, yTop,
             x != 0 ? BLeft + YLeft : -1, row != 0 ? c.YTopOff : -1,
             x != 0 ? BLeft + ULeft : -1, row != 0 ? c.UVTopOff : -1,
             x != 0 ? BLeft + VLeft : -1, row != 0 ? c.UVTopOff + 8 : -1);
-        var rd = new WebPModeScore();
-        rd.Init();
-        SaveScore(si, ref rd);
+        if (lane == 0)
+        {
+            var rd = new WebPModeScore();
+            rd.Init();
+            SaveScore(si, ref rd);
+        }
     }
 
     /// <summary>Stage 2: PickBestIntra16, explicitly grouped: one group of <see cref="I16Lanes"/> lanes (a lane per mode).</summary>

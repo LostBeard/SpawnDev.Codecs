@@ -170,9 +170,14 @@ internal static partial class WebPLossyEncodeRowKernel
 
     /// <summary>frame_enc.c FinalizeTokenProbas: new probabilities where the saving pays for the update; sets ProbaDirty.</summary>
     public static void FinalizeTokenProbas(ArrayView<int> coeffs, ArrayView<int> stats, ArrayView<int> t, ArrayView<int> meta)
+        => meta[M.ProbaDirty] = FinalizeTokenProbasLanes(0, 1, coeffs, stats, t) ? 1 : 0;
+
+    /// <summary>The probabilities of <see cref="FinalizeTokenProbas"/>, each independent: lane l of n does l, l + n, ...;
+    /// returns whether one of ITS probabilities changed (the caller ORs the lanes').</summary>
+    public static bool FinalizeTokenProbasLanes(int lane, int lanes, ArrayView<int> coeffs, ArrayView<int> stats, ArrayView<int> t)
     {
         bool hasChanged = false;
-        for (int i = 0; i < WebPLossySetupKernel.ProbaCount; ++i)
+        for (int i = lane; i < WebPLossySetupKernel.ProbaCount; i += lanes)
         {
             uint s = (uint)stats[i];
             int nb = (int)(s & 0xffff);
@@ -190,6 +195,6 @@ internal static partial class WebPLossyEncodeRowKernel
             }
             else coeffs[i] = oldP;
         }
-        meta[M.ProbaDirty] = hasChanged ? 1 : 0;
+        return hasChanged;
     }
 }
