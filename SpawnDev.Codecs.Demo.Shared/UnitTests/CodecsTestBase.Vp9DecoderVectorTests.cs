@@ -380,9 +380,26 @@ public abstract partial class CodecsTestBase
     /// every frame whose references are not loop-filtered yet (all earlier frames of the stream had filter level 0; the
     /// first frame of every stream qualifies). Covers intra prediction, inverse transforms, inter prediction and their
     /// orchestration; the loop filter extends this to every frame.
+    /// In four parts (the files dealt out in turn, so the large vectors land in different parts): the whole set did not
+    /// finish within one test's hour on Wasm (2026-11-16); together the parts still check every frame of every file.
     /// </summary>
     [TestMethod(Timeout = 3600000, Category = "NotOnWebGL,GiantShader")]
-    public async Task Vp9Decode_EveryFrame_MatchesLibvpx()
+    public Task Vp9Decode_EveryFrame_MatchesLibvpx_Part1of4() => Vp9DecodeEveryFrameAsync(0, 4);
+
+    /// <inheritdoc cref="Vp9Decode_EveryFrame_MatchesLibvpx_Part1of4"/>
+    [TestMethod(Timeout = 3600000, Category = "NotOnWebGL,GiantShader")]
+    public Task Vp9Decode_EveryFrame_MatchesLibvpx_Part2of4() => Vp9DecodeEveryFrameAsync(1, 4);
+
+    /// <inheritdoc cref="Vp9Decode_EveryFrame_MatchesLibvpx_Part1of4"/>
+    [TestMethod(Timeout = 3600000, Category = "NotOnWebGL,GiantShader")]
+    public Task Vp9Decode_EveryFrame_MatchesLibvpx_Part3of4() => Vp9DecodeEveryFrameAsync(2, 4);
+
+    /// <inheritdoc cref="Vp9Decode_EveryFrame_MatchesLibvpx_Part1of4"/>
+    [TestMethod(Timeout = 3600000, Category = "NotOnWebGL,GiantShader")]
+    public Task Vp9Decode_EveryFrame_MatchesLibvpx_Part4of4() => Vp9DecodeEveryFrameAsync(3, 4);
+
+    // files with index % parts == part, in Vp9Vectors' order
+    private async Task Vp9DecodeEveryFrameAsync(int part, int parts)
     {
         var modeInfoRef = LibvpxModeInfo();
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
@@ -394,8 +411,11 @@ public abstract partial class CodecsTestBase
             // VP9_STAGE_TIMES=1 (desktop): wait after every stage and report each stage's total and worst-frame time
             var stageTimes = !OperatingSystem.IsBrowser() && Environment.GetEnvironmentVariable("VP9_STAGE_TIMES") == "1"
                 ? new Dictionary<string, (double TotalMs, double MaxMs, int Frames)>() : null;
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            int index = -1;
             foreach (var v in Vp9Vectors())
             {
+                if (++index % parts != part) continue;
                 if (!modeInfoRef.TryGetValue(v.Name, out var want)) { failures.Add($"{v.Name}: no libvpx reference"); continue; }
                 files++;
                 using var pipe = new Vp9DecodePipeline(acc);
@@ -438,7 +458,7 @@ public abstract partial class CodecsTestBase
                 if (shown != v.FrameMd5.Length) failures.Add($"{v.Name}: {shown} output frames, libvpx {v.FrameMd5.Length}");
             }
         done:
-            Console.WriteLine($"{acc.AcceleratorType}: {files} files, {frames} frames decoded, {outputs} output frames == libvpx .md5");
+            Console.WriteLine($"{acc.AcceleratorType} part {part + 1} of {parts}: {files} files, {frames} frames decoded, {outputs} output frames == libvpx .md5, {clock.Elapsed.TotalSeconds:F0} s");
             if (stageTimes != null)
             {
                 foreach (var (stage, t) in stageTimes)
