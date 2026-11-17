@@ -215,6 +215,13 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>MD5 (hex) of <paramref name="bytes"/>, on every platform (FlacMd5: System.Security.Cryptography.MD5 is not in WASM).</summary>
+    // the FrameHash of a frame buffer's cropped planes, on the accelerator
+    private static async Task<string> PlanesHashAsync(Accelerator acc, Vp9DecodePipeline pipe, int buffer)
+    {
+        using var planes = await pipe.PackPlanesAsync(buffer);
+        return await FrameHash.ComputeAsync(acc, planes.View, planes.Length);
+    }
+
     private static string Md5Hex(byte[] bytes)
     {
         var samples = new int[bytes.Length];
@@ -223,10 +230,31 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>One decoded frame in libvpx_modeinfo.tsv.gz: mode info MD5, counts MD5 (or "-"), context after adaptation,
-    /// reconstructed frame before (Pre) and after (Post) the loop filter.</summary>
+    /// reconstructed frame before (Pre) and after (Post) the loop filter, as MD5 and as <see cref="FrameHash"/>.</summary>
     private sealed class Vp9FrameRef
     {
-        public string Mi = "", Counts = "", Adapted = "", Pre = "", Post = "";
+        public string Mi = "", Counts = "", Adapted = "", Pre = "", Post = "", PreHash = "", PostHash = "";
+    }
+
+    /// <summary>libvpx_modeinfo.tsv.gz "O" lines: file name -> the <see cref="FrameHash"/> of every output frame, in order
+    /// (make_modeinfo_tsv.py checked each frame's MD5 against the file's .md5 when it wrote them).</summary>
+    private static Dictionary<string, List<string>> LibvpxOutputHashes()
+    {
+        using var gz = new System.IO.Compression.GZipStream(new MemoryStream(ReadEmbedded(Vp9VectorPrefix + "libvpx_modeinfo.tsv.gz")),
+            System.IO.Compression.CompressionMode.Decompress);
+        using var reader = new StreamReader(gz);
+        var all = new Dictionary<string, List<string>>();
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            int tab = line.IndexOf('\t');
+            var parts = line[(tab + 1)..].Split(' ');
+            if (parts[0] != "O") continue;
+            string file = line[..tab];
+            if (!all.TryGetValue(file, out var list)) all[file] = list = new();
+            list.Add(parts[3]);
+        }
+        return all;
     }
 
     /// <summary>libvpx_modeinfo.tsv.gz: file name -> per decoded frame (M / A / P / L lines of libvpx_ref -m).</summary>
@@ -242,6 +270,7 @@ public abstract partial class CodecsTestBase
             int tab = line.IndexOf('\t');
             string file = line[..tab];
             var parts = line[(tab + 1)..].Split(' ');
+            if (parts[0] == "O") continue;   // output frames (numbered by output, not by decode): LibvpxOutputHashes
             if (!all.TryGetValue(file, out var list)) all[file] = list = new();
             int n = int.Parse(parts[1]);   // 1-based decoded frame number
             while (list.Count < n) list.Add(new Vp9FrameRef());
@@ -250,8 +279,8 @@ public abstract partial class CodecsTestBase
             {
                 case "M": f.Mi = parts[2]["mi=".Length..]; f.Counts = parts[3]["counts=".Length..]; break;
                 case "A": f.Adapted = parts[2]; break;
-                case "P": f.Pre = parts[2]; break;
-                case "L": f.Post = parts[2]; break;
+                case "P": f.Pre = parts[2]; f.PreHash = parts.Length > 3 ? parts[3] : ""; break;
+                case "L": f.Post = parts[2]; f.PostHash = parts.Length > 3 ? parts[3] : ""; break;
             }
         }
         return all;
@@ -402,6 +431,7 @@ public abstract partial class CodecsTestBase
     private async Task Vp9DecodeEveryFrameAsync(int part, int parts)
     {
         var modeInfoRef = LibvpxModeInfo();
+        var outputRef = LibvpxOutputHashes();
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         RequireFeatures(acc, SerialStreamKernels);
         try
@@ -417,12 +447,20 @@ public abstract partial class CodecsTestBase
             foreach (var v in Vp9Vectors())
             {
                 if (++index % parts != part) continue;
-                if (!modeInfoRef.TryGetValue(v.Name, out var want)) { failures.Add($"{v.Name}: no libvpx reference"); continue; }
+                if (!modeInfoRef.TryGetValue(v.Name, out var want) || !outputRef.TryGetValue(v.Name, out var wantOut))
+                { failures.Add($"{v.Name}: no libvpx reference"); continue; }
                 files++;
                 using var pipe = new Vp9DecodePipeline(acc);
                 if (!OperatingSystem.IsBrowser() && int.TryParse(Environment.GetEnvironmentVariable("VP9_DEBUG_FLAGS"), out int dbg)) pipe.DebugFlags = dbg;
                 pipe.StageTimes = stageTimes;
                 int decoded = 0, shown = 0;
+                // Every check compares a FrameHash computed on the accelerator (8 bytes come back, not the frame) with
+                // libvpx's (libvpx_modeinfo.tsv.gz; make_modeinfo_tsv.py proved each output frame's MD5 equal to the .md5).
+                // The frame buffer written last and its loop-filtered hash: when the packet shows that buffer (the usual
+                // case) the output check reuses the hash (only a decode writes a frame buffer, so the buffer written last
+                // still holds exactly the bytes that were hashed).
+                int lastBuffer = -1;
+                string lastHash = "";
                 foreach (byte[] packet in Vp9Packets.ReadFile(v.File))
                 {
                     using var buf = acc.Allocate1D(packet);
@@ -432,15 +470,16 @@ public abstract partial class CodecsTestBase
                         int n = decoded;
                         var h = await pipe.DecodeFrameAsync(packet.AsMemory(offset, length), buf.View, offset, async fh =>
                         {
-                            var pre = await pipe.ReadPlanesAsync(fh.NewBuffer);
                             // diagnostics: VP9_DUMP_PLANES=dir writes <backend>_<file>_<n>.yuv (pre loop filter)
                             string? dump = OperatingSystem.IsBrowser() ? null : Environment.GetEnvironmentVariable("VP9_DUMP_PLANES");
-                            if (dump != null) File.WriteAllBytes(Path.Combine(dump, $"{acc.AcceleratorType}_{v.Name}_{n + 1}.yuv"), pre);
-                            if (Md5Hex(pre) != want[n].Pre)
+                            if (dump != null) File.WriteAllBytes(Path.Combine(dump, $"{acc.AcceleratorType}_{v.Name}_{n + 1}.yuv"), await pipe.ReadPlanesAsync(fh.NewBuffer));
+                            if (await PlanesHashAsync(acc, pipe, fh.NewBuffer) != want[n].PreHash)
                                 failures.Add($"{v.Name} frame {n + 1}: reconstruction differs ({fh.Width}x{fh.Height}, type {fh.FrameType}, intra-only {fh.IntraOnly}, lossless {fh.Lossless})");
                         });
                         if (h.ShowExistingFrame) { show = h.FrameToShowBuffer; continue; }
-                        if (Md5Hex(await pipe.ReadPlanesAsync(h.NewBuffer)) != want[n].Post)
+                        lastBuffer = h.NewBuffer;
+                        lastHash = await PlanesHashAsync(acc, pipe, h.NewBuffer);
+                        if (lastHash != want[n].PostHash)
                             failures.Add($"{v.Name} frame {n + 1}: loop-filtered frame differs (filter level {h.LoopFilter.Level}, sharpness {h.LoopFilter.Sharpness})");
                         if (h.ShowFrame) show = h.NewBuffer;
                         decoded++;
@@ -449,17 +488,18 @@ public abstract partial class CodecsTestBase
                     }
                     if (show >= 0)
                     {
-                        if (shown >= v.FrameMd5.Length) failures.Add($"{v.Name}: more output frames than libvpx's {v.FrameMd5.Length}");
-                        else if (Md5Hex(await pipe.ReadPlanesAsync(show)) != v.FrameMd5[shown])
-                            failures.Add($"{v.Name} output frame {shown + 1}: MD5 differs from the vector's .md5");
+                        if (shown >= wantOut.Count) failures.Add($"{v.Name}: more output frames than libvpx's {wantOut.Count}");
+                        else if ((show == lastBuffer ? lastHash : await PlanesHashAsync(acc, pipe, show)) != wantOut[shown])
+                            failures.Add($"{v.Name} output frame {shown + 1}: differs from libvpx's output frame");
                         shown++;
                         outputs++;
                     }
                 }
-                if (shown != v.FrameMd5.Length) failures.Add($"{v.Name}: {shown} output frames, libvpx {v.FrameMd5.Length}");
+                if (shown != wantOut.Count || wantOut.Count != v.FrameMd5.Length)
+                    failures.Add($"{v.Name}: {shown} output frames, libvpx {wantOut.Count} (.md5 lists {v.FrameMd5.Length})");
             }
         done:
-            Console.WriteLine($"{acc.AcceleratorType} part {part + 1} of {parts}: {files} files, {frames} frames decoded, {outputs} output frames == libvpx .md5, {clock.Elapsed.TotalSeconds:F0} s");
+            Console.WriteLine($"{acc.AcceleratorType} part {part + 1} of {parts}: {files} files, {frames} frames decoded, {outputs} output frames == libvpx, {clock.Elapsed.TotalSeconds:F0} s");
             if (stageTimes != null)
             {
                 foreach (var (stage, t) in stageTimes)

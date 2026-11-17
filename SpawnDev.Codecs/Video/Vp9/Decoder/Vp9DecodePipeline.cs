@@ -255,15 +255,25 @@ internal sealed class Vp9DecodePipeline : IDisposable
     /// <summary>The cropped planes (Y, U, V, tight) of frame buffer <paramref name="buffer"/> (diagnostics / tests).</summary>
     internal async Task<byte[]> ReadPlanesAsync(int buffer)
     {
+        using var dst = await PackPlanesAsync(buffer);
+        return await dst.View.CopyToHostAsync();
+    }
+
+    /// <summary>
+    /// The cropped planes (Y, U, V, tight) of frame buffer <paramref name="buffer"/> packed into a new device buffer that
+    /// the caller disposes (tests hash it on the accelerator instead of reading the frame back).
+    /// </summary>
+    internal async Task<MemoryBuffer1D<byte, Stride1D.Dense>> PackPlanesAsync(int buffer)
+    {
         var l = _frames.Layout(buffer);
         long b = _frames.Offset(buffer);
         int uvW = l.UvCropWidth, uvH = l.UvCropHeight;
         long total = (long)l.Width * l.Height + 2L * uvW * uvH;
-        using var dst = _acc.Allocate1D<byte>(total);
+        var dst = _acc.Allocate1D<byte>(total);
         var pack = _packDiag ??= await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long>(
             Vp9OutputKernels.PackPlanesKernel);
         pack((int)total, _frames.Pool, dst.View, l.Width, l.Height, uvW, uvH, l.YStride, l.UvStride, b, b + l.UOffset, b + l.VOffset);
-        return await dst.View.CopyToHostAsync();
+        return dst;
     }
 
     public void Dispose()

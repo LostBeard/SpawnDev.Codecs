@@ -45,6 +45,80 @@ static void md5_hex(MD5Context *md5, char out[33]) {
   for (i = 0; i < 16; ++i) sprintf(out + 2 * i, "%02x", d[i]);
 }
 
+/* Frame hash: a 64-bit hash of the same bytes the MD5 covers, built so an accelerator computes it in parallel (the
+ * tests compare it on the device and read back 8 bytes instead of the frame). The stream is cut into 4096-byte
+ * chunks; chunk c gets two MurmurHash3 x86_32 values, seeds c * 0x9E3779B9 + 0x243F6A88 and c * 0x9E3779B9 +
+ * 0x85A308D3; then the A values (as little-endian words) are hashed with seed = stream length and the B values with
+ * seed = length ^ 0x13198A2E. Printed as "%08x%08x" (A, B). SpawnDev.Codecs.Demo.Shared/UnitTests/FrameHash.cs is the
+ * same function on the host and on the accelerator. */
+#define FH_CHUNK 4096
+typedef struct {
+  unsigned char buf[FH_CHUNK];
+  unsigned int fill, chunks, cap;
+  unsigned long long len;
+  unsigned int *a, *b;
+} FrameHash;
+static unsigned int fh_rotl(unsigned int x, int r) { return (x << r) | (x >> (32 - r)); }
+static unsigned int fh_murmur(const unsigned char *d, unsigned int n, unsigned int seed) {
+  unsigned int h = seed, k, i;
+  const unsigned int c1 = 0xcc9e2d51u, c2 = 0x1b873593u;
+  for (i = 0; i + 4 <= n; i += 4) {
+    k = d[i] | ((unsigned int)d[i + 1] << 8) | ((unsigned int)d[i + 2] << 16) | ((unsigned int)d[i + 3] << 24);
+    k *= c1; k = fh_rotl(k, 15); k *= c2;
+    h ^= k; h = fh_rotl(h, 13); h = h * 5 + 0xe6546b64u;
+  }
+  k = 0;
+  switch (n & 3) {
+    case 3: k ^= (unsigned int)d[i + 2] << 16; /* fall through */
+    case 2: k ^= (unsigned int)d[i + 1] << 8;  /* fall through */
+    case 1: k ^= d[i]; k *= c1; k = fh_rotl(k, 15); k *= c2; h ^= k;
+  }
+  h ^= n;
+  h ^= h >> 16; h *= 0x85ebca6bu; h ^= h >> 13; h *= 0xc2b2ae35u; h ^= h >> 16;
+  return h;
+}
+static void fh_init(FrameHash *f) { memset(f, 0, sizeof(*f)); }
+static void fh_chunk(FrameHash *f) {
+  const unsigned int base = f->chunks * 0x9E3779B9u;
+  if (f->chunks == f->cap) {
+    f->cap = f->cap ? 2 * f->cap : 256;
+    f->a = (unsigned int *)realloc(f->a, f->cap * sizeof(unsigned int));
+    f->b = (unsigned int *)realloc(f->b, f->cap * sizeof(unsigned int));
+  }
+  f->a[f->chunks] = fh_murmur(f->buf, f->fill, base + 0x243F6A88u);
+  f->b[f->chunks] = fh_murmur(f->buf, f->fill, base + 0x85A308D3u);
+  f->chunks++;
+  f->fill = 0;
+}
+static void fh_update(FrameHash *f, const unsigned char *p, int n) {
+  f->len += (unsigned long long)n;
+  while (n > 0) {
+    int take = FH_CHUNK - (int)f->fill;
+    if (take > n) take = n;
+    memcpy(f->buf + f->fill, p, take);
+    f->fill += take; p += take; n -= take;
+    if (f->fill == FH_CHUNK) fh_chunk(f);
+  }
+}
+static void fh_hex(FrameHash *f, char out[17]) {
+  unsigned char *wa, *wb;
+  unsigned int i, ha, hb;
+  if (f->fill > 0) fh_chunk(f);
+  wa = (unsigned char *)malloc(f->chunks * 4 + 1);
+  wb = (unsigned char *)malloc(f->chunks * 4 + 1);
+  for (i = 0; i < f->chunks; ++i) {
+    wa[4 * i] = (unsigned char)f->a[i]; wa[4 * i + 1] = (unsigned char)(f->a[i] >> 8);
+    wa[4 * i + 2] = (unsigned char)(f->a[i] >> 16); wa[4 * i + 3] = (unsigned char)(f->a[i] >> 24);
+    wb[4 * i] = (unsigned char)f->b[i]; wb[4 * i + 1] = (unsigned char)(f->b[i] >> 8);
+    wb[4 * i + 2] = (unsigned char)(f->b[i] >> 16); wb[4 * i + 3] = (unsigned char)(f->b[i] >> 24);
+  }
+  ha = fh_murmur(wa, f->chunks * 4, (unsigned int)f->len);
+  hb = fh_murmur(wb, f->chunks * 4, (unsigned int)f->len ^ 0x13198A2Eu);
+  sprintf(out, "%08x%08x", ha, hb);
+  free(wa); free(wb); free(f->a); free(f->b);
+  f->a = f->b = NULL;
+}
+
 /* -m: per decoded frame "M <n> mi=<md5> counts=<md5|->" after the tiles and "A <n> <md5>" (context after backward
  * adaptation). The mode info MD5 runs over every mi position in raster order, as int32s: sb_type, segment_id, skip,
  * tx_size, is_inter, then for intra blocks mode, uv_mode (+ bmi[0..3].as_mode below 8x8), for inter blocks mode,
@@ -110,16 +184,23 @@ static void mi_hook(struct VP9Decoder *pbi, int stage) {
     /* P = reconstructed frame before the loop filter, L = after (cropped planes, as the .md5 files hash them) */
     const YV12_BUFFER_CONFIG *f = get_frame_new_buffer((VP9_COMMON *)cm);
     int plane, y;
+    FrameHash fh;
+    char fhex[17];
     MD5Init(&md5);
+    fh_init(&fh);
     for (plane = 0; plane < 3; ++plane) {
       const unsigned char *p = plane == 0 ? f->y_buffer : plane == 1 ? f->u_buffer : f->v_buffer;
       const int stride = plane == 0 ? f->y_stride : f->uv_stride;
       const int w = plane == 0 ? f->y_crop_width : f->uv_crop_width;
       const int h = plane == 0 ? f->y_crop_height : f->uv_crop_height;
-      for (y = 0; y < h; ++y) MD5Update(&md5, p + y * stride, w);
+      for (y = 0; y < h; ++y) {
+        MD5Update(&md5, p + y * stride, w);
+        fh_update(&fh, p + y * stride, w);
+      }
     }
     md5_hex(&md5, hex);
-    printf("%c %d %s\n", stage == 4 ? 'P' : 'L', hooked_frames, hex);
+    fh_hex(&fh, fhex);
+    printf("%c %d %s %s\n", stage == 4 ? 'P' : 'L', hooked_frames, hex, fhex);
   } else if (stage == 3) {
     MD5Init(&md5);
     MD5Update(&md5, (const unsigned char *)cm->fc, CTX_BYTES - 1);
@@ -382,7 +463,10 @@ int main(int argc, char **argv) {
       MD5Context md5;
       unsigned char digest[16];
       int i;
+      FrameHash fh;
+      char fhex[17];
       MD5Init(&md5);
+      fh_init(&fh);
       for (plane = 0; plane < 3; ++plane) {
         const unsigned char *p = img->planes[plane];
         const int bps = (img->fmt & VPX_IMG_FMT_HIGHBITDEPTH) ? 2 : 1;
@@ -390,6 +474,7 @@ int main(int argc, char **argv) {
         const int w = (plane ? (int)((img->d_w + img->x_chroma_shift) >> img->x_chroma_shift) : (int)img->d_w) * bps;
         for (y = 0; y < h; ++y) {
           MD5Update(&md5, p, w);
+          fh_update(&fh, p, w);
           if (out) fwrite(p, 1, w, out);
           p += img->stride[plane];
         }
@@ -397,7 +482,8 @@ int main(int argc, char **argv) {
       MD5Final(digest, &md5);
       printf("%d %ux%u ", ++n, img->d_w, img->d_h);
       for (i = 0; i < 16; ++i) printf("%02x", digest[i]);
-      printf("\n");
+      fh_hex(&fh, fhex);
+      printf(" %s\n", fhex);
     }
   }
   vpx_codec_destroy(&codec);
