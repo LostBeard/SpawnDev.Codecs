@@ -9,7 +9,9 @@
 # (<name>.raw.sz / <name>.framed.sz) when it is under 512 KiB, else its length and SHA-256 in manifest.tsv.
 #
 # manifest.tsv columns: name, input kind, input length, seed, raw length, raw SHA-256, raw stored, framed length,
-# framed SHA-256, framed stored.
+# framed SHA-256, framed stored, raw FrameHash, framed FrameHash (scripts/common/frame_hash.py: the tests compare it on
+# the accelerator, so a large stream is never read back). Rewriting an existing manifest, the script refuses to write
+# unless every row's lengths and SHA-256 are unchanged (the same snap output).
 #
 # Decoder (TestData/SnappyDec): what a decoder meets beyond snap's output - literal lengths in the 1..4-byte forms
 # (tags 60..63), copy-4 elements, offsets reaching past 64 KB (one raw stream with no block structure), overlapping
@@ -27,6 +29,7 @@ import hashlib, os, struct, sys
 import cramjam
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from make_lz4_fixtures import gen_text, gen_noise, gen_struct
+from frame_hash import frame_hash   # scripts/common, put on sys.path by make_lz4_fixtures
 
 def gen_mixed(n, seed, period=4):
     x = (seed | 1) & 0xFFFFFFFF
@@ -156,7 +159,7 @@ def main(testdata):
         if rs: open(os.path.join(out, name + ".raw.sz"), "wb").write(r)
         if fs: open(os.path.join(out, name + ".framed.sz"), "wb").write(f)
         rows.append((name, kind, len(data), seed, len(r), hashlib.sha256(r).hexdigest(), int(rs),
-                     len(f), hashlib.sha256(f).hexdigest(), int(fs)))
+                     len(f), hashlib.sha256(f).hexdigest(), int(fs), frame_hash(r), frame_hash(f)))
 
     for n in (0, 1, 15, 16, 17, 18, 100, 4096, 65535, 65536, 65537, 200_000):
         add(f"text_{n}", "text", content("text", n, 7 + n % 13), 7 + n % 13)
@@ -175,7 +178,13 @@ def main(testdata):
     m = content("mixed", 65536, 3)
     assert 65536 - 65536 // 7 <= len(raw(m)) < 65536 - 65536 // 8, len(raw(m))
 
-    with open(os.path.join(out, "manifest.tsv"), "w", newline="\n") as mf:
+    path = os.path.join(out, "manifest.tsv")
+    if os.path.exists(path):
+        old = {l.split("\t")[0]: l.rstrip("\n").split("\t")[:10] for l in open(path) if l.strip() and not l.startswith("#")}
+        bad = [r[0] for r in rows if old.get(r[0]) != [str(x) for x in r[:10]]]
+        if bad or len(old) != len(rows):
+            sys.exit(f"not written: {len(bad)} rows differ from the existing manifest ({bad[:5]}), {len(old)} vs {len(rows)} rows")
+    with open(path, "w", newline="\n") as mf:
         mf.write(f"# Rust snap crate via cramjam {cramjam.__version__}\n")
         for r in rows: mf.write("\t".join(str(x) for x in r) + "\n")
     print(f"{len(rows)} inputs -> {out} (cramjam {cramjam.__version__})")

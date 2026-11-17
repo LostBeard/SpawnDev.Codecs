@@ -113,7 +113,7 @@ public abstract partial class CodecsTestBase
 
     /// <summary>16 MiB per case (four launches, thousands of blocks): forward output hashed against the reference, inverse compared on the accelerator.</summary>
     [TestMethod(Timeout = 600000)]
-    public async Task ShuffleFilterGpu_Large16MiB_MatchReferenceSha256_AndInvert()
+    public async Task ShuffleFilterGpu_Large16MiB_MatchReference_AndInvert()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
         try
@@ -126,7 +126,7 @@ public abstract partial class CodecsTestBase
                 var f = line.Trim().Split(' ');
                 bool bit = f[0] == "bshuf";
                 int e = int.Parse(f[1]), length = int.Parse(f[2]), seed = int.Parse(f[3]);
-                string sha = f[4];
+                string want = f.Length > 5 ? f[5] : "";   // the output's FrameHash (f[4] = its SHA-256, kept for the record)
                 byte[] input = FilterInput(length, seed);
                 using var dIn = DeviceVerify.Upload(acc, input);
                 using var dMid = DeviceVerify.Poisoned(acc, length);
@@ -142,8 +142,12 @@ public abstract partial class CodecsTestBase
                     await filter.UnshuffleAsync(dMid.View, dBack.View, length, e);
                 }
                 await acc.SynchronizeAsync();
-                string got = Sha256Hex(await DeviceTransfer.DownloadAsync(dMid.View, length));
-                Equal(sha, got, $"{line}: SHA-256 of our output");
+                // the 16 MiB output compared by its FrameHash on the accelerator (8 bytes back), not read back and
+                // SHA-256'd on the host (the browser's .NET heap; see the Lz4 40 MB case). CPU backends hash on the host.
+                string got = acc.AcceleratorType is AcceleratorType.CPU or AcceleratorType.Velocity
+                    ? FrameHash.Compute(await DeviceTransfer.DownloadAsync(dMid.View, length))
+                    : await FrameHash.ComputeAsync(acc, dMid.View, length);
+                Equal(want, got, $"{line}: FrameHash of our output");
                 string? back = await DeviceVerify.CompareAsync(acc, dBack.View, dIn.View, length);
                 True(back == null, $"{line}: inverse: {back}");
             }

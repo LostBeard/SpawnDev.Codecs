@@ -71,10 +71,11 @@ public abstract partial class CodecsTestBase
     };
 
     private sealed record SnappyCase(string Name, string Kind, int Length, int Seed, int RawLength, string RawSha, bool RawStored,
-        int FramedLength, string FramedSha, bool FramedStored)
+        int FramedLength, string FramedSha, bool FramedStored, string RawHash, string FramedHash)
     {
         public int StreamLength(SnappyFormat f) => f == SnappyFormat.Raw ? RawLength : FramedLength;
         public string Sha(SnappyFormat f) => f == SnappyFormat.Raw ? RawSha : FramedSha;
+        public string Hash(SnappyFormat f) => f == SnappyFormat.Raw ? RawHash : FramedHash;
         public bool Stored(SnappyFormat f) => f == SnappyFormat.Raw ? RawStored : FramedStored;
         public string File(SnappyFormat f) => SnappyFixturePrefix + Name + (f == SnappyFormat.Raw ? ".raw.sz" : ".framed.sz");
     }
@@ -88,7 +89,7 @@ public abstract partial class CodecsTestBase
             if (line.Length == 0 || line.StartsWith('#')) continue;
             var f = line.Split('\t');
             list.Add(new SnappyCase(f[0], f[1], int.Parse(f[2]), int.Parse(f[3]), int.Parse(f[4]), f[5], f[6] == "1",
-                int.Parse(f[7]), f[8], f[9] == "1"));
+                int.Parse(f[7]), f[8], f[9] == "1", f.Length > 10 ? f[10] : "", f.Length > 11 ? f[11] : ""));
         }
         return list;
     }
@@ -116,8 +117,13 @@ public abstract partial class CodecsTestBase
             string? diff = await DeviceVerify.CompareAsync(acc, dOut.View, withPoison);
             return diff == null ? null : $"{name}: {diff}";
         }
-        string sha = Sha256Hex(await DeviceTransfer.DownloadAsync(dOut.View, n));
-        return sha == c.Sha(format) ? null : $"{name}: SHA-256 {sha} != snap {c.Sha(format)}";
+        // a large stream is compared by its FrameHash on the accelerator (8 bytes back), not read back and SHA-256'd on
+        // the host (the browser's .NET heap: the Lz4 40 MB case ran out of memory that way, 2026-11-17). The CPU
+        // backends hash the read-back bytes.
+        string hash = acc.AcceleratorType is AcceleratorType.CPU or AcceleratorType.Velocity
+            ? FrameHash.Compute(await DeviceTransfer.DownloadAsync(dOut.View, n))
+            : await FrameHash.ComputeAsync(acc, dOut.View, n);
+        return hash == c.Hash(format) ? null : $"{name}: frame hash {hash} != snap's {c.Hash(format)}";
     }
 
     private async Task AssertSnappyCasesAsync(Func<SnappyCase, bool> which, int waveBlocks, int minCases)

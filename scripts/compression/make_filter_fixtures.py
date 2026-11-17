@@ -8,12 +8,16 @@
 #                  (cname='none'): the chunk bytes are bshuf_bitshuffle(in, out, size, elem_size, block_size).
 #
 # Inputs are procedural (gen() below; ShuffleFilterGpuTests.FilterInput rebuilds the same bytes), so only the truth is
-# stored: TestData/Filters/<case>.bin for the small cases, and SHA-256 lines in large.txt for the 16 MiB cases.
+# stored: TestData/Filters/<case>.bin for the small cases, and SHA-256 lines in large.txt for the 16 MiB cases, each
+# followed by the output's FrameHash (scripts/common/frame_hash.py: the tests compare it on the accelerator, so a 16 MiB
+# output is never read back). Rewriting large.txt, the script refuses unless every SHA-256 is unchanged.
 #
 # usage: python make_filter_fixtures.py <out dir>     (needs numpy, numcodecs, h5py, hdf5plugin)
 
 import hashlib, io, os, sys
 import numpy as np, numcodecs, h5py, hdf5plugin
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+from frame_hash import frame_hash
 
 def gen(n, seed):
     i = np.arange(n, dtype=np.uint64)
@@ -53,13 +57,21 @@ def main(out):
                 open(os.path.join(out, f'bshuf_e{e}_n{n}_bs{block}.bin'), 'wb').write(bitshuffle_ref(gen(n * e, seed), e, block))
                 count += 1
     big = 16 << 20
-    with open(os.path.join(out, 'large.txt'), 'w', newline='\n') as f:
-        for op, e in (('shuf', 4), ('bshuf', 4), ('bshuf', 2)):
-            seed = 1000 + e
-            raw = gen(big, seed)
-            t = shuffle_ref(raw, e) if op == 'shuf' else bitshuffle_ref(raw, e, 0)
-            f.write(f'{op} {e} {big} {seed} {hashlib.sha256(t).hexdigest()}\n')
-            count += 1
+    large = []
+    for op, e in (('shuf', 4), ('bshuf', 4), ('bshuf', 2)):
+        seed = 1000 + e
+        raw = gen(big, seed)
+        t = shuffle_ref(raw, e) if op == 'shuf' else bitshuffle_ref(raw, e, 0)
+        large.append(f'{op} {e} {big} {seed} {hashlib.sha256(t).hexdigest()} {frame_hash(t)}')
+        count += 1
+    path = os.path.join(out, 'large.txt')
+    if os.path.exists(path):
+        old = [l.split()[:5] for l in open(path) if l.strip()]
+        if old != [l.split()[:5] for l in large]:
+            sys.exit('not written: large.txt SHA-256 lines differ from the existing file')
+    with open(path, 'w', newline='\n') as f:
+        for l in large:
+            f.write(l + '\n')
     print(f'{count} fixtures -> {out}')
 
 if __name__ == '__main__':
