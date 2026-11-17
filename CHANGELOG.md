@@ -1,6 +1,28 @@
 # SpawnDev.Codecs CHANGELOG
 
-## Unreleased
+## 1.1.0 (2026-11-17)
+
+Everything since 1.0.1, listed below by date. The highlights:
+- **A full VP9 decoder**, `Video.Vp9.Decoder.Vp9DecoderGpu` (a port of libvpx v1.17.0, BSD-3-Clause), on the
+  accelerator: all 311 libvpx test vectors decode to libvpx's output (5,000 frames equal to the vectors' .md5) on CUDA,
+  OpenCL, Velocity, the CPU accelerator, WebGPU and Wasm.
+- **The VP9 encoder** writes inter frames, any picture size and tiles, with entropy coding in parallel; **the AV1
+  keyframe encoder** runs in parallel inside a tile and signals its level.
+- **MP3**: a decoder and a clean-room encoder (ISO 11172-3 / 13818-3). **FLAC**: a full decoder and a clean-room stream
+  encoder.
+- **No GPL or LGPL code.** The code ported from FFmpeg (LGPL) was removed, and the Ogg Opus writer and encoder, the WebM
+  writer and the FLAC encoder were rewritten clean-room. Third-party notices (BSD-3-Clause) are in NOTICE.md.
+- **WebP**: animated lossy and lossless files the way libwebp's WebPAnimEncoder writes them, ICCP / EXIF / XMP on
+  lossy stills, lossless tokenisation in parallel (17x), libwebp's entropy-based predictor-mode choice, and the lossy
+  rate-distortion stages in parallel.
+- **Files**: `VideoFileEncoderGpu` (frames + fps + audio to MP4, WebM or MKV), AV1 + Opus in MP4, the Matroska reader
+  fields a decoder needs, and ComfyUI LoadVideo parity (`Yuv420ToRgb16Gpu`, `WebMVideoLoaderGpu`).
+- Constructors compile nothing and kernels load awaited, so creating a codec no longer freezes a browser page.
+- The package carries the SpawnDev icon.
+- Dependencies: SpawnDev.ILGPU 5.4.35 (was 5.4.13), SpawnDev.EBML 3.0.1.
+- Release gate (2026-11-16 / 17), every class on every lane: CUDA, OpenCL and Velocity 1230 / 0, the CPU accelerator
+  3404 / 0, WebGPU 1223 / 0, WebGL 405 / 0 (on SpawnDev.ILGPU 5.4.34), Wasm 1223 / 0 (on SpawnDev.ILGPU 5.4.35-local.1,
+  which fixes a Wasm buffer released while work queued on it was still pending).
 
 ### Package icon (2026-11-16)
 - The NuGet package carries the SpawnDev icon (`icon-128.png`, as SpawnDev.ILGPU.ML's).

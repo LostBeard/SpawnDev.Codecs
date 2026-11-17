@@ -2,10 +2,17 @@
 
 What is verified, on which backend, and how. "Verified" means a test that compares against a reference
 implementation (never against this library's own output) passed on that backend, with its guard red-checked. Dates are
-the last run of the named lane. Updated 2026-11-16 (the 5.4.34 gate below; a cell keeps the date of the run behind it; counts are
+the last run of the named lane. Updated 2026-11-17 (the 1.1.0 gate below; a cell keeps the date of the run behind it; counts are
 passed / failed, skips are gated or CPU-only tests).
 
-**2026-11-16, SpawnDev.ILGPU 5.4.34 (commit b15ccc0 + 5.4.34-local.2): a scoped gate, not every test on every lane.** CUDA,
+**2026-11-16 / 17, release 1.1.0 (commit 99f274a): every class on every lane.** CUDA, OpenCL and Velocity 1230 / 0
+each, the CPU accelerator 3404 / 0, WebGPU 1223 / 0 and WebGL 405 / 0 on SpawnDev.ILGPU 5.4.34; Wasm 1223 / 0 on
+SpawnDev.ILGPU 5.4.35-local.1 (on 5.4.34 an MP3 encode failed with "RangeError: offset is out of bounds": the Wasm
+backend released a buffer disposed while work queued on it was still pending; fixed in 5.4.35). `Vp9Decode_EveryFrame`
+runs in four parts so each fits its 1 h limit on Wasm (2426 / 3077 / 2273 / 3148 s); together they check all 311 files.
+4 skips per desktop class and 2 per browser class are gated or environment-only tests.
+
+**Before that, 2026-11-16, SpawnDev.ILGPU 5.4.34 (commit b15ccc0 + 5.4.34-local.2): a scoped gate, not every test on every lane.** CUDA,
 OpenCL and Velocity 767 / 0 each, on the VP9, AV1, WebP, VP8, video, MDCT / IMDCT, CELT, Vorbis and MP3 tests; the CPU
 accelerator's full class 3396 / 0 (9 skipped); in Chrome the full WebGPU class, the Wasm encoder set and the WebGL audio
 transforms 1344 / 0. The MP3 decoder is green on CUDA. Open in that gate: `Vp9Decode_EveryFrame` on Wasm exceeds its 1 h
@@ -103,8 +110,9 @@ lanes (VP9 batch encode at unaligned sizes).
 
 ## Notes
 
-- **Open (2026-11-16 gate):** `Vp9Decode_EveryFrame` on Wasm exceeds its 1 h test limit. (The 5 Opus tests that skipped
-  when Concentus picked another mode now force the mode they need and run.)
+- **Closed in the 1.1.0 gate:** `Vp9Decode_EveryFrame` on Wasm exceeded its 1 h test limit as one test; it runs as four
+  parts now, each within its hour. The 5 Opus tests that skipped when Concentus picked another mode force the mode they
+  need and run.
 - **VP9 WebGPU device hang (the decoder trigger is fixed; the encoder's drain workaround stays, TJ-approved 2026-10-29).** In Chrome WebGPU (D3D12, NVIDIA RTX
   4070), a `Vp9EntropyStepKernel` queued while `Vp9EncodeWavefrontGroupKernel` (the single-dispatch barrier kernel of the
   batch encode) still runs leaves the device in a state where a LATER launch (the next encoder's first
@@ -164,7 +172,7 @@ lanes (VP9 batch encode at unaligned sizes).
 - **ILGPU 5.4.6-local.2** (2026-10-26): integer divisions no longer hoisted out of their guards (Wasm traps), WebGL sends a
   program's GLSL once (not per dispatch) and refuses kernels over the device's Transform Feedback varying limit at load,
   SpawnJS 3.0.5-local.1 (geometric message growth: the WebGL out-of-memory).
-- **ILGPU 5.4.5** (released 2026-10-25; this repo is on 5.4.34 now) carries the fixes the browser lanes needed: WGSL loop back-edge moves
+- **ILGPU 5.4.5** (released 2026-10-25; this repo is on 5.4.35 now) carries the fixes the browser lanes needed: WGSL loop back-edge moves
   (the lossless WebP encode hang), sub-view `.Length` (VP8 / VP9 kernels failed WGSL validation; WebGL silently used the
   whole buffer's length), WebGL inner-loop exits, struct-parameter bindings, pinned host copies, and an O(N^2) memory
   peak in the WGSL generator.

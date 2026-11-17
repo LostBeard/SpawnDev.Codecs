@@ -50,10 +50,8 @@ and reads back the finished file or picture. The same library and the same kerne
 
 ## Status
 
-The latest gate (2026-11-16, on SpawnDev.ILGPU 5.4.34) was scoped, not a run of every test on every lane: CUDA, OpenCL
-and Velocity 767 / 0 each on the VP9, AV1, WebP, VP8, video, MDCT / IMDCT, CELT, Vorbis and MP3 tests; the CPU
-accelerator's full class 3396 / 0 (9 skipped); in Chrome the full WebGPU class, the Wasm encoder set and the WebGL audio
-transforms 1344 / 0. WebGL has no scatter stores, so the serial frame coders (the video frame coders, the Opus coders)
+The 1.1.0 release gate (2026-11-16 / 17) ran every class on every lane: CUDA, OpenCL and Velocity 1230 / 0 each, the CPU
+accelerator 3404 / 0, and in Chrome WebGPU 1223 / 0, Wasm 1223 / 0 and WebGL 405 / 0. WebGL has no scatter stores, so the serial frame coders (the video frame coders, the Opus coders)
 are not offered there; their building blocks are. [**Docs/status.md**](Docs/status.md) lists every codec by backend
 with the evidence and the open items; where it disagrees with this page, that file wins.
 
@@ -63,7 +61,7 @@ with the evidence and the open items; where it disagrees with this page, that fi
 dotnet add package SpawnDev.Codecs
 ```
 
-Requires **.NET 10**. Depends on [SpawnDev.ILGPU](https://github.com/LostBeard/SpawnDev.ILGPU) 5.4.34 (which brings
+Requires **.NET 10**. Depends on [SpawnDev.ILGPU](https://github.com/LostBeard/SpawnDev.ILGPU) 5.4.35 (which brings
 [SpawnDev.SpawnJS](https://github.com/LostBeard/SpawnDev.SpawnJS)) and [SpawnDev.EBML](https://github.com/LostBeard/SpawnDev.EBML).
 The CPU reference implementations (for verification, with Concentus for Opus) are a separate project,
 `SpawnDev.Codecs.References`, so the main library has no third-party codec dependency.
