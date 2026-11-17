@@ -14,6 +14,17 @@ builder.Services.AddSpawnJSRuntime(out var JS);
 // test with it off. Opt in when hunting a leak: ?watchdispose=1 on the URL.
 SpawnJSRuntime.EnableIDisposableWatcher =
     JS.Get<string>("location.search")?.Contains("watchdispose=1", StringComparison.OrdinalIgnoreCase) ?? false;
+// ?env=NAME=value;NAME2=value2 (PlaywrightMultiTest's PMT_PAGE_ENV): environment variables for this runtime, so a test's
+// diagnostics switch read with Environment.GetEnvironmentVariable (VP9_STAGE_TIMES=1, ...) works in the browser lanes too.
+foreach (var part in (JS.Get<string>("location.search") ?? "").TrimStart('?').Split('&'))
+{
+    if (!part.StartsWith("env=", StringComparison.Ordinal)) continue;
+    foreach (var pair in Uri.UnescapeDataString(part.Substring(4)).Split(';', StringSplitOptions.RemoveEmptyEntries))
+    {
+        int eq = pair.IndexOf('=');
+        if (eq > 0) Environment.SetEnvironmentVariable(pair.Substring(0, eq), pair.Substring(eq + 1));
+    }
+}
 builder.Services.AddSingleton(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
 
 builder.Services.AddSingleton<WebGPUCodecsTests>();

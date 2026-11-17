@@ -307,7 +307,7 @@ namespace PlaywrightMultiTest
                                 wasmDumpChunks.Clear();
                             }
                             // Only log messages related to WGSL dumps, Wasm worker traces, or errors
-                            if (text.Contains("WGSL") || text.Contains("@compute") || text.Contains("@workgroup_size") || text.Contains("WGSL_DUMP") || text.Contains("GLSL_DUMP") || text.Contains("[WasmWorker]") || text.Contains("[Wasm") || text.Contains("CONV2D_TRACE") || text.Contains("TEX_UNIT") || text.Contains("PREPROCESS_TRACE") || text.Contains("LAYER_TRACE") || text.Contains("LOGITS_TRACE") || text.Contains("CPU_LOGITS") || text.Contains("DISP_TRACE") || text.Contains("TF_OFFSET") || text.Contains("CODEC_TRACE") || msg.Type == "error")
+                            if (text.Contains("WGSL") || text.Contains("@compute") || text.Contains("@workgroup_size") || text.Contains("WGSL_DUMP") || text.Contains("GLSL_DUMP") || text.Contains("[WasmWorker]") || text.Contains("[Wasm") || text.Contains("CONV2D_TRACE") || text.Contains("TEX_UNIT") || text.Contains("PREPROCESS_TRACE") || text.Contains("LAYER_TRACE") || text.Contains("LOGITS_TRACE") || text.Contains("CPU_LOGITS") || text.Contains("DISP_TRACE") || text.Contains("TF_OFFSET") || text.Contains("CODEC_TRACE") || text.Contains("VP9_STAGE") || msg.Type == "error")
                             {
                                 try
                                 {
@@ -319,6 +319,15 @@ namespace PlaywrightMultiTest
 
                         // go to the app's unit tests page.
                         var testPageUrl = new Uri(new Uri(baseUrl), testableProject.TestPage).ToString();
+                        // PMT_PAGE_ENV="NAME=value;NAME2=value2": environment variables for the .NET runtime in the page
+                        // (the demo's Program.cs sets them at startup from ?env=), so a test's diagnostics switch read
+                        // with Environment.GetEnvironmentVariable (VP9_STAGE_TIMES=1, ...) works in the browser lanes too.
+                        var pageEnv = Environment.GetEnvironmentVariable("PMT_PAGE_ENV");
+                        if (!string.IsNullOrEmpty(pageEnv))
+                        {
+                            testPageUrl += (testPageUrl.Contains('?') ? "&" : "?") + "env=" + Uri.EscapeDataString(pageEnv);
+                            LogStatus($"[PMT_PAGE_ENV] {pageEnv}");
+                        }
                         LogStatus($"Navigating to {testPageUrl}...");
                         await testableProject.Page.GotoAsync(testPageUrl).ConfigureAwait(false);
                         LogStatus("Page loaded, waiting for test table...");

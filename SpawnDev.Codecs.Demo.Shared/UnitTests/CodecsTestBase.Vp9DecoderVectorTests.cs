@@ -408,8 +408,9 @@ public abstract partial class CodecsTestBase
         {
             var failures = new List<string>();
             int frames = 0, outputs = 0, files = 0;
-            // VP9_STAGE_TIMES=1 (desktop): wait after every stage and report each stage's total and worst-frame time
-            var stageTimes = !OperatingSystem.IsBrowser() && Environment.GetEnvironmentVariable("VP9_STAGE_TIMES") == "1"
+            // VP9_STAGE_TIMES=1: wait after every stage and report each stage's total and worst-frame time (in the browser
+            // lanes through PlaywrightMultiTest's PMT_PAGE_ENV=VP9_STAGE_TIMES=1; the report goes to browser_console.log)
+            var stageTimes = Environment.GetEnvironmentVariable("VP9_STAGE_TIMES") == "1"
                 ? new Dictionary<string, (double TotalMs, double MaxMs, int Frames)>() : null;
             var clock = System.Diagnostics.Stopwatch.StartNew();
             int index = -1;
