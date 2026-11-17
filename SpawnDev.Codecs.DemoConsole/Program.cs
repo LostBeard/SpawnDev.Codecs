@@ -76,6 +76,25 @@ try
     services.AddSingleton<VelocityCodecsTests>();
     var sp = services.BuildServiceProvider();
     var runner = new UnitTestRunner(sp, true);
+    // --batch <file>: every test named in the file ("Type.Method" per line) in this one process. Starting a process per
+    // test costs ~0.75 s each (~90 min of a full desktop sweep). "BEGIN: name" before and "TEST: {...}" after each test
+    // let scripts/dev/run-desktop-tests.ps1 -Batch charge a crash or hang to the test that was running and restart the
+    // rest in a fresh process.
+    if (args.Length == 2 && args[0] == "--batch")
+    {
+        foreach (var name in File.ReadAllLines(args[1]))
+        {
+            if (name.Length == 0) continue;
+            Console.WriteLine($"BEGIN: {name}");
+            var test = runner.Tests.FirstOrDefault(t => $"{t.TestTypeName}.{t.TestMethodName}" == name) ?? runner.ResolveSingleTest(name);
+            if (test == null) { Console.WriteLine($"ERROR: Test not found: {name}"); continue; }
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            await runner.RunTest(test);
+            Console.WriteLine("TEST: " + System.Text.Json.JsonSerializer.Serialize(new { Name = name, test.ResultText, test.Error, Ms = (long)sw.Elapsed.TotalMilliseconds }));
+            Console.Out.Flush();
+        }
+        return 0;
+    }
     await ConsoleRunner.Run(args, runner);
 }
 catch (Exception ex)
