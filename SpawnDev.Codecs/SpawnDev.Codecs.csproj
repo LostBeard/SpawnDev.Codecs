@@ -4,7 +4,7 @@
 		<TargetFramework>net10.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<Version>1.1.0</Version>
+		<Version>1.1.1-local.1</Version>
 		<PackageReleaseNotes>1.1.0: a full VP9 decoder (libvpx v1.17.0 port) bit-exact on every libvpx test vector; VP9 encoder inter frames, tiles and parallel entropy coding; MP3 decoder and clean-room encoder; FLAC decoder and clean-room encoder; animated lossy and lossless WebP; MP4 / WebM / MKV file encoding with audio; no GPL or LGPL code (the FFmpeg-derived code was removed and rewritten clean-room); the SpawnDev package icon; SpawnDev.ILGPU 5.4.35. Full list: https://github.com/LostBeard/SpawnDev.Codecs/blob/master/CHANGELOG.md</PackageReleaseNotes>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -37,7 +37,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <PackageReference Include="SpawnDev.ILGPU" Version="5.4.35" />
+	  <PackageReference Include="SpawnDev.ILGPU" Version="5.4.36" />
 	  <PackageReference Include="SpawnDev.EBML" Version="3.0.1" />
 	  <!-- ZERO external dependencies past this line. The CPU reference Opus
 	       encoder + decoder (which use Concentus) live in
