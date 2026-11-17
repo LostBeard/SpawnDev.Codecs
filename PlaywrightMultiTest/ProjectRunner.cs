@@ -137,6 +137,19 @@ namespace PlaywrightMultiTest
             try { File.AppendAllText(StatusFile, line + "\n"); } catch { }
         }
 
+        /// <summary>A comma-separated filter: true when any term is a case-insensitive substring of the test's name, class or method.</summary>
+        private static bool MatchesFilter(string filter, ProjectTest t)
+        {
+            foreach (var term in filter.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            {
+                if ((t.Name?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (t.TestTypeName?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (t.TestMethodName?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false))
+                    return true;
+            }
+            return false;
+        }
+
         private async Task Init()
         {
             try { File.WriteAllText(StatusFile, ""); } catch { } // clear
@@ -156,6 +169,13 @@ namespace PlaywrightMultiTest
                     }
                 }
             }
+            // `dotnet test --filter` is applied by the NUnit adapter to PMT's wrapper cases and is NOT passed to this
+            // testhost; a filter of several `|` terms selected every case (the 1.1.0 sweep's WebGPU|Wasm|WebGL filter
+            // also ran the desktop classes). PMT_FILTER is read here and scopes what PMT enumerates: comma-separated
+            // terms, each a case-insensitive substring of "Class.Method", the class or the method (as in SpawnDev.ILGPU.ML),
+            // e.g. PMT_FILTER=WebGPUCodecsTests.,WasmCodecsTests.,WebGLCodecsTests.
+            filter ??= Environment.GetEnvironmentVariable("PMT_FILTER") is { Length: > 0 } envFilter ? envFilter : null;
+            LogStatus(filter == null ? "Test filter: NONE (every test of every project)" : $"Test filter: {filter}");
 
 
             LogStatus("Discovering projects...");
@@ -336,7 +356,7 @@ namespace PlaywrightMultiTest
 
                             if (filter != null)
                             {
-                                if (rowTest.Name != filter && rowTest.TestTypeName != filter && rowTest.TestMethodName != filter)
+                                if (!MatchesFilter(filter, rowTest))
                                 {
                                     continue;
                                 }
@@ -400,7 +420,7 @@ namespace PlaywrightMultiTest
                         var rowTest = new ProjectTest(testableProject, typeName!, methodName!);
                         if (filter != null)
                         {
-                            if (rowTest.Name != filter && rowTest.TestTypeName != filter && rowTest.TestMethodName != filter)
+                            if (!MatchesFilter(filter, rowTest))
                             {
                                 continue;
                             }
