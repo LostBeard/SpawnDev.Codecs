@@ -4,7 +4,10 @@
 @REM test --filter with several `|` terms selects every case, the desktop classes included).
 @REM   scripts\dev\run-release-sweep.cmd <outdir>
 @REM Holds the GPU, the CPU and the Codecs PMT ports for hours: mark the board and tell the crew first. Launch it outside
-@REM the agent shell (WMI Win32_Process Create, hidden window) so it outlives the session's job object.
+@REM the agent shell (WMI Win32_Process Create, hidden window) so it outlives the session's job object. The command line
+@REM needs the extra outer quotes (cmd /c strips the first and last quote of the line when it holds more than two):
+@REM   cmd.exe /c ""<repo>\scripts\dev\run-release-sweep.cmd" "<outdir>""
+@REM Measured 2026-11-17 on master (b356f5b, SpawnDev.ILGPU 5.4.36): 3 h 37 min end to end.
 @REM The oracle tests need Pillow 13 / libwebp 1.6.0: CODECS_PILLOW_PYTHON defaults to _oracle-venv in the folder that
 @REM holds this repo (a venv outside every session scratchpad: py -3.13 -m venv + pip install pillow==13.0.0 numpy soundfile).
 setlocal
