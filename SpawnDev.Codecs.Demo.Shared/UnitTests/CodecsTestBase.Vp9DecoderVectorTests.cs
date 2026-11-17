@@ -215,10 +215,15 @@ public abstract partial class CodecsTestBase
     }
 
     /// <summary>MD5 (hex) of <paramref name="bytes"/>, on every platform (FlacMd5: System.Security.Cryptography.MD5 is not in WASM).</summary>
-    // the FrameHash of a frame buffer's cropped planes, on the accelerator
+    // the FrameHash of a frame buffer's cropped planes: on the accelerator, except on the desktop CPU backends (CPU,
+    // Velocity), where the "device" is this CPU and native .NET hashes the read-back bytes faster than kernels do
+    // (every-frame part 1 on Velocity: 221 s host vs 267 s device). Same function either way
+    // (FrameHash_Device_EqualsHost_AndSeesOneByte).
     private static async Task<string> PlanesHashAsync(Accelerator acc, Vp9DecodePipeline pipe, int buffer)
     {
         using var planes = await pipe.PackPlanesAsync(buffer);
+        if (acc.AcceleratorType is AcceleratorType.CPU or AcceleratorType.Velocity)
+            return FrameHash.Compute(await planes.View.CopyToHostAsync());
         return await FrameHash.ComputeAsync(acc, planes.View, planes.Length);
     }
 
