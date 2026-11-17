@@ -88,7 +88,7 @@ public abstract partial class CodecsTestBase
     }
 
     private sealed record Lz4Case(string Name, string Kind, int Length, int Seed, bool StoreSize, bool BlockChecksum, bool ContentChecksum,
-        int Acceleration, int FrameLength, string Sha256, bool Stored)
+        int Acceleration, int FrameLength, string Sha256, bool Stored, string FrameHash)
     {
         public Lz4FrameOptions Options => new() { StoreContentSize = StoreSize, BlockChecksum = BlockChecksum, ContentChecksum = ContentChecksum, Acceleration = Acceleration };
     }
@@ -102,7 +102,7 @@ public abstract partial class CodecsTestBase
             if (line.Length == 0 || line.StartsWith('#')) continue;
             var f = line.Split('\t');
             list.Add(new Lz4Case(f[0], f[1], int.Parse(f[2]), int.Parse(f[3]), f[4] == "1", f[5] == "1", f[6] == "1", int.Parse(f[7]),
-                int.Parse(f[8]), f[9], f[10] == "1"));
+                int.Parse(f[8]), f[9], f[10] == "1", f.Length > 11 ? f[11] : ""));
         }
         return list;
     }
@@ -139,8 +139,13 @@ public abstract partial class CodecsTestBase
             string? diff = await DeviceVerify.CompareAsync(acc, dOut.View, withPoison);
             return diff == null ? null : $"{c.Name}: {diff}";
         }
-        string sha = Sha256Hex(await DeviceTransfer.DownloadAsync(dOut.View, n));
-        return sha == c.Sha256 ? null : $"{c.Name}: SHA-256 {sha} != liblz4 {c.Sha256}";
+        // a large frame is compared by its FrameHash on the accelerator (8 bytes back), not read back and hashed on the
+        // host: in the browser that pulled tens of MB into the single-threaded .NET heap, and SHA-256 there buffers its
+        // whole input (OutOfMemory late in a full sweep, 2026-11-17). The CPU backends hash the read-back bytes.
+        string hash = acc.AcceleratorType is AcceleratorType.CPU or AcceleratorType.Velocity
+            ? FrameHash.Compute(await DeviceTransfer.DownloadAsync(dOut.View, n))
+            : await FrameHash.ComputeAsync(acc, dOut.View, n);
+        return hash == c.FrameHash ? null : $"{c.Name}: frame hash {hash} != liblz4's {c.FrameHash}";
     }
 
     private async Task AssertLz4CasesAsync(Func<Lz4Case, bool> which, int waveBlocks, int minCases)

@@ -7,12 +7,16 @@
 # its length and SHA-256 in manifest.tsv.
 #
 # manifest.tsv columns: name, input kind, input length, seed, store_size, block_checksum, content_checksum,
-# acceleration, frame length, frame SHA-256, stored (1 = <name>.lz4 exists).
+# acceleration, frame length, frame SHA-256, stored (1 = <name>.lz4 exists), frame FrameHash (scripts/common/frame_hash.py:
+# the tests compare it on the accelerator, so a large frame is never read back). Rewriting an existing manifest, the
+# script refuses to write unless every row's lengths and SHA-256 are unchanged (the same liblz4 output).
 #
 # usage: python make_lz4_fixtures.py <TestData dir>     (needs lz4)
 
 import hashlib, os, sys
 import lz4, lz4.frame
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "common"))
+from frame_hash import frame_hash
 
 WORDS = ["the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog", "pack", "my", "box", "with", "five", "dozen",
          "liquor", "jugs", "sphinx", "of", "black", "quartz"]
@@ -65,7 +69,8 @@ def main(testdata):
         stored = len(f) < 512 * 1024
         if stored:
             open(os.path.join(out, name + ".lz4"), "wb").write(f)
-        rows.append((name, kind, len(data), seed, ss, bc, cc, accel, len(f), hashlib.sha256(f).hexdigest(), int(stored)))
+        rows.append((name, kind, len(data), seed, ss, bc, cc, accel, len(f), hashlib.sha256(f).hexdigest(), int(stored),
+                     frame_hash(f)))
 
     for n in (0, 1, 12, 13, 14, 100, 4096, 65535, 65536, 65537, 200_000):
         add(f"text_{n}", "text", gen_text(n, 7 + n % 13), 7 + n % 13)
@@ -87,7 +92,13 @@ def main(testdata):
         data = open(os.path.join(testdata, rel), "rb").read()
         add("file_" + rel.replace(".", "_"), "file:" + rel, data, 0, cc=1)
 
-    with open(os.path.join(out, "manifest.tsv"), "w", newline="\n") as m:
+    path = os.path.join(out, "manifest.tsv")
+    if os.path.exists(path):
+        old = {l.split("\t")[0]: l.rstrip("\n").split("\t")[:11] for l in open(path) if l.strip() and not l.startswith("#")}
+        bad = [r[0] for r in rows if old.get(r[0]) != [str(x) for x in r[:11]]]
+        if bad or len(old) != len(rows):
+            sys.exit(f"not written: {len(bad)} rows differ from the existing manifest ({bad[:5]}), {len(old)} vs {len(rows)} rows")
+    with open(path, "w", newline="\n") as m:
         m.write("# liblz4 " + lz4.library_version_string() + "\n")
         for r in rows:
             m.write("\t".join(str(x) for x in r) + "\n")
