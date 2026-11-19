@@ -168,6 +168,15 @@ loses to every generator, so the encoder is upgraded first. Parity target: libwe
       once. Next: measure the ALPH size of the estimate vs the exact trial on Lore's frames and the fixtures; if the exact
       trial is smaller, keep it but make it cheaper (the 4 measuring passes share the analysis; run them as one pass with
       4 outputs); never ship a bigger default without that measurement (speed is never bought with size).
+      2026-11-16/18 state: the exact trial is kept (the estimate is +2% on Lore's animation, up to +41% on small planes;
+      `ExactFilterChoice = false` opts out). 3b837d3: no fifth encode (the winner's stream is kept) and the colour analysis
+      in parallel: 16 frames 912 -> 759 ms per frame. Traced totals left over 16 frames (CUDA): trial predictor 1553, trial
+      raw 1138, cache 712, emit header 573 ms. NEXT (byte-identical by construction): the 4 filter trials in LOCKSTEP -
+      EncodeStreamAsync's host decisions (strategy by estimated bits, colour-cache size, meta groups) are per trial and
+      independent, so run the four trials' stages side by side (four planes in flight on separate work / token buffers,
+      one SynchronizeAsync + one meta readback per stage for all four instead of one per trial and stage). A 512x352 plane
+      fills a small part of the GPU per launch; four at once fill more, and the host round trips drop 4x. Measure the
+      split between GPU time and sync / launch overhead per stage first (trace with and without the waits), then build.
 - [x] ALPH (transparency, 2026-10-25): VP8X + ALPH + VP8, VP8 chunk byte-identical with libwebp, alpha exact (145 fixtures, CPU).
 - (superseded by the summary above; kept for the design notes) E2 intra mode decision: I16 (DC/V/H/TM), I4 (10 modes) and UV (4 modes) chosen by distortion + lambda * rate like
       libwebp method 4 (`VP8Decimate`: score = SSE * RD_DISTO_MULT + lambda * bits, with the spectral-distortion term
