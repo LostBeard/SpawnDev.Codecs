@@ -25,6 +25,8 @@
   interpolation removed and the bias divided by 9 both pass the hash test and fail this one).
 - The choices move slightly (integer instead of float rounding): SpawnGen's clip as a lossless animation 3,415,440 ->
   3,415,372 bytes (CUDA and Velocity give the same file).
+- SpawnGen's Save Animated WEBP node on an RX 590 (Lore, 1.1.1-local.3, AMD OpenCL): all 25 frames' VP8L payloads
+  identical to the RTX 4070's (with 1.1.0, 10 of 25 differed); the node call 35.7 -> 32.4 s against 1.1.0 (-9%).
 
 ### Lossless WebP: the predictor-mode choice in two kernels (2026-11-18)
 - libwebp's entropy-based predictor choice (`Vp8lPredictorChoose`, pictures with transparency at `Exact = false`) walked
