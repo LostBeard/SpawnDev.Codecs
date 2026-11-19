@@ -394,7 +394,10 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    [TestMethod]
+    // Cold WebGL runs (the first after any change to this kernel's GLSL, or a fresh Chrome profile) spend 25-32 s in
+    // the D3D shader compile (5.4.34 25.2 s, 5.4.36 29.0 s, 5.4.38-local.2 30.1 / 32.3 s under load; warm 2 s), past the
+    // 30 s default (Geordi, 2026-11-18). The compile time itself is an open item.
+    [TestMethod(Timeout = 180000)]
     public async Task CeltPvqGpu_Icwrs_BitExactVsConcentus()
     {
         var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
