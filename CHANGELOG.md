@@ -8,10 +8,16 @@
   wavefront and 7 histogram rounds, ~65 barriers per tile on one multiprocessor. Now `HistKernel` builds the histograms
   of 128 tiles at once (a work-group per tile, the whole GPU; they do not depend on the tiles before), and `WalkKernel`
   only scores them against the accumulated histograms, chooses and accumulates: 4 barriers per tile. The walk computes
-  every cost term as before, term for term, so the choices and the files are the same; the one-kernel form stays as
-  the oracle (`WebPEncodeKernels.SinglePassChooser`, tests only). New test `Vp8lPredictorChoose_TwoKernels_SameAsOneKernel`
-  (mode image and accumulated histograms identical on pictures up to 8,160 tiles, both fill walks, the predictor off;
-  whole files identical), red-checked with 5 mutations.
+  every cost term with the same float expressions as before, and the one-kernel form stays as the oracle
+  (`WebPEncodeKernels.SinglePassChooser`, tests only). New test `Vp8lPredictorChoose_TwoKernels_SameAsOneKernel` (mode
+  image and accumulated histograms identical on pictures up to 8,160 tiles, both fill walks, the predictor off; whole
+  files identical), red-checked with 5 mutations; it passes on CUDA, OpenCL (NVIDIA), Velocity, the CPU accelerator,
+  WebGPU and Wasm.
+- **Not bit-identical everywhere** (Lore, RX 590, AMD OpenCL): there one tile of the test's 12,478 takes another mode
+  (a near tie between two modes' float costs rounds differently in the two kernels), and SpawnGen's animation is 958
+  bytes smaller than with the one-kernel form; every frame decodes identically. The choice was never device-independent:
+  the one-kernel form's file for the same frames already differs between an RTX 4070 (CUDA) and the RX 590 in 10 of 25
+  frames. A device-independent choice (libwebp's integer cost arithmetic) is the open item that makes this exact.
 - SpawnGen's LTX clip as a lossless WebPAnimEncoder animation (25 frames 512x352, q80, RTX 4070): 329 -> 309 ms per
   frame, 3,415,440 bytes either way. The choice had cost 27 ms per frame here and ~176 on an RX 590.
 
