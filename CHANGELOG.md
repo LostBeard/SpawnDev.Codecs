@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### SpawnDev.ILGPU 5.4.38 (2026-11-19)
+- **SpawnDev.ILGPU 5.4.38** (was 5.4.37): WGSL / GLSL short-circuit lowering fix, accurate f32 log on WebGPU / WebGL,
+  Math Log2 / Cbrt / Asinh / Acosh / Atanh in kernels. Codecs check on 5.4.38-local.2 (Data's gate): WebGPU 1,226 / 0,
+  WebGL 404 / 1 (CeltPvqGpu_Icwrs: a cold WebGL compile past its 30 s limit, the same GLSL as on 5.4.37; the limit is
+  raised separately), VP9 WGSL sizes identical to 5.4.37.
+
+### Lossless WebP: the same file on every device (integer predictor costs) (2026-11-18)
+- The predictor-mode choice was the encoder's only decision made from real numbers, and float costs rounded
+  differently per device: SpawnGen's 25 LTX frames gave other files on an RTX 4070 (CUDA) and an RX 590 (AMD OpenCL)
+  in 10 of 25 frames, and AMD's compiler even disagreed between the one- and two-kernel forms on one tile. The costs
+  are now integers: bits in Q32 fixed point, 64-bit sums (so the order does not matter either), log2 from a table that
+  the host computes with integer arithmetic only (floor(log2(v) 2^32) for v up to 65,536 by repeated squaring;
+  larger counts interpolate on their top 16 bits, under a thousandth of a bit off), libwebp's bias weights as exact
+  fractions. Both kernel forms use the same `BinCost`.
+- New test `WebPLosslessEncoderGpu_SameFileOnEveryDevice`: six encodes (transparency at Exact = false, efforts 75 /
+  95, an opaque texture, a 4-frame WebPAnimEncoder animation) must have the recorded SHA-256 on every accelerator; it
+  also checks the table against double-precision log2. Identical on CUDA, OpenCL, Velocity and the CPU accelerator
+  (RTX 4070) and on an RX 590 (AMD OpenCL, Lore), where the float costs had differed. New test
+  `Vp8lPredictorChoose_IntegerCost_MatchesDoubles`: every cost term on the device against doubles (1,188 cases, counts
+  up to 2^28; worst 0.067 bits), because the hash test only sees terms that flip a choice (red-checked: the large-count
+  interpolation removed and the bias divided by 9 both pass the hash test and fail this one).
+- The choices move slightly (integer instead of float rounding): SpawnGen's clip as a lossless animation 3,415,440 ->
+  3,415,372 bytes (CUDA and Velocity give the same file).
+
 ### Lossless WebP: the predictor-mode choice in two kernels (2026-11-18)
 - libwebp's entropy-based predictor choice (`Vp8lPredictorChoose`, pictures with transparency at `Exact = false`) walked
   the tiles in one work-group that also built every tile's 14 residual histograms itself: the transparent fill as a

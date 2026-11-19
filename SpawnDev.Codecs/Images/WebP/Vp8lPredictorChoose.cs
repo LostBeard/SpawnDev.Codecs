@@ -24,8 +24,9 @@
 // Only the terms that differ between modes are computed: slog(sum X), slog(sum X + sum Y) and sum_Y slog(Y) are the
 // same for every mode of a tile, so a mode's relative entropy is -sum over its NONZERO bins of
 // slog(X) + slog(X + Y) - slog(Y), with slog(n) = n log2 n and the difference in the stable form
-// X log2(X + Y) + Y log2(1 + X / Y). Floats: the choice is ours, not libwebp's fixed point (our VP8L bytes are not
-// libwebp's anyway); the pixels stay exact whatever the modes.
+// X log2(X + Y) + Y (log2(X + Y) - log2(Y)). Integers (bits in Q32, 64-bit sums, log2 from a table computed with integer
+// arithmetic on the host): the same choice on every device and in both kernel forms (BinCost). The values are ours,
+// not libwebp's fixed point (our VP8L bytes are not libwebp's anyway); the pixels stay exact whatever the modes.
 
 using ILGPU;
 using ILGPU.Algorithms;
@@ -70,19 +71,112 @@ public static class Vp8lPredictorChoose
     /// (14 x TileMax each).</summary>
     public const int Acc = 0, Res = Acc + Bins, Fill = Res + Modes * TileMax, Total = Fill + Modes * TileMax;
 
-    // libwebp PredictionCostBias(counts, 1, 94): the weight of |residual| = i (1..15) is 0.94 * 0.6^(i - 1); 0 weighs 1
-    private static float BiasWeight(int i)
+    // ------------------------------------------------------------------
+    // Costs in integers (2026-11-18): bits in Q32 fixed point, 64-bit sums. Floats made the choice device-dependent: a
+    // near tie between two modes rounded differently per compiler (the same 25 frames gave other files on an RTX 4070 and
+    // an RX 590 in 10 of 25 frames, and AMD's OpenCL compiler even differed between two kernels with the same float
+    // expressions). Integer sums do not depend on the order either, so every backend and both kernel forms choose alike.
+    // ------------------------------------------------------------------
+
+    /// <summary>Entries of the exact log2 table (log2 v for v = 0..<see cref="LogTableMax"/>); larger v interpolate.</summary>
+    public const int LogTableMax = 65536;
+
+    /// <summary>Offset of the 16 bias weights in the cost table.</summary>
+    public const int BiasOff = LogTableMax + 1;
+
+    /// <summary>Longs of the cost table (<see cref="CostTable"/>).</summary>
+    public const int CostTableSize = BiasOff + 16;
+
+    private static long[]? _costTable;
+
+    /// <summary>
+    /// The cost table, computed on the host with integer arithmetic only (so it is the same on every machine):
+    /// [v] = floor(log2(v) * 2^32) for v = 1..65536 ([0] = 0); [BiasOff + i] = floor(w_i * 2^32) with libwebp's
+    /// PredictionCostBias(counts, 1, 94) weights, w_0 = 1 and w_i = 0.94 * 0.6^(i - 1) for |residual| = i in 1..15.
+    /// </summary>
+    public static long[] CostTable => _costTable ??= BuildCostTable();
+
+    private static long[] BuildCostTable()
     {
-        float w = 0.94f;
-        for (int k = 1; k < i; k++) w *= 0.6f;
-        return w;
+        var t = new long[CostTableSize];
+        for (int v = 1; v <= LogTableMax; v++) t[v] = Log2Q32Exact((uint)v);
+        t[BiasOff] = 1L << 32;
+        for (int i = 1; i < 16; i++)
+        {
+            // 94/100 * (6/10)^(i-1) * 2^32, exactly, then floor
+            UInt128 num = 94, den = 100;
+            for (int k = 1; k < i; k++) { num *= 6; den *= 10; }
+            t[BiasOff + i] = (long)((num << 32) / den);
+        }
+        return t;
     }
 
-    // n log2 n
-    private static float SLog(float n) => n > 0f ? n * XMath.Log2(n) : 0f;
+    // floor(log2(v) * 2^32) by repeated squaring of the mantissa in Q62: exact, integer only
+    private static long Log2Q32Exact(uint v)
+    {
+        int e = System.Numerics.BitOperations.Log2(v);
+        UInt128 m = (UInt128)v << (62 - e);          // v / 2^e in [1, 2), Q62
+        long bits = 0;
+        for (int i = 0; i < 32; i++)
+        {
+            m = (m * m) >> 62;                        // squared, still Q62, in [1, 4)
+            bits <<= 1;
+            if (m >= ((UInt128)1 << 63))
+            {
+                bits |= 1;
+                m >>= 1;
+            }
+        }
+        return ((long)e << 32) | bits;
+    }
 
-    // slog(x + y) - slog(y), stable for large y
-    private static float SLogStep(float x, float y) => y > 0f ? x * XMath.Log2(x + y) + y * XMath.Log2(1f + x / y) : SLog(x);
+    // log2(v) in Q32: the table up to 65536, above it interpolated between the table entries of v's top 16 bits (error
+    // below 2e-10 bits per bit of v: well under a thousandth of a bit for every count a picture can have)
+    internal static long Log2Q32(ArrayView<long> t, int v)
+    {
+        long r;
+        if (v <= LogTableMax)
+        {
+            r = t[v];
+        }
+        else
+        {
+            int e = 31 - IntrinsicMath.LeadingZeroCount(v);
+            int shift = e - 15;
+            int idx = v >> shift;                     // 32768 .. 65535
+            long frac = v - (idx << shift);
+            long lo = t[idx], hi = t[idx + 1];
+            r = lo + ((long)shift << 32) + (((hi - lo) * frac) >> shift);
+        }
+        return r;
+    }
+
+    /// <summary>
+    /// The cost (bits, Q32) one nonzero bin of a mode's tile histogram adds: -(slog(x) + slog(x + y) - slog(y)) - x w_v / 10,
+    /// with x the tile's count, y the accumulated count, v the bin's residual value and slog(n) = n log2 n; the difference in
+    /// the stable form x log2(x + y) + y (log2(x + y) - log2(y)) (no slog of a large y: it would not fit in 64 bits).
+    /// </summary>
+    internal static long BinCost(ArrayView<long> t, int x, int y, int v)
+    {
+        long lx = Log2Q32(t, x);
+        long step;
+        if (y > 0)
+        {
+            long lxy = Log2Q32(t, x + y);
+            step = x * lxy + y * (lxy - Log2Q32(t, y));
+        }
+        else
+        {
+            step = x * lx;
+        }
+        int wi = v == 0 ? 0 : v < 16 ? v : v > 240 ? 256 - v : -1;
+        long bias = 0;
+        if (wi >= 0) bias = (x * t[BiasOff + wi]) / 10;
+        return -(x * lx + step) - bias;
+    }
+
+    /// <summary>The neighbour bias of libwebp's choice, 15 bits, in Q32.</summary>
+    private const long NeighbourBonus = 15L << 32;
 
     // bin of channel c (0 alpha, 1 red, 2 green, 3 blue) of a residual
     private static int Bin(uint r, int c) => c * 256 + (int)((r >> (24 - 8 * c)) & 0xFFu);
@@ -93,11 +187,11 @@ public static class Vp8lPredictorChoose
     /// (w[RegionPredictor + t] = 0xff000000 | mode &lt;&lt; 8). The accumulated histograms must be zero before the first
     /// tile of an image (<see cref="ClearKernel"/>).
     /// </summary>
-    public static void ChooseKernel(ArrayView<uint> argb, ArrayView<int> w, ArrayView<int> meta, ArrayView<int> pc, int options, int first)
+    public static void ChooseKernel(ArrayView<uint> argb, ArrayView<int> w, ArrayView<int> meta, ArrayView<int> pc, ArrayView<long> lt, int options, int first)
     {
         var hist = SharedMemory.Allocate<int>(Batch * Bins);   // atomics only
-        var part = SharedMemory.Allocate<float>(2 * Batch * MaxGroupSize);
-        var cost = SharedMemory.Allocate<float>(Modes);
+        var part = SharedMemory.Allocate<long>(Batch * MaxGroupSize);
+        var cost = SharedMemory.Allocate<long>(Modes);
         var flags = SharedMemory.Allocate<int>(2);         // [1] the chosen mode ([0] unused since the group-wide OR)
         int lane = Group.IdxX;
         int groupSize = Group.DimX;               // a power of two <= MaxGroupSize (GroupSizeFor)
@@ -219,35 +313,28 @@ public static class Vp8lPredictorChoose
                     }
                 }
                 Group.Barrier();
-                int pb = ((mb / Batch) & 1) * Batch * groupSize;
                 for (int q = 0; q < nb; q++)
                 {
-                    float entropy = 0f, bias = 0f;
+                    long c = 0;
                     for (int j = 0; j < binsPerThread; j++)
                     {
                         int b = b0 + j;
                         int count = Atomic.Exchange(ref hist[q * Bins + b], 0);
-                        if (count > 0)
-                        {
-                            float x = count;
-                            entropy -= SLog(x) + SLogStep(x, pc[Acc + b]);
-                            int v = b & 255;
-                            if (v == 0) bias += x;
-                            else if (v < 16) bias += x * BiasWeight(v);
-                            else if (v > 240) bias += x * BiasWeight(256 - v);
-                        }
+                        // PredictionCostBias (-bits / 10) is inside BinCost. The oracle test does not pin that term (no tile
+                        // of its picture is decided by it): keep it equal to libwebp's text when touching it.
+                        if (count > 0) c += BinCost(lt, count, pc[Acc + b], b & 255);
                     }
-                    // PredictionCostBias: -bits / 10. The oracle test does not pin this term (no tile of its picture is decided
-                    // by it): keep it equal to libwebp's text when touching it.
-                    part[pb + q * groupSize + lane] = entropy - bias * 0.1f;
+                    part[q * groupSize + lane] = c;
                 }
                 Group.Barrier();
                 if (lane < nb)
                 {
-                    float sum = 0f;
-                    for (int u = 0; u < groupSize; u++) sum += part[pb + lane * groupSize + u];
+                    long sum = 0;
+                    for (int u = 0; u < groupSize; u++) sum += part[lane * groupSize + u];
                     cost[mb + lane] = sum;
                 }
+                // the next round writes `part` again
+                Group.Barrier();
             }
             Group.Barrier();
 
@@ -257,12 +344,12 @@ public static class Vp8lPredictorChoose
                 int left = tx > 0 ? (w[modes + t - 1] >> 8) & 0xFF : 0xFF;
                 int above = ty > 0 ? (w[modes + t - tilesPerRow] >> 8) & 0xFF : 0xFF;
                 int best = 0;
-                float bestCost = 0f;
+                long bestCost = 0;
                 for (int m = 0; m < Modes; m++)
                 {
-                    float c = cost[m];
-                    if (m == left) c -= 15f;
-                    if (m == above) c -= 15f;
+                    long c = cost[m];
+                    if (m == left) c -= NeighbourBonus;
+                    if (m == above) c -= NeighbourBonus;
                     if ((m == 0) | (c < bestCost))
                     {
                         bestCost = c;
@@ -298,6 +385,8 @@ public static class Vp8lPredictorChoose
     // the wavefront's and the 7 histogram rounds'. The walk computes every cost term exactly as ChooseKernel does (same
     // expressions, same bins per thread, same summation order), so the choices are ChooseKernel's (kept as the oracle).
     // ------------------------------------------------------------------
+
+    private const int HalfModes = Modes / 2;
 
     /// <summary>Tiles whose histograms are built per HistKernel launch (and scored per WalkKernel launch).</summary>
     public const int WindowTiles = 128;
@@ -447,10 +536,11 @@ public static class Vp8lPredictorChoose
     /// order, their histograms from HistKernel's slots: each mode scored against the accumulated histograms (ChooseKernel's
     /// phase B arithmetic, term for term), the choice (phase C), the chosen histogram added to the accumulated one.
     /// </summary>
-    public static void WalkKernel(ArrayView<int> w, ArrayView<int> meta, ArrayView<int> pc, int options, int first)
+    public static void WalkKernel(ArrayView<int> w, ArrayView<int> meta, ArrayView<int> pc, ArrayView<long> lt, int options, int first)
     {
-        var part = SharedMemory.Allocate<float>(Modes * MaxGroupSize);
-        var cost = SharedMemory.Allocate<float>(Modes);
+        // half the modes per round: 7 x 256 longs = 14 KB of shared memory (WebGPU's default limit is 16 KB)
+        var part = SharedMemory.Allocate<long>(HalfModes * MaxGroupSize);
+        var cost = SharedMemory.Allocate<long>(Modes);
         var flags = SharedMemory.Allocate<int>(2);
         int lane = Group.IdxX;
         int groupSize = Group.DimX;
@@ -474,45 +564,41 @@ public static class Vp8lPredictorChoose
             int hb = WSlots + (t - first) * HistSlot;
             int ty = t / tilesPerRow;
             int tx = t - ty * tilesPerRow;
-            for (int m = 0; m < Modes; m++)
+            for (int half = 0; half < 2; half++)
             {
-                float entropy = 0f, bias = 0f;
-                for (int j = 0; j < binsPerThread; j++)
+                for (int q = 0; q < HalfModes; q++)
                 {
-                    int b = b0 + j;
-                    int count = pc[hb + m * Bins + b];
-                    if (count > 0)
+                    int m = half * HalfModes + q;
+                    long c = 0;
+                    for (int j = 0; j < binsPerThread; j++)
                     {
-                        float x = count;
-                        entropy -= SLog(x) + SLogStep(x, pc[WAcc + b]);
-                        int v = b & 255;
-                        if (v == 0) bias += x;
-                        else if (v < 16) bias += x * BiasWeight(v);
-                        else if (v > 240) bias += x * BiasWeight(256 - v);
+                        int b = b0 + j;
+                        int count = pc[hb + m * Bins + b];
+                        if (count > 0) c += BinCost(lt, count, pc[WAcc + b], b & 255);
                     }
+                    part[q * groupSize + lane] = c;
                 }
-                // PredictionCostBias: -bits / 10 (as ChooseKernel)
-                part[m * groupSize + lane] = entropy - bias * 0.1f;
+                Group.Barrier();
+                if (lane < HalfModes)
+                {
+                    long sum = 0;
+                    for (int u = 0; u < groupSize; u++) sum += part[lane * groupSize + u];
+                    cost[half * HalfModes + lane] = sum;
+                }
+                // the next half writes `part` again; after the second, lane 0 reads `cost`
+                Group.Barrier();
             }
-            Group.Barrier();
-            if (lane < Modes)
-            {
-                float sum = 0f;
-                for (int u = 0; u < groupSize; u++) sum += part[lane * groupSize + u];
-                cost[lane] = sum;
-            }
-            Group.Barrier();
             if (lane == 0)
             {
                 int left = tx > 0 ? (w[modes + t - 1] >> 8) & 0xFF : 0xFF;
                 int above = ty > 0 ? (w[modes + t - tilesPerRow] >> 8) & 0xFF : 0xFF;
                 int best = 0;
-                float bestCost = 0f;
+                long bestCost = 0;
                 for (int m = 0; m < Modes; m++)
                 {
-                    float c = cost[m];
-                    if (m == left) c -= 15f;
-                    if (m == above) c -= 15f;
+                    long c = cost[m];
+                    if (m == left) c -= NeighbourBonus;
+                    if (m == above) c -= NeighbourBonus;
                     if ((m == 0) | (c < bestCost))
                     {
                         bestCost = c;

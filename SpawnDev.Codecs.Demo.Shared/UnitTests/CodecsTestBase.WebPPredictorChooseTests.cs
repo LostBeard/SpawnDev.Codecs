@@ -41,7 +41,8 @@ public abstract partial class CodecsTestBase
             meta[WebPEncMeta.Transparent] = 1;
             meta[WebPEncMeta.PaletteCount] = 0;
 
-            var choose = acc.LoadStreamKernel<ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Vp8lPredictorChoose.ChooseKernel);
+            var choose = acc.LoadStreamKernel<ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int, int>(Vp8lPredictorChoose.ChooseKernel);
+            using var dCost = acc.Allocate1D(Vp8lPredictorChoose.CostTable);
             var clear = acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(Vp8lPredictorChoose.ClearKernel);
             using var dArgb = acc.Allocate1D(argb);
             using var dMeta = acc.Allocate1D(meta);
@@ -53,7 +54,7 @@ public abstract partial class CodecsTestBase
                 dPc.View.MemSetToZero();
                 dW.View.MemSetToZero();
                 clear(Vp8lPredictorChoose.Res, dPc.View);
-                choose(new KernelConfig(1, Vp8lPredictorChoose.GroupSizeFor(acc)), dArgb.View, dW.View, dMeta.View, dPc.View, options, 0);
+                choose(new KernelConfig(1, Vp8lPredictorChoose.GroupSizeFor(acc)), dArgb.View, dW.View, dMeta.View, dPc.View, dCost.View, options, 0);
                 await acc.SynchronizeAsync();
                 return (await dW.View.CopyToHostAsync(), await dPc.View.CopyToHostAsync());
             }
@@ -172,7 +173,8 @@ public abstract partial class CodecsTestBase
             meta[WebPEncMeta.Transparent] = 1;
             meta[WebPEncMeta.PaletteCount] = 0;
 
-            var choose = acc.LoadStreamKernel<ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Vp8lPredictorChoose.ChooseKernel);
+            var choose = acc.LoadStreamKernel<ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int, int>(Vp8lPredictorChoose.ChooseKernel);
+            using var dCost = acc.Allocate1D(Vp8lPredictorChoose.CostTable);
             var clear = acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(Vp8lPredictorChoose.ClearKernel);
             using var dArgb = acc.Allocate1D(argb);
             using var dMeta = acc.Allocate1D(meta);
@@ -181,7 +183,7 @@ public abstract partial class CodecsTestBase
             dPc.View.MemSetToZero();
             dW.View.MemSetToZero();
             clear(Vp8lPredictorChoose.Res, dPc.View);
-            choose(new KernelConfig(1, Vp8lPredictorChoose.GroupSizeFor(acc)), dArgb.View, dW.View, dMeta.View, dPc.View, 1, 0);
+            choose(new KernelConfig(1, Vp8lPredictorChoose.GroupSizeFor(acc)), dArgb.View, dW.View, dMeta.View, dPc.View, dCost.View, 1, 0);
             await acc.SynchronizeAsync();
             int[] devW = await dW.View.CopyToHostAsync();
             int[] devPc = await dPc.View.CopyToHostAsync();

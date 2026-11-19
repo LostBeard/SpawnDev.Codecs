@@ -67,12 +67,13 @@ public sealed class WebPEncodeKernels : IDisposable
     private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args> _peFinish = null!;
     private MemoryBuffer1D<int, Stride1D.Dense>? _peWords;
     // libwebp's predictor-mode choice (Vp8lPredictorChoose)
-    private Action<KernelConfig, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _pcChoose = null!;
+    private Action<KernelConfig, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int, int> _pcChoose = null!;
     private Action<Index1D, ArrayView<int>> _pcClear = null!;
     private MemoryBuffer1D<int, Stride1D.Dense>? _pcScratch;
     private Action<KernelConfig, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _pcHist = null!;
-    private Action<KernelConfig, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _pcWalk = null!;
+    private Action<KernelConfig, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int, int> _pcWalk = null!;
     private MemoryBuffer1D<int, Stride1D.Dense>? _pcHistScratch, _pcFillScratch;
+    private MemoryBuffer1D<long, Stride1D.Dense>? _pcCostTable;
 
     /// <summary>
     /// Tests only: the predictor choice in one kernel (Vp8lPredictorChoose.ChooseKernel, one work-group walks the tiles and
@@ -225,10 +226,10 @@ public sealed class WebPEncodeKernels : IDisposable
             Vp8lTokenizeParallel.Args>(Vp8lEmitParallel.FinishKernel);
         _peTileHist = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lEmitParallel.TileHistKernel);
-        _pcChoose = await a.LoadStreamKernelAsync<ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Vp8lPredictorChoose.ChooseKernel);
+        _pcChoose = await a.LoadStreamKernelAsync<ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int, int>(Vp8lPredictorChoose.ChooseKernel);
         _pcClear = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(Vp8lPredictorChoose.ClearKernel);
         _pcHist = await a.LoadStreamKernelAsync<ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Vp8lPredictorChoose.HistKernel);
-        _pcWalk = await a.LoadStreamKernelAsync<ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Vp8lPredictorChoose.WalkKernel);
+        _pcWalk = await a.LoadStreamKernelAsync<ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int, int>(Vp8lPredictorChoose.WalkKernel);
         _emitHeader = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(EmitHeaderKernel);
         _emitBits = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(EmitBitsKernel);
         _subImageBegin = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(SubImageBeginKernel);
@@ -349,13 +350,20 @@ public sealed class WebPEncodeKernels : IDisposable
         int fillOn = (FillTransparent && PredictorModeSeesFill ? 1 : 0) | (SerialFillWalk ? 2 : 0);
         int groupSize = Vp8lPredictorChoose.GroupSizeFor(_accelerator);
         var group = new KernelConfig(1, groupSize);
+        // the integer cost table (log2 + bias weights), uploaded once
+        if (_pcCostTable == null)
+        {
+            _pcCostTable = _accelerator.Allocate1D<long>(Vp8lPredictorChoose.CostTableSize);
+            _pcCostTable.View.CopyFromCPU(Vp8lPredictorChoose.CostTable);
+        }
+        var lt = _pcCostTable.View;
         if (SinglePassChooser)
         {
             _pcScratch ??= _accelerator.Allocate1D<int>(Vp8lPredictorChoose.Total);
             var pc = _pcScratch.View;
             _pcClear(Vp8lPredictorChoose.Res, pc);
             for (int first = 0; first < tiles; first += Vp8lPredictorChoose.TilesPerLaunch)
-                _pcChoose(group, argb, work, meta, pc, fillOn, first);
+                _pcChoose(group, argb, work, meta, pc, lt, fillOn, first);
             return;
         }
         // fixed sizes (a window, not the picture), allocated once: never replaced under queued work
@@ -368,7 +376,7 @@ public sealed class WebPEncodeKernels : IDisposable
         {
             int n = Math.Min(Vp8lPredictorChoose.WindowTiles, tiles - first);
             _pcHist(new KernelConfig(n, groupSize), argb, meta, hist, fillPx, fillOn, first);
-            _pcWalk(group, work, meta, hist, fillOn, first);
+            _pcWalk(group, work, meta, hist, lt, fillOn, first);
         }
     }
 
@@ -2033,5 +2041,6 @@ public sealed class WebPEncodeKernels : IDisposable
         _pcScratch?.Dispose();
         _pcHistScratch?.Dispose();
         _pcFillScratch?.Dispose();
+        _pcCostTable?.Dispose();
     }
 }

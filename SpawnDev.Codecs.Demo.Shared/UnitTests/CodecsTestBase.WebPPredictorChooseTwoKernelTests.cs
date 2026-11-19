@@ -60,9 +60,10 @@ public abstract partial class CodecsTestBase
         RequireFeatures(acc, AtomicKernels);
         try
         {
-            var choose = acc.LoadStreamKernel<ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Vp8lPredictorChoose.ChooseKernel);
+            var choose = acc.LoadStreamKernel<ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int, int>(Vp8lPredictorChoose.ChooseKernel);
+            using var dCost = acc.Allocate1D(Vp8lPredictorChoose.CostTable);
             var hist = acc.LoadStreamKernel<ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Vp8lPredictorChoose.HistKernel);
-            var walk = acc.LoadStreamKernel<ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Vp8lPredictorChoose.WalkKernel);
+            var walk = acc.LoadStreamKernel<ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<long>, int, int>(Vp8lPredictorChoose.WalkKernel);
             var clear = acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>>(Vp8lPredictorChoose.ClearKernel);
             int groupSize = Vp8lPredictorChoose.GroupSizeFor(acc);
             using var dPc = acc.Allocate1D<int>(Vp8lPredictorChoose.Total);
@@ -109,7 +110,7 @@ public abstract partial class CodecsTestBase
                     dW.View.MemSetToZero();
                     clear(Vp8lPredictorChoose.Res, dPc.View);
                     for (int first = 0; first < tiles; first += Vp8lPredictorChoose.TilesPerLaunch)
-                        choose(new KernelConfig(1, groupSize), dArgb.View, dW.View, dMeta.View, dPc.View, options, first);
+                        choose(new KernelConfig(1, groupSize), dArgb.View, dW.View, dMeta.View, dPc.View, dCost.View, options, first);
                     await acc.SynchronizeAsync();
                     int[] wantModes = await dW.View.CopyToHostAsync();
                     int[] wantAcc = await dPc.View.SubView(0, 1024).CopyToHostAsync();
@@ -119,7 +120,7 @@ public abstract partial class CodecsTestBase
                     for (int first = 0; first < tiles; first += Vp8lPredictorChoose.WindowTiles)
                     {
                         hist(new KernelConfig(Math.Min(Vp8lPredictorChoose.WindowTiles, tiles - first), groupSize), dArgb.View, dMeta.View, dHist.View, dFill.View, options, first);
-                        walk(new KernelConfig(1, groupSize), dW.View, dMeta.View, dHist.View, options, first);
+                        walk(new KernelConfig(1, groupSize), dW.View, dMeta.View, dHist.View, dCost.View, options, first);
                         windowsSeen++;
                     }
                     await acc.SynchronizeAsync();
