@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### SpawnDev.ILGPU 5.4.37 (2026-11-18)
+- **SpawnDev.ILGPU 5.4.37** (was 5.4.36): CUDA page-locked allocations bind the accelerator's context (Codecs allocates
+  none), and the Wasm worker reuses kernel instances across dispatches. WasmCodecsTests on 5.4.37-local.1 (Data's gate):
+  1,226 / 0 / 2 of 1,228 in 3,136 s (5.4.36: 3,163 s), every outcome identical.
+- **PlaywrightMultiTest** kills a `dotnet publish` only when it prints nothing for `PMT_DOTNET_IDLE_SECONDS` (default
+  600) or runs past `PMT_DOTNET_MAX_SECONDS` (default 3600), not after a flat 300 s (a cold first publish in a fresh
+  clone ran past it while still progressing; ported from SpawnDev.ILGPU.ML).
+
 ### WebP: the colour analysis in parallel; the ALPH filter trial keeps its winner (2026-11-18)
 - **Lossless colour analysis on every thread**: the scan that finds whether a picture has alpha and, when it has at most
   256 colours, its sorted palette ran on one GPU thread (resumable launches of 8,192 pixels). It now runs a thread per
@@ -22,7 +30,8 @@
 - **SpawnDev.ILGPU 5.4.36** (was 5.4.35): on Wasm, buffers stay in the linear memory between dispatches, so a launch no
   longer zeroes, copies in and copies out every buffer it is given. The VP9 decoder launches one small kernel per
   wavefront diagonal over the whole frame pool: on Wasm, reconstruction went from 1,101 to 20.7 ms per frame and the
-  loop filter from 1,144 to 66.8 (every-frame part 1, 1,178 frames). WasmCodecsTests: 1230 / 0 in 53 min (was 4 h 1 m).
+  loop filter from 1,144 to 66.8 (every-frame part 1, 1,178 frames). WasmCodecsTests: 1,226 / 0 / 2 skipped of 1,228 in 53 min (was 4 h 1 m; the trx's 1,230 passed count PMT's
+  own build rows too).
 - **Desktop test runner batch mode** (`run-desktop-tests.ps1 -Batch`, `DemoConsole --batch`): one process per class
   instead of one per test (the process start was ~0.75 s per test). Same outcome for every test of every desktop class;
   CUDA 49 -> 17 min, OpenCL 54 -> 21, Velocity 71 -> 33, the CPU accelerator 105 -> 55.
