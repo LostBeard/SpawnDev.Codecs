@@ -841,7 +841,24 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
         {
             long slotBase = symBase + (long)(slot - waveStart) * Av1SymbolStreamGpu.SlotInts;
             int n = sym[slotBase];
-            for (int i = 1; i <= n; i++)
+            int i = 1;
+            // Eight entries loaded back to back, then coded: the coder's byte stores might alias `sym` as far as the
+            // compiler knows, so it keeps each load after the previous symbol's stores, and a one-thread-per-tile pass
+            // then waits a full global load latency per symbol (about 170 ns per symbol on CUDA, 2026-11-19).
+            for (; i + 7 <= n; i += 8)
+            {
+                int e0 = sym[slotBase + i], e1 = sym[slotBase + i + 1], e2 = sym[slotBase + i + 2], e3 = sym[slotBase + i + 3];
+                int e4 = sym[slotBase + i + 4], e5 = sym[slotBase + i + 5], e6 = sym[slotBase + i + 6], e7 = sym[slotBase + i + 7];
+                Av1SymbolStreamGpu.Encode(ref re, tileBytes, e0);
+                Av1SymbolStreamGpu.Encode(ref re, tileBytes, e1);
+                Av1SymbolStreamGpu.Encode(ref re, tileBytes, e2);
+                Av1SymbolStreamGpu.Encode(ref re, tileBytes, e3);
+                Av1SymbolStreamGpu.Encode(ref re, tileBytes, e4);
+                Av1SymbolStreamGpu.Encode(ref re, tileBytes, e5);
+                Av1SymbolStreamGpu.Encode(ref re, tileBytes, e6);
+                Av1SymbolStreamGpu.Encode(ref re, tileBytes, e7);
+            }
+            for (; i <= n; i++)
                 Av1SymbolStreamGpu.Encode(ref re, tileBytes, sym[slotBase + i]);
         }
 
