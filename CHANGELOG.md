@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Lossless WebP: the colour-cache trials reuse the LZ77 copies (2026-11-19)
+- An encode tokenises its main image once per strategy trial, once per colour-cache size (0 / 8 at effort 50, 0 / 6 / 9 at
+  75, 0 / 5 / 7 / 9 / 10 at 90) and once more for real. The copy search (hash chain + longest match per position) and the
+  parse depend on the pixels, the width and the chain depth only, not on the cache size, so a tokenisation of the same
+  pixels with another cache size now keeps them and rebuilds only the colour-cache links (`TokenizeAsync` reuseMatches,
+  passed by `EncodeStreamAsync` while the main image has not been rewritten since it was tokenised). Profile before
+  (Nsight Systems, lossy animation with transparency, 8 frames): the search was 1.75 of 4.5 s of GPU time, 32 times per
+  frame. SpawnGen's 25 LTX frames, RTX 4070: lossless WebPAnimEncoder animation 311 -> 261 ms per frame, lossy with
+  alpha 531 -> 508; the same bytes.
+- New test `WebPLosslessEncoderGpu_CacheTrialsReuseCopies_SameFiles` (every source at efforts 50 / 75 / 95, both Exact
+  settings, transparency, an animation: the files with and without reuse identical; red-checked: the cache links not
+  rebuilt, the main image's rewrite not noticed); `ParallelTokenizer_MatchesSerialWalk` keeps comparing against the
+  serial walk, which never reuses.
+
 ### SpawnDev.ILGPU 5.4.38 (2026-11-19)
 - **SpawnDev.ILGPU 5.4.38** (was 5.4.37): WGSL / GLSL short-circuit lowering fix, accurate f32 log on WebGPU / WebGL,
   Math Log2 / Cbrt / Asinh / Acosh / Atanh in kernels. Codecs check on 5.4.38-local.2 (Data's gate): WebGPU 1,226 / 0,

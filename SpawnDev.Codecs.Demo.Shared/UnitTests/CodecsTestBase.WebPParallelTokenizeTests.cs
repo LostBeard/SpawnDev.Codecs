@@ -31,6 +31,52 @@ public abstract partial class CodecsTestBase
         return rgba;
     }
 
+    /// <summary>
+    /// The colour-cache trials and the final tokenisation reuse the copies of the previous tokenisation of the same pixels
+    /// (TokenizeAsync reuseMatches, 2026-11-19): the files must be the ones a full tokenisation each time writes. Every source
+    /// at the efforts with cache trials (50: 0 / 8; 75: 0 / 6 / 9; 95: 0 / 5 / 7 / 9 / 10), both Exact settings, a picture
+    /// with transparency and an animation (one tokeniser for every frame: nothing may leak from one frame's search to the next).
+    /// </summary>
+    [TestMethod(Timeout = 1800000, Category = "NotOnWebGL")]
+    public async Task WebPLosslessEncoderGpu_CacheTrialsReuseCopies_SameFiles()
+    {
+        var (ctx, acc) = await AcquireAcceleratorOrSkipAsync();
+        RequireFeatures(acc, AtomicKernels);
+        try
+        {
+            using var enc = new WebPLosslessEncoderGpu(acc);
+            var failures = new List<string>();
+            int compared = 0;
+            async Task Compare(string tag, Func<Task<byte[]>> encode)
+            {
+                WebPEncodeKernels.NoMatchReuse = true;
+                byte[] full = await encode();
+                WebPEncodeKernels.NoMatchReuse = false;
+                byte[] reused = await encode();
+                compared++;
+                if (!full.AsSpan().SequenceEqual(reused)) failures.Add($"{tag}: reuse {reused.Length} B, full {full.Length} B");
+            }
+            foreach (var row in WebPSources())
+            {
+                var rgba = WebPSource(row.Name);
+                foreach (int q in new[] { 50, 75, 95 })
+                    foreach (bool exact in new[] { true, false })
+                        await Compare($"{row.Name} q{q} exact {exact}", () => enc.EncodeAsync(rgba, row.Width, row.Height, new WebPEncodeOptions { Quality = q, Exact = exact }));
+            }
+            var grad = WebPTokenizeStressPicture(3, 512, 352);
+            await Compare("gradient + transparency 512x352 q95", () => enc.EncodeAsync(grad, 512, 352, new WebPEncodeOptions { Quality = 95, Exact = false }));
+            var frames = new List<ReadOnlyMemory<byte>>();
+            for (int f = 0; f < 3; f++) frames.Add(WebPTokenizeStressPicture(f == 1 ? 2 : 3, 256, 176));
+            await Compare("animation 3 frames 256x176 q80", () => enc.EncodeAnimationAsync(frames, 256, 176, new[] { 41, 41, 41 }, new WebPEncodeOptions { Quality = 80, Exact = false }));
+            True(failures.Count == 0, $"{failures.Count} of {compared} differ:\n" + string.Join("\n", failures.Take(20)));
+        }
+        finally
+        {
+            WebPEncodeKernels.NoMatchReuse = false;
+            ReleaseAccelerator(ctx, acc);
+        }
+    }
+
     [TestMethod(Timeout = 1800000, Category = "NotOnWebGL")]
     public async Task WebPLosslessEncoderGpu_ParallelTokenizer_MatchesSerialWalk()
     {

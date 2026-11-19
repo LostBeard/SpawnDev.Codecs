@@ -296,9 +296,14 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
             modesFor = key;
         }
 
+        // True while the main image has been tokenised since it was last written: a tokenisation of the same pixels with
+        // another cache size may then reuse the copies (TokenizeAsync's reuseMatches). Every Apply rewrites the main image.
+        bool mainTokenized = false;
+
         // Applies a strategy: writes the host-side choices and runs the (parallel) transform kernels; returns the main image.
         ArrayView<uint> Apply(Strategy s)
         {
+            mainTokenized = false;
             int packed = width;
             hostMeta[WebPEncMeta.PaletteCount] = 0;
             hostMeta[WebPEncMeta.PaletteBits] = 0;
@@ -355,7 +360,8 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
         async Task<long> CostAsync(ArrayView<uint> main, int cacheBits, bool readBack)
         {
             await _kernels.TokenizeAsync(main, work, tok, meta, _tables.View, cacheBits, (long)hostMeta[WebPEncMeta.PackedWidth] * height,
-                hostMeta[WebPEncMeta.PackedWidth], plan.ChainDepth);
+                hostMeta[WebPEncMeta.PackedWidth], plan.ChainDepth, reuseMatches: mainTokenized);
+            mainTokenized = true;
             _kernels.BuildCodes(work, meta);
             if (!readBack) return 0;
             await _accelerator.SynchronizeAsync();

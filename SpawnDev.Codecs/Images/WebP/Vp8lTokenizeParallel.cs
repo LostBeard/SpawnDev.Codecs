@@ -87,6 +87,9 @@ public static class Vp8lTokenizeParallel
         public int N, XSize, CacheBits, ChainDepth, Blocks, EmitBlocks, Base;
         public int KeyPrev, CachePrev, Len, Dist, Flag, PairTable, CacheTable, BlockCount, BlockExtra, State;
         public int EBits, EWord, EShift, EState;
+        /// <summary>1: Links / Carry / Fixup build only the colour-cache links (the pair links, the search and the parse of the
+        /// previous tokenisation of the same pixels are reused: they do not depend on the cache size).</summary>
+        public int CacheOnly;
     }
 
     public static Args MakeArgs(in Layout l, int xsize, int cacheBits, int chainDepth) => new Args
@@ -115,17 +118,21 @@ public static class Vp8lTokenizeParallel
         int pt = a.PairTable + b * PairKeys;
         int ct = a.CacheTable + b * CacheKeys;
         int cacheShift = 32 - a.CacheBits;
+        bool pairs = a.CacheOnly == 0;
         for (int p = start; p < end; p++)
         {
-            int kp = -1;
-            if (p + 1 < a.N)
+            if (pairs)
             {
-                int h = Vp8lEncodeGpu.PairHash(pix[p], pix[p + 1]);
-                int last = s[pt + h];
-                kp = last >= 0 ? last : -2;   // -2: look before the block (Fixup)
-                s[pt + h] = p;
+                int kp = -1;
+                if (p + 1 < a.N)
+                {
+                    int h = Vp8lEncodeGpu.PairHash(pix[p], pix[p + 1]);
+                    int last = s[pt + h];
+                    kp = last >= 0 ? last : -2;   // -2: look before the block (Fixup)
+                    s[pt + h] = p;
+                }
+                s[a.KeyPrev + p] = kp;
             }
-            s[a.KeyPrev + p] = kp;
             int cp = -1;
             if (a.CacheBits > 0)
             {
@@ -145,7 +152,7 @@ public static class Vp8lTokenizeParallel
         int key = pair ? (int)k : k - PairKeys;
         int table = pair ? a.PairTable : a.CacheTable;
         int stride = pair ? PairKeys : CacheKeys;
-        bool live = pair | (key < CacheKeys & a.CacheBits > 0);
+        bool live = (pair & a.CacheOnly == 0) | (!pair & key < CacheKeys & a.CacheBits > 0);
         if (!live) return;
         int run = -1;
         for (int b = 0; b < a.Blocks; b++)
@@ -161,7 +168,7 @@ public static class Vp8lTokenizeParallel
     public static void FixupKernel(Index1D p, ArrayView<uint> pix, ArrayView<int> s, Args a)
     {
         int b = p / BlockPositions;
-        if (s[a.KeyPrev + p] == -2)
+        if ((a.CacheOnly == 0) & (s[a.KeyPrev + p] == -2))
             s[a.KeyPrev + p] = s[a.PairTable + b * PairKeys + Vp8lEncodeGpu.PairHash(pix[p], pix[p + 1])];
         if (s[a.CachePrev + p] == -2)
             s[a.CachePrev + p] = s[a.CacheTable + b * CacheKeys + (int)Vp8lEncodeGpu.CacheHash(pix[p], 32 - a.CacheBits)];

@@ -392,15 +392,27 @@ public sealed class WebPEncodeKernels : IDisposable
     public void CrossColor(ArrayView<uint> argb, ArrayView<int> work, ArrayView<int> meta, int pixels)
         => _crossForward(pixels, argb, work, meta);
 
+    // the (n, xsize, chain depth) of the last parallel tokenisation whose pair links, copies and parse are in the scratch
+    private (int N, int XSize, int ChainDepth)? _ptMatchesFor;
+
+    /// <summary>Tests only: never reuse the copies of the previous tokenisation (TokenizeAsync's reuseMatches is ignored).</summary>
+    internal static bool NoMatchReuse;
+
     /// <summary>
     /// LZ77 + colour cache tokenisation of the main image of <paramref name="pixels"/> (packed) pixels: a parallel set-up, then
     /// bounded launches that each continue the serial walk where the previous one stopped.
+    /// <paramref name="reuseMatches"/>: the caller guarantees <paramref name="main"/> holds the same pixels as at the previous
+    /// call (only the cache size differs: the colour-cache trials and the final tokenisation). The pair links, the copy
+    /// search and the parse depend on the pixels, the width and the chain depth only, so they are kept; only the cache links
+    /// are rebuilt (2026-11-19: the search was ~70% of the alpha plane's GPU time and ran 8 times per filter trial).
     /// </summary>
     public async ValueTask TokenizeAsync(ArrayView<uint> main, ArrayView<int> work, ArrayView<int> tok, ArrayView<int> meta, ArrayView<int> tables,
-        int cacheBits, long pixels, int xsize, int chainDepth)
+        int cacheBits, long pixels, int xsize, int chainDepth, bool reuseMatches = false)
     {
         _tokenizeInit(1 << Vp8lEncLayout.HashBits, work, meta, cacheBits);   // histograms, and the serial walk's state
         _ptTokens = false;
+        var matchesFor = _ptMatchesFor;
+        _ptMatchesFor = null;
         if (SerialTokenize)
         {
             for (int i = Vp8lEncLayout.Steps(pixels, Vp8lEncLayout.TokenizeChunk); i > 0; i--)
@@ -429,27 +441,46 @@ public sealed class WebPEncodeKernels : IDisposable
         }
         var s = _ptScratch.View;
         var args = Vp8lTokenizeParallel.MakeArgs(l, xsize, cacheBits, chainDepth);
-        int tables0 = args.PairTable, tablesLen = checked((int)(l.BlockCount - l.PairTable));
-        _ptFill(tablesLen, s, tables0, -1);
-        _ptFill(n, s, args.Flag, 0);
-        _ptFill(Vp8lTokenizeParallel.StateInts, s, args.State, 0);
-        _ptLinks(l.Blocks, main, s, args);
-        _ptCarry(Vp8lTokenizeParallel.PairKeys + Vp8lTokenizeParallel.CacheKeys, s, args);
-        _ptFixup(n, main, s, args);
-        await _pacer.LaunchedAsync();
-        for (int b = 0; b < n; b += Vp8lTokenizeParallel.SearchChunk)
+        // reuse only what the previous call left for the same size, width and chain depth (a reallocated scratch above was
+        // preceded by a different n, so it never matches)
+        bool reuse = reuseMatches && !NoMatchReuse && matchesFor == (n, xsize, chainDepth);
+        if (reuse)
         {
-            var sa = args;
-            sa.Base = b;
-            _ptSearch(Math.Min(Vp8lTokenizeParallel.SearchChunk, n - b), main, s, sa);
+            // only the cache links: their tables back to -1, then Links / Carry / Fixup in cache-only mode
+            args.CacheOnly = 1;
+            _ptFill(checked((int)(l.BlockCount - l.CacheTable)), s, args.CacheTable, -1);
+            _ptFill(Vp8lTokenizeParallel.StateInts, s, args.State, 0);
+            _ptLinks(l.Blocks, main, s, args);
+            _ptCarry(Vp8lTokenizeParallel.PairKeys + Vp8lTokenizeParallel.CacheKeys, s, args);
+            _ptFixup(n, main, s, args);
             await _pacer.LaunchedAsync();
         }
-        // the parse: at most n tokens, ParseChunk per launch
-        for (int i = (n + Vp8lTokenizeParallel.ParseChunk - 1) / Vp8lTokenizeParallel.ParseChunk; i > 0; i--)
+        else
         {
-            _ptParse(1, s, tables, args);
+            int tables0 = args.PairTable, tablesLen = checked((int)(l.BlockCount - l.PairTable));
+            _ptFill(tablesLen, s, tables0, -1);
+            _ptFill(n, s, args.Flag, 0);
+            _ptFill(Vp8lTokenizeParallel.StateInts, s, args.State, 0);
+            _ptLinks(l.Blocks, main, s, args);
+            _ptCarry(Vp8lTokenizeParallel.PairKeys + Vp8lTokenizeParallel.CacheKeys, s, args);
+            _ptFixup(n, main, s, args);
             await _pacer.LaunchedAsync();
+            for (int b = 0; b < n; b += Vp8lTokenizeParallel.SearchChunk)
+            {
+                var sa = args;
+                sa.Base = b;
+                _ptSearch(Math.Min(Vp8lTokenizeParallel.SearchChunk, n - b), main, s, sa);
+                await _pacer.LaunchedAsync();
+            }
+            // the parse: at most n tokens, ParseChunk per launch
+            for (int i = (n + Vp8lTokenizeParallel.ParseChunk - 1) / Vp8lTokenizeParallel.ParseChunk; i > 0; i--)
+            {
+                _ptParse(1, s, tables, args);
+                await _pacer.LaunchedAsync();
+            }
         }
+        args.CacheOnly = 0;
+        _ptMatchesFor = (n, xsize, chainDepth);
         _ptCount(l.EmitBlocks, s, args);
         _ptScan(1, s, args);
         _ptEmit(l.EmitBlocks, main, s, work, tok, meta, tables, args);
