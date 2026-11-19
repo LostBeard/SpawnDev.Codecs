@@ -57,14 +57,18 @@ public sealed class CeltPvqGpuTestKernel : IDisposable
         ExtractCollapseMask = 8,
     }
 
-    private readonly Action<Index1D, int, ArrayView<CeltPvqCase>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<uint>,
-        ArrayView<byte>, ArrayView<uint>, int> _kernel;
+    // The op is a SpecializedValue: ILGPU compiles one kernel per op actually launched, with the other eight folded away. The
+    // kernel holds all nine ops, and as one plain-int kernel its cold WebGL compile took 25-32 s (11.4K GLSL lines; D3D FXC is
+    // superlinear in the body), past the test's 30 s limit (Geordi, 2026-11-18). SpawnDev.ILGPU test
+    // SpecializedValue_SelectsItsBranch_EveryValue: one shader per value on WebGPU, every lane correct.
+    private readonly Action<Index1D, SpecializedValue<int>, ArrayView<CeltPvqCase>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
+        ArrayView<uint>, ArrayView<byte>, ArrayView<uint>, int> _kernel;
 
     /// <summary>Compile.</summary>
     public CeltPvqGpuTestKernel(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
-        _kernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, int, ArrayView<CeltPvqCase>, ArrayView<int>, ArrayView<int>,
+        _kernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SpecializedValue<int>, ArrayView<CeltPvqCase>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, ArrayView<uint>, ArrayView<byte>, ArrayView<uint>, int>(TestKernel);
     }
 
@@ -75,9 +79,9 @@ public sealed class CeltPvqGpuTestKernel : IDisposable
     /// </summary>
     public void Run(Op op, ArrayView<CeltPvqCase> cases, ArrayView<int> x, ArrayView<int> y, ArrayView<int> scratch,
         ArrayView<uint> scalar, ArrayView<byte> packets, ArrayView<uint> pvqU, int stride)
-        => _kernel((int)cases.Length, (int)op, cases, x, y, scratch, scalar, packets, pvqU, stride);
+        => _kernel((int)cases.Length, new SpecializedValue<int>((int)op), cases, x, y, scratch, scalar, packets, pvqU, stride);
 
-    private static void TestKernel(Index1D c, int op, ArrayView<CeltPvqCase> cases, ArrayView<int> x, ArrayView<int> y,
+    private static void TestKernel(Index1D c, SpecializedValue<int> op, ArrayView<CeltPvqCase> cases, ArrayView<int> x, ArrayView<int> y,
         ArrayView<int> scratch, ArrayView<uint> scalar, ArrayView<byte> packets, ArrayView<uint> pvqU, int stride)
     {
         CeltPvqCase k = cases[c];
