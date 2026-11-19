@@ -99,14 +99,13 @@ public abstract partial class CodecsTestBase
     private static readonly SnappyFormat[] SnappyFormats = { SnappyFormat.Raw, SnappyFormat.Framed };
 
     /// <summary>Compresses one case through the ArrayView1D overload into a poisoned buffer; null when it matches snap.</summary>
-    private static async Task<string?> RunSnappyCaseAsync(Accelerator acc, SnappyCompressorGpu comp, SnappyCase c, byte[] input, SnappyFormat format)
+    private static async Task<string?> RunSnappyCaseAsync(Accelerator acc, SnappyCompressorGpu comp, SnappyCase c,
+        ArrayView1D<byte, Stride1D.Dense> dIn, SnappyFormat format)
     {
         string name = $"{c.Name} {format}";
-        if (input.Length != c.Length) return $"{name}: input is {input.Length} bytes, manifest says {c.Length}";
-        long cap = SnappyCompressorGpu.GetMaxCompressedSize(input.Length, format) + 41;
-        using var dIn = DeviceVerify.Upload(acc, input, 7);
+        long cap = SnappyCompressorGpu.GetMaxCompressedSize(c.Length, format) + 41;
         using var dOut = DeviceVerify.Poisoned(acc, cap);
-        int n = await comp.CompressAsync(dIn.View, input.Length, dOut.View, format);
+        int n = await comp.CompressAsync(dIn, c.Length, dOut.View, format);
         if (n != c.StreamLength(format)) return $"{name}: stream is {n} bytes, snap wrote {c.StreamLength(format)}";
         if (c.Stored(format))
         {
@@ -138,11 +137,26 @@ public abstract partial class CodecsTestBase
             var failures = new List<string>();
             foreach (var c in cases)
             {
-                byte[] input = SnappyInput(c);
-                foreach (var format in SnappyFormats)
+                // the input on the accelerator, followed by 7 poison bytes; a large "text" input is generated there
+                // (Lz4GenTextGpuAsync): as a managed array it did not fit the browser's .NET heap late in a full Wasm lane
+                MemoryBuffer1D<byte, Stride1D.Dense> dIn;
+                if (c.Kind == "text" && c.Length > Lz4LargeInput)
                 {
-                    string? r = await RunSnappyCaseAsync(acc, comp, c, input, format);
-                    if (r != null) failures.Add(r);
+                    dIn = await Lz4GenTextGpuAsync(acc, c.Length, c.Seed, 7);
+                }
+                else
+                {
+                    byte[] input = SnappyInput(c);
+                    if (input.Length != c.Length) { failures.Add($"{c.Name}: input is {input.Length} bytes, manifest says {c.Length}"); continue; }
+                    dIn = DeviceVerify.Upload(acc, input, 7);
+                }
+                using (dIn)
+                {
+                    foreach (var format in SnappyFormats)
+                    {
+                        string? r = await RunSnappyCaseAsync(acc, comp, c, dIn.View, format);
+                        if (r != null) failures.Add(r);
+                    }
                 }
             }
             True(failures.Count == 0, $"{failures.Count} of {cases.Count * 2} streams differ from snap:\n" + string.Join("\n", failures));
@@ -335,6 +349,9 @@ public abstract partial class CodecsTestBase
             int count = 0;
             foreach (var c in SnappyCases())
             {
+                // only cases with a stored stream: building the input of the others (the 40 MB case) cost a 40 MB managed
+                // array for nothing, in the browser's .NET heap
+                if (!SnappyFormats.Any(f => c.Stored(f))) continue;
                 byte[] input = SnappyInput(c);
                 foreach (var format in SnappyFormats)
                 {
@@ -360,18 +377,18 @@ public abstract partial class CodecsTestBase
         {
             using var comp = new SnappyCompressorGpu(acc);
             using var dec = new SnappyDecompressorGpu(acc);
-            byte[] input = Lz4GenText(40_000_000, 31);
-            using var dIn = DeviceVerify.Upload(acc, input);
+            const int length = 40_000_000;
+            using var dIn = await Lz4GenTextGpuAsync(acc, length, 31);   // generated on the accelerator: off the .NET heap
             foreach (var format in SnappyFormats)
             {
-                using var dStream = acc.Allocate1D<byte>(SnappyCompressorGpu.GetMaxCompressedSize(input.Length, format));
-                int n = await comp.CompressAsync(dIn.View, input.Length, dStream.View, format);
-                using var dBack = DeviceVerify.Poisoned(acc, input.Length + 64);
+                using var dStream = acc.Allocate1D<byte>(SnappyCompressorGpu.GetMaxCompressedSize(length, format));
+                int n = await comp.CompressAsync(dIn.View, length, dStream.View, format);
+                using var dBack = DeviceVerify.Poisoned(acc, length + 64);
                 int m = await dec.DecompressAsync(dStream.View, n, dBack.View, format);
-                Equal(input.Length, m, $"{format}: decoded length");
-                string? diff = await DeviceVerify.CompareAsync(acc, dBack.View, dIn.View, input.Length);
+                Equal(length, m, $"{format}: decoded length");
+                string? diff = await DeviceVerify.CompareAsync(acc, dBack.View, dIn.View, length);
                 True(diff == null, $"{format} round trip: {diff}");
-                True(await DeviceVerify.AllEqualAsync(acc, dBack.View.SubView(input.Length, 64), 64, 0xAB) == null, $"{format}: wrote past the output");
+                True(await DeviceVerify.AllEqualAsync(acc, dBack.View.SubView(length, 64), 64, 0xAB) == null, $"{format}: wrote past the output");
             }
         }
         finally { ReleaseAccelerator(ctx, acc); }

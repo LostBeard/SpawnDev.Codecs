@@ -123,12 +123,15 @@ public abstract partial class CodecsTestBase
     /// <summary>Compresses one case through the ArrayView1D overload into a poisoned buffer; null when it matches liblz4.</summary>
     private static async Task<string?> RunLz4CaseAsync(Accelerator acc, Lz4FrameCompressorGpu comp, Lz4Case c)
     {
-        byte[] input = Lz4Input(c);
-        if (input.Length != c.Length) return $"{c.Name}: input is {input.Length} bytes, manifest says {c.Length}";
-        long cap = Lz4FrameCompressorGpu.GetMaxCompressedSize(input.Length) + 41;
-        using var dIn = DeviceVerify.Upload(acc, input, 7);
+        // a large "text" input is generated on the accelerator (Lz4GenTextGpuAsync): as a managed array it did not fit the
+        // browser's .NET heap late in a full Wasm lane (2026-11-19)
+        bool onDevice = c.Kind == "text" && c.Length > Lz4LargeInput;
+        byte[]? input = onDevice ? null : Lz4Input(c);
+        if (input != null && input.Length != c.Length) return $"{c.Name}: input is {input.Length} bytes, manifest says {c.Length}";
+        long cap = Lz4FrameCompressorGpu.GetMaxCompressedSize(c.Length) + 41;
+        using var dIn = onDevice ? await Lz4GenTextGpuAsync(acc, c.Length, c.Seed, 7) : DeviceVerify.Upload(acc, input!, 7);
         using var dOut = DeviceVerify.Poisoned(acc, cap);
-        int n = await comp.CompressAsync(dIn.View, input.Length, dOut.View, c.Options);
+        int n = await comp.CompressAsync(dIn.View, c.Length, dOut.View, c.Options);
         if (n != c.FrameLength) return $"{c.Name}: frame is {n} bytes, liblz4 wrote {c.FrameLength}";
         if (c.Stored)
         {

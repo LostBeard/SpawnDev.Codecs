@@ -20,6 +20,12 @@ Everything since 1.1.0, listed below by date. The highlights:
   no flat 300 s publish kill).
 - Dependencies: SpawnDev.ILGPU 5.4.40 (was 5.4.35; 5.4.39 / 5.4.40 fix a Wasm copy whose target offset could carry
   garbage high bits in a busy page, a Mono interpreter fault: dotnet/runtime#137923), SpawnDev.EBML 3.0.1.
+- Release gate (2026-11-19, every class on every lane, SpawnDev.ILGPU 5.4.40): CUDA, OpenCL and Velocity 1239 / 0, the
+  CPU accelerator 3413 / 0, WebGPU 1232 / 0, WebGL 408 / 0, Wasm 1233 / 0 (re-run after the large LZ4 / Snappy test
+  inputs moved to the accelerator: in the sweep one 40 MB test ran out of memory building its input as a managed array
+  in the browser heap, 1231 / 1). Sweep 3 h 40 min.
+- Tests: large LZ4 / Snappy inputs are generated on the accelerator (`Lz4GenTextGpuAsync`, one thread in bounded
+  launches; `Lz4GenTextGpu_MatchesManagedGenerator`, red-checked), not as 40 MB managed arrays.
 
 ### AV1 range coder: eight symbol entries loaded before coding them (2026-11-19, Data)
 - The coder's byte stores might alias the symbol view as far as the compiler knows, so each entry's load waited for the

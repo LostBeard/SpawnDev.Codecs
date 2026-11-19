@@ -2,8 +2,16 @@
 
 What is verified, on which backend, and how. "Verified" means a test that compares against a reference
 implementation (never against this library's own output) passed on that backend, with its guard red-checked. Dates are
-the last run of the named lane. Updated 2026-11-17 (the 1.1.0 gate below; a cell keeps the date of the run behind it; counts are
+the last run of the named lane. Updated 2026-11-19 (the 1.1.1 gate below; a cell keeps the date of the run behind it; counts are
 passed / failed, skips are gated or CPU-only tests).
+
+**2026-11-19, release 1.1.1 (commit c079547 + the test fix below), SpawnDev.ILGPU 5.4.40: every class on every lane.**
+CUDA, OpenCL and Velocity 1239 / 0 each, the CPU accelerator 3413 / 0, WebGPU 1232 / 0, WebGL 408 / 0 (3 h 40 min,
+`scripts/dev/run-release-sweep.cmd`). Wasm 1231 / 1 in the sweep: `Lz4FrameCompressorGpu_40MB_TwoWaves` ran out of memory
+building its 40 MB input as a managed array late in the lane (a test-side fault); the large LZ4 / Snappy inputs are now
+generated on the accelerator (`Lz4GenTextGpu_MatchesManagedGenerator`), and the Wasm class re-run is 1233 / 0. The lossless
+WebP encoder writes the same file on every device (`WebPLosslessEncoderGpu_SameFileOnEveryDevice`, also on an RX 590).
+4 skips per desktop class and 1-2 per browser class are gated or environment-only tests.
 
 **2026-11-16 / 17, release 1.1.0 (commit 99f274a): every class on every lane.** CUDA, OpenCL and Velocity 1230 / 0
 each, the CPU accelerator 3404 / 0, WebGPU 1223 / 0 and WebGL 405 / 0 on SpawnDev.ILGPU 5.4.34; Wasm 1223 / 0 on

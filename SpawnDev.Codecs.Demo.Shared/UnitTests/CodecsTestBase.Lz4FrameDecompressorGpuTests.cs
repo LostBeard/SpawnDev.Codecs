@@ -155,16 +155,16 @@ public abstract partial class CodecsTestBase
         {
             using var comp = new Lz4FrameCompressorGpu(acc);
             using var dec = new Lz4FrameDecompressorGpu(acc);
-            byte[] input = Lz4GenText(40_000_000, 31);
-            using var dIn = DeviceVerify.Upload(acc, input);
-            using var dFrame = acc.Allocate1D<byte>(Lz4FrameCompressorGpu.GetMaxCompressedSize(input.Length));
-            int n = await comp.CompressAsync(dIn.View, input.Length, dFrame.View, new Lz4FrameOptions { ContentChecksum = true, BlockChecksum = true });
-            using var dBack = DeviceVerify.Poisoned(acc, input.Length + 64);
+            const int length = 40_000_000;
+            using var dIn = await Lz4GenTextGpuAsync(acc, length, 31);   // generated on the accelerator: off the .NET heap
+            using var dFrame = acc.Allocate1D<byte>(Lz4FrameCompressorGpu.GetMaxCompressedSize(length));
+            int n = await comp.CompressAsync(dIn.View, length, dFrame.View, new Lz4FrameOptions { ContentChecksum = true, BlockChecksum = true });
+            using var dBack = DeviceVerify.Poisoned(acc, length + 64);
             int m = await dec.DecompressAsync(dFrame.View, n, dBack.View);
-            Equal(input.Length, m, "decoded length");
-            string? diff = await DeviceVerify.CompareAsync(acc, dBack.View, dIn.View, input.Length);
+            Equal(length, m, "decoded length");
+            string? diff = await DeviceVerify.CompareAsync(acc, dBack.View, dIn.View, length);
             True(diff == null, $"round trip: {diff}");
-            True(await DeviceVerify.AllEqualAsync(acc, dBack.View.SubView(input.Length, 64), 64, 0xAB) == null, "wrote past the output");
+            True(await DeviceVerify.AllEqualAsync(acc, dBack.View.SubView(length, 64), 64, 0xAB) == null, "wrote past the output");
         }
         finally { ReleaseAccelerator(ctx, acc); }
     }
