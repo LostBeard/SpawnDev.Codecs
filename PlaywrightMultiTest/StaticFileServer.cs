@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.Net;
 
@@ -32,9 +33,44 @@ namespace PlaywrightMultiTest
                 throw new Exception("testcert.pfx not found. Cannot create static server");
         }
         public bool Running => runningTask?.IsCompleted == false;
+        // completes when the server listens, or faults when it cannot (e.g. the port is taken)
+        TaskCompletionSource? listening;
+
+        /// <summary>
+        /// Starts the server and returns once it LISTENS; throws when it cannot. It used to return at once and lose a bind
+        /// failure inside the server task: with the fixed port taken by another Codecs tree's PMT, this run's browser then
+        /// loaded the OTHER tree's published app and tested that build (2026-11-19).
+        /// </summary>
+        // servers listening in this process, by URL: Init runs once per browser lane in one PMT process, and every run builds a
+        // server for the same URL and folder; the later ones reuse the first (before 2026-11-19 their bind failed silently)
+        static readonly Dictionary<string, StaticFileServer> listeningInProcess = new();
+
         public void Start()
         {
-            runningTask ??= StartAsync();
+            lock (listeningInProcess)
+            {
+                if (listeningInProcess.TryGetValue(Url, out var other) && !ReferenceEquals(other, this) && other.Running)
+                {
+                    if (!string.Equals(other.WWWRoot, WWWRoot, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"{Url} is already served by this process from {other.WWWRoot}, not {WWWRoot}.");
+                    return;   // the same app is already served at this URL
+                }
+            }
+            if (runningTask == null)
+            {
+                listening = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                runningTask = StartAsync();
+            }
+            try
+            {
+                listening!.Task.GetAwaiter().GetResult();
+                lock (listeningInProcess) listeningInProcess[Url] = this;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"The static server could not listen on {Url} (another PlaywrightMultiTest of this " +
+                    $"project, from another working tree, may be running and holding the port): {ex.Message}", ex);
+            }
         }
         private async Task StartAsync()
         {
@@ -89,11 +125,22 @@ namespace PlaywrightMultiTest
                         DefaultContentType = "application/octet-stream" // Optional: default MIME type for unknown files
                     }
                 });
-                // start hosting
-                await app.RunAsync();
+                // start hosting: report listening (or the bind failure) to Start, then serve until stopped
+                await app.StartAsync();
+                listening?.TrySetResult();
+                await app.WaitForShutdownAsync();
+            }
+            catch (Exception ex)
+            {
+                listening?.TrySetException(ex);
+                throw;
             }
             finally
             {
+                lock (listeningInProcess)
+                {
+                    if (listeningInProcess.TryGetValue(Url, out var me) && ReferenceEquals(me, this)) listeningInProcess.Remove(Url);
+                }
                 app = null;
                 runningTask = null;
             }

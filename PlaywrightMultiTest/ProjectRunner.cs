@@ -256,7 +256,12 @@ namespace PlaywrightMultiTest
                         // Use persistent context so IndexedDB, localStorage, and
                         // File System Access permissions survive across test runs.
                         // This enables ShaderDebugService's debug folder persistence.
-                        var userDataDir = Path.Combine(Path.GetTempPath(), "SpawnDev.Codecs.PlaywrightProfile");
+                        // One profile per working tree (a short hash of this PMT's folder): two Codecs trees (a clone, a worktree)
+                        // running PMT at once shared one profile, and Chrome refused the second launch ("Target page, context or
+                        // browser has been closed", 2026-11-19), so that run tested nothing in the browser.
+                        var treeKey = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                            System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(AppContext.BaseDirectory).ToLowerInvariant())))[..8];
+                        var userDataDir = Path.Combine(Path.GetTempPath(), "SpawnDev.Codecs.PlaywrightProfile-" + treeKey);
                         Directory.CreateDirectory(userDataDir);
                         LogStatus($"Launching Chrome (persistent profile: {userDataDir})...");
                         testableProject.BrowserContext = await testableProject.Playwright.Chromium.LaunchPersistentContextAsync(
@@ -399,6 +404,9 @@ namespace PlaywrightMultiTest
                     catch (Exception ex)
                     {
                         LogStatus($"Error initializing {project.Name}: {ex.Message}");
+                        // the browser project could not run (server, Chrome, page): fail its build row, or the run reports
+                        // success with no browser test executed (seen 2026-11-19: 'Passed 6' = build rows only)
+                        buildTest.SetError($"Browser project not initialized: {ex.Message}");
                     }
                 }
                 else if (project.AppProjectType == ProjectType.Exe)

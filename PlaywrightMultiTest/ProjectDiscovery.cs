@@ -13,6 +13,33 @@ public static class ProjectDiscovery
     private static readonly string[] TestSdkPackageIds = ["Microsoft.NET.Test.Sdk", "NUnit", "NUnit3TestAdapter", "xunit", "MSTest.TestFramework"];
 
     /// <summary>
+    /// Every *.csproj under <paramref name="root"/>, skipping folders that are not this tree's projects: dot-folders (.claude,
+    /// .git, .vs), bin / obj / node_modules, and nested git worktrees (a folder with a .git FILE). A plain recursive search
+    /// also found the sub-agent worktrees under .claude/worktrees, so every run published and initialised their stale copies
+    /// of the Demo too (2026-11-19).
+    /// </summary>
+    public static string[] FindProjectFiles(string root)
+    {
+        var result = new List<string>();
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var dir = pending.Pop();
+            result.AddRange(Directory.GetFiles(dir, "*.csproj"));
+            foreach (var sub in Directory.GetDirectories(dir))
+            {
+                var name = Path.GetFileName(sub);
+                if (name.StartsWith('.') || name is "bin" or "obj" or "node_modules") continue;
+                if (File.Exists(Path.Combine(sub, ".git"))) continue;   // a nested worktree
+                pending.Push(sub);
+            }
+        }
+        result.Sort(StringComparer.OrdinalIgnoreCase);
+        return result.ToArray();
+    }
+
+    /// <summary>
     /// Gets the workspace root (one directory up from current directory).
     /// </summary>
     public static List<ProjectDetails> GetWorkspaceRoot()
@@ -22,7 +49,7 @@ public static class ProjectDiscovery
         // backtrack through the path heirarchy until we find at least 1 test configurtation or don't find any.
         while (current != null)
         {
-            var files = Directory.GetFiles(current, "*.csproj", SearchOption.AllDirectories);
+            var files = FindProjectFiles(current);
             var testableFiles = files.Select(o => new ProjectDetails(o)).Where(o => o.IsTestProject).ToList();
             if (testableFiles.Count > 0)
             {
@@ -41,7 +68,7 @@ public static class ProjectDiscovery
     public static IReadOnlyList<string> DiscoverProjects(string workspaceRoot)
     {
         var result = new List<string>();
-        foreach (var csproj in Directory.GetFiles(workspaceRoot, "*.csproj", SearchOption.AllDirectories))
+        foreach (var csproj in FindProjectFiles(workspaceRoot))
         {
             if (IsPlaywrightTestProject(csproj))
                 result.Add(csproj);
