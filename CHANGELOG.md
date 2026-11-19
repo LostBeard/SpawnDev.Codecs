@@ -1,6 +1,36 @@
 # SpawnDev.Codecs CHANGELOG
 
-## Unreleased
+## 1.1.1 (2026-11-19)
+
+Everything since 1.1.0, listed below by date. The highlights:
+- **Lossless WebP writes the same file on every device**: the predictor-mode choice scores in integers (it was the
+  only decision made from floats, and the files differed between an RTX 4070 and an RX 590 in 10 of 25 frames); now
+  identical on CUDA, OpenCL (NVIDIA and AMD), Velocity, the CPU accelerator, WebGPU and Wasm.
+- **Faster WebP**: the colour analysis in parallel; the ALPH filter trial keeps its winner; the predictor choice in two
+  kernels; the colour-cache trials and the best strategy trial reuse the LZ77 copies. SpawnGen's Save Animated WEBP
+  node (25 LTX frames, RX 590, AMD OpenCL): 35.7 s with 1.1.0 -> 24.7 s (-31%), the full-frame call 19.4 -> 13.0 s
+  (Lore, each against a control run in the same session). The node's file is 3,415,400 bytes (1.1.0: 3,416,426, the
+  float choice) and now the same on every device. RTX 4070, `webp-anim-bench`, the same frames: lossless animation
+  329 ms per frame (0b8a85d) -> 245; lossy with transparency (16 frames) 912 -> 759 from the colour analysis and the
+  ALPH change, and 511 -> 499 (25 frames) from the copy reuse.
+- **AV1 range coder**: eight symbol entries loaded back to back before coding (Data): CUDA 1080p 33.9 -> 27.6 ms per
+  frame, the same bytes.
+- **Shorter release sweep** (desktop batch mode, frame hashes on the accelerator, PMT_FILTER) and PlaywrightMultiTest
+  fixes (only this tree's projects, a run fails when its app server cannot listen or its browser project cannot start,
+  no flat 300 s publish kill).
+- Dependencies: SpawnDev.ILGPU 5.4.40 (was 5.4.35; 5.4.39 / 5.4.40 fix a Wasm copy whose target offset could carry
+  garbage high bits in a busy page, a Mono interpreter fault: dotnet/runtime#137923), SpawnDev.EBML 3.0.1.
+
+### AV1 range coder: eight symbol entries loaded before coding them (2026-11-19, Data)
+- The coder's byte stores might alias the symbol view as far as the compiler knows, so each entry's load waited for the
+  previous symbol's stores (one global load latency per symbol in the one-thread-per-tile pass). Loading eight entries
+  first overlaps those latencies: CUDA range-code pass, 1080p L4.0 33.9 -> 27.6 ms, 832x480 1.78 -> 1.58 ms; output
+  bytes identical. AV1 suite 144 / 144 on every lane.
+
+### SpawnDev.ILGPU 5.4.40 (2026-11-19)
+- **SpawnDev.ILGPU 5.4.40** (was 5.4.39): the root fix of the Wasm copy fault below: a view's address is computed with
+  integer arithmetic, so no widening of a wasm32 native int to long can meet the Mono interpreter's fault
+  (dotnet/runtime#137923; Data). ILGPU gate 8,716 / 0.
 
 ### SpawnDev.ILGPU 5.4.39 (2026-11-19)
 - **SpawnDev.ILGPU 5.4.39** (was 5.4.38): on Wasm, a device-to-device copy into a sub-view could validate a target
