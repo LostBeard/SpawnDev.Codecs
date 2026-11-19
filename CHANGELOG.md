@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### SpawnDev.ILGPU 5.4.39 (2026-11-19)
+- **SpawnDev.ILGPU 5.4.39** (was 5.4.38): on Wasm, a device-to-device copy into a sub-view could validate a target
+  offset whose high 32 bits were garbage (a wasm32 native-int address widened to long), once the page had done many
+  copies: "Target copy range ... exceeds target buffer size". It hit the ALPH filter trial's copy (3b837d3) and the
+  WebP save / restore below in a busy page. Found by these WebP lanes; fixed in SpawnDev.ILGPU b598ac0 (Data). Recipe
+  `PMT_FILTER=WasmCodecsTests.DeviceCopy,WasmCodecsTests.WebPLossless`: 8 failures on 5.4.38, 24 / 24 on 5.4.39.
+- New tests `DeviceCopy_IntSubViews_ToAndFromAnotherBuffer` / `_AfterQueuedKernel` / `_InAsyncMethod_Hot` (int
+  sub-view copies, plain, behind queued kernels, from an async method 300 times).
+- **PlaywrightMultiTest**: discovers only this tree's projects (it also published the stale sub-agent worktrees under
+  .claude), fails a run whose app server cannot listen (it used to test whatever else served the port) or whose browser
+  project cannot initialise, one Chrome profile per working tree.
+
 ### Lossless WebP: the colour-cache trials reuse the LZ77 copies (2026-11-19)
 - An encode tokenises its main image once per strategy trial, once per colour-cache size (0 / 8 at effort 50, 0 / 6 / 9 at
   75, 0 / 5 / 7 / 9 / 10 at 90) and once more for real. The copy search (hash chain + longest match per position) and the
@@ -15,6 +27,12 @@
   settings, transparency, an animation: the files with and without reuse identical; red-checked: the cache links not
   rebuilt, the main image's rewrite not noticed); `ParallelTokenizer_MatchesSerialWalk` keeps comparing against the
   serial walk, which never reuses.
+- The best strategy trial's copies are kept too: when a trial becomes the best so far its copies and parse (3 ints per
+  pixel) are copied aside on the device, and when a later trial does not beat it, the winner is re-applied (the same
+  pixels) and its copies restored instead of searched again (`SaveMatchesAsync` / `RestoreMatches`). RTX 4070, 25
+  frames: lossless animation 263 -> 245 ms per frame, the full-frame animation 142 -> 129, lossy with alpha 511 -> 499;
+  the same bytes (red-checked: a restore that copies nothing, a save that keeps nothing). RX 590 (Lore, the cache-trial
+  reuse alone): SpawnGen's node call 32.4 -> 26.7 s, 25% under 1.1.0; its full-frame call 18.7 -> 14.5 s.
 
 ### SpawnDev.ILGPU 5.4.38 (2026-11-19)
 - **SpawnDev.ILGPU 5.4.38** (was 5.4.37): WGSL / GLSL short-circuit lowering fix, accurate f32 log on WebGPU / WebGL,

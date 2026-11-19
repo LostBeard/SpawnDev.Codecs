@@ -395,6 +395,46 @@ public sealed class WebPEncodeKernels : IDisposable
     // the (n, xsize, chain depth) of the last parallel tokenisation whose pair links, copies and parse are in the scratch
     private (int N, int XSize, int ChainDepth)? _ptMatchesFor;
 
+    // a saved copy of one tokenisation's copies and parse (Len, Dist, Flag: contiguous, 3n ints) and what they were for
+    private MemoryBuffer1D<int, Stride1D.Dense>? _ptSaved;
+    private (int N, int XSize, int ChainDepth)? _ptSavedFor;
+
+    /// <summary>
+    /// Keep the last parallel tokenisation's copies and parse (Len / Dist / Flag, a device copy of 3 ints per pixel) so a later
+    /// tokenisation of the SAME pixels can reuse them after other pictures were tokenised in between (the strategy trial that
+    /// turned out best, re-applied after the later trials: <see cref="RestoreMatches"/>). Does nothing after the serial walk.
+    /// </summary>
+    public async ValueTask SaveMatchesAsync()
+    {
+        _ptSavedFor = null;
+        if (_ptMatchesFor is not { } m || NoMatchReuse) return;
+        var l = new Vp8lTokenizeParallel.Layout(m.N);
+        long len = 3L * m.N;
+        if (_ptSaved == null || _ptSaved.Length < len)
+        {
+            await _accelerator.SynchronizeAsync();   // queued work may still use the old buffer
+            _ptSaved?.Dispose();
+            _ptSaved = _accelerator.Allocate1D<int>(len);
+        }
+        _ptScratch!.View.SubView(l.Len, len).CopyTo(_ptSaved.View.SubView(0, len));
+        _ptSavedFor = m;
+    }
+
+    /// <summary>
+    /// Put the saved copies and parse back (the caller has re-applied the same strategy: the same pixels), so the next
+    /// TokenizeAsync with reuseMatches keeps them. Returns false when nothing matching was saved (then tokenise in full).
+    /// </summary>
+    public bool RestoreMatches()
+    {
+        if (_ptSavedFor is not { } m || _ptScratch == null || NoMatchReuse) return false;
+        var l = new Vp8lTokenizeParallel.Layout(m.N);
+        if (_ptScratch.Length < l.Total) return false;
+        long len = 3L * m.N;
+        _ptSaved!.View.SubView(0, len).CopyTo(_ptScratch.View.SubView(l.Len, len));
+        _ptMatchesFor = m;
+        return true;
+    }
+
     /// <summary>Tests only: never reuse the copies of the previous tokenisation (TokenizeAsync's reuseMatches is ignored).</summary>
     internal static bool NoMatchReuse;
 
@@ -2068,6 +2108,7 @@ public sealed class WebPEncodeKernels : IDisposable
     public void Dispose()
     {
         _ptScratch?.Dispose();
+        _ptSaved?.Dispose();
         _peWords?.Dispose();
         _pcScratch?.Dispose();
         _pcHistScratch?.Dispose();

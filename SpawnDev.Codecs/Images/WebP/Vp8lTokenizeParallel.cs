@@ -65,6 +65,8 @@ public static class Vp8lTokenizeParallel
             long p = 0;
             KeyPrev = p; p += n;
             CachePrev = p; p += n;
+            // Len, Dist and Flag stay contiguous and in this order: WebPEncodeKernels.SaveMatchesAsync / RestoreMatches copy
+            // them as one block of 3n ints
             Len = p; p += n;
             Dist = p; p += n;
             Flag = p; p += n;

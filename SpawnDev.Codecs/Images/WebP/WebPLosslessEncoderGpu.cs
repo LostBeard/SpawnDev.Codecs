@@ -397,11 +397,18 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
                 {
                     bestCost = cost;
                     chosen = s;
+                    // keep this trial's copies: if a later trial does not beat it, it is re-applied below and reuses them
+                    await _kernels.SaveMatchesAsync();
                 }
                 last = s;
                 main = cur;
             }
-            if (chosen != last) main = Apply(chosen);
+            if (chosen != last)
+            {
+                main = Apply(chosen);
+                // the same strategy on the same input gives the same pixels: its saved copies hold
+                mainTokenized = _kernels.RestoreMatches();
+            }
         }
 
         // ---- pick the colour cache size that gives the smallest estimate, then entropy-code for real ----
