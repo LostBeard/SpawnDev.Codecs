@@ -157,7 +157,10 @@ public static class Vp8lEncLayout
         STokPos = 4, STokCount = 5, STokExtra = 6,
         SHistT = 7, SHistX = 8, SHistY = 9,
         SEmitPos = 10, SEmitAcc = 11, SEmitNbits = 12, SEmitOverflow = 13, SEmitT = 14, SEmitX = 15, SEmitY = 16,
-        SClusterSeeds = 17;
+        SClusterSeeds = 17,
+        // the parallel colour analysis: the colour 0 was seen (it cannot live in the table, where 0 marks an empty slot);
+        // an insert found no free slot in 1024 probes (only possible with more than 256 colours)
+        SAnalyzeZero = 18, SAnalyzeOverflow = 19;
 
     /// <summary>Pixels per launch of the analysis and the tokenisation; tokens per launch of the tile histograms and the emission.</summary>
     public const int StepChunk = 8192;

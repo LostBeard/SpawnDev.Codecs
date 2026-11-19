@@ -4,7 +4,8 @@
 // and reads back a few scalars (the output length, the cost of a colour-cache variant).
 //
 //   1. ToArgbKernel          (1 thread per pixel)   RGBA8 -> ARGB, optionally clearing RGB under alpha 0.
-//   2. Analyze               (resumable, 1 thread per launch)  alpha, distinct colours (palette when <= 256, sorted), delta-coded palette.
+//   2. Analyze               (1 thread per pixel, chunked)  alpha, distinct colours (lock-free hash set; palette when <= 256,
+//                            sorted by rank), delta-coded palette. The serial scan (1 thread per launch) is kept as the oracle.
 //   3. PaletteIndexKernel    (1 thread per packed pixel)   colour -> palette index, 2/4/8 pixels bundled per word.
 //   4. SubtractGreenKernel   (1 thread per pixel)   forward subtract green.
 //   5. PredictorModeKernel   (1 thread per tile)    picks the predictor mode per tile by minimum residual magnitude.
@@ -39,6 +40,8 @@ public sealed class WebPEncodeKernels : IDisposable
     private Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, int> _transparentFill = null!;
     private Action<Index1D, ArrayView<int>, ArrayView<int>> _analyzeInit = null!, _analyzeFinish = null!;
     private Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _analyze = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, int> _analyzeInsert = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>> _analyzeCount = null!, _analyzeRank = null!, _analyzeDelta = null!;
     private Action<Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, ArrayView<int>> _paletteIndex = null!;
     private Action<Index1D, ArrayView<uint>, ArrayView<int>> _subtractGreen = null!;
     private Action<Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, ArrayView<int>, int> _predictorMode = null!;
@@ -83,6 +86,13 @@ public sealed class WebPEncodeKernels : IDisposable
 
     /// <summary>Tests only: write the tokens with the serial writer (EmitTokensKernel) even after the parallel tokeniser.</summary>
     internal static bool SerialEmit;
+
+    /// <summary>
+    /// Tests only: the colour analysis as the serial scan (AnalyzeKernel, one thread per launch, the encoder before
+    /// 2026-11-18) instead of the parallel one (AnalyzeInsertKernel + count / rank / delta). Both give the same HasAlpha,
+    /// palette and delta-coded palette; the serial scan is the oracle.
+    /// </summary>
+    internal static bool SerialAnalysis;
 
     /// <summary>
     /// Tests only: tokenise with the serial walk (Vp8lEncodeGpu.TokenizeStep, one thread) instead of the parallel tokeniser
@@ -161,6 +171,11 @@ public sealed class WebPEncodeKernels : IDisposable
         _analyze = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>>(AnalyzeKernel);
         _analyzeFinish = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(AnalyzeFinishKernel);
+        _analyzeInsert = await a.LoadAutoGroupedStreamKernelAsync<
+            Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, int>(AnalyzeInsertKernel);
+        _analyzeCount = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(AnalyzeCountKernel);
+        _analyzeRank = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(AnalyzeRankKernel);
+        _analyzeDelta = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>>(AnalyzeDeltaKernel);
         _paletteIndex = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, ArrayView<int>>(PaletteIndexKernel);
         _subtractGreen = await a.LoadAutoGroupedStreamKernelAsync<
@@ -264,16 +279,37 @@ public sealed class WebPEncodeKernels : IDisposable
             _transparentFill(1, argb, work, meta, start);
     }
 
-    /// <summary>Colour analysis (alpha, palette) of <paramref name="pixels"/> pixels: set-up, bounded resumable scan launches, finish.</summary>
+    /// <summary>Pixels per launch of the parallel colour analysis (as ExactPaletteBuilder: one launch over a whole large
+    /// picture contends on the hash slots).</summary>
+    public const int AnalyzePixelsPerLaunch = 1 << 16;
+
+    /// <summary>
+    /// Colour analysis (alpha, palette) of <paramref name="pixels"/> pixels: set-up, the scan, the verdict, the sorted and
+    /// delta-coded palette. The scan runs a thread per pixel (chunked launches) into a lock-free hash set; the palette is
+    /// sorted by rank (each colour's place = the number of smaller colours), so nothing depends on the thread schedule and
+    /// the result is the serial scan's (<see cref="SerialAnalysis"/>, the oracle) exactly.
+    /// </summary>
     public async ValueTask AnalyzeAsync(ArrayView<uint> argb, ArrayView<int> work, ArrayView<int> meta, long pixels)
     {
         _analyzeInit(1024, work, meta);
-        for (int i = Vp8lEncLayout.Steps(pixels); i > 0; i--)
+        if (SerialAnalysis)
         {
-            _analyze(1, argb, work, meta);
+            for (int i = Vp8lEncLayout.Steps(pixels); i > 0; i--)
+            {
+                _analyze(1, argb, work, meta);
+                await _pacer.LaunchedAsync();
+            }
+            _analyzeFinish(1, work, meta);
+            return;
+        }
+        for (long first = 0; first < pixels; first += AnalyzePixelsPerLaunch)
+        {
+            _analyzeInsert((int)Math.Min(AnalyzePixelsPerLaunch, pixels - first), argb, work, meta, (int)first);
             await _pacer.LaunchedAsync();
         }
-        _analyzeFinish(1, work, meta);
+        _analyzeCount(1, work, meta);
+        _analyzeRank(1024, work, meta);
+        _analyzeDelta(256, work, meta);
     }
 
     /// <summary>Palette indices (bundled) from <paramref name="src"/> into <paramref name="dst"/>; extent = the pixel count (surplus threads return).</summary>
@@ -603,9 +639,11 @@ public sealed class WebPEncodeKernels : IDisposable
         return (ag & 0xff00ff00u) | (rb & 0x00ff00ffu);
     }
 
-    /// <summary>1024 threads: clear the colour hash; thread 0 resets the resumable analysis state.</summary>
+    /// <summary>1024 threads: clear the colour hash (keys: the parallel scan's table; flags: the serial scan's); thread 0
+    /// resets the analysis state.</summary>
     private static void AnalyzeInitKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta)
     {
+        w[Vp8lEncLayout.Analysis + index.X] = 0;
         w[Vp8lEncLayout.Analysis + 1024 + index.X] = 0;
         if (index.X == 0)
         {
@@ -613,6 +651,8 @@ public sealed class WebPEncodeKernels : IDisposable
             w[s + Vp8lEncLayout.SAnalyzeI] = 0;
             w[s + Vp8lEncLayout.SAnalyzeCount] = 0;
             w[s + Vp8lEncLayout.SAnalyzeAlpha] = 0;
+            w[s + Vp8lEncLayout.SAnalyzeZero] = 0;
+            w[s + Vp8lEncLayout.SAnalyzeOverflow] = 0;
             w[s + Vp8lEncLayout.SAnalyzeCollecting] = meta[WebPEncMeta.AllowPalette] == 1 ? 1 : 0;
         }
     }
@@ -674,6 +714,142 @@ public sealed class WebPEncodeKernels : IDisposable
             w[s + Vp8lEncLayout.SAnalyzeCount] = count;
             w[s + Vp8lEncLayout.SAnalyzeAlpha] = hasAlpha;
             w[s + Vp8lEncLayout.SAnalyzeCollecting] = collecting ? 1 : 0;
+        }
+    }
+
+    /// <summary>
+    /// The parallel scan, one thread per pixel of <c>first + index</c>: any alpha below 255 sets HasAlpha; every colour
+    /// goes into a lock-free open-addressing set of 1024 slots (the keys region; 0 = empty, so the colour 0 is a flag of
+    /// its own). The slot is READ before the compare-exchange: a slot never changes once written, so a pixel whose colour
+    /// is already in the table (nearly all of them) finds it without an atomic; a stale 0 only costs a compare-exchange,
+    /// which returns the real content. Inserting stops once more than 256 colours are known (no palette then); the set
+    /// never fills while it holds at most 256, so a probe that runs out of slots means "more than 256" as well.
+    /// </summary>
+    private static void AnalyzeInsertKernel(Index1D index, ArrayView<uint> argb, ArrayView<int> w, ArrayView<int> meta, int first)
+    {
+        int n = meta[WebPEncMeta.Width] * meta[WebPEncMeta.Height];
+        int keys = Vp8lEncLayout.Analysis;
+        int s = Vp8lEncLayout.StepState;
+        int i = first + index.X;
+        bool active = i < n;
+        if (active)
+        {
+            uint px = argb[i];
+            if ((px >> 24) != 255u) w[s + Vp8lEncLayout.SAnalyzeAlpha] = 1;
+            bool collecting = w[s + Vp8lEncLayout.SAnalyzeCollecting] == 1;
+            bool room = w[s + Vp8lEncLayout.SAnalyzeCount] + w[s + Vp8lEncLayout.SAnalyzeZero] <= 256;
+            bool wanted = collecting & room;
+            if (wanted)
+            {
+                if (px == 0u)
+                {
+                    w[s + Vp8lEncLayout.SAnalyzeZero] = 1;
+                }
+                else
+                {
+                    int key = (int)px;
+                    int slot = (int)((px * 0x9E3779B1u) >> 22);
+                    int step = 0;
+                    bool done = false;
+                    // Loop condition as a bool local built with non-short-circuit operators (WebGPU hangs on `a && b`).
+                    bool go = true;
+                    while (go)
+                    {
+                        int cur = w[keys + slot];
+                        if (cur == key)
+                        {
+                            done = true;
+                        }
+                        else
+                        {
+                            bool claimed = false;
+                            if (cur == 0)
+                            {
+                                int seen = Atomic.CompareExchange(ref w[keys + slot], 0, key);
+                                if (seen == 0)
+                                {
+                                    Atomic.Add(ref w[s + Vp8lEncLayout.SAnalyzeCount], 1);
+                                    claimed = true;
+                                }
+                                else if (seen == key)
+                                {
+                                    claimed = true;
+                                }
+                            }
+                            if (claimed)
+                            {
+                                done = true;
+                            }
+                            else
+                            {
+                                slot = (slot + 1) & 1023;
+                                step++;
+                                // over 256 colours the verdict is "no palette": stop probing
+                                if (w[s + Vp8lEncLayout.SAnalyzeCount] + w[s + Vp8lEncLayout.SAnalyzeZero] > 256) done = true;
+                            }
+                        }
+                        go = (!done) & (step < 1024);
+                    }
+                    if (!done) w[s + Vp8lEncLayout.SAnalyzeOverflow] = 1;
+                }
+            }
+        }
+    }
+
+    /// <summary>One thread after the parallel scan: HasAlpha, and PaletteAvailable = the number of colours when at most 256.</summary>
+    private static void AnalyzeCountKernel(Index1D _, ArrayView<int> w, ArrayView<int> meta)
+    {
+        int keys = Vp8lEncLayout.Analysis;
+        int s = Vp8lEncLayout.StepState;
+        meta[WebPEncMeta.HasAlpha] = w[s + Vp8lEncLayout.SAnalyzeAlpha];
+        int count = w[s + Vp8lEncLayout.SAnalyzeZero];
+        for (int k = 0; k < 1024; k++)
+        {
+            if (w[keys + k] != 0) count++;
+        }
+        bool palette = (w[s + Vp8lEncLayout.SAnalyzeCollecting] == 1) & (w[s + Vp8lEncLayout.SAnalyzeOverflow] == 0) & (count <= 256);
+        meta[WebPEncMeta.PaletteAvailable] = palette ? count : 0;
+    }
+
+    /// <summary>
+    /// 1024 threads (one per slot) when there is a palette: each colour goes to palette[number of smaller colours] (unsigned,
+    /// as the serial insertion sort orders them; the colour 0, when present, is the smallest: slot 0 of the palette).
+    /// </summary>
+    private static void AnalyzeRankKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta)
+    {
+        int keys = Vp8lEncLayout.Analysis;
+        int pal = Vp8lEncLayout.Palette;
+        int zero = w[Vp8lEncLayout.StepState + Vp8lEncLayout.SAnalyzeZero];
+        bool any = meta[WebPEncMeta.PaletteAvailable] > 0;
+        int k = w[keys + index.X];
+        bool live = any & (k != 0);
+        if (live)
+        {
+            uint v = (uint)k;
+            int rank = zero;
+            for (int j = 0; j < 1024; j++)
+            {
+                int o = w[keys + j];
+                bool smaller = (o != 0) & ((uint)o < v);
+                if (smaller) rank++;
+            }
+            w[pal + rank] = k;
+        }
+        bool zeroEntry = any & (zero == 1) & (index.X == 0);
+        if (zeroEntry) w[pal] = 0;
+    }
+
+    /// <summary>256 threads when there is a palette: the delta-coded palette (entry i minus entry i - 1, per channel).</summary>
+    private static void AnalyzeDeltaKernel(Index1D index, ArrayView<int> w, ArrayView<int> meta)
+    {
+        int pal = Vp8lEncLayout.Palette;
+        int i = index.X;
+        bool live = i < meta[WebPEncMeta.PaletteAvailable];
+        // if / else, not a select: entry 0 must never read entry -1 (a backend may evaluate both arms of a ?:)
+        if (live)
+        {
+            if (i == 0) w[Vp8lEncLayout.PaletteDelta] = w[pal];
+            else w[Vp8lEncLayout.PaletteDelta + i] = (int)SubPixels((uint)w[pal + i], (uint)w[pal + i - 1]);
         }
     }
 

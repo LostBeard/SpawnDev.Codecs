@@ -87,31 +87,46 @@ public sealed partial class WebPLosslessEncoderGpu
                 AfterMeta: () => _kernels.AlphaPickFilter(plane, rowCost, meta, height));
             if (options.Filter == WebPAlphaFilter.Auto && options.ExactFilterChoice && options.Quality >= AlphaExactFilterTrialQuality)
             {
-                // Exact choice: measure the stream each filter produces and keep the filter with the smallest one. The estimate
-                // the filter pick kernel makes (used below this effort) cannot see LZ77 runs, which decide masks and flat areas.
-                // A measuring pass runs the whole encoder with a writable capacity of 0: the bit writer still counts every byte
-                // (and flags the overflow, which is expected here), but stores nothing, so the caller's buffer only ever sees the
-                // final stream and no stale bytes of a longer trial are left behind it.
-                int realCapacity = hostMeta[WebPEncMeta.OutputCapacity];
+                // Exact choice: encode with each filter and keep the smallest stream. The estimate the filter pick kernel makes
+                // (used below this effort) cannot see LZ77 runs, which decide masks and flat areas.
+                // The trials write into the two halves of _alphaTrial, which take turns: a trial always goes to the half that
+                // does NOT hold the best stream so far, so the winner is kept as it was written and copied (on the device) into
+                // the caller's buffer, instead of being encoded a fifth time (it used to be: four measuring passes with a
+                // capacity of 0, then the winner again). The encoder is deterministic, so the kept stream is the one a re-encode
+                // would write. The caller's buffer only ever receives the final payload: nothing of a longer trial lands past
+                // it (WebPLosslessEncoderGpu_Alpha_ArrayViewOverload_WritesOnlyThePayload). A stream that overflows its 1 + n
+                // capacity still counts every byte (and flags the overflow), so the lengths compare as before; such a winner is
+                // replaced by the raw plane below.
+                var trialHalves = await _alphaTrial.EnsureDrainedAsync(2L * maxSize);
                 int bestFilter = 0;
                 int bestLength = int.MaxValue;
-                hostMeta[WebPEncMeta.OutputCapacity] = 0;
+                int bestIn = 1;           // the half holding the best stream; the first trial goes to half 0
+                int[]? bestMeta = null;
                 for (int f = 0; f < 4; f++)
                 {
+                    int into = 1 - bestIn;
                     hostMeta[WebPEncMeta.AlphaFilterRequest] = f;
-                    await EncodeStreamAsync(job, hostMeta, output);
+                    await EncodeStreamAsync(job, hostMeta, trialHalves.SubView((long)into * maxSize, maxSize));
                     await _accelerator.SynchronizeAsync();
                     var trial = await meta.CopyToHostAsync();
                     if (trial[WebPEncMeta.PayloadLength] < bestLength)
                     {
                         bestLength = trial[WebPEncMeta.PayloadLength];
                         bestFilter = f;
+                        bestIn = into;
+                        bestMeta = trial;
                     }
                 }
-                hostMeta[WebPEncMeta.OutputCapacity] = realCapacity;
                 hostMeta[WebPEncMeta.AlphaFilterRequest] = bestFilter;
+                // the winner's meta block (its filter, payload length, overflow flag) back on the device for FinalizeAlpha
+                meta.CopyFromCPU(bestMeta!);
+                if (bestMeta![WebPEncMeta.Error] == 0 && bestLength > 0)
+                    trialHalves.SubView((long)bestIn * maxSize + 1, bestLength).CopyTo(output.SubView(1, bestLength));
             }
-            await EncodeStreamAsync(job, hostMeta, output);
+            else
+            {
+                await EncodeStreamAsync(job, hostMeta, output);
+            }
             _kernels.FinalizeAlpha(output, meta, 0);
             await _accelerator.SynchronizeAsync();
             var m = await meta.CopyToHostAsync();

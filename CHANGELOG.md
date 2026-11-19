@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### WebP: the colour analysis in parallel; the ALPH filter trial keeps its winner (2026-11-18)
+- **Lossless colour analysis on every thread**: the scan that finds whether a picture has alpha and, when it has at most
+  256 colours, its sorted palette ran on one GPU thread (resumable launches of 8,192 pixels). It now runs a thread per
+  pixel into a lock-free 1,024-slot hash set (a slot is read before the compare-exchange, so repeated colours cost no
+  atomic), and the palette is sorted by rank. The result is the serial scan's exactly: the new test
+  `WebPLosslessEncoderGpu_ParallelAnalysis_MatchesSerialScanAndOracle` compares both with a host oracle (256 / 257
+  colours with and without the colour 0, unsigned order, colours that only appear in later launches, a last translucent
+  pixel) and the whole encoder's files, serial vs parallel; red-checked with 7 mutations. The serial scan stays as the
+  oracle (`WebPEncodeKernels.SerialAnalysis`, tests only).
+- **ALPH exact filter choice without a fifth encode**: with `Filter = Auto` at effort 50 and above, the four filter
+  trials now write into two halves of a scratch buffer that take turns, and the smallest stream is copied (on the
+  device) into the caller's buffer, instead of measuring four times and encoding the winner again. The caller's buffer
+  still receives only the payload.
+- SpawnGen's LTX clip (512x352, lossy q80 with transparency, 16 frames, RTX 4070): 912 -> 759 ms per frame, the same
+  bytes (128,448). The colour analysis was ~22 ms per lossless encode, five per frame.
+
 ### SpawnDev.ILGPU 5.4.36; a shorter release sweep (2026-11-17)
 - **SpawnDev.ILGPU 5.4.36** (was 5.4.35): on Wasm, buffers stay in the linear memory between dispatches, so a launch no
   longer zeroes, copies in and copies out every buffer it is given. The VP9 decoder launches one small kernel per

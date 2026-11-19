@@ -48,6 +48,8 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
     private readonly StageBuffer<int> _tokens;
     private readonly StageBuffer<byte> _blobs;
     private readonly StageBuffer<int> _rowCost;
+    /// <summary>The ALPH filter trials' streams: two halves of 1 + n bytes that take turns (the best so far stays in one).</summary>
+    private readonly StageBuffer<byte> _alphaTrial;
 
     /// <summary>Diagnostics: stage names of EncodeStreamAsync as they complete (tests time a browser lane with it). Null = off.</summary>
     internal static Action<string>? Trace;
@@ -82,6 +84,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
         _tokens = new StageBuffer<int>(accelerator);
         _blobs = new StageBuffer<byte>(accelerator);
         _rowCost = new StageBuffer<int>(accelerator);
+        _alphaTrial = new StageBuffer<byte>(accelerator);
     }
 
     // ------------------------------------------------------------------
@@ -636,5 +639,6 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
         _tokens.Dispose();
         _blobs.Dispose();
         _rowCost.Dispose();
+        _alphaTrial.Dispose();
     }
 }
