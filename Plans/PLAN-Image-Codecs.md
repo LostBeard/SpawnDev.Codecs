@@ -177,6 +177,11 @@ loses to every generator, so the encoder is upgraded first. Parity target: libwe
       one SynchronizeAsync + one meta readback per stage for all four instead of one per trial and stage). A 512x352 plane
       fills a small part of the GPU per launch; four at once fill more, and the host round trips drop 4x. Measure the
       split between GPU time and sync / launch overhead per stage first (trace with and without the waits), then build.
+      MEASURED 2026-11-19 (Nsight Systems, lossy, 8 frames): GPU-bound, not sync-bound - 4.5 s of kernel time, the LZ77
+      copy search (SearchKernel 1310 + LinksKernel 443 ms) the largest part, 32 tokenisations per alpha frame; 45,556
+      launches cost 233 ms of API time. So lockstep is NOT the lever; d79a21b reuses the copies across the cache trials
+      instead (lossless anim -16%, lossy -4%). Left: a strategy chosen before the last trial is re-applied and searched
+      again (keep its copies, or its tokens, instead); the search itself (chain depth 32 on every position).
 - [x] ALPH (transparency, 2026-10-25): VP8X + ALPH + VP8, VP8 chunk byte-identical with libwebp, alpha exact (145 fixtures, CPU).
 - (superseded by the summary above; kept for the design notes) E2 intra mode decision: I16 (DC/V/H/TM), I4 (10 modes) and UV (4 modes) chosen by distortion + lambda * rate like
       libwebp method 4 (`VP8Decimate`: score = SSE * RD_DISTO_MULT + lambda * bits, with the spectral-distortion term
