@@ -290,6 +290,246 @@ public static class Vp8lPredictorChoose
         }
     }
 
+    // ------------------------------------------------------------------
+    // Two-kernel form (the default since 2026-11-18): everything that does not depend on the tiles before - each tile's
+    // residuals for all 14 modes (with the transparent fill) and their histograms - is computed for a window of tiles at
+    // once, one work-group per tile (HistKernel, the whole GPU); the walk (WalkKernel, one work-group, tiles in order) only
+    // scores the stored histograms against the accumulated one, chooses, and accumulates: 4 barriers per tile instead of
+    // the wavefront's and the 7 histogram rounds'. The walk computes every cost term exactly as ChooseKernel does (same
+    // expressions, same bins per thread, same summation order), so the choices are ChooseKernel's (kept as the oracle).
+    // ------------------------------------------------------------------
+
+    /// <summary>Tiles whose histograms are built per HistKernel launch (and scored per WalkKernel launch).</summary>
+    public const int WindowTiles = 128;
+
+    /// <summary>Ints of one window slot of the histogram scratch: 14 histograms of 1024 bins.</summary>
+    public const int HistSlot = Modes * Bins;
+
+    /// <summary>Ints of one window slot of the fill scratch: 14 fill buffers of up to <see cref="TileMax"/> pixels.</summary>
+    public const int FillSlot = Modes * TileMax;
+
+    /// <summary>
+    /// The histogram scratch: accumulated histograms (1024, the walk's only), then <see cref="WindowTiles"/> slots (atomics
+    /// only in HistKernel). The fill pixels live in a second buffer (plain access only): WebGPU cannot mix atomic and plain
+    /// access to one array within a kernel.
+    /// </summary>
+    public const int WAcc = 0, WSlots = Bins, WTotal = WSlots + WindowTiles * HistSlot, FillTotal = WindowTiles * FillSlot;
+
+    /// <summary>
+    /// One work-group (<see cref="GroupSizeFor"/> threads) per tile <c>first + Grid.IdxX</c>: the 14 modes' residual
+    /// histograms of the tile into its slot (device-memory atomics; the slot is cleared first by atomic exchange: WebGPU
+    /// cannot mix atomic and plain access to one array in a kernel). Residuals as ChooseKernel's phase A.
+    /// </summary>
+    public static void HistKernel(ArrayView<uint> argb, ArrayView<int> meta, ArrayView<int> hist, ArrayView<int> fillPx, int options, int first)
+    {
+        int lane = Group.IdxX;
+        int groupSize = Group.DimX;
+        bool active = meta[WebPEncMeta.UsePredictor] == 1;
+        int width = meta[WebPEncMeta.PackedWidth];
+        int height = meta[WebPEncMeta.Height];
+        int bits = meta[WebPEncMeta.PredictorBits];
+        int side = 1 << bits;
+        int tilesPerRow = (width + side - 1) >> bits;
+        int tiles = tilesPerRow * ((height + side - 1) >> bits);
+        bool fill = ((options & 1) != 0) & (meta[WebPEncMeta.Transparent] == 1) & (meta[WebPEncMeta.PaletteCount] == 0);
+        bool serialWalk = (options & 2) != 0;
+        int t = first + Grid.IdxX;
+        // The same value in every thread (the same meta, the same t), but read from a storage buffer, which WGSL's
+        // uniformity analysis calls non-uniform: the barriers below would be rejected ("storageBarrier must only be called
+        // from uniform control flow", WebGPU 2026-11-18). A group-wide OR makes it uniform.
+        bool run = Group.BarrierOr(active & fill & (t < tiles));
+        if (run)
+        {
+            int hb = WSlots + Grid.IdxX * HistSlot;
+            int fb = Grid.IdxX * FillSlot;
+            int ty = t / tilesPerRow;
+            int tx = t - ty * tilesPerRow;
+            int x0 = tx << bits, y0 = ty << bits;
+            int x1 = x0 + side;
+            if (x1 > width) x1 = width;
+            int y1 = y0 + side;
+            if (y1 > height) y1 = height;
+            int tw = x1 - x0;
+            int tp = tw * (y1 - y0);
+
+            for (int b = lane; b < Modes * Bins; b += groupSize) Atomic.Exchange(ref hist[hb + b], 0);
+            bool mine = false;
+            for (int k = lane; k < tp; k += groupSize)
+            {
+                int ky = k / tw;
+                if ((argb[(y0 + ky) * width + x0 + (k - ky * tw)] >> 24) == 0u) mine = true;
+            }
+            // also the barrier after the clear
+            bool walkFill = Group.BarrierOr(mine);
+            if (walkFill)
+            {
+                int th = y1 - y0;
+                int steps = (tw - 1) + 2 * (th - 1) + 1;
+                if (serialWalk)
+                {
+                    if (lane < Modes)
+                        for (int y = y0; y < y1; y++)
+                            for (int x = x0; x < x1; x++) FillCellHist(argb, hist, fillPx, hb, fb, lane, x, y, x0, x1, y0, tw, width);
+                    steps = 0;
+                }
+                for (int d = 0; d < steps; d++)
+                {
+                    for (int item = lane; item < Modes * th; item += groupSize)
+                    {
+                        int mode = item / th;
+                        int ly = item - mode * th;
+                        int lx = d - 2 * ly;
+                        if ((lx >= 0) & (lx < tw)) FillCellHist(argb, hist, fillPx, hb, fb, mode, x0 + lx, y0 + ly, x0, x1, y0, tw, width);
+                    }
+                    // step d + 1 reads fill cells step d wrote (other lanes)
+                    Group.Barrier();
+                }
+            }
+            else
+            {
+                for (int idx = lane; idx < Modes * tp; idx += groupSize)
+                {
+                    int mode = idx / tp;
+                    int k = idx - mode * tp;
+                    int ky = k / tw;
+                    int y = y0 + ky, x = x0 + (k - ky * tw);
+                    int i = y * width + x;
+                    uint pred;
+                    if (i == 0) pred = 0xff000000u;
+                    else if (y == 0) pred = argb[i - 1];
+                    else if (x == 0) pred = argb[i - width];
+                    else pred = WebPKernels.Predict(mode, argb[i - 1], argb[i - width], argb[i - width + 1], argb[i - width - 1]);
+                    AddResidual(hist, hb + mode * Bins, SubPixels(argb[i], pred));
+                }
+            }
+        }
+    }
+
+    private static void AddResidual(ArrayView<int> pc, int h, uint r)
+    {
+        Atomic.Add(ref pc[h + Bin(r, 0)], 1);
+        Atomic.Add(ref pc[h + Bin(r, 1)], 1);
+        Atomic.Add(ref pc[h + Bin(r, 2)], 1);
+        Atomic.Add(ref pc[h + Bin(r, 3)], 1);
+    }
+
+    // FillCell of the two-kernel form: the residual goes into the mode's histogram of the slot instead of a residual buffer.
+    private static void FillCellHist(ArrayView<uint> argb, ArrayView<int> hist, ArrayView<int> fillPx, int hb, int fbBase, int mode, int x, int y, int x0, int x1, int y0, int tw, int width)
+    {
+        int fb = fbBase + mode * TileMax;
+        int i = y * width + x;
+        uint pred;
+        if (i == 0) pred = 0xff000000u;
+        else if (y == 0) pred = Neighbour(argb, fillPx, fb, x - 1, y, x0, x1, y0, tw, width, x, y);
+        else if (x == 0) pred = Neighbour(argb, fillPx, fb, x, y - 1, x0, x1, y0, tw, width, x, y);
+        else
+        {
+            bool lastCol = x + 1 == width;
+            pred = WebPKernels.Predict(mode,
+                Neighbour(argb, fillPx, fb, x - 1, y, x0, x1, y0, tw, width, x, y),
+                Neighbour(argb, fillPx, fb, x, y - 1, x0, x1, y0, tw, width, x, y),
+                Neighbour(argb, fillPx, fb, lastCol ? 0 : x + 1, lastCol ? y : y - 1, x0, x1, y0, tw, width, x, y),
+                Neighbour(argb, fillPx, fb, x - 1, y - 1, x0, x1, y0, tw, width, x, y));
+        }
+        uint p = argb[i];
+        uint r = SubPixels(p, pred);
+        if ((p >> 24) == 0u)
+        {
+            r &= 0xff000000u;
+            p = pred & 0x00ffffffu;
+        }
+        AddResidual(hist, hb + mode * Bins, r);
+        fillPx[fb + (y - y0) * tw + (x - x0)] = (int)p;
+    }
+
+    /// <summary>
+    /// One work-group: tiles [<paramref name="first"/>, <paramref name="first"/> + <see cref="WindowTiles"/>) in raster
+    /// order, their histograms from HistKernel's slots: each mode scored against the accumulated histograms (ChooseKernel's
+    /// phase B arithmetic, term for term), the choice (phase C), the chosen histogram added to the accumulated one.
+    /// </summary>
+    public static void WalkKernel(ArrayView<int> w, ArrayView<int> meta, ArrayView<int> pc, int options, int first)
+    {
+        var part = SharedMemory.Allocate<float>(Modes * MaxGroupSize);
+        var cost = SharedMemory.Allocate<float>(Modes);
+        var flags = SharedMemory.Allocate<int>(2);
+        int lane = Group.IdxX;
+        int groupSize = Group.DimX;
+        int binsPerThread = Bins / groupSize;
+        bool active = meta[WebPEncMeta.UsePredictor] == 1;
+        int width = meta[WebPEncMeta.PackedWidth];
+        int height = meta[WebPEncMeta.Height];
+        int bits = meta[WebPEncMeta.PredictorBits];
+        int side = 1 << bits;
+        int tilesPerRow = (width + side - 1) >> bits;
+        int tiles = tilesPerRow * ((height + side - 1) >> bits);
+        int modes = meta[WebPEncMeta.RegionPredictor];
+        bool fill = ((options & 1) != 0) & (meta[WebPEncMeta.Transparent] == 1) & (meta[WebPEncMeta.PaletteCount] == 0);
+        int last = first + WindowTiles;
+        if (last > tiles) last = tiles;
+        if (!active | !fill) last = first;
+        int b0 = lane * binsPerThread;
+
+        for (int t = first; t < last; t++)
+        {
+            int hb = WSlots + (t - first) * HistSlot;
+            int ty = t / tilesPerRow;
+            int tx = t - ty * tilesPerRow;
+            for (int m = 0; m < Modes; m++)
+            {
+                float entropy = 0f, bias = 0f;
+                for (int j = 0; j < binsPerThread; j++)
+                {
+                    int b = b0 + j;
+                    int count = pc[hb + m * Bins + b];
+                    if (count > 0)
+                    {
+                        float x = count;
+                        entropy -= SLog(x) + SLogStep(x, pc[WAcc + b]);
+                        int v = b & 255;
+                        if (v == 0) bias += x;
+                        else if (v < 16) bias += x * BiasWeight(v);
+                        else if (v > 240) bias += x * BiasWeight(256 - v);
+                    }
+                }
+                // PredictionCostBias: -bits / 10 (as ChooseKernel)
+                part[m * groupSize + lane] = entropy - bias * 0.1f;
+            }
+            Group.Barrier();
+            if (lane < Modes)
+            {
+                float sum = 0f;
+                for (int u = 0; u < groupSize; u++) sum += part[lane * groupSize + u];
+                cost[lane] = sum;
+            }
+            Group.Barrier();
+            if (lane == 0)
+            {
+                int left = tx > 0 ? (w[modes + t - 1] >> 8) & 0xFF : 0xFF;
+                int above = ty > 0 ? (w[modes + t - tilesPerRow] >> 8) & 0xFF : 0xFF;
+                int best = 0;
+                float bestCost = 0f;
+                for (int m = 0; m < Modes; m++)
+                {
+                    float c = cost[m];
+                    if (m == left) c -= 15f;
+                    if (m == above) c -= 15f;
+                    if ((m == 0) | (c < bestCost))
+                    {
+                        bestCost = c;
+                        best = m;
+                    }
+                }
+                w[modes + t] = (int)(0xff000000u | ((uint)best << 8));
+                flags[1] = best;
+            }
+            Group.Barrier();
+            int chosen = hb + flags[1] * Bins;
+            for (int j = 0; j < binsPerThread; j++) pc[WAcc + b0 + j] = pc[WAcc + b0 + j] + pc[chosen + b0 + j];
+            // the next tile reads the accumulated bins of every thread, and lane 0 the mode image
+            Group.Barrier();
+        }
+    }
+
     /// <summary>Thread i: clears the accumulated histograms (before the first tile of an image).</summary>
     public static void ClearKernel(Index1D i, ArrayView<int> pc)
     {

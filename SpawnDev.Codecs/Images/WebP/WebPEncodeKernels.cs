@@ -70,6 +70,16 @@ public sealed class WebPEncodeKernels : IDisposable
     private Action<KernelConfig, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _pcChoose = null!;
     private Action<Index1D, ArrayView<int>> _pcClear = null!;
     private MemoryBuffer1D<int, Stride1D.Dense>? _pcScratch;
+    private Action<KernelConfig, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _pcHist = null!;
+    private Action<KernelConfig, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _pcWalk = null!;
+    private MemoryBuffer1D<int, Stride1D.Dense>? _pcHistScratch, _pcFillScratch;
+
+    /// <summary>
+    /// Tests only: the predictor choice in one kernel (Vp8lPredictorChoose.ChooseKernel, one work-group walks the tiles and
+    /// builds every histogram itself; the encoder before 2026-11-18) instead of HistKernel (all tiles of a window at once)
+    /// + WalkKernel. Both make the same choices; the one-kernel form is the oracle.
+    /// </summary>
+    internal static bool SinglePassChooser;
 
     /// <summary>
     /// Tests only: off = the predictor modes are chosen per tile by summed residual magnitude (PredictorModeKernel, the
@@ -217,6 +227,8 @@ public sealed class WebPEncodeKernels : IDisposable
             ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lEmitParallel.TileHistKernel);
         _pcChoose = await a.LoadStreamKernelAsync<ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Vp8lPredictorChoose.ChooseKernel);
         _pcClear = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>>(Vp8lPredictorChoose.ClearKernel);
+        _pcHist = await a.LoadStreamKernelAsync<ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Vp8lPredictorChoose.HistKernel);
+        _pcWalk = await a.LoadStreamKernelAsync<ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(Vp8lPredictorChoose.WalkKernel);
         _emitHeader = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>>(EmitHeaderKernel);
         _emitBits = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, int>(EmitBitsKernel);
         _subImageBegin = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, int>(SubImageBeginKernel);
@@ -334,13 +346,30 @@ public sealed class WebPEncodeKernels : IDisposable
     /// </summary>
     public void PredictorChoose(ArrayView<uint> argb, ArrayView<int> work, ArrayView<int> meta, int tiles)
     {
-        _pcScratch ??= _accelerator.Allocate1D<int>(Vp8lPredictorChoose.Total);
-        var pc = _pcScratch.View;
-        _pcClear(Vp8lPredictorChoose.Res, pc);
         int fillOn = (FillTransparent && PredictorModeSeesFill ? 1 : 0) | (SerialFillWalk ? 2 : 0);
-        var group = new KernelConfig(1, Vp8lPredictorChoose.GroupSizeFor(_accelerator));
-        for (int first = 0; first < tiles; first += Vp8lPredictorChoose.TilesPerLaunch)
-            _pcChoose(group, argb, work, meta, pc, fillOn, first);
+        int groupSize = Vp8lPredictorChoose.GroupSizeFor(_accelerator);
+        var group = new KernelConfig(1, groupSize);
+        if (SinglePassChooser)
+        {
+            _pcScratch ??= _accelerator.Allocate1D<int>(Vp8lPredictorChoose.Total);
+            var pc = _pcScratch.View;
+            _pcClear(Vp8lPredictorChoose.Res, pc);
+            for (int first = 0; first < tiles; first += Vp8lPredictorChoose.TilesPerLaunch)
+                _pcChoose(group, argb, work, meta, pc, fillOn, first);
+            return;
+        }
+        // fixed sizes (a window, not the picture), allocated once: never replaced under queued work
+        _pcHistScratch ??= _accelerator.Allocate1D<int>(Vp8lPredictorChoose.WTotal);
+        _pcFillScratch ??= _accelerator.Allocate1D<int>(Vp8lPredictorChoose.FillTotal);
+        var hist = _pcHistScratch.View;
+        var fillPx = _pcFillScratch.View;
+        _pcClear(Vp8lPredictorChoose.Res, hist);   // the accumulated histograms (the first 1024 ints, as in the one-kernel scratch)
+        for (int first = 0; first < tiles; first += Vp8lPredictorChoose.WindowTiles)
+        {
+            int n = Math.Min(Vp8lPredictorChoose.WindowTiles, tiles - first);
+            _pcHist(new KernelConfig(n, groupSize), argb, meta, hist, fillPx, fillOn, first);
+            _pcWalk(group, work, meta, hist, fillOn, first);
+        }
     }
 
     /// <summary>Predictor residuals of <paramref name="src"/> into <paramref name="dst"/>.</summary>
@@ -2002,5 +2031,7 @@ public sealed class WebPEncodeKernels : IDisposable
         _ptScratch?.Dispose();
         _peWords?.Dispose();
         _pcScratch?.Dispose();
+        _pcHistScratch?.Dispose();
+        _pcFillScratch?.Dispose();
     }
 }
