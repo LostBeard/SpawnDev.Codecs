@@ -182,6 +182,16 @@ loses to every generator, so the encoder is upgraded first. Parity target: libwe
       launches cost 233 ms of API time. So lockstep is NOT the lever; d79a21b reuses the copies across the cache trials
       instead (lossless anim -16%, lossy -4%). Left: a strategy chosen before the last trial is re-applied and searched
       again (keep its copies, or its tokens, instead); the search itself (chain depth 32 on every position).
+      DONE 588aabe (best strategy's copies saved / restored). PROFILE 2026-11-19 after 1.1.1 (Nsight, lossless WebPAnimEncoder
+      animation, 25 LTX frames, RTX 4070): 8.2 s of kernel time, of which 2.2 s is the bench's PNG decode (InflateStepKernel).
+      Encode: ParseKernel 1228 ms (one thread: the greedy parse), TransparentFillKernel 1196 (one thread per chunk: transparent
+      pixels take their predictions in raster order), LinksKernel 1048 (one thread per 16384-position block: ~11 threads per
+      frame), ClusterAssign 669, chooser WalkKernel 581, Emit 263, BuildCodes 189; SearchKernel no longer in the top. NEXT,
+      byte-identical by construction: (1) parse in parallel segments: each segment parses speculatively from its own start;
+      a segment's true entry is where the previous segment's parse crosses into it, and the speculative parse is right
+      from the first start both parses share (greedy parses resynchronise within a few tokens), so only the short prefix
+      before that meeting point is re-parsed; (2) the fill as a wavefront (x + 2y, as the chooser's fill) or over runs of
+      transparent pixels only; (3) the links as a sort by (key, position) instead of a serial walk per block.
 - [x] ALPH (transparency, 2026-10-25): VP8X + ALPH + VP8, VP8 chunk byte-identical with libwebp, alpha exact (145 fixtures, CPU).
 - (superseded by the summary above; kept for the design notes) E2 intra mode decision: I16 (DC/V/H/TM), I4 (10 modes) and UV (4 modes) chosen by distortion + lambda * rate like
       libwebp method 4 (`VP8Decimate`: score = SSE * RD_DISTO_MULT + lambda * bits, with the spectral-distortion term
