@@ -148,6 +148,25 @@ loses to every generator, so the encoder is upgraded first. Parity target: libwe
 - [x] E2..E6 (opaque pictures, methods 3 / 4, one partition): `WebPLossyEncoderGpu` byte-identical with libwebp on CPU,
       CUDA, OpenCL (222 fixtures). Open: browser lanes; methods 0..2, 5..6 (trellis); 2/4/8 partitions;
       parallel candidate evaluation inside a macroblock (performance).
+- [ ] **Lossy in the BROWSER (2026-11-19, top priority)**: SpawnGen's site Text-to-video (25 LTX frames 512x352, lossy q90
+      method 4) spends 120.6 s of ~155 s in Save Animated WEBP in Chrome (WebGPU / D3D12) on an RX 590: ~4.8 s per frame
+      (Lore, Codecs 1.1.1). Same GPU, same tests: WebGPU 6-7x CUDA on the lossy animation tests (39.4 vs 5.4 s), Wasm
+      ~14x. Suspect: the RD loop's 5 one-macroblock launches per macroblock (~17,600 dispatches per 512x352 frame) - a
+      browser dispatch costs far more than a CUDA launch. MEASURE first (per-stage time and dispatch count on WebGPU).
+      DESIGN of the macroblock wavefront, byte-identical (checked against the stage code 2026-11-19):
+      - order inside a probability window (the refresh every max(mbCount >> 3, 96) macroblocks in raster order): diagonals
+        d = x + 2y; (x, y) needs (x - 1, y) (left samples, left nz / derr) and (x + 1, y - 1) (top-right samples); yTop[x]
+        is written by (x, y) after (x, y + 1)'s readers of row y ran (x + 2y < x + 2y + 2), so one yTop row stays correct;
+      - per-row state for the rows in flight: left samples (sb BLeft), left nz (si ILeftNz), left derr (si ILeftDerr), the
+        output-buffer swap (meta RowOutBuf / RowOut2Buf); per-macroblock scratch (sb BIn / BOut*, si IRdScalars, ...) for
+        every macroblock of a diagonal;
+      - tokens: RecordTokens appends to one stream in raster order and RecordStats updates saturating counters (halving at
+        0xfffe0000: ORDER-DEPENDENT once a counter saturates inside a window) -> per-macroblock token slots (with the stat
+        index), then one serial pass per window in raster order applies the stats and compacts the tokens; SizeP0 is a sum
+        (order-free);
+      - launches: each stage once per diagonal (a work-group per macroblock): ~mbW + 2 mbH diagonals per frame plus the
+        window seams, ~400-500 dispatches per 512x352 frame instead of ~17,600.
+      Guard: every lossy byte-identical-with-libwebp test (they pin the bytes), the Pillow oracles, all six backends.
 - [ ] Speed (2026-11-14, Lore: SpawnGen would use lossy for quick previews if it were fast). Measured: 25 LTX frames 512x352
       q80 on the RTX 4070, 2.15 s per frame (libwebp 40 ms, same bytes). The RD loop is 5 one-thread launches per macroblock
       (3,520 per frame at 512x352). Two independent steps, both byte-identical by construction:
