@@ -377,7 +377,7 @@ public static partial class DeflateGpu
 
     /// <summary>Canonical codes (bit-reversed, ready to emit LSB first) for the lengths at <paramref name="lensAt"/>.</summary>
     /// <remarks>
-    /// WORKAROUND (Chrome WebGPU on an AMD RX 590 / D3D12, 2026-11-20; tracked publicly, see CHANGELOG 1.1.3): the per-length
+    /// WORKAROUND (Chrome WebGPU on an AMD RX 590 / D3D12, 2026-11-20; tracked publicly: https://github.com/LostBeard/SpawnDev.Codecs/issues/1): the per-length
     /// counts and next codes are private to the thread, not slots of the block's storage scratch. With them in the
     /// scratch (the same slots for the literal, distance and code-length codes, called one after another), the second
     /// and third calls read back the FIRST call's counts there: the distance and code-length codes were built from the

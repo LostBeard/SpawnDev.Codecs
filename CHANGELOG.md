@@ -10,7 +10,7 @@
   on that GPU the second and third runs read the first run's counts back. CUDA, OpenCL on the same card, NVIDIA WebGPU,
   Velocity and the CPU accelerator wrote correct files; the WGSL is the same, so the miscompile is below the shader
   source. The per-length counts and next codes (and `BuildLengths`' per-depth counts) are now private to the thread.
-  Marked WORKAROUND in the source; tracked publicly. Every file is unchanged on the backends that were right (the
+  Marked WORKAROUND in the source; tracked in https://github.com/LostBeard/SpawnDev.Codecs/issues/1. Every file is unchanged on the backends that were right (the
   CUDA files of the new test are byte-identical before and after).
 - Test `PngEncoderGpu_RealPhotos_512AndWhole_RoundTripOnHostReader`: SpawnGen's render itself (TestData/PngPhoto, the
   exact pixels and the run's two tEXt chunks) and the three 1024x768 JPEG photos, whole and as 512x512 crops, in RGB at
