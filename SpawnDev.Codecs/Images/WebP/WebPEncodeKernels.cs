@@ -56,6 +56,11 @@ public sealed class WebPEncodeKernels : IDisposable
     private Action<Index1D, ArrayView<uint>, ArrayView<int>, Vp8lTokenizeParallel.Args> _ptLinks = null!, _ptFixup = null!, _ptSearch = null!;
     private Action<Index1D, ArrayView<int>, Vp8lTokenizeParallel.Args> _ptCarry = null!, _ptCount = null!, _ptScan = null!;
     private Action<Index1D, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args> _ptParse = null!, _ptFinish = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args> _ptParseSpec = null!, _ptParseFix = null!;
+
+    /// <summary>Tests only: the greedy parse on one thread (ParseKernel, before 2026-11-19) instead of in parallel segments
+    /// (ParseSpecKernel + ParseFixKernel). Both mark the same token starts.</summary>
+    internal static bool SerialParse;
     private Action<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
         Vp8lTokenizeParallel.Args> _ptEmit = null!;
     private MemoryBuffer1D<int, Stride1D.Dense>? _ptScratch;
@@ -211,6 +216,8 @@ public sealed class WebPEncodeKernels : IDisposable
         _ptCount = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.CountKernel);
         _ptScan = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.ScanKernel);
         _ptParse = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.ParseKernel);
+        _ptParseSpec = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.ParseSpecKernel);
+        _ptParseFix = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.ParseFixKernel);
         _ptFinish = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.FinishKernel);
         _ptEmit = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<uint>, ArrayView<int>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.EmitKernel);
@@ -512,11 +519,25 @@ public sealed class WebPEncodeKernels : IDisposable
                 _ptSearch(Math.Min(Vp8lTokenizeParallel.SearchChunk, n - b), main, s, sa);
                 await _pacer.LaunchedAsync();
             }
-            // the parse: at most n tokens, ParseChunk per launch
-            for (int i = (n + Vp8lTokenizeParallel.ParseChunk - 1) / Vp8lTokenizeParallel.ParseChunk; i > 0; i--)
+            if (SerialParse)
             {
-                _ptParse(1, s, tables, args);
+                // the parse: at most n tokens, ParseChunk per launch
+                for (int i = (n + Vp8lTokenizeParallel.ParseChunk - 1) / Vp8lTokenizeParallel.ParseChunk; i > 0; i--)
+                {
+                    _ptParse(1, s, tables, args);
+                    await _pacer.LaunchedAsync();
+                }
+            }
+            else
+            {
+                // the parse in parallel segments, then the fix-up of the segments entered inside (Vp8lTokenizeParallel)
+                _ptParseSpec(l.Segments, s, tables, args);
                 await _pacer.LaunchedAsync();
+                for (int seg = 0; seg < l.Segments; seg += Vp8lTokenizeParallel.FixSegmentsPerLaunch)
+                {
+                    _ptParseFix(1, s, tables, args);
+                    await _pacer.LaunchedAsync();
+                }
             }
         }
         args.CacheOnly = 0;

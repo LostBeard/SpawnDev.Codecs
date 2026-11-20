@@ -40,6 +40,10 @@ public static class Vp8lTokenizeParallel
     public const int SearchChunk = 1 << 18;
     /// <summary>Tokens per launch of the parse.</summary>
     public const int ParseChunk = 1 << 16;
+    /// <summary>Positions per segment of the parallel parse (ParseSpecKernel: one thread per segment).</summary>
+    public const int ParseSegment = 1024;
+    /// <summary>Segments per launch of the parse fix-up (bounded launches: each segment costs at most ~2 ParseSegment steps).</summary>
+    public const int FixSegmentsPerLaunch = 64;
 
     /// <summary>Keys of the hash-chain table per block (the serial walk's hash).</summary>
     public const int PairKeys = 1 << Vp8lEncLayout.HashBits;
@@ -47,21 +51,24 @@ public static class Vp8lTokenizeParallel
     public const int CacheKeys = 1 << 10;
 
     /// <summary>Slots of the state ints: the parse position, the token total, the extra bits; their count.</summary>
-    public const int SParsePos = 0, STotal = 1, SExtra = 2, StateInts = 4;
+    public const int SParsePos = 0, STotal = 1, SExtra = 2, SFixSeg = 3, StateInts = 4;
 
     /// <summary>Offsets of the parallel tokeniser's ints for a picture of N pixels (one buffer).</summary>
     public readonly struct Layout
     {
-        public readonly int N, Blocks, EmitBlocks;
+        public readonly int N, Blocks, EmitBlocks, Segments;
         public readonly long KeyPrev, CachePrev, Len, Dist, Flag, PairTable, CacheTable, BlockCount, BlockExtra, State, Total;
         /// <summary>Vp8lEmitParallel: bits, first word and first bit per emit block; its state.</summary>
         public readonly long EBits, EWord, EShift, EState;
+        /// <summary>The parallel parse: where each segment's speculative parse left the segment.</summary>
+        public readonly long SegExit;
 
         public Layout(int n)
         {
             N = n;
             Blocks = (n + BlockPositions - 1) / BlockPositions;
             EmitBlocks = (n + EmitBlock - 1) / EmitBlock;
+            Segments = (n + ParseSegment - 1) / ParseSegment;
             long p = 0;
             KeyPrev = p; p += n;
             CachePrev = p; p += n;
@@ -79,6 +86,7 @@ public static class Vp8lTokenizeParallel
             EWord = p; p += EmitBlocks;
             EShift = p; p += EmitBlocks;
             EState = p; p += Vp8lEmitParallel.EStateInts;
+            SegExit = p; p += Segments;
             Total = p;
         }
     }
@@ -92,6 +100,7 @@ public static class Vp8lTokenizeParallel
         /// <summary>1: Links / Carry / Fixup build only the colour-cache links (the pair links, the search and the parse of the
         /// previous tokenisation of the same pixels are reused: they do not depend on the cache size).</summary>
         public int CacheOnly;
+        public int Segments, SegExit;
     }
 
     public static Args MakeArgs(in Layout l, int xsize, int cacheBits, int chainDepth) => new Args
@@ -101,6 +110,7 @@ public static class Vp8lTokenizeParallel
         Flag = checked((int)l.Flag), PairTable = checked((int)l.PairTable), CacheTable = checked((int)l.CacheTable),
         BlockCount = checked((int)l.BlockCount), BlockExtra = checked((int)l.BlockExtra), State = checked((int)l.State),
         EBits = checked((int)l.EBits), EWord = checked((int)l.EWord), EShift = checked((int)l.EShift), EState = checked((int)l.EState),
+        Segments = l.Segments, SegExit = checked((int)l.SegExit),
     };
 
     /// <summary>Thread i: s[start + i] = value (the link tables start at -1, the flags at 0).</summary>
@@ -245,6 +255,93 @@ public static class Vp8lTokenizeParallel
             go = (pos < a.N) & (steps < ParseChunk);
         }
         s[a.State + SParsePos] = pos;
+    }
+
+    // ---- the parse in parallel ----
+    // The greedy parse (ParseKernel) is a chain: a token starts where the previous one ends. ParseSpecKernel parses every
+    // segment of ParseSegment positions at once, each from its own first position, as if a token started there. The parse
+    // from a position is fixed by the copies alone, so once the true parse reaches a position the speculative parse of
+    // that segment also marked as a start, the two agree from there on (greedy parses resynchronise within a few tokens).
+    // ParseFixKernel walks the segments in order with the true position: a segment it enters at its first position was
+    // parsed right; one it enters inside (the previous token ran past the boundary) is re-parsed only up to the meeting
+    // point, with the speculative marks before it cleared; one wholly inside a long copy is cleared. The flags are exactly
+    // ParseKernel's (the serial walk Vp8lEncodeGpu.TokenizeStep stays the test oracle).
+
+    // the step of the token starting at pos: its copy length, or 1 for a literal or cache hit (ParseKernel's decision)
+    private static int TokenStep(ArrayView<int> s, ArrayView<int> tables, Args a, int pos)
+    {
+        int len = s[a.Len + pos];
+        bool copy = len >= 4;
+        if (len == 3) copy = Vp8lEncodeGpu.DistanceToPlaneCode(a.XSize, s[a.Dist + pos], tables) <= 120;
+        return copy ? len : 1;
+    }
+
+    /// <summary>Thread seg: the speculative parse of segment seg (flags 1 literal, 2 copy; the flags start at 0); where it left.</summary>
+    public static void ParseSpecKernel(Index1D seg, ArrayView<int> s, ArrayView<int> tables, Args a)
+    {
+        int start = seg * ParseSegment;
+        int end = start + ParseSegment;
+        if (end > a.N) end = a.N;
+        int pos = start;
+        while (pos < end)
+        {
+            int st = TokenStep(s, tables, a, pos);
+            s[a.Flag + pos] = st > 1 ? 2 : 1;
+            pos += st;
+        }
+        s[a.SegExit + seg] = pos;
+    }
+
+    /// <summary>
+    /// One thread, resumable (state: the true parse position in SParsePos, the next segment in SFixSeg, both 0 at first):
+    /// up to FixSegmentsPerLaunch segments made exact (see above).
+    /// </summary>
+    public static void ParseFixKernel(Index1D _, ArrayView<int> s, ArrayView<int> tables, Args a)
+    {
+        int p = s[a.State + SParsePos];
+        int seg = s[a.State + SFixSeg];
+        int last = seg + FixSegmentsPerLaunch;
+        if (last > a.Segments) last = a.Segments;
+        for (; seg < last; seg++)
+        {
+            int start = seg * ParseSegment;
+            int end = start + ParseSegment;
+            if (end > a.N) end = a.N;
+            if (p == start)
+            {
+                p = s[a.SegExit + seg];   // entered at the first position: the speculative parse is the parse
+            }
+            else if (p >= end)
+            {
+                for (int x = start; x < end; x++) s[a.Flag + x] = 0;   // wholly inside a copy
+            }
+            else
+            {
+                // entered inside: walk the true parse until it meets a speculative start (or leaves the segment)
+                int q = p;
+                bool go = true;
+                while (go)
+                {
+                    bool inside = q < end;
+                    bool met = false;
+                    if (inside) met = s[a.Flag + q] != 0;
+                    go = inside & !met;
+                    if (go) q += TokenStep(s, tables, a, q);
+                }
+                int r = q < end ? q : end;
+                for (int x = start; x < r; x++) s[a.Flag + x] = 0;
+                int t = p;
+                while (t < r)
+                {
+                    int st = TokenStep(s, tables, a, t);
+                    s[a.Flag + t] = st > 1 ? 2 : 1;
+                    t += st;
+                }
+                p = q < end ? s[a.SegExit + seg] : q;
+            }
+        }
+        s[a.State + SParsePos] = p;
+        s[a.State + SFixSeg] = seg;
     }
 
     // ---- emit ----

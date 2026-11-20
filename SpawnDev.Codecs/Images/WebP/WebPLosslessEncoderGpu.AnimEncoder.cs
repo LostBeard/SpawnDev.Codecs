@@ -66,6 +66,61 @@ public sealed partial class WebPLosslessEncoderGpu
     }
 
     /// <summary>
+    /// Upper bound on the size of a WebPAnimEncoder animation of <paramref name="frameCount"/> frames on a
+    /// <paramref name="width"/> x <paramref name="height"/> canvas (every frame full size, the metadata of
+    /// <paramref name="animation"/>), for sizing the output of
+    /// <see cref="EncodeAnimationAsync(IReadOnlyList{ArrayView1D{byte, Stride1D.Dense}}, int, int, IReadOnlyList{int}, ArrayView1D{byte, Stride1D.Dense}, WebPEncodeOptions?, WebPAnimEncoderOptions?)"/>.
+    /// A guarantee from the encoder's limits, far above real files: to get the file at its exact size instead, use
+    /// <see cref="EncodeAnimationToDeviceAsync"/> or, in a browser, <see cref="EncodeAnimationToUint8ArrayAsync"/>.
+    /// </summary>
+    public static long GetMaxAnimationEncodedSize(int frameCount, int width, int height, WebPEncodeOptions? options = null,
+        WebPAnimEncoderOptions? animation = null)
+    {
+        if (frameCount < 0) throw new ArgumentOutOfRangeException(nameof(frameCount));
+        // a frame is a still file's chunks inside an ANMF chunk (header 8 + 16); a still file at most GetMaxEncodedSize
+        long frame = 8 + 16 + GetMaxEncodedSize(width, height) + 1;
+        long size = 12 + 18 + 14 + frameCount * frame;
+        if (animation?.IccProfile is { } icc) size += 8 + icc.Length + 1;
+        if (animation?.Exif is { } exif) size += 8 + exif.Length + 1;
+        if (animation?.Xmp is { } xmp) size += 8 + xmp.Length + 1;
+        return size;
+    }
+
+    /// <summary>
+    /// Encode an animation whose frames are on the accelerator (as the ArrayView1D overload) and hand the file back where
+    /// the encoder built it: a view of exactly the file's length into a buffer this encoder owns, valid until its next
+    /// encode or its disposal. No worst-case output buffer: the file's own size is all that is held.
+    /// </summary>
+    public async Task<ArrayView1D<byte, Stride1D.Dense>> EncodeAnimationToDeviceAsync(
+        IReadOnlyList<ArrayView1D<byte, Stride1D.Dense>> frames, int width, int height, IReadOnlyList<int> durationsMs,
+        WebPEncodeOptions? options = null, WebPAnimEncoderOptions? animation = null)
+    {
+        ArgumentNullException.ThrowIfNull(frames);
+        var o = options ?? new WebPEncodeOptions();
+        ValidateAnimEncode(frames.Count, width, height, durationsMs, o);
+        long need = (long)width * height * 4;
+        for (int k = 0; k < frames.Count; k++)
+            if (frames[k].Length < need) throw new ArgumentException($"frame {k}: must hold {need} bytes.", nameof(frames));
+        var anim = AnimEncoder;
+        int length = await anim.EncodeAsync(frames.Count, k => new ValueTask<ArrayView1D<byte, Stride1D.Dense>>(frames[k]),
+            width, height, durationsMs, true, o.Quality, LosslessFrameEncoder(o), animation ?? new WebPAnimEncoderOptions(), WebPAnimEncoder.Sink.Growing(anim));
+        return anim.Output.SubView(0, length);
+    }
+
+    /// <summary>
+    /// Encode an animation whose frames are on the accelerator; the file comes back as a JS Uint8Array of exactly its
+    /// length (browser accelerators; the bytes never enter the .NET heap). The caller disposes the result.
+    /// </summary>
+    [SupportedOSPlatform("browser")]
+    public async Task<Uint8Array> EncodeAnimationToUint8ArrayAsync(
+        IReadOnlyList<ArrayView1D<byte, Stride1D.Dense>> frames, int width, int height, IReadOnlyList<int> durationsMs,
+        WebPEncodeOptions? options = null, WebPAnimEncoderOptions? animation = null)
+    {
+        var file = await EncodeAnimationToDeviceAsync(frames, width, height, durationsMs, options, animation);
+        return await DeviceTransfer.DownloadUint8ArrayAsync(file, file.Length);
+    }
+
+    /// <summary>
     /// Encode an animation of managed RGBA8 frames (full canvas each) like libwebp's WebPAnimEncoder (see the ArrayView1D
     /// overload). Returns the file as a managed array (a terminal CPU sink). Frames are uploaded one at a time.
     /// </summary>

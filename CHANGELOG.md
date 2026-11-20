@@ -1,5 +1,34 @@
 # SpawnDev.Codecs CHANGELOG
 
+## Unreleased
+
+### WebP animations: the file at its exact size from device frames; published upper bounds (2026-11-19)
+- `WebPLosslessEncoderGpu` and `WebPLossyEncoderGpu` gain `EncodeAnimationToDeviceAsync(frames on the accelerator, ...)`,
+  which returns the file as a view of exactly its length into a buffer the encoder owns (valid until its next encode),
+  and, in a browser, `EncodeAnimationToUint8ArrayAsync(...)`, the file as a JS Uint8Array that never enters the .NET heap.
+  A caller with its frames on the device no longer sizes a worst-case output buffer (SpawnGen: 121 frames at 1280x704
+  on 8 GB cards; Lore).
+- Upper bounds for callers that bring their own buffer: `WebPLosslessEncoderGpu.GetMaxAnimationEncodedSize(frameCount,
+  width, height, WebPEncodeOptions?, WebPAnimEncoderOptions?)`, and for the lossy encoder `GetMaxEncodedSize(width, height,
+  options)` and `GetMaxAnimationEncodedSize(frameCount, width, height, options, animation)`, all `long`. The lossy bound
+  follows the encoder's limits: partition 0 at most 4096 + 64 bytes per macroblock, the token partition at most 7,625
+  tokens per macroblock (25 blocks x (1 + 16 coefficients x 19 tokens)) of at most a byte each, the ALPH chunk at most
+  1 + width x height. Test `WebPAnimation_ToDevice_SameFileAsManaged_AndWithinTheBounds` (the device and Uint8Array
+  results byte for byte the managed overload's, lossless and lossy at q80 / q100; every file within its bound, noise
+  included).
+
+### Lossless WebP: the greedy parse in parallel segments (2026-11-19)
+- The tokeniser's parse (which positions start a token: a copy jumps by its length) ran on one thread: 1.23 s of the 6 s
+  of encode kernel time for SpawnGen's 25-frame animation (Nsight, RTX 4070). `ParseSpecKernel` now parses every segment
+  of 1,024 positions at once from its own first position, and `ParseFixKernel` walks the segments in order with the true
+  position: a segment entered at its first position is right as parsed; one entered inside is re-parsed only until the
+  true parse meets a speculative start (from there both agree: the parse from a position is fixed by the copies); one
+  wholly inside a copy is cleared. The same token starts as the one-thread parse (kept as `WebPEncodeKernels.SerialParse`,
+  tests only) and as the serial tokeniser `ParallelTokenizer_MatchesSerialWalk` compares against.
+- SpawnGen's 25 LTX frames, RTX 4070, run 2: lossless WebPAnimEncoder animation 250 -> 198 ms per frame (-21%), the
+  full-frame animation 129 -> 92 (-28%); the same bytes (3,415,372 / 3,124,892). Red-checked with the device hash test (an
+  entry inside a segment taken as its start, stale speculative marks kept, a segment inside a copy not cleared).
+
 ## 1.1.1 (2026-11-19)
 
 Everything since 1.1.0, listed below by date. The highlights:
