@@ -72,7 +72,10 @@ internal static partial class WebPLossyEncodeRowKernel
     public const int IUVLanes = II16Lanes + 4 * I16LaneStride;
     public const int UVLaneStride = 320, UVLLevels = 0, UVLTmp = 128, UVLT16 = 256, UVLDerr = 272, UVLTopNz = 278,
         UVLLeftNz = 287, UVLScore = 296;
-    public const int IntScratchSize = IUVLanes + 4 * UVLaneStride;
+    // Per macroblock ROW (each row of macroblocks has its own scratch since the wavefront, 2026-11-20): the iterator's
+    // output-buffer swap (yuv_out / yuv_out2), and the tokens this row recorded in the current probability window.
+    public const int IRowOut = IUVLanes + 4 * UVLaneStride, IRowOut2 = IRowOut + 1, IRowTokens = IRowOut + 2;
+    public const int IntScratchSize = IRowOut + 4;
     // level-array offsets inside a ModeScore slot
     private const int LDc = 0, LAc = 16, LUv = 272;
 

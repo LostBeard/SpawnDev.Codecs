@@ -64,6 +64,8 @@ internal static class WebPLossyEncMeta
     public const int PassMaxI4HeaderBits = 66;                         // max_i4_header_bits of the current pass
     public const int HasAlpha = 67;                                    // 1 when any alpha sample is not 255 (kernel 2)
     public const int AlphaPlanePresent = 68;                           // host: 0 for YUV input (no alpha plane to scan)
+    public const int WinReplayAll = 70;   // tests: 1 = WindowApplyKernel replays every probability's updates in order
+    public const int StWinOff = 69;   // in the state int buffer: a window's statistics, count / ones per probability (2 x ProbaCount)
 
     // ---- per segment (4 x SegStride ints) ----
     public const int Seg = 80;
@@ -85,11 +87,13 @@ internal static class WebPLossyEncMeta
     public const int P0Writer = Step + 10;         // partition 0 VP8BitWriter (8 ints)
     public const int TokNext = Step + 18;          // next token to emit
     public const int MbNext = Step + 19;           // next macroblock of VP8CodeIntraModes
+    public const int RowTokenCap = Step + 20;      // tokens one macroblock row may record per probability window (wavefront)
 
     public const int Size = Step + 32;             // 496
 
     /// <summary>Per-macroblock record (ints): type, uv mode, skip, segment, alpha.</summary>
-    public const int MbType = 0, MbUVMode = 1, MbSkip = 2, MbSegment = 3, MbAlpha = 4, MbUVAlphaRaw = 5, MbTransparent = 6;
+    public const int MbType = 0, MbUVMode = 1, MbSkip = 2, MbSegment = 3, MbAlpha = 4, MbUVAlphaRaw = 5, MbTransparent = 6,
+        MbP0Bits = 7;   // the macroblock's partition-0 cost (ModeScore H), summed in raster order by the window pass
     public const int MbStride = 8;
 }
 
@@ -101,5 +105,6 @@ internal enum WebPLossyEncError
     Partition0TooBig = 2,
     Partition0ScratchTooSmall = 3,
     TokenScratchTooSmall = 4,
+    RowTokenBufferTooSmall = 6,   // a macroblock row's token buffer (one probability window of the wavefront)
     OutputTooSmall = 5,
 }

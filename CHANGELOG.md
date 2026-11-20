@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### Lossy WebP: 2.8x faster frames, same bytes - the RD loop as a macroblock wavefront, the token partition in parallel (2026-11-20)
+- RTX 4070, warm, 512x352 q90 m4 (`Probe_DispatchCost_AndLossyFrameTime`): 272 -> 96 ms per frame on CUDA, 247 -> 88 on
+  OpenCL, the same 40,570 bytes. All 222 cases of `WebPLossyEncoderGpu_Methods3And4_ByteIdenticalWithLibwebp` stay
+  byte-identical with libwebp.
+- Measured first: the rate-distortion loop ran one macroblock at a time, five stage kernels per macroblock, each one small
+  work-group (3,520 launches for a 512x352 frame). One launch costs 7 us on CUDA, 44 us on WebGPU and 528 us on Wasm,
+  9-20% of the frame. The cost was the one-macroblock-at-a-time work, not the launches.
+- The wavefront: between two probability refreshes (every max(macroblocks / 8, 96) macroblocks in raster order) the level
+  costs do not change, so a macroblock depends on earlier ones only through its left, top and top-right neighbours. Each
+  stage now launches once per diagonal x + 2y of such a window, with a work-group per macroblock (269 launches per stage
+  for 512x352). Each macroblock row has its own scratch and token buffer.
+- The window pass: a group per row appends the row's tokens to the stream in raster order and counts them per probability
+  (atomics). A thread per probability then adds the counts. libwebp halves a counter that reached 0xfffe0000, so only a
+  counter that can saturate inside the window depends on order; that counter is replayed from the tokens in raster order.
+- The token partition (VP8EmitTokens into one bool writer) no longer runs on one thread. The writer's output is one big
+  number: each token with bit 1 adds (split + 1), shifted by its own normalisation shift and every later one. Range maps
+  per chunk of 256 tokens, from all 128 possible start ranges, are composed in order. Every chunk then adds its tokens
+  into the number with 32-bit atomic adds and carry propagation, which does not depend on order. The digits are the bytes,
+  and a writer rebuilt from them runs libwebp's VP8BitWriterFinish unchanged. The rebuild rule was checked on a model of
+  the writer before building. CUDA: 43 -> 1 ms per frame.
+- The per-segment max edge (filter strength) is now an atomic maximum, because a diagonal runs several macroblocks of
+  one segment at once.
+- Tests:
+  - `WebPLossyWavefront_ParallelDiagonals_SameBytesAsOneAtATime` (640x480, where windows start inside a row; 333x211;
+    16x400) gets the same bytes in four modes: parallel diagonals; one macroblock at a time (`SerialWavefront`, tests
+    only); row token buffers that start far too small (`RowTokensPerMacroblock`); every statistic replayed in order
+    (`ReplayAllStatistics`).
+  - `WebPLossyTokenPartition_Parallel_SameBytesAsTheWalk` (1x1 to 640x480, q0 to q100 noise) checks the parallel token
+    partition against the one-thread walk (`SerialTokenPartition`, tests only).
+  - Red-check: a diagonal loop that started at the window's first macroblock skipped macroblocks and failed the 640x480
+    libwebp cases.
+
 ### WebP animations: the file at its exact size from device frames; published upper bounds (2026-11-19)
 - `WebPLosslessEncoderGpu` and `WebPLossyEncoderGpu` gain `EncodeAnimationToDeviceAsync(frames on the accelerator, ...)`,
   which returns the file as a view of exactly its length into a buffer the encoder owns (valid until its next encode),

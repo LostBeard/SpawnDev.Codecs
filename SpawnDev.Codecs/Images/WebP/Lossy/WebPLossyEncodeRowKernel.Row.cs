@@ -23,32 +23,38 @@ internal static partial class WebPLossyEncodeRowKernel
         return bit;
     }
 
-    private static void PushToken(ArrayView<int> tokens, ArrayView<int> meta, int value)
+    /// <summary>Token flag of the row buffers: the statistic of this token is counted at probaIdx - 1 (libwebp's Cat5 / Cat6
+    /// slot 9 for probability 10). The window pass strips it.</summary>
+    public const int StatBelowBit = 1 << 16;
+
+    // The macroblock row's own token buffer (since the wavefront, 2026-11-20): the count is in the row's scratch, the
+    // statistics are counted later by the window pass in raster order (RecordStats halves saturated counters: the order
+    // matters), which also appends the row buffers to the token stream in raster order.
+    private static void PushToken(ArrayView<int> tokens, ArrayView<int> meta, ArrayView<int> si, int value)
     {
-        int n = meta[M.TokenCount];
-        if (n < meta[M.TokenCapacity]) tokens[n] = value;
-        else meta[M.Error] = (int)WebPLossyEncError.TokenBufferTooSmall;
-        meta[M.TokenCount] = n + 1;
+        int n = si[IRowTokens];
+        if (n < meta[M.RowTokenCap]) tokens[n] = value;
+        else meta[M.Error] = (int)WebPLossyEncError.RowTokenBufferTooSmall;
+        si[IRowTokens] = n + 1;
     }
 
-    private static int AddToken(ArrayView<int> tokens, ArrayView<int> meta, ArrayView<int> stats, int bit, int probaIdx, int statIdx)
+    private static int AddToken(ArrayView<int> tokens, ArrayView<int> meta, ArrayView<int> si, int bit, int probaIdx, int statIdx)
     {
-        PushToken(tokens, meta, (bit << 15) | probaIdx);
-        RecordStats(bit, stats, statIdx);
+        PushToken(tokens, meta, si, (bit << 15) | probaIdx | (statIdx != probaIdx ? StatBelowBit : 0));
         return bit;
     }
 
-    private static void AddConstantToken(ArrayView<int> tokens, ArrayView<int> meta, int bit, int proba)
-        => PushToken(tokens, meta, (bit << 15) | FixedProbaBit | proba);
+    private static void AddConstantToken(ArrayView<int> tokens, ArrayView<int> meta, ArrayView<int> si, int bit, int proba)
+        => PushToken(tokens, meta, si, (bit << 15) | FixedProbaBit | proba);
 
     /// <summary>VP8RecordCoeffTokens; returns 1 when the block has a non-zero coefficient.</summary>
     private static int RecordCoeffTokens(ArrayView<int> si, int lvOff, int ctx, int type, int first,
-        ArrayView<int> tokens, ArrayView<int> meta, ArrayView<int> stats, ArrayView<int> t)
+        ArrayView<int> tokens, ArrayView<int> meta, ArrayView<int> t)
     {
         int last = LastNonZero(si, lvOff);
         int n = first;
         int baseId = PIdx(type, n, ctx);
-        if (AddToken(tokens, meta, stats, last >= 0 ? 1 : 0, baseId + 0, baseId + 0) == 0) return 0;
+        if (AddToken(tokens, meta, si, last >= 0 ? 1 : 0, baseId + 0, baseId + 0) == 0) return 0;
         bool go = n < 16;
         while (go)
         {
@@ -57,31 +63,31 @@ internal static partial class WebPLossyEncodeRowKernel
             bool sign = cv < 0;
             int v = sign ? -cv : cv;
             bool eob = false;
-            if (AddToken(tokens, meta, stats, v != 0 ? 1 : 0, baseId + 1, baseId + 1) == 0)
+            if (AddToken(tokens, meta, si, v != 0 ? 1 : 0, baseId + 1, baseId + 1) == 0)
             {
                 baseId = PIdx(type, t[T.EncBands + n], 0);
             }
             else
             {
-                if (AddToken(tokens, meta, stats, v > 1 ? 1 : 0, baseId + 2, baseId + 2) == 0)
+                if (AddToken(tokens, meta, si, v > 1 ? 1 : 0, baseId + 2, baseId + 2) == 0)
                 {
                     baseId = PIdx(type, t[T.EncBands + n], 1);
                 }
                 else
                 {
-                    if (AddToken(tokens, meta, stats, v > 4 ? 1 : 0, baseId + 3, baseId + 3) == 0)
+                    if (AddToken(tokens, meta, si, v > 4 ? 1 : 0, baseId + 3, baseId + 3) == 0)
                     {
-                        if (AddToken(tokens, meta, stats, v != 2 ? 1 : 0, baseId + 4, baseId + 4) != 0)
-                            AddToken(tokens, meta, stats, v == 4 ? 1 : 0, baseId + 5, baseId + 5);
+                        if (AddToken(tokens, meta, si, v != 2 ? 1 : 0, baseId + 4, baseId + 4) != 0)
+                            AddToken(tokens, meta, si, v == 4 ? 1 : 0, baseId + 5, baseId + 5);
                     }
-                    else if (AddToken(tokens, meta, stats, v > 10 ? 1 : 0, baseId + 6, baseId + 6) == 0)
+                    else if (AddToken(tokens, meta, si, v > 10 ? 1 : 0, baseId + 6, baseId + 6) == 0)
                     {
-                        if (AddToken(tokens, meta, stats, v > 6 ? 1 : 0, baseId + 7, baseId + 7) == 0)
-                            AddConstantToken(tokens, meta, v == 6 ? 1 : 0, 159);
+                        if (AddToken(tokens, meta, si, v > 6 ? 1 : 0, baseId + 7, baseId + 7) == 0)
+                            AddConstantToken(tokens, meta, si, v == 6 ? 1 : 0, 159);
                         else
                         {
-                            AddConstantToken(tokens, meta, v >= 9 ? 1 : 0, 165);
-                            AddConstantToken(tokens, meta, (v & 1) == 0 ? 1 : 0, 145);
+                            AddConstantToken(tokens, meta, si, v >= 9 ? 1 : 0, 165);
+                            AddConstantToken(tokens, meta, si, (v & 1) == 0 ? 1 : 0, 145);
                         }
                     }
                     else
@@ -91,33 +97,33 @@ internal static partial class WebPLossyEncodeRowKernel
                         int residue = v - 3;
                         if (residue < (8 << 1))
                         {
-                            AddToken(tokens, meta, stats, 0, baseId + 8, baseId + 8);
-                            AddToken(tokens, meta, stats, 0, baseId + 9, baseId + 9);
+                            AddToken(tokens, meta, si, 0, baseId + 8, baseId + 8);
+                            AddToken(tokens, meta, si, 0, baseId + 9, baseId + 9);
                             residue -= 8 << 0; mask = 1 << 2; tab = T.Cat3;
                         }
                         else if (residue < (8 << 2))
                         {
-                            AddToken(tokens, meta, stats, 0, baseId + 8, baseId + 8);
-                            AddToken(tokens, meta, stats, 1, baseId + 9, baseId + 9);
+                            AddToken(tokens, meta, si, 0, baseId + 8, baseId + 8);
+                            AddToken(tokens, meta, si, 1, baseId + 9, baseId + 9);
                             residue -= 8 << 1; mask = 1 << 3; tab = T.Cat4;
                         }
                         else if (residue < (8 << 3))
                         {
                             // libwebp records the statistic of p[10] in slot 9 for Cat5 / Cat6
-                            AddToken(tokens, meta, stats, 1, baseId + 8, baseId + 8);
-                            AddToken(tokens, meta, stats, 0, baseId + 10, baseId + 9);
+                            AddToken(tokens, meta, si, 1, baseId + 8, baseId + 8);
+                            AddToken(tokens, meta, si, 0, baseId + 10, baseId + 9);
                             residue -= 8 << 2; mask = 1 << 4; tab = T.Cat5;
                         }
                         else
                         {
-                            AddToken(tokens, meta, stats, 1, baseId + 8, baseId + 8);
-                            AddToken(tokens, meta, stats, 1, baseId + 10, baseId + 9);
+                            AddToken(tokens, meta, si, 1, baseId + 8, baseId + 8);
+                            AddToken(tokens, meta, si, 1, baseId + 10, baseId + 9);
                             residue -= 8 << 3; mask = 1 << 10; tab = T.Cat6;
                         }
                         bool more = mask != 0;
                         while (more)
                         {
-                            AddConstantToken(tokens, meta, (residue & mask) != 0 ? 1 : 0, t[tab]);
+                            AddConstantToken(tokens, meta, si, (residue & mask) != 0 ? 1 : 0, t[tab]);
                             tab++;
                             mask >>= 1;
                             more = mask != 0;
@@ -125,10 +131,10 @@ internal static partial class WebPLossyEncodeRowKernel
                     }
                     baseId = PIdx(type, t[T.EncBands + n], 2);
                 }
-                AddConstantToken(tokens, meta, sign ? 1 : 0, 128);
+                AddConstantToken(tokens, meta, si, sign ? 1 : 0, 128);
                 bool atEnd = n == 16;
                 if (atEnd) eob = true;
-                else if (AddToken(tokens, meta, stats, n <= last ? 1 : 0, baseId + 0, baseId + 0) == 0) eob = true;
+                else if (AddToken(tokens, meta, si, n <= last ? 1 : 0, baseId + 0, baseId + 0) == 0) eob = true;
             }
             go = (n < 16) & !eob;
         }
@@ -136,14 +142,14 @@ internal static partial class WebPLossyEncodeRowKernel
     }
 
     private static void RecordTokens(ArrayView<int> si, ArrayView<int> nzRow, int x, ArrayView<int> coeffs,
-        ArrayView<int> stats, ArrayView<int> t, ArrayView<int> meta, ArrayView<int> tokens, bool i16)
+        ArrayView<int> t, ArrayView<int> meta, ArrayView<int> tokens, bool i16)
     {
         NzToBytes(nzRow, x, si);
         int acType = 3, acFirst = 0;
         if (i16)
         {
             int ctx = si[ITopNz + 8] + si[ILeftNz + 8];
-            int nzDc = RecordCoeffTokens(si, IRdA + LDc, ctx, 1, 0, tokens, meta, stats, t);
+            int nzDc = RecordCoeffTokens(si, IRdA + LDc, ctx, 1, 0, tokens, meta, t);
             si[ITopNz + 8] = nzDc;
             si[ILeftNz + 8] = nzDc;
             acType = 0; acFirst = 1;
@@ -152,7 +158,7 @@ internal static partial class WebPLossyEncodeRowKernel
             for (int xx = 0; xx < 4; ++xx)
             {
                 int ctx = si[ITopNz + xx] + si[ILeftNz + y];
-                int nzb = RecordCoeffTokens(si, IRdA + LAc + (xx + y * 4) * 16, ctx, acType, acFirst, tokens, meta, stats, t);
+                int nzb = RecordCoeffTokens(si, IRdA + LAc + (xx + y * 4) * 16, ctx, acType, acFirst, tokens, meta, t);
                 si[ITopNz + xx] = nzb;
                 si[ILeftNz + y] = nzb;
             }
@@ -161,7 +167,7 @@ internal static partial class WebPLossyEncodeRowKernel
                 for (int xx = 0; xx < 2; ++xx)
                 {
                     int ctx = si[ITopNz + 4 + ch + xx] + si[ILeftNz + 4 + ch + y];
-                    int nzb = RecordCoeffTokens(si, IRdA + LUv + (ch * 2 + xx + y * 2) * 16, ctx, 2, 0, tokens, meta, stats, t);
+                    int nzb = RecordCoeffTokens(si, IRdA + LUv + (ch * 2 + xx + y * 2) * 16, ctx, 2, 0, tokens, meta, t);
                     si[ITopNz + 4 + ch + xx] = nzb;
                     si[ILeftNz + 4 + ch + y] = nzb;
                 }

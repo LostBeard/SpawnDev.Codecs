@@ -6,14 +6,23 @@
 // everything and took minutes / killed the GPU process on kernels of that size). Every stage stays well under the browser
 // budget (Plans/PLAN-Oversized-Kernels.md).
 //
-//   PrepareStage   InitTop / InitLeft at a row start, VP8IteratorImport, the probability refresh, the I16 / UV predictions
+//   PrepareStage   InitTop / InitLeft at a row start, VP8IteratorImport, the I16 / UV predictions
 //   Intra16Stage   PickBestIntra16
 //   Intra4Stage    PickBestIntra4
 //   UVStage        PickBestUV
-//   RecordStage    skip flag, RecordTokens, the partition-0 size, VP8IteratorSaveBoundary
+//   RecordStage    skip flag, RecordTokens (into the row's buffer), the partition-0 cost, VP8IteratorSaveBoundary
 //
-// What crosses stages lives on the device: the ModeScore scalars in the int scratch (IRdScalars), the output-buffer
-// swap in meta[RowOutBuf / RowOut2Buf], and everything that already crossed macroblocks (see EncodeRowKernel).
+// What crosses stages lives on the device: the ModeScore scalars and the output-buffer swap in the ROW's int scratch,
+// and everything that already crossed macroblocks (see EncodeRowKernel).
+//
+// WAVEFRONT (2026-11-20): inside a probability window (the level costs change only at the refresh, every
+// max(mbCount >> 3, 96) macroblocks in raster order) a macroblock (x, y) depends on earlier ones only through (x - 1, y)
+// (left samples, left nz / derr, the output-buffer swap: the row's scratch) and (x, y - 1) / (x + 1, y - 1) (top /
+// top-right samples, nz, derr, the 4x4 mode map). Each stage is launched once per diagonal d = x + 2y of the window, a
+// group (RecordStage: a thread) per macroblock: group g of a launch at (row, x) is macroblock (x - 2g, row + g). Within
+// one launch no two macroblocks touch the same column of the top state (their columns differ by 2 or more), and a row
+// has one macroblock per diagonal. The statistics (RecordStats halves saturated counters: order-dependent) and the token
+// stream are the window pass's (WindowKernel), in raster order: the same bytes as the serial walk.
 
 using ILGPU;
 using ILGPU.Runtime;
@@ -50,14 +59,14 @@ internal static partial class WebPLossyEncodeRowKernel
         return rd;
     }
 
-    private static RowCtx MakeCtx(ArrayView<int> meta, ArrayView<int> mbRecs, int row, int x)
+    private static RowCtx MakeCtx(ArrayView<int> meta, ArrayView<int> si, ArrayView<int> mbRecs, int row, int x)
     {
         int mbW = meta[M.MbW];
         int predsW = 4 * mbW + 1;
         return new RowCtx
         {
             Y = row, X = x, MbW = mbW, MbH = meta[M.MbH], Width = meta[M.Width], Height = meta[M.Height], PredsW = predsW,
-            OutBuf = meta[M.RowOutBuf], Out2Buf = meta[M.RowOut2Buf], ErrDiff = meta[M.ErrorDiffusion] != 0,
+            OutBuf = si[IRowOut], Out2Buf = si[IRowOut2], ErrDiff = meta[M.ErrorDiffusion] != 0,
             PredsIdx = 1 + predsW + row * 4 * predsW + x * 4,
             YTopOff = x * 16,
             UVTopOff = mbW * 16 + x * 16,
@@ -65,11 +74,20 @@ internal static partial class WebPLossyEncodeRowKernel
         };
     }
 
-    private static void SaveOut(ArrayView<int> meta, ref RowCtx c)
+    private static void SaveOut(ArrayView<int> si, ref RowCtx c)
     {
-        meta[M.RowOutBuf] = c.OutBuf;
-        meta[M.RowOut2Buf] = c.Out2Buf;
+        si[IRowOut] = c.OutBuf;
+        si[IRowOut2] = c.Out2Buf;
     }
+
+    // The macroblock row's byte / int scratch (each row its own since the wavefront: a diagonal runs one macroblock per row,
+    // and a row's macroblocks still run left to right, so the row-carried state - left samples, left nz / derr, the
+    // output-buffer swap - is exactly the serial walk's).
+    private static ArrayView<byte> RowBytes(ArrayView<byte> work, ArrayView<int> meta, int row) =>
+        work.SubView(meta[M.WorkScratchOff] + row * ByteScratchSize, ByteScratchSize);
+
+    private static ArrayView<int> RowInts(ArrayView<int> state, ArrayView<int> meta, int row) =>
+        state.SubView(meta[M.StScratchOff] + row * IntScratchSize, IntScratchSize);
 
     /// <summary>Lanes of the prepare stage's thread group.</summary>
     public const int PrepareLanes = 64;
@@ -86,18 +104,16 @@ internal static partial class WebPLossyEncodeRowKernel
     {
         // an early return before barriers must be uniform for WGSL: the group-wide OR of the flag is
         if (Group.BarrierOr(meta[M.Error] != 0)) return;
+        row += Grid.IdxX; x -= 2 * Grid.IdxX;   // the diagonal's macroblock of this group
         int lane = Group.IdxX;
         int mbW = meta[M.MbW];
         int width = meta[M.Width], height = meta[M.Height];
         int cw = (width + 1) >> 1;
         var yTop = work.SubView(meta[M.WorkYTopOff], 2 * mbW * 16);
-        var sb = work.SubView(meta[M.WorkScratchOff], ByteScratchSize);
+        var sb = RowBytes(work, meta, row);
         var nzRow = state.SubView(meta[M.StNzOff], mbW + 1);
         var topDerr = state.SubView(meta[M.StTopDerrOff], mbW * 4);
-        var coeffs = state.SubView(meta[M.StCoeffsOff], WebPLossySetupKernel.ProbaCount);
-        var stats = state.SubView(meta[M.StStatsOff], WebPLossySetupKernel.ProbaCount);
-        var lc = state.SubView(meta[M.StLevelCostOff], WebPLossySetupKernel.LevelCostCount);
-        var si = state.SubView(meta[M.StScratchOff], IntScratchSize);
+        var si = RowInts(state, meta, row);
         int uOff = meta[M.YuvUOff], vOff = meta[M.YuvVOff];
 
         if ((x == 0) & (lane == 0))
@@ -116,13 +132,12 @@ internal static partial class WebPLossyEncodeRowKernel
             for (int i = 0; i < 8; ++i) { sb[BLeft + ULeft + i] = 129; sb[BLeft + VLeft + i] = 129; }
             si[ILeftNz + 8] = 0;
             for (int i = 0; i < 4; ++i) si[ILeftDerr + i] = 0;
-            meta[M.RowOutBuf] = BOutA;
-            meta[M.RowOut2Buf] = BOutB;
+            si[IRowOut] = BOutA;
+            si[IRowOut2] = BOutB;
+            si[IRowTokens] = 0;
         }
-        // every lane reads the countdown before lane 0 rewrites it (after the next barrier)
-        int cnt = meta[M.MbCountDown] - 1;
         Group.Barrier();   // the row start (left / top samples, the output buffers) is visible
-        var c = MakeCtx(meta, mbRecs, row, x);
+        var c = MakeCtx(meta, si, mbRecs, row, x);
 
         // ---- VP8IteratorImport (no boundary): the 16x16 luma and two 8x8 chroma samples, one item each
         int w = Min(width - x * 16, 16), h = Min(height - row * 16, 16);
@@ -143,19 +158,8 @@ internal static partial class WebPLossyEncodeRowKernel
             }
         }
 
-        // ---- probability refresh (`if (--cnt < 0)`): the probabilities, then (when one changed) the level-cost tables
-        if (Group.BarrierOr(cnt < 0))
-        {
-            bool changed = Group.BarrierOr(FinalizeTokenProbasLanes(lane, PrepareLanes, coeffs, stats, t));
-            // (BarrierOr is a barrier: every lane's coefficients are written)
-            if (changed) WebPLossySetupKernel.CalculateLevelCostsLanes(lane, PrepareLanes, coeffs, lc, t);
-            if (lane == 0)
-            {
-                meta[M.ProbaDirty] = 0;   // FinalizeTokenProbas sets it, the level costs consume it
-                cnt = meta[M.MaxCount];
-            }
-        }
-        if (lane == 0) meta[M.MbCountDown] = cnt;
+        // (the probability refresh, `if (--cnt < 0)` in VP8EncTokenLoop, is RefreshKernel: the host launches it before the
+        // first macroblock of each probability window, whose bounds it computes from the same countdown)
 
         // ---- VP8Decimate (RD_OPT_BASIC): the I16 / UV predictions (VP8MakeLuma16Preds + VP8MakeChroma8Preds) + rd init
         PredictAll(lane, PrepareLanes, sb, yTop,
@@ -178,22 +182,23 @@ internal static partial class WebPLossyEncodeRowKernel
         // explicitly grouped: one group of I16Lanes lanes (a lane per mode); the error check before the barrier in
         // PickBestIntra16 is made uniform with a group-wide OR (WGSL)
         if (Group.BarrierOr(meta[M.Error] != 0)) return;
+        row += Grid.IdxX; x -= 2 * Grid.IdxX;   // the diagonal's macroblock of this group
         int lane = Group.IdxX;
         int mbW = meta[M.MbW], mbH = meta[M.MbH];
         var preds = work.SubView(0, (4 * mbW + 1) * (4 * mbH + 1));
-        var sb = work.SubView(meta[M.WorkScratchOff], ByteScratchSize);
+        var sb = RowBytes(work, meta, row);
         var nzRow = state.SubView(meta[M.StNzOff], mbW + 1);
         var coeffs = state.SubView(meta[M.StCoeffsOff], WebPLossySetupKernel.ProbaCount);
         var lc = state.SubView(meta[M.StLevelCostOff], WebPLossySetupKernel.LevelCostCount);
-        var si = state.SubView(meta[M.StScratchOff], IntScratchSize);
-        var c = MakeCtx(meta, mbRecs, row, x);
+        var si = RowInts(state, meta, row);
+        var c = MakeCtx(meta, si, mbRecs, row, x);
         var rd = LoadScore(si);
         int modeI16 = -1;
         PickBestIntra16(lane, sb, si, meta, t, coeffs, lc, nzRow, preds, mbRecs, ref c, ref rd, ref modeI16);
         if (lane == 0)
         {
             SaveScore(si, ref rd);
-            SaveOut(meta, ref c);
+            SaveOut(si, ref c);
         }
     }
 
@@ -205,22 +210,23 @@ internal static partial class WebPLossyEncodeRowKernel
         // an early return before the barriers in PickBestIntra4 must be uniform for WGSL's validator: a value read from
         // a storage buffer is not, the group-wide OR of it is
         if (Group.BarrierOr(meta[M.Error] != 0)) return;
+        row += Grid.IdxX; x -= 2 * Grid.IdxX;   // the diagonal's macroblock of this group
         int lane = Group.IdxX;
         int mbW = meta[M.MbW], mbH = meta[M.MbH];
         var preds = work.SubView(0, (4 * mbW + 1) * (4 * mbH + 1));
         var yTop = work.SubView(meta[M.WorkYTopOff], 2 * mbW * 16);
-        var sb = work.SubView(meta[M.WorkScratchOff], ByteScratchSize);
+        var sb = RowBytes(work, meta, row);
         var nzRow = state.SubView(meta[M.StNzOff], mbW + 1);
         var coeffs = state.SubView(meta[M.StCoeffsOff], WebPLossySetupKernel.ProbaCount);
         var lc = state.SubView(meta[M.StLevelCostOff], WebPLossySetupKernel.LevelCostCount);
-        var si = state.SubView(meta[M.StScratchOff], IntScratchSize);
-        var c = MakeCtx(meta, mbRecs, row, x);
+        var si = RowInts(state, meta, row);
+        var c = MakeCtx(meta, si, mbRecs, row, x);
         var rd = LoadScore(si);
         PickBestIntra4(lane, sb, si, meta, t, coeffs, lc, nzRow, preds, yTop, mbRecs, ref c, ref rd);
         if (lane == 0)
         {
             SaveScore(si, ref rd);
-            SaveOut(meta, ref c);
+            SaveOut(si, ref c);
         }
     }
 
@@ -231,48 +237,48 @@ internal static partial class WebPLossyEncodeRowKernel
     {
         // the error check before the barrier in PickBestUV is made uniform with a group-wide OR (WGSL)
         if (Group.BarrierOr(meta[M.Error] != 0)) return;
+        row += Grid.IdxX; x -= 2 * Grid.IdxX;   // the diagonal's macroblock of this group
         int lane = Group.IdxX;
         int mbW = meta[M.MbW];
-        var sb = work.SubView(meta[M.WorkScratchOff], ByteScratchSize);
+        var sb = RowBytes(work, meta, row);
         var nzRow = state.SubView(meta[M.StNzOff], mbW + 1);
         var topDerr = state.SubView(meta[M.StTopDerrOff], mbW * 4);
         var coeffs = state.SubView(meta[M.StCoeffsOff], WebPLossySetupKernel.ProbaCount);
         var lc = state.SubView(meta[M.StLevelCostOff], WebPLossySetupKernel.LevelCostCount);
-        var si = state.SubView(meta[M.StScratchOff], IntScratchSize);
-        var c = MakeCtx(meta, mbRecs, row, x);
+        var si = RowInts(state, meta, row);
+        var c = MakeCtx(meta, si, mbRecs, row, x);
         var rd = LoadScore(si);
         PickBestUV(lane, sb, si, meta, t, coeffs, lc, nzRow, topDerr, mbRecs, ref c, ref rd);
         if (lane == 0)
         {
             SaveScore(si, ref rd);
-            SaveOut(meta, ref c);
+            SaveOut(si, ref c);
         }
     }
 
     /// <summary>Stage 5: skip flag, RecordTokens, the partition-0 size, VP8IteratorSaveBoundary.</summary>
     public static void RecordStage(
-        Index1D _, ArrayView<byte> yuv, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state,
+        Index1D g, ArrayView<byte> yuv, ArrayView<int> mbRecs, ArrayView<byte> work, ArrayView<int> state,
         ArrayView<int> meta, ArrayView<int> t, ArrayView<int> tokens, int row, int x)
     {
         if (meta[M.Error] != 0) return;
+        row += g; x -= 2 * g;   // the diagonal's macroblock of this thread
         int mbW = meta[M.MbW], mbH = meta[M.MbH];
         var yTop = work.SubView(meta[M.WorkYTopOff], 2 * mbW * 16);
-        var sb = work.SubView(meta[M.WorkScratchOff], ByteScratchSize);
+        var sb = RowBytes(work, meta, row);
         var nzRow = state.SubView(meta[M.StNzOff], mbW + 1);
         var coeffs = state.SubView(meta[M.StCoeffsOff], WebPLossySetupKernel.ProbaCount);
-        var stats = state.SubView(meta[M.StStatsOff], WebPLossySetupKernel.ProbaCount);
-        var si = state.SubView(meta[M.StScratchOff], IntScratchSize);
-        var c = MakeCtx(meta, mbRecs, row, x);
+        var si = RowInts(state, meta, row);
+        var c = MakeCtx(meta, si, mbRecs, row, x);
         var rd = LoadScore(si);
         int rec = (row * mbW + x) * M.MbStride;
         mbRecs[rec + M.MbSkip] = rd.Nz == 0 ? 1 : 0;
 
-        // ---- RecordTokens
-        RecordTokens(si, nzRow, x, coeffs, stats, t, meta, tokens, mbRecs[rec + M.MbType] == 1);
-        long sizeP0 = ((long)meta[M.SizeP0Hi] << 32) | (uint)meta[M.SizeP0Lo];
-        sizeP0 += rd.H;
-        meta[M.SizeP0Lo] = (int)sizeP0;
-        meta[M.SizeP0Hi] = (int)(sizeP0 >> 32);
+        // ---- RecordTokens, into this row's token buffer (the window pass counts the statistics and appends the rows'
+        // tokens to the stream in raster order); the partition-0 cost is summed there too
+        int cap = meta[M.RowTokenCap];
+        RecordTokens(si, nzRow, x, coeffs, t, meta, tokens.SubView((long)row * cap, cap), mbRecs[rec + M.MbType] == 1);
+        mbRecs[rec + M.MbP0Bits] = (int)rd.H;
 
         // ---- VP8IteratorSaveBoundary
         int o = c.OutBuf;

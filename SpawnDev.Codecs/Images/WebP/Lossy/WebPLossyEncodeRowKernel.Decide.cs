@@ -108,7 +108,8 @@ internal static partial class WebPLossyEncodeRowKernel
             int v0 = Abs(si[IRdA + LDc + 1]), v1 = Abs(si[IRdA + LDc + 2]), v2 = Abs(si[IRdA + LDc + 4]);
             int maxV = v1 > v0 ? v1 : v0;
             maxV = v2 > maxV ? v2 : maxV;
-            if (maxV > meta[segBase + M.SMaxEdge]) meta[segBase + M.SMaxEdge] = maxV;
+            // a maximum over the frame (order-free): atomic, as a wavefront diagonal runs macroblocks of one segment at once
+            Atomic.Max(ref meta[segBase + M.SMaxEdge], maxV);
         }
     }
 

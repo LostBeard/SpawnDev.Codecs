@@ -8,10 +8,13 @@
 //   WebPRgbaToYuvGpu          RGBA -> YUV 4:2:0 + alpha, libwebp's import + transparent-area cleanup (unless Exact)
 //   WebPLossyAnalysisKernel   one thread per macroblock: susceptibility histogram, I16 / UV mode guesses
 //   WebPLossySetupKernel      one thread: k-means segmentation, quantizers / matrices / lambdas, segment probabilities
-//   WebPLossyEncodeRowKernel  one thread, five stage kernels per macroblock (prepare, I16, I4, UV, record): the RD token loop
-//                             (serial by libwebp's design), split so each kernel fits a browser shader compiler
-//   WebPLossyFinishKernel     one thread, a chain of bounded launches: final probabilities, token partition, filter
-//                             strength, partition 0
+//   WebPLossyEncodeRowKernel  the RD token loop as five stage kernels (prepare, I16, I4, UV, record; each fits a browser
+//                             shader compiler), launched once per diagonal x + 2y of each probability window with a
+//                             work-group per macroblock (the wavefront), plus the refresh and window passes
+//                             (WebPLossyEncodeRowKernel.Window.cs) - the same bytes as libwebp's serial walk
+//   WebPLossyTokenPartitionKernels  the token partition as one big number, in parallel (byte-identical with the walk)
+//   WebPLossyFinishKernel     one thread, a chain of bounded launches: final probabilities, the end of the token
+//                             partition, filter strength, partition 0
 //
 // No launch does work that grows with the picture (a long launch stalls the desktop and trips the OS GPU watchdog): the
 // serial stages resume from state kept in meta[WebPLossyEncMeta.Step ..] and the device buffers.
@@ -90,6 +93,13 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
     private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _prepare = null!;
     // the UV stage: one explicit group, a lane per mode (WebPLossyEncodeRowKernel.UVLanes)
     private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _uv = null!;
+    // the probability windows of the wavefront: the refresh before a window, the token / statistics pass after it
+    private Action<KernelConfig, ArrayView<int>, ArrayView<int>, ArrayView<int>> _refresh = null!;
+    private Action<KernelConfig, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _window = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> _windowApply = null!;
+    // the token partition in parallel (WebPLossyTokenPartitionKernels)
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> _tpMap = null!, _tpCompose = null!, _tpAdd = null!;
+    private Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int> _tpDigits = null!, _tpTail = null!;
 
     /// <summary>Names of <see cref="_stages"/>, in launch order (diagnostics: <see cref="Trace"/>).</summary>
     // no digits: webp-anim-bench folds digits into '#' when it groups trace names
@@ -101,6 +111,22 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
     /// caller can attribute the time since its previous call. The waits add their own cost. Null in normal encoding.
     /// </summary>
     internal static Action<string>? Trace;
+
+    /// <summary>Tests only: launch a diagonal's macroblocks one at a time (in row order) instead of all at once - the
+    /// wavefront's dependency order without its concurrency (the red-check of the parallel launches).</summary>
+    internal static bool SerialWavefront;
+
+    /// <summary>Tests only: the first size of a macroblock row's token buffer, in tokens per macroblock of the row (a
+    /// small value makes the encode grow it: the retry path).</summary>
+    internal static int RowTokensPerMacroblock = 512;
+
+    /// <summary>Tests only: the window pass replays every probability's statistics in raster order (the path a counter
+    /// that saturates inside a window takes) instead of adding the window's counts.</summary>
+    internal static bool ReplayAllStatistics;
+
+    /// <summary>Tests only: write the token partition with the one-thread walk (FinishTokensKernel) instead of the
+    /// parallel big-number kernels - the reference the parallel bytes are compared with.</summary>
+    internal static bool SerialTokenPartition;
     private Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>>
         _finishProbas = null!, _finishTokens = null!, _finishHeader = null!, _finishModes = null!, _finishEnd = null!;
     private Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<byte>> _assemble = null!;
@@ -112,8 +138,9 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _meta;
     private readonly MemoryBuffer1D<int, Stride1D.Dense> _qTable;
     private readonly StageBuffer<byte> _yuv, _work, _scratch, _stageIn, _stageOut;
-    private readonly StageBuffer<int> _mbRecs, _state, _tokens;
+    private readonly StageBuffer<int> _mbRecs, _state, _tokens, _rowTokens, _tp;
     private long _tokenCapacity;
+    private int _rowTokenCapacity;   // tokens one macroblock row may record in one probability window
 
     private const ulong Partition0SizeLimit = ((1UL << 19) - 2048UL) << 11;
 
@@ -136,6 +163,8 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
         _mbRecs = new StageBuffer<int>(accelerator);
         _state = new StageBuffer<int>(accelerator);
         _tokens = new StageBuffer<int>(accelerator);
+        _rowTokens = new StageBuffer<int>(accelerator);
+        _tp = new StageBuffer<int>(accelerator);
     }
 
     /// <summary>Load every kernel this encoder uses, once (awaited loads: each compile yields to the browser's event loop first).</summary>
@@ -168,6 +197,18 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
             ArrayView<int>, ArrayView<int>, int, int>(WebPLossyEncodeRowKernel.Intra16Stage);
         _intra4 = await a.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, ArrayView<int>, int, int>(WebPLossyEncodeRowKernel.Intra4Stage);
+        _refresh = await a.LoadStreamKernelAsync<ArrayView<int>, ArrayView<int>, ArrayView<int>>(WebPLossyEncodeRowKernel.RefreshKernel);
+        _window = await a.LoadStreamKernelAsync<ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(
+            WebPLossyEncodeRowKernel.WindowKernel);
+        _windowApply = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int>(
+            WebPLossyEncodeRowKernel.WindowApplyKernel);
+        _tpMap = await LoadTp(a, WebPLossyTokenPartitionKernels.MapKernel);
+        _tpCompose = await LoadTp(a, WebPLossyTokenPartitionKernels.ComposeKernel);
+        _tpAdd = await LoadTp(a, WebPLossyTokenPartitionKernels.AddKernel);
+        _tpDigits = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int>(
+            WebPLossyTokenPartitionKernels.DigitsKernel);
+        _tpTail = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>, int, int>(
+            WebPLossyTokenPartitionKernels.TailKernel);
         _finishProbas = await LoadFinish(a, WebPLossyFinishKernel.FinishProbasKernel);
         _finishTokens = await LoadFinish(a, WebPLossyFinishKernel.FinishTokensKernel);
         _finishHeader = await LoadFinish(a, WebPLossyFinishKernel.FinishHeaderKernel);
@@ -195,6 +236,10 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
         Accelerator accelerator, Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, int, int> kernel)
         => await accelerator.LoadAutoGroupedStreamKernelAsync(kernel);
 
+    private static async Task<Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>>> LoadTp(
+        Accelerator accelerator, Action<Index1D, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>> kernel)
+        => await accelerator.LoadAutoGroupedStreamKernelAsync(kernel);
+
     private static async Task<Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>>> LoadFinish(
         Accelerator accelerator, Action<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<byte>> kernel)
         => await accelerator.LoadAutoGroupedStreamKernelAsync(kernel);
@@ -216,7 +261,7 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
         public int Width, Height, MbW, MbH, MbCount, PredsSize, Cw, Ch;
         public int YuvU, YuvV, YuvA, YuvSize;
         public int WorkYTop, WorkScratch, WorkSize;
-        public int StNz, StTopDerr, StCoeffs, StStats, StLevelCost, StScratch, StateSize;
+        public int StNz, StTopDerr, StCoeffs, StStats, StLevelCost, StWin, StScratch, StateSize;
         public int P0Cap, T1Cap;
     }
 
@@ -230,11 +275,12 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
         int predsW = 4 * l.MbW + 1;
         l.PredsSize = predsW * (4 * l.MbH + 1);
         l.WorkYTop = Align4(l.PredsSize); l.WorkScratch = Align4(l.WorkYTop + 2 * l.MbW * 16);
-        l.WorkSize = l.WorkScratch + WebPLossyEncodeRowKernel.ByteScratchSize;
+        l.WorkSize = l.WorkScratch + l.MbH * WebPLossyEncodeRowKernel.ByteScratchSize;   // a scratch per macroblock row
         l.StNz = 0; l.StTopDerr = l.MbW + 1; l.StCoeffs = AlignInts(l.StTopDerr + l.MbW * 4);
         l.StStats = AlignInts(l.StCoeffs + WebPLossySetupKernel.ProbaCount); l.StLevelCost = AlignInts(l.StStats + WebPLossySetupKernel.ProbaCount);
-        l.StScratch = AlignInts(l.StLevelCost + WebPLossySetupKernel.LevelCostCount);
-        l.StateSize = l.StScratch + WebPLossyEncodeRowKernel.IntScratchSize;
+        l.StWin = AlignInts(l.StLevelCost + WebPLossySetupKernel.LevelCostCount);
+        l.StScratch = AlignInts(l.StWin + 2 * WebPLossySetupKernel.ProbaCount);
+        l.StateSize = l.StScratch + l.MbH * WebPLossyEncodeRowKernel.IntScratchSize;   // a scratch per macroblock row
         l.P0Cap = 4096 + l.MbCount * 64;
         // A token codes at most one bit; at worst a bit costs 8 bits (probability 1/256): tokens bytes + slack.
         l.T1Cap = (int)Math.Min(int.MaxValue / 2, tokenCapacity + 1024);
@@ -266,6 +312,7 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
         m[M.WorkYTopOff] = l.WorkYTop; m[M.WorkScratchOff] = l.WorkScratch;
         m[M.StNzOff] = l.StNz; m[M.StTopDerrOff] = l.StTopDerr; m[M.StCoeffsOff] = l.StCoeffs;
         m[M.StStatsOff] = l.StStats; m[M.StLevelCostOff] = l.StLevelCost; m[M.StScratchOff] = l.StScratch;
+        m[M.StWinOff] = l.StWin;
         return m;
     }
 
@@ -384,13 +431,18 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
         {
             var l = MakeLayout(width, height, _tokenCapacity);
             _tokens.Ensure(_tokenCapacity);
+            if (_rowTokenCapacity < l.MbW * RowTokensPerMacroblock) _rowTokenCapacity = l.MbW * RowTokensPerMacroblock;
+            _rowTokens.Ensure((long)l.MbH * _rowTokenCapacity);
             _scratch.Ensure((long)l.P0Cap + l.T1Cap);
             var hostMeta = HostMeta(l, o, _tokenCapacity, maxI4);
             hostMeta[M.AlphaPlanePresent] = alphaPlanePresent ? 1 : 0;
+            hostMeta[M.RowTokenCap] = _rowTokenCapacity;
+            hostMeta[M.WinReplayAll] = ReplayAllStatistics ? 1 : 0;
             _meta.View.CopyFromCPU(hostMeta);
             var state = _state.View;
             // ResetBoundaryPredictions: the border row / column of the 4x4 mode map is B_DC_PRED (0); the analysis writes the rest.
             _work.View.SubView(0, l.PredsSize).MemSetToZero();
+            state.SubView(l.StWin, 2 * WebPLossySetupKernel.ProbaCount).MemSetToZero();   // the window statistics (WindowApplyKernel re-zeroes them)
             _analysis(l.MbCount, yuv.SubView(0, (long)width * height), yuv.SubView(l.YuvU, (long)l.Cw * l.Ch), yuv.SubView(l.YuvV, (long)l.Cw * l.Ch),
                 yuv.SubView(l.YuvA, (long)width * height), _mbRecs.View, _work.View, _meta.View);
             _setup(1, _mbRecs.View, _meta.View, _tables.View, _qTable.View,
@@ -399,24 +451,59 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
             var trace = Trace;
             if (trace != null) { await _accelerator.SynchronizeAsync(); trace("analysis + setup"); }
             var pacer = new LaunchPacer(_accelerator);
-            for (int row = 0; row < l.MbH; row++)
-                for (int x = 0; x < l.MbW; x++)
+            var rowTokens = _rowTokens.View;
+            // The RD loop as a wavefront inside each probability window (WebPLossyEncodeRowKernel.Stages.cs): VP8EncTokenLoop
+            // refreshes the probabilities before macroblock maxCount, then every maxCount + 1 macroblocks (`if (--cnt < 0)`,
+            // cnt starting at maxCount). Each stage runs once per diagonal d = x + 2y of the window, a group per macroblock.
+            int maxCount = hostMeta[M.MaxCount];
+            int lastDiagonal = (l.MbW - 1) + 2 * (l.MbH - 1);
+            for (int first = 0, end = Math.Min(maxCount, l.MbCount); first < l.MbCount; first = end, end = Math.Min(end + maxCount + 1, l.MbCount))
+            {
+                if (first > 0)
+                {
+                    _refresh(new KernelConfig(1, WebPLossyEncodeRowKernel.PrepareLanes), state, _meta.View, _tables.View);
+                    if (trace != null) { await _accelerator.SynchronizeAsync(); trace("refresh"); }
+                    else await pacer.LaunchedAsync();
+                }
+                int y0 = first / l.MbW, x0 = first % l.MbW, y1 = (end - 1) / l.MbW, x1 = (end - 1) % l.MbW;
+                for (int d = 2 * y0; d <= lastDiagonal; d++)   // (a window that starts inside a row has lower diagonals in the next rows)
+                {
+                    // the window's macroblocks on diagonal d: rows lo..hi (consecutive), x = d - 2y
+                    int lo = Math.Max(y0, (d - (l.MbW - 1) + 1) >> 1), hi = Math.Min(y1, d >> 1);
+                    if (lo == y0 && d - 2 * y0 < x0) lo++;
+                    if (hi == y1 && d - 2 * y1 > x1) hi--;
+                    if (lo > hi) continue;
+                    int count = hi - lo + 1, x = d - 2 * lo;
+                    int step = SerialWavefront ? 1 : count;
+                    for (int g0 = 0; g0 < count; g0 += step)
                     for (int s = 0; s < _stages.Length; s++)
                     {
-                        if (s == 0) _prepare(new KernelConfig(1, WebPLossyEncodeRowKernel.PrepareLanes), yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
-                        else if (s == 1) _intra16(new KernelConfig(1, WebPLossyEncodeRowKernel.I16Lanes), yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
-                        else if (s == 3) _uv(new KernelConfig(1, WebPLossyEncodeRowKernel.UVLanes), yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
-                        else if (s == 2) _intra4(new KernelConfig(1, WebPLossyEncodeRowKernel.I4Lanes), yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
-                        else _stages[s](1, yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, row, x);
+                        int n = step, row = lo + g0, xg = x - 2 * g0;
+                        if (s == 0) _prepare(new KernelConfig(n, WebPLossyEncodeRowKernel.PrepareLanes), yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, rowTokens, row, xg);
+                        else if (s == 1) _intra16(new KernelConfig(n, WebPLossyEncodeRowKernel.I16Lanes), yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, rowTokens, row, xg);
+                        else if (s == 3) _uv(new KernelConfig(n, WebPLossyEncodeRowKernel.UVLanes), yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, rowTokens, row, xg);
+                        else if (s == 2) _intra4(new KernelConfig(n, WebPLossyEncodeRowKernel.I4Lanes), yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, rowTokens, row, xg);
+                        else _stages[s](n, yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, rowTokens, row, xg);
                         if (trace != null) { await _accelerator.SynchronizeAsync(); trace(StageNames[s]); }
                         else await pacer.LaunchedAsync();
                     }
+                }
+                _window(new KernelConfig(y1 - y0 + 1, WebPLossyEncodeRowKernel.WindowLanes), _mbRecs.View, state, _meta.View, rowTokens, _tokens.View, first, end);
+                _windowApply(WebPLossySetupKernel.ProbaCount, _mbRecs.View, state, _meta.View, rowTokens, _tokens.View, first, end);
+                if (trace != null) { await _accelerator.SynchronizeAsync(); trace("window"); }
+                else await pacer.LaunchedAsync();
+            }
             await _accelerator.SynchronizeAsync();
             var m = await _meta.View.CopyToHostAsync();
             var err = (WebPLossyEncError)m[M.Error];
             if (err == WebPLossyEncError.TokenBufferTooSmall)
             {
                 _tokenCapacity = (long)(m[M.TokenCount] * 1.25) + 1024;
+                continue;
+            }
+            if (err == WebPLossyEncError.RowTokenBufferTooSmall)
+            {
+                _rowTokenCapacity *= 2;
                 continue;
             }
             if (err != WebPLossyEncError.None) throw new InvalidOperationException($"lossy WebP encode failed: {err}");
@@ -428,11 +515,33 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
                 continue;
             }
             _finishProbas(1, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, _scratch.View);
-            int tokenSteps = Math.Max(1, (m[M.TokenCount] + WebPLossyFinishKernel.TokensPerLaunch - 1) / WebPLossyFinishKernel.TokensPerLaunch);
-            for (int i = 0; i < tokenSteps; i++)
+            int tokenCount = m[M.TokenCount];
+            if (SerialTokenPartition)
             {
-                _finishTokens(1, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, _scratch.View);
-                await pacer.LaunchedAsync();
+                int tokenSteps = Math.Max(1, (tokenCount + WebPLossyFinishKernel.TokensPerLaunch - 1) / WebPLossyFinishKernel.TokensPerLaunch);
+                for (int i = 0; i < tokenSteps; i++)
+                {
+                    _finishTokens(1, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, _scratch.View);
+                    await pacer.LaunchedAsync();
+                }
+            }
+            else
+            {
+                // VP8EmitTokens as one big number (WebPLossyTokenPartitionKernels): the range maps per chunk, their
+                // composition, the additions, the digits, the writer rebuilt for VP8BitWriterFinish
+                var tp = _tp.Ensure(WebPLossyTokenPartitionKernels.BufferInts(tokenCount));
+                int chunks = WebPLossyTokenPartitionKernels.Chunks(tokenCount);
+                if (chunks > 0)
+                {
+                    tp.SubView(WebPLossyTokenPartitionKernels.NumberOff(chunks), WebPLossyTokenPartitionKernels.NumberWords(tokenCount)).MemSetToZero();
+                    _tpMap(chunks * 128, state, _meta.View, _tables.View, _tokens.View, tp);
+                    _tpCompose(1, state, _meta.View, _tables.View, _tokens.View, tp);
+                    _tpAdd(chunks, state, _meta.View, _tables.View, _tokens.View, tp);
+                    _tpDigits((int)((7L * tokenCount + 16) / 8), state, _meta.View, _tables.View, _tokens.View, tp, _scratch.View, l.P0Cap, l.T1Cap);
+                }
+                _tpTail(1, state, _meta.View, _tables.View, _tokens.View, tp, _scratch.View, l.P0Cap, l.T1Cap);
+                if (trace != null) { await _accelerator.SynchronizeAsync(); trace("token partition"); }
+                else await pacer.LaunchedAsync();
             }
             _finishHeader(1, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, _scratch.View);
             int modeSteps = (l.MbCount + WebPLossyFinishKernel.MbsPerLaunch - 1) / WebPLossyFinishKernel.MbsPerLaunch;
@@ -495,7 +604,7 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
         _toYuv.Dispose();
         _tables.Dispose(); _meta.Dispose(); _qTable.Dispose();
         _yuv.Dispose(); _work.Dispose(); _scratch.Dispose(); _stageIn.Dispose(); _stageOut.Dispose();
-        _mbRecs.Dispose(); _state.Dispose(); _tokens.Dispose();
+        _mbRecs.Dispose(); _state.Dispose(); _tokens.Dispose(); _rowTokens.Dispose(); _tp.Dispose();
         _alphaEncoder?.Dispose(); _alphaPayload.Dispose();
         _animEncoder?.Dispose();
     }

@@ -170,6 +170,29 @@ loses to every generator, so the encoder is upgraded first. Parity target: libwe
       - launches: each stage once per diagonal (a work-group per macroblock): ~mbW + 2 mbH diagonals per frame plus the
         window seams, ~400-500 dispatches per 512x352 frame instead of 3,520, each running up to ~20 macroblocks at once.
       Guard: every lossy byte-identical-with-libwebp test (they pin the bytes), the Pillow oracles, all six backends.
+      DONE 2026-11-20 (see CHANGELOG): stages per diagonal, per-row scratch and token buffers, window pass (atomic counts;
+      ordered replay only for a counter that can saturate inside the window). 222/222 libwebp cases; RTX 4070 512x352 q90
+      272 -> 185 ms CUDA. Traced CUDA frame after it: RD stages 109 ms, window 30 (one group, before the atomic version),
+      finish 43 (the token partition on ONE thread).
+- [x] DONE 2026-11-20 (CUDA 43 -> 1 ms per 512x352 frame; frame 272 -> 96 ms with the wavefront): the token partition in parallel, byte-identical (VP8 bool coder; the finish step's 43 ms on CUDA, far more on
+      WebGPU where one thread is slow). The coded stream is the big number sum over tokens with bit 1 of
+      (split + 1) << (shifts after the token), written in bytes; the 0xff run and the carry into the previous byte are that
+      big number's carries. So: (1) the range sequence: chunks of K tokens, each chunk run from all 128 possible start
+      ranges (range is 127..254 after normalisation) -> per chunk a map start -> (end range, shift total); compose the maps
+      over the chunks in order (one thread, N / K steps) -> each chunk's true start range and bit offset; (2) each chunk
+      rebuilds its slice of the big number from its true start (its own bits plus a carry out); (3) add the slices at their
+      bit offsets with a carry-lookahead scan over bytes (generate / propagate); (4) the final flush as VP8BitWriterFinish.
+      Guard: the token partition bytes of every lossy libwebp case, plus a stress stream of all-0xff runs and long carries.
+      MODEL CHECKED 2026-11-20 (Python, 5,000 random streams incl. extreme-probability runs): after any token the writer
+      state equals the big number exactly: int(written bytes ++ 0xff x run) << (16 + nb) + value == sum(add_i << (own shift
+      + all later shifts)), with 8 + nb + 8 x (bytes + run) == the total shift count. So the parallel pass can produce the
+      bytes plus the end state (value, nb, run, range), and VP8BitWriterFinish runs on it unchanged (one thread, a few bits).
+      Rebuilding the end state: with t = total shifts - 8, bytes + run = ceil(t / 8) and nb = t - 8 x that (in (-8, 0]);
+      the writer may hold a pending carry in value (220 of 5,862 model streams), so its bytes can differ from the big
+      number's digits; a writer rebuilt as (digits up to the trailing 0xff run, run = that run, value = big mod
+      2^(16 + nb), the range from the scan) finishes to the SAME bytes in all 5,862 (scratchpad boolstate.py). Chunk
+      slices can be summed into the global number by 32-bit atomic adds with carry propagation (order-free); slices overlap
+      deeply where a chunk shifts little (high-probability runs), so no fixed neighbour-overlap assumption.
 - [ ] Speed (2026-11-14, Lore: SpawnGen would use lossy for quick previews if it were fast). Measured: 25 LTX frames 512x352
       q80 on the RTX 4070, 2.15 s per frame (libwebp 40 ms, same bytes). The RD loop is 5 one-thread launches per macroblock
       (3,520 per frame at 512x352). Two independent steps, both byte-identical by construction:
