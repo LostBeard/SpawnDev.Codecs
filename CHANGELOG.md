@@ -1,6 +1,24 @@
 # SpawnDev.Codecs CHANGELOG
 
-## Unreleased
+## 1.1.2 (2026-11-20)
+
+Everything since 1.1.1, listed below by date. The highlights:
+- **Lossy WebP 2.8x faster, the same bytes as libwebp**: the rate-distortion loop runs as a macroblock wavefront inside
+  each probability window, and the token partition is written in parallel as one big number. RTX 4070, warm, 512x352 q90
+  m4, per frame: CUDA 272 -> 96 ms, OpenCL 247 -> 88, Chrome WebGPU 759 -> 287, Wasm 9.6 -> 1.6 s; all 222 libwebp
+  byte-identity cases on every lane. SpawnGen (RX 590, AMD OpenCL, 25 LTX frames, lossy q90 animation): 79.4 -> 54.0 s
+  warm, the same file (302,664 bytes) (Lore).
+- **Lossless WebP**: the greedy parse in parallel segments: SpawnGen's 25-frame animation 24.7 -> 19.0 s on the RX 590,
+  250 -> 198 ms per frame on the RTX 4070, the same bytes.
+- **Animations from device frames at their exact size** (`EncodeAnimationToDeviceAsync`, and in a browser
+  `EncodeAnimationToUint8ArrayAsync`), published upper bounds for callers that size their own buffers, and browser
+  TypedArray results that are the caller's on Wasm (they aliased the module's memory).
+- SpawnDev.ILGPU 5.4.41.
+
+Gate (2026-11-20, commit 8272d25, `scripts/dev/run-release-sweep.cmd`, 3 h 23 min): CUDA, OpenCL and Velocity 1244 / 0
+each, the CPU accelerator 3418 / 0, WebGPU 1237 / 0, WebGL 408 / 0; Wasm 1236 / 1 in the sweep (the page's .NET heap ran
+out at test 391 of 1239, "Garbage collector could not allocate 16384u bytes for major heap section", the known
+retention of accelerators across a long browser lane; the test passes alone) and the Wasm class re-run 1239 / 0.
 
 ### Browser TypedArray results are the caller's on Wasm; SpawnDev.ILGPU 5.4.41 (2026-11-20)
 - `EncodeAnimationToUint8ArrayAsync` (both WebP encoders) and the other Uint8Array / Float32Array outputs read back through

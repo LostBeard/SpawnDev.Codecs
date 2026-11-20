@@ -2,8 +2,16 @@
 
 What is verified, on which backend, and how. "Verified" means a test that compares against a reference
 implementation (never against this library's own output) passed on that backend, with its guard red-checked. Dates are
-the last run of the named lane. Updated 2026-11-19 (the 1.1.1 gate below; a cell keeps the date of the run behind it; counts are
+the last run of the named lane. Updated 2026-11-20 (the 1.1.2 gate below; a cell keeps the date of the run behind it; counts are
 passed / failed, skips are gated or CPU-only tests).
+
+**2026-11-20, release 1.1.2 (commit 8272d25), SpawnDev.ILGPU 5.4.41: every class on every lane.** CUDA, OpenCL and
+Velocity 1244 / 0 each, the CPU accelerator 3418 / 0, WebGPU 1237 / 0, WebGL 408 / 0 (3 h 23 min,
+`scripts/dev/run-release-sweep.cmd`). Wasm 1236 / 1 in the sweep: `Codecs_ConstructorsCompileNothing_WarmUpCompilesWhatTheyUse`
+died at test 391 of the lane when the page's .NET heap ran out ("Garbage collector could not allocate 16384u bytes for
+major heap section": the retention of accelerators across a long browser lane, open in SpawnDev.ILGPU); it passes alone,
+and the Wasm class re-run is 1239 / 0. Lossy WebP is byte-identical with libwebp in all 222 method 3 / 4 cases on every
+lane after the macroblock wavefront and the parallel token partition.
 
 **2026-11-19, release 1.1.1 (commit c079547 + the test fix below), SpawnDev.ILGPU 5.4.40: every class on every lane.**
 CUDA, OpenCL and Velocity 1239 / 0 each, the CPU accelerator 3413 / 0, WebGPU 1232 / 0, WebGL 408 / 0 (3 h 40 min,
