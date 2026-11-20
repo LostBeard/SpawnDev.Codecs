@@ -1,5 +1,23 @@
 # SpawnDev.Codecs CHANGELOG
 
+## Unreleased
+
+### PNG decoding: the scanline unfilter as a row wavefront (2026-11-20)
+- `PngDecoderGpu` reversed the scanline filters with one thread per byte of a pixel (3 for RGB), each walking the whole
+  image serially. In Chrome WebGPU on an RX 590 a 512x512 decode did not finish within 2 minutes (Lore; OpenCL on the
+  same card: 463 ms). Now a thread per row runs over its row in 32-byte segments, one segment behind the row above:
+  rows + segments steps per block of up to 256 rows (the group limit), with a group barrier between steps. The bytes
+  are the serial walk's (every PNG decoder test passes on every lane, the interlaced ones included).
+- Probe `Probe_PngDecode512_StageTimes` (a real 512x512 RGB PNG, 707,671 bytes; `PngDecoderGpu.Trace`, tests only)
+  reports per-stage times, RTX 4070, warm. Inflate is now the main cost; it is serial (one thread, bounded launches):
+
+  | Lane | Warm decode | Inflate | Unfilter |
+  |---|---|---|---|
+  | CUDA | 149 ms | 148 ms | 0 ms |
+  | OpenCL | 136 ms | 134 ms | 0 ms |
+  | Chrome WebGPU | 462 ms | 436 ms | 2 ms |
+  | Wasm | 67 ms | 44 ms | 18 ms |
+
 ## 1.1.3 (2026-11-20)
 
 Gate (2026-11-20, commit 8017401 = 63733a1 + the warm-up test split, `scripts/dev/run-release-sweep.cmd`, 3 h 50 min):

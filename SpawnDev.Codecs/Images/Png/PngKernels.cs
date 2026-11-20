@@ -45,7 +45,11 @@ public sealed class PngKernels : IDisposable
     /// Bytes one unfilter lane reverses per launch. One thread per filter byte lane (bpp lanes) walks its bytes in
     /// scanline order; 32 KiB is about 2 ms on a desktop GPU.
     /// </summary>
-    public const int UnfilterLaneBytes = 32768;
+    /// <summary>Bytes of a scanline one thread unfilters per step of the row wavefront (see <see cref="UnfilterRowsKernel"/>).</summary>
+    public const int UnfilterSegmentBytes = 32;
+
+    /// <summary>Rows (threads) of one unfilter group: the device's group limit, at most 256.</summary>
+    private readonly int _unfilterLanes;
 
     private Action<Index1D, ArrayView<byte>, int, ArrayView<int>> _scanInit = null!;
     private Action<Index1D, ArrayView<byte>, int, ArrayView<int>, ArrayView<int>, ArrayView<int>, int> _scan = null!;
@@ -53,7 +57,7 @@ public sealed class PngKernels : IDisposable
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, ArrayView<int>> _crcPiece = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, int> _crcCombine = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>> _gather = null!;
-    private Action<Index1D, ArrayView<byte>, ArrayView<int>, int, int> _unfilter = null!;
+    private Action<KernelConfig, ArrayView<byte>, ArrayView<int>, int, int> _unfilter = null!;
     private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>> _toRgba = null!;
 
     private readonly LaunchPacer _pacer;
@@ -67,6 +71,7 @@ public sealed class PngKernels : IDisposable
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _pacer = new LaunchPacer(accelerator);
+        _unfilterLanes = Math.Min(256, accelerator.MaxNumThreadsPerGroup);
     }
 
     /// <summary>Load the kernels once (awaited loads: each compile yields to the browser's event loop first).</summary>
@@ -89,8 +94,7 @@ public sealed class PngKernels : IDisposable
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<uint>, ArrayView<uint>, ArrayView<int>, int>(CrcCombineKernel);
         _gather = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<byte>, ArrayView<int>>(GatherKernel);
-        _unfilter = await a.LoadAutoGroupedStreamKernelAsync<
-            Index1D, ArrayView<byte>, ArrayView<int>, int, int>(UnfilterKernel);
+        _unfilter = await a.LoadStreamKernelAsync<ArrayView<byte>, ArrayView<int>, int, int>(UnfilterRowsKernel);
         _toRgba = await a.LoadAutoGroupedStreamKernelAsync<
             Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<byte>, ArrayView<int>>(ToRgbaKernel);
     }
@@ -144,14 +148,19 @@ public sealed class PngKernels : IDisposable
     /// (<paramref name="filterBpp"/> = <see cref="PngMeta.FilterBytesPerPixel"/>): launches of
     /// <see cref="UnfilterLaneBytes"/> bytes per lane, in order.
     /// </summary>
-    public async ValueTask UnfilterAsync(ArrayView<byte> raw, ArrayView<int> meta, long rawSize, int filterBpp)
+    /// <summary>
+    /// Reverse the scanline filters of every pass (<paramref name="passRows"/>: the rows of each pass, 0 for a pass
+    /// without pixels): per pass, one group per block of <c>_unfilterLanes</c> rows, in order (see
+    /// <see cref="UnfilterRowsKernel"/>).
+    /// </summary>
+    public async ValueTask UnfilterAsync(ArrayView<byte> raw, ArrayView<int> meta, int[] passRows)
     {
-        long chunk = (long)UnfilterLaneBytes * filterBpp;
-        for (long start = 0; start < rawSize; start += chunk)
-        {
-            _unfilter(filterBpp, raw, meta, (int)start, (int)Math.Min(rawSize, start + chunk));
-            await _pacer.LaunchedAsync();
-        }
+        for (int pass = 0; pass < passRows.Length; pass++)
+            for (int first = 0; first < passRows[pass]; first += _unfilterLanes)
+            {
+                _unfilter(new KernelConfig(1, _unfilterLanes), raw, meta, pass, first);
+                await _pacer.LaunchedAsync();
+            }
     }
 
     /// <summary>Convert the unfiltered samples to RGBA8 / RGBA16 in <paramref name="output"/>.</summary>
@@ -406,57 +415,44 @@ public sealed class PngKernels : IDisposable
     }
 
     /// <summary>
-    /// Lane <c>index</c> (0 .. bpp-1) reverses the filters of the bytes in [<paramref name="start"/>,
-    /// <paramref name="end"/>) of the inflated buffer whose scanline byte index is congruent to the lane mod bpp. Every
-    /// byte a filter reads (left: i - bpp, up: the previous scanline's i, up-left: its i - bpp) is in the same lane, so
-    /// the lanes never read each other, and each lane walks its bytes in scanline order: launches over consecutive
-    /// ranges reproduce the serial unfilter exactly.
+    /// Rows [<paramref name="firstRow"/>, + Group.DimX) of pass <paramref name="pass"/>, a thread per row: the scanline
+    /// filters reversed as a wavefront. A byte reads the byte bpp before it in its row (left) and the bytes at and bpp
+    /// before it in the previous row (up, up-left), so thread t unfilters segment k - t of its row
+    /// (<see cref="UnfilterSegmentBytes"/> bytes, in order) at step k: the previous row's segment k - t was done at step
+    /// k - 1, its own earlier segments before. A group barrier between steps; the group's first row reads the previous
+    /// block's last row (an earlier launch). The same bytes as the serial walk, in rows + segments steps instead of one
+    /// pass over the image per byte of a pixel. (Before 2026-11-20: bpp threads walking the image serially - too slow
+    /// for Chrome WebGPU on an RX 590, which tripped the driver's watchdog on a 512x512 picture.)
     /// </summary>
-    private static void UnfilterKernel(Index1D index, ArrayView<byte> raw, ArrayView<int> meta, int start, int end)
+    private static void UnfilterRowsKernel(ArrayView<byte> raw, ArrayView<int> meta, int pass, int firstRow)
     {
-        int lane = index.X;
-        int passCount = meta[PngMeta.PassCount];
+        int t = Group.IdxX;
         int bpp = meta[PngMeta.FilterBytesPerPixel];
-        int badFilter = 0;
-        int pos = start;
-        bool going = pos < end;
-        while (going)
+        int e = PngMeta.PassTable + pass * PngMeta.PassStride;
+        int off = meta[e + PngMeta.PassOffset];
+        int rb = meta[e + PngMeta.PassRowBytes];
+        int rows = meta[e + PngMeta.PassHeight];
+        int stride = rb + 1;
+        int y = firstRow + t;
+        bool mine = y < rows;
+        int rowStart = off + y * stride;
+        int ft = mine ? raw[rowStart] : 0;
+        if (mine & (ft > 4)) meta[PngMeta.Error] = (int)PngError.BadFilter;
+        bool work = mine & (ft >= 1) & (ft <= 4);
+        int cur = rowStart + 1;
+        int prev = cur - stride;
+        int segs = (rb + UnfilterSegmentBytes - 1) / UnfilterSegmentBytes;
+        int steps = Group.DimX - 1 + segs;
+        int k = 0;
+        // the loop condition is made uniform by the group-wide OR, which is also the barrier between the steps (WGSL)
+        while (Group.BarrierOr(k < steps))
         {
-            // The pass holding pos (passes without pixels own no bytes).
-            int pass = 0;
-            for (int p = 0; p < passCount; p++)
+            int sgm = k - t;
+            if (work & (sgm >= 0) & (sgm < segs))
             {
-                int ep = PngMeta.PassTable + p * PngMeta.PassStride;
-                int poff = meta[ep + PngMeta.PassOffset];
-                int prows = meta[ep + PngMeta.PassHeight];
-                int psize = prows * (meta[ep + PngMeta.PassRowBytes] + 1);
-                bool holds = (prows > 0) & (meta[ep + PngMeta.PassWidth] > 0) & (pos >= poff) & (pos < poff + psize);
-                if (holds) pass = p;
-            }
-            int e = PngMeta.PassTable + pass * PngMeta.PassStride;
-            int off = meta[e + PngMeta.PassOffset];
-            int rb = meta[e + PngMeta.PassRowBytes];
-            int stride = rb + 1;
-            int y = (pos - off) / stride;
-            int rowStart = off + y * stride;
-            int segEnd = rowStart + stride;
-            if (segEnd > end) segEnd = end;
-            int i0 = pos - rowStart - 1;
-            if (i0 < 0) i0 = 0;
-            int i1 = segEnd - rowStart - 1;
-
-            int ft = raw[rowStart];
-            int cur = rowStart + 1;
-            int prev = cur - stride;
-            if (ft > 4)
-            {
-                badFilter = 1;
-            }
-            else if (ft != 0)
-            {
-                // First byte index >= i0 of this lane.
-                int i = i0 + (lane - i0 % bpp + bpp) % bpp;
-                for (; i < i1; i += bpp)
+                int i1 = (sgm + 1) * UnfilterSegmentBytes;
+                if (i1 > rb) i1 = rb;
+                for (int i = sgm * UnfilterSegmentBytes; i < i1; i++)
                 {
                     int x = raw[cur + i];
                     int a = 0;
@@ -476,11 +472,8 @@ public sealed class PngKernels : IDisposable
                     raw[cur + i] = (byte)v;
                 }
             }
-            pos = segEnd;
-            going = pos < end;
+            k++;
         }
-        bool report = (badFilter != 0) & (lane == 0);
-        if (report) meta[PngMeta.Error] = (int)PngError.BadFilter;
     }
 
     // ------------------------------------------------------------------

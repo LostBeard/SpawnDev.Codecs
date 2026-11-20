@@ -85,6 +85,7 @@ public sealed class PngDecoderGpu : IDisposable
         public int Width, Height, BitDepth, ColorType, Interlace;
         public int PlteLength, TrnsOffset, TrnsLength, ApngFrames, IdatTotal;
         public int Channels, BitsPerPixel, FilterBpp, PassCount;
+        public int[] PassRows = System.Array.Empty<int>();   // rows of each pass (0: a pass without pixels)
         public long RawSize;
         public bool HasColorKey;
         public readonly int[] HostSlots = new int[PngMeta.Size - PngMeta.HostWrittenStart];
@@ -168,6 +169,7 @@ public sealed class PngDecoderGpu : IDisposable
                      || (l.ColorType == 2 && l.TrnsOffset >= 0 && l.TrnsLength >= 6);
 
         long running = 0;
+        l.PassRows = new int[l.PassCount];
         for (int p = 0; p < l.PassCount; p++)
         {
             int xs = l.Interlace == 0 ? 0 : AdamXStart[p];
@@ -189,6 +191,7 @@ public sealed class PngDecoderGpu : IDisposable
             l.HostSlots[e + PngMeta.PassXStep] = dx;
             l.HostSlots[e + PngMeta.PassYStep] = dy;
             if (pw > 0 && ph > 0) running += (long)ph * (rowBytes + 1);
+            l.PassRows[p] = pw > 0 ? ph : 0;
         }
         if (running > int.MaxValue)
             throw new ImageDecodeException(ImageFormat.Png, "image data too large");
@@ -281,6 +284,12 @@ public sealed class PngDecoderGpu : IDisposable
         return info;
     }
 
+    /// <summary>
+    /// Diagnostics (tests): when set, the decode synchronizes after each stage (inflate, unfilter, to-RGBA) and calls this
+    /// with the stage's name, so the caller can attribute the time since its previous call. Null in normal decoding.
+    /// </summary>
+    internal static Action<string>? Trace;
+
     private async Task RunPipelineAsync(
         ArrayView1D<byte, Stride1D.Dense> file, Layout layout, ImageInfo info,
         ArrayView1D<byte, Stride1D.Dense> output, PixelFormat format)
@@ -291,12 +300,17 @@ public sealed class PngDecoderGpu : IDisposable
         _meta.View.SubView(PngMeta.HostWrittenStart, layout.HostSlots.Length)
              .CopyFromCPU(ref layout.HostSlots[0], layout.HostSlots.Length);
 
+        var trace = Trace;
+        if (trace != null) { await _accelerator.SynchronizeAsync(); trace("scan + layout"); }
         _kernels.GatherIdat(file, _idatTable.View, _zlib.View, _meta.View, layout.IdatTotal);
         await _inflate.RunAsync(_zlib.View, layout.IdatTotal, _raw.View, (int)layout.RawSize,
             _inflateScratch.View, _inflateResult.View, verifyAdler: true);
-        await _kernels.UnfilterAsync(_raw.View, _meta.View, layout.RawSize, layout.FilterBpp);
+        if (trace != null) { await _accelerator.SynchronizeAsync(); trace("gather + inflate"); }
+        await _kernels.UnfilterAsync(_raw.View, _meta.View, layout.PassRows);
+        if (trace != null) { await _accelerator.SynchronizeAsync(); trace("unfilter"); }
         _kernels.ToRgba(file, _raw.View, output, _meta.View, info.Width * info.Height);
         await _accelerator.SynchronizeAsync();
+        trace?.Invoke("to rgba");
 
         int inflated = (await _inflateResult.View.CopyToHostAsync())[0];
         int status = (await _meta.View.SubView(PngMeta.Error, 1).CopyToHostAsync())[0];
