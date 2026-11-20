@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### PNG decoding: EXIF orientation from the eXIf chunk (2026-11-20)
+- `PngDecoderGpu` (and `ImageDecoderGpu` for PNG) reports `ImageInfo.Orientation` from an eXIf chunk, as the JPEG and
+  WebP decoders report theirs (it was always 1; SpawnGen's Load Image turns pictures by it, Lore). The pixels come back
+  as stored. The TIFF orientation parser moved out of the WebP kernels into `ExifTiff`, shared by the WebP and PNG chunk
+  scans. It reads the block with or without JPEG's "Exif\0\0" prefix; an invalid block reads as 1.
+- Test `PngDecoderGpu_ExifChunk_ReportsOrientation` checks orientations 1-8 in both TIFF byte orders, with the chunk
+  before and after IDAT, and four blocks that must read as 1 (no tag, bad magic, truncated, value 9). It also checks the
+  prefixed form, reported as given. Red: with the value forced to 1, it fails at orientation 2.
+
 ### PNG decoding: the scanline unfilter as a row wavefront (2026-11-20)
 - `PngDecoderGpu` reversed the scanline filters with one thread per byte of a pixel (3 for RGB), each walking the whole
   image serially. In Chrome WebGPU on an RX 590 a 512x512 decode did not finish within 2 minutes (Lore; OpenCL on the

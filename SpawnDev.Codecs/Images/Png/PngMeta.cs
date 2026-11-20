@@ -87,6 +87,8 @@ public static class PngMeta
     public const int ScanDone = 21;
     /// <summary>CRC pieces of all recorded chunks (each chunk's first piece index is slot 3 of its chunk-table entry).</summary>
     public const int CrcPieces = 22;
+    /// <summary>EXIF orientation 1..8 from an eXIf chunk (1 without one, or when its TIFF block is invalid).</summary>
+    public const int Orientation = 23;
 
     // ---- written by the host after it has read the scalars above ----
     /// <summary>Total bytes the inflated, filtered scanlines occupy (all Adam7 passes).</summary>

@@ -37,6 +37,7 @@ public sealed class PngKernels : IDisposable
     private const uint TypeIend = 0x49454E44;
     private const uint TypeActl = 0x6163544C;
     private const uint TypeSrgb = 0x73524742;
+    private const uint TypeExif = 0x65584966;   // eXIf: a TIFF block (no "Exif\0\0" prefix), PNG 1.5 / PNG third edition
 
     /// <summary>Chunks one scan launch walks at most.</summary>
     public const int ScanChunks = 4096;
@@ -183,6 +184,7 @@ public sealed class PngKernels : IDisposable
         for (int i = 0; i < PngMeta.Size; i++) meta[i] = 0;
         meta[PngMeta.PlteOffset] = -1;
         meta[PngMeta.TrnsOffset] = -1;
+        meta[PngMeta.Orientation] = 1;
 
         int bad = 0;
         if (fileLen < 8)
@@ -289,6 +291,10 @@ public sealed class PngKernels : IDisposable
                     {
                         meta[PngMeta.TrnsOffset] = dataOff;
                         meta[PngMeta.TrnsLength] = (int)len;
+                    }
+                    else if (type == TypeExif)
+                    {
+                        meta[PngMeta.Orientation] = ExifTiff.Orientation(file, dataOff, (int)len);
                     }
                     else if (type == TypeActl)
                     {

@@ -82,7 +82,7 @@ public sealed class PngDecoderGpu : IDisposable
 
     private sealed class Layout
     {
-        public int Width, Height, BitDepth, ColorType, Interlace;
+        public int Width, Height, BitDepth, ColorType, Interlace, Orientation;
         public int PlteLength, TrnsOffset, TrnsLength, ApngFrames, IdatTotal;
         public int Channels, BitsPerPixel, FilterBpp, PassCount;
         public int[] PassRows = System.Array.Empty<int>();   // rows of each pass (0: a pass without pixels)
@@ -94,7 +94,7 @@ public sealed class PngDecoderGpu : IDisposable
 
         public ImageInfo ToInfo() => new(
             ImageFormat.Png, Width, Height, HasAlpha, BitDepth,
-            ApngFrames > 1 ? ApngFrames : 1, Orientation: 1, IsInterlaced: Interlace != 0);
+            ApngFrames > 1 ? ApngFrames : 1, Orientation: Orientation, IsInterlaced: Interlace != 0);
     }
 
     private static readonly int[] AdamXStart = { 0, 4, 0, 2, 0, 1, 0 };
@@ -129,6 +129,7 @@ public sealed class PngDecoderGpu : IDisposable
             TrnsOffset = m[PngMeta.TrnsOffset],
             TrnsLength = m[PngMeta.TrnsLength],
             ApngFrames = m[PngMeta.ApngFrames],
+            Orientation = m[PngMeta.Orientation],
             IdatTotal = m[PngMeta.IdatTotal],
         };
 
