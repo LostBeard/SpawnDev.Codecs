@@ -10,6 +10,11 @@
 // the accelerator's compiles plus its hits in the process-wide shader cache; WebGPU / WebGL / Wasm reuse a kernel another
 // accelerator in the page already compiled, and a hit does not count in CompiledKernelCount).
 
+// The work is split by family (audio + VP9, still images, compressors), each on its own fresh accelerator: one test that
+// held every codec of the library and every compiled kernel at once exhausted the .NET heap of the Wasm page late in a
+// browser lane (1.1.2 and 1.1.3 release sweeps, "Garbage collector could not allocate" / OutOfMemoryException); each
+// family's checks are the same as before.
+
 using ILGPU;
 using ILGPU.Runtime;
 using SpawnDev.Codecs.Audio.Flac;
@@ -39,7 +44,7 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 public abstract partial class CodecsTestBase
 {
     [TestMethod(Timeout = 1800000)]
-    public async Task Codecs_ConstructorsCompileNothing_WarmUpCompilesWhatTheyUse()
+    public async Task Codecs_Audio_ConstructorsCompileNothing_WarmUpCompilesWhatTheyUse()
     {
         (Context ctx, Accelerator acc) fresh;
         try { fresh = await CreateKernelAcceleratorAsync(); }
@@ -69,37 +74,6 @@ public abstract partial class CodecsTestBase
             using var vorbisDec = new VorbisAudioDecoderGpu(acc, vorbisEnc.Identification, vorbisEnc.Setup);
             Equal(ca, Count(), "kernels loaded by the constructors (Mp3EncoderGpu, OpusDecoderGpu, SilkPacketDecoderGpu, " +
                 "CeltDecoderGpu, SilkDecodeFrameGpuOrchestrator, VorbisAudioEncoderGpu, VorbisAudioDecoderGpu)");
-
-            // the still-image codecs, also before anything of theirs is loaded
-            long ci = Count();
-            using var bmpDec = new BmpDecoderGpu(acc);
-            using var bmpEnc = new BmpEncoderGpu(acc);
-            using var gifDec = new GifDecoderGpu(acc);
-            using var gifEnc = new GifEncoderGpu(acc);
-            using var jpegDec = new JpegDecoderGpu(acc);
-            using var jpegEnc = new JpegEncoderGpu(acc);
-            using var pngDec = new PngDecoderGpu(acc);
-            using var pngEnc = new PngEncoderGpu(acc);
-            using var webpDec = new WebPDecoderGpu(acc);
-            using var webpLossless = new WebPLosslessEncoderGpu(acc);
-            using var webpLossy = new WebPLossyEncoderGpu(acc);
-            using var bcnEnc = new BcnEncoderGpu(acc);
-            using var bcnDec = new BcnDecoderGpu(acc);
-            Equal(ci, Count(), "kernels loaded by the image codec constructors (BMP, GIF, JPEG, PNG decoders and encoders, " +
-                "WebPDecoderGpu, WebPLosslessEncoderGpu, WebPLossyEncoderGpu, BcnEncoderGpu, BcnDecoderGpu)");
-
-            // the compressors (small waves: the working memory, not the kernels, scales with them)
-            long cz = Count();
-            using var shuffle = new ShuffleFilterGpu(acc);
-            using var weightPack = new WeightPackGpu(acc, decompressWave: 16);
-            using var gdeflateEnc = new GDeflateCompressorGpu(acc, wave: 4);
-            using var gdeflateDec = new GDeflateDecompressorGpu(acc, wave: 4);
-            using var lz4Enc = new Lz4FrameCompressorGpu(acc, waveBlocks: 4);
-            using var lz4Dec = new Lz4FrameDecompressorGpu(acc);
-            using var snappyEnc = new SnappyCompressorGpu(acc, waveBlocks: 4);
-            using var snappyDec = new SnappyDecompressorGpu(acc);
-            Equal(cz, Count(), "kernels loaded by the compressor constructors (ShuffleFilterGpu, WeightPackGpu, GDeflate, LZ4 frame " +
-                "and Snappy compressors and decompressors)");
 
             // The codecs need scatter stores (their tests are NotOnWebGL): the constructor checks above run on every
             // backend, the warm-ups and the work below where the codecs run.
@@ -202,6 +176,52 @@ public abstract partial class CodecsTestBase
             });
             Equal(0L, after, "kernels loaded by work after the warm-ups");
 
+        }
+        finally
+        {
+            acc.Dispose();
+            ctx.Dispose();
+        }
+    }
+
+    [TestMethod(Timeout = 1800000)]
+    public async Task Codecs_Images_ConstructorsCompileNothing_WarmUpCompilesWhatTheyUse()
+    {
+        (Context ctx, Accelerator acc) fresh;
+        try { fresh = await CreateKernelAcceleratorAsync(); }
+        catch (NotSupportedException ex) { throw new UnsupportedTestException(ex.Message); }
+        var (ctx, acc) = fresh;
+        try
+        {
+            long Count() => acc.LoadedKernelCount;   // loads: compiles + shader-cache hits, this accelerator only
+            // the still-image codecs, also before anything of theirs is loaded
+            long ci = Count();
+            using var bmpDec = new BmpDecoderGpu(acc);
+            using var bmpEnc = new BmpEncoderGpu(acc);
+            using var gifDec = new GifDecoderGpu(acc);
+            using var gifEnc = new GifEncoderGpu(acc);
+            using var jpegDec = new JpegDecoderGpu(acc);
+            using var jpegEnc = new JpegEncoderGpu(acc);
+            using var pngDec = new PngDecoderGpu(acc);
+            using var pngEnc = new PngEncoderGpu(acc);
+            using var webpDec = new WebPDecoderGpu(acc);
+            using var webpLossless = new WebPLosslessEncoderGpu(acc);
+            using var webpLossy = new WebPLossyEncoderGpu(acc);
+            using var bcnEnc = new BcnEncoderGpu(acc);
+            using var bcnDec = new BcnDecoderGpu(acc);
+            Equal(ci, Count(), "kernels loaded by the image codec constructors (BMP, GIF, JPEG, PNG decoders and encoders, " +
+                "WebPDecoderGpu, WebPLosslessEncoderGpu, WebPLossyEncoderGpu, BcnEncoderGpu, BcnDecoderGpu)");
+
+            // The codecs need scatter stores (their tests are NotOnWebGL): the constructor checks above run on every
+            // backend, the warm-ups and the work below where the codecs run.
+            if (!acc.Device.Satisfies(SerialStreamKernels)) return;
+
+            async Task<long> Compiled(Func<Task> work)
+            {
+                long before = Count();
+                await work();
+                return Count() - before;
+            }
             var imageWarmUps = new (string Name, Func<Task> WarmUp)[]
             {
                 ("BmpDecoderGpu", bmpDec.WarmUpAsync), ("BmpEncoderGpu", bmpEnc.WarmUpAsync),
@@ -262,6 +282,47 @@ public abstract partial class CodecsTestBase
             }
             True(imageSteps.Count == 0, $"{acc.AcceleratorType}: kernels loaded by image work after the warm-ups: " + string.Join(", ", imageSteps));
 
+        }
+        finally
+        {
+            acc.Dispose();
+            ctx.Dispose();
+        }
+    }
+
+    [TestMethod(Timeout = 1800000)]
+    public async Task Codecs_Compressors_ConstructorsCompileNothing_WarmUpCompilesWhatTheyUse()
+    {
+        (Context ctx, Accelerator acc) fresh;
+        try { fresh = await CreateKernelAcceleratorAsync(); }
+        catch (NotSupportedException ex) { throw new UnsupportedTestException(ex.Message); }
+        var (ctx, acc) = fresh;
+        try
+        {
+            long Count() => acc.LoadedKernelCount;   // loads: compiles + shader-cache hits, this accelerator only
+            // the compressors (small waves: the working memory, not the kernels, scales with them)
+            long cz = Count();
+            using var shuffle = new ShuffleFilterGpu(acc);
+            using var weightPack = new WeightPackGpu(acc, decompressWave: 16);
+            using var gdeflateEnc = new GDeflateCompressorGpu(acc, wave: 4);
+            using var gdeflateDec = new GDeflateDecompressorGpu(acc, wave: 4);
+            using var lz4Enc = new Lz4FrameCompressorGpu(acc, waveBlocks: 4);
+            using var lz4Dec = new Lz4FrameDecompressorGpu(acc);
+            using var snappyEnc = new SnappyCompressorGpu(acc, waveBlocks: 4);
+            using var snappyDec = new SnappyDecompressorGpu(acc);
+            Equal(cz, Count(), "kernels loaded by the compressor constructors (ShuffleFilterGpu, WeightPackGpu, GDeflate, LZ4 frame " +
+                "and Snappy compressors and decompressors)");
+
+            // The codecs need scatter stores (their tests are NotOnWebGL): the constructor checks above run on every
+            // backend, the warm-ups and the work below where the codecs run.
+            if (!acc.Device.Satisfies(SerialStreamKernels)) return;
+
+            async Task<long> Compiled(Func<Task> work)
+            {
+                long before = Count();
+                await work();
+                return Count() - before;
+            }
             // ShuffleFilterGpu first: WeightPackGpu's warm-up loads the shuffle kernels too (cache hits then)
             var compressorWarmUps = new (string Name, Func<Task> WarmUp)[]
             {
