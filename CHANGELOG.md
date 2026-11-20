@@ -1,6 +1,12 @@
 # SpawnDev.Codecs CHANGELOG
 
-## Unreleased
+## 1.1.3 (2026-11-20)
+
+Gate (2026-11-20, commit 8017401 = 63733a1 + the warm-up test split, `scripts/dev/run-release-sweep.cmd`, 3 h 50 min):
+CUDA, OpenCL and Velocity 1245 / 0 each, the CPU accelerator 3419 / 0, WebGPU 1238 / 0, WebGL 408 / 0; Wasm 1237 / 1 in
+the sweep (the all-codecs warm-up test ran out of the page's .NET heap, as in the 1.1.2 sweep: split by family, see
+below) and the Wasm class re-run 1240 / 0. The PNG fix was verified on the RX 590 itself (Lore: the photo test 40 / 40,
+SpawnGen's SD-Turbo / SD 1.5 / image to image / hires fix / inpainting in Chrome, every PNG decodes).
 
 ### PNG / zlib / deflate: broken Huffman codes on Chrome WebGPU with an AMD RX 590 (2026-11-20)
 - SpawnGen's live site (Codecs 1.1.2, Chrome, D3D12, RX 590) wrote PNGs that did not decode: every deflate block's
@@ -10,7 +16,10 @@
   on that GPU the second and third runs read the first run's counts back. CUDA, OpenCL on the same card, NVIDIA WebGPU,
   Velocity and the CPU accelerator wrote correct files; the WGSL is the same, so the miscompile is below the shader
   source. The per-length counts and next codes (and `BuildLengths`' per-depth counts) are now private to the thread.
-  Marked WORKAROUND in the source; tracked in https://github.com/LostBeard/SpawnDev.Codecs/issues/1. Every file is unchanged on the backends that were right (the
+  Marked WORKAROUND in the source; tracked in https://github.com/LostBeard/SpawnDev.Codecs/issues/1,
+  https://github.com/LostBeard/SpawnDev.ILGPU/issues/12 and https://issues.chromium.org/issues/587973845 (reproduced
+  without SpawnDev code by replaying the recorded WebGPU calls; the AMD D3D12 driver: Chrome's DXC and FXC and Firefox's
+  wgpu all write the same broken file). Every file is unchanged on the backends that were right (the
   CUDA files of the new test are byte-identical before and after).
 - Test `PngEncoderGpu_RealPhotos_512AndWhole_RoundTripOnHostReader`: SpawnGen's render itself (TestData/PngPhoto, the
   exact pixels and the run's two tEXt chunks) and the three 1024x768 JPEG photos, whole and as 512x512 crops, in RGB at
@@ -23,6 +32,9 @@
   lane. The sums are integers, so the scores equal the one-thread ones. RTX 4070, 512x352 q90 m4: CUDA 96 -> 72 ms per
   frame (Intra16 28 -> 11, UV 14 -> 7), OpenCL 88 -> 66, the same bytes (the 222 libwebp cases on CUDA and OpenCL).
 
+- Test `Codecs_ConstructorsCompileNothing_WarmUpCompilesWhatTheyUse` is split by family (audio + VP9, images,
+  compressors), each on its own accelerator: holding every codec and every compiled kernel at once exhausted the Wasm
+  page's .NET heap late in the browser lane (the 1.1.2 and 1.1.3 sweeps). The same checks per family.
 - SpawnDev.ILGPU 5.4.41 -> 5.4.42 (the buffer interface's Uint8Array readback is an owned copy on Wasm and WebGL too).
 
 ## 1.1.2 (2026-11-20)

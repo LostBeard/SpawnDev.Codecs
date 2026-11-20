@@ -50,8 +50,8 @@ and reads back the finished file or picture. The same library and the same kerne
 
 ## Status
 
-The 1.1.2 release gate (2026-11-20, SpawnDev.ILGPU 5.4.41) ran every class on every lane: CUDA, OpenCL and Velocity
-1244 / 0 each, the CPU accelerator 3418 / 0, and in Chrome WebGPU 1237 / 0, Wasm 1239 / 0 and WebGL 408 / 0. WebGL has no scatter stores, so the serial frame coders (the video frame coders, the Opus coders)
+The 1.1.3 release gate (2026-11-20, SpawnDev.ILGPU 5.4.42) ran every class on every lane: CUDA, OpenCL and Velocity
+1245 / 0 each, the CPU accelerator 3419 / 0, and in Chrome WebGPU 1238 / 0, Wasm 1240 / 0 and WebGL 408 / 0. WebGL has no scatter stores, so the serial frame coders (the video frame coders, the Opus coders)
 are not offered there; their building blocks are. [**Docs/status.md**](Docs/status.md) lists every codec by backend
 with the evidence and the open items; where it disagrees with this page, that file wins.
 

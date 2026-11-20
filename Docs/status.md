@@ -2,8 +2,14 @@
 
 What is verified, on which backend, and how. "Verified" means a test that compares against a reference
 implementation (never against this library's own output) passed on that backend, with its guard red-checked. Dates are
-the last run of the named lane. Updated 2026-11-20 (the 1.1.2 gate below; a cell keeps the date of the run behind it; counts are
+the last run of the named lane. Updated 2026-11-20 (the 1.1.3 gate below; a cell keeps the date of the run behind it; counts are
 passed / failed, skips are gated or CPU-only tests).
+
+**2026-11-20, release 1.1.3 (commit 8017401), SpawnDev.ILGPU 5.4.42: every class on every lane.** CUDA, OpenCL and
+Velocity 1245 / 0 each, the CPU accelerator 3419 / 0, WebGPU 1238 / 0, WebGL 408 / 0 (3 h 50 min). Wasm 1237 / 1 in the
+sweep: the all-codecs warm-up test ran out of the page's .NET heap (as in the 1.1.2 sweep), now split by family on its
+own accelerators; the Wasm class re-run is 1240 / 0. The PNG encoder writes valid files on Chrome WebGPU with an AMD RX 590
+(the deflate WORKAROUND, issue #1; verified on that card by Lore).
 
 **2026-11-20, release 1.1.2 (commit 8272d25), SpawnDev.ILGPU 5.4.41: every class on every lane.** CUDA, OpenCL and
 Velocity 1244 / 0 each, the CPU accelerator 3418 / 0, WebGPU 1237 / 0, WebGL 408 / 0 (3 h 23 min,
