@@ -64,14 +64,18 @@ internal static partial class WebPLossyEncodeRowKernel
     // dc tmp (16), the reconstruction tmp (16), the distortion tmp (16), top / left nz contexts (9 each), the ModeScore
     // (D, SD, H, R as lo/hi, Nz) and the level flatness
     public const int II16Lanes = II4Lanes + 10 * I4LaneStride;
-    public const int I16LaneStride = 768, I16LSlot = 0, I16LTmp = 400, I16LDc = 656, I16LT16 = 672, I16LDisto = 688,
-        I16LTopNz = 704, I16LLeftNz = 713, I16LScore = 722, I16LFlat = 733;
+    // (since the 64-lane Intra16, 2026-11-20: per 4x4 block a transform tmp (16 ints) and the block's partial results:
+    // quantizer nz, level nz, AC flatness count, SSE, spectral distortion, token cost; and the mode's DC quantizer nz)
+    public const int I16LaneStride = 1120, I16LSlot = 0, I16LTmp = 400, I16LDc = 656, I16LT16 = 672, I16LDisto = 688,
+        I16LTopNz = 704, I16LLeftNz = 713, I16LScore = 722, I16LFlat = 733, I16LNzDc = 734, I16LBlk = 736, I16LPart = 992;
+    private const int I16PartStride = 8, PQ = 0, PNzb = 1, PFlat = 2, PSse = 3, PDisto = 4, PCost = 5;
     // PickBestUV's mode lanes, UVLaneStride ints each: uv levels (128), the transform tmp (128), the reconstruction tmp
     // (16), the error-diffusion output (6), top / left nz contexts (9 each), the ModeScore. Read-only state they use:
     // ILeftDerr, topDerr, nzRow (lane 0 updates them after the choice, past the barrier).
     public const int IUVLanes = II16Lanes + 4 * I16LaneStride;
-    public const int UVLaneStride = 320, UVLLevels = 0, UVLTmp = 128, UVLT16 = 256, UVLDerr = 272, UVLTopNz = 278,
-        UVLLeftNz = 287, UVLScore = 296;
+    // (since the 32-lane UV stage, 2026-11-20: per 4x4 block a transform tmp (16 ints) and its partial results)
+    public const int UVLaneStride = 512, UVLLevels = 0, UVLTmp = 128, UVLT16 = 256, UVLDerr = 272, UVLTopNz = 278,
+        UVLLeftNz = 287, UVLScore = 296, UVLBlk = 320, UVLPart = 448;
     // Per macroblock ROW (each row of macroblocks has its own scratch since the wavefront, 2026-11-20): the iterator's
     // output-buffer swap (yuv_out / yuv_out2), and the tokens this row recorded in the current probability window.
     public const int IRowOut = IUVLanes + 4 * UVLaneStride, IRowOut2 = IRowOut + 1, IRowTokens = IRowOut + 2;
@@ -255,15 +259,6 @@ internal static partial class WebPLossyEncodeRowKernel
 
     private static int Disto4x4(ArrayView<byte> a, int ao, ArrayView<byte> b, int bo, ArrayView<int> t, ArrayView<int> tmp)
         => Abs(TTransform(b, bo, t, tmp) - TTransform(a, ao, t, tmp)) >> 5;
-
-    private static int Disto16x16(ArrayView<byte> a, int ao, ArrayView<byte> b, int bo, ArrayView<int> t, ArrayView<int> tmp)
-    {
-        int d = 0;
-        for (int y = 0; y < 4; ++y)
-            for (int x = 0; x < 4; ++x)
-                d += Disto4x4(a, ao + x * 4 + y * 4 * BPS, b, bo + x * 4 + y * 4 * BPS, t, tmp);
-        return d;
-    }
 
     /// <summary>QuantizeBlock_C with the matrix of segment `seg`, kind 0 = y1, 1 = y2, 2 = uv. Levels in zigzag order.</summary>
     private static int QuantizeBlock(ArrayView<int> input, int io, ArrayView<int> output, int oo,

@@ -100,77 +100,7 @@ internal static partial class WebPLossyEncodeRowKernel
         nzRow[1 + x] = nz;
     }
 
-    // top / left: the nz context arrays (9 ints each) this call may overwrite (one pair per Intra16 mode lane)
-    private static int GetCostLuma16(ArrayView<int> t, ArrayView<int> coeffs, ArrayView<int> lc, ArrayView<int> nzRow, int x,
-        ArrayView<int> si, int slot, int top, int left)
-    {
-        NzToBytes(nzRow, x, si, top, left);
-        int R = GetResidualCost(t, coeffs, lc, si[top + 8] + si[left + 8], 1, 0, si, slot + LDc);
-        for (int y = 0; y < 4; ++y)
-            for (int xx = 0; xx < 4; ++xx)
-            {
-                int ctx = si[top + xx] + si[left + y];
-                int o = slot + LAc + (xx + y * 4) * 16;
-                R += GetResidualCost(t, coeffs, lc, ctx, 0, 1, si, o);
-                int nzb = LastNonZero(si, o) >= 0 ? 1 : 0;
-                si[top + xx] = nzb;
-                si[left + y] = nzb;
-            }
-        return R;
-    }
-
-    // top / left: the nz context arrays (9 ints each) this call may overwrite (entries 4..7, all rebuilt by NzToBytes)
-    private static int GetCostUV(ArrayView<int> t, ArrayView<int> coeffs, ArrayView<int> lc, ArrayView<int> nzRow, int x,
-        ArrayView<int> si, int uvLevels, int top, int left)
-    {
-        NzToBytes(nzRow, x, si, top, left);
-        int R = 0;
-        for (int ch = 0; ch <= 2; ch += 2)
-            for (int y = 0; y < 2; ++y)
-                for (int xx = 0; xx < 2; ++xx)
-                {
-                    int ctx = si[top + 4 + ch + xx] + si[left + 4 + ch + y];
-                    int o = uvLevels + (ch * 2 + xx + y * 2) * 16;
-                    R += GetResidualCost(t, coeffs, lc, ctx, 2, 0, si, o);
-                    int nzb = LastNonZero(si, o) >= 0 ? 1 : 0;
-                    si[top + 4 + ch + xx] = nzb;
-                    si[left + 4 + ch + y] = nzb;
-                }
-        return R;
-    }
-
     // ================================================================== reconstruction (quant_enc.c)
-
-    // tmp (256) / dcTmp (16) / t16 (16): ints of si (one set per Intra16 mode lane)
-    private static uint ReconstructIntra16(ArrayView<byte> sb, ArrayView<int> si, ArrayView<int> meta, ArrayView<int> t,
-        int seg, int slot, int dst, int mode, int tmp, int dcTmp, int t16)
-    {
-        int refO = BPred + I16Off(mode);
-        var tmpV = si.SubView(t16, 16);
-        uint nz = 0;
-        for (int n = 0; n < 16; n += 2)
-        {
-            FTransform(sb, BIn + ScanY(n), sb, refO + ScanY(n), si, tmp + n * 16, tmpV);
-            FTransform(sb, BIn + ScanY(n) + 4, sb, refO + ScanY(n) + 4, si, tmp + (n + 1) * 16, tmpV);
-        }
-        FTransformWHT(si, tmp, si, dcTmp, tmpV);
-        nz |= (uint)QuantizeBlock(si, dcTmp, si, slot + LDc, meta, seg, 1, t) << 24;
-        for (int n = 0; n < 16; n += 2)
-        {
-            si[tmp + n * 16] = 0;
-            si[tmp + (n + 1) * 16] = 0;
-            uint q2 = (uint)QuantizeBlock(si, tmp + n * 16, si, slot + LAc + n * 16, meta, seg, 0, t)
-                    | ((uint)QuantizeBlock(si, tmp + (n + 1) * 16, si, slot + LAc + (n + 1) * 16, meta, seg, 0, t) << 1);
-            nz |= q2 << n;
-        }
-        TransformWHT(si, dcTmp, si, tmp, tmpV);
-        for (int n = 0; n < 16; n += 2)
-        {
-            ITransformOne(sb, refO + ScanY(n), si, tmp + n * 16, sb, dst + ScanY(n), tmpV);
-            ITransformOne(sb, refO + ScanY(n) + 4, si, tmp + (n + 1) * 16, sb, dst + ScanY(n) + 4, tmpV);
-        }
-        return nz;
-    }
 
     // tmpA / tmpB: 16 ints each of si (one pair per mode lane: the lanes reconstruct in parallel)
     private static int ReconstructIntra4(ArrayView<byte> sb, ArrayView<int> si, ArrayView<int> meta, ArrayView<int> t,
@@ -222,33 +152,6 @@ internal static partial class WebPLossyEncodeRowKernel
             si[derrOut + ch * 3 + 1] = (sbyte)err2;
             si[derrOut + ch * 3 + 2] = (sbyte)err3;
         }
-    }
-
-    // uvTmp (128) / t16 (16): ints of si (one set per UV mode lane)
-    private static uint ReconstructUV(ArrayView<byte> sb, ArrayView<int> si, ArrayView<int> meta, ArrayView<int> t,
-        ArrayView<int> topDerr, int x, bool errDiff, int seg, int uvLevels, int derrOut, int dst, int mode, int uvTmp, int t16)
-    {
-        int refO = BPred + UVOff(mode);
-        var tmpV = si.SubView(t16, 16);
-        uint nz = 0;
-        for (int n = 0; n < 8; n += 2)
-        {
-            FTransform(sb, BIn + 16 + ScanUV(n), sb, refO + ScanUV(n), si, uvTmp + n * 16, tmpV);
-            FTransform(sb, BIn + 16 + ScanUV(n) + 4, sb, refO + ScanUV(n) + 4, si, uvTmp + (n + 1) * 16, tmpV);
-        }
-        if (errDiff) CorrectDCValues(si, topDerr, x, meta, seg, derrOut, uvTmp);
-        for (int n = 0; n < 8; n += 2)
-        {
-            uint q2 = (uint)QuantizeBlock(si, uvTmp + n * 16, si, uvLevels + n * 16, meta, seg, 2, t)
-                    | ((uint)QuantizeBlock(si, uvTmp + (n + 1) * 16, si, uvLevels + (n + 1) * 16, meta, seg, 2, t) << 1);
-            nz |= q2 << n;
-        }
-        for (int n = 0; n < 8; n += 2)
-        {
-            ITransformOne(sb, refO + ScanUV(n), si, uvTmp + n * 16, sb, dst + 16 + ScanUV(n), tmpV);
-            ITransformOne(sb, refO + ScanUV(n) + 4, si, uvTmp + (n + 1) * 16, sb, dst + 16 + ScanUV(n) + 4, tmpV);
-        }
-        return nz << 16;
     }
 
     private static bool IsFlat(ArrayView<int> lv, int o, int numBlocks, int thresh)

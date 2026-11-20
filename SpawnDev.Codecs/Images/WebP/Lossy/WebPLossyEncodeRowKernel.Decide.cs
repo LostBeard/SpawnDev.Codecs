@@ -36,18 +36,22 @@ internal static partial class WebPLossyEncodeRowKernel
 
     // ------------------------------------------------------------------ PickBestIntra16
 
-    /// <summary>Lanes of the Intra16 stage's thread group: one per mode.</summary>
-    public const int I16Lanes = 4;
+    /// <summary>Lanes of the Intra16 stage's thread group: 16 per mode, one per 4x4 block.</summary>
+    public const int I16Lanes = 64;
 
     private static int I16LaneRecon(int mode) => BI16Lanes + (mode >> 1) * 16 * BPS + (mode & 1) * 16;
 
     /// <summary>
-    /// PickBestIntra16 by a thread group of <see cref="I16Lanes"/> lanes (every lane calls it; one barrier inside): lane m
-    /// reconstructs and scores mode m into its own scratch (a level slot, tmps, nz contexts, the 16x16 reconstruction at
-    /// <see cref="I16LaneRecon"/>); then lane 0 replays libwebp's walk over the 4 results in order - the flatness that
-    /// doubles D / SD holds while every mode so far was flat (a prefix AND), the first minimum wins - copies the winner's
-    /// levels into slot A and its reconstruction into the output buffer (libwebp swaps the two output buffers instead:
-    /// the contents later stages read are the same). Only lane 0's <paramref name="rd"/> / mode count.
+    /// PickBestIntra16 by a thread group of <see cref="I16Lanes"/> lanes (every lane calls it; barriers inside): lanes
+    /// 16m .. 16m + 15 reconstruct and score mode m into the mode's scratch (a level slot, tmps, nz contexts, the 16x16
+    /// reconstruction at <see cref="I16LaneRecon"/>), a lane per 4x4 block: the forward transforms; the DC transform and
+    /// its quantization (the mode's first lane); the AC quantizations; the inverse DC transform (first lane); then each
+    /// block's reconstruction, SSE, spectral distortion and token cost (a block's nz context is its top / left neighbour's
+    /// level nz, all known once the blocks are quantized) - the same integers as ReconstructIntra16 / GetCostLuma16 /
+    /// Disto16x16 in one thread, summed by the mode's first lane. Then lane 0 replays libwebp's walk over the 4 results in
+    /// order - the flatness that doubles D / SD holds while every mode so far was flat (a prefix AND), the first minimum
+    /// wins - copies the winner's levels into slot A and its reconstruction into the output buffer (libwebp swaps the two
+    /// output buffers instead: the contents later stages read are the same). Only lane 0's <paramref name="rd"/> / mode count.
     /// </summary>
     private static void PickBestIntra16(int lane, ArrayView<byte> sb, ArrayView<int> si, ArrayView<int> meta, ArrayView<int> t,
         ArrayView<int> coeffs, ArrayView<int> lc, ArrayView<int> nzRow, ArrayView<byte> preds, ArrayView<int> mbRecs,
@@ -56,22 +60,72 @@ internal static partial class WebPLossyEncodeRowKernel
         int segBase = M.Seg + c.Seg * M.SegStride;
         int lambda = meta[segBase + M.SLambdaI16];
         int tlambda = meta[segBase + M.STLambda];
-        if (lane < 4)
         {
-            int mode = lane;
-            int lo = II16Lanes + lane * I16LaneStride;
+            int mode = lane >> 4, n = lane & 15;
+            int lo = II16Lanes + mode * I16LaneStride;
             int dst = I16LaneRecon(mode);
-            var cur = new WebPModeScore();
-            cur.Nz = ReconstructIntra16(sb, si, meta, t, c.Seg, lo + I16LSlot, dst, mode, lo + I16LTmp, lo + I16LDc, lo + I16LT16);
-            cur.D = SSE(sb, BIn, sb, dst, 16, 16);
-            cur.SD = tlambda != 0 ? (tlambda * Disto16x16(sb, BIn, sb, dst, t, si.SubView(lo + I16LDisto, 16)) + 128) >> 8 : 0;
-            cur.H = t[T.FixedCostsI16 + mode];
-            // left[8] (the left DC block's nz) is NOT rebuilt by NzToBytes: it is state across macroblocks (zeroed at a
-            // row start, set by RecordTokens) - give the lane's copy the shared value (it read garbage until 2026-11-15)
-            si[lo + I16LLeftNz + 8] = si[ILeftNz + 8];
-            cur.R = GetCostLuma16(t, coeffs, lc, nzRow, c.X, si, lo + I16LSlot, lo + I16LTopNz, lo + I16LLeftNz);
-            StoreLaneScore(si, lo + I16LScore, ref cur);
-            si[lo + I16LFlat] = IsFlat(si, lo + I16LSlot + LAc, 16, 0) ? 1 : 0;
+            int refO = BPred + I16Off(mode);
+            int slot = lo + I16LSlot, tmp = lo + I16LTmp, dcTmp = lo + I16LDc;
+            int lv = slot + LAc + n * 16;
+            var blkTmp = si.SubView(lo + I16LBlk + n * 16, 16);
+            int part = lo + I16LPart + n * I16PartStride;
+            // the forward transform of block n; the mode's first lane also takes the macroblock's nz contexts
+            FTransform(sb, BIn + ScanY(n), sb, refO + ScanY(n), si, tmp + n * 16, blkTmp);
+            if (n == 0)
+            {
+                NzToBytes(nzRow, c.X, si, lo + I16LTopNz, lo + I16LLeftNz);
+                // left[8] (the left DC block's nz) is NOT rebuilt by NzToBytes: it is state across macroblocks (zeroed at
+                // a row start, set by RecordTokens) - give the mode's copy the shared value (it read garbage until 2026-11-15)
+                si[lo + I16LLeftNz + 8] = si[ILeftNz + 8];
+            }
+            Group.Barrier();   // every block's coefficients
+            if (n == 0)
+            {
+                FTransformWHT(si, tmp, si, dcTmp, si.SubView(lo + I16LT16, 16));
+                si[lo + I16LNzDc] = QuantizeBlock(si, dcTmp, si, slot + LDc, meta, c.Seg, 1, t);
+            }
+            Group.Barrier();   // the DCs are taken (the AC quantization clears them)
+            si[tmp + n * 16] = 0;
+            si[part + PQ] = QuantizeBlock(si, tmp + n * 16, si, lv, meta, c.Seg, 0, t);
+            si[part + PNzb] = LastNonZero(si, lv) >= 0 ? 1 : 0;
+            int nonZeroAc = 0;
+            for (int i = 1; i < 16; ++i) nonZeroAc += si[lv + i] != 0 ? 1 : 0;
+            si[part + PFlat] = nonZeroAc;
+            Group.Barrier();   // every block quantized (its DC slot is 0 again)
+            if (n == 0) TransformWHT(si, dcTmp, si, tmp, si.SubView(lo + I16LT16, 16));
+            Group.Barrier();   // every block's DC is back
+            ITransformOne(sb, refO + ScanY(n), si, tmp + n * 16, sb, dst + ScanY(n), blkTmp);
+            si[part + PSse] = SSE(sb, BIn + ScanY(n), sb, dst + ScanY(n), 4, 4);
+            si[part + PDisto] = tlambda != 0 ? Disto4x4(sb, BIn + ScanY(n), sb, dst + ScanY(n), t, blkTmp) : 0;
+            int xx = n & 3, yy = n >> 2;
+            int topCtx = yy == 0 ? si[lo + I16LTopNz + xx] : si[part - 4 * I16PartStride + PNzb];
+            int leftCtx = xx == 0 ? si[lo + I16LLeftNz + yy] : si[part - I16PartStride + PNzb];
+            si[part + PCost] = GetResidualCost(t, coeffs, lc, topCtx + leftCtx, 0, 1, si, lv);
+            Group.Barrier();   // every block scored
+            if (n == 0)
+            {
+                var cur = new WebPModeScore();
+                uint nz = (uint)si[lo + I16LNzDc] << 24;
+                long d = 0;
+                int disto = 0, r = 0, flatCount = 0;
+                int p0 = lo + I16LPart;
+                for (int b = 0; b < 16; ++b)
+                {
+                    int pb = p0 + b * I16PartStride;
+                    nz |= (uint)si[pb + PQ] << b;
+                    d += si[pb + PSse];
+                    disto += si[pb + PDisto];
+                    r += si[pb + PCost];
+                    flatCount += si[pb + PFlat];
+                }
+                cur.Nz = nz;
+                cur.D = d;
+                cur.SD = tlambda != 0 ? (tlambda * disto + 128) >> 8 : 0;
+                cur.H = t[T.FixedCostsI16 + mode];
+                cur.R = GetResidualCost(t, coeffs, lc, si[lo + I16LTopNz + 8] + si[lo + I16LLeftNz + 8], 1, 0, si, slot + LDc) + r;
+                StoreLaneScore(si, lo + I16LScore, ref cur);
+                si[lo + I16LFlat] = flatCount <= 0 ? 1 : 0;   // IsFlat(levels, 16 blocks, thresh 0)
+            }
         }
         Group.Barrier();   // the 4 modes are scored
         if (lane != 0) return;
@@ -269,17 +323,21 @@ internal static partial class WebPLossyEncodeRowKernel
     // ------------------------------------------------------------------ PickBestUV
 
     /// <summary>Lanes of the UV stage's thread group: one per mode.</summary>
-    public const int UVLanes = 4;
+    public const int UVLanes = 32;   // 8 per mode, one per 4x4 chroma block
 
     // a lane's chroma reconstruction buffer: 8 rows of BPS, chroma at columns 16..31 (the BOutA layout)
     private static int UVLaneRecon(int mode) => BUVLanes + mode * 8 * BPS - 16;
 
     /// <summary>
-    /// PickBestUV by a thread group of <see cref="UVLanes"/> lanes (every lane calls it; one barrier inside): lane m
-    /// reconstructs and scores mode m into its own scratch (uv levels, tmps, error-diffusion output, nz contexts, the
-    /// chroma reconstruction at <see cref="UVLaneRecon"/>); lane 0 keeps the first minimum (libwebp's walk: a mode is kept
-    /// only when strictly better), copies its levels, error-diffusion values and reconstruction where libwebp's walk
-    /// leaves them, and updates the error-diffusion state. Only lane 0's <paramref name="rd"/> counts.
+    /// PickBestUV by a thread group of <see cref="UVLanes"/> lanes (every lane calls it; barriers inside): lanes 8m ..
+    /// 8m + 7 reconstruct and score mode m into the mode's scratch (uv levels, tmps, error-diffusion output, nz contexts,
+    /// the chroma reconstruction at <see cref="UVLaneRecon"/>), a lane per 4x4 block: the forward transforms; the
+    /// error-diffusion DC correction (the mode's first lane: sequential over the 4 DCs of a plane); the quantizations;
+    /// each block's reconstruction, SSE and token cost (a block's nz context is its top / left neighbour's level nz) -
+    /// the same integers as ReconstructUV / GetCostUV in one thread, summed by the mode's first lane. Lane 0 keeps the
+    /// first minimum (libwebp's walk: a mode is kept only when strictly better), copies its levels, error-diffusion values
+    /// and reconstruction where libwebp's walk leaves them, and updates the error-diffusion state. Only lane 0's
+    /// <paramref name="rd"/> counts.
     /// </summary>
     private static void PickBestUV(int lane, ArrayView<byte> sb, ArrayView<int> si, ArrayView<int> meta, ArrayView<int> t,
         ArrayView<int> coeffs, ArrayView<int> lc, ArrayView<int> nzRow, ArrayView<int> topDerr, ArrayView<int> mbRecs,
@@ -287,22 +345,58 @@ internal static partial class WebPLossyEncodeRowKernel
     {
         int segBase = M.Seg + c.Seg * M.SegStride;
         int lambda = meta[segBase + M.SLambdaUV];
-        if (lane < 4)
         {
-            int mode = lane;
-            int lo = IUVLanes + lane * UVLaneStride;
+            int mode = lane >> 3, n = lane & 7;
+            int lo = IUVLanes + mode * UVLaneStride;
             int dst = UVLaneRecon(mode);
-            var rdUv = new WebPModeScore();
-            rdUv.Nz = ReconstructUV(sb, si, meta, t, topDerr, c.X, c.ErrDiff, c.Seg, lo + UVLLevels, lo + UVLDerr, dst, mode,
-                lo + UVLTmp, lo + UVLT16);
-            rdUv.D = SSE(sb, BIn + 16, sb, dst + 16, 16, 8);
-            rdUv.SD = 0;
-            rdUv.H = t[T.FixedCostsUV + mode];
-            rdUv.R = GetCostUV(t, coeffs, lc, nzRow, c.X, si, lo + UVLLevels, lo + UVLTopNz, lo + UVLLeftNz);
-            bool flatPenalty = (mode > 0) & IsFlat(si, lo + UVLLevels, 8, 2);
-            if (flatPenalty) rdUv.R += 140 * 8;
-            rdUv.SetRD(lambda);
-            StoreLaneScore(si, lo + UVLScore, ref rdUv);
+            int refO = BPred + UVOff(mode);
+            int uvTmp = lo + UVLTmp;
+            int lv = lo + UVLLevels + n * 16;
+            var blkTmp = si.SubView(lo + UVLBlk + n * 16, 16);
+            int part = lo + UVLPart + n * I16PartStride;
+            FTransform(sb, BIn + 16 + ScanUV(n), sb, refO + ScanUV(n), si, uvTmp + n * 16, blkTmp);
+            if (n == 0) NzToBytes(nzRow, c.X, si, lo + UVLTopNz, lo + UVLLeftNz);
+            Group.Barrier();   // every block's coefficients
+            if ((n == 0) & c.ErrDiff) CorrectDCValues(si, topDerr, c.X, meta, c.Seg, lo + UVLDerr, uvTmp);
+            Group.Barrier();   // the corrected DCs
+            si[part + PQ] = QuantizeBlock(si, uvTmp + n * 16, si, lv, meta, c.Seg, 2, t);
+            si[part + PNzb] = LastNonZero(si, lv) >= 0 ? 1 : 0;
+            int nonZeroAc = 0;
+            for (int i = 1; i < 16; ++i) nonZeroAc += si[lv + i] != 0 ? 1 : 0;
+            si[part + PFlat] = nonZeroAc;
+            Group.Barrier();   // every block quantized
+            ITransformOne(sb, refO + ScanUV(n), si, uvTmp + n * 16, sb, dst + 16 + ScanUV(n), blkTmp);
+            si[part + PSse] = SSE(sb, BIn + 16 + ScanUV(n), sb, dst + 16 + ScanUV(n), 4, 4);
+            // GetCostUV's order: plane k (U, V), then 2x2 blocks; block n = 4k + xx + 2y
+            int k = n >> 2, xx = n & 1, yy = (n >> 1) & 1;
+            int topCtx = yy == 0 ? si[lo + UVLTopNz + 4 + 2 * k + xx] : si[part - 2 * I16PartStride + PNzb];
+            int leftCtx = xx == 0 ? si[lo + UVLLeftNz + 4 + 2 * k + yy] : si[part - I16PartStride + PNzb];
+            si[part + PCost] = GetResidualCost(t, coeffs, lc, topCtx + leftCtx, 2, 0, si, lv);
+            Group.Barrier();   // every block scored
+            if (n == 0)
+            {
+                var rdUv = new WebPModeScore();
+                uint nz = 0;
+                long d = 0;
+                int r = 0, nonZero = 0;
+                int p0 = lo + UVLPart;
+                for (int b = 0; b < 8; ++b)
+                {
+                    int pb = p0 + b * I16PartStride;
+                    nz |= (uint)si[pb + PQ] << b;
+                    d += si[pb + PSse];
+                    r += si[pb + PCost];
+                    nonZero += si[pb + PFlat];
+                }
+                rdUv.Nz = nz << 16;
+                rdUv.D = d;
+                rdUv.SD = 0;
+                rdUv.H = t[T.FixedCostsUV + mode];
+                bool flatPenalty = (mode > 0) & (nonZero <= 2);   // IsFlat(levels, 8 blocks, thresh 2)
+                rdUv.R = r + (flatPenalty ? 140 * 8 : 0);
+                rdUv.SetRD(lambda);
+                StoreLaneScore(si, lo + UVLScore, ref rdUv);
+            }
         }
         Group.Barrier();   // the 4 modes are scored (the error-diffusion state they read is updated only below)
         if (lane != 0) return;
