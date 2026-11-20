@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Browser TypedArray results are the caller's on Wasm; SpawnDev.ILGPU 5.4.41 (2026-11-20)
+- `EncodeAnimationToUint8ArrayAsync` (both WebP encoders) and the other Uint8Array / Float32Array outputs read back through
+  `DeviceTransfer`. On the Wasm accelerator that readback was a window onto the module's memory: the encoder's next encode
+  changed an array the caller still held. The readbacks now use SpawnDev.ILGPU 5.4.41's view readback
+  (`view.CopyToHostUint8ArrayAsync()`), an owned copy on every backend.
+- Test `WebPAnimation_ToDevice_SameFileAsManaged_AndWithinTheBounds` now encodes again after taking the Uint8Array and
+  checks that the array is unchanged. Red-check: on the old readback it fails on Wasm three times (lossless, lossy q80,
+  q100); it passes on WebGPU.
+- SpawnDev.ILGPU 5.4.40 -> 5.4.41.
+
 ### Lossy WebP: 2.8x faster frames, same bytes - the RD loop as a macroblock wavefront, the token partition in parallel (2026-11-20)
 - RTX 4070, warm, 512x352 q90 m4 (`Probe_DispatchCost_AndLossyFrameTime`): 272 -> 96 ms per frame on CUDA, 247 -> 88 on
   OpenCL, the same 40,570 bytes. All 222 cases of `WebPLossyEncoderGpu_Methods3And4_ByteIdenticalWithLibwebp` stay

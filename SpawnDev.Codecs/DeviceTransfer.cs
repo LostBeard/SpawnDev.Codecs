@@ -76,15 +76,17 @@ public static class DeviceTransfer
 
     /// <summary>
     /// Read <paramref name="length"/> bytes from the start of <paramref name="src"/> into a new JS
-    /// <see cref="Uint8Array"/> (the caller disposes it). The bytes do not enter the .NET heap.
+    /// <see cref="Uint8Array"/> (the caller disposes it). The bytes do not enter the .NET heap. The array is the caller's:
+    /// an owned copy on every backend (SpawnDev.ILGPU's view readback; the buffer interface's Wasm readback is a window
+    /// onto the module's memory, which the encoder's next encode overwrites).
     /// </summary>
     /// <exception cref="NotSupportedException">The view is not on a browser accelerator.</exception>
     [SupportedOSPlatform("browser")]
     public static Task<Uint8Array> DownloadUint8ArrayAsync(ArrayView1D<byte, Stride1D.Dense> src, long length)
     {
         if (length < 0 || length > src.Length) throw new ArgumentOutOfRangeException(nameof(length));
-        var browser = RequireBrowserBuffer(src, out long byteOffset);
-        return browser.CopyToHostUint8ArrayAsync(byteOffset, length);
+        RequireBrowserBuffer(src, out _);
+        return ((ArrayView<byte>)src.SubView(0, length)).CopyToHostUint8ArrayAsync();
     }
 
     /// <summary>
@@ -120,11 +122,12 @@ public static class DeviceTransfer
     {
         if (count < 0 || count > src.Length) throw new ArgumentOutOfRangeException(nameof(count));
         var contiguous = (IContiguousArrayView)src.BaseView;
-        if (contiguous.Buffer is not IBrowserMemoryBuffer browser)
+        if (contiguous.Buffer is not IBrowserMemoryBuffer)
             throw new NotSupportedException(
                 $"A TypedArray overload needs a browser accelerator buffer; got {contiguous.Buffer.GetType().Name} " +
                 $"on {contiguous.Buffer.Accelerator.AcceleratorType}. On a desktop accelerator use the managed or ArrayView1D overload.");
-        using var bytes = await browser.CopyToHostUint8ArrayAsync(contiguous.IndexInBytes, count * sizeof(float));
+        // an owned copy on every backend (see DownloadUint8ArrayAsync)
+        using var bytes = await ((ArrayView<float>)src.SubView(0, count)).CopyToHostUint8ArrayAsync();
         // A float view needs a 4-aligned byte offset: view the bytes in place when they are, copy (in JS) when not.
         if ((bytes.ByteOffset & 3) == 0) return bytes.ReCast<Float32Array>(0, count);
         var result = new Float32Array(count);

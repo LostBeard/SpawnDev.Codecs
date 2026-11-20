@@ -58,6 +58,10 @@ public abstract partial class CodecsTestBase
                         using var js = await lossless.EncodeAnimationToUint8ArrayAsync(views, w, h, durations, o, anim);
                         if (js.Length != want.Length) failures.Add($"lossless Uint8Array: {js.Length} B, managed {want.Length} B");
                         else if (!js.ReadBytes().AsSpan().SequenceEqual(want)) failures.Add("lossless Uint8Array: bytes differ");
+                        // the array is the caller's: the encoder's next encode (other frames) must not change it
+                        await lossless.EncodeAnimationToDeviceAsync(views.AsEnumerable().Reverse().ToList(), w, h, durations, o, anim);
+                        await acc.SynchronizeAsync();
+                        if (!js.ReadBytes().AsSpan().SequenceEqual(want)) failures.Add("lossless Uint8Array: changed by the next encode (aliases the encoder's buffer)");
                     }
                     long bound = WebPLosslessEncoderGpu.GetMaxAnimationEncodedSize(3, w, h, o, anim);
                     if (want.Length > bound) failures.Add($"lossless: {want.Length} B over the bound {bound}");
@@ -76,6 +80,9 @@ public abstract partial class CodecsTestBase
                             using var js = await lossy.EncodeAnimationToUint8ArrayAsync(views, w, h, durations, o, anim);
                             if (js.Length != want.Length) failures.Add($"lossy q{q} Uint8Array: {js.Length} B, managed {want.Length} B");
                             else if (!js.ReadBytes().AsSpan().SequenceEqual(want)) failures.Add($"lossy q{q} Uint8Array: bytes differ");
+                            await lossy.EncodeAnimationToDeviceAsync(views.AsEnumerable().Reverse().ToList(), w, h, durations, o, anim);
+                            await acc.SynchronizeAsync();
+                            if (!js.ReadBytes().AsSpan().SequenceEqual(want)) failures.Add($"lossy q{q} Uint8Array: changed by the next encode (aliases the encoder's buffer)");
                         }
                         long bound = WebPLossyEncoderGpu.GetMaxAnimationEncodedSize(3, w, h, o, anim);
                         if (want.Length > bound) failures.Add($"lossy q{q}: {want.Length} B over the bound {bound}");
