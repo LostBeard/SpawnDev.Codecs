@@ -2,7 +2,7 @@
 // live site hit on Chrome WebGPU (RX 590, 2026-11-20, Lore): a 512x512 RGB render whose first deflate block came out with a
 // broken dynamic Huffman header (the code-length sequence did not match the block's own code-length code). Photographic
 // statistics drive the Huffman construction into branches flat or synthetic data do not (long codes, the length limits).
-// The photos here: SpawnGen's broken render itself (TestData/Png/sdturbo_apple_512_rgb.png, the valid host-written copy of
+// The photos here: SpawnGen's broken render itself (TestData/PngPhoto/sdturbo_apple_512_rgb.png, the valid host-written copy of
 // the same pixels, with the run's two tEXt chunks), and the three 1024x768 JPEG fixtures, decoded on the accelerator,
 // encoded whole and as 512x512 crops; all in RGB as SpawnGen writes them, at every compression level. The host reader
 // checks every chunk CRC, the zlib stream (Adler-32 included) and every pixel; a failure also reports whether the serial
@@ -72,12 +72,18 @@ public abstract partial class CodecsTestBase
         finally { ReleaseAccelerator(ctx, acc); }
     }
 
-    private const string PngPhotoPrefix = "SpawnDev.Codecs.Demo.Shared.TestData.Png.";
+    private const string PngPhotoPrefix = "SpawnDev.Codecs.Demo.Shared.TestData.PngPhoto.";
 
     private async Task CheckPhotoPngAsync(PngEncoderGpu enc, List<string> failures, string what, byte[] rgba, int w, int h, PngEncodeOptions o)
     {
         int level = o.CompressionLevel;
         byte[] file = await enc.EncodeAsync(rgba, w, h, o);
+        string? dumpDir = OperatingSystem.IsBrowser() ? null : Environment.GetEnvironmentVariable("CODECS_DUMP_DIR");
+        if (!string.IsNullOrEmpty(dumpDir))
+        {
+            Directory.CreateDirectory(dumpDir);
+            File.WriteAllBytes(Path.Combine(dumpDir, $"photo_{what.Replace(' ', '_').Replace(',', '_')}_L{level}.png"), file);
+        }
                         try
                         {
                             var png = ReadPngOnHost(file);

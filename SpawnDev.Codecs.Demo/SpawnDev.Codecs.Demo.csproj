@@ -41,7 +41,7 @@
   <ItemGroup>
     <!-- Keep this pin equal to SpawnDev.Codecs.csproj's: a direct reference wins over the library's, so a stale pin here
          runs every browser lane (PlaywrightMultiTest) on the old ILGPU. -->
-    <PackageReference Include="SpawnDev.ILGPU" Version="5.4.41" />
+    <PackageReference Include="SpawnDev.ILGPU" Version="5.4.42" />
     <ProjectReference Include="..\SpawnDev.Codecs\SpawnDev.Codecs.csproj" />
     <ProjectReference Include="..\SpawnDev.Codecs.Demo.Shared\SpawnDev.Codecs.Demo.Shared.csproj" />
   </ItemGroup>

@@ -87,8 +87,7 @@ public static partial class DeflateGpu
     private const int TreeFreqOff = 1640;    // [576]
     private const int TreeParentOff = 2216;  // [576]
     private const int TreeDepthOff = 2792;   // [576]
-    private const int TreeCountOff = 3368;   // [16]
-    private const int TreeNextOff = 3384;    // [16]
+    // 3368 .. 3399: free (the per-length counts / next codes moved to private memory, see AssignCodes)
     private const int StateOff = 3400;       // [24]  resumable block state (St* slots)
     private const int TailInts = 3424;
 
@@ -257,7 +256,8 @@ public static partial class DeflateGpu
         int nodeFreqAt = tail + TreeFreqOff;
         int parentAt = tail + TreeParentOff;
         int depthAt = tail + TreeDepthOff;
-        int countAt = tail + TreeCountOff;
+        // the per-depth counts private to the thread (see AssignCodes' WORKAROUND: the same scratch slots for every code)
+        var count = LocalMemory.Allocate<int>(16);
 
         int m = 0;
         for (int sym = 0; sym < n; sym++)
@@ -335,27 +335,27 @@ public static partial class DeflateGpu
             s[depthAt + i] = s[depthAt + s[parentAt + i]] + 1;
 
         // Count leaves per depth, clamping to maxBits, then repair the Kraft sum.
-        for (int len = 0; len <= 15; len++) s[countAt + len] = 0;
+        for (int len = 0; len <= 15; len++) count[len] = 0;
         for (int i = 0; i < m; i++)
         {
             int d = s[depthAt + i];
             if (d > maxBits) d = maxBits;
-            s[countAt + d] = s[countAt + d] + 1;
+            count[d] = count[d] + 1;
         }
         int total = 0;
         for (int len = maxBits; len > 0; len--)
-            total += s[countAt + len] << (maxBits - len);
+            total += count[len] << (maxBits - len);
         while (total != (1 << maxBits))
         {
-            s[countAt + maxBits] = s[countAt + maxBits] - 1;
+            count[maxBits] = count[maxBits] - 1;
             int fixedUp = 0;
             for (int len = maxBits - 1; len > 0; len--)
             {
-                bool canFix = (fixedUp == 0) & (s[countAt + len] != 0);
+                bool canFix = (fixedUp == 0) & (count[len] != 0);
                 if (canFix)
                 {
-                    s[countAt + len] = s[countAt + len] - 1;
-                    s[countAt + len + 1] = s[countAt + len + 1] + 2;
+                    count[len] = count[len] - 1;
+                    count[len + 1] = count[len + 1] + 2;
                     fixedUp = 1;
                 }
             }
@@ -366,7 +366,7 @@ public static partial class DeflateGpu
         int idx = m - 1;
         for (int len = 1; len <= maxBits; len++)
         {
-            int c = s[countAt + len];
+            int c = count[len];
             for (int k = 0; k < c; k++)
             {
                 s[lensAt + s[sortedAt + idx]] = len;
@@ -376,31 +376,40 @@ public static partial class DeflateGpu
     }
 
     /// <summary>Canonical codes (bit-reversed, ready to emit LSB first) for the lengths at <paramref name="lensAt"/>.</summary>
+    /// <remarks>
+    /// WORKAROUND (Chrome WebGPU on an AMD RX 590 / D3D12, 2026-11-20; tracked publicly, see CHANGELOG 1.1.3): the per-length
+    /// counts and next codes are private to the thread, not slots of the block's storage scratch. With them in the
+    /// scratch (the same slots for the literal, distance and code-length codes, called one after another), the second
+    /// and third calls read back the FIRST call's counts there: the distance and code-length codes were built from the
+    /// literal code's counts (every length right, every code wrong; SpawnGen's PNGs did not decode). CUDA, OpenCL on the
+    /// same card, NVIDIA WebGPU, Velocity and the CPU accelerator were right; the WGSL is the same, so the miscompile is
+    /// below it. Test: PngEncoderGpu_RealPhotos_512AndWhole_RoundTripOnHostReader (its RX 590 run).
+    /// </remarks>
     private static void AssignCodes(ArrayView<int> s, int lensAt, int n, int codesAt, int tail)
     {
-        int countAt = tail + TreeCountOff;
-        int nextAt = tail + TreeNextOff;
-        for (int len = 0; len <= 15; len++) s[countAt + len] = 0;
+        var count = LocalMemory.Allocate<int>(16);
+        var nextCode = LocalMemory.Allocate<int>(16);
+        for (int len = 0; len <= 15; len++) count[len] = 0;
         for (int sym = 0; sym < n; sym++)
         {
             int l = s[lensAt + sym];
-            s[countAt + l] = s[countAt + l] + 1;
+            count[l] = count[l] + 1;
         }
-        s[countAt] = 0;
+        count[0] = 0;
         int code = 0;
-        s[nextAt] = 0;
+        nextCode[0] = 0;
         for (int len = 1; len <= 15; len++)
         {
-            code = (code + s[countAt + len - 1]) << 1;
-            s[nextAt + len] = code;
+            code = (code + count[len - 1]) << 1;
+            nextCode[len] = code;
         }
         for (int sym = 0; sym < n; sym++)
         {
             int l = s[lensAt + sym];
             if (l != 0)
             {
-                int c = s[nextAt + l];
-                s[nextAt + l] = c + 1;
+                int c = nextCode[l];
+                nextCode[l] = c + 1;
                 s[codesAt + sym] = (int)ReverseBits((uint)c, l);
             }
             else

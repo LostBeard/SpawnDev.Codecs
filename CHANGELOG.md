@@ -1,5 +1,30 @@
 # SpawnDev.Codecs CHANGELOG
 
+## Unreleased
+
+### PNG / zlib / deflate: broken Huffman codes on Chrome WebGPU with an AMD RX 590 (2026-11-20)
+- SpawnGen's live site (Codecs 1.1.2, Chrome, D3D12, RX 590) wrote PNGs that did not decode: every deflate block's
+  dynamic header carried the right code LENGTHS and wrong CODES (Lore). Compared bit for bit with the CUDA file of the
+  same pixels (the same size, every chunk the same length), the distance and code-length codes on the RX 590 were built
+  from the LITERAL code's per-length counts: `AssignCodes` runs three times on the same scratch slots for its counts, and
+  on that GPU the second and third runs read the first run's counts back. CUDA, OpenCL on the same card, NVIDIA WebGPU,
+  Velocity and the CPU accelerator wrote correct files; the WGSL is the same, so the miscompile is below the shader
+  source. The per-length counts and next codes (and `BuildLengths`' per-depth counts) are now private to the thread.
+  Marked WORKAROUND in the source; tracked publicly. Every file is unchanged on the backends that were right (the
+  CUDA files of the new test are byte-identical before and after).
+- Test `PngEncoderGpu_RealPhotos_512AndWhole_RoundTripOnHostReader`: SpawnGen's render itself (TestData/PngPhoto, the
+  exact pixels and the run's two tEXt chunks) and the three 1024x768 JPEG photos, whole and as 512x512 crops, in RGB at
+  levels 1-3 (managed and device calls). The host reader checks every file. On a failure the test also reports whether
+  the serial path writes a valid file. Red: on the RX 590 all 40 cases failed, the serial path too (Lore).
+
+### Lossy WebP: Intra16 as 64 lanes, UV as 32 lanes (2026-11-20)
+- Each mode's 4x4 blocks transform, quantize, reconstruct and score in parallel. A block's nz context is its neighbours'
+  level nz, all known once quantized. The DC transform and the UV error-diffusion correction stay on the mode's first
+  lane. The sums are integers, so the scores equal the one-thread ones. RTX 4070, 512x352 q90 m4: CUDA 96 -> 72 ms per
+  frame (Intra16 28 -> 11, UV 14 -> 7), OpenCL 88 -> 66, the same bytes (the 222 libwebp cases on CUDA and OpenCL).
+
+- SpawnDev.ILGPU 5.4.41 -> 5.4.42 (the buffer interface's Uint8Array readback is an owned copy on Wasm and WebGL too).
+
 ## 1.1.2 (2026-11-20)
 
 Everything since 1.1.1, listed below by date. The highlights:
