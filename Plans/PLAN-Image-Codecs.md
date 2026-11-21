@@ -174,6 +174,15 @@ loses to every generator, so the encoder is upgraded first. Parity target: libwe
       ordered replay only for a counter that can saturate inside the window). 222/222 libwebp cases; RTX 4070 512x352 q90
       272 -> 185 ms CUDA. Traced CUDA frame after it: RD stages 109 ms, window 30 (one group, before the atomic version),
       finish 43 (the token partition on ONE thread).
+- [ ] NEXT (measured 2026-11-20, webp-anim-bench lossy q90 m4, Lore's 25 frames, OpenCL RTX 4070, warm): 414 ms per frame,
+      302,636 B; the ALPH plane's EXACT filter trials (4 full lossless encodes, each with strategy trials + cache search,
+      host readback per step) are ~2/3 of it, the lossy RD stages ~1/3. The fast estimate (--alpha-fast 1) gives 148 ms but
+      307,014 B (+1.4%): not allowed (size is never traded for speed). Plan: the 4 trials in LOCKSTEP with the same choices
+      and bytes - a child encoder per trial (own buffers; the plane is small), their awaits interleaved so the host round
+      trips overlap (one sync covers 4 trials' queued kernels). Open point: on desktop the interleaved continuations may
+      launch from different threads on one stream - run them under a single-threaded scheduler, or prove the stream is
+      thread-safe. Guard: ALPH bytes identical with and without lockstep on every lane (a tests-only switch), Lore's
+      302,636 B file unchanged.
 - [x] DONE 2026-11-20 (CUDA 43 -> 1 ms per 512x352 frame; frame 272 -> 96 ms with the wavefront): the token partition in parallel, byte-identical (VP8 bool coder; the finish step's 43 ms on CUDA, far more on
       WebGPU where one thread is slow). The coded stream is the big number sum over tokens with bit 1 of
       (split + 1) << (shifts after the token), written in bytes; the 0xff run and the carry into the previous byte are that
