@@ -43,6 +43,67 @@ public sealed partial class WebPLosslessEncoderGpu
     /// <param name="output">Receives the payload; at least <see cref="GetMaxAlphaEncodedSize"/> bytes.</param>
     /// <param name="options">Encoder options (null = defaults).</param>
     /// <returns>The length of the payload in <paramref name="output"/>.</returns>
+    /// <summary>
+    /// The four exact filter trials of an ALPH plane in LOCKSTEP (meant as the browser default; off until verified): each trial on its own encoder
+    /// (its own buffers and metadata), the four started together, so their host round trips overlap: one synchronize
+    /// covers the four trials' queued kernels instead of one each. Each trial makes the choices it makes alone, so the
+    /// chosen filter and the bytes are those of the one-trial-after-another loop. In a browser the interleaved
+    /// continuations all run on the page's one thread; on the desktop the loop stays sequential (one stream, launches from
+    /// one thread). Tests switch it both ways (WebPAlphaLockstep_SameBytesAsOneTrialAtATime).
+    /// </summary>
+    // OFF until WebPAlphaLockstep_SameBytesAsOneTrialAtATime has run on the browser lanes (written 2026-11-20, not yet run);
+    // then the default becomes OperatingSystem.IsBrowser().
+    internal static bool LockstepAlphaTrials;
+
+    // the encoders of trials 1..3 (trial 0 runs on this one); created on the first lockstep trial
+    private WebPLosslessEncoderGpu[]? _trialEncoders;
+
+    private async Task EncodeAlphaTrialsLockstepAsync(ArrayView1D<byte, Stride1D.Dense> plane, int width, int height, int quality,
+        int maxSize, ArrayView1D<byte, Stride1D.Dense> output, int[] hostMeta)
+    {
+        if (_trialEncoders == null)
+        {
+            var made = new WebPLosslessEncoderGpu[3];
+            for (int i = 0; i < 3; i++) made[i] = new WebPLosslessEncoderGpu(_accelerator);
+            _trialEncoders = made;
+        }
+        foreach (var e in _trialEncoders) await e._kernels.EnsureKernelsAsync();
+        // one region per trial: no trial writes where another reads
+        var regions = await _alphaTrial.EnsureDrainedAsync(4L * maxSize);
+        var runs = new Task<int[]>[4];
+        for (int f = 0; f < 4; f++)
+        {
+            var enc = f == 0 ? this : _trialEncoders[f - 1];
+            runs[f] = enc.AlphaTrialAsync(plane, width, height, quality, f, (int[])hostMeta.Clone(),
+                regions.SubView((long)f * maxSize, maxSize));
+        }
+        var metas = await Task.WhenAll(runs);
+        // the first minimum, in filter order, as the sequential loop keeps it
+        int best = 0;
+        for (int f = 1; f < 4; f++)
+            if (metas[f][WebPEncMeta.PayloadLength] < metas[best][WebPEncMeta.PayloadLength]) best = f;
+        hostMeta[WebPEncMeta.AlphaFilterRequest] = best;
+        _meta.View.CopyFromCPU(metas[best]);
+        int length = metas[best][WebPEncMeta.PayloadLength];
+        if (metas[best][WebPEncMeta.Error] == 0 && length > 0)
+            regions.SubView((long)best * maxSize + 1, length).CopyTo(output.SubView(1, length));
+    }
+
+    // One exact-choice trial with filter `filter`, on this encoder's own buffers; returns its metadata block.
+    private async Task<int[]> AlphaTrialAsync(ArrayView1D<byte, Stride1D.Dense> plane, int width, int height, int quality,
+        int filter, int[] hostMeta, ArrayView1D<byte, Stride1D.Dense> into)
+    {
+        int n = width * height;
+        var meta = _meta.View;
+        var rowCost = _rowCost.Ensure(4L * height);
+        hostMeta[WebPEncMeta.AlphaFilterRequest] = filter;
+        var job = new StreamJob(width, height, quality, a => _kernels.AlphaToArgb(plane, a, meta, n), Plane: true,
+            AfterMeta: () => _kernels.AlphaPickFilter(plane, rowCost, meta, height));
+        await EncodeStreamAsync(job, hostMeta, into);
+        await _accelerator.SynchronizeAsync();
+        return await meta.CopyToHostAsync();
+    }
+
     public async Task<int> EncodeAlphaAsync(
         ArrayView1D<byte, Stride1D.Dense> alpha, int width, int height,
         ArrayView1D<byte, Stride1D.Dense> output, WebPAlphaEncodeOptions? options = null)
@@ -97,6 +158,12 @@ public sealed partial class WebPLosslessEncoderGpu
                 // it (WebPLosslessEncoderGpu_Alpha_ArrayViewOverload_WritesOnlyThePayload). A stream that overflows its 1 + n
                 // capacity still counts every byte (and flags the overflow), so the lengths compare as before; such a winner is
                 // replaced by the raw plane below.
+                if (LockstepAlphaTrials)
+                {
+                    await EncodeAlphaTrialsLockstepAsync(plane, width, height, options.Quality, maxSize, output, hostMeta);
+                }
+                else
+                {
                 var trialHalves = await _alphaTrial.EnsureDrainedAsync(2L * maxSize);
                 int bestFilter = 0;
                 int bestLength = int.MaxValue;
@@ -122,6 +189,7 @@ public sealed partial class WebPLosslessEncoderGpu
                 meta.CopyFromCPU(bestMeta!);
                 if (bestMeta![WebPEncMeta.Error] == 0 && bestLength > 0)
                     trialHalves.SubView((long)bestIn * maxSize + 1, bestLength).CopyTo(output.SubView(1, bestLength));
+                }
             }
             else
             {

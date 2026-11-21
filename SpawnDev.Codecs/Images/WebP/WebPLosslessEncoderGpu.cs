@@ -653,5 +653,6 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
         _blobs.Dispose();
         _rowCost.Dispose();
         _alphaTrial.Dispose();
+        if (_trialEncoders != null) foreach (var e in _trialEncoders) e.Dispose();
     }
 }
