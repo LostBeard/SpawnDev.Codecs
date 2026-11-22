@@ -19,6 +19,12 @@
 
   SpawnGen's Save Animated WEBP, lossy q90 (Lore's 25 frames 512x352, `webp-anim-bench`, OpenCL, warm): 414 ms per
   frame -> 166 ms, the same 302,636-byte file (the ALPH plane's exact filter trials were about two thirds of a frame).
+- The copy lengths at distance 1 and at the row above come from a new pass (`RunsKernel`: one thread per 1024
+  positions counts the runs backward, capped at 4096) instead of a scan of up to 4096 pixels at every position. They
+  live in the parse flags' ints until the parse, so no memory is added. Same bytes (oracle on every lane; red: with the
+  run compared at distance 2, 30 cases differ). The gain is on the backends that run threads one after another: tokenize
+  of the probe above Wasm 1,516 -> 854 ms (encode 3.0 -> 2.5 s), CPU 1,114 -> 378 ms, Velocity 1,531 -> 379 ms; the GPU
+  lanes are unchanged (CUDA 69 / 76 ms, OpenCL 61 / 63, WebGPU 183 / 193: within run-to-run noise).
 - `WebPLosslessEncoderGpu.Trace` (tests only) also marks the transforms, the tokenize and the code build of each
   strategy trial, each after a synchronize, so a probe can tell them apart.
 

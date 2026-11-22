@@ -53,7 +53,7 @@ public sealed class WebPEncodeKernels : IDisposable
     private Action<Index1D, ArrayView<int>, ArrayView<int>> _buildCodes = null!;
     // the parallel tokeniser (Vp8lTokenizeParallel)
     private Action<Index1D, ArrayView<int>, int, int> _ptFill = null!;
-    private Action<Index1D, ArrayView<uint>, ArrayView<int>, Vp8lTokenizeParallel.Args> _ptLinks = null!, _ptFixup = null!, _ptSearch = null!;
+    private Action<Index1D, ArrayView<uint>, ArrayView<int>, Vp8lTokenizeParallel.Args> _ptLinks = null!, _ptFixup = null!, _ptSearch = null!, _ptRuns = null!;
     private Action<Index1D, ArrayView<int>, Vp8lTokenizeParallel.Args> _ptCarry = null!, _ptCount = null!, _ptScan = null!;
     private Action<Index1D, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args> _ptParse = null!, _ptFinish = null!;
     private Action<Index1D, ArrayView<int>, ArrayView<int>, Vp8lTokenizeParallel.Args> _ptParseSpec = null!, _ptParseFix = null!;
@@ -212,6 +212,7 @@ public sealed class WebPEncodeKernels : IDisposable
         _ptLinks = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<uint>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.LinksKernel);
         _ptFixup = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<uint>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.FixupKernel);
         _ptSearch = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<uint>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.SearchKernel);
+        _ptRuns = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<uint>, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.RunsKernel);
         _ptCarry = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.CarryKernel);
         _ptCount = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.CountKernel);
         _ptScan = await a.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<int>, Vp8lTokenizeParallel.Args>(Vp8lTokenizeParallel.ScanKernel);
@@ -506,11 +507,12 @@ public sealed class WebPEncodeKernels : IDisposable
         {
             int tables0 = args.PairTable, tablesLen = checked((int)(l.BlockCount - l.PairTable));
             _ptFill(tablesLen, s, tables0, -1);
-            _ptFill(n, s, args.Flag, 0);
             _ptFill(Vp8lTokenizeParallel.StateInts, s, args.State, 0);
             _ptLinks(l.Blocks, main, s, args);
             _ptCarry(Vp8lTokenizeParallel.PairKeys + Vp8lTokenizeParallel.CacheKeys, s, args);
             _ptFixup(n, main, s, args);
+            // the run and row-above copy lengths of every position, in the Flag ints until the parse (RunsKernel)
+            _ptRuns((n + Vp8lTokenizeParallel.RunBlock - 1) / Vp8lTokenizeParallel.RunBlock, main, s, args);
             await _pacer.LaunchedAsync();
             for (int b = 0; b < n; b += Vp8lTokenizeParallel.SearchChunk)
             {
@@ -519,6 +521,7 @@ public sealed class WebPEncodeKernels : IDisposable
                 _ptSearch(Math.Min(Vp8lTokenizeParallel.SearchChunk, n - b), main, s, sa);
                 await _pacer.LaunchedAsync();
             }
+            _ptFill(n, s, args.Flag, 0);   // the parse starts from flags of 0 (they held the runs)
             if (SerialParse)
             {
                 // the parse: at most n tokens, ParseChunk per launch

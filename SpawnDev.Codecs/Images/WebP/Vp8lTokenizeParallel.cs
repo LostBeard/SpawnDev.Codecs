@@ -186,12 +186,63 @@ public static class Vp8lTokenizeParallel
             s[a.CachePrev + p] = s[a.CacheTable + b * CacheKeys + (int)Vp8lEncodeGpu.CacheHash(pix[p], 32 - a.CacheBits)];
     }
 
+    // ---- runs ----
+
+    /// <summary>Positions per thread of <see cref="RunsKernel"/>.</summary>
+    public const int RunBlock = 1024;
+
+    /// <summary>The longest copy (VP8L): the runs are counted up to it.</summary>
+    public const int MaxCopy = 4096;
+
+    /// <summary>
+    /// Thread b: for each position p of block b, the copy lengths at distance 1 and at the row above (xsize), capped at
+    /// MaxCopy, packed as run1 | runX &lt;&lt; 16 into the Flag ints (free until the parse, which refills them with 0).
+    /// runD(p) = (pix[p] == pix[p - D]) ? min(1 + runD(p + 1), MaxCopy) : 0 with runD(N) = 0, which is
+    /// min(MatchLength(p - D, p, all the way), MaxCopy): SearchKernel's two MatchLength scans of up to 4096 pixels per
+    /// position become one load (in a flat area every position scanned to the run's end). The thread first counts the run
+    /// at its block's end forward (at most MaxCopy compares per distance: nothing longer is used), then walks back.
+    /// </summary>
+    public static void RunsKernel(Index1D b, ArrayView<uint> pix, ArrayView<int> s, Args a)
+    {
+        int n = a.N, xs = a.XSize;
+        int start = b * RunBlock;
+        int end = start + RunBlock;
+        if (end > n) end = n;
+        int r1 = 0, rx = 0;
+        if (end < n)
+        {
+            bool go = end > 0;
+            while (go)
+            {
+                int q = end + r1;
+                bool eq = pix[q - 1] == pix[q];
+                if (eq) r1++;
+                go = eq & (r1 < MaxCopy) & (end + r1 < n);
+            }
+            go = end >= xs;
+            while (go)
+            {
+                int q = end + rx;
+                bool eq = pix[q - xs] == pix[q];
+                if (eq) rx++;
+                go = eq & (rx < MaxCopy) & (end + rx < n);
+            }
+        }
+        for (int p = end - 1; p >= start; p--)
+        {
+            bool e1 = p > 0 && pix[p - 1] == pix[p];
+            r1 = e1 ? (r1 + 1 < MaxCopy ? r1 + 1 : MaxCopy) : 0;
+            bool ex = p >= xs && pix[p - xs] == pix[p];
+            rx = ex ? (rx + 1 < MaxCopy ? rx + 1 : MaxCopy) : 0;
+            s[a.Flag + p] = r1 | (rx << 16);
+        }
+    }
+
     // ---- search ----
 
-    /// <summary>Thread i: position a.Base + i's best copy, exactly as TokenizeStep searches at a token start.</summary>
+    /// <summary>Thread i: position a.Base + i's best copy, exactly as TokenizeStep searches at a token start (RunsKernel first).</summary>
     public static void SearchKernel(Index1D i, ArrayView<uint> pix, ArrayView<int> s, Args a)
     {
-        const int MaxCopy = 4096;
         const int MaxDist = (1 << 20) - 120;
         int pos = a.Base + i;
         if (pos >= a.N) return;
@@ -201,18 +252,22 @@ public static class Vp8lTokenizeParallel
         int bestLen = 0, bestDist = 0;
         if (pos > 0)
         {
-            int l = Vp8lEncodeGpu.MatchLength(pix, pos - 1, pos, maxLen);
+            // the run and the row above from RunsKernel: MatchLength(pos - D, pos, maxLen) == min(runD(pos), maxLen)
+            int runs = s[a.Flag + pos];
+            int l = runs & 0xFFFF;
+            if (l > maxLen) l = maxLen;
             if (l > bestLen) { bestLen = l; bestDist = 1; }
-            // A candidate beats bestLen only if it also matches at index bestLen: that one compare rejects most candidates
+            if (pos >= xsize)
+            {
+                l = runs >> 16;
+                if (l > maxLen) l = maxLen;
+                if (l > bestLen) { bestLen = l; bestDist = xsize; }
+            }
+            // A chain candidate beats bestLen only if it also matches at index bestLen: that one compare rejects most of them
             // (in a flat run every candidate matches up to the run's end, as the best already does) before a MatchLength of
             // up to 4096 compares. Same lengths and distances as comparing every candidate in full (the serial walk,
             // Vp8lEncodeGpu.TokenizeStep, still does, and stays the oracle). At bestLen == maxLen nothing can beat it, and
             // pos + maxLen may be one past the data, so no compare then.
-            if (pos >= xsize && bestLen < maxLen && pix[pos - xsize + bestLen] == pix[pos + bestLen])
-            {
-                l = Vp8lEncodeGpu.MatchLength(pix, pos - xsize, pos, maxLen);
-                if (l > bestLen) { bestLen = l; bestDist = xsize; }
-            }
             if (a.ChainDepth > 0 & pos + 1 < n)
             {
                 int cand = s[a.KeyPrev + pos];
