@@ -17,6 +17,8 @@
   | CUDA | 586 ms | 142 ms |
   | Chrome WebGPU | 1,073 ms | 745 ms |
 
+  SpawnGen's Save Animated WEBP, lossy q90 (Lore's 25 frames 512x352, `webp-anim-bench`, OpenCL, warm): 414 ms per
+  frame -> 166 ms, the same 302,636-byte file (the ALPH plane's exact filter trials were about two thirds of a frame).
 - `WebPLosslessEncoderGpu.Trace` (tests only) also marks the transforms, the tokenize and the code build of each
   strategy trial, each after a synchronize, so a probe can tell them apart.
 
