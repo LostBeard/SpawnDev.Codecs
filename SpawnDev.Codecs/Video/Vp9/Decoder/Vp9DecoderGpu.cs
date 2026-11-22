@@ -93,13 +93,14 @@ public sealed class Vp9DecoderGpu : IDisposable
     /// </summary>
     public async Task WarmUpAsync()
     {
+        using var kernelLoads = KernelLoadBatch.Scope(_acc);   // one release for the whole warm-up
         await _pipe.EnsureKernelsAsync();
         await EnsurePackAsync();
     }
 
     private async Task EnsurePackAsync()
-        => _pack ??= await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long>(
-            Vp9OutputKernels.PackPlanesKernel);
+        => _pack ??= await KernelLoadBatch.RunAsync(_acc, () => _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>, int, int, int, int, int, int, long, long, long>(
+            Vp9OutputKernels.PackPlanesKernel));
 
     /// <summary>Decode the packets of a WebM / Matroska (first V_VP9 track) or IVF file; one picture per shown packet.</summary>
     /// <remarks>WebM alpha (BlockAdditional, AlphaMode 1) is decoded too: <see cref="Vp9VideoFrame.Alpha"/>.</remarks>

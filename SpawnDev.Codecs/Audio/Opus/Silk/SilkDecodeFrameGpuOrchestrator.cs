@@ -101,7 +101,7 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
         if (_indicesKernel != null && _pulsesKernel != null && _parametersKernel != null && _decodeCoreKernel != null &&
             _finalizeKernel != null)
             return Task.CompletedTask;
-        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = KernelLoadBatch.RunAsync(_accelerator, LoadKernelsAsync);
         return _kernelsLoad;
     }
 
@@ -154,46 +154,46 @@ public sealed class SilkDecodeFrameGpuOrchestrator : IDisposable
 
     // The launchers of the synchronous methods: each loads synchronously when nothing has loaded it.
     private Action<Index1D, ArrayView<byte>, int, int, SilkIndicesInputs, SilkIndicesScalars, ArrayView<OpusRangeDecoderGpuState>, ArrayView<int>> IndicesLauncher
-        => _indicesKernel ??= _accelerator.LoadAutoGroupedStreamKernel<
+        => _indicesKernel ??= KernelLoadBatch.Run(_accelerator, () => _accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<byte>, int, int,
             SilkIndicesInputs,
             SilkIndicesScalars,
             ArrayView<OpusRangeDecoderGpuState>,
-            ArrayView<int>>(SilkFrameIndicesKernel);
+            ArrayView<int>>(SilkFrameIndicesKernel));
 
     private Action<Index1D, ArrayView<byte>, int, int, SilkPulsesInputs, ArrayView<int>, int, ArrayView<OpusRangeDecoderGpuState>, ArrayView<short>> PulsesLauncher
-        => _pulsesKernel ??= _accelerator.LoadAutoGroupedStreamKernel<
+        => _pulsesKernel ??= KernelLoadBatch.Run(_accelerator, () => _accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<byte>, int, int,
             SilkPulsesInputs,
             ArrayView<int>,
             int,
             ArrayView<OpusRangeDecoderGpuState>,
-            ArrayView<short>>(SilkFramePulsesKernel);
+            ArrayView<short>>(SilkFramePulsesKernel));
 
     private Action<Index1D, ArrayView<int>, SilkParametersInputs, SilkParametersState, SilkParametersScalars, ArrayView<int>, ArrayView<short>> ParametersLauncher
-        => _parametersKernel ??= _accelerator.LoadAutoGroupedStreamKernel<
+        => _parametersKernel ??= KernelLoadBatch.Run(_accelerator, () => _accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<int>,
             SilkParametersInputs,
             SilkParametersState,
             SilkParametersScalars,
             ArrayView<int>,
-            ArrayView<short>>(SilkFrameParametersKernel);
+            ArrayView<short>>(SilkFrameParametersKernel));
 
     private Action<Index1D, SilkDecodeCoreInputs, SilkDecodeCoreScalars> DecodeCoreLauncher
-        => _decodeCoreKernel ??= _accelerator.LoadAutoGroupedStreamKernel<
+        => _decodeCoreKernel ??= KernelLoadBatch.Run(_accelerator, () => _accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             SilkDecodeCoreInputs,
-            SilkDecodeCoreScalars>(SilkFrameDecodeCoreKernel);
+            SilkDecodeCoreScalars>(SilkFrameDecodeCoreKernel));
 
     private Action<Index1D, ArrayView<short>, int, int, int, int> FinalizeLauncher
-        => _finalizeKernel ??= _accelerator.LoadAutoGroupedStreamKernel<
+        => _finalizeKernel ??= KernelLoadBatch.Run(_accelerator, () => _accelerator.LoadAutoGroupedStreamKernel<
             Index1D,
             ArrayView<short>,
             int, int,
-            int, int>(SilkFrameFinalizeKernel);
+            int, int>(SilkFrameFinalizeKernel));
 
     /// <summary>
     /// Phase A: dispatch the indices + pulses decode. Range decoder state

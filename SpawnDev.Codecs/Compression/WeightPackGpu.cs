@@ -119,19 +119,20 @@ public sealed class WeightPackGpu : IDisposable
     /// yields to the browser's event loop first.</summary>
     public async Task WarmUpAsync()
     {
+        using var kernelLoads = KernelLoadBatch.Scope(_accelerator);   // one release for the whole warm-up
         await EnsurePackKernelsAsync();
         await EnsureUnpackKernelsAsync();
     }
 
     private Task EnsurePackKernelsAsync()
     {
-        if (_packLoad == null || _packLoad.IsFaulted || _packLoad.IsCanceled) _packLoad = LoadPackKernelsAsync();
+        if (_packLoad == null || _packLoad.IsFaulted || _packLoad.IsCanceled) _packLoad = KernelLoadBatch.RunAsync(_accelerator, LoadPackKernelsAsync);
         return _packLoad;
     }
 
     private Task EnsureUnpackKernelsAsync()
     {
-        if (_unpackLoad == null || _unpackLoad.IsFaulted || _unpackLoad.IsCanceled) _unpackLoad = LoadUnpackKernelsAsync();
+        if (_unpackLoad == null || _unpackLoad.IsFaulted || _unpackLoad.IsCanceled) _unpackLoad = KernelLoadBatch.RunAsync(_accelerator, LoadUnpackKernelsAsync);
         return _unpackLoad;
     }
 

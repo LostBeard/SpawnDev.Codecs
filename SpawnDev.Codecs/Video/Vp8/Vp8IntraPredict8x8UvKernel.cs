@@ -34,6 +34,7 @@ public sealed class Vp8IntraPredict8x8UvKernel : IDisposable
     /// <summary>Compile the kernel onto <paramref name="accelerator"/>.</summary>
     public Vp8IntraPredict8x8UvKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

@@ -140,8 +140,8 @@ public sealed partial class FlacEncoderGpu : IDisposable
 
         // De-interleave every frame into its channel-major slot of dAllSamples
         // (a frame's slot covers the same sample range as its interleaved slice).
-        var deinterleave = _deinterleaveKernel ??= await _accelerator.LoadAutoGroupedStreamKernelAsync<
-            Index1D, ArrayView<int>, ArrayView<int>, int, int>(FlacEncodeDeinterleaveKernel);
+        var deinterleave = _deinterleaveKernel ??= await KernelLoadBatch.RunAsync(_accelerator, () => _accelerator.LoadAutoGroupedStreamKernelAsync<
+            Index1D, ArrayView<int>, ArrayView<int>, int, int>(FlacEncodeDeinterleaveKernel));
         var pacer = new LaunchPacer(_accelerator);
         for (int first = 0; first < totalSamples; first += DeinterleaveLaunchSamples)
         {

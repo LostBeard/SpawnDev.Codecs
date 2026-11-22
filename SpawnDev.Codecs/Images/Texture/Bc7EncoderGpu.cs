@@ -74,7 +74,7 @@ internal sealed class Bc7EncoderGpu : IDisposable
     public Task WarmUpAsync()
     {
         if (_mode != null && _pack != null) return Task.CompletedTask;
-        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = KernelLoadBatch.RunAsync(_accelerator, LoadKernelsAsync);
         return _kernelsLoad;
     }
 
@@ -197,8 +197,8 @@ internal sealed class Bc7EncoderGpu : IDisposable
     /// </summary>
     public void Encode(ArrayView<byte> rgba, int width, int height, ArrayView<int> scratchA, ArrayView<int> scratchB, ArrayView<byte> blocks)
     {
-        var mode = _mode ??= _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int, int, int>(ModeKernel);
-        var pack = _pack ??= _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>>(PackKernel);
+        var mode = _mode ??= KernelLoadBatch.Run(_accelerator, () => _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<int>, ArrayView<int>, ArrayView<int>, ArrayView<float>, int, int, int, int>(ModeKernel));
+        var pack = _pack ??= KernelLoadBatch.Run(_accelerator, () => _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<int>, ArrayView<byte>, ArrayView<int>>(PackKernel));
         int count = ((width + 3) / 4) * ((height + 3) / 4);
         for (int which = 0; which < 4; which++)
         {

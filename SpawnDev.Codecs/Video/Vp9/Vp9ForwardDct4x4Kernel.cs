@@ -40,6 +40,7 @@ public sealed class Vp9ForwardDct4x4Kernel : IDisposable
     /// <summary>Compile the kernel onto <paramref name="accelerator"/>.</summary>
     public Vp9ForwardDct4x4Kernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

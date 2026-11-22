@@ -20,6 +20,7 @@ public sealed class SilkDecodeCoreGpuTestKernel : IDisposable
     /// <summary>Compile.</summary>
     public SilkDecodeCoreGpuTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, SilkDecodeCoreInputs, SilkDecodeCoreScalars>(SilkDecodeCoreTestKernel);

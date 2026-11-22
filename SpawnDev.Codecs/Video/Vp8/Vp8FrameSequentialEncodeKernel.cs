@@ -112,6 +112,7 @@ public sealed class Vp8FrameSequentialEncodeKernel : IDisposable
     /// <summary>Compile.</summary>
     public Vp8FrameSequentialEncodeKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

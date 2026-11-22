@@ -41,6 +41,7 @@ public sealed class Vp8FrameLayoutKernels : IDisposable
     /// <summary>Compile kernels onto <paramref name="accelerator"/>.</summary>
     public Vp8FrameLayoutKernels(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _gatherY16Kernel = accelerator.LoadAutoGroupedStreamKernel<

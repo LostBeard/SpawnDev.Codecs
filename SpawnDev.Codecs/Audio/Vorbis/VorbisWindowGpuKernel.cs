@@ -21,6 +21,7 @@ public sealed class VorbisCanonicalWindowGpuKernel : IDisposable
     /// <summary>Compile.</summary>
     public VorbisCanonicalWindowGpuKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, int>(VorbisCanonicalWindowKernel);

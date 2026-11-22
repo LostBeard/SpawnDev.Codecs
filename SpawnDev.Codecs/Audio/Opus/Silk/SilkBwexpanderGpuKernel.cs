@@ -24,6 +24,7 @@ public sealed class SilkBwexpanderGpuKernel : IDisposable
     /// <summary>Compile both kernels.</summary>
     public SilkBwexpanderGpuKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel16 = accelerator.LoadAutoGroupedStreamKernel<

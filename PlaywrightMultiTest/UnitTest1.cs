@@ -28,7 +28,7 @@ namespace PlaywrightMultiTest
                     if (test.Result == TestResult.Unsupported)
                     {
                         sw.Stop();
-                        TestResultsWriter.RecordResult(test.Name, "Skip", test.ResultMessage, sw.Elapsed.TotalMilliseconds);
+                        TestResultsWriter.RecordResult(test.Name, "Skip", test.ResultMessage, sw.Elapsed.TotalMilliseconds, test.Reports);
                         Assert.Ignore(test.ResultMessage!);
                     }
                 }
@@ -38,17 +38,20 @@ namespace PlaywrightMultiTest
                     if (test.Result == TestResult.Unsupported)
                     {
                         sw.Stop();
-                        TestResultsWriter.RecordResult(test.Name, "Skip", test.ResultMessage, sw.Elapsed.TotalMilliseconds);
+                        TestResultsWriter.RecordResult(test.Name, "Skip", test.ResultMessage, sw.Elapsed.TotalMilliseconds, test.Reports);
                         Assert.Ignore(test.ResultMessage!);
                     }
                 }
                 sw.Stop();
-                TestResultsWriter.RecordResult(test.Name, "Pass", null, sw.Elapsed.TotalMilliseconds);
+                TestResultsWriter.RecordResult(test.Name, "Pass", null, sw.Elapsed.TotalMilliseconds, test.Reports);
             }
-            catch (Exception ex)
+            // Assert.Ignore above throws IgnoreException (an NUnit ResultStateException): that skip is already recorded,
+            // and catching it here recorded the same test a second time as "Fail" in playwright-*.json (11-22: 1 failed
+            // of 31 for a run NUnit reported 0 failed of 30).
+            catch (Exception ex) when (ex is not ResultStateException)
             {
                 sw.Stop();
-                TestResultsWriter.RecordResult(test.Name, "Fail", ex.Message, sw.Elapsed.TotalMilliseconds);
+                TestResultsWriter.RecordResult(test.Name, "Fail", ex.Message, sw.Elapsed.TotalMilliseconds, test.Reports);
                 throw;
             }
         }

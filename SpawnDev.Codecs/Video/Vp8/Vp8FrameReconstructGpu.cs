@@ -49,10 +49,14 @@ public sealed class Vp8FrameReconstructGpu : IDisposable
     private readonly Action<Index1D, ArrayView<short>, ArrayView<short>, int> _injectY2DcKernel;
     private readonly Action<Index1D, ArrayView<short>, ArrayView<short>, int> _walshDc1OnlyKernel;
     private readonly Action<Index1D, ArrayView<short>, ArrayView<int>, int> _detectAcOnlyKernel;
+    private readonly Action<Index1D, ArrayView<short>, ArrayView<short>, ArrayView<byte>, int> _fusedY2InverseKernel;
+    private readonly Action<Index1D, ArrayView<short>, ArrayView<byte>, int> _computeY2HasAcKernel;
+    private readonly Action<Index1D, ArrayView<short>, ArrayView<short>, int, int> _expandPerMbKernel;
 
     /// <summary>Compile kernels onto <paramref name="accelerator"/>.</summary>
     public Vp8FrameReconstructGpu(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _dequantKernel = new Vp8DequantizerKernel(accelerator);
@@ -65,6 +69,9 @@ public sealed class Vp8FrameReconstructGpu : IDisposable
             Index1D, ArrayView<short>, ArrayView<short>, int>(Vp8FrameReconstructGpuWalshDc1OnlyKernel);
         _detectAcOnlyKernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<short>, ArrayView<int>, int>(Vp8FrameReconstructGpuDetectAcOnlyKernel);
+        _fusedY2InverseKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<short>, ArrayView<byte>, int>(Vp8FrameReconstructGpuFusedY2InverseKernel);
+        _computeY2HasAcKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<byte>, int>(Vp8FrameReconstructGpuComputeY2HasAcKernel);
+        _expandPerMbKernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<short>, int, int>(Vp8FrameReconstructGpuExpandPerMbKernel);
     }
 
     /// <summary>
@@ -222,8 +229,7 @@ public sealed class Vp8FrameReconstructGpu : IDisposable
         ArrayView<byte> y2HasAc,
         int mbCount)
     {
-        var k = _accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<short>, ArrayView<byte>, int>(Vp8FrameReconstructGpuFusedY2InverseKernel);
+        var k = _fusedY2InverseKernel;
         k((Index1D)(mbCount * 16), y2Coefs, y2Inv, y2HasAc, mbCount);
     }
 
@@ -264,8 +270,7 @@ public sealed class Vp8FrameReconstructGpu : IDisposable
         int mbCount)
     {
         if (mbCount == 0) return;
-        var k = _accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<byte>, int>(Vp8FrameReconstructGpuComputeY2HasAcKernel);
+        var k = _computeY2HasAcKernel;
         k((Index1D)mbCount, y2Coefs, y2HasAc, mbCount);
     }
 
@@ -305,8 +310,7 @@ public sealed class Vp8FrameReconstructGpu : IDisposable
         ArrayView<short> perMb, ArrayView<short> perBlock,
         int mbCount, int blocksPerMb)
     {
-        var k = _accelerator.LoadAutoGroupedStreamKernel<
-            Index1D, ArrayView<short>, ArrayView<short>, int, int>(Vp8FrameReconstructGpuExpandPerMbKernel);
+        var k = _expandPerMbKernel;
         k((Index1D)(mbCount * blocksPerMb), perMb, perBlock, mbCount, blocksPerMb);
     }
 

@@ -76,6 +76,7 @@ public sealed class Vp9KeyframeDecodeKernel : IDisposable
     /// <summary>Compile.</summary>
     public Vp9KeyframeDecodeKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _ctx = new StageBuffer<byte>(accelerator);

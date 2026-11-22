@@ -58,6 +58,7 @@ public sealed class CeltQuantBandsGpuTestKernel : IDisposable
     /// <summary>Compile.</summary>
     public CeltQuantBandsGpuTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _kernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<CeltQuantBandsCase>, CeltModeGpu, ArrayView<int>,
             ArrayView<int>, ArrayView<byte>, ArrayView<uint>>(TestKernel);

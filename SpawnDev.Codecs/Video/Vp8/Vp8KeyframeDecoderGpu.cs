@@ -103,6 +103,7 @@ public sealed class Vp8KeyframeDecoderGpu : IDisposable
     /// <summary>Compile + cache kernels and constants onto <paramref name="accelerator"/>.</summary>
     public Vp8KeyframeDecoderGpu(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _setup = new Vp8FrameSetupKernel(accelerator);

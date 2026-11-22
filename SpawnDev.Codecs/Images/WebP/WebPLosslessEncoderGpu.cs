@@ -60,6 +60,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
     /// </summary>
     public async Task WarmUpAsync()
     {
+        using var kernelLoads = KernelLoadBatch.Scope(_accelerator);   // one release for the whole warm-up
         await EnsureStreamKernelsAsync();
         await AnimEncoder.EnsureKernelsAsync();
     }

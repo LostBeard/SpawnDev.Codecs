@@ -173,6 +173,7 @@ public sealed class WebPDecoderGpu : IDisposable
     /// </summary>
     public async Task WarmUpAsync()
     {
+        using var kernelLoads = KernelLoadBatch.Scope(_accelerator);   // one release for the whole warm-up
         await _kernels.EnsureKernelsAsync();
         _vp8 ??= new Vp8FullKeyframeDecoderGpu(_accelerator);
         _yuv ??= new WebPYuvToRgbaGpu(_accelerator);

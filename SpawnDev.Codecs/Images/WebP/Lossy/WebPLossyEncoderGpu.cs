@@ -170,7 +170,7 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
     /// <summary>Load every kernel this encoder uses, once (awaited loads: each compile yields to the browser's event loop first).</summary>
     private Task EnsureKernelsAsync()
     {
-        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = KernelLoadBatch.RunAsync(_accelerator, LoadKernelsAsync);
         return _kernelsLoad;
     }
 
@@ -226,6 +226,7 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
     /// </summary>
     public async Task WarmUpAsync()
     {
+        using var kernelLoads = KernelLoadBatch.Scope(_accelerator);   // one release for the whole warm-up
         await EnsureKernelsAsync();
         _alphaEncoder ??= new WebPLosslessEncoderGpu(_accelerator);
         await _alphaEncoder.EnsureStreamKernelsAsync();

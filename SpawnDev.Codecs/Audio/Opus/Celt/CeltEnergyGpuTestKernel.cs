@@ -48,6 +48,7 @@ public sealed class CeltEnergyGpuTestKernel : IDisposable
     /// <summary>Compile.</summary>
     public CeltEnergyGpuTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _kernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<CeltEnergyCase>, CeltModeGpu, ArrayView<int>,
             ArrayView<byte>>(TestKernel);

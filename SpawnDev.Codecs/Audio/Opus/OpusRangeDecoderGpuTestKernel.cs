@@ -53,6 +53,7 @@ public sealed class OpusRangeDecoderGpuTestKernel : IDisposable
     /// <summary>Compile the kernel on the supplied accelerator.</summary>
     public OpusRangeDecoderGpuTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _state = accelerator.Allocate1D<OpusRangeDecoderGpuState>(1);

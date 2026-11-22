@@ -21,6 +21,7 @@ public sealed class SilkShellCoderGpuTestKernel : IDisposable
     /// <summary>Compile.</summary>
     public SilkShellCoderGpuTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,

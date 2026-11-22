@@ -108,6 +108,7 @@ public sealed class SilkIndicesDecoderGpuTestKernel : IDisposable
     /// <summary>Compile.</summary>
     public SilkIndicesDecoderGpuTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,

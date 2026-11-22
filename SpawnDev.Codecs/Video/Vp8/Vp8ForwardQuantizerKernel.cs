@@ -27,6 +27,7 @@ public sealed class Vp8ForwardQuantizerKernel : IDisposable
     /// <summary>Compile the kernel onto <paramref name="accelerator"/>.</summary>
     public Vp8ForwardQuantizerKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

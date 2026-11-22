@@ -23,6 +23,7 @@ public sealed class Av1ForwardIdentity32Kernel : IDisposable
     /// <summary>Compile the kernel onto <paramref name="accelerator"/>.</summary>
     public Av1ForwardIdentity32Kernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

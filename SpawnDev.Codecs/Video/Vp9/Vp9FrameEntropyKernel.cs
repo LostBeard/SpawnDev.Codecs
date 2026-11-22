@@ -157,6 +157,7 @@ public sealed class Vp9FrameEntropyKernel : IDisposable
     /// <summary>Compile.</summary>
     public Vp9FrameEntropyKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _ctx = new StageBuffer<byte>(accelerator);

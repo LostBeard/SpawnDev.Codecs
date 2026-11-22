@@ -31,6 +31,7 @@ public sealed class MdctReferenceGpuKernel : IDisposable
     /// <summary>Compile.</summary>
     public MdctReferenceGpuKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

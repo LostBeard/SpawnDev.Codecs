@@ -138,7 +138,7 @@ public sealed partial class FlacEncoderGpu
     /// <summary>The stream encoder's kernels, loaded once on first use (awaited, so a browser page keeps running).</summary>
     private Task<StreamKernels> KernelsAsync()
     {
-        if (_streamLoad == null || _streamLoad.IsFaulted || _streamLoad.IsCanceled) _streamLoad = LoadStreamKernelsAsync();
+        if (_streamLoad == null || _streamLoad.IsFaulted || _streamLoad.IsCanceled) _streamLoad = KernelLoadBatch.RunAsync(_accelerator, LoadStreamKernelsAsync);
         return _streamLoad;
     }
 

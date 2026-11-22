@@ -326,6 +326,7 @@ public sealed class Av1FrameSequentialEncodeKernel : IDisposable
     /// <summary>Compile the kernels.</summary>
     public Av1FrameSequentialEncodeKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         var type = accelerator.AcceleratorType;

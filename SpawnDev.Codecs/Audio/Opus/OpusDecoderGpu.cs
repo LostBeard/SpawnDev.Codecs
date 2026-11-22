@@ -101,7 +101,7 @@ public sealed class OpusDecoderGpu : IDisposable
     /// event loop first).</summary>
     private Task EnsureKernelsAsync()
     {
-        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = KernelLoadBatch.RunAsync(_accelerator, LoadKernelsAsync);
         return _kernelsLoad;
     }
 
@@ -127,6 +127,7 @@ public sealed class OpusDecoderGpu : IDisposable
     public async Task WarmUpAsync()
     {
         await EnsureKernelsAsync();
+        using var kernelLoads = KernelLoadBatch.Scope(_accelerator);   // one release for the whole warm-up (SILK, CELT)
         await GetCeltAsync();
     }
 

@@ -70,6 +70,7 @@ public sealed class Vp9FrameAssembleKernel : IDisposable
     /// <summary>Compile.</summary>
     public Vp9FrameAssembleKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

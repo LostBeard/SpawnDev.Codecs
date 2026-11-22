@@ -33,6 +33,7 @@ public sealed class Av1RangeCoderRoundTripKernel : IDisposable
     /// <summary>Compile.</summary>
     public Av1RangeCoderRoundTripKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

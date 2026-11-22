@@ -110,7 +110,7 @@ public sealed class Lz4FrameDecompressorGpu : IDisposable
 
     private Task EnsureKernelsAsync()
     {
-        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = KernelLoadBatch.RunAsync(_accelerator, LoadKernelsAsync);
         return _kernelsLoad;
     }
 

@@ -143,6 +143,7 @@ public sealed class PngEncoderGpu : IDisposable
     /// </summary>
     public async Task WarmUpAsync()
     {
+        using var kernelLoads = KernelLoadBatch.Scope(_accelerator);   // one release for the whole warm-up
         await _kernels.EnsureKernelsAsync();
         await GetRunner(ZlibCompressorGpu.DefaultBlockSize).Kernels.EnsureKernelsAsync();
     }

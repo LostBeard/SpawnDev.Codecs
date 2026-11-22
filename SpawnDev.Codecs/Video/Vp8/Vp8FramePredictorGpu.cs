@@ -44,6 +44,7 @@ public sealed class Vp8FramePredictorGpu : IDisposable
     /// <summary>Compile kernels onto <paramref name="accelerator"/>.</summary>
     public Vp8FramePredictorGpu(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _intraY16Kernel = new Vp8IntraPredict16x16Kernel(accelerator);

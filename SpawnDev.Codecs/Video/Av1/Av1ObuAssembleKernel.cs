@@ -48,6 +48,7 @@ public sealed class Av1ObuAssembleKernel : IDisposable
     /// <summary>Compile the kernels.</summary>
     public Av1ObuAssembleKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _offsets = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<long>, ArrayView<int>, ArrayView<byte>, int, int>(Av1TileOffsetsKernel);
         _bytes = accelerator.LoadAutoGroupedStreamKernel<

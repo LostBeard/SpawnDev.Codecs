@@ -98,6 +98,7 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
     /// <summary>Construct an encoder bound to <paramref name="accelerator"/>. Uploads the constant tables once.</summary>
     public Av1KeyframeEncoderGpu(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
 
@@ -588,8 +589,8 @@ public sealed class Av1KeyframeEncoderGpu : IDisposable
         int reconW = Coded(width), reconH = Coded(height);
         int total = width * height + 2 * cw * ch;
         _stageRecon.Ensure(total);
-        _packRecon ??= await _accelerator.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>,
-            int, int, int, int, int, int, long, long, long>(Vp9.Decoder.Vp9OutputKernels.PackPlanesKernel);
+        _packRecon ??= await KernelLoadBatch.RunAsync(_accelerator, () => _accelerator.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<byte>, ArrayView<byte>,
+            int, int, int, int, int, int, long, long, long>(Vp9.Decoder.Vp9OutputKernels.PackPlanesKernel));
         long uOff = (long)reconW * reconH;
         _packRecon(total, _dRecon.View, _stageRecon.View, width, height, cw, ch, reconW, reconW >> 1,
             0L, uOff, uOff + (long)(reconW >> 1) * (reconH >> 1));

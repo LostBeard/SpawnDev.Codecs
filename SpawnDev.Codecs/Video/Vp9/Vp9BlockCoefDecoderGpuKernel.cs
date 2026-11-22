@@ -32,6 +32,7 @@ public sealed class Vp9BlockCoefDecoderTestKernel : IDisposable
     /// <summary>Compile.</summary>
     public Vp9BlockCoefDecoderTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

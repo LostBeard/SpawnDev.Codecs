@@ -61,6 +61,7 @@ public sealed class Vp9KeyframeSymbolsKernel
     /// <summary>Compile.</summary>
     public Vp9KeyframeSymbolsKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _kernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<short>, ArrayView<short>, ArrayView<short>,
             ArrayView<byte>, ArrayView<ushort>, ArrayView<int>, ArrayView<int>, ArrayView<ushort>, Vp9KeySymbolParams>(SymbolsKernel);

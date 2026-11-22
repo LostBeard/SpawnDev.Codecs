@@ -369,6 +369,7 @@ public static class OggOpusEncoder
     public static async Task WarmUpAsync(Accelerator accelerator)
     {
         ArgumentNullException.ThrowIfNull(accelerator);
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);   // one release for both warm-up encodes
         await EncodeAsync(accelerator, new short[2400 * 2], 48000, 2);
         await EncodeAsync(accelerator, new float[2400 * 2], 48000, 2);
     }

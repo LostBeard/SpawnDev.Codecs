@@ -35,6 +35,7 @@ public sealed class FlacBitRoundTripKernel : IDisposable
     /// <summary>Compile.</summary>
     public FlacBitRoundTripKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _state = accelerator.Allocate1D<int>(StateInts);

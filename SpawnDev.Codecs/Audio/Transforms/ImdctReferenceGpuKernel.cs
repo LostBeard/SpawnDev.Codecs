@@ -29,6 +29,7 @@ public sealed class ImdctReferenceGpuKernel : IDisposable
     /// <summary>Compile.</summary>
     public ImdctReferenceGpuKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

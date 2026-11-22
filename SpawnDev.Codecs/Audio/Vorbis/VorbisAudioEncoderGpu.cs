@@ -111,7 +111,7 @@ public sealed class VorbisAudioEncoderGpu : IDisposable
     /// <summary>Load every kernel once (awaited loads: each compile yields to the browser's event loop first).</summary>
     private Task EnsureKernelsAsync()
     {
-        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = KernelLoadBatch.RunAsync(_accelerator, LoadKernelsAsync);
         return _kernelsLoad;
     }
 

@@ -24,6 +24,7 @@ public sealed class Av1ForwardQuantizerGpuKernel : IDisposable
     /// <summary>Compile.</summary>
     public Av1ForwardQuantizerGpuKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

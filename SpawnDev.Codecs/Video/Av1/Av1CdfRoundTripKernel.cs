@@ -29,6 +29,7 @@ public sealed class Av1CdfRoundTripKernel : IDisposable
     /// <summary>Compile.</summary>
     public Av1CdfRoundTripKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

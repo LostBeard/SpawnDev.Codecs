@@ -35,6 +35,7 @@ public sealed class Vp9DequantizerComputeKernel : IDisposable
     /// <summary>Compile.</summary>
     public Vp9DequantizerComputeKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

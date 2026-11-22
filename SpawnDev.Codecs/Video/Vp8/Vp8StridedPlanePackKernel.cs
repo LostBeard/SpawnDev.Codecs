@@ -35,7 +35,7 @@ public sealed class Vp8StridedPlanePackKernel : IDisposable
     /// <summary>Load the kernel once (awaited load: the compile yields to the browser's event loop first).</summary>
     public Task EnsureKernelsAsync()
     {
-        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = KernelLoadBatch.RunAsync(_accelerator, LoadKernelsAsync);
         return _kernelsLoad;
     }
 

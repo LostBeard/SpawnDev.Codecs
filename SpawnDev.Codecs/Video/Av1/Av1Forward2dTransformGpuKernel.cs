@@ -23,6 +23,7 @@ public sealed class Av1Forward2dTransformGpuKernel : IDisposable
     /// <summary>Compile.</summary>
     public Av1Forward2dTransformGpuKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

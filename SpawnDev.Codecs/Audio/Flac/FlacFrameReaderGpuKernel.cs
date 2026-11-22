@@ -35,6 +35,7 @@ public sealed class FlacFrameReaderGpuKernel : IDisposable
     /// <summary>Compile.</summary>
     public FlacFrameReaderGpuKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _tables = accelerator.Allocate1D<int>(FlacCrcGpu.TableInts);

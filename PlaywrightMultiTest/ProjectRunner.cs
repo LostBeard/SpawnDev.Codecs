@@ -468,6 +468,13 @@ namespace PlaywrightMultiTest
                         {
                             var result = await ProcessRunner.Run(publishedBinary, rowTest.Name, timeout: 300_000).ConfigureAwait(false);
                             var resultLines = result.Text.Split(new[] { '\n', '\r' }, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                            // the test's measurements (see ProjectTest.Reports): dropped here before 11-22
+                            foreach (var report in resultLines.Where(l => l.StartsWith("[report] ", StringComparison.Ordinal)).Take(50))
+                            {
+                                var clipped = report.Length > 4000 ? report[..4000] : report;
+                                rowTest.Reports.Add(clipped);
+                                Console.Error.WriteLine($"[{rowTest.Name}] {clipped}");
+                            }
                             var testResltTest = resultLines.LastOrDefault(o => o.StartsWith("TEST: "))?.Substring(6);
                             var unitTest = testResltTest != null ? JsonSerializer.Deserialize<UnitTest>(testResltTest) : null;
                             if (unitTest == null)

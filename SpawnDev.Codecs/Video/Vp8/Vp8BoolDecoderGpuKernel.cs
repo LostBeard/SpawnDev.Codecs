@@ -26,6 +26,7 @@ public sealed class Vp8BoolDecoderTestKernel : IDisposable
     /// <summary>Compile.</summary>
     public Vp8BoolDecoderTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

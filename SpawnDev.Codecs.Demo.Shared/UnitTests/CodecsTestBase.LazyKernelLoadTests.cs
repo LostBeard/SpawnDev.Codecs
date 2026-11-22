@@ -34,6 +34,7 @@ using SpawnDev.Codecs.Images.Png;
 using SpawnDev.Codecs.Images.WebP;
 using SpawnDev.Codecs.Images.WebP.Lossy;
 using SpawnDev.Codecs.Images.Texture;
+using SpawnDev.Codecs.Video.Vp8;
 using SpawnDev.Codecs.Video.Vp9.Decoder;
 using SpawnDev.ILGPU;
 using SpawnDev.UnitTesting;
@@ -357,6 +358,56 @@ public abstract partial class CodecsTestBase
             foreach (var format in new[] { SnappyFormat.Raw, SnappyFormat.Framed })
                 await Zip($"Snappy ({format})", async () => await snappyDec.DecompressAsync(await snappyEnc.CompressAsync(data, format), format));
             True(zipSteps.Count == 0, $"{acc.AcceleratorType}: kernels loaded by compressor work after the warm-ups: " + string.Join(", ", zipSteps));
+        }
+        finally
+        {
+            acc.Dispose();
+            ctx.Dispose();
+        }
+    }
+
+    // KernelLoadBatch: a codec's kernel loads release the ILGPU compiler cache (ReleaseCompilerCaches, SpawnDev.ILGPU
+    // 5.4.44) ONCE, after the outermost load, however its loaders nest, and only when something was loaded. Each release
+    // costs the next load a re-import (5-15 ms), so a release per nested loader would add that cost per loader. The codecs
+    // keep working after the release (round trip below), and work after the warm-ups releases nothing more.
+    [TestMethod(Timeout = 1800000)]
+    public async Task Codecs_KernelLoads_ReleaseCompilerCacheOncePerCodec()
+    {
+        (Context ctx, Accelerator acc) fresh;
+        try { fresh = await CreateKernelAcceleratorAsync(); }
+        catch (NotSupportedException ex) { throw new UnsupportedTestException(ex.Message); }
+        var (ctx, acc) = fresh;
+        try
+        {
+            if (!acc.Device.Satisfies(SerialStreamKernels)) throw new UnsupportedTestException("the codecs need scatter stores");
+            int Releases() => KernelLoadBatch.ReleaseCount(ctx);
+            Equal(0, Releases(), "releases before any codec loaded a kernel");
+
+            // nested async loaders: PngDecoderGpu's batch holds PngKernels' and InflateKernel's
+            using var pngDec = new PngDecoderGpu(acc);
+            using var pngEnc = new PngEncoderGpu(acc);
+            Equal(0, Releases(), "releases by constructors that compile nothing");
+            await pngDec.WarmUpAsync();
+            Equal(1, Releases(), "releases by PngDecoderGpu.WarmUpAsync (PngKernels + InflateKernel: one batch)");
+            await pngDec.WarmUpAsync();
+            Equal(1, Releases(), "releases by a second PngDecoderGpu.WarmUpAsync (nothing loaded)");
+
+            // a warm-up chaining two loaders (the PNG kernels, the zlib compressor's)
+            await pngEnc.WarmUpAsync();
+            Equal(2, Releases(), "releases by PngEncoderGpu.WarmUpAsync (two loaders: one batch)");
+
+            // the kernels loaded before a release keep working: a lossless round trip, which loads and releases nothing
+            const int w = 33, h = 17;
+            var rgba = new byte[w * h * 4];
+            for (int i = 0; i < rgba.Length; i++) rgba[i] = (byte)(i * 7 + (i >> 5));
+            var png = await pngEnc.EncodeAsync(rgba, w, h);
+            True((await pngDec.DecodeAsync(png)).Pixels.AsSpan().SequenceEqual(rgba), "PNG round trip after the releases is not lossless");
+            Equal(2, Releases(), "releases by work after the warm-ups");
+
+            // a constructor compiling two kernel classes synchronously (frame setup, keyframe decode; the plane pack loads
+            // lazily): one batch. Red-check 11-22: without the constructor's scope this is 4 (a release per class).
+            using (var vp8 = new Vp8KeyframeDecoderGpu(acc))
+                Equal(3, Releases(), "releases by the Vp8KeyframeDecoderGpu constructor (two kernel classes: one batch)");
         }
         finally
         {

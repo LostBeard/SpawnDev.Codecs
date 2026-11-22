@@ -67,6 +67,7 @@ public sealed class CeltPvqGpuTestKernel : IDisposable
     /// <summary>Compile.</summary>
     public CeltPvqGpuTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _kernel = accelerator.LoadAutoGroupedStreamKernel<Index1D, SpecializedValue<int>, ArrayView<CeltPvqCase>, ArrayView<int>, ArrayView<int>,
             ArrayView<int>, ArrayView<uint>, ArrayView<byte>, ArrayView<uint>, int>(TestKernel);

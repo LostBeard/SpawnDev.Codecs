@@ -186,7 +186,7 @@ public sealed class VideoFileEncoderGpu : IDisposable
         Func<int, ArrayView1D<float, Stride1D.Dense>, ArrayView1D<float, Stride1D.Dense>> frame, int width, int height,
         int fpsNum, int fpsDen, bool av1, int q, int keyInterval, int av1LevelLimit)
     {
-        _toRgba ??= await _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<byte>>(ToRgbaKernel);
+        _toRgba ??= await KernelLoadBatch.RunAsync(_acc, () => _acc.LoadAutoGroupedStreamKernelAsync<Index1D, ArrayView<float>, ArrayView<byte>>(ToRgbaKernel));
         await _toYuv.EnsureKernelsAsync();
         int pixels = width * height;
         long chroma = WebPRgbaToYuvGpu.ChromaPlaneSize(width, height);

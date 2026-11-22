@@ -63,7 +63,16 @@ public sealed class BmpEncoderGpu : IDisposable
     }
 
     // Kernels load lazily (awaited by EncodeAsync, where every overload ends up): the constructor compiles nothing.
-    private async Task EnsureKernelsAsync()
+    private Task? _kernelsLoad;
+
+    /// <summary>Load every kernel once, as one batch: one compiler-cache release for the whole codec (see KernelLoadBatch).</summary>
+    private Task EnsureKernelsAsync()
+    {
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = KernelLoadBatch.RunAsync(_accelerator, LoadKernelsAsync);
+        return _kernelsLoad;
+    }
+
+    private async Task LoadKernelsAsync()
     {
         await _kernels.EnsureKernelsAsync();
         await _palette.EnsureKernelsAsync();

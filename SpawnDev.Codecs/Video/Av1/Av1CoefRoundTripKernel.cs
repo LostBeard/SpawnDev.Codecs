@@ -57,6 +57,7 @@ public sealed class Av1CoefRoundTripKernel : IDisposable
     /// <summary>Compile.</summary>
     public Av1CoefRoundTripKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

@@ -27,6 +27,7 @@ public sealed class FlacCrcGpuKernel : IDisposable
     /// <summary>Compile.</summary>
     public FlacCrcGpuKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _tables = accelerator.Allocate1D<int>(FlacCrcGpu.TableInts);

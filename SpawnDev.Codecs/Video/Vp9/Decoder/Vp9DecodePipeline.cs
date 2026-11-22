@@ -46,7 +46,7 @@ internal sealed class Vp9DecodePipeline : IDisposable
     /// <summary>Load every kernel once (awaited loads: each compile yields to the browser's event loop first).</summary>
     internal Task EnsureKernelsAsync()
     {
-        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = KernelLoadBatch.RunAsync(_acc, LoadKernelsAsync);
         return _kernelsLoad;
     }
 

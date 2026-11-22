@@ -22,6 +22,7 @@ public sealed class Vp9Idct8x8GpuTestKernel : IDisposable
     /// <summary>Compile.</summary>
     public Vp9Idct8x8GpuTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

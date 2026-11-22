@@ -112,6 +112,7 @@ public sealed class Vp9KeyframeDecoderGpu : IDisposable
     /// </summary>
     public Vp9KeyframeDecoderGpu(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
 

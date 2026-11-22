@@ -415,7 +415,7 @@ public sealed class SilkPacketDecoderGpu : IDisposable
     public Task WarmUpAsync()
     {
         if (_kernels != null) return Task.CompletedTask;
-        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = KernelLoadBatch.RunAsync(_acc, LoadKernelsAsync);
         return _kernelsLoad;
     }
 
@@ -426,7 +426,7 @@ public sealed class SilkPacketDecoderGpu : IDisposable
     }
 
     /// <summary>The kernels; loads them synchronously when nothing has (the synchronous entry points).</summary>
-    private Kernels Launchers => _kernels ??= Kernels.Load(_acc);
+    private Kernels Launchers => _kernels ??= KernelLoadBatch.Run(_acc, () => Kernels.Load(_acc));
 
     private SilkResetTargets ResetTargets => new SilkResetTargets
     {

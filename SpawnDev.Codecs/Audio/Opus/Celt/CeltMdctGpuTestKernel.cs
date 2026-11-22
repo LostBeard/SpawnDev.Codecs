@@ -33,6 +33,7 @@ public sealed class CeltMdctGpuTestKernel : IDisposable
     /// <summary>Compile.</summary>
     public CeltMdctGpuTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _backward = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<CeltMdctCase>, CeltModeGpu, ArrayView<int>>(BackwardKernel);
         _forward = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<CeltMdctCase>, CeltModeGpu, ArrayView<int>>(ForwardKernel);

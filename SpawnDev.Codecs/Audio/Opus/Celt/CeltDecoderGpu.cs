@@ -162,7 +162,7 @@ public sealed class CeltDecoderGpu : IDisposable
             FlushReset(_kernels);
             return Task.CompletedTask;
         }
-        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = KernelLoadBatch.RunAsync(_accelerator, LoadKernelsAsync);
         return _kernelsLoad;
     }
 
@@ -179,7 +179,7 @@ public sealed class CeltDecoderGpu : IDisposable
     {
         get
         {
-            var k = _kernels ??= Kernels.Load(_accelerator);
+            var k = _kernels ??= KernelLoadBatch.Run(_accelerator, () => Kernels.Load(_accelerator));
             FlushReset(k);
             return k;
         }

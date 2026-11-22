@@ -32,7 +32,7 @@ public static class TestResultsWriter
     }
 
     /// <summary>Record a test result. Called after each test completes.</summary>
-    public static void RecordResult(string testName, string result, string? error, double durationMs)
+    public static void RecordResult(string testName, string result, string? error, double durationMs, IReadOnlyList<string>? reports = null)
     {
         lock (_lock)
         {
@@ -43,6 +43,7 @@ public static class TestResultsWriter
                 Error = error?.Length > 500 ? error[..500] : error,
                 DurationMs = double.IsNaN(durationMs) || double.IsInfinity(durationMs) ? -1 : Math.Round(durationMs, 1),
                 Timestamp = DateTime.Now.ToString("HH:mm:ss"),
+                Reports = reports is { Count: > 0 } ? reports.ToList() : null,
             });
             WriteJson();
         }
@@ -118,4 +119,6 @@ public class TestResultEntry
     public string? Error { get; init; }
     public double DurationMs { get; init; }
     public string Timestamp { get; init; } = "";
+    /// <summary>The test's "[report] " lines (its measurements), or null when it printed none.</summary>
+    public List<string>? Reports { get; init; }
 }

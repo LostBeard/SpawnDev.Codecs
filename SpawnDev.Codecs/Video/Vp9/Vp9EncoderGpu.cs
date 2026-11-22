@@ -159,6 +159,7 @@ public sealed class Vp9EncoderGpu : IDisposable
     /// <summary>An encoder on <paramref name="accelerator"/>.</summary>
     public Vp9EncoderGpu(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         _acc = accelerator ?? throw new ArgumentNullException(nameof(accelerator));
         _key = new Vp9KeyframeEncoderGpu(_acc);
         _pad = new PlanePadKernel(_acc);
@@ -190,7 +191,7 @@ public sealed class Vp9EncoderGpu : IDisposable
 
     private Task EnsureKernelsAsync()
     {
-        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = KernelLoadBatch.RunAsync(_acc, LoadKernelsAsync);
         return _kernelsLoad;
     }
 

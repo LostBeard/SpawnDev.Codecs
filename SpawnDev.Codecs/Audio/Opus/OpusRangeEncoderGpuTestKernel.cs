@@ -41,6 +41,7 @@ public sealed class OpusRangeEncoderGpuTestKernel : IDisposable
     /// <summary>Compile the kernel on <paramref name="accelerator"/>.</summary>
     public OpusRangeEncoderGpuTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D, ArrayView<int>, int, ArrayView<byte>, ArrayView<ushort>, ArrayView<byte>, int, ArrayView<int>>(ScriptKernel);

@@ -21,6 +21,7 @@ public sealed class Av1InverseDct8GpuKernel : IDisposable
     /// <summary>Compile.</summary>
     public Av1InverseDct8GpuKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

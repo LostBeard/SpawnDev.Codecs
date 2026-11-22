@@ -54,6 +54,7 @@ public sealed class CeltSynthesisGpuTestKernel : IDisposable
     /// <summary>Compile.</summary>
     public CeltSynthesisGpuTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _denormalise = accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<CeltSynthesisCase>, CeltModeGpu, ArrayView<int>,
             ArrayView<short>>(DenormaliseKernel);

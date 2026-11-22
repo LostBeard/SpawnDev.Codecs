@@ -135,6 +135,7 @@ public sealed class Av1FrameSequentialDecodeKernel : IDisposable
     /// <summary>Compile the kernel.</summary>
     public Av1FrameSequentialDecodeKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

@@ -20,6 +20,7 @@ public sealed class VorbisFloor1ApplyGpuKernel : IDisposable
     /// <summary>Compile.</summary>
     public VorbisFloor1ApplyGpuKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

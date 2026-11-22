@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+### Smaller heap: the ILGPU compiler cache is released after each codec's kernel loads (2026-11-22)
+- SpawnDev.ILGPU 5.4.44. The ILGPU `Context` keeps the IR and type information of every method it compiles for its
+  whole life. In a browser the Context usually lives as long as the page, so every codec a page loaded stayed on the
+  .NET heap (in the 1.1.2 and 1.1.3 release sweeps, one test holding every codec ran the Wasm page's heap out:
+  "Garbage collector could not allocate"). The codecs now call the new
+  `accelerator.ReleaseCompilerCaches()` once their kernels are loaded. Kernels already loaded keep running; a later
+  load re-imports the code it shares with earlier ones (5-15 ms for that first load, measured by SpawnDev.ILGPU).
+- `KernelLoadBatch` (internal) makes it ONE release per codec, however its loaders nest (the PNG decoder loads the PNG,
+  inflate and pixel kernels; the VP9 keyframe encoder's constructor builds nine kernel classes). A depth count per
+  Context lets only the outermost load release, only if a kernel was compiled. A warm-up called again, or work after
+  the warm-up, releases nothing. Every kernel load in the library goes through it: async loaders, the synchronous
+  constructors and lazy loads, and the warm-ups that chain several loaders. Thread-safe on desktop: SpawnDev.ILGPU
+  5.4.44 makes the release wait for compiles on other threads, and a load wait for the release.
+- Measured (test `Codecs_CompilerCacheRelease_LossyWebP_SmallerHeap_SameBytes`): a lossy WebP encoder after 3 encodes
+  of 512x352 holds this much less live heap, with the same bytes written:
+
+  | Lane | Release off | Release on | Saved |
+  |---|---|---|---|
+  | Chrome WebGPU | 41.1 / 38.2 MiB | 4.8 / 10.0 MiB | 32.3 MiB |
+  | Wasm | 29.5 / 27.3 MiB | 1.2 / -5.7 MiB | 30.7 MiB |
+  | CUDA | 49.8 / 49.3 MiB | 4.7 / 4.6 MiB | 44.9 MiB |
+  | OpenCL / CPU | | | 44.9 MiB |
+  | Velocity | | | 28.2 MiB |
+
+  Warm-up time is unchanged within one codec (its release comes after its last load).
+- NOT RELEASED YET, known cost: the accelerator's kernel cache holds kernels weakly, and without the release the
+  Context's caches kept them alive. With the release, a codec created AGAIN after its previous instance was disposed
+  and a GC ran recompiles its kernels from IL (Wasm, Vp9KeyframeDecoderGpu in a later test: 2,072 ms and 3 kernels
+  compiled, against 1 ms and 0 without the release). A page that makes an encoder per call would pay that per call.
+  Reported to SpawnDev.ILGPU (compiled kernels should live as long as the accelerator, independent of the IR); this
+  waits for that fix before a package.
+- Test `Codecs_KernelLoads_ReleaseCompilerCacheOncePerCodec`: one release per codec warm-up (PNG decoder, PNG encoder),
+  none on a second warm-up or later work, a lossless round trip after the releases, one release for a constructor that
+  compiles two kernel classes. Red: without the PNG decoder's batch it counts 2 (expected 1); without the VP8 keyframe
+  decoder constructor's batch, 4 (expected 3).
+- `Vp8FrameReconstructGpu` and `Vp8FrameTransformGpu` looked up five kernels in the accelerator's cache on every
+  dispatch; they now load them once in the constructor.
+- Test harness: a skipped test was recorded twice in `_mldump/playwright-*.json`, as Skip and as Fail (the `Assert.Ignore`
+  exception was caught by the failure handler). Test `[report] ` lines (measurements) are now printed to stderr, which
+  `dotnet test` shows for passing tests, and stored per test in the json. The desktop lanes dropped them before.
+
 ### PNG decoding: EXIF orientation from the eXIf chunk (2026-11-20)
 - `PngDecoderGpu` (and `ImageDecoderGpu` for PNG) reports `ImageInfo.Orientation` from an eXIf chunk, as the JPEG and
   WebP decoders report theirs (it was always 1; SpawnGen's Load Image turns pictures by it, Lore). The pixels come back

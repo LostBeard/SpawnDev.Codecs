@@ -61,6 +61,7 @@ public sealed class BcnEncoderGpu : IDisposable
     /// </summary>
     public async Task WarmUpAsync(params BcnFormat[] formats)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(_accelerator);   // one release for the whole warm-up
         bool all = formats.Length == 0;
         if (all || formats.Any(f => f != BcnFormat.Bc7)) await EnsureBcnKernelAsync();
         if (all || formats.Contains(BcnFormat.Bc7)) await (_bc7 ??= new Bc7EncoderGpu(_accelerator)).WarmUpAsync();
@@ -69,7 +70,7 @@ public sealed class BcnEncoderGpu : IDisposable
     private Task EnsureBcnKernelAsync()
     {
         if (_encode != null) return Task.CompletedTask;
-        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadBcnKernelAsync();
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = KernelLoadBatch.RunAsync(_accelerator, LoadBcnKernelAsync);
         return _kernelsLoad;
     }
 
@@ -127,7 +128,7 @@ public sealed class BcnEncoderGpu : IDisposable
             long ints = Bc7EncoderGpu.ScratchInts(width, height);
             _bc7.Encode(rgba, width, height, _bc7ScratchA.Ensure(ints), _bc7ScratchB.Ensure(ints), blocks);
         }
-        else (_encode ??= _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>(EncodeKernel))((int)(size / 4), rgba, blocks, _tables.View, (int)format, width, height);
+        else (_encode ??= KernelLoadBatch.Run(_accelerator, () => _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>(EncodeKernel)))((int)(size / 4), rgba, blocks, _tables.View, (int)format, width, height);
     }
 
     private static void Validate(BcnFormat format, int width, int height)

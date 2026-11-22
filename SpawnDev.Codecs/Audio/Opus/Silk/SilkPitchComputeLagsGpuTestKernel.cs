@@ -22,6 +22,7 @@ public sealed class SilkPitchComputeLagsGpuTestKernel : IDisposable
     /// <summary>Compile.</summary>
     public SilkPitchComputeLagsGpuTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,

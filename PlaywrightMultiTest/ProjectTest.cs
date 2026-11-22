@@ -13,6 +13,12 @@ public class ProjectTest
     public string? TestPageUrl { get; }
     public TestResult Result { get; set; }
     public string? ResultMessage { get; set; }
+    /// <summary>
+    /// The test's "[report] " lines (its measurements), from the page console (browser) or the test process's output
+    /// (desktop). Printed to stderr, which dotnet test shows for passing tests too (stdout of a passing test is kept by
+    /// NUnit and never shown), and written to the run's playwright-*.json.
+    /// </summary>
+    public List<string> Reports { get; } = new();
     public Func<IPage, Task> TestFunc { get; set; }
     /// <summary>
     /// The test's own time limit from its page row (data-test-timeout, SpawnDev.UnitTesting 2.5.8-local.4+; 0 = the
@@ -254,7 +260,10 @@ public class ProjectTest
                     Console.Error.WriteLine($"  WARN: {Clip(warn, 2000)}");
             }
             foreach (var report in consoleReports.Take(50))
-                Console.WriteLine($"[{Name}] {Clip(report, 4000)}");
+            {
+                Reports.Add(Clip(report, 4000));
+                Console.Error.WriteLine($"[{Name}] {Clip(report, 4000)}");
+            }
 
             ResultMessage = stateMessage;
 

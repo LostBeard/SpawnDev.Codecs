@@ -31,6 +31,7 @@ public sealed class SilkSideInfoDecoderGpuTestKernel : IDisposable
     /// <summary>Compile.</summary>
     public SilkSideInfoDecoderGpuTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,

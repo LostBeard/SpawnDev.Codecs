@@ -72,6 +72,7 @@ public sealed class Vp8KeyframeDecodeKernel : IDisposable
     /// <summary>Compile.</summary>
     public Vp8KeyframeDecodeKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _state = new StageBuffer<int>(accelerator);

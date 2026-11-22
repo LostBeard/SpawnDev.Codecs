@@ -28,6 +28,7 @@ public sealed class Vp8CoefBlockDecoderTestKernel : IDisposable
     /// <summary>Compile.</summary>
     public Vp8CoefBlockDecoderTestKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

@@ -26,6 +26,7 @@ public sealed class PlanePadKernel : IDisposable
     /// <summary>Compile.</summary>
     public PlanePadKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _kernel = accelerator.LoadAutoGroupedStreamKernel<
             Index1D,

@@ -100,6 +100,7 @@ public sealed class Vp8BoolEncoderParallelGpu : IDisposable
     /// <summary>Compile the kernels.</summary>
     public Vp8BoolEncoderParallelGpu(Accelerator accelerator, int windowSymbols = 1 << 22, int blockBytes = DefaultBlockBytes)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         _acc = accelerator ?? throw new ArgumentNullException(nameof(accelerator));
         if (windowSymbols <= 0 || windowSymbols % (ChunkSymbols * GroupChunks) != 0)
             throw new ArgumentOutOfRangeException(nameof(windowSymbols), $"a positive multiple of {ChunkSymbols * GroupChunks}");

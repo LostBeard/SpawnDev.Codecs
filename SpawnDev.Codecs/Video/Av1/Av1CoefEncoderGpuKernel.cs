@@ -30,6 +30,7 @@ public sealed class Av1CoefEncoderGpuKernel : IDisposable
     /// <summary>Compile.</summary>
     public Av1CoefEncoderGpuKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

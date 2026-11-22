@@ -54,6 +54,7 @@ public sealed class Vp8FrameAssembleKernel : IDisposable
     /// <summary>Compile.</summary>
     public Vp8FrameAssembleKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

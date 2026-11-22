@@ -71,7 +71,7 @@ public sealed class BcnDecoderGpu : IDisposable
     public Task WarmUpAsync()
     {
         if (_decode != null) return Task.CompletedTask;
-        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = LoadKernelsAsync();
+        if (_kernelsLoad == null || _kernelsLoad.IsFaulted || _kernelsLoad.IsCanceled) _kernelsLoad = KernelLoadBatch.RunAsync(_accelerator, LoadKernelsAsync);
         return _kernelsLoad;
     }
 
@@ -80,7 +80,7 @@ public sealed class BcnDecoderGpu : IDisposable
 
     /// <summary>The decode kernel; loads it synchronously when nothing has (the synchronous <see cref="Decode"/> path).</summary>
     private Action<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int> DecodeLauncher
-        => _decode ??= _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>(DecodeKernel);
+        => _decode ??= KernelLoadBatch.Run(_accelerator, () => _accelerator.LoadAutoGroupedStreamKernel<Index1D, ArrayView<byte>, ArrayView<byte>, ArrayView<int>, int, int, int>(DecodeKernel));
 
     private static int[] BuildTables()
     {

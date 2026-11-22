@@ -17,6 +17,7 @@ public sealed class SilkLog2GpuKernel : IDisposable
     /// <summary>Compile.</summary>
     public SilkLog2GpuKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _kernel = accelerator.LoadAutoGroupedStreamKernel<

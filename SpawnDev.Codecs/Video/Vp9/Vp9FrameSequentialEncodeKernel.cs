@@ -130,6 +130,7 @@ public sealed class Vp9FrameSequentialEncodeKernel : IDisposable
     /// <summary>Compile.</summary>
     public Vp9FrameSequentialEncodeKernel(Accelerator accelerator)
     {
+        using var kernelLoads = KernelLoadBatch.Scope(accelerator);
         ArgumentNullException.ThrowIfNull(accelerator);
         _accelerator = accelerator;
         _batchKernel = accelerator.LoadAutoGroupedStreamKernel<
