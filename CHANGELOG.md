@@ -33,6 +33,14 @@
 - `WebPLosslessEncoderGpu.Trace` (tests only) also marks the transforms, the tokenize and the code build of each
   strategy trial, each after a synchronize, so a probe can tell them apart.
 
+### WebP lossy: the 4x4 transforms keep their intermediate in registers (2026-11-22)
+-  /  (the row kernel: every I4, I16 and UV reconstruction) passed their 16-value
+  intermediate through the caller's int scratch in device memory, a write and a dependent read back per value. It is
+  now 16 locals; same integers in the same order (libwebp dsp/enc.c). Timing attribution of the I4 decision (nsys,
+  CUDA, each piece run twice): the reconstruction was ~45% of . Now  1,906 -> 1,712 ms over
+  Lore's 25 frames x 2; Save Animated WEBP on OpenCL 153 -> 149 ms per frame, the same 302,636 bytes. Every lossy,
+  animation and alpha WebP test passes on every lane (76 / 0 / 12, the skips need Pillow or a browser).
+
 ### WebP alpha: the exact filter trials run in lockstep on WebGPU (2026-11-22)
 - The ALPH plane's exact filter choice encodes the plane with each of the four filters and keeps the smallest. On WebGPU
   in a browser the four trials now run together, each on its own encoder, so their host round trips overlap (one wait

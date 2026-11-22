@@ -108,9 +108,9 @@ internal static partial class WebPLossyEncodeRowKernel
     {
         int refO = BPred + I4Off(mode);
         var tmpV = si.SubView(tmpB, 16);
-        FTransform(sb, src, sb, refO, si, tmpA, tmpV);
+        FTransform(sb, src, sb, refO, si, tmpA);
         int nz = QuantizeBlock(si, tmpA, si, levels, meta, seg, 0, t);
-        ITransformOne(sb, refO, si, tmpA, sb, dst, tmpV);
+        ITransformOne(sb, refO, si, tmpA, sb, dst);
         return nz;
     }
 

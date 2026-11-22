@@ -70,7 +70,7 @@ internal static partial class WebPLossyEncodeRowKernel
             var blkTmp = si.SubView(lo + I16LBlk + n * 16, 16);
             int part = lo + I16LPart + n * I16PartStride;
             // the forward transform of block n; the mode's first lane also takes the macroblock's nz contexts
-            FTransform(sb, BIn + ScanY(n), sb, refO + ScanY(n), si, tmp + n * 16, blkTmp);
+            FTransform(sb, BIn + ScanY(n), sb, refO + ScanY(n), si, tmp + n * 16);
             if (n == 0)
             {
                 NzToBytes(nzRow, c.X, si, lo + I16LTopNz, lo + I16LLeftNz);
@@ -94,7 +94,7 @@ internal static partial class WebPLossyEncodeRowKernel
             Group.Barrier();   // every block quantized (its DC slot is 0 again)
             if (n == 0) TransformWHT(si, dcTmp, si, tmp, si.SubView(lo + I16LT16, 16));
             Group.Barrier();   // every block's DC is back
-            ITransformOne(sb, refO + ScanY(n), si, tmp + n * 16, sb, dst + ScanY(n), blkTmp);
+            ITransformOne(sb, refO + ScanY(n), si, tmp + n * 16, sb, dst + ScanY(n));
             si[part + PSse] = SSE(sb, BIn + ScanY(n), sb, dst + ScanY(n), 4, 4);
             si[part + PDisto] = tlambda != 0 ? Disto4x4(sb, BIn + ScanY(n), sb, dst + ScanY(n), t, blkTmp) : 0;
             int xx = n & 3, yy = n >> 2;
@@ -354,7 +354,7 @@ internal static partial class WebPLossyEncodeRowKernel
             int lv = lo + UVLLevels + n * 16;
             var blkTmp = si.SubView(lo + UVLBlk + n * 16, 16);
             int part = lo + UVLPart + n * I16PartStride;
-            FTransform(sb, BIn + 16 + ScanUV(n), sb, refO + ScanUV(n), si, uvTmp + n * 16, blkTmp);
+            FTransform(sb, BIn + 16 + ScanUV(n), sb, refO + ScanUV(n), si, uvTmp + n * 16);
             if (n == 0) NzToBytes(nzRow, c.X, si, lo + UVLTopNz, lo + UVLLeftNz);
             Group.Barrier();   // every block's coefficients
             if ((n == 0) & c.ErrDiff) CorrectDCValues(si, topDerr, c.X, meta, c.Seg, lo + UVLDerr, uvTmp);
@@ -365,7 +365,7 @@ internal static partial class WebPLossyEncodeRowKernel
             for (int i = 1; i < 16; ++i) nonZeroAc += si[lv + i] != 0 ? 1 : 0;
             si[part + PFlat] = nonZeroAc;
             Group.Barrier();   // every block quantized
-            ITransformOne(sb, refO + ScanUV(n), si, uvTmp + n * 16, sb, dst + 16 + ScanUV(n), blkTmp);
+            ITransformOne(sb, refO + ScanUV(n), si, uvTmp + n * 16, sb, dst + 16 + ScanUV(n));
             si[part + PSse] = SSE(sb, BIn + 16 + ScanUV(n), sb, dst + 16 + ScanUV(n), 4, 4);
             // GetCostUV's order: plane k (U, V), then 2x2 blocks; block n = 4k + xx + 2y
             int k = n >> 2, xx = n & 1, yy = (n >> 1) & 1;

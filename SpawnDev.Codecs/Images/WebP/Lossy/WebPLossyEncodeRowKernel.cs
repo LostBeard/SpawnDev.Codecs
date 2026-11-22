@@ -105,60 +105,89 @@ internal static partial class WebPLossyEncodeRowKernel
 
     // ================================================================== dsp (libwebp dsp/enc.c C versions)
 
-    private static void FTransform(ArrayView<byte> s, int so, ArrayView<byte> r, int ro, ArrayView<int> o, int oo, ArrayView<int> tmp)
+    // FTransform / ITransformOne keep their 4x4 intermediate in locals (16 ints in registers): it went through the
+    // caller's int scratch in device memory, a write and a dependent read back per value. The transforms are the hot
+    // part of the I4 decision (ReconstructIntra4: ~45% of Intra4Stage, nsys CUDA RTX 4070, lossy animated WebP, 2026-11-22).
+    // Same integers in the same order as libwebp's dsp/enc.c FTransform_C / ITransformOne.
+
+    // one row of the forward transform's first pass: the row's residual (s - r) -> its 4 intermediate values
+    private static void FTransformRow(ArrayView<byte> s, int so, ArrayView<byte> r, int ro, out int t0, out int t1, out int t2, out int t3)
     {
-        for (int i = 0; i < 4; ++i)
-        {
-            int d0 = s[so + i * BPS + 0] - r[ro + i * BPS + 0];
-            int d1 = s[so + i * BPS + 1] - r[ro + i * BPS + 1];
-            int d2 = s[so + i * BPS + 2] - r[ro + i * BPS + 2];
-            int d3 = s[so + i * BPS + 3] - r[ro + i * BPS + 3];
-            int a0 = d0 + d3, a1 = d1 + d2, a2 = d1 - d2, a3 = d0 - d3;
-            tmp[0 + i * 4] = (a0 + a1) * 8;
-            tmp[1 + i * 4] = (a2 * 2217 + a3 * 5352 + 1812) >> 9;
-            tmp[2 + i * 4] = (a0 - a1) * 8;
-            tmp[3 + i * 4] = (a3 * 2217 - a2 * 5352 + 937) >> 9;
-        }
-        for (int i = 0; i < 4; ++i)
-        {
-            int a0 = tmp[0 + i] + tmp[12 + i];
-            int a1 = tmp[4 + i] + tmp[8 + i];
-            int a2 = tmp[4 + i] - tmp[8 + i];
-            int a3 = tmp[0 + i] - tmp[12 + i];
-            int nz = a3 != 0 ? 1 : 0;
-            o[oo + 0 + i] = (short)((a0 + a1 + 7) >> 4);
-            o[oo + 4 + i] = (short)(((a2 * 2217 + a3 * 5352 + 12000) >> 16) + nz);
-            o[oo + 8 + i] = (short)((a0 - a1 + 7) >> 4);
-            o[oo + 12 + i] = (short)((a3 * 2217 - a2 * 5352 + 51000) >> 16);
-        }
+        int d0 = s[so + 0] - r[ro + 0];
+        int d1 = s[so + 1] - r[ro + 1];
+        int d2 = s[so + 2] - r[ro + 2];
+        int d3 = s[so + 3] - r[ro + 3];
+        int a0 = d0 + d3, a1 = d1 + d2, a2 = d1 - d2, a3 = d0 - d3;
+        t0 = (a0 + a1) * 8;
+        t1 = (a2 * 2217 + a3 * 5352 + 1812) >> 9;
+        t2 = (a0 - a1) * 8;
+        t3 = (a3 * 2217 - a2 * 5352 + 937) >> 9;
     }
 
-    private static void ITransformOne(ArrayView<byte> r, int ro, ArrayView<int> input, int io, ArrayView<byte> d, int dO, ArrayView<int> c)
+    // one column of the forward transform's second pass (rows' values u0..u3 of the column) -> o[oo], o[oo + 4], ...
+    private static void FTransformCol(int u0, int u1, int u2, int u3, ArrayView<int> o, int oo)
     {
-        for (int i = 0; i < 4; ++i)
-        {
-            int a = input[io + i] + input[io + i + 8];
-            int b = input[io + i] - input[io + i + 8];
-            int cc = Mul2(input[io + i + 4]) - Mul1(input[io + i + 12]);
-            int dd = Mul1(input[io + i + 4]) + Mul2(input[io + i + 12]);
-            c[i * 4 + 0] = a + dd;
-            c[i * 4 + 1] = b + cc;
-            c[i * 4 + 2] = b - cc;
-            c[i * 4 + 3] = a - dd;
-        }
-        for (int i = 0; i < 4; ++i)
-        {
-            int dc = c[i] + 4;
-            int a = dc + c[i + 8];
-            int b = dc - c[i + 8];
-            int cc = Mul2(c[i + 4]) - Mul1(c[i + 12]);
-            int dd = Mul1(c[i + 4]) + Mul2(c[i + 12]);
-            int row = i * BPS;
-            d[dO + 0 + row] = Clip8b(r[ro + 0 + row] + ((a + dd) >> 3));
-            d[dO + 1 + row] = Clip8b(r[ro + 1 + row] + ((b + cc) >> 3));
-            d[dO + 2 + row] = Clip8b(r[ro + 2 + row] + ((b - cc) >> 3));
-            d[dO + 3 + row] = Clip8b(r[ro + 3 + row] + ((a - dd) >> 3));
-        }
+        int a0 = u0 + u3;
+        int a1 = u1 + u2;
+        int a2 = u1 - u2;
+        int a3 = u0 - u3;
+        int nz = a3 != 0 ? 1 : 0;
+        o[oo + 0] = (short)((a0 + a1 + 7) >> 4);
+        o[oo + 4] = (short)(((a2 * 2217 + a3 * 5352 + 12000) >> 16) + nz);
+        o[oo + 8] = (short)((a0 - a1 + 7) >> 4);
+        o[oo + 12] = (short)((a3 * 2217 - a2 * 5352 + 51000) >> 16);
+    }
+
+    private static void FTransform(ArrayView<byte> s, int so, ArrayView<byte> r, int ro, ArrayView<int> o, int oo)
+    {
+        FTransformRow(s, so + 0 * BPS, r, ro + 0 * BPS, out int t00, out int t01, out int t02, out int t03);
+        FTransformRow(s, so + 1 * BPS, r, ro + 1 * BPS, out int t10, out int t11, out int t12, out int t13);
+        FTransformRow(s, so + 2 * BPS, r, ro + 2 * BPS, out int t20, out int t21, out int t22, out int t23);
+        FTransformRow(s, so + 3 * BPS, r, ro + 3 * BPS, out int t30, out int t31, out int t32, out int t33);
+        FTransformCol(t00, t10, t20, t30, o, oo + 0);
+        FTransformCol(t01, t11, t21, t31, o, oo + 1);
+        FTransformCol(t02, t12, t22, t32, o, oo + 2);
+        FTransformCol(t03, t13, t23, t33, o, oo + 3);
+    }
+
+    // one column of the inverse transform's first pass (input column i) -> the 4 values of intermediate row i
+    private static void ITransformVert(ArrayView<int> input, int io, out int c0, out int c1, out int c2, out int c3)
+    {
+        int a = input[io] + input[io + 8];
+        int b = input[io] - input[io + 8];
+        int cc = Mul2(input[io + 4]) - Mul1(input[io + 12]);
+        int dd = Mul1(input[io + 4]) + Mul2(input[io + 12]);
+        c0 = a + dd;
+        c1 = b + cc;
+        c2 = b - cc;
+        c3 = a - dd;
+    }
+
+    // one output row of the inverse transform (intermediate column values v0..v3) added to the prediction row
+    private static void ITransformHorz(int v0, int v1, int v2, int v3, ArrayView<byte> r, int ro, ArrayView<byte> d, int dO)
+    {
+        int dc = v0 + 4;
+        int a = dc + v2;
+        int b = dc - v2;
+        int cc = Mul2(v1) - Mul1(v3);
+        int dd = Mul1(v1) + Mul2(v3);
+        d[dO + 0] = Clip8b(r[ro + 0] + ((a + dd) >> 3));
+        d[dO + 1] = Clip8b(r[ro + 1] + ((b + cc) >> 3));
+        d[dO + 2] = Clip8b(r[ro + 2] + ((b - cc) >> 3));
+        d[dO + 3] = Clip8b(r[ro + 3] + ((a - dd) >> 3));
+    }
+
+    private static void ITransformOne(ArrayView<byte> r, int ro, ArrayView<int> input, int io, ArrayView<byte> d, int dO)
+    {
+        ITransformVert(input, io + 0, out int c00, out int c01, out int c02, out int c03);
+        ITransformVert(input, io + 1, out int c10, out int c11, out int c12, out int c13);
+        ITransformVert(input, io + 2, out int c20, out int c21, out int c22, out int c23);
+        ITransformVert(input, io + 3, out int c30, out int c31, out int c32, out int c33);
+        // output row i reads the intermediate's column i: c[i], c[i + 4], c[i + 8], c[i + 12] = c_0i, c_1i, c_2i, c_3i
+        ITransformHorz(c00, c10, c20, c30, r, ro + 0 * BPS, d, dO + 0 * BPS);
+        ITransformHorz(c01, c11, c21, c31, r, ro + 1 * BPS, d, dO + 1 * BPS);
+        ITransformHorz(c02, c12, c22, c32, r, ro + 2 * BPS, d, dO + 2 * BPS);
+        ITransformHorz(c03, c13, c23, c33, r, ro + 3 * BPS, d, dO + 3 * BPS);
     }
 
     private static void FTransformWHT(ArrayView<int> input, int io, ArrayView<int> o, int oo, ArrayView<int> tmp)
