@@ -139,6 +139,11 @@ public static class Vp8lTokenizeParallel
     // WORSE: 32 lanes per block, each owning the keys k % 32 == lane (2799 -> 3328 ms over the run): the lanes share a
     // warp, and on every position SOME lane takes the table branch, so the warp still pays its latency per position, plus
     // the 32x hashing. A faster pass needs fewer positions per thread, i.e. smaller blocks without a 65536-entry table each.
+    // Also tried and NOT kept (2026-11-22): the links as a stable sort of the keyed positions by pair hash (two 8-bit LSD
+    // passes: per-tile histograms, a two-level scan, a stable per-tile scatter; the link = the predecessor in the sorted
+    // order with the same hash). Exact (oracle on every lane), and CUDA's link time over Lore's run fell 1297 -> ~946 ms
+    // (probe CUDA 109 -> 102 ms, OpenCL 93 -> 80), but Chrome WebGPU got slower (probe 689 -> 796 ms, tokenize 151 -> 221:
+    // ~11 more dispatches per tokenisation), and WebGPU is SpawnGen's lane.
     public static void LinksKernel(Index1D b, ArrayView<uint> pix, ArrayView<int> s, Args a)
     {
         int start = b * BlockPositions;
