@@ -74,12 +74,12 @@
   | Velocity | | | 28.2 MiB |
 
   Warm-up time is unchanged within one codec (its release comes after its last load).
-- NOT RELEASED YET, known cost: the accelerator's kernel cache holds kernels weakly, and without the release the
-  Context's caches kept them alive. With the release, a codec created AGAIN after its previous instance was disposed
-  and a GC ran recompiles its kernels from IL (Wasm, Vp9KeyframeDecoderGpu in a later test: 2,072 ms and 3 kernels
-  compiled, against 1 ms and 0 without the release). A page that makes an encoder per call would pay that per call.
-  Reported to SpawnDev.ILGPU (compiled kernels should live as long as the accelerator, independent of the IR); this
-  waits for that fix before a package.
+- Keep a codec alive and reuse it. The accelerator's kernel cache holds kernels weakly (ILGPU's design, kept), so a
+  full GC after a codec is disposed drops its kernels, with or without the release (SpawnDev.ILGPU measured every lane,
+  2026-11-22), and a codec created again recompiles them from IL: Wasm, Vp9KeyframeDecoderGpu in a later test 2,072 ms
+  and 3 kernels compiled, against 1 ms and 0 when they survived. In a Wasm test sweep that happened more often with the
+  release than without (likely when the major GCs land; not proven). A page that makes a codec per call pays it per
+  call: keep one per accelerator.
 - Test `Codecs_KernelLoads_ReleaseCompilerCacheOncePerCodec`: one release per codec warm-up (PNG decoder, PNG encoder),
   none on a second warm-up or later work, a lossless round trip after the releases, one release for a constructor that
   compiles two kernel classes. Red: without the PNG decoder's batch it counts 2 (expected 1); without the VP8 keyframe
