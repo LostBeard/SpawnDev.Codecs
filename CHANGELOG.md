@@ -25,6 +25,11 @@
   run compared at distance 2, 30 cases differ). The gain is on the backends that run threads one after another: tokenize
   of the probe above Wasm 1,516 -> 854 ms (encode 3.0 -> 2.5 s), CPU 1,114 -> 378 ms, Velocity 1,531 -> 379 ms; the GPU
   lanes are unchanged (CUDA 69 / 76 ms, OpenCL 61 / 63, WebGPU 183 / 193: within run-to-run noise).
+- The colour-cache links (the previous pixel with the same cache key) have their own pass with 1024-position blocks
+  (`CacheLinksKernel`; their table is 1024 entries per block, one int per pixel), instead of riding in the pair-key pass
+  (one thread per 16384 positions: 11 threads for 512x352, each a dependent table read and write per position). nsys,
+  CUDA, over Lore's 25 frames twice: link passes 2,802 -> 1,294 ms. Same bytes (oracle on every lane; red: with the
+  cache fix-up on the pair blocks, 28 cases differ). Save Animated WEBP lossy q90 on OpenCL: 166 -> 153 ms per frame.
 - `WebPLosslessEncoderGpu.Trace` (tests only) also marks the transforms, the tokenize and the code build of each
   strategy trial, each after a synchronize, so a probe can tell them apart.
 

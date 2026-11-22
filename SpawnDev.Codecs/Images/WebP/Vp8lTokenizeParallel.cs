@@ -32,8 +32,15 @@ namespace SpawnDev.Codecs.Images.WebP;
 /// <summary>Layout and kernels of the parallel VP8L tokeniser (see the file header).</summary>
 public static class Vp8lTokenizeParallel
 {
-    /// <summary>Positions per block of the link pass.</summary>
+    /// <summary>Positions per block of the pair-key link pass.</summary>
     public const int BlockPositions = 16384;
+    /// <summary>
+    /// Positions per block of the colour-cache link pass. Its table has only CacheKeys (1024) entries per block, so its
+    /// blocks can be 16x finer than the pair keys' (65536 entries) for one int per pixel: 16x the threads, each walking
+    /// 1024 positions instead of 16384 (one thread's walk is a dependent table read and write per position: latency-bound;
+    /// nsys, CUDA RTX 4070, lossy animated WebP 512x352, 2026-11-22: ~0.9 ms a call with the pair blocks).
+    /// </summary>
+    public const int CacheBlock = 1024;
     /// <summary>Positions per thread of the emit passes.</summary>
     public const int EmitBlock = 1024;
     /// <summary>Positions per launch of the search pass.</summary>
@@ -56,7 +63,7 @@ public static class Vp8lTokenizeParallel
     /// <summary>Offsets of the parallel tokeniser's ints for a picture of N pixels (one buffer).</summary>
     public readonly struct Layout
     {
-        public readonly int N, Blocks, EmitBlocks, Segments;
+        public readonly int N, Blocks, CacheBlocks, EmitBlocks, Segments;
         public readonly long KeyPrev, CachePrev, Len, Dist, Flag, PairTable, CacheTable, BlockCount, BlockExtra, State, Total;
         /// <summary>Vp8lEmitParallel: bits, first word and first bit per emit block; its state.</summary>
         public readonly long EBits, EWord, EShift, EState;
@@ -67,6 +74,7 @@ public static class Vp8lTokenizeParallel
         {
             N = n;
             Blocks = (n + BlockPositions - 1) / BlockPositions;
+            CacheBlocks = (n + CacheBlock - 1) / CacheBlock;
             EmitBlocks = (n + EmitBlock - 1) / EmitBlock;
             Segments = (n + ParseSegment - 1) / ParseSegment;
             long p = 0;
@@ -78,7 +86,7 @@ public static class Vp8lTokenizeParallel
             Dist = p; p += n;
             Flag = p; p += n;
             PairTable = p; p += (long)Blocks * PairKeys;
-            CacheTable = p; p += (long)Blocks * CacheKeys;
+            CacheTable = p; p += (long)CacheBlocks * CacheKeys;
             BlockCount = p; p += EmitBlocks;
             BlockExtra = p; p += EmitBlocks;
             State = p; p += StateInts;
@@ -101,6 +109,8 @@ public static class Vp8lTokenizeParallel
         /// previous tokenisation of the same pixels are reused: they do not depend on the cache size).</summary>
         public int CacheOnly;
         public int Segments, SegExit;
+        /// <summary>Blocks of the colour-cache link pass (CacheBlock positions each).</summary>
+        public int CacheBlocks;
     }
 
     public static Args MakeArgs(in Layout l, int xsize, int cacheBits, int chainDepth) => new Args
@@ -111,6 +121,7 @@ public static class Vp8lTokenizeParallel
         BlockCount = checked((int)l.BlockCount), BlockExtra = checked((int)l.BlockExtra), State = checked((int)l.State),
         EBits = checked((int)l.EBits), EWord = checked((int)l.EWord), EShift = checked((int)l.EShift), EState = checked((int)l.EState),
         Segments = l.Segments, SegExit = checked((int)l.SegExit),
+        CacheBlocks = l.CacheBlocks,
     };
 
     /// <summary>Thread i: s[start + i] = value (the link tables start at -1, the flags at 0).</summary>
@@ -121,36 +132,43 @@ public static class Vp8lTokenizeParallel
 
     // ---- links ----
 
-    /// <summary>Thread b: block b's in-block links and its last position per key (tables pre-filled with -1).</summary>
-    // The GPU cost of a tokenisation (nsys, CUDA RTX 4070, lossy animated WebP 512x352, 2026-11-22): 1.8 ms a call, the
-    // biggest kernel of the encode: one thread per block of 16384 positions (11 threads), each position a dependent read
-    // and write of the block's 65536-key table. Tried and measured WORSE: 32 lanes per block, each owning the keys
-    // k % 32 == lane (2799 -> 3328 ms over the run): the lanes share a warp, and on every position SOME lane takes the
-    // table branch, so the warp still pays its latency per position, plus the 32x hashing. A faster pass needs fewer
-    // positions per thread, i.e. smaller blocks without a 65536-entry table each.
+    /// <summary>Thread b: block b's in-block pair-key links and its last position per pair key (table pre-filled with -1).</summary>
+    // The GPU cost of a tokenisation (nsys, CUDA RTX 4070, lossy animated WebP 512x352, 2026-11-22): one thread per block of
+    // 16384 positions (11 threads), each position a dependent read and write of the block's 65536-key table: ~1.5 ms a call
+    // for the pair keys (the cache keys, ~0.9 ms, now have their own finer pass, CacheLinksKernel). Tried and measured
+    // WORSE: 32 lanes per block, each owning the keys k % 32 == lane (2799 -> 3328 ms over the run): the lanes share a
+    // warp, and on every position SOME lane takes the table branch, so the warp still pays its latency per position, plus
+    // the 32x hashing. A faster pass needs fewer positions per thread, i.e. smaller blocks without a 65536-entry table each.
     public static void LinksKernel(Index1D b, ArrayView<uint> pix, ArrayView<int> s, Args a)
     {
         int start = b * BlockPositions;
         int end = start + BlockPositions;
         if (end > a.N) end = a.N;
         int pt = a.PairTable + b * PairKeys;
-        int ct = a.CacheTable + b * CacheKeys;
-        int cacheShift = 32 - a.CacheBits;
-        bool pairs = a.CacheOnly == 0;
         for (int p = start; p < end; p++)
         {
-            if (pairs)
+            int kp = -1;
+            if (p + 1 < a.N)
             {
-                int kp = -1;
-                if (p + 1 < a.N)
-                {
-                    int h = Vp8lEncodeGpu.PairHash(pix[p], pix[p + 1]);
-                    int last = s[pt + h];
-                    kp = last >= 0 ? last : -2;   // -2: look before the block (Fixup)
-                    s[pt + h] = p;
-                }
-                s[a.KeyPrev + p] = kp;
+                int h = Vp8lEncodeGpu.PairHash(pix[p], pix[p + 1]);
+                int last = s[pt + h];
+                kp = last >= 0 ? last : -2;   // -2: look before the block (Fixup)
+                s[pt + h] = p;
             }
+            s[a.KeyPrev + p] = kp;
+        }
+    }
+
+    /// <summary>Thread b: cache block b's in-block colour-cache links and its last position per cache key (table pre-filled with -1).</summary>
+    public static void CacheLinksKernel(Index1D b, ArrayView<uint> pix, ArrayView<int> s, Args a)
+    {
+        int start = b * CacheBlock;
+        int end = start + CacheBlock;
+        if (end > a.N) end = a.N;
+        int ct = a.CacheTable + b * CacheKeys;
+        int cacheShift = 32 - a.CacheBits;
+        for (int p = start; p < end; p++)
+        {
             int cp = -1;
             if (a.CacheBits > 0)
             {
@@ -170,10 +188,11 @@ public static class Vp8lTokenizeParallel
         int key = pair ? (int)k : k - PairKeys;
         int table = pair ? a.PairTable : a.CacheTable;
         int stride = pair ? PairKeys : CacheKeys;
+        int blocks = pair ? a.Blocks : a.CacheBlocks;
         bool live = (pair & a.CacheOnly == 0) | (!pair & key < CacheKeys & a.CacheBits > 0);
         if (!live) return;
         int run = -1;
-        for (int b = 0; b < a.Blocks; b++)
+        for (int b = 0; b < blocks; b++)
         {
             int at = table + b * stride + key;
             int last = s[at];
@@ -188,8 +207,9 @@ public static class Vp8lTokenizeParallel
         int b = p / BlockPositions;
         if ((a.CacheOnly == 0) & (s[a.KeyPrev + p] == -2))
             s[a.KeyPrev + p] = s[a.PairTable + b * PairKeys + Vp8lEncodeGpu.PairHash(pix[p], pix[p + 1])];
+        int cb = p / CacheBlock;
         if (s[a.CachePrev + p] == -2)
-            s[a.CachePrev + p] = s[a.CacheTable + b * CacheKeys + (int)Vp8lEncodeGpu.CacheHash(pix[p], 32 - a.CacheBits)];
+            s[a.CachePrev + p] = s[a.CacheTable + cb * CacheKeys + (int)Vp8lEncodeGpu.CacheHash(pix[p], 32 - a.CacheBits)];
     }
 
     // ---- runs ----
