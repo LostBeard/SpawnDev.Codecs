@@ -1,8 +1,11 @@
-// The ALPH plane's exact filter trials run in lockstep in a browser (WebPLosslessEncoderGpu.LockstepAlphaTrials: four
-// trials on four encoders, started together, so their host round trips overlap). Each trial makes its own choices, so the
-// chosen filter and the payload must be those of the one-trial-after-another loop. The planes: a blended animation
+// The ALPH plane's exact filter trials run in lockstep on WebGPU in a browser (WebPLosslessEncoderGpu.LockstepAlphaTrials:
+// four trials on four encoders, started together, so their host round trips overlap). Each trial makes its own choices, so
+// the chosen filter and the payload must be those of the one-trial-after-another loop. The planes: a blended animation
 // frame's mask (flat blocks made transparent), a soft gradient with a hard edge, noise, and a mostly opaque plane.
+// The test runs both paths (LockstepAlphaTrialsOverride) and checks the default: lockstep on WebGPU only (2026-11-22:
+// WebGPU 28-59% faster with it, Wasm within 1.5%: no host round trip to overlap there).
 
+using ILGPU.Runtime;
 using SpawnDev.Codecs.Images.WebP;
 using SpawnDev.UnitTesting;
 using static SpawnDev.Codecs.Demo.Shared.UnitTests.TestHelpers;
@@ -21,6 +24,11 @@ public abstract partial class CodecsTestBase
         try
         {
             using var enc = new WebPLosslessEncoderGpu(acc);
+            Equal(acc.AcceleratorType == AcceleratorType.WebGPU, enc.LockstepAlphaTrials, $"lockstep by default on {acc.AcceleratorType}");
+            // Timed (a warm encode before each timed one) only on WebGPU, where the timing decides the default. Elsewhere the
+            // bytes are checked without the warm encodes: Wasm's timing is settled (within 1.5%, twice, 11-22) and the warm
+            // encodes doubled a test that ran 649 s there, past its limit (a 512x352 exact alpha encode is ~92 s on Wasm).
+            bool timed = acc.AcceleratorType == AcceleratorType.WebGPU;
             var failures = new List<string>();
             foreach (var (name, w, h, plane) in AlphaLockstepPlanes())
             {
@@ -29,23 +37,23 @@ public abstract partial class CodecsTestBase
                 double lockMs, serialMs;
                 try
                 {
-                    WebPLosslessEncoderGpu.LockstepAlphaTrials = true;
-                    await enc.EncodeAlphaAsync(plane, w, h, o);   // warm (the trial encoders and their kernels)
+                    WebPLosslessEncoderGpu.LockstepAlphaTrialsOverride = true;
+                    if (timed) await enc.EncodeAlphaAsync(plane, w, h, o);   // warm (the trial encoders and their kernels)
                     var sw = System.Diagnostics.Stopwatch.StartNew();
                     lockstep = await enc.EncodeAlphaAsync(plane, w, h, o);
                     lockMs = sw.Elapsed.TotalMilliseconds;
-                    WebPLosslessEncoderGpu.LockstepAlphaTrials = false;
-                    await enc.EncodeAlphaAsync(plane, w, h, o);
+                    WebPLosslessEncoderGpu.LockstepAlphaTrialsOverride = false;
+                    if (timed) await enc.EncodeAlphaAsync(plane, w, h, o);
                     sw.Restart();
                     serial = await enc.EncodeAlphaAsync(plane, w, h, o);
                     serialMs = sw.Elapsed.TotalMilliseconds;
                 }
-                finally { WebPLosslessEncoderGpu.LockstepAlphaTrials = false; }   // the default until this test has run (see the field)
+                finally { WebPLosslessEncoderGpu.LockstepAlphaTrialsOverride = null; }   // back to the default (WebGPU in a browser)
                 if (!lockstep.AsSpan().SequenceEqual(serial))
                     failures.Add($"{name}: lockstep {lockstep.Length} B (filter {(lockstep[0] >> 2) & 3}) vs one at a time {serial.Length} B " +
                         $"(filter {(serial[0] >> 2) & 3}), first difference at byte {FirstDifference(lockstep, serial)}");
                 else Console.WriteLine($"[report] {acc.AcceleratorType} {name}: {serial.Length} B, filter {(serial[0] >> 2) & 3}, same bytes; " +
-                    $"lockstep {lockMs:F0} ms, one trial at a time {serialMs:F0} ms");
+                    $"lockstep {lockMs:F0} ms, one trial at a time {serialMs:F0} ms{(timed ? "" : " (untimed lane: the first includes the trial encoders' creation)")}");
             }
             True(failures.Count == 0, string.Join("\n", failures));
         }

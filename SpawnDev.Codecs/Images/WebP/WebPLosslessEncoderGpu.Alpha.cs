@@ -44,16 +44,21 @@ public sealed partial class WebPLosslessEncoderGpu
     /// <param name="options">Encoder options (null = defaults).</param>
     /// <returns>The length of the payload in <paramref name="output"/>.</returns>
     /// <summary>
-    /// The four exact filter trials of an ALPH plane in LOCKSTEP (meant as the browser default; off until verified): each trial on its own encoder
+    /// The four exact filter trials of an ALPH plane in LOCKSTEP on WebGPU in a browser: each trial on its own encoder
     /// (its own buffers and metadata), the four started together, so their host round trips overlap: one synchronize
     /// covers the four trials' queued kernels instead of one each. Each trial makes the choices it makes alone, so the
     /// chosen filter and the bytes are those of the one-trial-after-another loop. In a browser the interleaved
-    /// continuations all run on the page's one thread; on the desktop the loop stays sequential (one stream, launches from
-    /// one thread). Tests switch it both ways (WebPAlphaLockstep_SameBytesAsOneTrialAtATime).
+    /// continuations all run on the page's one thread; elsewhere the loop stays sequential (one stream, launches from
+    /// one thread).
     /// </summary>
-    // OFF until WebPAlphaLockstep_SameBytesAsOneTrialAtATime has run on the browser lanes (written 2026-11-20, not yet run);
-    // then the default becomes OperatingSystem.IsBrowser().
-    internal static bool LockstepAlphaTrials;
+    // Measured 2026-11-22 (WebPAlphaLockstep_SameBytesAsOneTrialAtATime, same bytes on every plane, RTX 4070): WebGPU
+    // lockstep 856 / 283 / 194 / 597 ms vs one at a time 1196 / 641 / 470 / 907 ms; Wasm 71.6 / 15.8 / 1.4 / 51.0 s vs
+    // 70.6 / 16.0 / 1.4 / 51.1 s (no gain: Wasm kernels run on the page's thread, there is no round trip to overlap). So
+    // WebGPU only. Tests force either path with LockstepAlphaTrialsOverride.
+    internal bool LockstepAlphaTrials =>LockstepAlphaTrialsOverride ?? (OperatingSystem.IsBrowser() && _accelerator.AcceleratorType == AcceleratorType.WebGPU);
+
+    /// <summary>Tests only: forces the lockstep on (true) or off (false); null = the default (WebGPU in a browser).</summary>
+    internal static bool? LockstepAlphaTrialsOverride;
 
     // the encoders of trials 1..3 (trial 0 runs on this one); created on the first lockstep trial
     private WebPLosslessEncoderGpu[]? _trialEncoders;

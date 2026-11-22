@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### WebP alpha: the exact filter trials run in lockstep on WebGPU (2026-11-22)
+- The ALPH plane's exact filter choice encodes the plane with each of the four filters and keeps the smallest. On WebGPU
+  in a browser the four trials now run together, each on its own encoder, so their host round trips overlap (one wait
+  covers four trials' kernels). Same bytes as one trial at a time (`WebPAlphaLockstep_SameBytesAsOneTrialAtATime`,
+  four planes), Chrome WebGPU, RTX 4070:
+
+  | Plane | Lockstep | One at a time |
+  |---|---|---|
+  | blended animation frame mask 512x352 | 856 ms | 1,196 ms |
+  | gradient + hard edge 300x200 | 283 ms | 641 ms |
+  | noise 97x61 | 194 ms | 470 ms |
+  | mostly opaque 640x64 | 597 ms | 907 ms |
+
+  Wasm keeps the sequential loop: there the kernels run on the page's thread and the lockstep measured within 1.5%
+  (71.6 vs 70.6 s on the first plane). The desktop backends keep it too (one stream, launches from one thread).
+
 ### Smaller heap: the ILGPU compiler cache is released after each codec's kernel loads (2026-11-22)
 - SpawnDev.ILGPU 5.4.44. The ILGPU `Context` keeps the IR and type information of every method it compiles for its
   whole life. In a browser the Context usually lives as long as the page, so every codec a page loaded stayed on the
