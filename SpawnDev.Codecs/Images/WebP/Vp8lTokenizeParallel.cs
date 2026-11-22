@@ -203,7 +203,12 @@ public static class Vp8lTokenizeParallel
         {
             int l = Vp8lEncodeGpu.MatchLength(pix, pos - 1, pos, maxLen);
             if (l > bestLen) { bestLen = l; bestDist = 1; }
-            if (pos >= xsize)
+            // A candidate beats bestLen only if it also matches at index bestLen: that one compare rejects most candidates
+            // (in a flat run every candidate matches up to the run's end, as the best already does) before a MatchLength of
+            // up to 4096 compares. Same lengths and distances as comparing every candidate in full (the serial walk,
+            // Vp8lEncodeGpu.TokenizeStep, still does, and stays the oracle). At bestLen == maxLen nothing can beat it, and
+            // pos + maxLen may be one past the data, so no compare then.
+            if (pos >= xsize && bestLen < maxLen && pix[pos - xsize + bestLen] == pix[pos + bestLen])
             {
                 l = Vp8lEncodeGpu.MatchLength(pix, pos - xsize, pos, maxLen);
                 if (l > bestLen) { bestLen = l; bestDist = xsize; }
@@ -223,8 +228,11 @@ public static class Vp8lTokenizeParallel
                     }
                     else
                     {
-                        l = Vp8lEncodeGpu.MatchLength(pix, cand, pos, maxLen);
-                        if (l > bestLen) { bestLen = l; bestDist = dist; }
+                        if (bestLen < maxLen && pix[cand + bestLen] == pix[pos + bestLen])
+                        {
+                            l = Vp8lEncodeGpu.MatchLength(pix, cand, pos, maxLen);
+                            if (l > bestLen) { bestLen = l; bestDist = dist; }
+                        }
                         cand = s[a.KeyPrev + cand];
                         depth++;
                         go = (cand >= 0) & (depth < a.ChainDepth) & (bestLen < maxLen);

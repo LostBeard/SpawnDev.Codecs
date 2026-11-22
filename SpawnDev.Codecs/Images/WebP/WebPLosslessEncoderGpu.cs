@@ -362,8 +362,10 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
         {
             await _kernels.TokenizeAsync(main, work, tok, meta, _tables.View, cacheBits, (long)hostMeta[WebPEncMeta.PackedWidth] * height,
                 hostMeta[WebPEncMeta.PackedWidth], plan.ChainDepth, reuseMatches: mainTokenized);
+            if (Trace != null) { await _accelerator.SynchronizeAsync(); Trace($"tokenize{(mainTokenized ? " (matches reused)" : "")}"); }
             mainTokenized = true;
             _kernels.BuildCodes(work, meta);
+            if (Trace != null) { await _accelerator.SynchronizeAsync(); Trace("build codes"); }
             if (!readBack) return 0;
             await _accelerator.SynchronizeAsync();
             var m = await meta.CopyToHostAsync();
@@ -388,6 +390,7 @@ public sealed partial class WebPLosslessEncoderGpu : IDisposable
             foreach (var s in strategies)
             {
                 var cur = Apply(s);
+                if (Trace != null) { await _accelerator.SynchronizeAsync(); Trace($"transforms {s}"); }
                 long cost = await CostAsync(cur, plan.TrialCache, true);
                 Trace?.Invoke($"trial {s}");
                 // side information the transforms add to the stream

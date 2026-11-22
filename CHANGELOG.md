@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### WebP lossless and alpha: the LZ77 match search rejects most candidates with one compare (2026-11-22)
+- The parallel tokeniser finds the best copy at every position: distance 1, the row above, and up to 128 hash-chain
+  candidates at quality 90+, each compared for up to 4096 pixels. In flat areas (alpha masks) every candidate matches
+  up to the run's end, as the best one already does, so all of them were compared in full. A candidate now gets the
+  full compare only if it matches at index bestLen (it cannot be longer otherwise). Same copies, same bytes: the
+  serial walk keeps comparing in full and stays the oracle (`WebPLosslessEncoderGpu_ParallelTokenizer_MatchesSerialWalk`,
+  every lane; red: with the check inverted 76 cases differ).
+- Exact-filter alpha encode of a 512x352 animation frame mask (`Probe_WebPAlphaExact_StageTimes`, warm, RTX 4070):
+
+  | Lane | Before | After |
+  |---|---|---|
+  | Wasm | 70.8 s | 3.0 s |
+  | CUDA | 586 ms | 142 ms |
+  | Chrome WebGPU | 1,073 ms | 745 ms |
+
+- `WebPLosslessEncoderGpu.Trace` (tests only) also marks the transforms, the tokenize and the code build of each
+  strategy trial, each after a synchronize, so a probe can tell them apart.
+
 ### WebP alpha: the exact filter trials run in lockstep on WebGPU (2026-11-22)
 - The ALPH plane's exact filter choice encodes the plane with each of the four filters and keeps the smallest. On WebGPU
   in a browser the four trials now run together, each on its own encoder, so their host round trips overlap (one wait
