@@ -122,6 +122,12 @@ public static class Vp8lTokenizeParallel
     // ---- links ----
 
     /// <summary>Thread b: block b's in-block links and its last position per key (tables pre-filled with -1).</summary>
+    // The GPU cost of a tokenisation (nsys, CUDA RTX 4070, lossy animated WebP 512x352, 2026-11-22): 1.8 ms a call, the
+    // biggest kernel of the encode: one thread per block of 16384 positions (11 threads), each position a dependent read
+    // and write of the block's 65536-key table. Tried and measured WORSE: 32 lanes per block, each owning the keys
+    // k % 32 == lane (2799 -> 3328 ms over the run): the lanes share a warp, and on every position SOME lane takes the
+    // table branch, so the warp still pays its latency per position, plus the 32x hashing. A faster pass needs fewer
+    // positions per thread, i.e. smaller blocks without a 65536-entry table each.
     public static void LinksKernel(Index1D b, ArrayView<uint> pix, ArrayView<int> s, Args a)
     {
         int start = b * BlockPositions;
