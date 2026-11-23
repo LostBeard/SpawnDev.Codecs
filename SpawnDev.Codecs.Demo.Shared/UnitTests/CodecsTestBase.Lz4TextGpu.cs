@@ -17,8 +17,14 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    /// <summary>Bytes generated per launch (bounded launches: a long single-thread launch stalls the desktop / trips the watchdog).</summary>
-    private const int Lz4TextChunk = 1 << 20;
+    /// <summary>
+    /// Bytes generated per launch (bounded launches: a long single-thread launch stalls the desktop / trips the watchdog).
+    /// 1 MB was not bounded enough: ~100 ms per launch on CUDA (RTX 4070, nsys 2026-11-23), slower on WebGPU (the LCG is
+    /// 64-bit, emulated there), and the 40 launches of a 40 MB input went out unpaced: late in a full WebGPU lane they
+    /// reset the GPU (Windows TDR, 2 s) in Lz4FrameCompressorGpu_40MB_TwoWaves, on every Codecs/ILGPU version back to
+    /// 1.1.3. 64 KB is ~6 ms on CUDA, and the launches go through LaunchPacer like the codecs' own.
+    /// </summary>
+    private const int Lz4TextChunk = 1 << 16;
 
     /// <summary>Inputs larger than this are generated on the accelerator.</summary>
     private const int Lz4LargeInput = 4_000_000;
@@ -76,9 +82,11 @@ public abstract partial class CodecsTestBase
         using var dWords = acc.Allocate1D(wordBytes.ToArray());
         using var dInfo = acc.Allocate1D(info);
         using var dState = acc.Allocate1D(new long[] { seed & 0x7FFFFFFF, 0 });
+        var pacer = new LaunchPacer(acc);
         for (long end = Lz4TextChunk; ; end += Lz4TextChunk)
         {
             kernel(1, buf.View, dWords.View, dInfo.View, dState.View, n, (int)Math.Min(end, n));
+            await pacer.LaunchedAsync();
             if (end >= n) break;
         }
         // the small buffers are disposed on return: the launches that read them must be done first (async: the browser

@@ -38,6 +38,7 @@ public abstract partial class CodecsTestBase
             try { fresh = await CreateKernelAcceleratorAsync(); }
             catch (NotSupportedException ex) { throw new UnsupportedTestException(ex.Message); }
             var (ctx, acc) = fresh;
+            bool savedRelease = KernelLoadBatch.ReleaseEnabled;   // restored as it was (not forced on)
             KernelLoadBatch.ReleaseEnabled = release;
             // Every run compiles from IL. WebGPU's page-wide shader-artifact cache otherwise serves a kernel loaded
             // before (by an earlier run, or an earlier test in the page) without building its IR at all, so nothing
@@ -62,7 +63,7 @@ public abstract partial class CodecsTestBase
             finally
             {
                 ShaderArtifactCache.Enabled = artifactCache;
-                KernelLoadBatch.ReleaseEnabled = true;
+                KernelLoadBatch.ReleaseEnabled = savedRelease;
                 acc.Dispose();
                 ctx.Dispose();
             }

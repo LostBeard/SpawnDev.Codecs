@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### SpawnDev.ILGPU 5.4.45; the WebGPU lane's GPU reset was a test helper (2026-11-23)
+- SpawnDev.ILGPU 5.4.44 -> 5.4.45 (weak kernel lifetime + the shader-artifact cache on every browser backend). Full
+  WebGPU lane 1,249 passed, 0 failed, 2 skipped (RTX 4070, Chromium 1248).
+- The GPU reset (Windows TDR, "device lost" then DXGI_ERROR_DEVICE_REMOVED for every later test) in
+  `Lz4FrameCompressorGpu_40MB_TwoWaves_ByteIdenticalWithLiblz4`, late in a full WebGPU lane, came from the tests' own
+  input generator, not from the codec or ILGPU: `Lz4GenTextGpuAsync` built the 40 MB input in 39 single-thread
+  launches of 1 MB each (~100 ms apiece on CUDA, nsys; slower on WebGPU, where its 64-bit LCG is emulated), unpaced,
+  with one wait at the end. It reset the GPU on every Codecs version back to 1.1.3 (5 lanes in a row on 11-22/23)
+  and passed alone. Now 64 KB per launch (6.8 ms max on CUDA) through `LaunchPacer`, like the codecs' own launches:
+  same bytes (`Lz4GenTextGpu_MatchesManagedGenerator`), the LZ4 40 MB tests pass in the full lane (7.2 s, 10.4 s),
+  no reset. (KernelLoadBatch's compiler-cache release was suspected first and is cleared: a lane with it off reset too.)
+- The compiler-cache tests that switch `KernelLoadBatch.ReleaseEnabled` restore the previous value instead of
+  forcing it on (forcing it on made a lane run with the release off silently run its later tests with it on).
+- Demo: SpawnDev.Blazor.BootRecovery 1.0.1 (1.0.0 broke BlazorJS.WebWorkers worker boots).
+
 ### WebP lossless and alpha: the LZ77 match search rejects most candidates with one compare (2026-11-22)
 - The parallel tokeniser finds the best copy at every position: distance 1, the row above, and up to 128 hash-chain
   candidates at quality 90+, each compared for up to 4096 pixels. In flat areas (alpha masks) every candidate matches

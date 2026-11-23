@@ -41,7 +41,7 @@
   <ItemGroup>
     <!-- Keep this pin equal to SpawnDev.Codecs.csproj's: a direct reference wins over the library's, so a stale pin here
          runs every browser lane (PlaywrightMultiTest) on the old ILGPU. -->
-    <PackageReference Include="SpawnDev.ILGPU" Version="5.4.44" />
+    <PackageReference Include="SpawnDev.ILGPU" Version="5.4.45" />
     <ProjectReference Include="..\SpawnDev.Codecs\SpawnDev.Codecs.csproj" />
     <ProjectReference Include="..\SpawnDev.Codecs.Demo.Shared\SpawnDev.Codecs.Demo.Shared.csproj" />
   </ItemGroup>
@@ -49,7 +49,7 @@
   <ItemGroup>
     <!-- Temporary fix for dotnet/runtime#135090: a cached 503/404 boot file under force-cache bricks the app;
          this JS initializer retries such a fetch once with cache: reload. Remove when .NET fixes it. -->
-    <PackageReference Include="SpawnDev.Blazor.BootRecovery" Version="1.0.0" />
+    <PackageReference Include="SpawnDev.Blazor.BootRecovery" Version="1.0.1" />
   </ItemGroup>
 
 </Project>
