@@ -298,19 +298,26 @@ internal static partial class WebPLossyEncodeRowKernel
         int iqS = kind == 0 ? M.SIQY1 : (kind == 1 ? M.SIQY2 : M.SIQUV);
         int bS = kind == 0 ? M.SBiasY1 : (kind == 1 ? M.SBiasY2 : M.SBiasUV);
         int zS = kind == 0 ? M.SZtY1 : (kind == 1 ? M.SZtY2 : M.SZtUV);
+        // the quantizer is one (zthresh, q, iq, bias) for the DC coefficient and one for the 15 AC ones: read the 8 values
+        // once per block instead of 4 global reads per coefficient (in the Intra4 stage each mode lane quantizes 16
+        // blocks per macroblock on the serial chain)
+        uint zt0 = (uint)meta[sb + zS], zt1 = (uint)meta[sb + zS + 1];
+        uint q0 = (uint)meta[sb + qS], q1 = (uint)meta[sb + qS + 1];
+        uint iq0 = (uint)meta[sb + iqS], iq1 = (uint)meta[sb + iqS + 1];
+        uint b0 = (uint)meta[sb + bS], b1 = (uint)meta[sb + bS + 1];
         int last = -1;
         for (int n = 0; n < 16; ++n)
         {
             int j = t[T.Zigzag + n];
-            int k = j == 0 ? 0 : 1;
+            bool dc = j == 0;
             int v = input[io + j];
             bool sign = v < 0;
             int sharpen = kind == 0 ? meta[sb + M.SSharpY1 + j] : 0;
             uint coeff = (uint)((sign ? -v : v) + sharpen);
-            uint zthresh = (uint)meta[sb + zS + k];
+            uint zthresh = dc ? zt0 : zt1;
             if (coeff > zthresh)
             {
-                uint Q = (uint)meta[sb + qS + k], iQ = (uint)meta[sb + iqS + k], B = (uint)meta[sb + bS + k];
+                uint Q = dc ? q0 : q1, iQ = dc ? iq0 : iq1, B = dc ? b0 : b1;
                 int level = (int)((coeff * iQ + B) >> 17);
                 if (level > 2047) level = 2047;
                 if (sign) level = -level;

@@ -276,13 +276,16 @@ internal static partial class WebPLossyEncodeRowKernel
             Group.Barrier();   // every mode is scored
             if (ok & (lane == 0))
             {
+                // the first minimum of the 10 scores, reading only each score (2 ints) and then the winner's full record
+                // (11): the whole records of every mode were 110 serial global reads per block on lane 0
                 int bestMode = 0;
-                var rdI4 = LoadLaneScore(si, II4Lanes + I4LScore);
+                long bestScore = Long(si, II4Lanes + I4LScore + 8);
                 for (int mode = 1; mode < 10; ++mode)
                 {
-                    var r = LoadLaneScore(si, II4Lanes + mode * I4LaneStride + I4LScore);
-                    if (r.Score < rdI4.Score) { rdI4 = r; bestMode = mode; }
+                    long score = Long(si, II4Lanes + mode * I4LaneStride + I4LScore + 8);
+                    if (score < bestScore) { bestScore = score; bestMode = mode; }
                 }
+                var rdI4 = LoadLaneScore(si, II4Lanes + bestMode * I4LaneStride + I4LScore);
                 int blo = II4Lanes + bestMode * I4LaneStride + I4LLevels;
                 for (int k = 0; k < 16; ++k) si[II4Best + i4 * 16 + k] = si[blo + k];
                 rdI4.SetRD(lambdaMode);

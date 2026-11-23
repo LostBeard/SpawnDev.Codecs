@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- WebP lossy: fewer serial global reads on the Intra4 chain (the encoder's largest stage). The quantizer reads its 8
+  per-block values (zero threshold, q, iq, bias for DC and AC) once per block instead of 4 per coefficient, and the
+  Intra4 mode pick compares the 10 lanes' scores (2 ints each) and then loads only the winner's record, instead of every
+  record (110 reads per 4x4 block). Same choices, same bytes (the lossy WebP tests: CUDA and OpenCL 13/0, Chrome WebGPU
+  15/0). nsys, RTX 4070, Lore's 25 frames 512x352 q90 x2: Intra4Stage 1,733 -> 1,632 ms (-5.8%), Intra16Stage
+  543 -> 523 ms.
 - SpawnDev.ILGPU 5.4.45 -> 5.4.46: a recompiled kernel gives byte-identical WGSL/GLSL, so a codec re-created after its
   kernels were collected hits the browser's shader/program caches instead of a driver recompile; a kernel that fails to
   compile no longer breaks every later kernel of the context. No codec change. Full WebGPU lane 1,249 passed, 0 failed,
