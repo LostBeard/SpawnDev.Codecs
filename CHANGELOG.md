@@ -1,5 +1,12 @@
 # SpawnDev.Codecs CHANGELOG
 
+## Unreleased
+
+- SpawnDev.ILGPU 5.4.45 -> 5.4.46: a recompiled kernel gives byte-identical WGSL/GLSL, so a codec re-created after its
+  kernels were collected hits the browser's shader/program caches instead of a driver recompile; a kernel that fails to
+  compile no longer breaks every later kernel of the context. No codec change. Full WebGPU lane 1,249 passed, 0 failed,
+  2 skipped (RTX 4070, Chromium 1248), as on 5.4.45.
+
 ## 1.1.4 (2026-11-23)
 
 Gate (2026-11-23, commit 0eb8db5, SpawnDev.ILGPU 5.4.45, `scripts/dev/run-release-sweep.cmd`, 3 h 50 min): CUDA, OpenCL and Velocity 1253 / 0 each, the CPU accelerator 3427 / 0, WebGPU 1247 / 0, Wasm 1247 / 0, WebGL 410 / 0.
