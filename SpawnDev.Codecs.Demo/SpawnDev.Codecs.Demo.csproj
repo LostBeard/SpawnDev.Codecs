@@ -46,4 +46,10 @@
     <ProjectReference Include="..\SpawnDev.Codecs.Demo.Shared\SpawnDev.Codecs.Demo.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Temporary fix for dotnet/runtime#135090: a cached 503/404 boot file under force-cache bricks the app;
+         this JS initializer retries such a fetch once with cache: reload. Remove when .NET fixes it. -->
+    <PackageReference Include="SpawnDev.Blazor.BootRecovery" Version="1.0.0" />
+  </ItemGroup>
+
 </Project>
