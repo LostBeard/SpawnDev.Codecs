@@ -2,8 +2,13 @@
 
 What is verified, on which backend, and how. "Verified" means a test that compares against a reference
 implementation (never against this library's own output) passed on that backend, with its guard red-checked. Dates are
-the last run of the named lane. Updated 2026-11-20 (the 1.1.3 gate below; a cell keeps the date of the run behind it; counts are
+the last run of the named lane. Updated 2026-11-23 (the 1.1.4 gate below; a cell keeps the date of the run behind it; counts are
 passed / failed, skips are gated or CPU-only tests).
+
+**2026-11-23, release 1.1.4 (commit 0eb8db5), SpawnDev.ILGPU 5.4.45: every class on every lane.** CUDA, OpenCL and Velocity 1253 / 0 each, the CPU accelerator 3427 / 0, WebGPU 1247 / 0, Wasm 1247 / 0, WebGL 410 / 0
+(3 h 50 min), no failure, no GPU reset. KernelLoadBatch releases the ILGPU compiler cache once per codec construction;
+the WebP lossless/alpha tokeniser and the lossy transforms are faster with the same bytes; the WebGPU lane's GPU reset
+(Windows TDR) was the LZ4 tests' input generator, now bounded and paced.
 
 **2026-11-20, release 1.1.3 (commit 8017401), SpawnDev.ILGPU 5.4.42: every class on every lane.** CUDA, OpenCL and
 Velocity 1245 / 0 each, the CPU accelerator 3419 / 0, WebGPU 1238 / 0, WebGL 408 / 0 (3 h 50 min). Wasm 1237 / 1 in the

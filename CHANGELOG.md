@@ -1,6 +1,9 @@
 # SpawnDev.Codecs CHANGELOG
 
-## Unreleased
+## 1.1.4 (2026-11-23)
+
+Gate (2026-11-23, commit 0eb8db5, SpawnDev.ILGPU 5.4.45, `scripts/dev/run-release-sweep.cmd`, 3 h 50 min): CUDA, OpenCL and Velocity 1253 / 0 each, the CPU accelerator 3427 / 0, WebGPU 1247 / 0, Wasm 1247 / 0, WebGL 410 / 0.
+No failure and no GPU reset on any lane.
 
 ### SpawnDev.ILGPU 5.4.45; the WebGPU lane's GPU reset was a test helper (2026-11-23)
 - SpawnDev.ILGPU 5.4.44 -> 5.4.45 (weak kernel lifetime + the shader-artifact cache on every browser backend). Full
