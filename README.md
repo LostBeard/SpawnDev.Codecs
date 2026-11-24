@@ -7,6 +7,8 @@
 Every encoder and decoder is a chain of C# kernels that [SpawnDev.ILGPU](https://github.com/LostBeard/SpawnDev.ILGPU) compiles to WGSL, GLSL, WebAssembly, PTX, OpenCL C or SIMD CPU code.
 No native binaries. No server. Patent-clean formats only.
 
+[![NuGet](https://img.shields.io/nuget/v/SpawnDev.Codecs.svg?label=nuget&logo=nuget)](https://www.nuget.org/packages/SpawnDev.Codecs)
+[![Downloads](https://img.shields.io/nuget/dt/SpawnDev.Codecs.svg?label=downloads)](https://www.nuget.org/packages/SpawnDev.Codecs)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.txt)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512bd4.svg)](https://dotnet.microsoft.com/)
 [![Sponsor](https://img.shields.io/badge/sponsor-LostBeard-ea4aaa.svg?logo=githubsponsors)](https://github.com/sponsors/LostBeard)
