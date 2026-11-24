@@ -358,16 +358,17 @@ internal static class WebPLossySetupKernel
                     {
                         int pattern = t[T.LevelCodes + (v - 1) * 2 + 0];
                         int bits = t[T.LevelCodes + (v - 1) * 2 + 1];
+                        // libwebp walks the pattern's bits while any are left; the widest pattern is 9 bits (0x153), so a
+                        // fixed walk over 9 positions adds the same terms in the same order (an unset bit adds nothing).
+                        // WORKAROUND (https://github.com/LostBeard/SpawnDev.Codecs/issues/2): the data-dependent loop
+                        // stopped the table early on an AMD RX 590 in Chrome WebGPU (D3D12): 31 of the 32 (type, band)
+                        // groups never written (Lore, 2026-11-24, Probe_WebPLossy_StageHashes); standalone page:
+                        // https://github.com/LostBeard/wgsl-loop-early-exit
                         int cost = 0;
-                        int i = 2;
-                        bool go = pattern != 0;
-                        while (go)
+                        for (int k = 0; k < 9; ++k)
                         {
-                            if ((pattern & 1) != 0) cost += BitCost(t, bits & 1, coeffs[p + i]);
-                            bits >>= 1;
-                            pattern >>= 1;
-                            ++i;
-                            go = pattern != 0;
+                            int bit = (pattern >> k) & 1;
+                            if (bit != 0) cost += BitCost(t, (bits >> k) & 1, coeffs[p + 2 + k]);
                         }
                         levelCost[table + v] = costBase + cost;
                     }

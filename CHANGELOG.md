@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Lossy WebP on Chrome WebGPU with an AMD RX 590 (D3D12): the files are libwebp's again. The level-cost table of the setup
+  kernel (`CalculateLevelCosts`) was mostly not written on that card, since at least 1.1.3: its innermost
+  data-dependent loop (`while (pattern != 0)`) stopped the table after two of its 96 tables, so every cost read zeros (36
+  of 222 `Methods3And4` cases were byte-identical; files even differed run to run, from the unwritten memory behind
+  them). It now walks a fixed 9 bits, the same sums by construction (the widest libwebp level pattern is 9 bits). Found
+  by stage hashes on the two GPUs (`Probe_WebPLossy_StageHashes`), reduced to `Probe_LevelCostLoopShapes` and a page with
+  no SpawnDev code: https://github.com/LostBeard/wgsl-loop-early-exit. Marked `WORKAROUND`
+  (https://github.com/LostBeard/SpawnDev.Codecs/issues/2). RX 590 (Lore): all 14 WebPLossy tests + the repeat-encode
+  probe, every file equal to the RTX 4070's; CUDA stage hashes unchanged, lossy tests 16 / 0.
+- Test `WebPLossyEncoderGpu_GarbageInWorkingBuffers_SameFile` (4d8c655): the encoder reads no working-buffer memory it did
+  not write (it fails on an affected card when the table stays unwritten).
 - WebP lossy in the browser: the RD loop waits for the GPU every 256 launches instead of every 32 (a submit every 64
   instead of 8). Its ~1,400 launches per 512x352 frame are tiny (a macroblock diagonal of one stage), and each wait in
   a browser is a submit plus a round trip to the GPU. Chrome WebGPU, RTX 4070, 512x352 q90 m4: 226 -> 188 ms per encode,
