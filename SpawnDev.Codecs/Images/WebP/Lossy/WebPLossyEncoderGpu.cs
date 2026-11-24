@@ -132,8 +132,24 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
         var recs = await _mbRecs.View.CopyToHostAsync();
         var state = await _state.View.CopyToHostAsync();
         var work = await _work.View.CopyToHostAsync();
-        return $"meta {H(meta)} recs {H(recs)} state {H(state)} work {HB(work)}";
+        string line = $"meta {H(meta)} recs {H(recs)} state {H(state)} work {HB(work)}";
+        if (_dumpLayout is not { } l) return line;
+        // state by region, and the probability / level-cost tables by (type, band): 32 short hashes each
+        string R(int from, int to) => H(state[from..to]);
+        string Groups(int from, int count)
+        {
+            var sb = new System.Text.StringBuilder();
+            int per = count / 32;
+            for (int g = 0; g < 32; g++) sb.Append(H(state[(from + g * per)..(from + (g + 1) * per)]).AsSpan(0, 4)).Append(g % 8 == 7 ? "|" : ".");
+            return sb.ToString();
+        }
+        return line + $" | nz {R(l.StNz, l.StTopDerr)} topDerr {R(l.StTopDerr, l.StCoeffs)} coeffs {R(l.StCoeffs, l.StCoeffs + WebPLossySetupKernel.ProbaCount)}" +
+            $" stats {R(l.StStats, l.StStats + WebPLossySetupKernel.ProbaCount)} levelCost {R(l.StLevelCost, l.StLevelCost + WebPLossySetupKernel.LevelCostCount)}" +
+            $" win {R(l.StWin, l.StWin + 2 * WebPLossySetupKernel.ProbaCount)} scratch {R(l.StScratch, l.StateSize)}" +
+            $" | coeffs by type/band {Groups(l.StCoeffs, WebPLossySetupKernel.ProbaCount)} levelCost by type/band {Groups(l.StLevelCost, WebPLossySetupKernel.LevelCostCount)}";
     }
+
+    private Layout? _dumpLayout;
 
     /// <summary>Tests only: fill the working buffers with this byte before each encode (see EncodePlanesToScratchAsync).</summary>
     internal static byte? PoisonScratch;
@@ -456,6 +472,7 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
         while (true)
         {
             var l = MakeLayout(width, height, _tokenCapacity);
+            _dumpLayout = l;
             _tokens.Ensure(_tokenCapacity);
             if (_rowTokenCapacity < l.MbW * RowTokensPerMacroblock) _rowTokenCapacity = l.MbW * RowTokensPerMacroblock;
             _rowTokens.Ensure((long)l.MbH * _rowTokenCapacity);
