@@ -116,6 +116,9 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
     /// wavefront's dependency order without its concurrency (the red-check of the parallel launches).</summary>
     internal static bool SerialWavefront;
 
+    /// <summary>Tests only: fill the working buffers with this byte before each encode (see EncodePlanesToScratchAsync).</summary>
+    internal static byte? PoisonScratch;
+
     /// <summary>The RD loop's pacing (see LaunchPacer): a submit every 64 launches, a wait for the GPU every 256.</summary>
     private const int RdFlushEvery = 64, RdWaitEvery = 256;
 
@@ -444,6 +447,14 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
             hostMeta[M.WinReplayAll] = ReplayAllStatistics ? 1 : 0;
             _meta.View.CopyFromCPU(hostMeta);
             var state = _state.View;
+            if (PoisonScratch is byte poison)
+            {
+                // tests only: every byte of the working buffers is garbage before the encode writes them, so a stage that
+                // reads what this encode never wrote gives different bytes for different garbage (the RX 590 in Chrome
+                // WebGPU wrote a different file every encode, 2026-11-23)
+                _work.View.MemSet(poison); state.MemSet(poison); _mbRecs.View.MemSet(poison);
+                _tokens.View.MemSet(poison); _rowTokens.View.MemSet(poison); _scratch.View.MemSet(poison);
+            }
             // ResetBoundaryPredictions: the border row / column of the 4x4 mode map is B_DC_PRED (0); the analysis writes the rest.
             _work.View.SubView(0, l.PredsSize).MemSetToZero();
             state.SubView(l.StWin, 2 * WebPLossySetupKernel.ProbaCount).MemSetToZero();   // the window statistics (WindowApplyKernel re-zeroes them)
