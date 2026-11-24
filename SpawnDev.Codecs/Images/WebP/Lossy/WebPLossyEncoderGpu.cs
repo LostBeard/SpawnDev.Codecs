@@ -116,6 +116,25 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
     /// wavefront's dependency order without its concurrency (the red-check of the parallel launches).</summary>
     internal static bool SerialWavefront;
 
+    /// <summary>
+    /// Tests only: called after every traced step (analysis + setup, each RD stage launch, refresh, window, token
+    /// partition) once the accelerator is idle - for <see cref="HashWorkingBuffersAsync"/> dumps that find the first step
+    /// where two GPUs part ways.
+    /// </summary>
+    internal static Func<WebPLossyEncoderGpu, string, Task>? StageDump;
+
+    /// <summary>Tests only: FNV-1a hashes of meta, the macroblock records, the state and the work buffer, as one line.</summary>
+    internal async Task<string> HashWorkingBuffersAsync()
+    {
+        static string H(int[] a) { ulong x = 14695981039346656037UL; foreach (int v in a) { x ^= (uint)v; x *= 1099511628211UL; } return x.ToString("x16"); }
+        static string HB(byte[] a) { ulong x = 14695981039346656037UL; foreach (byte v in a) { x ^= v; x *= 1099511628211UL; } return x.ToString("x16"); }
+        var meta = await _meta.View.CopyToHostAsync();
+        var recs = await _mbRecs.View.CopyToHostAsync();
+        var state = await _state.View.CopyToHostAsync();
+        var work = await _work.View.CopyToHostAsync();
+        return $"meta {H(meta)} recs {H(recs)} state {H(state)} work {HB(work)}";
+    }
+
     /// <summary>Tests only: fill the working buffers with this byte before each encode (see EncodePlanesToScratchAsync).</summary>
     internal static byte? PoisonScratch;
 
@@ -463,8 +482,8 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
             _setup(1, _mbRecs.View, _meta.View, _tables.View, _qTable.View,
                 state.SubView(l.StCoeffs, WebPLossySetupKernel.ProbaCount), state.SubView(l.StStats, WebPLossySetupKernel.ProbaCount),
                 state.SubView(l.StLevelCost, WebPLossySetupKernel.LevelCostCount));
-            var trace = Trace;
-            if (trace != null) { await _accelerator.SynchronizeAsync(); trace("analysis + setup"); }
+            Action<string>? trace = Trace ?? (StageDump != null ? new Action<string>(_ => { }) : null);
+            if (trace != null) { await _accelerator.SynchronizeAsync(); trace("analysis + setup"); if (StageDump != null) await StageDump(this, "analysis + setup"); }
             // the RD loop's launches are tiny (one macroblock diagonal of one stage, tens of us): a wait every 256 of them
             // still bounds the work in flight to a few tens of ms (8 / 32 cost ~17% of a 512x352 frame in Chrome WebGPU)
             var pacer = new LaunchPacer(_accelerator, RdFlushEvery, RdWaitEvery);
@@ -479,7 +498,7 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
                 if (first > 0)
                 {
                     _refresh(new KernelConfig(1, WebPLossyEncodeRowKernel.PrepareLanes), state, _meta.View, _tables.View);
-                    if (trace != null) { await _accelerator.SynchronizeAsync(); trace("refresh"); }
+                    if (trace != null) { await _accelerator.SynchronizeAsync(); trace("refresh"); if (StageDump != null) await StageDump(this, "refresh"); }
                     else await pacer.LaunchedAsync();
                 }
                 int y0 = first / l.MbW, x0 = first % l.MbW, y1 = (end - 1) / l.MbW, x1 = (end - 1) % l.MbW;
@@ -501,13 +520,13 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
                         else if (s == 3) _uv(new KernelConfig(n, WebPLossyEncodeRowKernel.UVLanes), yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, rowTokens, row, xg);
                         else if (s == 2) _intra4(new KernelConfig(n, WebPLossyEncodeRowKernel.I4Lanes), yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, rowTokens, row, xg);
                         else _stages[s](n, yuv, _mbRecs.View, _work.View, state, _meta.View, _tables.View, rowTokens, row, xg);
-                        if (trace != null) { await _accelerator.SynchronizeAsync(); trace(StageNames[s]); }
+                        if (trace != null) { await _accelerator.SynchronizeAsync(); trace(StageNames[s]); if (StageDump != null) await StageDump(this, StageNames[s]); }
                         else await pacer.LaunchedAsync();
                     }
                 }
                 _window(new KernelConfig(y1 - y0 + 1, WebPLossyEncodeRowKernel.WindowLanes), _mbRecs.View, state, _meta.View, rowTokens, _tokens.View, first, end);
                 _windowApply(WebPLossySetupKernel.ProbaCount, _mbRecs.View, state, _meta.View, rowTokens, _tokens.View, first, end);
-                if (trace != null) { await _accelerator.SynchronizeAsync(); trace("window"); }
+                if (trace != null) { await _accelerator.SynchronizeAsync(); trace("window"); if (StageDump != null) await StageDump(this, "window"); }
                 else await pacer.LaunchedAsync();
             }
             await _accelerator.SynchronizeAsync();
@@ -557,7 +576,7 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
                     _tpDigits((int)((7L * tokenCount + 16) / 8), state, _meta.View, _tables.View, _tokens.View, tp, _scratch.View, l.P0Cap, l.T1Cap);
                 }
                 _tpTail(1, state, _meta.View, _tables.View, _tokens.View, tp, _scratch.View, l.P0Cap, l.T1Cap);
-                if (trace != null) { await _accelerator.SynchronizeAsync(); trace("token partition"); }
+                if (trace != null) { await _accelerator.SynchronizeAsync(); trace("token partition"); if (StageDump != null) await StageDump(this, "token partition"); }
                 else await pacer.LaunchedAsync();
             }
             _finishHeader(1, _mbRecs.View, _work.View, state, _meta.View, _tables.View, _tokens.View, _scratch.View);
