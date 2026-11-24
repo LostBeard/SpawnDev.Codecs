@@ -9,6 +9,7 @@ No native binaries. No server. Patent-clean formats only.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.txt)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512bd4.svg)](https://dotnet.microsoft.com/)
+[![Sponsor](https://img.shields.io/badge/sponsor-LostBeard-ea4aaa.svg?logo=githubsponsors)](https://github.com/sponsors/LostBeard)
 
 [Docs](Docs/README.md) | [What is verified](Docs/status.md) | [Changelog](CHANGELOG.md) | [Plans](Plans/)
 
@@ -298,8 +299,7 @@ backend named. Run the tests for the lanes you touched before opening a pull req
 
 SpawnDev libraries are built and maintained by the SpawnDev development team, which uses AI agents in its daily work.
 Everything is MIT-licensed and public, usable and forkable by anyone. If it is useful to you, stars, issues and sharing
-what you build with it help; [sponsoring on GitHub](https://github.com/sponsors/LostBeard) funds more codecs, more verified
-formats and more backends.
+what you build with it help.
 
 ## Credits
 
