@@ -4,7 +4,7 @@
 		<TargetFramework>net10.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<Version>1.1.5-local.2</Version>
+		<Version>1.1.5-local.3</Version>
 		<PackageReleaseNotes>1.1.1: lossless WebP writes the same file on every device (integer predictor costs; CUDA, OpenCL NVIDIA and AMD, Velocity, CPU, WebGPU, Wasm); faster WebP (parallel colour analysis, ALPH trial keeps its winner, two-kernel predictor choice, LZ77 copies reused across colour-cache and strategy trials: SpawnGen Save Animated WEBP on an RX 590 -31% vs 1.1.0); AV1 range coder -19% at 1080p; SpawnDev.ILGPU 5.4.40 (Wasm copy fix). Full list: CHANGELOG.md.</PackageReleaseNotes>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
