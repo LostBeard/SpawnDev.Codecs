@@ -21,18 +21,36 @@ public sealed class LaunchPacer
     /// <summary>Launches between waits for completion (each launch is bounded to a few ms: at most ~0.3 s in flight).</summary>
     public const int WaitEvery = 32;
 
+    /// <summary>Tests only (measurements): replace <see cref="FlushEvery"/> / <see cref="WaitEvery"/> for every pacer.</summary>
+    internal static int? FlushEveryOverride, WaitEveryOverride;
+
     private readonly Accelerator _accelerator;
+    private readonly int _flushEvery, _waitEvery;
     private int _count;
 
     /// <summary>A pacer for launches on <paramref name="accelerator"/>.</summary>
-    public LaunchPacer(Accelerator accelerator) => _accelerator = accelerator;
+    public LaunchPacer(Accelerator accelerator) : this(accelerator, FlushEvery, WaitEvery) { }
+
+    /// <summary>
+    /// A pacer for a loop of launches much shorter than "a few ms": waiting for the GPU every
+    /// <paramref name="waitEvery"/> launches instead of <see cref="WaitEvery"/> keeps the work in flight as bounded (a
+    /// wait in a browser is a submit plus a round trip to the GPU, ms each; the lossy WebP RD loop's ~1,400 tiny launches
+    /// per frame spent ~17% of the frame in them at 8 / 32 in Chrome WebGPU, 2026-11-23).
+    /// </summary>
+    public LaunchPacer(Accelerator accelerator, int flushEvery, int waitEvery)
+    {
+        if (flushEvery < 1 || waitEvery < flushEvery) throw new ArgumentOutOfRangeException(nameof(waitEvery));
+        _accelerator = accelerator;
+        _flushEvery = flushEvery;
+        _waitEvery = waitEvery;
+    }
 
     /// <summary>Call after each launch: submits every <see cref="FlushEvery"/> launches, waits every <see cref="WaitEvery"/>.</summary>
     public ValueTask LaunchedAsync()
     {
         _count++;
-        if (_count % WaitEvery == 0) return new ValueTask(_accelerator.SynchronizeAsync());
-        if (_count % FlushEvery == 0) _accelerator.Flush();
+        if (_count % (WaitEveryOverride ?? _waitEvery) == 0) return new ValueTask(_accelerator.SynchronizeAsync());
+        if (_count % (FlushEveryOverride ?? _flushEvery) == 0) _accelerator.Flush();
         return default;
     }
 }

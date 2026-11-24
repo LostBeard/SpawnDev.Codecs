@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- WebP lossy in the browser: the RD loop waits for the GPU every 256 launches instead of every 32 (a submit every 64
+  instead of 8). Its ~1,400 launches per 512x352 frame are tiny (a macroblock diagonal of one stage), and each wait in
+  a browser is a submit plus a round trip to the GPU. Chrome WebGPU, RTX 4070, 512x352 q90 m4: 226 -> 188 ms per encode,
+  the same bytes (probe `Probe_WebPLossy_DispatchCost`, which also shows every dispatch on SpawnDev.ILGPU's batched path).
+  CUDA 173 / OpenCL 150 ms per animation frame, unchanged. `LaunchPacer` takes per-loop limits for such loops; the
+  other codecs keep 8 / 32.
+- Tests: SpawnDev.UnitTesting.Browser 2.7.2 (the stable release of 2.7.2-local.4) in the demo projects.
 - WebP lossy: fewer serial global reads on the Intra4 chain (the encoder's largest stage). The quantizer reads its 8
   per-block values (zero threshold, q, iq, bias for DC and AC) once per block instead of 4 per coefficient, and the
   Intra4 mode pick compares the 10 lanes' scores (2 ints each) and then loads only the winner's record, instead of every

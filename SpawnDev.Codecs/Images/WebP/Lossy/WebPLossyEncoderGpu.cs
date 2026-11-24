@@ -116,6 +116,9 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
     /// wavefront's dependency order without its concurrency (the red-check of the parallel launches).</summary>
     internal static bool SerialWavefront;
 
+    /// <summary>The RD loop's pacing (see LaunchPacer): a submit every 64 launches, a wait for the GPU every 256.</summary>
+    private const int RdFlushEvery = 64, RdWaitEvery = 256;
+
     /// <summary>Tests only: the first size of a macroblock row's token buffer, in tokens per macroblock of the row (a
     /// small value makes the encode grow it: the retry path).</summary>
     internal static int RowTokensPerMacroblock = 512;
@@ -451,7 +454,9 @@ public sealed partial class WebPLossyEncoderGpu : IDisposable
                 state.SubView(l.StLevelCost, WebPLossySetupKernel.LevelCostCount));
             var trace = Trace;
             if (trace != null) { await _accelerator.SynchronizeAsync(); trace("analysis + setup"); }
-            var pacer = new LaunchPacer(_accelerator);
+            // the RD loop's launches are tiny (one macroblock diagonal of one stage, tens of us): a wait every 256 of them
+            // still bounds the work in flight to a few tens of ms (8 / 32 cost ~17% of a 512x352 frame in Chrome WebGPU)
+            var pacer = new LaunchPacer(_accelerator, RdFlushEvery, RdWaitEvery);
             var rowTokens = _rowTokens.View;
             // The RD loop as a wavefront inside each probability window (WebPLossyEncodeRowKernel.Stages.cs): VP8EncTokenLoop
             // refreshes the probabilities before macroblock maxCount, then every maxCount + 1 macroblocks (`if (--cnt < 0)`,
