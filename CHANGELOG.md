@@ -26,10 +26,12 @@
   record (110 reads per 4x4 block). Same choices, same bytes (the lossy WebP tests: CUDA and OpenCL 13/0, Chrome WebGPU
   15/0). nsys, RTX 4070, Lore's 25 frames 512x352 q90 x2: Intra4Stage 1,733 -> 1,632 ms (-5.8%), Intra16Stage
   543 -> 523 ms.
-- SpawnDev.ILGPU 5.4.45 -> 5.4.46: a recompiled kernel gives byte-identical WGSL/GLSL, so a codec re-created after its
-  kernels were collected hits the browser's shader/program caches instead of a driver recompile; a kernel that fails to
-  compile no longer breaks every later kernel of the context. No codec change. Full WebGPU lane 1,249 passed, 0 failed,
-  2 skipped (RTX 4070, Chromium 1248), as on 5.4.45.
+- SpawnDev.ILGPU stays at 5.4.45. 5.4.46 grew the generated WGSL of two VP9 kernels (`FrameInitKernel` +41%, past the
+  size guard's budget of 24,780 characters; `CompressedHeaderKernel` +7%: test
+  `Vp9DecoderKernels_GenerateWgsl_WithinSizeBudget`). `FrameInitKernel` and the lossy encoder's refresh kernel (which has the
+  other grown helper) run no faster for it (nsys, RTX 4070). 5.4.47's WGSL is invalid for some kernels (an unfilled
+  placeholder). Apps that also use a package requiring 5.4.46 or newer resolve that one; the RX 590 fix was verified there
+  (Lore, 5.4.46).
 
 ## 1.1.4 (2026-11-23)
 
