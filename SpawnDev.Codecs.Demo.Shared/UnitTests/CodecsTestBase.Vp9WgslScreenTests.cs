@@ -9,6 +9,7 @@
 // GLSL (WebGL) is not screened yet: SpawnDev.ILGPU 5.4.21's GLSL generator overflows the stack on these kernels.
 
 using System.Reflection;
+using SpawnDev.Codecs.Audio.Flac;
 using SpawnDev.Codecs.Video.Vp9.Decoder;
 using SpawnDev.ILGPU;
 using SpawnDev.UnitTesting;
@@ -18,7 +19,11 @@ namespace SpawnDev.Codecs.Demo.Shared.UnitTests;
 
 public abstract partial class CodecsTestBase
 {
-    // (class, kernel method, WGSL character budget), each today's size + 10%. Measured 2026-11-09 on SpawnDev.ILGPU
+    // (class, kernel method, WGSL character budget), each today's size + 10%. Re-measured 2026-11-25 on SpawnDev.ILGPU 5.4.49
+    // (VP9_WGSL_PRINT=1). Its optimizer order (5.4.46+) grew three: FrameInitKernel 22.5k -> 30.9k chars (+41%),
+    // CompressedHeaderKernel +5%, PackPlanesKernel +4%. FrameInitKernel and the lossy encoder's refresh kernel (the other helper
+    // that grew) run no faster or slower for it (nsys, RTX 4070, 2026-11-24); Data owns the growth and keeps the order, which
+    // shrinks the FLAC decoders by half (FlacWgslKernels below). Measured 2026-11-09 on SpawnDev.ILGPU
     // 5.4.23-local.3, which emits view-taking helpers, ref state and LocalMemory views as WGSL functions instead of
     // inlining them. Re-measured 2026-11-10 on 5.4.23 after the reconstruction and loop-filter kernels moved from 64-bit
     // to 32-bit pixel / coefficient / scratch offsets (64-bit math is emulated in WGSL): loop-filter Wavefront 9.0 MB
@@ -29,29 +34,55 @@ public abstract partial class CodecsTestBase
     // the call-site rewrite 9.0 MB / 113,564 lines, but ParseBlock was a 111k-line WGSL function called from 6 places,
     // so about 763k lines inlined). A WGSL function's call sites multiply it on D3D, so the line count alone can hide
     // a regression: VP9_WGSL_DUMP=dir writes the WGSL to look at.
+    // FLAC's stream decoder: the largest WGSL in the library after the VP9 parse (FindSyncKernel and DecodeFrameKernel scan and
+    // decode a frame in one thread). ILGPU 5.4.46's callee-first optimize halved the text of both and 5.4.45's order doubles it, so a
+    // swing like that must fail here. Measured 2026-11-25 on ILGPU 5.4.49 (its optimizer order), each +10%.
+    private static readonly (Type Owner, string Kernel, long Budget)[] FlacWgslKernels =
+    {
+        (typeof(FlacStreamDecodeKernels), "FindSyncKernel", 379781),
+        (typeof(FlacStreamDecodeKernels), "DecodeFrameKernel", 859585),
+        (typeof(FlacStreamDecodeKernels), "WalkKernel", 464730),
+    };
+
     private static readonly (Type Owner, string Kernel, long Budget)[] Vp9WgslKernels =
     {
-        (typeof(Vp9CompressedHeaderKernels), "CopyContextKernel", 3734),
-        (typeof(Vp9CompressedHeaderKernels), "CompressedHeaderKernel", 471586),
-        (typeof(Vp9ParseKernels), "ParseKernel", 600774),
-        (typeof(Vp9ReconKernels), "InterPredictKernel", 303188),
-        (typeof(Vp9ReconKernels), "InterResidualKernel", 563233),
-        (typeof(Vp9ReconKernels), "IntraWaveKernel", 794108),
-        (typeof(Vp9LoopFilterKernels), "FrameInitKernel", 24780),
-        (typeof(Vp9LoopFilterKernels), "WavefrontKernel", 602837),
-        (typeof(Vp9LoopFilterKernels), "MaskKernel", 214012),   // 2026-11-15: the masks moved out of WavefrontKernel (754k -> 561k); 11-16: + the horizontal-edge plan (161k -> 195k, Wavefront 561k -> 548k)
-        (typeof(Vp9AdaptKernels), "SumCountsKernel", 3579),
-        (typeof(Vp9AdaptKernels), "AdaptKernel", 354152),
-        (typeof(Vp9OutputKernels), "PackPlanesKernel", 19703),
+        (typeof(Vp9CompressedHeaderKernels), "CopyContextKernel", 3654),
+        (typeof(Vp9CompressedHeaderKernels), "CompressedHeaderKernel", 498092),
+        (typeof(Vp9ParseKernels), "ParseKernel", 564875),
+        (typeof(Vp9ReconKernels), "InterPredictKernel", 296954),
+        (typeof(Vp9ReconKernels), "InterResidualKernel", 550611),
+        (typeof(Vp9ReconKernels), "IntraWaveKernel", 776724),
+        (typeof(Vp9LoopFilterKernels), "FrameInitKernel", 34001),
+        (typeof(Vp9LoopFilterKernels), "WavefrontKernel", 593986),
+        (typeof(Vp9LoopFilterKernels), "MaskKernel", 207478),   // 2026-11-15: the masks moved out of WavefrontKernel (754k -> 561k); 11-16: + the horizontal-edge plan (161k -> 195k, Wavefront 561k -> 548k)
+        (typeof(Vp9AdaptKernels), "SumCountsKernel", 3499),
+        (typeof(Vp9AdaptKernels), "AdaptKernel", 344954),
+        (typeof(Vp9OutputKernels), "PackPlanesKernel", 20485),
     };
 
     [TestMethod(Timeout = 1800000, Category = "CpuOnly")]
     public async Task Vp9DecoderKernels_GenerateWgsl_WithinSizeBudget()
     {
         await Task.Yield();
-        bool print = !OperatingSystem.IsBrowser() && Environment.GetEnvironmentVariable("VP9_WGSL_PRINT") == "1";
+        CheckWgslSizes(Vp9WgslKernels, "VP9_WGSL");
+    }
+
+    [TestMethod(Timeout = 1800000, Category = "CpuOnly")]
+    public async Task FlacDecoderKernels_GenerateWgsl_WithinSizeBudget()
+    {
+        await Task.Yield();
+        CheckWgslSizes(FlacWgslKernels, "FLAC_WGSL");
+    }
+
+    /// <summary>
+    /// Generates each kernel's WGSL and checks it against its budget (<paramref name="label"/>_PRINT=1 prints the budget
+    /// table instead of checking; <paramref name="label"/>_DUMP=dir writes the text).
+    /// </summary>
+    private static void CheckWgslSizes((Type Owner, string Kernel, long Budget)[] kernels, string label)
+    {
+        bool print = !OperatingSystem.IsBrowser() && Environment.GetEnvironmentVariable(label + "_PRINT") == "1";
         var failures = new List<string>();
-        foreach (var (owner, kernel, budget) in Vp9WgslKernels)
+        foreach (var (owner, kernel, budget) in kernels)
         {
             var method = owner.GetMethod(kernel, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
                 ?? throw new InvalidOperationException($"{owner.Name}.{kernel} not found");
@@ -60,7 +91,7 @@ public abstract partial class CodecsTestBase
             {
                 string wgsl = ShaderCompiler.Generate(method, CapabilityProfiles.WebGPUBaseline).Source ?? "";
                 // diagnostics: VP9_WGSL_DUMP=dir writes <class>.<kernel>.wgsl (to see which code repeats)
-                string? dump = OperatingSystem.IsBrowser() ? null : Environment.GetEnvironmentVariable("VP9_WGSL_DUMP");
+                string? dump = OperatingSystem.IsBrowser() ? null : Environment.GetEnvironmentVariable(label + "_DUMP");
                 if (dump != null) File.WriteAllText(Path.Combine(dump, $"{owner.Name}.{kernel}.wgsl"), wgsl);
                 chars = wgsl.Length;
                 lines = 1;
@@ -74,12 +105,12 @@ public abstract partial class CodecsTestBase
                 failures.Add($"{owner.Name}.{kernel}: no WGSL: {inner.GetType().Name}: {inner.Message}");
                 continue;
             }
-            Console.WriteLine($"VP9_WGSL {owner.Name}.{kernel}: {chars:N0} chars, {lines:N0} lines");
-            if (print) Console.WriteLine($"VP9_WGSL_BUDGET (typeof({owner.Name}), \"{kernel}\", {chars + chars / 10}),");
-            else if (budget <= 0) failures.Add($"{owner.Name}.{kernel}: no budget set ({chars:N0} chars); run with VP9_WGSL_PRINT=1");
+            Console.WriteLine($"{label} {owner.Name}.{kernel}: {chars:N0} chars, {lines:N0} lines");
+            if (print) Console.WriteLine($"{label}_BUDGET (typeof({owner.Name}), \"{kernel}\", {chars + chars / 10}),");
+            else if (budget <= 0) failures.Add($"{owner.Name}.{kernel}: no budget set ({chars:N0} chars); run with {label}_PRINT=1");
             else if (chars > budget) failures.Add($"{owner.Name}.{kernel}: {chars:N0} chars, budget {budget:N0}");
         }
-        if (print) throw new UnsupportedTestException("VP9_WGSL_PRINT=1: printed the budget table instead of checking it.");
+        if (print) throw new UnsupportedTestException(label + "_PRINT=1: printed the budget table instead of checking it.");
         True(failures.Count == 0, string.Join("\n", failures));
     }
 }

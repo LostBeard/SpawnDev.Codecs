@@ -1,5 +1,13 @@
 # SpawnDev.Codecs CHANGELOG
 
+## Unreleased
+
+- SpawnDev.ILGPU 5.4.45 -> 5.4.49 (its 5.4.46+ optimizer order; 5.4.47's WGSL placeholder and the failed-compile bug fixed).
+  The WGSL size guard is re-measured on it and now covers FLAC (`FlacDecoderKernels_GenerateWgsl_WithinSizeBudget`: the
+  stream decoder's FindSyncKernel 345k, DecodeFrameKernel 781k and WalkKernel 422k characters, each +10%). Three VP9 budgets
+  rise: FrameInitKernel 24,780 -> 34,001 (+41% since 5.4.45, the library optimizer's; no runtime difference measured, nsys
+  CUDA RTX 4070), CompressedHeaderKernel 471,586 -> 498,092, PackPlanesKernel 19,703 -> 20,485; the rest stay or tighten.
+
 ## 1.1.5 (2026-11-24)
 
 Gate (2026-11-24, commit 61f3f76, SpawnDev.ILGPU 5.4.45, `scripts/dev/run-release-sweep.cmd`, 4 h): CUDA, OpenCL and Velocity 1259 / 0 each, the CPU accelerator 3433 / 0, WebGPU 1253 / 0, Wasm 1253 / 0, WebGL 410 / 0. No
