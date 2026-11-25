@@ -103,6 +103,7 @@ lanes (VP9 batch encode at unaligned sizes).
 | WebP lossy encode with alpha | green | green | green (10-27) | green (10-28) | n/a (scatter stores) | green (10-28) | VP8 chunk byte-identical with libwebp, alpha exact (libwebp and our decoder), 145 fixtures |
 | WebP lossy animation encode, ICC / EXIF / XMP on stills | green (11-08) | green (11-08, 10 / 0) | green (11-08, 10 / 0) | green (11-08, 8 / 0) | n/a (scatter stores) | green (11-08, 8 / 0) | 26 fixtures against Pillow 13 / libwebp 1.6.0: 19 byte-identical, 7 identical except the ALPH chunks; Intra4, Intra16 and UV mode decisions parallel since 11-15 / 16 (same bytes) |
 | GIF decode / encode | green | green | green | green (10-28, 21 / 0; the slow fixture tests now inside the default) | n/a (scatter stores) | green (10-28, ILGPU 5.4.9-local.6: the next frame's histogram was zeroed under the previous frame's kernels, so a count read 0 and Wasm trapped on the division) | Pillow decodes our files to the same pixels; quantizer PSNR vs Pillow |
+| PSD layered writer | green (11-25, also Velocity) | green (11-25) | green (11-25) | green (11-25) | n/a (scatter stores) | green (11-25) | psd-tools: layer pixels, names, rectangles, opacity, visibility, blend keys and merged image; a C# reader (written from the spec) decodes the whole file in the tests; red checks on the writer |
 | BMP decode / encode | green | green | green | green (10-28, 19 / 0) | green (10-28, 12 / 0; header and alpha scans as gathers); RLE refused (scatter stores) | green (10-28, 19 / 0) | Pillow |
 
 ## Textures

@@ -9,7 +9,7 @@
 @REM   cmd.exe /c ""<repo>\scripts\dev\run-release-sweep.cmd" "<outdir>""
 @REM Measured 2026-11-17 on master (b356f5b, SpawnDev.ILGPU 5.4.36): 3 h 37 min end to end.
 @REM The oracle tests need Pillow 13 / libwebp 1.6.0: CODECS_PILLOW_PYTHON defaults to _oracle-venv in the folder that
-@REM holds this repo (a venv outside every session scratchpad: py -3.13 -m venv + pip install pillow==13.0.0 numpy soundfile).
+@REM holds this repo (a venv outside every session scratchpad: py -3.13 -m venv + pip install pillow==13.0.0 numpy soundfile psd-tools).
 setlocal
 if "%~1" == "" ( echo usage: run-release-sweep.cmd ^<outdir^> & exit /b 2 )
 set OUT=%~f1

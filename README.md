@@ -32,7 +32,7 @@ and reads back the finished file or picture. The same library and the same kerne
 
 - **Image codecs, checked against the reference libraries.** PNG (APNG files decode their default image, Adam7, 16-bit,
   text chunks), JPEG (baseline and progressive), WebP (lossless, lossy, alpha, animation), GIF and BMP, encode and
-  decode, plus one `ImageDecoderGpu` that recognizes the format. BC1, BC3, BC4, BC5 and BC7 texture blocks and the byte compressors
+  decode, layered PSD (write), plus one `ImageDecoderGpu` that recognizes the format. BC1, BC3, BC4, BC5 and BC7 texture blocks and the byte compressors
   (zlib / deflate, LZ4, Snappy, GDeflate, shuffle filters) run on the accelerator too.
 - **Byte-identical with the reference encoders where the format allows it:** WebP lossy encode matches libwebp 1.6.0
   (methods 3 and 4, 222 opaque and 145 transparent test pictures) and JPEG encode matches libjpeg-turbo file for file;
@@ -170,6 +170,7 @@ float[] opusPcm = await opusDecoder.DecodePacketAsync(opusPacket);
 | **WebP** | `WebPLosslessEncoderGpu` (VP8L, alpha planes, metadata, animation); `WebPLossyEncoderGpu` (VP8, byte-identical with libwebp, alpha via ALPH, ICC / EXIF / XMP, animation the WebPAnimEncoder way) | `WebPDecoderGpu`: lossless, lossy, ALPH, animations (lossy, lossless and mixed), ICC / EXIF / XMP |
 | **GIF** | `GifEncoderGpu`: quantization, LZW, animations | `GifDecoderGpu`: LZW, interlace, transparency, disposal, animations |
 | **BMP** | `BmpEncoderGpu` | `BmpDecoderGpu` |
+| **PSD** (layered, write) | `PsdEncoderGpu`: PSD version 1, RGB 8-bit, RLE; layers (position, opacity, 26 blend modes, visibility, Unicode names), merged image with or without alpha | n/a |
 | **Any image** | n/a | `ImageDecoderGpu` recognizes PNG, JPEG, WebP, GIF and BMP on the device and dispatches |
 | **VP8** | `Vp8KeyframeEncoderGpu` (keyframes, one token partition, batches of frames) | `Vp8FullKeyframeDecoderGpu` (full keyframe syntax, loop filter, segments, B_PRED) |
 | **VP9** | `Vp9EncoderGpu` (key frames, then inter frames with motion search; parallel entropy coding; fixed quantizer) and `Vp9KeyframeEncoderGpu` (keyframes, batches) | `Vp9DecoderGpu` (profile 0, every libvpx profile-0 feature, WebM alpha); `Vp9KeyframeDecoderGpu` is obsolete |
@@ -262,7 +263,7 @@ red-checked: the fix is disabled and the test must fail by name.
 | | |
 |---|---|
 | [Status](Docs/status.md) | Every codec by backend, with the evidence |
-| [Images](Docs/images.md) | PNG, JPEG, WebP, GIF, BMP: API, options, limits |
+| [Images](Docs/images.md) | PNG, JPEG, WebP, GIF, BMP, layered PSD: API, options, limits |
 | [Video](Docs/video.md) | VP8, VP9, AV1: API, batches, limits |
 | [Audio](Docs/audio.md) | Vorbis, FLAC, Opus, audio containers |
 | [API shape](Docs/api.md) | The three overloads, buffers, zero copy in the browser |

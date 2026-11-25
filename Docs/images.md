@@ -137,6 +137,21 @@ compared with Pillow's median cut.
 
 `BmpDecoderGpu` and `BmpEncoderGpu` (`BmpEncodeOptions.Format`, default `Bgra32`). Checked against Pillow.
 
+## PSD (layered, write)
+
+`PsdEncoderGpu` writes a layered Photoshop file (version 1, 8 bits per channel, RGB, RLE): `PsdDocument` is the canvas size, the layers
+(bottom first) and the merged image (`PsdComposite`, required). A `PsdLayer` has its name (kept whole: Unicode in a `luni` block), its
+rectangle on the canvas (`Left` / `Top` may be negative and the layer may run past the canvas), `Width` x `Height`, RGBA8 pixels either as managed
+bytes (`Rgba`) or as an accelerator view (`RgbaView`), a `PsdBlendMode`, an opacity and a visible flag. `PsdComposite.HasAlpha` writes the merged
+image with an alpha channel (colours matted over white, the way Photoshop stores merged images, so a reader un-mattes them). Overloads:
+`EncodeAsync(doc, outputView)` (length returned, output of at least `GetMaxEncodedSize(doc)` bytes), `EncodeAsync(doc)` to a managed array, and in a browser
+`EncodeToUint8ArrayAsync(doc)`.
+
+The 26 blend modes are Adobe's keys as ComfyUI writes them (measured); grain extract and grain merge, which the format has no key for, are written as
+normal. Layers may be empty (a flat PSD), up to 8192 of them; canvas and layer sides up to 30,000. Read back pixel by pixel by psd-tools (layers, names,
+rectangles off the canvas, opacity, visibility, blend keys, merged image); Pillow's PSD plugin is not the oracle because it reads alpha-first layers
+in the wrong channel order. Not on WebGL (scatter stores).
+
 ## BCn textures
 
 `BcnDecoderGpu` decodes BC1, BC3, BC4, BC5 and BC7 blocks to RGBA8 and `BcnEncoderGpu` encodes RGBA8 to BC1, BC3, BC4 and

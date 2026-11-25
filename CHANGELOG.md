@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### New: layered PSD writer (2026-11-25)
+- `PsdEncoderGpu` writes layered Photoshop files (version 1, RGB 8-bit, RLE): layers (bottom first) with a name, rectangle (negative or past the
+  canvas), opacity, visibility and one of 26 blend modes, the merged image with or without an alpha channel. Kernels count, lay out
+  and write every byte of the pixel data (PackBits per row, packed rows emitted at their file offsets); the host prepares the metadata
+  (header, layer records, names) and gives the kernels' totals their places in the file. ILGPU backends except WebGL (scatter stores).
+- Tests: a reader written from Adobe's specification decodes the whole file (layers, channels, records, flags, names, the merged image), and psd-tools
+  (MIT, the standard reader) reads every layer exactly: layer pixels on and off the canvas, names, opacity, visibility, blend keys. Every red check
+  on the writer turns a test red (repeat runs, row table, opacity, channel ids, hidden flag, matting, merged alpha, channel count).
+- The sweep's oracle venv needs psd-tools (the README of `run-release-sweep.cmd` says so); without it the psd-tools test skips.
+
 - SpawnDev.ILGPU 5.4.45 -> 5.4.49 (its 5.4.46+ optimizer order; 5.4.47's WGSL placeholder and the failed-compile bug fixed).
   The WGSL size guard is re-measured on it and now covers FLAC (`FlacDecoderKernels_GenerateWgsl_WithinSizeBudget`: the
   stream decoder's FindSyncKernel 345k, DecodeFrameKernel 781k and WalkKernel 422k characters, each +10%). Three VP9 budgets
