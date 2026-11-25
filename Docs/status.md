@@ -2,8 +2,13 @@
 
 What is verified, on which backend, and how. "Verified" means a test that compares against a reference
 implementation (never against this library's own output) passed on that backend, with its guard red-checked. Dates are
-the last run of the named lane. Updated 2026-11-23 (the 1.1.4 gate below; a cell keeps the date of the run behind it; counts are
+the last run of the named lane. Updated 2026-11-24 (the 1.1.5 gate below; a cell keeps the date of the run behind it; counts are
 passed / failed, skips are gated or CPU-only tests).
+
+**2026-11-24, release 1.1.5 (commit 61f3f76), SpawnDev.ILGPU 5.4.45: every class on every lane.** CUDA, OpenCL and Velocity 1259 / 0 each, the CPU accelerator 3433 / 0, WebGPU 1253 / 0, Wasm 1253 / 0, WebGL 410 / 0
+(4 h), no failure, no GPU reset. Lossy WebP on an AMD RX 590 in Chrome WebGPU writes libwebp's bytes again (issue #2, a
+WORKAROUND): all 11 lossy WebP tests pass on the card (Lore, ILGPU 5.4.45), and SpawnGen's animated WebP there equals the
+OpenCL engine's file on ILGPU 5.4.46 and 5.4.48-local.2 (the code of 5.4.48).
 
 **2026-11-23, release 1.1.4 (commit 0eb8db5), SpawnDev.ILGPU 5.4.45: every class on every lane.** CUDA, OpenCL and Velocity 1253 / 0 each, the CPU accelerator 3427 / 0, WebGPU 1247 / 0, Wasm 1247 / 0, WebGL 410 / 0
 (3 h 50 min), no failure, no GPU reset. KernelLoadBatch releases the ILGPU compiler cache once per codec construction;

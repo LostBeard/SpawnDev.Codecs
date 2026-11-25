@@ -1,6 +1,11 @@
 # SpawnDev.Codecs CHANGELOG
 
-## Unreleased
+## 1.1.5 (2026-11-24)
+
+Gate (2026-11-24, commit 61f3f76, SpawnDev.ILGPU 5.4.45, `scripts/dev/run-release-sweep.cmd`, 4 h): CUDA, OpenCL and Velocity 1259 / 0 each, the CPU accelerator 3433 / 0, WebGPU 1253 / 0, Wasm 1253 / 0, WebGL 410 / 0. No
+failure and no GPU reset on any lane. The RX 590 fix was run on the card by Lore (the 11 lossy WebP tests on this commit with
+ILGPU 5.4.45 in Chrome WebGPU; animated WebP byte parity with the OpenCL engine in SpawnGen on ILGPU 5.4.46 and on
+5.4.48-local.2, the code of the released 5.4.48).
 
 - Lossy WebP on Chrome WebGPU with an AMD RX 590 (D3D12): the files are libwebp's again. The level-cost table of the setup
   kernel (`CalculateLevelCosts`) was mostly not written on that card, since at least 1.1.3: its innermost
