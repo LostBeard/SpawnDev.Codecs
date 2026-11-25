@@ -2,8 +2,11 @@
 
 What is verified, on which backend, and how. "Verified" means a test that compares against a reference
 implementation (never against this library's own output) passed on that backend, with its guard red-checked. Dates are
-the last run of the named lane. Updated 2026-11-24 (the 1.1.5 gate below; a cell keeps the date of the run behind it; counts are
+the last run of the named lane. Updated 2026-11-25 (the 1.1.6 gate below; a cell keeps the date of the run behind it; counts are
 passed / failed, skips are gated or CPU-only tests).
+
+**2026-11-25, release 1.1.6 (commit 25b43b3), SpawnDev.ILGPU 5.4.49: every class on every lane.** CUDA, OpenCL and Velocity 1265 / 0 each, the CPU accelerator 3440 / 0, WebGPU 1258 / 0, Wasm 1258 / 0, WebGL 410 / 0
+(4 h 9 min), no failure. New: the layered PSD writer (6 tests per class; psd-tools reads every layer exactly).
 
 **2026-11-24, release 1.1.5 (commit 61f3f76), SpawnDev.ILGPU 5.4.45: every class on every lane.** CUDA, OpenCL and Velocity 1259 / 0 each, the CPU accelerator 3433 / 0, WebGPU 1253 / 0, Wasm 1253 / 0, WebGL 410 / 0
 (4 h), no failure, no GPU reset. Lossy WebP on an AMD RX 590 in Chrome WebGPU writes libwebp's bytes again (issue #2, a

@@ -1,6 +1,9 @@
 # SpawnDev.Codecs CHANGELOG
 
-## Unreleased
+## 1.1.6 (2026-11-25)
+
+Release gate (commit 25b43b3, SpawnDev.ILGPU 5.4.49): every class on every lane, no failure. CUDA, OpenCL and Velocity
+1265 / 0 each, the CPU accelerator 3440 / 0; in Chrome WebGPU 1258 / 0, Wasm 1258 / 0, WebGL 410 / 0 (4 h 9 min).
 
 ### New: layered PSD writer (2026-11-25)
 - `PsdEncoderGpu` writes layered Photoshop files (version 1, RGB 8-bit, RLE): layers (bottom first) with a name, rectangle (negative or past the
@@ -10,7 +13,10 @@
 - Tests: a reader written from Adobe's specification decodes the whole file (layers, channels, records, flags, names, the merged image), and psd-tools
   (MIT, the standard reader) reads every layer exactly: layer pixels on and off the canvas, names, opacity, visibility, blend keys. Every red check
   on the writer turns a test red (repeat runs, row table, opacity, channel ids, hidden flag, matting, merged alpha, channel count).
-- The sweep's oracle venv needs psd-tools (the README of `run-release-sweep.cmd` says so); without it the psd-tools test skips.
+- The sweep's oracle venv needs psd-tools (the header of `run-release-sweep.cmd` says so); without it the psd-tools test skips.
+- Checked in SpawnGen's compositor (Lore): its Export PSD on an AMD RX 590 (Chrome WebGPU) and on the CPU accelerator gives the layer
+  records ComfyUI's export writes for the same edit; psd-tools and GIMP 2.10.30 open it with the right layers, offsets, sizes, modes,
+  opacity and Unicode names.
 
 - SpawnDev.ILGPU 5.4.45 -> 5.4.49 (its 5.4.46+ optimizer order; 5.4.47's WGSL placeholder and the failed-compile bug fixed).
   The WGSL size guard is re-measured on it and now covers FLAC (`FlacDecoderKernels_GenerateWgsl_WithinSizeBudget`: the
