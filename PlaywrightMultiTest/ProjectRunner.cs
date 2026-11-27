@@ -263,6 +263,15 @@ namespace PlaywrightMultiTest
                             System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(AppContext.BaseDirectory).ToLowerInvariant())))[..8];
                         var userDataDir = Path.Combine(Path.GetTempPath(), "SpawnDev.Codecs.PlaywrightProfile-" + treeKey);
                         Directory.CreateDirectory(userDataDir);
+                        // The profile's HTTP cache goes before every run: a corrupt entry makes a boot file fail with
+                        // net::ERR_CACHE_READ_FAILURE and the test page never starts (GameUI's 1.1.1 gate, 2026-11-26; SpawnDev.ILGPU's
+                        // runner has the same step). A run publishes fresh files, so the cache holds nothing it needs; site storage stays.
+                        foreach (var cacheDir in new[] { "Cache", "Code Cache" })
+                        {
+                            var cachePath = Path.Combine(userDataDir, "Default", cacheDir);
+                            try { if (Directory.Exists(cachePath)) Directory.Delete(cachePath, true); }
+                            catch (Exception ex) { LogStatus($"Could not clear the profile's {cacheDir} ({ex.Message}); a corrupt entry there can stop the test page from starting"); }
+                        }
                         LogStatus($"Launching Chrome (persistent profile: {userDataDir})...");
                         testableProject.BrowserContext = await testableProject.Playwright.Chromium.LaunchPersistentContextAsync(
                             userDataDir,
